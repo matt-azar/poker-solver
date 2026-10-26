@@ -1,0 +1,6 @@
+{
+  "game": "kuhn",
+  "algorithm": "vanilla_cfr",
+  "iterations": 100000,
+  "notes": "Chance is fully enumerated. Runs are deterministic for a given iteration count and traversal order. Seed is unused."
+}
