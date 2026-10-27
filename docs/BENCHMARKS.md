@@ -156,3 +156,42 @@ street_solver --board Ah,Kd,7c,4s --oop-range random --ip-range random --no-all-
 ```
 
 `street_memory_bench` checks those two solves and is not part of the unit suite. There is no wall-time gate in `poker_solver_tests`.
+
+## Betting convergence
+
+`build\Release\street_betting_bench.exe`, Release, MSVC 19.40, Windows 10.0.26200, x64, Intel Core i7-10510U. One solver per case, frozen CFR+, cumulative iterations. Checkpoints are 0, 1, 3, 10, 30, 100, 300, and 1000. A case stops after a checkpoint whose NashConv/pot is at or below 0.001, at 1000 iterations, or at 600 seconds of wall time, and only between complete iterations. NashConv is `player0_br + player1_br`. The gains are `player0_br - player0_ev` and `player1_br + player0_ev`. Checkpoint 0 is the uniform average, before any regret update. After one CFR+ iteration that average is still uniform, because the first strategy is the zero-regret strategy, so checkpoint 1 matches checkpoint 0. Live allocation did not change during training. `reserved_bytes` stayed 0.
+
+Both cases first measured NashConv/pot at or below 0.01 at iteration 100, and at or below 0.001 at iteration 300. Iteration 1000 was not run. The 600-second wall budget was not reached.
+
+Turn, full range, `Ah Kd 7c 4s`, pot 100, stack 100, bets 0.5 for both players, the same fraction copied to raises, all-in on, max raises 1, budget 1024 MiB. 1,167,480 deals, 940,752 information sets, 24 public decisions, 931,649,040 expanded decisions, 1,083,421,440 expanded terminals. Construction 0.2340047 s. Allocated and peak 141,622,270 bytes. Estimated peak 141,612,638 bytes. Regret plus strategy sum 28,479,744 bytes. Process peak RSS 147,513,344 bytes. The value and NashConv at 3 iterations match the earlier review of this tree: 1.48406518248 and 36.6075596709.
+
+| Iterations | Player 0 EV | Player 0 BR | Player 1 BR | Gain 0 | Gain 1 | NashConv | NashConv/pot | Train (s) | Eval (s) | Wall (s) |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 15.1234567901 | 54.801367047 | 26.4329993713 | 39.6779102568 | 41.5564561615 | 81.2343664183 | 0.812343664183 | 0 | 1.2562867 | 1.4905239 |
+| 1 | 15.1234567901 | 54.801367047 | 26.4329993713 | 39.6779102568 | 41.5564561615 | 81.2343664183 | 0.812343664183 | 0.8719182 | 2.289552 | 3.3958214 |
+| 3 | 1.48406518248 | 20.54040094 | 16.0671587309 | 19.0563357575 | 17.5512239134 | 36.6075596709 | 0.366075596709 | 2.4908632 | 3.2642562 | 5.9895792 |
+| 10 | -2.72884841994 | 2.489251836 | 6.36469030298 | 5.21810025594 | 3.63584188304 | 8.85394213898 | 0.0885394213898 | 8.0582858 | 4.2650919 | 12.5580548 |
+| 30 | -2.42408044671 | -1.51518630947 | 3.11455885903 | 0.908894137243 | 0.69047841232 | 1.59937254956 | 0.0159937254956 | 23.7112235 | 5.2573332 | 29.2034056 |
+| 100 | -2.21195627511 | -2.05774191733 | 2.32836865839 | 0.154214357781 | 0.116412383279 | 0.27062674106 | 0.0027062674106 | 77.4923685 | 6.2298115 | 83.9571652 |
+| 300 | -2.18915110333 | -2.15750924203 | 2.21350255886 | 0.031641861296 | 0.0243514555302 | 0.0559933168262 | 0.000559933168262 | 236.8521104 | 9.093738 | 246.1810338 |
+
+Flop, `Ah Kd 7c`, both ranges `QQ,JJ,TT,99`, pot 100, stack 100, the same half-pot bet, copied raise, and all-in, max raises 1, budget 1024 MiB. 456 deals, 1,992,192 information sets, 62 public decisions, 33,572,544 expanded terminals, 34,681,536 expanded decisions. Construction 0.1286845 s. Allocated and peak 171,117,298 bytes. Estimated peak 170,876,354 bytes. Regret plus strategy sum 52,091,904 bytes. Process peak RSS 177,401,856 bytes.
+
+| Iterations | Player 0 EV | Player 0 BR | Player 1 BR | Gain 0 | Gain 1 | NashConv | NashConv/pot | Train (s) | Eval (s) | Wall (s) |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 16.2637174211 | 58.3007708666 | 30.9470804537 | 42.0370534454 | 47.2107978748 | 89.2478513202 | 0.892478513202 | 0 | 1.7478745 | 1.8767367 |
+| 1 | 16.2637174211 | 58.3007708666 | 30.9470804537 | 42.0370534454 | 47.2107978748 | 89.2478513202 | 0.892478513202 | 1.1237933 | 4.0716728 | 5.3244263 |
+| 3 | 0.83997658227 | 23.9660411949 | 22.369336823 | 23.1260646126 | 23.2093134053 | 46.3353780179 | 0.463353780179 | 3.6757219 | 5.3968517 | 9.2017029 |
+| 10 | -4.12886553878 | 8.32756137738 | 11.4659860718 | 12.4564269162 | 7.33712053298 | 19.7935474491 | 0.197935474491 | 11.52576 | 6.8127681 | 18.4677514 |
+| 30 | -2.52812936902 | 0.020706627972 | 4.01679374506 | 2.54883599699 | 1.48866437604 | 4.03750037304 | 0.0403750037304 | 40.4349392 | 8.2552529 | 48.8195152 |
+| 100 | -2.03253110071 | -1.67301679218 | 2.2172274205 | 0.359514308526 | 0.184696319789 | 0.544210628316 | 0.00544210628316 | 122.2273693 | 9.6905865 | 132.0474369 |
+| 300 | -1.94346200025 | -1.8927024819 | 1.96537221362 | 0.0507595183529 | 0.0219102133695 | 0.0726697317224 | 0.000726697317224 | 352.995994 | 11.540952 | 364.6666577 |
+
+Training is the dominant cost on both cases. At the 300-iteration stop it is 236.9 s of 246.2 s on the turn and 353.0 s of 364.7 s on the flop. Evaluation is under 12 s and construction is under 0.3 s. The turn walk at 3 iterations costs about 0.83 s of training per iteration; the flop walk costs about 1.23 s. Memory stays flat and well under the 1024 MiB budget, so the measured limit is the sequential pass over the expanded histories, not allocation. The same command shape is:
+
+```sh
+street_solver --board Ah,Kd,7c,4s --pot 100 --stack 100 --oop-range random --ip-range random --oop-bets 0.5 --ip-bets 0.5 --all-in --max-raises 1 --iterations 300 --frozen --memory-mib 1024
+street_solver --board Ah,Kd,7c --pot 100 --stack 100 --oop-range QQ,JJ,TT,99 --ip-range QQ,JJ,TT,99 --oop-bets 0.5 --ip-bets 0.5 --all-in --max-raises 1 --iterations 300 --frozen --memory-mib 1024
+```
+
+`street_betting_bench` is not part of the unit suite. These two runs do not establish a comparison with PioSolver.

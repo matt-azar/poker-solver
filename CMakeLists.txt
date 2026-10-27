@@ -81,3 +81,8 @@ add_test(NAME poker_solver_tests COMMAND poker_solver_tests)
 add_executable(street_memory_bench tests/street_memory_bench.cpp)
 target_link_libraries(street_memory_bench PRIVATE poker_solver_core)
 poker_set_warnings(street_memory_bench)
+
+# Betting convergence. Not part of ctest: each case may run for ten minutes.
+add_executable(street_betting_bench tests/street_betting_bench.cpp)
+target_link_libraries(street_betting_bench PRIVATE poker_solver_core)
+poker_set_warnings(street_betting_bench)
