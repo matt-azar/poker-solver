@@ -18,8 +18,9 @@ namespace poker::streets
 inline constexpr int kMaxStreetActions = 8;
 inline constexpr int kMaxStreetHistory = 24;
 
-// Heads-up flop (3-card board) or turn (4-card board) with the same
-// pot-fraction bets on every street. The river is dealt inside the tree.
+// Heads-up flop (3-card board) or turn (4-card board). The betting
+// structure does not depend on the turn or river card. Sizes may differ
+// by street. The river is dealt inside the tree.
 // Information sets store the acting player's hand and the cards already dealt.
 // They do not store the opponent's hand or a card that has not been dealt.
 struct StreetConfig
@@ -33,10 +34,46 @@ struct StreetConfig
     std::vector<double> ip_bet_sizes{};
     std::vector<double> oop_raise_sizes{};
     std::vector<double> ip_raise_sizes{};
+    // Used on that street only. Empty means the street uses the lists above.
+    std::vector<double> oop_flop_bets{};
+    std::vector<double> oop_turn_bets{};
+    std::vector<double> oop_river_bets{};
+    std::vector<double> ip_flop_bets{};
+    std::vector<double> ip_turn_bets{};
+    std::vector<double> ip_river_bets{};
+    std::vector<double> oop_flop_raises{};
+    std::vector<double> oop_turn_raises{};
+    std::vector<double> oop_river_raises{};
+    std::vector<double> ip_flop_raises{};
+    std::vector<double> ip_turn_raises{};
+    std::vector<double> ip_river_raises{};
+    // One extra size that splits the remaining stack into equal pot fractions
+    // over the streets still to play. On the river that size is all-in.
+    bool geometric = false;
+    // A size that would commit more than this fraction of the starting stack
+    // is replaced by all-in. Zero leaves every size as listed.
+    double all_in_threshold = 0.0;
     bool allow_all_in = true;
     int max_raises = 1;
     int first_to_act = 0;
 };
+
+// Pot fraction that invests stack_left over streets_left equal called bets.
+// One street left returns the all-in fraction.
+inline double geometric_pot_fraction(int pot, int stack_left, int streets_left)
+{
+    if (pot <= 0 || stack_left <= 0 || streets_left <= 0)
+    {
+        return 0.0;
+    }
+    if (streets_left == 1)
+    {
+        return static_cast<double>(stack_left) / static_cast<double>(pot);
+    }
+    const double ratio = 1.0 + 2.0 * static_cast<double>(stack_left) / static_cast<double>(pot);
+    const double root = std::pow(ratio, 1.0 / static_cast<double>(streets_left));
+    return (root - 1.0) / 2.0;
+}
 
 class StreetGame
 {
@@ -367,6 +404,10 @@ private:
         {
             throw std::invalid_argument("max raises must be from 0 through 6");
         }
+        if (config_.all_in_threshold < 0.0)
+        {
+            throw std::invalid_argument("all-in threshold must be nonnegative");
+        }
     }
 
     void build_deals()
@@ -445,13 +486,46 @@ private:
         return holdem::compare_showdown(deal.c0, deal.c1, deal.d0, deal.d1, std::span<const int>(board, 5));
     }
 
-    const std::vector<double>& size_list(int player, bool facing) const
+    int street_kind(int street) const
     {
-        if (player == 0)
+        return config_.board.size() == 3 ? street : street + 1;
+    }
+
+    const std::vector<double>& listed_bets(int player, int kind) const
+    {
+        const std::vector<double>& specific = player == 0
+            ? (kind == 0 ? config_.oop_flop_bets : kind == 1 ? config_.oop_turn_bets : config_.oop_river_bets)
+            : (kind == 0 ? config_.ip_flop_bets : kind == 1 ? config_.ip_turn_bets : config_.ip_river_bets);
+        if (!specific.empty())
         {
-            return facing ? config_.oop_raise_sizes : config_.oop_bet_sizes;
+            return specific;
         }
-        return facing ? config_.ip_raise_sizes : config_.ip_bet_sizes;
+        return player == 0 ? config_.oop_bet_sizes : config_.ip_bet_sizes;
+    }
+
+    const std::vector<double>& listed_raises(int player, int kind) const
+    {
+        const std::vector<double>& specific = player == 0
+            ? (kind == 0 ? config_.oop_flop_raises : kind == 1 ? config_.oop_turn_raises : config_.oop_river_raises)
+            : (kind == 0 ? config_.ip_flop_raises : kind == 1 ? config_.ip_turn_raises : config_.ip_river_raises);
+        if (!specific.empty())
+        {
+            return specific;
+        }
+        const std::vector<double>& street_bets = player == 0
+            ? (kind == 0 ? config_.oop_flop_bets : kind == 1 ? config_.oop_turn_bets : config_.oop_river_bets)
+            : (kind == 0 ? config_.ip_flop_bets : kind == 1 ? config_.ip_turn_bets : config_.ip_river_bets);
+        if (!street_bets.empty())
+        {
+            return street_bets;
+        }
+        return player == 0 ? config_.oop_raise_sizes : config_.ip_raise_sizes;
+    }
+
+    const std::vector<double>& size_list(int player, int street, bool facing) const
+    {
+        const int kind = street_kind(street);
+        return facing ? listed_raises(player, kind) : listed_bets(player, kind);
     }
 
     static std::string chip_label(int code, int add, int street_total, bool all_in, bool facing)
@@ -539,6 +613,15 @@ private:
                 }
                 add = max_add;
             }
+            if (config_.all_in_threshold > 0.0 && config_.allow_all_in)
+            {
+                const double committed_after = static_cast<double>(state.contrib[player] + add);
+                const double limit = config_.all_in_threshold * static_cast<double>(config_.stack);
+                if (committed_after > limit && add < max_add)
+                {
+                    add = max_add;
+                }
+            }
             const int raise_by = add - to_call;
             if (raise_by <= 0)
             {
@@ -555,8 +638,16 @@ private:
         };
 
         const int basis = facing ? state.pot + to_call : state.pot;
-        for (double fraction : size_list(player, facing))
+        for (double fraction : size_list(player, state.street, facing))
         {
+            const int sized = round_chips(fraction, basis);
+            consider(facing ? to_call + sized : sized);
+        }
+        if (config_.geometric)
+        {
+            const int streets_left = betting_streets() - state.street;
+            const int stack_left = facing ? max_add - to_call : max_add;
+            const double fraction = geometric_pot_fraction(basis, stack_left, streets_left);
             const int sized = round_chips(fraction, basis);
             consider(facing ? to_call + sized : sized);
         }

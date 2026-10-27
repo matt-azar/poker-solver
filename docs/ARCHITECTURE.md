@@ -30,7 +30,7 @@ Phase 9 adds the `explorer` program and the static files in `ui/`. The program l
 | `poker::river::RiverGame` | Reference river tree: one copy of every hand pair |
 | `poker::solver::RiverBatchSolver` | Same river rules on one public tree, with one-pass best response |
 | `river_solver` | Command-line driver; public tree by default, `--reference` for the enumerator |
-| `poker::streets::StreetGame` | Turn or flop tree: later cards are chance, same pot-fraction bets |
+| `poker::streets::StreetGame` | Turn or flop tree: one betting structure for every runout, sizes per street |
 | `street_solver` | Command-line driver over `CfrTrainer<StreetGame>` |
 | `explorer` | Local page. Serves `ui/` and calls `RiverBatchSolver` |
 

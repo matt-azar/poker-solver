@@ -19,8 +19,12 @@ void print_usage(const char* argv0)
               << " [--board Ah,Kd,7c,4s] [--pot N] [--stack N]"
               << " [--oop-range TEXT] [--ip-range TEXT]"
               << " [--oop-bets 0.5,1] [--ip-bets 0.5,1]"
+              << " [--oop-turn-bets 0.5] [--oop-river-bets 1]"
+              << " [--ip-turn-bets 0.5] [--ip-river-bets 1]"
+              << " [--geometric] [--all-in-threshold 0.4]"
               << " [--all-in | --no-all-in] [--max-raises N]"
-              << " [--iterations N] [--algorithm vanilla|cfr_plus]\n";
+              << " [--iterations N] [--algorithm vanilla|cfr_plus]"
+              << " [--accuracy 0.05]\n";
 }
 
 std::vector<double> parse_sizes(const std::string& text)
@@ -101,6 +105,7 @@ int main(int argc, char** argv)
         config.allow_all_in = false;
         config.max_raises = 1;
         int iterations = 400;
+        double accuracy = -1.0;
         poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
 
         for (int i = 1; i < argc; ++i)
@@ -141,6 +146,42 @@ int main(int argc, char** argv)
             else if (arg == "--ip-bets")
             {
                 config.ip_bet_sizes = parse_sizes(need("--ip-bets"));
+            }
+            else if (arg == "--oop-flop-bets")
+            {
+                config.oop_flop_bets = parse_sizes(need("--oop-flop-bets"));
+            }
+            else if (arg == "--oop-turn-bets")
+            {
+                config.oop_turn_bets = parse_sizes(need("--oop-turn-bets"));
+            }
+            else if (arg == "--oop-river-bets")
+            {
+                config.oop_river_bets = parse_sizes(need("--oop-river-bets"));
+            }
+            else if (arg == "--ip-flop-bets")
+            {
+                config.ip_flop_bets = parse_sizes(need("--ip-flop-bets"));
+            }
+            else if (arg == "--ip-turn-bets")
+            {
+                config.ip_turn_bets = parse_sizes(need("--ip-turn-bets"));
+            }
+            else if (arg == "--ip-river-bets")
+            {
+                config.ip_river_bets = parse_sizes(need("--ip-river-bets"));
+            }
+            else if (arg == "--geometric")
+            {
+                config.geometric = true;
+            }
+            else if (arg == "--all-in-threshold")
+            {
+                config.all_in_threshold = std::atof(need("--all-in-threshold"));
+            }
+            else if (arg == "--accuracy")
+            {
+                accuracy = std::atof(need("--accuracy"));
             }
             else if (arg == "--all-in")
             {
@@ -198,6 +239,11 @@ int main(int argc, char** argv)
         const poker::streets::StreetGame game(config);
         poker::solver::SolveConfig solve_config;
         solve_config.max_iterations = iterations;
+        if (accuracy >= 0.0)
+        {
+            solve_config.nash_gap_threshold = accuracy * static_cast<double>(config.pot);
+            solve_config.eval_interval = 20;
+        }
         poker::solver::CfrTrainer<poker::streets::StreetGame> trainer(game, algorithm);
         const poker::solver::SolveStats stats = trainer.solve(solve_config);
 
@@ -219,6 +265,8 @@ int main(int argc, char** argv)
         std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
         std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
         std::cout << "nash_gap: " << stats.nash_gap << "\n";
+        std::cout << "nash_gap_fraction_of_pot: "
+                  << stats.nash_gap / static_cast<double>(config.pot) << "\n";
         std::cout << "deterministic: yes (runouts enumerated; no RNG)\n";
         std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
     }

@@ -309,4 +309,73 @@ void run_street_tests()
     std::cout << "  player0_expected_utility " << flop_stats.p1_expected_utility << "\n";
     std::cout << "  enumerated " << flop_ev << "\n";
     std::cout << "  runtime_seconds " << flop_stats.runtime_seconds << "\n";
+
+    const double flop_geometric = (std::pow(7.0, 1.0 / 3.0) - 1.0) / 2.0;
+    CHECK_NEAR(poker::streets::geometric_pot_fraction(100, 300, 3), flop_geometric, 1e-12);
+    CHECK_NEAR(poker::streets::geometric_pot_fraction(100, 300, 1), 3.0, 1e-12);
+
+    StreetConfig geo;
+    geo.board = turn_board;
+    geo.pot = 100;
+    geo.stack = 300;
+    geo.oop = Range::parse("QcQd");
+    geo.ip = Range::parse("JcJd");
+    geo.geometric = true;
+    geo.allow_all_in = true;
+    geo.max_raises = 1;
+    const StreetGame geo_game(geo);
+    const StreetGame::State geo_open = geo_game.child_chance(geo_game.root(), 0);
+    const int geo_chips = static_cast<int>(std::llround(
+        poker::streets::geometric_pot_fraction(100, 300, 2) * 100.0));
+    const std::string geo_label = "Bet " + std::to_string(geo_chips);
+    CHECK(find_action(geo_game, geo_open, geo_label.c_str()) >= 0);
+    StreetGame::State geo_called = geo_game.child_action(
+        geo_open, find_action(geo_game, geo_open, geo_label.c_str()));
+    geo_called = geo_game.child_action(geo_called, find_action(geo_game, geo_called, "Call"));
+    CHECK(geo_game.is_chance(geo_called));
+    const StreetGame::State geo_river = geo_game.child_chance(geo_called, 0);
+    const int river_stack = 300 - geo_chips;
+    CHECK(find_action(geo_game, geo_river, ("Bet " + std::to_string(river_stack) + " all-in").c_str()) >= 0);
+    const int geo_river_index = river_outcome(geo_game, geo_called, card("9c"));
+    const StreetGame::State geo_other = geo_game.child_chance(geo_called, geo_river_index);
+    CHECK(geo_game.action_count(geo_game.infoset(geo_river))
+        == geo_game.action_count(geo_game.infoset(geo_other)));
+
+    StreetConfig by_street;
+    by_street.board = turn_board;
+    by_street.pot = 100;
+    by_street.stack = 400;
+    by_street.oop = Range::parse("QcQd");
+    by_street.ip = Range::parse("JcJd");
+    by_street.oop_turn_bets = {0.5};
+    by_street.oop_river_bets = {1.0};
+    by_street.allow_all_in = false;
+    by_street.max_raises = 1;
+    const StreetGame by_street_game(by_street);
+    const StreetGame::State turn_open = by_street_game.child_chance(by_street_game.root(), 0);
+    CHECK(find_action(by_street_game, turn_open, "Bet 50") >= 0);
+    StreetGame::State called = by_street_game.child_action(
+        turn_open, find_action(by_street_game, turn_open, "Bet 50"));
+    called = by_street_game.child_action(called, find_action(by_street_game, called, "Call"));
+    const StreetGame::State river_open = by_street_game.child_chance(called, 0);
+    CHECK(find_action(by_street_game, river_open, "Bet 200") >= 0);
+
+    StreetConfig threshold;
+    threshold.board = turn_board;
+    threshold.pot = 100;
+    threshold.stack = 200;
+    threshold.oop = Range::parse("QcQd");
+    threshold.ip = Range::parse("JcJd");
+    threshold.oop_bet_sizes = {0.5};
+    threshold.allow_all_in = true;
+    threshold.all_in_threshold = 0.2;
+    threshold.max_raises = 1;
+    const StreetGame snapped(threshold);
+    const StreetGame::State snapped_open = snapped.child_chance(snapped.root(), 0);
+    CHECK(find_action(snapped, snapped_open, "Bet 200 all-in") >= 0);
+    CHECK(find_action(snapped, snapped_open, "Bet 50") < 0);
+    threshold.all_in_threshold = 0.4;
+    const StreetGame kept(threshold);
+    const StreetGame::State kept_open = kept.child_chance(kept.root(), 0);
+    CHECK(find_action(kept, kept_open, "Bet 50") >= 0);
 }

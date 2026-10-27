@@ -8,7 +8,21 @@ Player 0 is out of position and acts first on every street. Utilities use the sa
 
 An information set is the acting player's own hand, the cards already dealt, and the public action line. It does not contain the opponent's hand. A turn decision is one node, shared by every river that can follow it.
 
-Bet sizes are the same pot fractions on every street. The pot they multiply grows after each call. Raise sizes, when omitted on the command line, copy that player's bet sizes. At most eight actions are legal at one decision. A tree with more than 200,000 terminals is rejected.
+The betting lines are the same on every turn card and every river card. A player cannot have one size on one river and a different size on another. That is the postflop tree shape used by PioSOLVER. This project does not include PioSOLVER's solver. The regret update is still vanilla CFR or CFR+.
+
+Sizes are pot fractions. A list given for one street replaces the shared list on that street only. A street with no raise list of its own uses that street's bet list. The shared lists still apply where no street list is set.
+
+A geometric size splits the chips still behind into equal pot fractions over the streets that remain, including the current one. With `S` streets left, pot `P`, and stack left `E`, the fraction is
+
+`( (1 + 2E/P) ^ (1/S) - 1 ) / 2`.
+
+One street left, that fraction is all-in. PioSOLVER's geometric size is this split.
+
+An all-in threshold is a fraction of the starting stack. A size that would commit more than that fraction is replaced by all-in, when all-ins are allowed. Zero leaves every listed size unchanged.
+
+`--accuracy 0.05` stops when the Nash gap divided by the pot is at or below 0.05. The printed Nash gap is still NashConv. The fraction of pot is printed beside it and is not NashConv/2.
+
+At most eight actions are legal at one decision. A tree with more than 200,000 terminals is rejected.
 
 ## Checked values
 
@@ -23,6 +37,7 @@ On the flop `Ah Kd 7c`, queens versus jacks, check-only, the value matches the a
 ```sh
 street_solver
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1 --algorithm vanilla
+street_solver --board Ah,Kd,7c,4s --pot 100 --stack 300 --oop-range QcQd --ip-range JcJd --geometric --iterations 200
 ```
 
 The default is the turn lock above. The reported Nash gap is NashConv, not NashConv/2.

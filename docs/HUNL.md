@@ -6,7 +6,7 @@ Unrestricted HUNL deals two hole cards from a 52-card deck and then three street
 
 ## What would still have to be chosen
 
-**Action abstraction.** The river, turn, and flop solvers offer a list of pot fractions, not every chip amount. An equilibrium of that list is not an equilibrium of the game in which the opponent can choose a size that was left out.
+**Action abstraction.** The river, turn, and flop solvers offer a list of pot fractions, not every chip amount. The turn and flop tree uses one betting structure for every runout, with a separate list per street, a geometric size, and an all-in threshold. Those are the public tree-building rules of PioSOLVER. An equilibrium of that list is not an equilibrium of the game in which the opponent can choose a size that was left out. PioSOLVER's own CFR implementation is not in this repository.
 
 **Hand abstraction and bucketing.** The river solver keeps one information set per combo. Bucketing would merge combos that the real game can tell apart, on the flop or turn or by a feature such as equity. That changes the game. The error is the exploitability of the resulting strategy in the unbucketed game. It is not measured here, because the unbucketed multi-street game is the one that does not fit.
 
