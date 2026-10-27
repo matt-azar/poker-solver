@@ -28,7 +28,8 @@ void solve_case(
     int public_decisions,
     std::uint64_t runouts,
     std::uint64_t decision_factor,
-    std::uint64_t expected_deals)
+    std::uint64_t expected_deals,
+    int threads)
 {
     poker::streets::StreetConfig config;
     config.board = board;
@@ -40,6 +41,7 @@ void solve_case(
     config.allow_all_in = false;
     config.max_raises = 0;
     config.memory_mib = 1024;
+    config.threads = threads;
 
     const auto wall_started = std::chrono::steady_clock::now();
     poker::solver::StreetBatchSolver solver(config);
@@ -63,6 +65,9 @@ void solve_case(
     std::cout << "player0_expected_utility: " << stats.p1_expected_utility << "\n";
     std::cout << "nash_gap: " << stats.nash_gap << "\n";
     std::cout << "construction_seconds: " << report.construction_seconds << "\n";
+    std::cout << "cache_init_seconds: " << report.cache_init_seconds << "\n";
+    std::cout << "worker_setup_seconds: " << report.worker_setup_seconds << "\n";
+    std::cout << "thread_count: " << report.thread_count << "\n";
     std::cout << "train_seconds: " << report.train_seconds << "\n";
     std::cout << "evaluation_seconds: " << report.evaluation_seconds << "\n";
     std::cout << "solve_runtime_seconds: " << stats.runtime_seconds << "\n";
@@ -123,22 +128,24 @@ void solve_case(
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
     try
     {
+        const int threads = argc > 1 ? std::stoi(argv[1]) : 1;
         const int ah = poker::holdem::parse_card("Ah");
         const int kd = poker::holdem::parse_card("Kd");
         const int seven = poker::holdem::parse_card("7c");
         const int four = poker::holdem::parse_card("4s");
-        solve_case("turn", {ah, kd, seven, four}, 4, 44, 2ull * (1ull + 44ull), 0);
+        solve_case("turn", {ah, kd, seven, four}, 4, 44, 2ull * (1ull + 44ull), 0, threads);
         solve_case(
             "flop",
             {ah, kd, seven},
             6,
             45ull * 44ull,
             2ull * (1ull + 45ull + 45ull * 44ull),
-            1271256ull);
+            1271256ull,
+            threads);
     }
     catch (const std::exception& error)
     {

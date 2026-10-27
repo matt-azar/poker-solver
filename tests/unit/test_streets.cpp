@@ -1713,6 +1713,40 @@ void run_street_showdown_tests()
         {
             sorted[index] = sample.opponent_rank[static_cast<std::size_t>(sample.order[index])];
         }
+        CHECK(sample.card_offset.size() == 53);
+        CHECK(sample.card_offset[0] == 0);
+        CHECK(sample.card_offset[52] == static_cast<int>(sample.order.size()) * 2);
+        CHECK(sample.card_order.size() == static_cast<std::size_t>(sample.card_offset[52]));
+        CHECK(sample.card_cut.size() == sample.hero_rank.size() * 4);
+        for (int card_id = 0; card_id < 52; ++card_id)
+        {
+            const int begin = sample.card_offset[static_cast<std::size_t>(card_id)];
+            const int end = sample.card_offset[static_cast<std::size_t>(card_id + 1)];
+            CHECK(end >= begin);
+            for (int at = begin + 1; at < end; ++at)
+            {
+                CHECK(sample.card_order[static_cast<std::size_t>(at)]
+                    > sample.card_order[static_cast<std::size_t>(at - 1)]);
+            }
+        }
+        const auto list_cut = [&](int card_id, int order_end) -> int
+        {
+            int lower = sample.card_offset[static_cast<std::size_t>(card_id)];
+            int upper = sample.card_offset[static_cast<std::size_t>(card_id + 1)];
+            while (lower < upper)
+            {
+                const int mid = lower + (upper - lower) / 2;
+                if (sample.card_order[static_cast<std::size_t>(mid)] < order_end)
+                {
+                    lower = mid + 1;
+                }
+                else
+                {
+                    upper = mid;
+                }
+            }
+            return lower - sample.card_offset[static_cast<std::size_t>(card_id)];
+        };
         for (std::size_t hand = 0; hand < sample.hero_rank.size(); ++hand)
         {
             const std::uint32_t rank = sample.hero_rank[hand];
@@ -1722,12 +1756,23 @@ void run_street_showdown_tests()
                 std::upper_bound(sorted.begin(), sorted.end(), rank) - sorted.begin());
             CHECK(sample.worse_end[hand] == lower);
             CHECK(sample.better_begin[hand] == upper);
+            const int c0 = sample.hero_card0[hand];
+            const int c1 = sample.hero_card1[hand];
+            const int hands = static_cast<int>(sample.order.size());
+            CHECK(list_cut(c0, 0) == 0);
+            CHECK(list_cut(c1, 0) == 0);
+            CHECK(list_cut(c0, hands) == sample.card_offset[static_cast<std::size_t>(c0 + 1)]
+                - sample.card_offset[static_cast<std::size_t>(c0)]);
+            CHECK(list_cut(c1, hands) == sample.card_offset[static_cast<std::size_t>(c1 + 1)]
+                - sample.card_offset[static_cast<std::size_t>(c1)]);
+            CHECK(sample.card_cut[hand * 4] == list_cut(c0, sample.worse_end[hand]));
+            CHECK(sample.card_cut[hand * 4 + 1] == list_cut(c1, sample.worse_end[hand]));
+            CHECK(sample.card_cut[hand * 4 + 2] == list_cut(c0, sample.better_begin[hand]));
+            CHECK(sample.card_cut[hand * 4 + 3] == list_cut(c1, sample.better_begin[hand]));
             double worse = 0.0;
             double better = 0.0;
             double tied = 0.0;
             oracle(sample, turn, river, amount, hand, worse, better, tied);
-            const int c0 = sample.hero_card0[hand];
-            const int c1 = sample.hero_card1[hand];
             const bool hero_dead = (turn >= 0 && (c0 == turn || c1 == turn))
                 || (river >= 0 && (c0 == river || c1 == river));
             if (hero_dead)

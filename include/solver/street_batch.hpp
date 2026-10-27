@@ -70,6 +70,11 @@ struct ShowdownSample
     std::vector<int> position;
     std::vector<int> worse_end;
     std::vector<int> better_begin;
+    // Opponent card-list offsets (53) and rank-order indexes (two per opponent hand).
+    std::vector<int> card_offset;
+    std::vector<int> card_order;
+    // Four cuts per hero hand: card A at L, card B at L, card A at U, card B at U.
+    std::vector<int> card_cut;
     std::vector<double> worse_mass;
     std::vector<double> better_mass;
 };
