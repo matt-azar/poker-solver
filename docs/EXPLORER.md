@@ -22,4 +22,4 @@ The page then shows:
 - The betting line, chosen from the public history, with the strategy at that line
 - Export writes the same JSON the page is showing
 
-The default spot is aces versus kings on `Ah Kd 7c 4s 2h`. That is the same tree as `configs/river_default.json`, with 200 iterations instead of 500. A wide flop with several bet sizes can exceed the 200,000-terminal cap; the page shows that error instead of building the tree.
+The default spot is aces versus kings on `Ah Kd 7c 4s 2h`. That is the same tree as `configs/river_default.json`, with 200 iterations instead of 500. A flop or a turn sends `memory_mib` (default 1024). That is the street solver's heap budget. If the tree does not fit, the page keeps running and shows the budget error. The solve is not reported as finished. The 200,000-terminal limit belongs to the `StreetGame` reference enumerator, which this page does not use.

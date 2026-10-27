@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <map>
 #include <span>
@@ -573,6 +574,109 @@ void expect_average_without_opponent_reach()
 
 void run_tree_rule_tests(const std::vector<int>& turn_board);
 
+std::uint64_t component_bytes(
+    const poker::solver::StreetMemoryReport& report,
+    const char* name)
+{
+    for (const poker::solver::StreetMemoryComponent& component : report.components)
+    {
+        if (component.name == name)
+        {
+            return component.bytes;
+        }
+    }
+    return 0;
+}
+
+void expect_memory_budget()
+{
+    StreetConfig zero = check_only(
+        {card("Ah"), card("Kd"), card("7c"), card("4s")}, "AcAd", "KsKc");
+    zero.memory_mib = 0;
+    std::string zero_message;
+    try
+    {
+        poker::solver::StreetBatchSolver solver(zero);
+    }
+    catch (const std::invalid_argument& error)
+    {
+        zero_message = error.what();
+    }
+    CHECK(zero_message.find("positive") != std::string::npos);
+
+    const std::vector<int> flop = {card("Ah"), card("Kd"), card("7c")};
+    StreetConfig wide = check_only(flop, "77+", "77+");
+    wide.memory_mib = 1;
+    std::string denied;
+    try
+    {
+        poker::solver::StreetBatchSolver solver(wide);
+    }
+    catch (const std::invalid_argument& error)
+    {
+        denied = error.what();
+    }
+    CHECK(denied.find("memory budget") != std::string::npos);
+    CHECK(denied.find("budget ") != std::string::npos);
+    CHECK(denied.find("allocated ") != std::string::npos);
+    CHECK(denied.find("request ") != std::string::npos);
+
+    wide.memory_mib = 1024;
+    poker::solver::StreetBatchSolver solver(wide);
+    const poker::solver::StreetMemoryReport report = solver.memory_report();
+    CHECK(report.memory_budget_bytes == 1024ull * 1048576ull);
+    CHECK(report.allocated_bytes > 0);
+    CHECK(report.peak_allocated_bytes >= report.allocated_bytes);
+    CHECK(report.peak_allocated_bytes > report.regret_strategy_sum_bytes);
+    CHECK(report.estimated_peak_bytes > report.regret_strategy_sum_bytes);
+    CHECK(component_bytes(report, "rank_cache") > 0);
+    CHECK(component_bytes(report, "scratch") > 0);
+    CHECK(component_bytes(report, "deals") > 0);
+    CHECK(component_bytes(report, "support") > 0);
+#ifdef _WIN32
+    CHECK(report.process_peak_working_set_bytes > 0);
+#endif
+    CHECK(solver.public_decisions() == 6);
+    const std::uint64_t runouts = 45ull * 44ull;
+    CHECK(solver.terminal_count() == solver.deal_count() * runouts);
+    CHECK(solver.decision_node_count() == solver.deal_count() * 2ull * (1ull + 45ull + runouts));
+    CHECK(solver.terminal_count() == report.expanded_terminals);
+    CHECK(solver.decision_node_count() == report.expanded_decisions);
+
+    const std::uint64_t need = report.peak_allocated_bytes > report.estimated_peak_bytes
+        ? report.peak_allocated_bytes
+        : report.estimated_peak_bytes;
+    StreetConfig tight_config = wide;
+    tight_config.memory_mib = static_cast<int>(need / 1048576ull) + 1;
+    poker::solver::StreetBatchSolver tight(tight_config);
+    solver.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+    tight.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+    CHECK_NEAR(solver.expected_utility(), tight.expected_utility(), 1e-8);
+    CHECK_NEAR(solver.nash_gap(), tight.nash_gap(), 1e-8);
+    const poker::solver::StreetMemoryReport trained = solver.memory_report();
+    CHECK(trained.train_seconds > 0.0);
+    CHECK(trained.evaluation_seconds > 0.0);
+    CHECK(trained.peak_allocated_bytes >= report.peak_allocated_bytes);
+
+    const std::vector<int> turn = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+    StreetConfig weighted = check_only(turn, "AcAd:1,5c5d:3", "KsKc");
+    poker::solver::StreetBatchSolver weighted_solver(weighted);
+    weighted_solver.run_iterations(1, poker::solver::Algorithm::VanillaCfr);
+    const double aces = average_turn_runout(
+        turn, card("Ac"), card("Ad"), card("Ks"), card("Kc"), 100);
+    const double fives = average_turn_runout(
+        turn, card("5c"), card("5d"), card("Ks"), card("Kc"), 100);
+    CHECK_NEAR(weighted_solver.expected_utility(), 0.25 * aces + 0.75 * fives, 1e-9);
+    StreetConfig weighted_other_config = weighted;
+    weighted_other_config.memory_mib = 64;
+    poker::solver::StreetBatchSolver weighted_other(weighted_other_config);
+    weighted_other.run_iterations(1, poker::solver::Algorithm::VanillaCfr);
+    CHECK_NEAR(weighted_other.expected_utility(), weighted_solver.expected_utility(), 1e-9);
+
+    StreetConfig blocked = check_only(turn, "QcQd,JsJd", "QcTc,JhTh");
+    expect_street_batch(blocked, poker::solver::Algorithm::VanillaCfr, 1, false);
+}
+
 void run_street_tests()
 {
     StreetConfig blocked;
@@ -1010,4 +1114,9 @@ void run_tree_rule_tests(const std::vector<int>& turn_board)
         }
         expect_street_batch(donk, poker::solver::Algorithm::VanillaCfr, 1, false);
     }
+}
+
+void run_street_memory_tests()
+{
+    expect_memory_budget();
 }

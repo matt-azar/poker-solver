@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <fstream>
 #include <iostream>
 #include <mutex>
@@ -249,6 +250,7 @@ struct Job
     int max_raises = 2;
     int iterations = 200;
     int samples = 5;
+    int memory_mib = 1024;
     poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
 };
 
@@ -314,6 +316,14 @@ Job parse_job(const std::string& text)
     job.allow_all_in = read_number(text, "allow_all_in", 1) != 0.0;
     job.geometric = read_number(text, "geometric", 0) != 0.0;
     job.frozen = read_number(text, "frozen", 0) != 0.0;
+    const double memory_raw = read_number(text, "memory_mib", 1024);
+    if (!std::isfinite(memory_raw) || memory_raw < 1.0 || memory_raw != std::floor(memory_raw)
+        || memory_raw > static_cast<double>(std::numeric_limits<int>::max()))
+    {
+        throw std::invalid_argument(
+            "memory_mib must be a positive integer number of mebibytes");
+    }
+    job.memory_mib = static_cast<int>(memory_raw);
     job.all_in_threshold = read_number(text, "all_in_threshold", 0);
     job.accuracy = read_number(text, "accuracy", -1);
     job.max_raises = static_cast<int>(read_number(text, "max_raises", 2));
@@ -758,6 +768,7 @@ poker::streets::StreetConfig street_config(const Job& job)
     config.geometric = job.geometric;
     config.all_in_threshold = job.all_in_threshold;
     config.max_raises = job.max_raises;
+    config.memory_mib = job.memory_mib;
     return config;
 }
 

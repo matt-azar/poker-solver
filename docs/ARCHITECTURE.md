@@ -6,7 +6,7 @@ Phase 5 adds a 52-card deck, a seven-card evaluator, and 1,326-hand ranges under
 
 Phase 6 adds `poker::river::RiverGame`, a heads-up no-limit river on that trainer. Chance deals private hands from the two ranges. The regret update was not rewritten. See [RIVER.md](RIVER.md).
 
-Phase 7 adds `poker::solver::RiverBatchSolver`. It keeps one copy of the public betting tree and runs the same regret update, in the same deal order, including the CFR+ floor between deals. Best response is one bottom-up pass: each river information set is one player, one private hand, and one public history, so that pass matches deepest-first best response on `RiverGame`. `CfrTrainer<RiverGame>` remains the reference and is selected with `--reference`. Kuhn and Leduc still use only `CfrTrainer`.
+Phase 7 adds `poker::solver::RiverBatchSolver`. It keeps one copy of the public betting tree and runs the same regret update, in the same deal order. A pass freezes regret matching. CFR+ floors one player after that player's deals, not between deals. Best response is one bottom-up pass: each river information set is one player, one private hand, and one public history, so that pass matches deepest-first best response on `RiverGame`. `CfrTrainer<RiverGame>` remains the reference and is selected with `--reference`. Kuhn and Leduc still use only `CfrTrainer`.
 
 Phase 8 adds `poker::streets::StreetGame` for a turn or a flop. Later cards are chance nodes. The regret update was not rewritten. See [STREETS.md](STREETS.md).
 
@@ -53,7 +53,7 @@ Kuhn’s only chance node is the root deal: six equally likely ordered hands. Af
 
 Regrets and strategy sums are two `std::vector<double>` blocks. An offset table maps each information set to its first action. Kuhn has 12 information sets and 2 actions each, so 24 doubles per table. The inner CFR recursion uses stack arrays and does not allocate. The action-count scratch limit is 8 per information set.
 
-CFR+ stores the same tables. Negative cumulative regrets are replaced by zero after each update, and the average strategy is weighted by the iteration index. Linear CFR weights both the new regret and the average strategy by the iteration index and does not floor. See [MATHEMATICS.md](MATHEMATICS.md).
+CFR+ stores the same tables. Negative cumulative regrets are replaced by zero once, after the updating player's pass has summed its counterfactual regret. The opponent's table is left unchanged. The average strategy is weighted by the iteration index. Linear CFR weights both the new regret and the average strategy by the iteration index and does not floor. See [MATHEMATICS.md](MATHEMATICS.md).
 
 ## Best response
 

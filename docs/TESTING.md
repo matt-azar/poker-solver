@@ -94,6 +94,12 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - The public turn and flop tree matches `StreetGame` action by action: check-down, a shared turn infoset with two hands, a different river size, and a geometric size. The largest strategy difference in those tests was 0
 - Continuing a fresh public street solver for 4 iterations matches one that was reset and run for those same 4 iterations
 - The frozen combo pass matches check-down equity on the turn and on the flop. On the nuts-versus-air turn lock, 400 CFR+ iterations reach a value within 1 chip of +50 and a smaller Nash gap than 20 iterations
+- A zero memory budget is rejected. A 1 MiB budget rejects a `77+` versus `77+` check-down flop and names the budget, the current allocation, and the denied request. A later solve with a sufficient budget still runs
+- Two sufficient budgets on that flop produce the same value and the same Nash gap. The report includes scratch and the reserved rank cache, and its peak is larger than the regret-plus-strategy-sum figure
+- A weighted turn and a blocker turn match the existing closed form or `StreetGame` strategy check
+- Expanded terminal and decision counts on that flop are 64-bit products of the deal count and the runout count
+
+`street_memory_bench` repeats the uniform full-range check-down on the turn and the flop and checks the centered value. It is not a CTest test and it has no wall-time limit. The command is in [BENCHMARKS.md](BENCHMARKS.md).
 - Continuing a fresh public-tree solver for 40 iterations matches a solver that was reset and run for those same 40 iterations
 
 The explorer is not part of `poker_solver_tests`. It was checked in the browser at `http://127.0.0.1:8765`. Painting queens onto aces wrote `AA,QQ` and counted 9 live combos on the default river board. A check-only flop, `Ah Kd 7c` with `QcQd` versus `JcJd`, finished at value 41.6161616162 and Nash gap 0, and the history listed flop, turn, and river lines from that one solve.

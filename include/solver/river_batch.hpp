@@ -17,9 +17,11 @@ struct RiverStrategyEntry
     double probability = 0.0;
 };
 
-// Same CFR and CFR+ update as CfrTrainer<RiverGame>, including per-deal order
-// and the CFR+ floor between deals. The betting tree is stored once. Best
-// response is one walk over that tree. RiverGame remains the reference.
+// Same CFR and CFR+ update as CfrTrainer<RiverGame>. A pass freezes regret
+// matching, sums that player's counterfactual regret across every deal, then
+// CFR+ floors only that player. The floor is not applied between deals. The
+// betting tree is stored once. Best response is one walk over that tree.
+// RiverGame remains the reference.
 class RiverBatchSolver
 {
 public:

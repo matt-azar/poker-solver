@@ -87,7 +87,7 @@ CFR+ changes three things relative to the vanilla update above. The counterfactu
 R^{t+1}(I,a) = \max\left(0, R^t(I,a) + r^t(I,a)\right).
 \]
 
-**Alternating updates.** Iteration \(t\) (starting at 1) makes one full traversal that updates only player 1, then one full traversal that updates only player 2. During a player’s traversal the opponent’s strategy is the current regret-matching strategy, including regrets written earlier in the same iteration. This is the usual CFR+ schedule (Tammelin, 2014). It is not part of the regret formula itself.
+**Alternating updates.** Iteration \(t\) (starting at 1) updates player 1, then player 2. Each pass freezes regret matching at the start and holds that strategy for the whole pass. Counterfactual regret is summed across the pass. The floor above is applied once, to the player who just updated, after that sum. The other player's regret table is not modified. Vanilla CFR and linear CFR use one pass for both players and do not floor. This is the usual CFR+ schedule (Tammelin, 2014) with the floor taken after the information-set sum rather than after each history.
 
 **Iteration-weighted averaging.** The average strategy still multiplies by the acting player’s reach, and also by the iteration index:
 
@@ -148,7 +148,7 @@ Player 0's terminal utility is `pot / 2` plus the opponent's river investment wh
 
 An opening fraction `f` bets `round(f * pot)` chips. A raise fraction `f` increases the bet by `round(f * pot_after_the_call)`. The minimum later raise equals the previous full bet or raise. Details and a solved toy are in [RIVER.md](RIVER.md).
 
-`RiverBatchSolver` does not change that update. Deals are visited in joint-distribution order, and each deal updates regrets before the next deal starts. CFR+ still floors a regret at zero before the next deal. The average strategy is still accumulated once per visit, with weight `1` or the iteration index times the acting player's reach, and chance is not part of that weight. Because a river information set is exactly one private hand plus one public history, a single bottom-up pass that maximizes player 0's chips and minimizes them for player 1, breaking ties toward the lower action index, is the same best response as the deepest-first walk.
+`RiverBatchSolver` does not change that update. Deals are visited in joint-distribution order. The strategy is frozen for the pass, and CFR+ floors one player after that player's deals. The average strategy is still accumulated once per visit, with weight `1` or the iteration index times the acting player's reach, and chance is not part of that weight. Because a river information set is exactly one private hand plus one public history, a single bottom-up pass that maximizes player 0's chips and minimizes them for player 1, breaking ties toward the lower action index, is the same best response as the deepest-first walk.
 
 One checked case: pot 100, one all-in, aces or fives against kings. The equilibrium value for the out-of-position player is +25, with aces always betting, fives betting half the time, and kings calling half the time. CFR+ at 4,000 iterations reached a value of 24.9999102275. The Nash gap fell from 2.45089917903 at 40 iterations to 0.196997733488. That gap is NashConv for this bet-size tree, not for every legal chip size.
 

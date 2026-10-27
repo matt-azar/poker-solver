@@ -2,7 +2,7 @@
 
 The solvers in this repository find an equilibrium of a finite game: Kuhn, six-card Leduc, a river with a fixed list of bet sizes, or a turn or flop small enough to enumerate. That is not an equilibrium of unrestricted heads-up no-limit Texas Hold'em.
 
-Unrestricted HUNL deals two hole cards from a 52-card deck and then three streets of board cards. At every decision a player may fold, call, or bet any legal chip amount up to the stack. The exact extensive form of that game does not fit in memory on a commodity machine, and this repository does not claim to solve it. The largest exact trees measured here are a `22+` versus `22+` river with two bet sizes (882 information sets) and a check-only flop with one combo each (4,052 information sets). Both are abstractions. See [BENCHMARKS.md](BENCHMARKS.md).
+Unrestricted HUNL deals two hole cards from a 52-card deck and then three streets of board cards. At every decision a player may fold, call, or bet any legal chip amount up to the stack. The exact extensive form of that game does not fit in memory on a commodity machine, and this repository does not claim to solve it. The largest exact tree measured here is a uniform full-range check-down on `Ah Kd 7c`: 5,197,920 stored information sets and about 399 MiB of solver-owned heap, inside the default 1024 MiB budget. Expanded histories on that tree are in the billions and are not stored. A `22+` versus `22+` river with two bet sizes (882 information sets) and a one-combo check-only flop (4,052 information sets) remain small checked abstractions. See [BENCHMARKS.md](BENCHMARKS.md).
 
 ## What would still have to be chosen
 
@@ -20,13 +20,13 @@ Unrestricted HUNL deals two hole cards from a 52-card deck and then three street
 
 **Exploitability.** The Nash gap reported everywhere in this repository is NashConv, `u0(BR0) + u1(BR1)`, computed by an exact best response on the game that was solved. It is not an estimate of exploitability in unrestricted HUNL.
 
-**Storage and threads.** Regrets and the average strategy are two arrays of doubles in memory. A larger abstract game needs compression or disk-backed tables, and a parallel traversal needs a split of the tree that still applies the same regret update. Neither is implemented. There is no measured speedup to report.
+**Storage and threads.** The street solver charges solver-owned heap against `memory_mib`. The regret array plus the strategy-sum array is one component of that total, reported as `regret_strategy_sum_bytes`. Process RSS is reported separately when the operating system provides it. A parallel traversal is not implemented. There is no measured speedup to report.
 
 ## Linear CFR on Kuhn
 
-Linear CFR uses the same regret-matching rule as vanilla CFR. On iteration `t` (starting at 1) it multiplies both the new regret and the average-strategy contribution by `t`. It does not floor regrets. Both players update in one traversal. CFR+ is unchanged: it floors regrets, weights only the average strategy by `t`, and alternates the player who updates.
+Linear CFR uses the same regret-matching rule as vanilla CFR. On iteration `t` (starting at 1) it multiplies both the new regret and the average-strategy contribution by `t`. It does not floor regrets. Both players update in one traversal. CFR+ floors only the updating player after that player's pass, weights only the average strategy by `t`, and alternates the player who updates.
 
-Same machine as the other Kuhn rows. Command: `kuhn_solver --iterations 10000 --algorithm <name>`.
+The 10,000-iteration table below is historical, from before that pass-level floor. The current 200,000-iteration Kuhn rows are in [BENCHMARKS.md](BENCHMARKS.md). Command for this historical table: `kuhn_solver --iterations 10000 --algorithm <name>`.
 
 | Algorithm | Iterations | Runtime (s) | Iterations/s | Player 1 value | Nash gap |
 | --- | ---: | ---: | ---: | ---: | ---: |

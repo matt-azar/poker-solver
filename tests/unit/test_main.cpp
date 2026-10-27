@@ -16,6 +16,7 @@ int main()
     run_holdem_tests();
     run_river_tests();
     run_street_tests();
+    run_street_memory_tests();
     }
     catch (const std::exception& error)
     {

@@ -1,6 +1,8 @@
 ## Kuhn vanilla CFR and CFR+
 
-Measured with `build\Release\kuhn_solver.exe` on Windows 10.0.26200, MSVC 19.40.33811.0, Release, x64. Runtime is the regret-update loop. Memory is the regret table, the strategy-sum table, and the information-set offset table: `2 * 24 * 8 + 13 * 4` = 436 bytes. It is not process RSS.
+The table below is historical. It was measured when CFR+ floored each regret during the traversal. The current update freezes the strategy for a pass and floors only the player who just finished that pass. Those rows are not the current solver.
+
+Historical measurement: `build\Release\kuhn_solver.exe` on Windows 10.0.26200, MSVC 19.40.33811.0, Release, x64. Runtime is the regret-update loop. Memory is the regret table, the strategy-sum table, and the information-set offset table: `2 * 24 * 8 + 13 * 4` = 436 bytes. It is not process RSS.
 
 | Algorithm | Iterations | Runtime (s) | Iterations/s | \(u_1\) | Nash gap |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -17,9 +19,21 @@ Measured with `build\Release\kuhn_solver.exe` on Windows 10.0.26200, MSVC 19.40.
 
 CFR+ walks the tree twice per iteration (one pass for each player), so its iteration rate is lower. At 200,000 iterations its Nash gap is smaller than vanilla CFR’s. On this 12-information-set game the wall-clock advantage is small. These times are not a prediction for Leduc or Hold’em.
 
+## Kuhn after the pass-level floor
+
+Same machine and compiler, Release, from `poker_solver_tests` in this change (parent `9e0d87d`). Runtime is the regret-update loop inside the unit test, not a separate `kuhn_solver` invocation. Memory is still 436 bytes. At 200,000 iterations the CFR+ Nash gap is smaller than the vanilla gap. That comparison is this Kuhn measurement only.
+
+| Algorithm | Iterations | Runtime (s) | \(u_1\) | Nash gap |
+| --- | ---: | ---: | ---: | ---: |
+| vanilla CFR | 200000 | 0.361615 | -0.0555541620942 | 0.000962626251605 |
+| CFR+ | 200000 | 0.6515666 | -0.055555555546 | 2.63026537634e-06 |
+| linear CFR | 2000 | 0.0034519 | -0.055423756632 | 0.0110188373994 |
+
+\(-1/18\) is -0.0555555555556. Linear CFR does not floor. The 2,000-iteration linear row is not a replacement for the historical 10,000-iteration row.
+
 ## Linear CFR on Kuhn
 
-Same machine and compiler, measured together. `kuhn_solver --iterations 10000 --algorithm <name>`. Linear CFR weights iteration `t` on both the new regret and the average strategy. It does not floor regrets. Both players update in one pass.
+Historical, from before the pass-level floor. Same machine and compiler. `kuhn_solver --iterations 10000 --algorithm <name>`. Linear CFR weights iteration `t` on both the new regret and the average strategy. It does not floor regrets. Both players update in one pass.
 
 | Algorithm | Iterations | Runtime (s) | Iterations/s | \(u_1\) | Nash gap |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -107,6 +121,36 @@ About 1.42× on the regret loop. The public-tree memory figure omits the referen
 
 ## Frozen combo pass
 
-`street_solver --frozen` holds the strategy fixed for a pass and updates every combo on that pass. Each action keeps an exploration probability of `0.05 / actions`, so a line the strategy has left is still updated. On this one-combo lock the pass is slower than the per-deal walk; the pass is the one that can take a wider range. The timer below is 20 iterations plus 400 iterations.
+`street_solver --frozen` holds the strategy fixed for one pass and updates every combo on that pass. Child reach is the frozen action probability. There is no extra exploration mixture. On the one-combo nuts-versus-air lock, the unit test trains 20 CFR+ iterations and then 400. That timer is training only. This change, Release, same machine: training 0.1840145 seconds, value 50.003565929, Nash gap at 400 iterations 0.00467581047378, Nash gap at 20 iterations 1.78571428571.
 
-The 20-iteration Nash gap is 0.360187888642. The 400-iteration value is 50.0009429068 and the Nash gap is 0.000943154882123. Training both of those runs took 1.5202292 seconds.
+The earlier frozen numbers that used a 0.05 exploration mixture are historical and are not this update.
+
+## Full-range check-down
+
+`build\Release\street_memory_bench.exe`, Release, MSVC 19.40, Windows 10.0.26200, x64, parent `9e0d87d`. One frozen CFR+ iteration, uniform random ranges, no all-in, max raises 0, pot 100, stack 100, budget 1024 MiB. Tolerance is `1e-8 * pot` = `1e-6` chips. Both cases are inside it. The times below are an isolated run. A second run while another process was active was slower and reproduced the same values and the same byte counts. Expanded counts are histories, not stored nodes. `regret_strategy_sum_bytes` is the regret array plus the strategy-sum array. `peak_allocated_bytes` is solver-owned heap. `process_peak_working_set_bytes` is process RSS and is a different number. `solve` runtime is training plus the final value and best-response evaluation. Construction is separate. Wall time is the whole bench case.
+
+| | Turn `Ah Kd 7c 4s` | Flop `Ah Kd 7c` |
+| --- | ---: | ---: |
+| Deals | 1167480 | 1271256 |
+| Stored information sets | 106032 | 5197920 |
+| Expanded terminals | 51369120 | 2517086880 |
+| Expanded decisions | 105073200 | 5151129312 |
+| Player 0 value | 1.9567680809e-15 | 1.28230759344e-14 |
+| NashConv | 8.64586180427e-15 | 1.43912659567e-14 |
+| Construction (s) | 0.2179782 | 0.4312478 |
+| Training (s) | 0.373041 | 16.0721216 |
+| Evaluation (s) | 0.0918128 | 4.9844792 |
+| Wall (s) | 0.6830277 | 21.4921134 |
+| Estimated peak (bytes) | 60855838 | 418555390 |
+| Peak engine (bytes) | 60855838 | 418555390 |
+| Regret + strategy sum (bytes) | 1696512 | 83166720 |
+| Process peak RSS (bytes) | 66572288 | 425504768 |
+
+The flop rank-cache component is a reserved bound of 22,729,728 bytes, charged before the pass. The same command is:
+
+```sh
+street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024
+street_solver --board Ah,Kd,7c,4s --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024
+```
+
+`street_memory_bench` checks those two solves and is not part of the unit suite. There is no wall-time gate in `poker_solver_tests`.

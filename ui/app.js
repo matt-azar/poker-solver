@@ -409,6 +409,7 @@ $("setup").addEventListener("submit", async (event) => {
     accuracy: $("accuracy").value.trim() === "" ? -1 : Number($("accuracy").value),
     max_raises: Number($("max-raises").value),
     iterations: Number($("iterations").value),
+    memory_mib: Number($("memory-mib").value),
     algorithm: $("algorithm").value,
     samples: 5
   };

@@ -27,6 +27,9 @@ add_library(poker_solver_core STATIC
 target_include_directories(poker_solver_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+if(WIN32)
+    target_link_libraries(poker_solver_core PUBLIC psapi)
+endif()
 poker_set_warnings(poker_solver_core)
 
 add_executable(kuhn_solver src/main.cpp)
@@ -72,3 +75,8 @@ target_link_libraries(poker_solver_tests PRIVATE poker_solver_core)
 poker_set_warnings(poker_solver_tests)
 
 add_test(NAME poker_solver_tests COMMAND poker_solver_tests)
+
+# Full-range check-down. Not part of ctest: it allocates hundreds of mebibytes.
+add_executable(street_memory_bench tests/street_memory_bench.cpp)
+target_link_libraries(street_memory_bench PRIVATE poker_solver_core)
+poker_set_warnings(street_memory_bench)

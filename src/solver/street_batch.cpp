@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <numeric>
 #include <span>
 #include <stdexcept>
@@ -16,6 +17,14 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#endif
 
 namespace poker::solver
 {
@@ -370,6 +379,172 @@ BetState apply_action(const streets::StreetConfig& config, BetState state, const
     return state;
 }
 
+std::uint64_t checked_add(std::uint64_t left, std::uint64_t right, const char* what)
+{
+    if (left > std::numeric_limits<std::uint64_t>::max() - right)
+    {
+        throw std::invalid_argument(std::string(what) + " overflowed");
+    }
+    return left + right;
+}
+
+std::uint64_t checked_mul(std::uint64_t left, std::uint64_t right, const char* what)
+{
+    if (left != 0 && right > std::numeric_limits<std::uint64_t>::max() / left)
+    {
+        throw std::invalid_argument(std::string(what) + " overflowed");
+    }
+    return left * right;
+}
+
+std::uint64_t budget_bytes(int mib)
+{
+    if (mib <= 0)
+    {
+        throw std::invalid_argument(
+            "memory budget must be a positive integer number of mebibytes");
+    }
+    const auto value = static_cast<std::uint64_t>(mib);
+    if (value > std::numeric_limits<std::uint64_t>::max() / 1048576ull)
+    {
+        throw std::invalid_argument("memory budget overflows");
+    }
+    return value * 1048576ull;
+}
+
+std::uint64_t heap_string_bytes(const std::string& text)
+{
+    if (text.capacity() <= 15)
+    {
+        return 0;
+    }
+    return static_cast<std::uint64_t>(text.capacity()) + 1;
+}
+
+std::uint64_t process_peak_working_set_bytes()
+{
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS counters = {};
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters)) != 0)
+    {
+        return static_cast<std::uint64_t>(counters.PeakWorkingSetSize);
+    }
+#endif
+    return 0;
+}
+
+class MemoryLedger
+{
+public:
+    explicit MemoryLedger(std::uint64_t limit_bytes)
+        : limit_(limit_bytes)
+    {
+    }
+
+    std::uint64_t limit() const
+    {
+        return limit_;
+    }
+
+    std::uint64_t current() const
+    {
+        return current_;
+    }
+
+    std::uint64_t peak() const
+    {
+        return peak_;
+    }
+
+    std::uint64_t bucket(const std::string& name) const
+    {
+        for (const auto& item : buckets_)
+        {
+            if (item.first == name)
+            {
+                return item.second;
+            }
+        }
+        return 0;
+    }
+
+    const std::vector<std::pair<std::string, std::uint64_t>>& buckets() const
+    {
+        return buckets_;
+    }
+
+    void require_additional(std::uint64_t bytes, const char* stage) const
+    {
+        if (current_ > limit_ || bytes > limit_ - current_)
+        {
+            deny(stage, bytes, saturating_sum(current_, bytes));
+        }
+    }
+
+    void set_bucket(const std::string& name, std::uint64_t bytes, const char* stage)
+    {
+        std::uint64_t& stored = slot_for(name);
+        const std::uint64_t old = stored;
+        if (bytes > old)
+        {
+            const std::uint64_t simultaneous = saturating_sum(current_, bytes);
+            if (current_ > limit_ || bytes > limit_ - current_)
+            {
+                deny(stage, bytes, simultaneous);
+            }
+            if (simultaneous > peak_)
+            {
+                peak_ = simultaneous;
+            }
+        }
+        current_ = current_ - old + bytes;
+        stored = bytes;
+        if (current_ > peak_)
+        {
+            peak_ = current_;
+        }
+    }
+
+private:
+    static std::uint64_t saturating_sum(std::uint64_t left, std::uint64_t right)
+    {
+        if (left > std::numeric_limits<std::uint64_t>::max() - right)
+        {
+            return std::numeric_limits<std::uint64_t>::max();
+        }
+        return left + right;
+    }
+
+    [[noreturn]] void deny(const char* stage, std::uint64_t request, std::uint64_t requirement) const
+    {
+        throw std::invalid_argument(
+            "street solver memory budget exceeded during " + std::string(stage)
+            + ": budget " + std::to_string(limit_)
+            + " bytes, allocated " + std::to_string(current_)
+            + " bytes, request " + std::to_string(request)
+            + " bytes, estimated requirement " + std::to_string(requirement)
+            + " bytes");
+    }
+
+    std::uint64_t& slot_for(const std::string& name)
+    {
+        for (auto& item : buckets_)
+        {
+            if (item.first == name)
+            {
+                return item.second;
+            }
+        }
+        buckets_.emplace_back(name, 0);
+        return buckets_.back().second;
+    }
+
+    std::uint64_t limit_ = 0;
+    std::uint64_t current_ = 0;
+    std::uint64_t peak_ = 0;
+    std::vector<std::pair<std::string, std::uint64_t>> buckets_;
+};
+
 std::uint32_t pack_rank(const holdem::HandValue& value)
 {
     std::uint32_t rank = static_cast<std::uint32_t>(value.category);
@@ -428,6 +603,7 @@ struct StreetBatchSolver::Engine
     };
 
     streets::StreetConfig config;
+    MemoryLedger ledger;
     std::vector<int> combos[2];
     std::vector<Deal> deals;
     std::vector<Node> nodes;
@@ -442,8 +618,21 @@ struct StreetBatchSolver::Engine
     int n1 = 0;
     int public_decisions = 0;
     int public_terminals = 0;
-    int expanded_decisions = 0;
-    int expanded_terminals = 0;
+    std::uint64_t expanded_decisions = 0;
+    std::uint64_t expanded_terminals = 0;
+    std::uint64_t counted_deals_ = 0;
+    std::uint64_t planned_slots_ = 0;
+    std::int64_t planned_cursor_ = 0;
+    std::uint64_t estimated_peak_bytes_ = 0;
+    std::uint64_t max_rank_keys_ = 0;
+    double construction_seconds_ = 0.0;
+    double train_seconds_ = 0.0;
+    mutable double evaluation_seconds_ = 0.0;
+    double joint_mass_ = 0.0;
+    std::vector<char> combo_blocked;
+    std::vector<int> combo_low;
+    std::vector<int> combo_high;
+    std::vector<int> combo_to_hand[2];
     int trained = 0;
     std::vector<double> range_w[2];
     std::vector<int> hole_a[2];
@@ -479,27 +668,41 @@ struct StreetBatchSolver::Engine
         std::vector<double> aev1;
     };
     mutable std::vector<Scratch> scratch;
+    mutable std::vector<double> amount_buf[2];
 
     explicit Engine(streets::StreetConfig incoming)
         : config(std::move(incoming))
+        , ledger(budget_bytes(config.memory_mib))
     {
+        const auto started = std::chrono::steady_clock::now();
         validate();
         BetState root;
         root.pot = config.pot;
         root.acting = config.first_to_act;
         root.street = 0;
         build_node(root, "", 0);
-        build_deals();
-        prepare_slots();
-        register_tree();
-        regret.assign(static_cast<std::size_t>(cursor_), 0.0);
-        strategy_sum.assign(static_cast<std::size_t>(cursor_), 0.0);
-        average.assign(static_cast<std::size_t>(cursor_), 0.0);
-        frozen_sigma.assign(static_cast<std::size_t>(cursor_), 0.0);
+        account_public_tree();
+        count_and_index_hands();
+        set_hand_counts();
+        visit_slots(false);
+        const std::uint64_t rest = planned_allocation_bytes();
+        estimated_peak_bytes_ = checked_add(ledger.current(), rest, "plan");
+        ledger.require_additional(rest, "plan");
+        fill_deals();
+        allocate_slot_of();
+        allocate_slots();
+        visit_slots(true);
+        if (static_cast<std::uint64_t>(slots.size()) != planned_slots_ || cursor_ != planned_cursor_)
+        {
+            throw std::logic_error("street slot registration did not match the memory plan");
+        }
+        allocate_tables();
         build_reach_table();
+        construction_seconds_ = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
     }
 
-    int cursor_ = 0;
+    std::int64_t cursor_ = 0;
 
     void validate() const
     {
@@ -548,6 +751,7 @@ struct StreetBatchSolver::Engine
             node.folded = state.folded;
             node.contrib[0] = state.contrib[0];
             node.contrib[1] = state.contrib[1];
+            admit_public_growth();
             nodes.push_back(std::move(node));
             ++public_terminals;
             return static_cast<int>(nodes.size()) - 1;
@@ -559,6 +763,7 @@ struct StreetBatchSolver::Engine
             node.street = state.street;
             node.deal_which = state.deal_which;
             const int id = static_cast<int>(nodes.size());
+            admit_public_growth();
             nodes.push_back(std::move(node));
             BetState next = state;
             next.chance = false;
@@ -609,8 +814,10 @@ struct StreetBatchSolver::Engine
                 legal.code[action], legal.add[action], street_total, all_in, facing);
         }
         const int id = static_cast<int>(nodes.size());
+        admit_public_growth();
         nodes.push_back(std::move(node));
         ++public_decisions;
+        admit_public_growth();
         decision_ids.push_back(id);
         for (int action = 0; action < legal.count; ++action)
         {
@@ -622,45 +829,173 @@ struct StreetBatchSolver::Engine
         return id;
     }
 
-    int hand_index(int player, int combo)
+    void admit_public_growth()
     {
-        for (int i = 0; i < static_cast<int>(combos[player].size()); ++i)
+        const bool nodes_grow = nodes.size() == nodes.capacity();
+        const bool ids_grow = decision_ids.size() == decision_ids.capacity();
+        if (!nodes_grow && !ids_grow)
         {
-            if (combos[player][static_cast<std::size_t>(i)] == combo)
-            {
-                return i;
-            }
+            return;
         }
-        combos[player].push_back(combo);
-        return static_cast<int>(combos[player].size()) - 1;
+        const std::uint64_t node_cap = nodes_grow
+            ? (nodes.capacity() == 0 ? 8 : nodes.capacity() + nodes.capacity() / 2 + 1)
+            : nodes.capacity();
+        const std::uint64_t id_cap = ids_grow
+            ? (decision_ids.capacity() == 0 ? 8 : decision_ids.capacity() + decision_ids.capacity() / 2 + 1)
+            : decision_ids.capacity();
+        std::uint64_t bytes = checked_mul(node_cap, sizeof(Node), "public tree");
+        bytes = checked_add(bytes, checked_mul(id_cap, sizeof(int), "public tree"), "public tree");
+        const std::uint64_t existing = ledger.bucket("public_tree");
+        if (bytes < existing)
+        {
+            bytes = existing;
+        }
+        ledger.set_bucket("public_tree", bytes, "public tree");
     }
 
-    void build_deals()
+    void account_public_tree()
     {
-        const std::vector<holdem::HandPairProbability> rows = holdem::joint_distribution(
+        std::uint64_t bytes = checked_mul(nodes.capacity(), sizeof(Node), "public tree");
+        bytes = checked_add(
+            bytes, checked_mul(decision_ids.capacity(), sizeof(int), "public tree"), "public tree");
+        for (const Node& node : nodes)
+        {
+            bytes = checked_add(bytes, heap_string_bytes(node.path), "public tree");
+            for (int action = 0; action < node.n_actions; ++action)
+            {
+                bytes = checked_add(bytes, heap_string_bytes(node.action_labels[action]), "public tree");
+            }
+        }
+        ledger.set_bucket("public_tree", bytes, "public tree");
+    }
+
+    void prepare_pair_scan()
+    {
+        combo_blocked.assign(static_cast<std::size_t>(holdem::kComboCount), 0);
+        combo_low.assign(static_cast<std::size_t>(holdem::kComboCount), 0);
+        combo_high.assign(static_cast<std::size_t>(holdem::kComboCount), 0);
+        for (int combo = 0; combo < holdem::kComboCount; ++combo)
+        {
+            int low = 0;
+            int high = 0;
+            holdem::Range::combo_cards(combo, low, high);
+            combo_low[static_cast<std::size_t>(combo)] = low;
+            combo_high[static_cast<std::size_t>(combo)] = high;
+            for (int card : config.board)
+            {
+                if (card == low || card == high)
+                {
+                    combo_blocked[static_cast<std::size_t>(combo)] = 1;
+                }
+            }
+        }
+        joint_mass_ = holdem::joint_mass(
             config.oop, config.ip, config.board.data(), static_cast<int>(config.board.size()));
-        if (rows.empty())
+    }
+
+    template <typename Visit>
+    void for_each_legal_pair(Visit&& visit) const
+    {
+        for (int first = 0; first < holdem::kComboCount; ++first)
+        {
+            const double left = config.oop.weight(first);
+            if (left == 0.0 || combo_blocked[static_cast<std::size_t>(first)] != 0)
+            {
+                continue;
+            }
+            const int a0 = combo_low[static_cast<std::size_t>(first)];
+            const int a1 = combo_high[static_cast<std::size_t>(first)];
+            for (int second = 0; second < holdem::kComboCount; ++second)
+            {
+                const double right = config.ip.weight(second);
+                if (right == 0.0 || combo_blocked[static_cast<std::size_t>(second)] != 0)
+                {
+                    continue;
+                }
+                const int b0 = combo_low[static_cast<std::size_t>(second)];
+                const int b1 = combo_high[static_cast<std::size_t>(second)];
+                if (a0 == b0 || a0 == b1 || a1 == b0 || a1 == b1)
+                {
+                    continue;
+                }
+                visit(first, second, left * right);
+            }
+        }
+    }
+
+    void count_and_index_hands()
+    {
+        prepare_pair_scan();
+        if (joint_mass_ <= 0.0)
         {
             throw std::invalid_argument("ranges leave no legal hand pair");
         }
-        deals.reserve(rows.size());
-        for (const holdem::HandPairProbability& row : rows)
+        combo_to_hand[0].assign(static_cast<std::size_t>(holdem::kComboCount), -1);
+        combo_to_hand[1].assign(static_cast<std::size_t>(holdem::kComboCount), -1);
+        std::uint64_t count = 0;
+        for_each_legal_pair([&](int first, int second, double)
         {
-            Deal deal;
-            deal.h0 = hand_index(0, row.combo0);
-            deal.h1 = hand_index(1, row.combo1);
-            deal.combo0 = row.combo0;
-            deal.combo1 = row.combo1;
-            deal.probability = row.probability;
-            holdem::Range::combo_cards(row.combo0, deal.c0, deal.c1);
-            holdem::Range::combo_cards(row.combo1, deal.d0, deal.d1);
-            deals.push_back(deal);
+            ++count;
+            if (combo_to_hand[0][static_cast<std::size_t>(first)] < 0)
+            {
+                combo_to_hand[0][static_cast<std::size_t>(first)] = static_cast<int>(combos[0].size());
+                combos[0].push_back(first);
+            }
+            if (combo_to_hand[1][static_cast<std::size_t>(second)] < 0)
+            {
+                combo_to_hand[1][static_cast<std::size_t>(second)] = static_cast<int>(combos[1].size());
+                combos[1].push_back(second);
+            }
+        });
+        if (count == 0)
+        {
+            throw std::invalid_argument("ranges leave no legal hand pair");
         }
+        counted_deals_ = count;
         n0 = static_cast<int>(combos[0].size());
         n1 = static_cast<int>(combos[1].size());
+        std::uint64_t bytes = 0;
+        bytes = checked_add(bytes, checked_mul(combos[0].capacity(), sizeof(int), "hands"), "hands");
+        bytes = checked_add(bytes, checked_mul(combos[1].capacity(), sizeof(int), "hands"), "hands");
+        bytes = checked_add(bytes, checked_mul(combo_blocked.capacity(), sizeof(char), "hands"), "hands");
+        bytes = checked_add(bytes, checked_mul(combo_low.capacity(), sizeof(int), "hands"), "hands");
+        bytes = checked_add(bytes, checked_mul(combo_high.capacity(), sizeof(int), "hands"), "hands");
+        bytes = checked_add(bytes, checked_mul(combo_to_hand[0].capacity(), sizeof(int), "hands"), "hands");
+        bytes = checked_add(bytes, checked_mul(combo_to_hand[1].capacity(), sizeof(int), "hands"), "hands");
+        ledger.set_bucket("combos", bytes, "hands");
     }
 
-    void prepare_slots()
+    void fill_deals()
+    {
+        const std::uint64_t bytes = checked_mul(counted_deals_, sizeof(Deal), "deals");
+        ledger.set_bucket("deals", bytes, "deals");
+        deals.reserve(static_cast<std::size_t>(counted_deals_));
+        const std::uint64_t reserved = checked_mul(deals.capacity(), sizeof(Deal), "deals");
+        if (reserved != bytes)
+        {
+            ledger.set_bucket("deals", reserved, "deals");
+        }
+        for_each_legal_pair([&](int first, int second, double product)
+        {
+            Deal deal;
+            deal.combo0 = first;
+            deal.combo1 = second;
+            deal.h0 = combo_to_hand[0][static_cast<std::size_t>(first)];
+            deal.h1 = combo_to_hand[1][static_cast<std::size_t>(second)];
+            deal.probability = product / joint_mass_;
+            deal.c0 = combo_low[static_cast<std::size_t>(first)];
+            deal.c1 = combo_high[static_cast<std::size_t>(first)];
+            deal.d0 = combo_low[static_cast<std::size_t>(second)];
+            deal.d1 = combo_high[static_cast<std::size_t>(second)];
+            deals.push_back(deal);
+        });
+        if (deals.size() != static_cast<std::size_t>(counted_deals_))
+        {
+            throw std::logic_error("street deal fill did not match the counted pairs");
+        }
+    }
+
+    void set_hand_counts()
     {
         for (Node& node : nodes)
         {
@@ -669,17 +1004,165 @@ struct StreetBatchSolver::Engine
                 continue;
             }
             node.hands = node.player == 0 ? n0 : n1;
-            int dim = 1;
+        }
+    }
+
+    std::uint64_t slot_index_cells() const
+    {
+        std::uint64_t cells = 0;
+        for (const Node& node : nodes)
+        {
+            if (node.terminal || node.chance)
+            {
+                continue;
+            }
+            std::uint64_t dim = 1;
             if (node.card_mode == 1)
             {
                 dim = 52;
             }
             else if (node.card_mode == 2)
             {
-                dim = 52 * 52;
+                dim = 52ull * 52ull;
             }
-            node.slot_of.assign(static_cast<std::size_t>(dim * node.hands), -1);
+            cells = checked_add(
+                cells,
+                checked_mul(dim, static_cast<std::uint64_t>(node.hands), "slot index"),
+                "slot index");
         }
+        return cells;
+    }
+
+    std::uint64_t planned_allocation_bytes() const
+    {
+        const std::uint64_t hands0 = static_cast<std::uint64_t>(n0);
+        const std::uint64_t hands1 = static_cast<std::uint64_t>(n1);
+        const std::uint64_t wide = hands0 > hands1 ? hands0 : hands1;
+        std::uint64_t total = 0;
+        const auto add = [&](std::uint64_t bytes)
+        {
+            total = checked_add(total, bytes, "plan");
+        };
+        add(checked_mul(counted_deals_, sizeof(Deal), "plan"));
+        add(checked_mul(slot_index_cells(), sizeof(int), "plan"));
+        add(checked_mul(planned_slots_, sizeof(Slot), "plan"));
+        const std::uint64_t table = checked_mul(
+            static_cast<std::uint64_t>(planned_cursor_), sizeof(double), "plan");
+        add(table);
+        add(table);
+        add(table);
+        add(table);
+        const std::uint64_t scratch_level = checked_add(
+            checked_mul(hands0, sizeof(double) * 10, "plan"),
+            checked_mul(hands1, sizeof(double) * 10, "plan"),
+            "plan");
+        add(checked_mul(32, sizeof(Scratch), "plan"));
+        add(checked_mul(32, scratch_level, "plan"));
+        add(checked_mul(hands0 + hands1, sizeof(std::uint64_t), "plan"));
+        add(checked_mul(hands0 + hands1, sizeof(double), "plan"));
+        add(checked_mul((hands0 + hands1) * 2, sizeof(int), "plan"));
+        add(checked_mul(static_cast<std::uint64_t>(holdem::kComboCount) * 2, sizeof(int), "plan"));
+        add(checked_mul(wide, sizeof(int), "plan"));
+        add(checked_mul(wide, sizeof(int), "plan"));
+        add(checked_mul(wide + 1, sizeof(double), "plan"));
+        add(checked_mul(52ull * (wide + 1), sizeof(double), "plan"));
+        add(checked_mul(wide, sizeof(std::uint32_t), "plan"));
+        add(checked_mul(planned_slots_, sizeof(int), "plan"));
+        add(checked_mul(hands0 + hands1, sizeof(double), "plan"));
+        const int free_cards = 52 - static_cast<int>(config.board.size());
+        const std::uint64_t keys = config.board.size() == 3
+            ? checked_mul(
+                static_cast<std::uint64_t>(free_cards),
+                static_cast<std::uint64_t>(free_cards - 1),
+                "plan")
+            : static_cast<std::uint64_t>(free_cards);
+        const std::uint64_t per_key = checked_add(
+            checked_add(
+                checked_mul(hands0, sizeof(std::uint32_t), "plan"),
+                checked_mul(hands1, sizeof(std::uint32_t), "plan"),
+                "plan"),
+            256,
+            "plan");
+        add(checked_mul(keys, per_key, "plan"));
+        return total;
+    }
+
+    void allocate_slot_of()
+    {
+        const std::uint64_t bytes = checked_mul(slot_index_cells(), sizeof(int), "slot index");
+        ledger.set_bucket("slot_of", bytes, "slot index");
+        for (Node& node : nodes)
+        {
+            if (node.terminal || node.chance)
+            {
+                continue;
+            }
+            std::uint64_t dim = 1;
+            if (node.card_mode == 1)
+            {
+                dim = 52;
+            }
+            else if (node.card_mode == 2)
+            {
+                dim = 52ull * 52ull;
+            }
+            const std::uint64_t count = checked_mul(
+                dim, static_cast<std::uint64_t>(node.hands), "slot index");
+            node.slot_of.assign(static_cast<std::size_t>(count), -1);
+        }
+        std::uint64_t actual = 0;
+        for (const Node& node : nodes)
+        {
+            actual = checked_add(
+                actual, checked_mul(node.slot_of.capacity(), sizeof(int), "slot index"), "slot index");
+        }
+        if (actual != bytes)
+        {
+            ledger.set_bucket("slot_of", actual, "slot index");
+        }
+    }
+
+    void allocate_slots()
+    {
+        const std::uint64_t bytes = checked_mul(planned_slots_, sizeof(Slot), "slots");
+        ledger.set_bucket("slots", bytes, "slots");
+        slots.reserve(static_cast<std::size_t>(planned_slots_));
+        const std::uint64_t reserved = checked_mul(slots.capacity(), sizeof(Slot), "slots");
+        if (reserved != bytes)
+        {
+            ledger.set_bucket("slots", reserved, "slots");
+        }
+    }
+
+    void allocate_tables()
+    {
+        if (cursor_ != planned_cursor_)
+        {
+            throw std::logic_error("street regret cursor did not match the memory plan");
+        }
+        const auto entries = static_cast<std::size_t>(cursor_);
+        const std::uint64_t bytes = checked_mul(
+            static_cast<std::uint64_t>(entries), sizeof(double), "regret");
+        ledger.set_bucket("regret", bytes, "regret");
+        ledger.set_bucket("strategy_sum", bytes, "strategy sum");
+        ledger.set_bucket("average", bytes, "average strategy");
+        ledger.set_bucket("frozen", bytes, "frozen strategy");
+        regret.assign(entries, 0.0);
+        strategy_sum.assign(entries, 0.0);
+        average.assign(entries, 0.0);
+        frozen_sigma.assign(entries, 0.0);
+        const auto sync = [&](const char* name, const std::vector<double>& values)
+        {
+            const std::uint64_t actual = checked_mul(values.capacity(), sizeof(double), name);
+            if (actual != bytes)
+            {
+                ledger.set_bucket(name, actual, name);
+            }
+        };
+        sync("regret", regret);
+        sync("strategy_sum", strategy_sum);
+        sync("average", average);
+        sync("frozen", frozen_sigma);
     }
 
     int card_key(const Node& node, int hand, int turn, int river) const
@@ -750,10 +1233,21 @@ struct StreetBatchSolver::Engine
     void add_slot(int node_index, int hand, int turn, int river)
     {
         Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (slots.size() >= static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        {
+            throw std::invalid_argument(
+                "street information-set count exceeded the 32-bit stored id limit");
+        }
+        if (node.n_actions < 0
+            || cursor_ > static_cast<std::int64_t>(std::numeric_limits<int>::max()) - node.n_actions)
+        {
+            throw std::invalid_argument(
+                "street regret table exceeded the 32-bit stored id limit");
+        }
         const int key = card_key(node, hand, turn, river);
         Slot slot;
         slot.node = node_index;
-        slot.base = cursor_;
+        slot.base = static_cast<int>(cursor_);
         slot.n_actions = node.n_actions;
         slot.hand = hand;
         slot.turn = turn;
@@ -763,40 +1257,51 @@ struct StreetBatchSolver::Engine
         cursor_ += node.n_actions;
     }
 
-    // Every legal deal keeps four distinct hole cards off the board, so each
-    // public node is reached by deals.size() times the same runout count.
-    // extra is 0 on the first street, 1 after the next card, and 2 on the river.
-    void charge_visits(int extra, bool terminal)
+    void note_planned_slot(const Node& node)
     {
-        int live = 52 - static_cast<int>(config.board.size()) - 4;
-        long long per_deal = 1;
-        for (int i = 0; i < extra; ++i)
-        {
-            per_deal *= live;
-            --live;
-        }
-        const long long visits = per_deal * static_cast<long long>(deals.size());
-        if (terminal)
-        {
-            const long long next = static_cast<long long>(expanded_terminals) + visits;
-            if (next > 100000000LL)
-            {
-                throw std::invalid_argument(
-                    "street tree has more than 100000000 hand terminals; use smaller ranges");
-            }
-            expanded_terminals = static_cast<int>(next);
-            return;
-        }
-        const long long next = static_cast<long long>(expanded_decisions) + visits;
-        if (next > 2000000000LL)
+        if (node.n_actions < 0
+            || planned_cursor_ > static_cast<std::int64_t>(std::numeric_limits<int>::max()) - node.n_actions)
         {
             throw std::invalid_argument(
-                "street tree has more than 2000000000 decision visits; use smaller ranges");
+                "street regret table exceeded the 32-bit stored id limit");
         }
-        expanded_decisions = static_cast<int>(next);
+        ++planned_slots_;
+        planned_cursor_ += node.n_actions;
     }
 
-    void register_tree()
+    void consider_slot(bool commit, int node_index, int hand, int turn, int river)
+    {
+        if (commit)
+        {
+            add_slot(node_index, hand, turn, river);
+            return;
+        }
+        note_planned_slot(nodes[static_cast<std::size_t>(node_index)]);
+    }
+
+    // Every legal deal keeps four distinct hole cards off the board, so each
+    // public node is reached by counted_deals_ times the same runout count.
+    // extra is 0 on the first street, 1 after the next card, and 2 on the river.
+    // The product is an expanded-history statistic. It is not a stored node count.
+    void charge_visits(int extra, bool terminal)
+    {
+        std::uint64_t live = 52 - static_cast<std::uint64_t>(config.board.size()) - 4;
+        std::uint64_t per_deal = 1;
+        for (int i = 0; i < extra; ++i)
+        {
+            per_deal = checked_mul(per_deal, live, "expanded histories");
+            --live;
+        }
+        const std::uint64_t visits = checked_mul(per_deal, counted_deals_, "expanded histories");
+        if (terminal)
+        {
+            expanded_terminals = checked_add(expanded_terminals, visits, "expanded histories");
+            return;
+        }
+        expanded_decisions = checked_add(expanded_decisions, visits, "expanded histories");
+    }
+
+    void visit_slots(bool commit)
     {
         bool on_board[52] = {};
         for (int card : config.board)
@@ -822,39 +1327,56 @@ struct StreetBatchSolver::Engine
             }
         }
 
-        for (const Node& node : nodes)
+        if (!commit)
         {
-            if (node.chance)
+            planned_slots_ = 0;
+            planned_cursor_ = 0;
+            expanded_decisions = 0;
+            expanded_terminals = 0;
+            for (const Node& node : nodes)
             {
-                continue;
-            }
-            charge_visits(node.terminal ? node.street : node.card_mode, node.terminal);
-        }
-
-        for (int player = 0; player < 2; ++player)
-        {
-            const int opp = 1 - player;
-            const int count = static_cast<int>(combos[player].size());
-            const int opp_count = static_cast<int>(combos[opp].size());
-            support[player].assign(static_cast<std::size_t>(count), Support{});
-            for (int hand = 0; hand < count; ++hand)
-            {
-                const int c0 = card_a[player][static_cast<std::size_t>(hand)];
-                const int c1 = card_b[player][static_cast<std::size_t>(hand)];
-                Support& row = support[player][static_cast<std::size_t>(hand)];
-                for (int other = 0; other < opp_count; ++other)
+                if (node.chance)
                 {
-                    const int d0 = card_a[opp][static_cast<std::size_t>(other)];
-                    const int d1 = card_b[opp][static_cast<std::size_t>(other)];
-                    if (d0 == c0 || d0 == c1 || d1 == c0 || d1 == c1)
+                    continue;
+                }
+                charge_visits(node.terminal ? node.street : node.card_mode, node.terminal);
+            }
+
+            for (int player = 0; player < 2; ++player)
+            {
+                const int opp = 1 - player;
+                const int count = static_cast<int>(combos[player].size());
+                const int opp_count = static_cast<int>(combos[opp].size());
+                support[player].assign(static_cast<std::size_t>(count), Support{});
+                for (int hand = 0; hand < count; ++hand)
+                {
+                    const int c0 = card_a[player][static_cast<std::size_t>(hand)];
+                    const int c1 = card_b[player][static_cast<std::size_t>(hand)];
+                    Support& row = support[player][static_cast<std::size_t>(hand)];
+                    for (int other = 0; other < opp_count; ++other)
                     {
-                        continue;
+                        const int d0 = card_a[opp][static_cast<std::size_t>(other)];
+                        const int d1 = card_b[opp][static_cast<std::size_t>(other)];
+                        if (d0 == c0 || d0 == c1 || d1 == c0 || d1 == c1)
+                        {
+                            continue;
+                        }
+                        ++row.compatible;
+                        ++row.contain[d0];
+                        ++row.contain[d1];
                     }
-                    ++row.compatible;
-                    ++row.contain[d0];
-                    ++row.contain[d1];
                 }
             }
+            std::uint64_t support_bytes = 0;
+            support_bytes = checked_add(
+                support_bytes,
+                checked_mul(support[0].capacity(), sizeof(Support), "support"),
+                "support");
+            support_bytes = checked_add(
+                support_bytes,
+                checked_mul(support[1].capacity(), sizeof(Support), "support"),
+                "support");
+            ledger.set_bucket("support", support_bytes, "support");
         }
 
         for (int node_index = 0; node_index < static_cast<int>(nodes.size()); ++node_index)
@@ -873,7 +1395,7 @@ struct StreetBatchSolver::Engine
                 const int c1 = card_b[player][static_cast<std::size_t>(hand)];
                 if (node.card_mode == 0)
                 {
-                    add_slot(node_index, hand, -1, -1);
+                    consider_slot(commit, node_index, hand, -1, -1);
                     continue;
                 }
                 if (node.card_mode == 1)
@@ -890,11 +1412,11 @@ struct StreetBatchSolver::Engine
                         }
                         if (node.mode1_is_turn)
                         {
-                            add_slot(node_index, hand, card, -1);
+                            consider_slot(commit, node_index, hand, card, -1);
                         }
                         else
                         {
-                            add_slot(node_index, hand, -1, card);
+                            consider_slot(commit, node_index, hand, -1, card);
                         }
                     }
                     continue;
@@ -921,7 +1443,7 @@ struct StreetBatchSolver::Engine
                         {
                             continue;
                         }
-                        add_slot(node_index, hand, turn, river);
+                        consider_slot(commit, node_index, hand, turn, river);
                     }
                 }
             }
@@ -1095,6 +1617,7 @@ struct StreetBatchSolver::Engine
             throw std::invalid_argument("the public street tree implements vanilla CFR and CFR+");
         }
         average_ready = false;
+        const auto started = std::chrono::steady_clock::now();
         for (int step = 0; step < count; ++step)
         {
             ++trained;
@@ -1123,6 +1646,8 @@ struct StreetBatchSolver::Engine
                 floor_player(1);
             }
         }
+        train_seconds_ += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
     }
 
     void ensure_average() const
@@ -1388,6 +1913,7 @@ struct StreetBatchSolver::Engine
 
     double utility_of_response(int responding) const
     {
+        const auto started = std::chrono::steady_clock::now();
         ensure_average();
         response.assign(slots.size(), -1);
         std::fill(scratch[0].pi0.begin(), scratch[0].pi0.end(), 1.0);
@@ -1399,6 +1925,8 @@ struct StreetBatchSolver::Engine
         {
             total += value;
         }
+        evaluation_seconds_ += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
         return total;
     }
 
@@ -1409,6 +1937,21 @@ struct StreetBatchSolver::Engine
         {
             board_mask |= std::uint64_t{1} << card;
         }
+        const std::uint64_t hands0 = static_cast<std::uint64_t>(n0);
+        const std::uint64_t hands1 = static_cast<std::uint64_t>(n1);
+        const std::uint64_t wide = hands0 > hands1 ? hands0 : hands1;
+        std::uint64_t range_bytes = 0;
+        range_bytes = checked_add(
+            range_bytes, checked_mul(hands0 + hands1, sizeof(std::uint64_t), "ranges"), "ranges");
+        range_bytes = checked_add(
+            range_bytes, checked_mul(hands0 + hands1, sizeof(double), "ranges"), "ranges");
+        range_bytes = checked_add(
+            range_bytes, checked_mul((hands0 + hands1) * 2, sizeof(int), "ranges"), "ranges");
+        range_bytes = checked_add(
+            range_bytes,
+            checked_mul(static_cast<std::uint64_t>(holdem::kComboCount) * 2, sizeof(int), "ranges"),
+            "ranges");
+        ledger.set_bucket("ranges", range_bytes, "ranges");
         const holdem::Range* ranges[2] = {&config.oop, &config.ip};
         for (int player = 0; player < 2; ++player)
         {
@@ -1430,13 +1973,38 @@ struct StreetBatchSolver::Engine
                 hand_of[player][static_cast<std::size_t>(combo)] = static_cast<int>(hand);
             }
         }
-        const double mass = holdem::joint_mass(
-            config.oop, config.ip, config.board.data(), static_cast<int>(config.board.size()));
-        if (mass <= 0.0)
+        std::uint64_t actual_ranges = 0;
+        for (int player = 0; player < 2; ++player)
+        {
+            actual_ranges = checked_add(
+                actual_ranges, checked_mul(mask[player].capacity(), sizeof(std::uint64_t), "ranges"), "ranges");
+            actual_ranges = checked_add(
+                actual_ranges, checked_mul(range_w[player].capacity(), sizeof(double), "ranges"), "ranges");
+            actual_ranges = checked_add(
+                actual_ranges, checked_mul(hole_a[player].capacity(), sizeof(int), "ranges"), "ranges");
+            actual_ranges = checked_add(
+                actual_ranges, checked_mul(hole_b[player].capacity(), sizeof(int), "ranges"), "ranges");
+            actual_ranges = checked_add(
+                actual_ranges, checked_mul(hand_of[player].capacity(), sizeof(int), "ranges"), "ranges");
+        }
+        if (actual_ranges != range_bytes)
+        {
+            ledger.set_bucket("ranges", actual_ranges, "ranges");
+        }
+        if (joint_mass_ <= 0.0)
         {
             throw std::logic_error("street ranges have no joint weight");
         }
-        joint_scale = 1.0 / mass;
+        joint_scale = 1.0 / joint_mass_;
+        const std::uint64_t scratch_level = checked_add(
+            checked_mul(hands0, sizeof(double) * 10, "traversal scratch"),
+            checked_mul(hands1, sizeof(double) * 10, "traversal scratch"),
+            "traversal scratch");
+        const std::uint64_t scratch_bytes = checked_add(
+            checked_mul(32, sizeof(Scratch), "traversal scratch"),
+            checked_mul(32, scratch_level, "traversal scratch"),
+            "traversal scratch");
+        ledger.set_bucket("scratch", scratch_bytes, "traversal scratch");
         scratch.resize(32);
         for (Scratch& level : scratch)
         {
@@ -1447,6 +2015,109 @@ struct StreetBatchSolver::Engine
             level.aev0.assign(static_cast<std::size_t>(8 * n0), 0.0);
             level.aev1.assign(static_cast<std::size_t>(8 * n1), 0.0);
         }
+        std::uint64_t actual_scratch = checked_mul(scratch.capacity(), sizeof(Scratch), "traversal scratch");
+        for (const Scratch& level : scratch)
+        {
+            actual_scratch = checked_add(
+                actual_scratch, checked_mul(level.ev0.capacity(), sizeof(double), "traversal scratch"),
+                "traversal scratch");
+            actual_scratch = checked_add(
+                actual_scratch, checked_mul(level.ev1.capacity(), sizeof(double), "traversal scratch"),
+                "traversal scratch");
+            actual_scratch = checked_add(
+                actual_scratch, checked_mul(level.pi0.capacity(), sizeof(double), "traversal scratch"),
+                "traversal scratch");
+            actual_scratch = checked_add(
+                actual_scratch, checked_mul(level.pi1.capacity(), sizeof(double), "traversal scratch"),
+                "traversal scratch");
+            actual_scratch = checked_add(
+                actual_scratch, checked_mul(level.aev0.capacity(), sizeof(double), "traversal scratch"),
+                "traversal scratch");
+            actual_scratch = checked_add(
+                actual_scratch, checked_mul(level.aev1.capacity(), sizeof(double), "traversal scratch"),
+                "traversal scratch");
+        }
+        if (actual_scratch != scratch_bytes)
+        {
+            ledger.set_bucket("scratch", actual_scratch, "traversal scratch");
+        }
+
+        const std::uint64_t prefix_bytes = checked_add(
+            checked_add(
+                checked_add(
+                    checked_mul(wide, sizeof(int), "showdown prefix"),
+                    checked_mul(wide, sizeof(int), "showdown prefix"),
+                    "showdown prefix"),
+                checked_add(
+                    checked_mul(wide + 1, sizeof(double), "showdown prefix"),
+                    checked_mul(52ull * (wide + 1), sizeof(double), "showdown prefix"),
+                    "showdown prefix"),
+                "showdown prefix"),
+            checked_mul(wide, sizeof(std::uint32_t), "showdown prefix"),
+            "showdown prefix");
+        ledger.set_bucket("prefix", prefix_bytes, "showdown prefix");
+        order_buf.assign(static_cast<std::size_t>(wide), 0);
+        pos_buf.assign(static_cast<std::size_t>(wide), 0);
+        prefix_buf.assign(static_cast<std::size_t>(wide + 1), 0.0);
+        card_prefix_buf.assign(static_cast<std::size_t>(52ull * (wide + 1)), 0.0);
+        sorted_rank_buf.assign(static_cast<std::size_t>(wide), 0);
+        const std::uint64_t actual_prefix = checked_add(
+            checked_add(
+                checked_add(
+                    checked_mul(order_buf.capacity(), sizeof(int), "showdown prefix"),
+                    checked_mul(pos_buf.capacity(), sizeof(int), "showdown prefix"),
+                    "showdown prefix"),
+                checked_add(
+                    checked_mul(prefix_buf.capacity(), sizeof(double), "showdown prefix"),
+                    checked_mul(card_prefix_buf.capacity(), sizeof(double), "showdown prefix"),
+                    "showdown prefix"),
+                "showdown prefix"),
+            checked_mul(sorted_rank_buf.capacity(), sizeof(std::uint32_t), "showdown prefix"),
+            "showdown prefix");
+        if (actual_prefix != prefix_bytes)
+        {
+            ledger.set_bucket("prefix", actual_prefix, "showdown prefix");
+        }
+
+        const std::uint64_t response_bytes = checked_mul(planned_slots_, sizeof(int), "best response");
+        ledger.set_bucket("response", response_bytes, "best response");
+        response.assign(slots.size(), -1);
+        const std::uint64_t actual_response = checked_mul(response.capacity(), sizeof(int), "best response");
+        if (actual_response != response_bytes)
+        {
+            ledger.set_bucket("response", actual_response, "best response");
+        }
+
+        const std::uint64_t terminal_bytes = checked_mul(hands0 + hands1, sizeof(double), "terminal buffers");
+        ledger.set_bucket("terminal_buffers", terminal_bytes, "terminal buffers");
+        amount_buf[0].assign(static_cast<std::size_t>(n0), 0.0);
+        amount_buf[1].assign(static_cast<std::size_t>(n1), 0.0);
+        const std::uint64_t actual_terminal = checked_add(
+            checked_mul(amount_buf[0].capacity(), sizeof(double), "terminal buffers"),
+            checked_mul(amount_buf[1].capacity(), sizeof(double), "terminal buffers"),
+            "terminal buffers");
+        if (actual_terminal != terminal_bytes)
+        {
+            ledger.set_bucket("terminal_buffers", actual_terminal, "terminal buffers");
+        }
+
+        const int free_cards = 52 - static_cast<int>(config.board.size());
+        max_rank_keys_ = config.board.size() == 3
+            ? checked_mul(
+                static_cast<std::uint64_t>(free_cards),
+                static_cast<std::uint64_t>(free_cards - 1),
+                "rank cache")
+            : static_cast<std::uint64_t>(free_cards);
+        const std::uint64_t per_key = checked_add(
+            checked_add(
+                checked_mul(hands0, sizeof(std::uint32_t), "rank cache"),
+                checked_mul(hands1, sizeof(std::uint32_t), "rank cache"),
+                "rank cache"),
+            256,
+            "rank cache");
+        const std::uint64_t cache_bytes = checked_mul(max_rank_keys_, per_key, "rank cache");
+        ledger.set_bucket("rank_cache", cache_bytes, "rank cache");
+        runout_ranks.reserve(static_cast<std::size_t>(max_rank_keys_));
     }
 
     bool hand_live(int player, int hand, int turn, int river) const
@@ -1466,6 +2137,11 @@ struct StreetBatchSolver::Engine
     const std::vector<std::uint32_t>& ranks_for(int player, int turn, int river) const
     {
         const int key = (turn + 1) * 64 + (river + 1);
+        if (runout_ranks.find(key) == runout_ranks.end()
+            && runout_ranks.size() >= max_rank_keys_)
+        {
+            throw std::logic_error("street rank cache exceeded its reserved bound");
+        }
         RunoutRanks& table = runout_ranks[key];
         if (table.rank[0].empty())
         {
@@ -1741,14 +2417,12 @@ struct StreetBatchSolver::Engine
         std::vector<double>& ev0,
         std::vector<double>& ev1) const
     {
-        std::vector<double> amount0;
-        std::vector<double> amount1;
         double total0 = 0.0;
         double total1 = 0.0;
         double by0[52];
         double by1[52];
-        collect_reach(0, turn, river, pi0, true, amount0, total0, by0);
-        collect_reach(1, turn, river, pi1, true, amount1, total1, by1);
+        collect_reach(0, turn, river, pi0, true, amount_buf[0], total0, by0);
+        collect_reach(1, turn, river, pi1, true, amount_buf[1], total1, by1);
         const double half = static_cast<double>(config.pot) * 0.5;
         if (node.folded >= 0)
         {
@@ -1762,7 +2436,7 @@ struct StreetBatchSolver::Engine
                     ev0[static_cast<std::size_t>(hand)] = 0.0;
                     continue;
                 }
-                const double open = total1 - blocked_reach(0, hand, by1, amount1);
+                const double open = total1 - blocked_reach(0, hand, by1, amount_buf[1]);
                 ev0[static_cast<std::size_t>(hand)] =
                     pay * range_w[0][static_cast<std::size_t>(hand)] * joint_scale * open;
             }
@@ -1773,7 +2447,7 @@ struct StreetBatchSolver::Engine
                     ev1[static_cast<std::size_t>(hand)] = 0.0;
                     continue;
                 }
-                const double open = total0 - blocked_reach(1, hand, by0, amount0);
+                const double open = total0 - blocked_reach(1, hand, by0, amount_buf[0]);
                 ev1[static_cast<std::size_t>(hand)] =
                     pay * range_w[1][static_cast<std::size_t>(hand)] * joint_scale * open;
             }
@@ -1781,8 +2455,8 @@ struct StreetBatchSolver::Engine
         }
         const double win_pay = half + static_cast<double>(node.contrib[1]);
         const double lose_pay = -(half + static_cast<double>(node.contrib[0]));
-        showdown_side(0, turn, river, win_pay, lose_pay, amount1, ev0);
-        showdown_side(1, turn, river, win_pay, lose_pay, amount0, ev1);
+        showdown_side(0, turn, river, win_pay, lose_pay, amount_buf[1], ev0);
+        showdown_side(1, turn, river, win_pay, lose_pay, amount_buf[0], ev1);
     }
 
     void frozen_walk(int node_index, int turn, int river, int depth, int updating, double weight_iter)
@@ -2026,6 +2700,7 @@ struct StreetBatchSolver::Engine
             throw std::invalid_argument("the frozen street pass implements vanilla CFR and CFR+");
         }
         average_ready = false;
+        const auto started = std::chrono::steady_clock::now();
         for (int step = 0; step < count; ++step)
         {
             ++trained;
@@ -2040,6 +2715,8 @@ struct StreetBatchSolver::Engine
                 frozen_pass(1, weight_iter, algorithm);
             }
         }
+        train_seconds_ += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
     }
 
     bool assign_labeled_regret(const std::string& infoset, const std::string& action, double value)
@@ -2085,6 +2762,32 @@ struct StreetBatchSolver::Engine
             }
         }
         return false;
+    }
+
+    StreetMemoryReport memory_report() const
+    {
+        StreetMemoryReport report;
+        report.memory_budget_bytes = ledger.limit();
+        report.allocated_bytes = ledger.current();
+        report.peak_allocated_bytes = ledger.peak();
+        report.regret_strategy_sum_bytes = regret.size() * sizeof(double)
+            + strategy_sum.size() * sizeof(double);
+        report.estimated_peak_bytes = estimated_peak_bytes_;
+        report.expanded_terminals = expanded_terminals;
+        report.expanded_decisions = expanded_decisions;
+        report.process_peak_working_set_bytes = process_peak_working_set_bytes();
+        report.construction_seconds = construction_seconds_;
+        report.train_seconds = train_seconds_;
+        report.evaluation_seconds = evaluation_seconds_;
+        report.components.reserve(ledger.buckets().size());
+        for (const auto& item : ledger.buckets())
+        {
+            StreetMemoryComponent component;
+            component.name = item.first;
+            component.bytes = item.second;
+            report.components.push_back(std::move(component));
+        }
+        return report;
     }
 };
 
@@ -2145,7 +2848,6 @@ SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm 
             }
         }
     }
-    const auto end = std::chrono::steady_clock::now();
     if (!fresh)
     {
         stats.p1_expected_utility = expected_utility();
@@ -2153,6 +2855,7 @@ SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm 
         stats.p2_best_response_utility = p2_best_response_utility();
         stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
     }
+    const auto end = std::chrono::steady_clock::now();
     stats.iterations = completed;
     stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
     stats.memory_bytes_estimate = memory_bytes_estimate();
@@ -2187,7 +2890,6 @@ SolveStats StreetBatchSolver::solve(const SolveConfig& config, Algorithm algorit
             }
         }
     }
-    const auto end = std::chrono::steady_clock::now();
     if (!fresh)
     {
         stats.p1_expected_utility = expected_utility();
@@ -2195,6 +2897,7 @@ SolveStats StreetBatchSolver::solve(const SolveConfig& config, Algorithm algorit
         stats.p2_best_response_utility = p2_best_response_utility();
         stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
     }
+    const auto end = std::chrono::steady_clock::now();
     stats.iterations = completed;
     stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
     stats.memory_bytes_estimate = memory_bytes_estimate();
@@ -2221,14 +2924,14 @@ double StreetBatchSolver::nash_gap() const
     return p1_best_response_utility() + p2_best_response_utility();
 }
 
-int StreetBatchSolver::infoset_count() const
+std::uint64_t StreetBatchSolver::infoset_count() const
 {
-    return static_cast<int>(engine_->slots.size());
+    return static_cast<std::uint64_t>(engine_->slots.size());
 }
 
-int StreetBatchSolver::deal_count() const
+std::uint64_t StreetBatchSolver::deal_count() const
 {
-    return static_cast<int>(engine_->deals.size());
+    return static_cast<std::uint64_t>(engine_->deals.size());
 }
 
 int StreetBatchSolver::public_decisions() const
@@ -2241,12 +2944,12 @@ int StreetBatchSolver::public_terminals() const
     return engine_->public_terminals;
 }
 
-int StreetBatchSolver::decision_node_count() const
+std::uint64_t StreetBatchSolver::decision_node_count() const
 {
     return engine_->expanded_decisions;
 }
 
-int StreetBatchSolver::terminal_count() const
+std::uint64_t StreetBatchSolver::terminal_count() const
 {
     return engine_->expanded_terminals;
 }
@@ -2260,6 +2963,11 @@ std::size_t StreetBatchSolver::memory_bytes_estimate() const
 {
     return engine_->regret.size() * sizeof(double)
         + engine_->strategy_sum.size() * sizeof(double);
+}
+
+StreetMemoryReport StreetBatchSolver::memory_report() const
+{
+    return engine_->memory_report();
 }
 
 bool StreetBatchSolver::set_regret(const std::string& infoset, const std::string& action, double value)

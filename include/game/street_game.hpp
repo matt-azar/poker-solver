@@ -69,6 +69,8 @@ struct StreetConfig
     bool allow_three_bet = true;
     int max_raises = 1;
     int first_to_act = 0;
+    // Solver-owned heap for StreetBatchSolver, in mebibytes. Zero is rejected.
+    int memory_mib = 1024;
 };
 
 // Pot fraction that invests stack_left over streets_left equal called bets.
@@ -907,7 +909,8 @@ private:
             if (terminals_ > 200000)
             {
                 throw std::invalid_argument(
-                    "street tree has more than 200000 terminals; use smaller ranges");
+                    "street reference enumerator has more than 200000 terminals; "
+                    "this limit is only the StreetGame walk. Use the street solver without --reference");
             }
             return;
         }

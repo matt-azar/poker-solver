@@ -1,6 +1,6 @@
 # Turn and flop
 
-`StreetGame` is a heads-up no-limit tree on a 4-card turn or a 3-card flop. `StreetBatchSolver` stores that betting structure once and reuses it on every runout. It applies the same CFR and CFR+ update as `CfrTrainer<StreetGame>`, in the same deal order and the same runout order. `street_solver` uses the public tree unless `--reference` is set. `--frozen` holds the strategy fixed for one pass and updates every combo together. Each action is still explored with probability at least 0.05 / (number of actions), so a line the strategy has left keeps being updated. That pass is not the per-deal update, so a short run will not reproduce `--reference` action by action. It is checked by the value and the Nash gap. `RiverGame` is still the one-street river. There is no hand bucketing and no RNG.
+`StreetGame` is a heads-up no-limit tree on a 4-card turn or a 3-card flop. `StreetBatchSolver` stores that betting structure once and reuses it on every runout. It applies the same CFR and CFR+ update as `CfrTrainer<StreetGame>`. A pass freezes regret matching, sums that player's counterfactual regret, then CFR+ floors only the player who just updated. Vanilla regrets stay signed. There is no fixed exploration mixture: a child is reached with probability equal to the frozen strategy. Own-reach averaging is not gated on the opponent's reach. A hand that meets the board, or that has no compatible opponent left, is structurally unsupported and is not an information set. A supported hand with zero strategic reach still has a slot and still receives a counterfactual value. `street_solver` uses the public tree unless `--reference` is set. `--frozen` is one public-tree pass per player. Once the pass contract matches, its action probabilities match the per-deal walk. `RiverGame` is still the one-street river. There is no hand bucketing and no RNG.
 
 Chance deals an ordered hand pair from the joint distribution on the starting board, then the players bet. When the street ends without a fold, the next card is dealt uniformly from the cards that are not on the board and not in either hand. A turn tree deals the river. A flop tree deals the turn and then the river. A fold ends the hand. Chips already invested stay in the pot, and the next street starts with no bet to call.
 
@@ -28,7 +28,9 @@ An all-in threshold is a fraction of the starting stack. A size that would commi
 
 `--accuracy 0.05` stops when the Nash gap divided by the pot is at or below 0.05. The printed Nash gap is still NashConv. The fraction of pot is printed beside it and is not NashConv/2.
 
-At most eight actions are legal at one decision. A tree with more than 200,000 terminals is rejected.
+At most eight actions are legal at one decision. `StreetGame` rejects a reference enumeration above 200,000 terminals and tells the caller to use the batch solver. `StreetBatchSolver` does not use that cap, and it does not cap expanded histories. Its limit is `StreetConfig::memory_mib`, default 1024. One mebibyte is 1,048,576 bytes. Zero is rejected. The budget is solver-owned heap: the public tree, deal rows, slot indexes, regret and average tables, support, traversal scratch, the reserved rank-cache bound, and the showdown and best-response buffers. It is not process RSS, and it does not include the executable, thread stacks, allocator bookkeeping, the caller's ranges, or a later strategy export. The solver plans that total before it allocates the large tables. If the plan does not fit, construction throws and frees the partial tree. It does not drop hands, drop actions, sample cards, or raise the budget.
+
+Expanded terminals and expanded decisions are 64-bit counts of histories. They are not stored nodes. A full-range check-down on `Ah Kd 7c` has 1,271,256 deals, 2,517,086,880 expanded terminals, 5,151,129,312 expanded decision histories, and 5,197,920 stored information sets.
 
 ## Checked values
 
@@ -43,6 +45,7 @@ On the flop `Ah Kd 7c`, queens versus jacks, check-only, the value matches the a
 ```sh
 street_solver
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1 --algorithm vanilla
+street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024
 street_solver --board Ah,Kd,7c,4s --pot 100 --stack 300 --oop-range QcQd --ip-range JcJd --geometric --iterations 200
 street_solver --board Ah,Kd,7c --oop-donk 40c --oop-bets 1 --ip-bets 0.5 --no-all-in --max-raises 1 --iterations 1
 ```

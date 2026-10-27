@@ -5,8 +5,11 @@
 #include "solver/trainer.hpp"
 
 #include <cctype>
+#include <cerrno>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -27,7 +30,7 @@ void print_usage(const char* argv0)
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
-              << " [--accuracy 0.05] [--reference] [--frozen]\n";
+              << " [--accuracy 0.05] [--memory-mib N] [--reference] [--frozen]\n";
 }
 
 std::string trim_copy(const std::string& text)
@@ -279,6 +282,25 @@ int main(int argc, char** argv)
             {
                 iterations = std::atoi(need("--iterations"));
             }
+            else if (arg == "--memory-mib")
+            {
+                const std::string text = need("--memory-mib");
+                if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
+                {
+                    throw std::invalid_argument(
+                        "memory-mib must be a positive integer number of mebibytes");
+                }
+                errno = 0;
+                char* end = nullptr;
+                const unsigned long long value = std::strtoull(text.c_str(), &end, 10);
+                if (end != text.c_str() + text.size() || errno == ERANGE || value == 0
+                    || value > static_cast<unsigned long long>(std::numeric_limits<int>::max()))
+                {
+                    throw std::invalid_argument(
+                        "memory-mib must be a positive integer number of mebibytes");
+                }
+                config.memory_mib = static_cast<int>(value);
+            }
             else if (arg == "--algorithm")
             {
                 const std::string name = need("--algorithm");
@@ -324,11 +346,12 @@ int main(int argc, char** argv)
             solve_config.eval_interval = 20;
         }
         poker::solver::SolveStats stats;
-        int deals = 0;
-        int infosets = 0;
-        int decision_nodes = 0;
-        int terminals = 0;
+        std::uint64_t deals = 0;
+        std::uint64_t infosets = 0;
+        std::uint64_t decision_nodes = 0;
+        std::uint64_t terminals = 0;
         int public_decisions = 0;
+        poker::solver::StreetMemoryReport memory;
         const char* solver_name = "public";
         if (reference)
         {
@@ -355,6 +378,7 @@ int main(int argc, char** argv)
             decision_nodes = solver.decision_node_count();
             terminals = solver.terminal_count();
             public_decisions = solver.public_decisions();
+            memory = solver.memory_report();
         }
 
         std::cout.setf(std::ios::fmtflags(0), std::ios::floatfield);
@@ -375,7 +399,27 @@ int main(int argc, char** argv)
         std::cout << "terminals: " << terminals << "\n";
         std::cout << "iterations: " << stats.iterations << "\n";
         std::cout << "runtime_seconds: " << stats.runtime_seconds << "\n";
-        std::cout << "memory_bytes_estimate: " << stats.memory_bytes_estimate << "\n";
+        if (!reference)
+        {
+            std::cout << "construction_seconds: " << memory.construction_seconds << "\n";
+            std::cout << "train_seconds: " << memory.train_seconds << "\n";
+            std::cout << "evaluation_seconds: " << memory.evaluation_seconds << "\n";
+            std::cout << "total_seconds: "
+                      << (memory.construction_seconds + memory.train_seconds
+                          + memory.evaluation_seconds)
+                      << "\n";
+            std::cout << "memory_budget_bytes: " << memory.memory_budget_bytes << "\n";
+            std::cout << "allocated_bytes: " << memory.allocated_bytes << "\n";
+            std::cout << "peak_allocated_bytes: " << memory.peak_allocated_bytes << "\n";
+            std::cout << "estimated_peak_bytes: " << memory.estimated_peak_bytes << "\n";
+            std::cout << "regret_strategy_sum_bytes: " << memory.regret_strategy_sum_bytes << "\n";
+            std::cout << "process_peak_working_set_bytes: "
+                      << memory.process_peak_working_set_bytes << "\n";
+            for (const poker::solver::StreetMemoryComponent& component : memory.components)
+            {
+                std::cout << "memory_component " << component.name << " " << component.bytes << "\n";
+            }
+        }
         std::cout << "player0_expected_utility: " << stats.p1_expected_utility << "\n";
         std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
         std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
