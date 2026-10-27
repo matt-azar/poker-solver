@@ -25,7 +25,7 @@ void print_usage(const char* argv0)
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
-              << " [--accuracy 0.05] [--reference]\n";
+              << " [--accuracy 0.05] [--reference] [--frozen]\n";
 }
 
 std::vector<double> parse_sizes(const std::string& text)
@@ -108,6 +108,7 @@ int main(int argc, char** argv)
         int iterations = 400;
         double accuracy = -1.0;
         bool reference = false;
+        bool frozen = false;
         poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
 
         for (int i = 1; i < argc; ++i)
@@ -188,6 +189,10 @@ int main(int argc, char** argv)
             else if (arg == "--reference")
             {
                 reference = true;
+            }
+            else if (arg == "--frozen")
+            {
+                frozen = true;
             }
             else if (arg == "--all-in")
             {
@@ -270,7 +275,12 @@ int main(int argc, char** argv)
         else
         {
             poker::solver::StreetBatchSolver solver(config);
-            stats = solver.solve(solve_config, algorithm);
+            stats = frozen ? solver.solve_frozen(solve_config, algorithm)
+                           : solver.solve(solve_config, algorithm);
+            if (frozen)
+            {
+                solver_name = "frozen";
+            }
             deals = solver.deal_count();
             infosets = solver.infoset_count();
             decision_nodes = solver.decision_node_count();

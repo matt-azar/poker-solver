@@ -31,8 +31,14 @@ public:
     StreetBatchSolver& operator=(const StreetBatchSolver&) = delete;
 
     SolveStats solve(const SolveConfig& config, Algorithm algorithm);
+    // One pass over the public tree with the strategy held fixed for that pass.
+    // Regrets are summed across combos and runouts, then applied. This is not
+    // the per-deal update used by run_iterations, and it will not reproduce
+    // that update's strategy at a small iteration count.
+    SolveStats solve_frozen(const SolveConfig& config, Algorithm algorithm);
     void run_iterations(int count, Algorithm algorithm);
     void continue_iterations(int count, Algorithm algorithm);
+    void run_frozen_iterations(int count, Algorithm algorithm);
 
     double expected_utility() const;
     double p1_best_response_utility() const;

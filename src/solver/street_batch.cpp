@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -365,6 +366,20 @@ struct StreetBatchSolver::Engine
     int expanded_decisions = 0;
     int expanded_terminals = 0;
     int trained = 0;
+    std::vector<double> weight;
+    std::vector<std::uint64_t> mask[2];
+    std::uint64_t board_mask = 0;
+    std::vector<double> frozen_sigma;
+    struct Scratch
+    {
+        std::vector<double> ev0;
+        std::vector<double> ev1;
+        std::vector<double> pi0;
+        std::vector<double> pi1;
+        std::vector<double> aev0;
+        std::vector<double> aev1;
+    };
+    std::vector<Scratch> scratch;
 
     explicit Engine(streets::StreetConfig incoming)
         : config(std::move(incoming))
@@ -381,6 +396,8 @@ struct StreetBatchSolver::Engine
         regret.assign(static_cast<std::size_t>(cursor_), 0.0);
         strategy_sum.assign(static_cast<std::size_t>(cursor_), 0.0);
         average.assign(static_cast<std::size_t>(cursor_), 0.0);
+        frozen_sigma.assign(static_cast<std::size_t>(cursor_), 0.0);
+        build_reach_table();
     }
 
     int cursor_ = 0;
@@ -1063,6 +1080,427 @@ struct StreetBatchSolver::Engine
         }
         return total;
     }
+
+    void build_reach_table()
+    {
+        board_mask = 0;
+        for (int card : config.board)
+        {
+            board_mask |= std::uint64_t{1} << card;
+        }
+        for (int player = 0; player < 2; ++player)
+        {
+            mask[player].assign(combos[player].size(), 0);
+            for (std::size_t hand = 0; hand < combos[player].size(); ++hand)
+            {
+                int c0 = 0;
+                int c1 = 0;
+                holdem::Range::combo_cards(combos[player][hand], c0, c1);
+                mask[player][hand] = (std::uint64_t{1} << c0) | (std::uint64_t{1} << c1);
+            }
+        }
+        weight.assign(static_cast<std::size_t>(n0 * n1), 0.0);
+        for (const Deal& deal : deals)
+        {
+            weight[static_cast<std::size_t>(deal.h0 * n1 + deal.h1)] = deal.probability;
+        }
+        scratch.resize(32);
+        for (Scratch& level : scratch)
+        {
+            level.ev0.assign(static_cast<std::size_t>(n0), 0.0);
+            level.ev1.assign(static_cast<std::size_t>(n1), 0.0);
+            level.pi0.assign(static_cast<std::size_t>(n0), 0.0);
+            level.pi1.assign(static_cast<std::size_t>(n1), 0.0);
+            level.aev0.assign(static_cast<std::size_t>(8 * n0), 0.0);
+            level.aev1.assign(static_cast<std::size_t>(8 * n1), 0.0);
+        }
+    }
+
+    bool hand_live(int player, int hand, int turn, int river) const
+    {
+        const std::uint64_t bits = mask[player][static_cast<std::size_t>(hand)];
+        if (turn >= 0 && ((bits >> turn) & 1u) != 0)
+        {
+            return false;
+        }
+        if (river >= 0 && ((bits >> river) & 1u) != 0)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    double pair_payoff(const Node& node, int h0, int h1, int turn, int river) const
+    {
+        const double half = static_cast<double>(config.pot) * 0.5;
+        if (node.folded == 0)
+        {
+            return -(half + static_cast<double>(node.contrib[0]));
+        }
+        if (node.folded == 1)
+        {
+            return half + static_cast<double>(node.contrib[1]);
+        }
+        int c0 = 0;
+        int c1 = 0;
+        int d0 = 0;
+        int d1 = 0;
+        holdem::Range::combo_cards(combos[0][static_cast<std::size_t>(h0)], c0, c1);
+        holdem::Range::combo_cards(combos[1][static_cast<std::size_t>(h1)], d0, d1);
+        int board[5];
+        int count = 0;
+        for (int card : config.board)
+        {
+            board[count++] = card;
+        }
+        if (turn >= 0)
+        {
+            board[count++] = turn;
+        }
+        if (river >= 0)
+        {
+            board[count++] = river;
+        }
+        const int outcome = holdem::compare_showdown(
+            c0, c1, d0, d1, std::span<const int>(board, 5));
+        if (outcome > 0)
+        {
+            return half + static_cast<double>(node.contrib[1]);
+        }
+        if (outcome < 0)
+        {
+            return -(half + static_cast<double>(node.contrib[0]));
+        }
+        return 0.0;
+    }
+
+    double opponent_mass(int hero, int hand, const double* opp_pi) const
+    {
+        double sum = 0.0;
+        if (hero == 0)
+        {
+            for (int h1 = 0; h1 < n1; ++h1)
+            {
+                sum += weight[static_cast<std::size_t>(hand * n1 + h1)] * opp_pi[h1];
+            }
+        }
+        else
+        {
+            for (int h0 = 0; h0 < n0; ++h0)
+            {
+                sum += weight[static_cast<std::size_t>(h0 * n1 + hand)] * opp_pi[h0];
+            }
+        }
+        return sum;
+    }
+
+    void frozen_walk(int node_index, int turn, int river, int depth, int updating, double weight_iter)
+    {
+        if (depth + 1 >= static_cast<int>(scratch.size()))
+        {
+            throw std::logic_error("frozen street traversal ran out of scratch");
+        }
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        Scratch& here = scratch[static_cast<std::size_t>(depth)];
+        const double* pi0 = here.pi0.data();
+        const double* pi1 = here.pi1.data();
+        if (node.terminal)
+        {
+            for (int h0 = 0; h0 < n0; ++h0)
+            {
+                double sum = 0.0;
+                if (hand_live(0, h0, turn, river))
+                {
+                    for (int h1 = 0; h1 < n1; ++h1)
+                    {
+                        const double mass = weight[static_cast<std::size_t>(h0 * n1 + h1)] * pi1[h1];
+                        if (mass == 0.0 || !hand_live(1, h1, turn, river))
+                        {
+                            continue;
+                        }
+                        sum += mass * pair_payoff(node, h0, h1, turn, river);
+                    }
+                }
+                here.ev0[static_cast<std::size_t>(h0)] = sum;
+            }
+            for (int h1 = 0; h1 < n1; ++h1)
+            {
+                double sum = 0.0;
+                if (hand_live(1, h1, turn, river))
+                {
+                    for (int h0 = 0; h0 < n0; ++h0)
+                    {
+                        const double mass = weight[static_cast<std::size_t>(h0 * n1 + h1)] * pi0[h0];
+                        if (mass == 0.0 || !hand_live(0, h0, turn, river))
+                        {
+                            continue;
+                        }
+                        sum += mass * pair_payoff(node, h0, h1, turn, river);
+                    }
+                }
+                here.ev1[static_cast<std::size_t>(h1)] = sum;
+            }
+            return;
+        }
+        if (node.chance)
+        {
+            std::fill(here.ev0.begin(), here.ev0.end(), 0.0);
+            std::fill(here.ev1.begin(), here.ev1.end(), 0.0);
+            int denom = 52 - static_cast<int>(config.board.size()) - 4;
+            std::uint64_t dead = board_mask;
+            if (turn >= 0)
+            {
+                --denom;
+                dead |= std::uint64_t{1} << turn;
+            }
+            if (river >= 0)
+            {
+                --denom;
+                dead |= std::uint64_t{1} << river;
+            }
+            const double probability = 1.0 / static_cast<double>(denom);
+            Scratch& child = scratch[static_cast<std::size_t>(depth + 1)];
+            for (int card = 0; card < 52; ++card)
+            {
+                if (((dead >> card) & 1u) != 0)
+                {
+                    continue;
+                }
+                const std::uint64_t bit = std::uint64_t{1} << card;
+                bool any_pair = false;
+                for (int h0 = 0; h0 < n0 && !any_pair; ++h0)
+                {
+                    if (pi0[h0] == 0.0 || (mask[0][static_cast<std::size_t>(h0)] & bit) != 0)
+                    {
+                        continue;
+                    }
+                    for (int h1 = 0; h1 < n1; ++h1)
+                    {
+                        if (pi1[h1] == 0.0 || (mask[1][static_cast<std::size_t>(h1)] & bit) != 0)
+                        {
+                            continue;
+                        }
+                        if (weight[static_cast<std::size_t>(h0 * n1 + h1)] > 0.0)
+                        {
+                            any_pair = true;
+                            break;
+                        }
+                    }
+                }
+                if (!any_pair)
+                {
+                    continue;
+                }
+                for (int h0 = 0; h0 < n0; ++h0)
+                {
+                    child.pi0[static_cast<std::size_t>(h0)] =
+                        ((mask[0][static_cast<std::size_t>(h0)] & bit) != 0) ? 0.0 : pi0[h0];
+                }
+                for (int h1 = 0; h1 < n1; ++h1)
+                {
+                    child.pi1[static_cast<std::size_t>(h1)] =
+                        ((mask[1][static_cast<std::size_t>(h1)] & bit) != 0) ? 0.0 : pi1[h1];
+                }
+                int next_turn = turn;
+                int next_river = river;
+                if (node.deal_which == 1)
+                {
+                    next_turn = card;
+                }
+                else
+                {
+                    next_river = card;
+                }
+                frozen_walk(node.child[0], next_turn, next_river, depth + 1, updating, weight_iter);
+                for (int h0 = 0; h0 < n0; ++h0)
+                {
+                    here.ev0[static_cast<std::size_t>(h0)] += probability * child.ev0[static_cast<std::size_t>(h0)];
+                }
+                for (int h1 = 0; h1 < n1; ++h1)
+                {
+                    here.ev1[static_cast<std::size_t>(h1)] += probability * child.ev1[static_cast<std::size_t>(h1)];
+                }
+            }
+            return;
+        }
+
+        Scratch& child = scratch[static_cast<std::size_t>(depth + 1)];
+        for (int action = 0; action < node.n_actions; ++action)
+        {
+            if (node.player == 0)
+            {
+                for (int h0 = 0; h0 < n0; ++h0)
+                {
+                    if (!hand_live(0, h0, turn, river))
+                    {
+                        child.pi0[static_cast<std::size_t>(h0)] = 0.0;
+                        continue;
+                    }
+                    const int index = slot_index(node, h0, turn, river);
+                    const double* sigma = frozen_sigma.data() + slots[static_cast<std::size_t>(index)].base;
+                    const double explored = (1.0 - 0.05) * sigma[action] + 0.05 / static_cast<double>(node.n_actions);
+                    child.pi0[static_cast<std::size_t>(h0)] = pi0[h0] * explored;
+                }
+                std::copy(pi1, pi1 + n1, child.pi1.begin());
+            }
+            else
+            {
+                std::copy(pi0, pi0 + n0, child.pi0.begin());
+                for (int h1 = 0; h1 < n1; ++h1)
+                {
+                    if (!hand_live(1, h1, turn, river))
+                    {
+                        child.pi1[static_cast<std::size_t>(h1)] = 0.0;
+                        continue;
+                    }
+                    const int index = slot_index(node, h1, turn, river);
+                    const double* sigma = frozen_sigma.data() + slots[static_cast<std::size_t>(index)].base;
+                    const double explored = (1.0 - 0.05) * sigma[action] + 0.05 / static_cast<double>(node.n_actions);
+                    child.pi1[static_cast<std::size_t>(h1)] = pi1[h1] * explored;
+                }
+            }
+            frozen_walk(node.child[action], turn, river, depth + 1, updating, weight_iter);
+            std::copy(child.ev0.begin(), child.ev0.end(), here.aev0.begin() + static_cast<std::size_t>(action * n0));
+            std::copy(child.ev1.begin(), child.ev1.end(), here.aev1.begin() + static_cast<std::size_t>(action * n1));
+        }
+
+        for (int h0 = 0; h0 < n0; ++h0)
+        {
+            if (!hand_live(0, h0, turn, river))
+            {
+                here.ev0[static_cast<std::size_t>(h0)] = 0.0;
+                continue;
+            }
+            double mix = 0.0;
+            if (node.player == 0)
+            {
+                const int index = slot_index(node, h0, turn, river);
+                const int base = slots[static_cast<std::size_t>(index)].base;
+                const double* sigma = frozen_sigma.data() + base;
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    mix += sigma[action] * here.aev0[static_cast<std::size_t>(action * n0 + h0)];
+                }
+                here.ev0[static_cast<std::size_t>(h0)] = mix;
+                if ((updating < 0 || updating == 0) && opponent_mass(0, h0, pi1) > 0.0)
+                {
+                    accumulate_average(
+                        strategy_sum.data() + base, sigma, node.n_actions, weight_iter * pi0[h0]);
+                    for (int action = 0; action < node.n_actions; ++action)
+                    {
+                        regret[static_cast<std::size_t>(base + action)] +=
+                            here.aev0[static_cast<std::size_t>(action * n0 + h0)] - mix;
+                    }
+                }
+            }
+            else
+            {
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    mix += here.aev0[static_cast<std::size_t>(action * n0 + h0)];
+                }
+                here.ev0[static_cast<std::size_t>(h0)] = mix;
+            }
+        }
+        for (int h1 = 0; h1 < n1; ++h1)
+        {
+            if (!hand_live(1, h1, turn, river))
+            {
+                here.ev1[static_cast<std::size_t>(h1)] = 0.0;
+                continue;
+            }
+            double mix = 0.0;
+            if (node.player == 1)
+            {
+                const int index = slot_index(node, h1, turn, river);
+                const int base = slots[static_cast<std::size_t>(index)].base;
+                const double* sigma = frozen_sigma.data() + base;
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    mix += sigma[action] * here.aev1[static_cast<std::size_t>(action * n1 + h1)];
+                }
+                here.ev1[static_cast<std::size_t>(h1)] = mix;
+                if ((updating < 0 || updating == 1) && opponent_mass(1, h1, pi0) > 0.0)
+                {
+                    accumulate_average(
+                        strategy_sum.data() + base, sigma, node.n_actions, weight_iter * pi1[h1]);
+                    for (int action = 0; action < node.n_actions; ++action)
+                    {
+                        regret[static_cast<std::size_t>(base + action)] +=
+                            mix - here.aev1[static_cast<std::size_t>(action * n1 + h1)];
+                    }
+                }
+            }
+            else
+            {
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    mix += here.aev1[static_cast<std::size_t>(action * n1 + h1)];
+                }
+                here.ev1[static_cast<std::size_t>(h1)] = mix;
+            }
+        }
+    }
+
+    void floor_player(int player)
+    {
+        for (const Slot& slot : slots)
+        {
+            if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player != player)
+            {
+                continue;
+            }
+            for (int action = 0; action < slot.n_actions; ++action)
+            {
+                double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                if (cumulative < 0.0)
+                {
+                    cumulative = 0.0;
+                }
+            }
+        }
+    }
+
+    void frozen_pass(int updating, double weight_iter, Algorithm algorithm)
+    {
+        for (const Slot& slot : slots)
+        {
+            regret_matching(
+                regret.data() + slot.base,
+                frozen_sigma.data() + slot.base,
+                slot.n_actions);
+        }
+        std::fill(scratch[0].pi0.begin(), scratch[0].pi0.end(), 1.0);
+        std::fill(scratch[0].pi1.begin(), scratch[0].pi1.end(), 1.0);
+        frozen_walk(0, -1, -1, 0, updating, weight_iter);
+        if (algorithm == Algorithm::CfrPlus)
+        {
+            floor_player(updating);
+        }
+    }
+
+    void train_frozen(int count, Algorithm algorithm)
+    {
+        if (algorithm != Algorithm::VanillaCfr && algorithm != Algorithm::CfrPlus)
+        {
+            throw std::invalid_argument("the frozen street pass implements vanilla CFR and CFR+");
+        }
+        average_ready = false;
+        for (int step = 0; step < count; ++step)
+        {
+            ++trained;
+            if (algorithm == Algorithm::VanillaCfr)
+            {
+                frozen_pass(-1, 1.0, algorithm);
+            }
+            else
+            {
+                const double weight_iter = static_cast<double>(trained);
+                frozen_pass(0, weight_iter, algorithm);
+                frozen_pass(1, weight_iter, algorithm);
+            }
+        }
+    }
 };
 
 StreetBatchSolver::StreetBatchSolver(streets::StreetConfig config)
@@ -1081,6 +1519,54 @@ void StreetBatchSolver::run_iterations(int count, Algorithm algorithm)
 void StreetBatchSolver::continue_iterations(int count, Algorithm algorithm)
 {
     engine_->train_more(count, algorithm);
+}
+
+void StreetBatchSolver::run_frozen_iterations(int count, Algorithm algorithm)
+{
+    engine_->reset();
+    engine_->train_frozen(count, algorithm);
+}
+
+SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm algorithm)
+{
+    const auto start = std::chrono::steady_clock::now();
+    engine_->reset();
+    int completed = 0;
+    SolveStats stats;
+    bool fresh = false;
+    for (int step = 0; step < config.max_iterations; ++step)
+    {
+        engine_->train_frozen(1, algorithm);
+        ++completed;
+        fresh = false;
+        const bool check_gap = config.nash_gap_threshold >= 0.0
+            && config.eval_interval > 0
+            && completed % config.eval_interval == 0;
+        if (check_gap)
+        {
+            stats.p1_expected_utility = expected_utility();
+            stats.p1_best_response_utility = p1_best_response_utility();
+            stats.p2_best_response_utility = p2_best_response_utility();
+            stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            fresh = true;
+            if (stats.nash_gap <= config.nash_gap_threshold)
+            {
+                break;
+            }
+        }
+    }
+    const auto end = std::chrono::steady_clock::now();
+    if (!fresh)
+    {
+        stats.p1_expected_utility = expected_utility();
+        stats.p1_best_response_utility = p1_best_response_utility();
+        stats.p2_best_response_utility = p2_best_response_utility();
+        stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+    }
+    stats.iterations = completed;
+    stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
+    stats.memory_bytes_estimate = memory_bytes_estimate();
+    return stats;
 }
 
 SolveStats StreetBatchSolver::solve(const SolveConfig& config, Algorithm algorithm)

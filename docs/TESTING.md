@@ -91,6 +91,7 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - A bet that commits more than the all-in threshold becomes all-in, and a bet under the threshold stays as listed
 - The public turn and flop tree matches `StreetGame` action by action: check-down, a shared turn infoset with two hands, a different river size, and a geometric size. The largest strategy difference in those tests was 0
 - Continuing a fresh public street solver for 4 iterations matches one that was reset and run for those same 4 iterations
+- The frozen combo pass matches check-down equity on the turn and on the flop. On the nuts-versus-air turn lock, 400 CFR+ iterations reach a value within 1 chip of +50 and a smaller Nash gap than 20 iterations
 - Continuing a fresh public-tree solver for 40 iterations matches a solver that was reset and run for those same 40 iterations
 
 The river explorer is not part of `poker_solver_tests`. It was checked by opening `http://127.0.0.1:8765`, solving the default aces-versus-kings river, and reading the value, the ace-combo mixes, and a later betting line.

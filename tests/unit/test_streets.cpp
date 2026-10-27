@@ -520,4 +520,46 @@ void run_street_tests()
         CHECK(left[i].action == right[i].action);
         CHECK_NEAR(left[i].probability, right[i].probability, 1e-12);
     }
+
+    poker::solver::StreetBatchSolver frozen_check(check_only(turn_board, "QcQd", "JcJd"));
+    frozen_check.run_frozen_iterations(1, poker::solver::Algorithm::VanillaCfr);
+    CHECK_NEAR(frozen_check.expected_utility(), queens_ev, 1e-9);
+    CHECK_NEAR(frozen_check.nash_gap(), 0.0, 1e-8);
+
+    const std::vector<int> flop_frozen_board = {card("Ah"), card("Kd"), card("7c")};
+    const double flop_frozen_ev = average_flop_runout(
+        flop_frozen_board, card("Qc"), card("Qd"), card("Jc"), card("Jd"), 100);
+    poker::solver::StreetBatchSolver frozen_flop(check_only(flop_frozen_board, "QcQd", "JcJd"));
+    frozen_flop.run_frozen_iterations(1, poker::solver::Algorithm::VanillaCfr);
+    CHECK_NEAR(frozen_flop.expected_utility(), flop_frozen_ev, 1e-9);
+    CHECK_NEAR(frozen_flop.nash_gap(), 0.0, 1e-8);
+
+    StreetConfig frozen_lock;
+    frozen_lock.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
+    frozen_lock.pot = 100;
+    frozen_lock.stack = 100;
+    frozen_lock.oop = Range::parse("AhAd");
+    frozen_lock.ip = Range::parse("2c3d");
+    frozen_lock.oop_bet_sizes = {1.0};
+    frozen_lock.ip_bet_sizes = {1.0};
+    frozen_lock.allow_all_in = false;
+    frozen_lock.max_raises = 1;
+    poker::solver::StreetBatchSolver frozen_brief(frozen_lock);
+    poker::solver::StreetBatchSolver frozen_long(frozen_lock);
+    const auto frozen_started = std::chrono::steady_clock::now();
+    frozen_brief.run_frozen_iterations(20, poker::solver::Algorithm::CfrPlus);
+    frozen_long.run_frozen_iterations(400, poker::solver::Algorithm::CfrPlus);
+    const double frozen_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - frozen_started).count();
+    const double frozen_gap_20 = frozen_brief.nash_gap();
+    const double frozen_gap_400 = frozen_long.nash_gap();
+    const double frozen_value = frozen_long.expected_utility();
+    std::cout << "REPORT street_frozen_lock\n";
+    std::cout << "  runtime_seconds " << frozen_seconds << "\n";
+    std::cout << "  player0_expected_utility " << frozen_value << "\n";
+    std::cout << "  nash_gap " << frozen_gap_400 << "\n";
+    std::cout << "  gap_at_20 " << frozen_gap_20 << "\n";
+    CHECK_NEAR(frozen_value, 50.0, 1.0);
+    CHECK(frozen_gap_400 < frozen_gap_20);
+    CHECK(frozen_gap_400 < 1.0);
 }

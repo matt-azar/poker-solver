@@ -104,3 +104,9 @@ Measured together on the turn lock above, Release, this machine. Both solvers re
 | Public tree | 0.5261684 | 0.6829143 | 5008 | 50.0016209123 | 0.00187032418952 |
 
 About 1.42× on the regret loop. The public-tree memory figure omits the reference offset table, which is the 896-byte difference. The earlier 0.517897 s row is a different run of the reference solver and is not this comparison.
+
+## Frozen combo pass
+
+`street_solver --frozen` holds the strategy fixed for a pass and updates every combo on that pass. Each action keeps an exploration probability of `0.05 / actions`, so a line the strategy has left is still updated. On this one-combo lock the pass is slower than the per-deal walk; the pass is the one that can take a wider range. The timer below is 20 iterations plus 400 iterations.
+
+The 20-iteration Nash gap is 0.360187888642. The 400-iteration value is 50.0009429068 and the Nash gap is 0.000943154882123. Training both of those runs took 1.5202292 seconds.
