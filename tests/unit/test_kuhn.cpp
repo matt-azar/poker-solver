@@ -1,4 +1,5 @@
 #include "game/kuhn.hpp"
+#include "game/kuhn_game.hpp"
 #include "harness.hpp"
 
 #include <set>
@@ -118,4 +119,22 @@ void run_kuhn_tests()
     CHECK(infoset_is_facing_bet(3));
     CHECK(!infoset_is_facing_bet(6));
     CHECK(infoset_is_facing_bet(9));
+
+    KuhnGame game;
+    const auto root = game.root();
+    CHECK(game.is_chance(root));
+    CHECK(game.chance_count(root) == 6);
+    double chance_mass = 0.0;
+    for (int outcome = 0; outcome < game.chance_count(root); ++outcome)
+    {
+        chance_mass += game.chance_probability(root, outcome);
+    }
+    CHECK_NEAR(chance_mass, 1.0, 1e-12);
+
+    const auto jack_versus_queen = game.child_chance(root, 0);
+    const auto jack_versus_king = game.child_chance(root, 1);
+    CHECK(!game.is_chance(jack_versus_queen));
+    CHECK(game.infoset(jack_versus_queen) == game.infoset(jack_versus_king));
+    CHECK(game.acting_player(game.infoset(jack_versus_queen)) == 0);
+    CHECK(game.infoset(jack_versus_queen) != game.infoset(game.child_chance(root, 2)));
 }

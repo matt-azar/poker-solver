@@ -77,6 +77,30 @@ This implementation enumerates all six chance deals each iteration (no sampling,
 
 Reported expected utility is \(u_1(\bar\sigma)\), obtained by traversing the tree with both players’ average strategies and chance probabilities.
 
+## CFR+
+
+CFR+ changes three things relative to the vanilla update above. The counterfactual regret \(r^t(I,a)\) is unchanged.
+
+**Regret flooring** (regret-matching+):
+
+\[
+R^{t+1}(I,a) = \max\left(0, R^t(I,a) + r^t(I,a)\right).
+\]
+
+**Alternating updates.** Iteration \(t\) (starting at 1) makes one full traversal that updates only player 1, then one full traversal that updates only player 2. During a player’s traversal the opponent’s strategy is the current regret-matching strategy, including regrets written earlier in the same iteration. This is the usual CFR+ schedule (Tammelin, 2014). It is not part of the regret formula itself.
+
+**Iteration-weighted averaging.** The average strategy still multiplies by the acting player’s reach, and also by the iteration index:
+
+\[
+\bar\sigma^T(I,a)
+\propto
+\sum_{t=1}^{T} t \, \pi_i^t(I) \, \sigma^t(I,a).
+\]
+
+A player’s average is accumulated only on that player’s traversal, so the two passes in one iteration do not double-count it. Vanilla CFR uses the same reach weight with \(t\) replaced by 1, and updates both players in a single traversal.
+
+On Kuhn, both algorithms approach \(V=-1/18\). At equal iteration counts CFR+ eventually reports a smaller Nash gap. Each CFR+ iteration walks the tree twice, so a smaller gap does not by itself mean a shorter wall-clock solve. Measured times are in [BENCHMARKS.md](BENCHMARKS.md).
+
 ## Best response and Nash gap
 
 With \(\bar\sigma_{-i}\) frozen, player \(i\) has six infosets and two actions, so 64 pure plans. The solver evaluates all of them. Let

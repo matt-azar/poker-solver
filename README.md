@@ -2,7 +2,7 @@
 
 Heads-up no-limit Texas Hold'em GTO solver under incremental development. The core is C++20. Python bindings and a graphical explorer are planned later; they are not required to build or run the solver.
 
-**Current milestone:** Phase 2 — Kuhn Poker with vanilla CFR.
+**Current milestone:** Phase 3 — generalized CFR, with Kuhn solved by vanilla CFR and CFR+.
 
 This repository does **not** yet solve Texas Hold'em. Convergence on Kuhn Poker is exact-game equilibrium for that toy game, not unrestricted no-limit Hold'em.
 
@@ -45,7 +45,9 @@ cmake --build build-debug
 ## Run Kuhn solver
 
 ```sh
-kuhn_solver --iterations 100000 --print-strategies
+kuhn_solver --iterations 100000 --algorithm vanilla --print-strategies
+kuhn_solver --iterations 100000 --algorithm cfr_plus --print-strategies
+kuhn_solver --algorithm cfr_plus --iterations 100000 --gap-threshold 0.001 --eval-interval 1000
 kuhn_solver --iterations 100000 --json kuhn_result.json
 ```
 

@@ -1,8 +1,6 @@
-#include "game/kuhn.hpp"
-#include "solver/best_response.hpp"
+#include "game/kuhn_game.hpp"
 #include "solver/cfr.hpp"
 
-#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -17,7 +15,9 @@ namespace
 void print_usage(const char* argv0)
 {
     std::cerr << "Usage: " << argv0
-              << " [--iterations N] [--print-strategies] [--json PATH]\n";
+              << " [--iterations N] [--algorithm vanilla|cfr_plus]"
+              << " [--gap-threshold X] [--eval-interval N]"
+              << " [--print-strategies] [--json PATH]\n";
 }
 
 void print_strategies(const std::vector<double>& strategy, std::ostream& out)
@@ -38,7 +38,8 @@ void print_strategies(const std::vector<double>& strategy, std::ostream& out)
 
 void write_json(const poker::solver::SolveStats& stats,
                 const std::vector<double>& strategy,
-                const std::string& path)
+                const std::string& path,
+                const char* algorithm)
 {
     using namespace poker::kuhn;
     std::ofstream out(path);
@@ -56,7 +57,7 @@ void write_json(const poker::solver::SolveStats& stats,
     out << "  \"player2_best_response_utility\": " << stats.p2_best_response_utility << ",\n";
     out << "  \"nash_gap\": " << stats.nash_gap << ",\n";
     out << "  \"theoretical_player1_value\": " << kEquilibriumP1Value << ",\n";
-    out << "  \"algorithm\": \"vanilla_cfr\",\n";
+    out << "  \"algorithm\": \"" << algorithm << "\",\n";
     out << "  \"strategies\": [\n";
     for (int infoset = 0; infoset < kNumInfosets; ++infoset)
     {
@@ -81,6 +82,9 @@ int main(int argc, char** argv)
     int iterations = 100000;
     bool print_strat = false;
     std::string json_path;
+    poker::solver::Algorithm algorithm = poker::solver::Algorithm::VanillaCfr;
+    double gap_threshold = -1.0;
+    int eval_interval = 1000;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -96,6 +100,31 @@ int main(int argc, char** argv)
         else if (arg == "--json" && i + 1 < argc)
         {
             json_path = argv[++i];
+        }
+        else if (arg == "--algorithm" && i + 1 < argc)
+        {
+            const std::string name = argv[++i];
+            if (name == "vanilla" || name == "vanilla_cfr")
+            {
+                algorithm = poker::solver::Algorithm::VanillaCfr;
+            }
+            else if (name == "cfr_plus" || name == "cfr+")
+            {
+                algorithm = poker::solver::Algorithm::CfrPlus;
+            }
+            else
+            {
+                std::cerr << "unknown algorithm: " << name << "\n";
+                return 2;
+            }
+        }
+        else if (arg == "--gap-threshold" && i + 1 < argc)
+        {
+            gap_threshold = std::atof(argv[++i]);
+        }
+        else if (arg == "--eval-interval" && i + 1 < argc)
+        {
+            eval_interval = std::atoi(argv[++i]);
         }
         else if (arg == "--help" || arg == "-h")
         {
@@ -115,19 +144,18 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    poker::solver::KuhnCfrTrainer trainer;
-    const auto start = std::chrono::steady_clock::now();
-    trainer.solve(iterations);
-    const auto end = std::chrono::steady_clock::now();
+    poker::solver::SolveConfig config;
+    config.max_iterations = iterations;
+    config.nash_gap_threshold = gap_threshold;
+    config.eval_interval = eval_interval;
 
+    poker::solver::CfrTrainer<poker::kuhn::KuhnGame> trainer(poker::kuhn::KuhnGame{}, algorithm);
+    const auto stats = trainer.solve(config);
     const auto strategy = trainer.average_strategy();
-    auto stats = trainer.evaluate();
-    stats.iterations = iterations;
-    stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
-    stats.memory_bytes_estimate = poker::solver::KuhnCfrTrainer::table_memory_bytes();
+    const char* algorithm_label = poker::solver::algorithm_name(algorithm);
 
     std::cout << std::setprecision(12);
-    std::cout << "algorithm: vanilla CFR\n";
+    std::cout << "algorithm: " << algorithm_label << "\n";
     std::cout << "iterations: " << stats.iterations << "\n";
     std::cout << "runtime_seconds: " << stats.runtime_seconds << "\n";
     std::cout << "memory_bytes_estimate: " << stats.memory_bytes_estimate << "\n";
@@ -146,7 +174,7 @@ int main(int argc, char** argv)
 
     if (!json_path.empty())
     {
-        write_json(stats, strategy, json_path);
+        write_json(stats, strategy, json_path, algorithm_label);
         std::cout << "wrote " << json_path << "\n";
     }
 

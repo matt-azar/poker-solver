@@ -1,18 +1,55 @@
 # Architecture
 
-Phase 1–2 implements a standalone Kuhn Poker engine and a vanilla CFR trainer. The CFR code is already split from game rules so Phase 3 can introduce a generic extensive-form interface without changing the regret-matching math.
+Phase 3 solves Kuhn Poker with one CFR engine that is not tied to Kuhn’s 12 information sets. Vanilla CFR and CFR+ are two settings of that engine. The core library still has no Python or UI dependency.
 
 ## Modules
 
 | Module | Role |
 | --- | --- |
 | `poker::kuhn` | Cards, public sequences, legal actions, infoset ids, net-chip utilities |
-| `poker::solver` regret matching | Current strategy from cumulative regret; average-strategy accumulation |
-| `poker::solver::KuhnCfrTrainer` | Enumerated-chance vanilla CFR |
-| `poker::solver` best response | Exact pure-strategy best response over 12 infosets |
-| `kuhn_solver` | CLI: iterations, strategies, JSON dump |
+| `poker::kuhn::KuhnGame` | Those rules behind the extensive-game interface |
+| `poker::solver::CfrTrainer<Game>` | Vanilla CFR and CFR+ for any type that models the interface |
+| `regret_matching` | Current strategy from cumulative regret; reach-weighted accumulation |
+| `compute_best_response` | Exact best response from the game tree, deepest information set first |
+| `KuhnCfrTrainer` | Vanilla-CFR wrapper kept for the original Kuhn entry point |
+| `kuhn_solver` | CLI over `CfrTrainer<KuhnGame>` |
 
-The static library `poker_solver_core` has no Python or UI dependency.
+`expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker. It is not a second CFR implementation.
+
+## Extensive-game interface
+
+A game type provides a small `State` and these operations:
+
+- `root`, `is_chance`, `is_terminal`, `p1_utility`
+- `chance_count`, `chance_probability`, `child_chance`
+- `infoset`, `acting_player`, `action_count`, `child_action`
+
+Player 1’s utility is in net chips. Player 2’s utility is the negation. `acting_player` is 0 or 1. Actions are local indexes, not a global action id. The concept `ExtensiveGame` checks this at compile time.
+
+Kuhn’s only chance node is the root deal: six equally likely ordered hands. After that, `State` holds the deal and the public `Sequence`. The information set is still `(player, private card, public sequence)`.
+
+## Solver storage
+
+Regrets and strategy sums are two `std::vector<double>` blocks. An offset table maps each information set to its first action. Kuhn has 12 information sets and 2 actions each, so 24 doubles per table. The inner CFR recursion uses stack arrays and does not allocate. The action-count scratch limit is 8 per information set.
+
+CFR+ stores the same tables. Negative cumulative regrets are replaced by zero after each update, and the average strategy is weighted by the iteration index. See [MATHEMATICS.md](MATHEMATICS.md).
+
+## Best response
+
+`compute_best_response` walks every information set of the responding player from the deepest public decision back to the root. At each set it sums opponent-and-chance-weighted continuation values and keeps the action with the larger sum. Ties keep the lower action index. The continuation already uses the chosen action at every deeper set.
+
+The Nash gap is \(u_1(\mathrm{BR}_1,\bar\sigma_2)+u_2(\bar\sigma_1,\mathrm{BR}_2)\). Tests also enumerate all 64 pure plans per Kuhn player and require the same values. That enumeration is a Kuhn-only check, not the solver used for new games.
+
+## Stopping
+
+`SolveConfig` sets a maximum iteration count and an optional Nash-gap threshold. The threshold is used only when it is non-negative and `eval_interval` is positive. Runtime reported by `solve` is the regret-update loop, including any gap checks that can end the run early. The final gap measurement after a fixed iteration count is not included in that timer.
+
+## Design limits
+
+- The engine is ready for another two-player zero-sum tree. Leduc is not implemented yet.
+- Best response is exact for trees of Kuhn’s size. It is not a sampled exploitability estimate, and it will not be cheap on a Hold’em tree.
+- Convergence here is equilibrium of this finite Kuhn tree, not of unrestricted no-limit Hold’em.
+- At most 8 actions per information set until the scratch arrays are widened.
 
 ## Kuhn public sequences
 
@@ -37,15 +74,8 @@ An infoset key is `(player, private_card, public_sequence)`. The opponent’s ca
 
 ## Memory layout
 
-Regrets and strategy sums are `std::vector<double>` of length `12 * 2`. Index `infoset * 2 + local_action`. Local action 0 is Check or Fold; local action 1 is Bet or Call. Tables are allocated in the trainer constructor; the inner CFR loop does not allocate on the heap.
+Regrets and strategy sums live in the generic trainer, not in Kuhn-specific arrays. See the solver-storage section above.
 
 ## Utilities
 
 Terminal payoffs are player-1 **net chips**, including the unit ante each player posts. Player 2’s payoff is the negation (zero-sum). See [MATHEMATICS.md](MATHEMATICS.md).
-
-## Design limits (intentional)
-
-- No CFR+ yet (Phase 3).
-- No Leduc or Hold’em (Phases 4–6).
-- Best response enumerates `2^6 = 64` pure plans per player, which is exact for Kuhn and will not scale to Hold’em.
-- Convergence here is equilibrium of this finite Kuhn tree, not of unrestricted no-limit Hold’em.
