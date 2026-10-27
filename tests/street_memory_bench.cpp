@@ -70,6 +70,7 @@ void solve_case(
     std::cout << "memory_budget_bytes: " << report.memory_budget_bytes << "\n";
     std::cout << "allocated_bytes: " << report.allocated_bytes << "\n";
     std::cout << "peak_allocated_bytes: " << report.peak_allocated_bytes << "\n";
+    std::cout << "reserved_bytes: " << report.reserved_bytes << "\n";
     std::cout << "estimated_peak_bytes: " << report.estimated_peak_bytes << "\n";
     std::cout << "regret_strategy_sum_bytes: " << report.regret_strategy_sum_bytes << "\n";
     std::cout << "process_peak_working_set_bytes: "
@@ -99,6 +100,8 @@ void solve_case(
             std::string(name) + " deals " + std::to_string(solver.deal_count()));
     }
     require(report.memory_budget_bytes == 1024ull * 1048576ull, std::string(name) + " budget");
+    require(report.allocated_bytes <= report.peak_allocated_bytes, std::string(name) + " allocated exceeds peak");
+    require(report.reserved_bytes == 0, std::string(name) + " reservation credit is outstanding");
     require(report.peak_allocated_bytes <= report.memory_budget_bytes, std::string(name) + " peak exceeded the budget");
     require(report.peak_allocated_bytes > report.regret_strategy_sum_bytes, std::string(name) + " peak is only the two arrays");
     require(report.train_seconds > 0.0, std::string(name) + " training time");

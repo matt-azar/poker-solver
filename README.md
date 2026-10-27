@@ -57,7 +57,7 @@ explorer
 
 `explorer` listens on `http://127.0.0.1:8765`.
 
-Kuhn chance is the six equally likely deals. Leduc chance deals two private cards and, if the hand continues, one board card. The river solver deals private hands from the two ranges on a fixed board. The street solver does that on a turn or a flop and then deals the missing board cards. `street_solver` uses one public betting tree; `--reference` walks `StreetGame` instead. `--memory-mib` sets the street solver's heap budget in mebibytes. The default is 1024. None of the solvers uses an RNG. Rules are in [docs/LEDUC.md](docs/LEDUC.md), [docs/RIVER.md](docs/RIVER.md), and [docs/STREETS.md](docs/STREETS.md).
+Kuhn chance is the six equally likely deals. Leduc chance deals two private cards and, if the hand continues, one board card. The river solver deals private hands from the two ranges on a fixed board. The street solver does that on a turn or a flop and then deals the missing board cards. `street_solver` uses one public betting tree; `--reference` walks `StreetGame` instead. `--memory-mib` sets the street solver's allocation budget in mebibytes. The default is 1024. That budget is bytes the solver requests from its allocator, not process RSS. None of the solvers uses an RNG. Rules are in [docs/LEDUC.md](docs/LEDUC.md), [docs/RIVER.md](docs/RIVER.md), and [docs/STREETS.md](docs/STREETS.md).
 
 For Kuhn, the expected value of the first player approaches `-1/18`. The reported **Nash gap** is NashConv `u1(BR1, σ2) + u2(σ1, BR2)`. That is not NashConv/2. Leduc has no closed form in this repository; the tests check that its Nash gap falls.
 

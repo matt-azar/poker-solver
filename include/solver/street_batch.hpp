@@ -1,10 +1,11 @@
 #pragma once
 
 #include "game/street_game.hpp"
+#include "solver/budget_resource.hpp"
 #include "solver/trainer.hpp"
 
 #include <cstdint>
-#include <memory>
+#include <memory_resource>
 #include <string>
 #include <vector>
 
@@ -18,22 +19,25 @@ struct StreetStrategyEntry
     double probability = 0.0;
 };
 
-// One named piece of solver-owned heap. Rank-cache bytes are a reserved bound,
-// charged before the first pass, not a claim that every runout is already stored.
+// One named piece of live engine allocation. Bytes are what the budget
+// resource has requested from its upstream allocator and not yet released.
 struct StreetMemoryComponent
 {
     std::string name;
     std::uint64_t bytes = 0;
 };
 
-// Engine heap tracked by the street solver. This is not process RSS.
-// estimated_peak_bytes is the plan made before the large tables are allocated.
+// Engine heap measured by the allocation resource. This is not process RSS.
+// estimated_peak_bytes is a labeled plan, not the measured allocation.
+// reserved_bytes is unused reservation credit. The rank cache is allocated
+// before training, so that credit is zero after construction.
 // regret_strategy_sum_bytes is only the regret array plus the strategy-sum array.
 struct StreetMemoryReport
 {
     std::uint64_t memory_budget_bytes = 0;
     std::uint64_t allocated_bytes = 0;
     std::uint64_t peak_allocated_bytes = 0;
+    std::uint64_t reserved_bytes = 0;
     std::uint64_t regret_strategy_sum_bytes = 0;
     std::uint64_t estimated_peak_bytes = 0;
     std::uint64_t expanded_terminals = 0;
@@ -49,12 +53,16 @@ struct StreetMemoryReport
 // matching, sums that player's counterfactual regret, then CFR+ floors only
 // that player. The sequential walk and the frozen combo walk both use this
 // contract. StreetGame remains the reference. Construction and the workspace
-// used by a pass stay inside StreetConfig::memory_mib. That budget is
-// solver-owned heap, not an operating-system memory limit.
+// used by a pass stay inside StreetConfig::memory_mib. That budget is the
+// bytes the engine requests from its allocator, not an operating-system limit.
+// upstream observes those requests. A null upstream uses the global new/delete
+// resource. Caller-owned inputs and returned strategy text stay outside it.
 class StreetBatchSolver
 {
 public:
-    explicit StreetBatchSolver(streets::StreetConfig config);
+    explicit StreetBatchSolver(
+        streets::StreetConfig config,
+        std::pmr::memory_resource* upstream = nullptr);
     ~StreetBatchSolver();
 
     StreetBatchSolver(const StreetBatchSolver&) = delete;
@@ -92,6 +100,9 @@ public:
 
 private:
     struct Engine;
-    std::unique_ptr<Engine> engine_;
+    std::pmr::memory_resource* upstream_ = nullptr;
+    BudgetResource budget_;
+    void* engine_storage_ = nullptr;
+    Engine* engine_ = nullptr;
 };
 } // namespace poker::solver

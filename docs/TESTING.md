@@ -94,8 +94,11 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - The public turn and flop tree matches `StreetGame` action by action: check-down, a shared turn infoset with two hands, a different river size, and a geometric size. The largest strategy difference in those tests was 0
 - Continuing a fresh public street solver for 4 iterations matches one that was reset and run for those same 4 iterations
 - The frozen combo pass matches check-down equity on the turn and on the flop. On the nuts-versus-air turn lock, 400 CFR+ iterations reach a value within 1 chip of +50 and a smaller Nash gap than 20 iterations
+- The budget resource accepts an allocation that fills its limit, refuses one byte past that limit, counts an old block and a new block together, returns to zero after deallocation, and rolls the charge back when the upstream allocator throws
 - A zero memory budget is rejected. A 1 MiB budget rejects a `77+` versus `77+` check-down flop and names the budget, the current allocation, and the denied request. A later solve with a sufficient budget still runs
-- Two sufficient budgets on that flop produce the same value and the same Nash gap. The report includes scratch and the reserved rank cache, and its peak is larger than the regret-plus-strategy-sum figure
+- The same 1 MiB budget rejects the branching flop `Ah Kd 7c`, pot 100, stack 10000, `QcQd` versus `JcJd`, bet sizes 0.25/0.5/1, raise sizes 0.5/1, all-in, max raises 3. An independent allocation observer records a peak at or below 1,048,576 bytes and a live total of zero after the exception
+- Two sufficient budgets on the `77+` flop produce the same value and the same Nash gap. The report's scratch and rank-cache components are live allocations, reservation credit is zero, and one training pass does not change the live total. The peak is larger than the regret-plus-strategy-sum figure
+- A finished solve's live bytes match that independent observer, including a turn tree whose action paths are longer than a check-down
 - A weighted turn and a blocker turn match the existing closed form or `StreetGame` strategy check
 - Expanded terminal and decision counts on that flop are 64-bit products of the deal count and the runout count
 

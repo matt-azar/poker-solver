@@ -629,7 +629,10 @@ void expect_memory_budget()
     CHECK(report.peak_allocated_bytes >= report.allocated_bytes);
     CHECK(report.peak_allocated_bytes > report.regret_strategy_sum_bytes);
     CHECK(report.estimated_peak_bytes > report.regret_strategy_sum_bytes);
-    CHECK(component_bytes(report, "rank_cache") > 0);
+    CHECK(report.reserved_bytes == 0);
+    CHECK(report.allocated_bytes <= report.peak_allocated_bytes);
+    CHECK(report.peak_allocated_bytes <= report.memory_budget_bytes);
+    CHECK(component_bytes(report, "rank_cache") > 100000);
     CHECK(component_bytes(report, "scratch") > 0);
     CHECK(component_bytes(report, "deals") > 0);
     CHECK(component_bytes(report, "support") > 0);
@@ -656,6 +659,7 @@ void expect_memory_budget()
     const poker::solver::StreetMemoryReport trained = solver.memory_report();
     CHECK(trained.train_seconds > 0.0);
     CHECK(trained.evaluation_seconds > 0.0);
+    CHECK(trained.allocated_bytes == report.allocated_bytes);
     CHECK(trained.peak_allocated_bytes >= report.peak_allocated_bytes);
 
     const std::vector<int> turn = {card("Ah"), card("Kd"), card("7c"), card("4s")};
@@ -1116,7 +1120,82 @@ void run_tree_rule_tests(const std::vector<int>& turn_board)
     }
 }
 
+void expect_allocation_audit()
+{
+    const std::vector<int> flop = {card("Ah"), card("Kd"), card("7c")};
+    StreetConfig branching;
+    branching.board = flop;
+    branching.pot = 100;
+    branching.stack = 10000;
+    branching.oop = Range::parse("QcQd");
+    branching.ip = Range::parse("JcJd");
+    branching.oop_bet_sizes = {0.25, 0.5, 1.0};
+    branching.ip_bet_sizes = {0.25, 0.5, 1.0};
+    branching.oop_raise_sizes = {0.5, 1.0};
+    branching.ip_raise_sizes = {0.5, 1.0};
+    branching.allow_all_in = true;
+    branching.max_raises = 3;
+    branching.memory_mib = 1;
+
+    poker::solver::CountingResource denied_audit;
+    std::string denied;
+    try
+    {
+        poker::solver::StreetBatchSolver solver(branching, &denied_audit);
+    }
+    catch (const std::invalid_argument& error)
+    {
+        denied = error.what();
+    }
+    CHECK(denied.find("memory budget") != std::string::npos);
+    CHECK(denied.find("budget ") != std::string::npos);
+    CHECK(denied.find("allocated ") != std::string::npos);
+    CHECK(denied.find("request ") != std::string::npos);
+    CHECK(denied_audit.current() == 0);
+    CHECK(denied_audit.peak() > 0);
+    CHECK(denied_audit.peak() <= 1048576ull);
+
+    poker::solver::CountingResource live_audit;
+    StreetConfig small = check_only(flop, "QcQd", "JcJd");
+    small.memory_mib = 64;
+    poker::solver::StreetBatchSolver small_solver(small, &live_audit);
+    const poker::solver::StreetMemoryReport small_report = small_solver.memory_report();
+    CHECK(live_audit.current() == small_report.allocated_bytes);
+    CHECK(live_audit.peak() <= small_report.memory_budget_bytes);
+    CHECK(small_report.reserved_bytes == 0);
+    const std::uint64_t before = live_audit.current();
+    small_solver.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+    CHECK(live_audit.current() == before);
+    CHECK(std::isfinite(small_solver.expected_utility()));
+
+    const std::vector<int> turn = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+    StreetConfig betting = check_only(turn, "QcQd", "JcJd");
+    betting.stack = 400;
+    betting.oop_bet_sizes = {0.5, 1.0};
+    betting.ip_bet_sizes = {0.5, 1.0};
+    betting.oop_raise_sizes = {0.5, 1.0};
+    betting.ip_raise_sizes = {0.5, 1.0};
+    betting.allow_all_in = true;
+    betting.max_raises = 2;
+    betting.memory_mib = 64;
+    poker::solver::CountingResource wide_audit;
+    poker::solver::StreetBatchSolver wide_solver(betting, &wide_audit);
+    const poker::solver::StreetMemoryReport wide_report = wide_solver.memory_report();
+    CHECK(wide_audit.current() == wide_report.allocated_bytes);
+    CHECK(wide_audit.current() > 0);
+    CHECK(wide_audit.peak() <= wide_report.memory_budget_bytes);
+    CHECK(component_bytes(wide_report, "public_tree") > 0);
+    CHECK(component_bytes(wide_report, "rank_cache") > 0);
+    CHECK(wide_solver.public_decisions() > 4);
+    const std::uint64_t wide_before = wide_audit.current();
+    wide_solver.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+    CHECK(wide_audit.current() == wide_before);
+    CHECK(std::isfinite(wide_solver.expected_utility()));
+    CHECK(wide_solver.nash_gap() >= -1e-8);
+}
+
 void run_street_memory_tests()
 {
     expect_memory_budget();
+    expect_allocation_audit();
 }

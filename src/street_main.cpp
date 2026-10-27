@@ -411,6 +411,7 @@ int main(int argc, char** argv)
             std::cout << "memory_budget_bytes: " << memory.memory_budget_bytes << "\n";
             std::cout << "allocated_bytes: " << memory.allocated_bytes << "\n";
             std::cout << "peak_allocated_bytes: " << memory.peak_allocated_bytes << "\n";
+            std::cout << "reserved_bytes: " << memory.reserved_bytes << "\n";
             std::cout << "estimated_peak_bytes: " << memory.estimated_peak_bytes << "\n";
             std::cout << "regret_strategy_sum_bytes: " << memory.regret_strategy_sum_bytes << "\n";
             std::cout << "process_peak_working_set_bytes: "

@@ -20,7 +20,7 @@ Unrestricted HUNL deals two hole cards from a 52-card deck and then three street
 
 **Exploitability.** The Nash gap reported everywhere in this repository is NashConv, `u0(BR0) + u1(BR1)`, computed by an exact best response on the game that was solved. It is not an estimate of exploitability in unrestricted HUNL.
 
-**Storage and threads.** The street solver charges solver-owned heap against `memory_mib`. The regret array plus the strategy-sum array is one component of that total, reported as `regret_strategy_sum_bytes`. Process RSS is reported separately when the operating system provides it. A parallel traversal is not implemented. There is no measured speedup to report.
+**Storage and threads.** The street solver charges bytes it requests from its allocator against `memory_mib`. `allocated_bytes` is that live total. `estimated_peak_bytes` is a separate plan. `reserved_bytes` is unused reservation credit. The regret array plus the strategy-sum array is one component, reported as `regret_strategy_sum_bytes`. Process RSS is reported separately when the operating system provides it. A parallel traversal is not implemented. There is no measured speedup to report.
 
 ## Linear CFR on Kuhn
 

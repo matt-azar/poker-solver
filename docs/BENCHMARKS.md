@@ -127,7 +127,7 @@ The earlier frozen numbers that used a 0.05 exploration mixture are historical a
 
 ## Full-range check-down
 
-`build\Release\street_memory_bench.exe`, Release, MSVC 19.40, Windows 10.0.26200, x64, parent `9e0d87d`. One frozen CFR+ iteration, uniform random ranges, no all-in, max raises 0, pot 100, stack 100, budget 1024 MiB. Tolerance is `1e-8 * pot` = `1e-6` chips. Both cases are inside it. The times below are an isolated run. A second run while another process was active was slower and reproduced the same values and the same byte counts. Expanded counts are histories, not stored nodes. `regret_strategy_sum_bytes` is the regret array plus the strategy-sum array. `peak_allocated_bytes` is solver-owned heap. `process_peak_working_set_bytes` is process RSS and is a different number. `solve` runtime is training plus the final value and best-response evaluation. Construction is separate. Wall time is the whole bench case.
+`build\Release\street_memory_bench.exe`, Release, MSVC 19.40, Windows 10.0.26200, x64, Intel Core i7-10510U. One frozen CFR+ iteration, uniform random ranges, no all-in, max raises 0, pot 100, stack 100, budget 1024 MiB. Tolerance is `1e-8 * pot` = `1e-6` chips. Both cases are inside it. Values and expanded counts match the run from before the allocation-resource change. Byte totals below are measured requests, not that earlier plan. Expanded counts are histories, not stored nodes. `estimated_peak_bytes` is the labeled plan. `allocated_bytes` and `peak_allocated_bytes` are the resource's live total and high-water mark. `reserved_bytes` is zero. `regret_strategy_sum_bytes` is the regret array plus the strategy-sum array. `process_peak_working_set_bytes` is process RSS. `solve` runtime is training plus the final value and best-response evaluation. Construction is separate. Wall time is the whole bench case.
 
 | | Turn `Ah Kd 7c 4s` | Flop `Ah Kd 7c` |
 | --- | ---: | ---: |
@@ -137,16 +137,18 @@ The earlier frozen numbers that used a 0.05 exploration mixture are historical a
 | Expanded decisions | 105073200 | 5151129312 |
 | Player 0 value | 1.9567680809e-15 | 1.28230759344e-14 |
 | NashConv | 8.64586180427e-15 | 1.43912659567e-14 |
-| Construction (s) | 0.2179782 | 0.4312478 |
-| Training (s) | 0.373041 | 16.0721216 |
-| Evaluation (s) | 0.0918128 | 4.9844792 |
-| Wall (s) | 0.6830277 | 21.4921134 |
-| Estimated peak (bytes) | 60855838 | 418555390 |
-| Peak engine (bytes) | 60855838 | 418555390 |
+| Construction (s) | 0.2115396 | 0.4245992 |
+| Training (s) | 0.3797007 | 17.5002061 |
+| Evaluation (s) | 0.0872993 | 4.5951126 |
+| Wall (s) | 0.6786679 | 22.5266944 |
+| Estimated peak (bytes) | 60874006 | 418186774 |
+| Allocated (bytes) | 60883158 | 418426374 |
+| Peak allocated (bytes) | 60883158 | 418426374 |
+| Reserved (bytes) | 0 | 0 |
 | Regret + strategy sum (bytes) | 1696512 | 83166720 |
-| Process peak RSS (bytes) | 66572288 | 425504768 |
+| Process peak RSS (bytes) | 66592768 | 425652224 |
 
-The flop rank-cache component is a reserved bound of 22,729,728 bytes, charged before the pass. The same command is:
+The flop rank-cache component is 22,569,496 bytes of buffers allocated before the pass. The same command is:
 
 ```sh
 street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024
