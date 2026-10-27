@@ -47,9 +47,24 @@ struct StreetMemoryReport
     double construction_seconds = 0.0;
     // Rank values written before the first pass. Separate from construction.
     double cache_init_seconds = 0.0;
+    // Persistent worker threads and their charged contexts. Thread stacks are
+    // not included; those stay with the operating system.
+    double worker_setup_seconds = 0.0;
     double train_seconds = 0.0;
     double evaluation_seconds = 0.0;
+    int thread_count = 1;
     std::vector<StreetMemoryComponent> components;
+};
+
+// Scoped times from an enabled walk profile. Showdown includes the sort and
+// prefix work. Chance time is the caller's wait and reduction at the first
+// public-card split. These are measurements, not part of the solve.
+struct StreetWalkProfile
+{
+    double order_seconds = 0.0;
+    double showdown_seconds = 0.0;
+    double decision_seconds = 0.0;
+    double chance_seconds = 0.0;
 };
 
 // Same pass contract as CfrTrainer<StreetGame>. Each pass freezes regret
@@ -58,8 +73,12 @@ struct StreetMemoryReport
 // contract. StreetGame remains the reference. Construction and the workspace
 // used by a pass stay inside StreetConfig::memory_mib. That budget is the
 // bytes the engine requests from its allocator, not an operating-system limit.
-// Scratch, action values, and showdown prefix buffers live in one serial
-// WorkerContext. Training and evaluation do not run at the same time.
+// Scratch, action values, and showdown prefix buffers live in a WorkerContext.
+// One context is the caller and the evaluator. Extra contexts exist only when
+// the frozen pass uses more than one thread. Training and evaluation do not
+// run at the same time. Threads above 1 split the first future public card
+// and leave later cards on that worker. Native thread stacks are outside the
+// budget. The budget is not touched from a worker.
 // upstream observes those requests. A null upstream uses the global new/delete
 // resource. Caller-owned inputs and returned strategy text stay outside it.
 class StreetBatchSolver
@@ -102,6 +121,13 @@ public:
     std::vector<StreetStrategyEntry> average_strategy_entries() const;
     std::span<const double> regret_table() const;
     std::span<const double> strategy_sum_table() const;
+    int thread_count() const;
+    void enable_walk_profile(bool enabled);
+    StreetWalkProfile walk_profile() const;
+    // One CFR+ pass for one player. Descendants of the other player stay put.
+    void run_single_frozen_pass_for_test(int updating);
+    void arm_worker_failure_for_test();
+    void arm_card_delay_for_test(int microseconds);
     bool set_regret(const std::string& infoset, const std::string& action, double value);
     bool regret_value(const std::string& infoset, const std::string& action, double& value) const;
 

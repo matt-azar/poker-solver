@@ -19,6 +19,7 @@ int main()
     run_street_tests();
     run_street_memory_tests();
     run_street_workspace_tests();
+    run_street_parallel_tests();
     }
     catch (const std::exception& error)
     {

@@ -27,9 +27,11 @@ add_library(poker_solver_core STATIC
 target_include_directories(poker_solver_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+find_package(Threads REQUIRED)
 if(WIN32)
     target_link_libraries(poker_solver_core PUBLIC psapi)
 endif()
+target_link_libraries(poker_solver_core PUBLIC Threads::Threads)
 poker_set_warnings(poker_solver_core)
 
 add_executable(kuhn_solver src/main.cpp)
@@ -86,3 +88,8 @@ poker_set_warnings(street_memory_bench)
 add_executable(street_betting_bench tests/street_betting_bench.cpp)
 target_link_libraries(street_betting_bench PRIVATE poker_solver_core)
 poker_set_warnings(street_betting_bench)
+
+# Thread scaling for the two betting trees. Not part of ctest.
+add_executable(street_parallel_bench tests/street_parallel_bench.cpp)
+target_link_libraries(street_parallel_bench PRIVATE poker_solver_core)
+poker_set_warnings(street_parallel_bench)

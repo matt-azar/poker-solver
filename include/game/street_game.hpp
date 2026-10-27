@@ -71,6 +71,8 @@ struct StreetConfig
     int first_to_act = 0;
     // Solver-owned heap for StreetBatchSolver, in mebibytes. Zero is rejected.
     int memory_mib = 1024;
+    // Frozen-pass threads, including the caller. One keeps the serial walk.
+    int threads = 1;
 };
 
 // Pot fraction that invests stack_left over streets_left equal called bets.

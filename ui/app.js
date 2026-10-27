@@ -410,6 +410,7 @@ $("setup").addEventListener("submit", async (event) => {
     max_raises: Number($("max-raises").value),
     iterations: Number($("iterations").value),
     memory_mib: Number($("memory-mib").value),
+    threads: Number($("threads").value),
     algorithm: $("algorithm").value,
     samples: 5
   };

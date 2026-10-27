@@ -187,7 +187,7 @@ Flop, `Ah Kd 7c`, both ranges `QQ,JJ,TT,99`, pot 100, stack 100, the same half-p
 | 100 | -2.03253110071 | -1.67301679218 | 2.2172274205 | 0.359514308526 | 0.184696319789 | 0.544210628316 | 0.00544210628316 | 122.2273693 | 9.6905865 | 132.0474369 |
 | 300 | -1.94346200025 | -1.8927024819 | 1.96537221362 | 0.0507595183529 | 0.0219102133695 | 0.0726697317224 | 0.000726697317224 | 352.995994 | 11.540952 | 364.6666577 |
 
-Training is the dominant cost on both cases. At the 300-iteration stop it is 236.9 s of 246.2 s on the turn and 353.0 s of 364.7 s on the flop. Evaluation is under 12 s and construction is under 0.3 s. The turn walk at 3 iterations costs about 0.83 s of training per iteration; the flop walk costs about 1.23 s. Memory stays flat and well under the 1024 MiB budget, so the measured limit is the sequential pass over the expanded histories, not allocation. The same command shape is:
+Training is the dominant cost on both cases. At the 300-iteration stop it is 236.9 s of 246.2 s on the turn and 353.0 s of 364.7 s on the flop. Evaluation is under 12 s and construction is under 0.3 s. The turn walk at 3 iterations costs about 0.83 s of training per iteration; the flop walk costs about 1.23 s. Memory stays flat and well under the 1024 MiB budget. Those expanded-history counts are statistics. The frozen walk does not visit each history. It walks the public tree with a vector of hands, and a terminal value is a blocker-corrected sum. The one-thread limit is that public-tree pass. The threaded measurements are below. The same command shape is:
 
 ```sh
 street_solver --board Ah,Kd,7c,4s --pot 100 --stack 100 --oop-range random --ip-range random --oop-bets 0.5 --ip-bets 0.5 --all-in --max-raises 1 --iterations 300 --frozen --memory-mib 1024
@@ -195,3 +195,61 @@ street_solver --board Ah,Kd,7c --pot 100 --stack 100 --oop-range QQ,JJ,TT,99 --i
 ```
 
 `street_betting_bench` is not part of the unit suite. These two runs do not establish a comparison with PioSolver.
+
+## Frozen pass threads
+
+`build\Release\street_parallel_bench.exe`, same compiler and machine as the betting table: Release, MSVC 19.40, Windows 10.0.26200, x64, Intel Core i7-10510U (4 cores, 8 threads). The bench is not part of CTest. `converge` skips the timing repetitions. `converge 100` stops at iteration 100. The default run includes the repetitions and the full checkpoint list, with the same 600-second wall stop as `street_betting_bench`.
+
+The thread count includes the caller. One thread keeps the serial chance loop and allocates no extra worker context and no card-result buffer. More threads split only the first future public card. A turn splits rivers. A flop splits turns, and each worker deals that turn's rivers itself. Descendant regrets of different cards are disjoint, so a worker writes them directly. The caller reduces card values in ascending card order after every task has joined. Evaluation stays serial.
+
+Rank fill is `cache_init_seconds`. It is outside construction and outside training. Worker creation is `worker_setup_seconds`. Native thread stacks are outside the engine budget.
+
+### Thirty-iteration block
+
+Three repetitions of 30 frozen CFR+ iterations after one warmup, each repetition reset to zero regrets. The figure is training time. Cache fill is the warmup's `cache_init_seconds` and is not inside the 30-iteration number.
+
+This block is the speed comparison. On the one-thread turn, the median 23.564511 s sits next to the 23.7112235 s cumulative training time at iteration 30 in the table above. That older number includes the one rank fill. The warmup rank fill here was 0.2564049 s. One of the three turn repetitions took 32.4450141 s, which is the whole range. The other two were 23.423217 s and 23.564511 s.
+
+| Case | Threads | Median train (s) | Range (s) | Speedup | Allocated | Worker setup (s) | Cache init (s) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Turn | 1 | 23.564511 | 9.0217971 | 1 | 141624990 | 0.0000002 | 0.2564049 |
+| Turn | 2 | 18.6877432 | 1.3539398 | 1.261 | 148860430 | 0.0030317 | 0.19862 |
+| Turn | 4 | 14.0271184 | 0.2184014 | 1.680 | 161454222 | 0.008855 | 0.221569 |
+| Turn | 8 | 11.9048975 | 0.4642758 | 1.979 | 186641806 | 0.0263557 | 0.2946854 |
+| Flop | 1 | 31.8706521 | 0.3188664 | 1 | 171120018 | 0 | 0.2159568 |
+| Flop | 2 | 22.6354356 | 0.6372678 | 1.408 | 171285442 | 0.0001535 | 0.2168932 |
+| Flop | 4 | 17.3644758 | 1.773533 | 1.836 | 171576258 | 0.000417 | 0.2460198 |
+| Flop | 8 | 16.1711532 | 4.6621579 | 1.971 | 172157890 | 0.0011076 | 0.2925108 |
+
+Four threads is 1.68x on the turn and 1.84x on the flop. That is past the 1.5x goal on both betting trees. Eight threads was the fastest of the four counts. The flop's eight-thread range is 4.66 s, from 13.8677496 s to 18.5299075 s, so the step from four to eight threads on that tree is small next to the noise.
+
+One thread allocates 2,720 bytes more than commit `027e652` on both trees (141,624,990 versus 141,622,270 on the turn, 171,120,018 versus 171,117,298 on the flop). Those bytes are the idle thread-pool members. The regret and strategy-sum arrays are unchanged: 28,479,744 and 52,091,904. Two threads add about 7.2 MiB on the full-range turn and 165 KiB on the paired flop. Eight threads add about 45.0 MiB and 1.0 MiB. The flop add is small because the worker scratch follows the hand count.
+
+Process peak RSS in the timing process had already been raised by the instrumented solves, so those prints are not a per-thread RSS. A fresh one-thread turn process later reported 147,394,560 bytes, next to 147,513,344 at `027e652`.
+
+The one-thread flop median, 31.87 s for a warm block of 30, is not the same measurement as the 40.43 s cumulative training time at iteration 30 above. The cumulative figure includes the cold start. It is not a claim that the walk got faster.
+
+### Where the one-thread time goes
+
+An instrumented three-iteration pass, with the timers on, so the training times below include that overhead and are not the medians above. `chance_seconds` is zero on one thread because that timer is the caller's wait at a parallel split. With four threads it is caller wall, including the child walks. Showdown and order times with more than one thread are summed across threads and can exceed the training wall.
+
+| Case | Threads | Train (s) | Showdown (s) | Order (s) | Decision (s) | Chance (s) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Turn | 1 | 2.323535 | 1.3317528 | 0.899315 | 0.3857275 | 0 |
+| Turn | 4 | 1.1701352 | 1.8339555 | 1.2185765 | 0.8149006 | 1.0917848 |
+| Flop | 1 | 3.0705686 | 1.3039796 | 0.805276 | 0.5619667 | 0 |
+| Flop | 4 | 1.4128643 | 2.0323213 | 1.206818 | 0.9212747 | 1.2413234 |
+
+On one thread the turn spends 57 percent of training in showdown, and 39 percent in the rank order inside that showdown. Decisions are 17 percent. The flop spends 42 percent in showdown and 18 percent in decisions. The instrumented four-thread training times are 1.99x and 2.17x the instrumented one-thread times.
+
+### Same-build agreement
+
+On both betting trees, two, four, and eight threads matched the one-thread raw regret table and the raw strategy-sum table at iterations 3, 30, and 100. The relative delta was 0. Player-0 EV, both best responses, and NashConv matched the rows in the betting table at iterations 0, 1, 3, 10, 30, and 100. NashConv/pot first reached 0.01 at iteration 100, the same checkpoint as `027e652`. Iteration 300 was not part of that paired run.
+
+An earlier eight-thread flop did reach iteration 300: player-0 EV `-1.94346200025`, NashConv `0.0726697317224`, NashConv/pot `0.000726697317224`, training 231.2164908 s, evaluation 34.6194937 s, wall 267.174506 s, cache init 0.8201007 s. Those scalars match the iteration-300 flop row above. The raw tables were not compared at 300, because the one-thread reference in that process had stopped at iteration 187. A printed construction time of 912 s in that process is a suspend, not solver work. The laptop was later unplugged, and the lid was closed.
+
+The paired run to iteration 100 was after that sustained load. One-thread training to iteration 100 was 202.0960753 s on the turn and 239.4912473 s on the flop, against 77.4923685 s and 122.2273693 s at `027e652`. A clock sample in that window was 1803 MHz on the Samsung power plan. The same binary's warm 30-iteration block, above, still matched the older turn training time, so this gap is the machine, not a one-thread regression in the walk. Against that slower one-thread, training to iteration 100 scaled by 1.47x, 2.48x, and 4.32x on the turn at 2, 4, and 8 threads, and by 2.55x, 4.82x, and 6.12x on the flop. Those ratios use the slowed one-thread. The 30-iteration medians are the speedup to cite.
+
+ThreadSanitizer was not run. WSL Ubuntu g++ 11.4.0 is installed. The sanitizer build was not started: the machine is on battery after the lid was closed. The timing stress that did run sleeps a different amount on each card and still matched the one-thread raw tables. That is not a ThreadSanitizer result.
+
+`street_memory_bench` was not repeated in this iteration. The full-range check-down figures above stay the `027e652` measurements. The unit suite's last full run, with the parallel tests included, was 337,239 assertions and 0 failures. Debug traces were removed after that run and the suite was not started again.

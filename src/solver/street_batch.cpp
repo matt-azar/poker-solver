@@ -6,17 +6,22 @@
 #include "solver/regret_matching.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <memory_resource>
+#include <mutex>
 #include <new>
 #include <numeric>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -657,6 +662,7 @@ struct StreetBatchSolver::Engine
     // call evaluation, so the two never run together on one solver.
     struct WorkerContext
     {
+        using allocator_type = std::pmr::polymorphic_allocator<std::byte>;
         std::pmr::vector<Scratch> scratch;
         std::pmr::vector<double> amount_buf[2];
         std::pmr::vector<int> order_buf;
@@ -664,15 +670,24 @@ struct StreetBatchSolver::Engine
         std::pmr::vector<double> prefix_buf;
         std::pmr::vector<double> card_prefix_buf;
         std::pmr::vector<std::uint32_t> sorted_rank_buf;
+        double order_seconds = 0.0;
+        double showdown_seconds = 0.0;
+        double decision_seconds = 0.0;
+        double chance_seconds = 0.0;
 
         explicit WorkerContext(std::pmr::memory_resource* heap)
-            : scratch(heap)
-            , amount_buf{std::pmr::vector<double>(heap), std::pmr::vector<double>(heap)}
-            , order_buf(heap)
-            , pos_buf(heap)
-            , prefix_buf(heap)
-            , card_prefix_buf(heap)
-            , sorted_rank_buf(heap)
+            : WorkerContext(std::allocator_arg, allocator_type(heap))
+        {
+        }
+
+        WorkerContext(std::allocator_arg_t, const allocator_type& alloc)
+            : scratch(alloc)
+            , amount_buf{std::pmr::vector<double>(alloc), std::pmr::vector<double>(alloc)}
+            , order_buf(alloc)
+            , pos_buf(alloc)
+            , prefix_buf(alloc)
+            , card_prefix_buf(alloc)
+            , sorted_rank_buf(alloc)
         {
         }
     };
@@ -705,6 +720,38 @@ struct StreetBatchSolver::Engine
     mutable bool average_ready = false;
     mutable bool ranks_ready_ = false;
     mutable double cache_init_seconds_ = 0.0;
+    double worker_setup_seconds_ = 0.0;
+    bool failed_ = false;
+    bool profile_ = false;
+    static constexpr int kMaxThreads = 64;
+    WorkerContext* extra_contexts_[kMaxThreads] = {};
+    int extra_count_ = 0;
+    std::pmr::vector<double> result0_;
+    std::pmr::vector<double> result1_;
+    int active_cards_[52] = {};
+    int active_count_ = 0;
+    int chunk_begin_[kMaxThreads] = {};
+    int chunk_end_[kMaxThreads] = {};
+    int task_node_ = 0;
+    int task_turn_ = -1;
+    int task_river_ = -1;
+    int task_depth_ = 0;
+    int task_updating_ = -1;
+    int task_deal_ = 0;
+    double task_weight_ = 1.0;
+    const double* task_pi0_ = nullptr;
+    const double* task_pi1_ = nullptr;
+    std::thread workers_[kMaxThreads];
+    int worker_count_ = 0;
+    std::mutex pool_mutex_;
+    std::condition_variable work_cv_;
+    std::condition_variable done_cv_;
+    std::uint64_t epoch_ = 0;
+    int finished_ = 0;
+    bool stop_ = false;
+    std::exception_ptr worker_error_;
+    std::atomic<int> fail_tickets_{0};
+    std::atomic<int> delay_us_{0};
     int n0 = 0;
     int n1 = 0;
     int public_decisions = 0;
@@ -750,6 +797,8 @@ struct StreetBatchSolver::Engine
         , mask{std::pmr::vector<std::uint64_t>(heap_), std::pmr::vector<std::uint64_t>(heap_)}
         , support{std::pmr::vector<Support>(heap_), std::pmr::vector<Support>(heap_)}
         , frozen_sigma(heap_)
+        , result0_(heap_)
+        , result1_(heap_)
     {
         const auto started = std::chrono::steady_clock::now();
         validate();
@@ -775,6 +824,41 @@ struct StreetBatchSolver::Engine
         build_reach_table();
         construction_seconds_ = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - started).count();
+        const auto setup_started = std::chrono::steady_clock::now();
+        try
+        {
+            setup_workers();
+        }
+        catch (...)
+        {
+            join_workers();
+            destroy_extra_contexts();
+            throw;
+        }
+        worker_setup_seconds_ = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - setup_started).count();
+    }
+
+    ~Engine()
+    {
+        join_workers();
+        destroy_extra_contexts();
+    }
+
+    void destroy_extra_contexts()
+    {
+        for (int index = 0; index < extra_count_; ++index)
+        {
+            WorkerContext* ctx = extra_contexts_[index];
+            extra_contexts_[index] = nullptr;
+            if (ctx == nullptr)
+            {
+                continue;
+            }
+            ctx->~WorkerContext();
+            budget_->deallocate(ctx, sizeof(WorkerContext), alignof(WorkerContext));
+        }
+        extra_count_ = 0;
     }
 
     std::int64_t cursor_ = 0;
@@ -809,6 +893,11 @@ struct StreetBatchSolver::Engine
         if (config.pot_cap < 0.0)
         {
             throw std::invalid_argument("pot cap must be nonnegative");
+        }
+        if (config.threads < 1 || config.threads > kMaxThreads)
+        {
+            throw std::invalid_argument(
+                "thread count must be a positive integer from 1 through 64");
         }
     }
 
@@ -1115,6 +1204,25 @@ struct StreetBatchSolver::Engine
         // This is a plan, not the measured allocation.
         const std::uint64_t map_node = 3ull * sizeof(void*) + sizeof(RunoutRanks);
         add(checked_mul(keys, checked_add(payload, map_node, "plan"), "plan"));
+        if (config.threads > 1)
+        {
+            const std::uint64_t extra = static_cast<std::uint64_t>(config.threads - 1);
+            const std::uint64_t extra_scratch = checked_add(
+                checked_mul(hands0, sizeof(double) * 10, "plan"),
+                checked_mul(hands1, sizeof(double) * 10, "plan"),
+                "plan");
+            add(checked_mul(extra, sizeof(WorkerContext), "plan"));
+            add(checked_mul(extra, checked_mul(32, sizeof(Scratch), "plan"), "plan"));
+            add(checked_mul(extra, checked_mul(32, extra_scratch, "plan"), "plan"));
+            add(checked_mul(extra, checked_mul(wide, sizeof(int), "plan"), "plan"));
+            add(checked_mul(extra, checked_mul(wide, sizeof(int), "plan"), "plan"));
+            add(checked_mul(extra, checked_mul(wide + 1, sizeof(double), "plan"), "plan"));
+            add(checked_mul(extra, checked_mul(52ull * (wide + 1), sizeof(double), "plan"), "plan"));
+            add(checked_mul(extra, checked_mul(wide, sizeof(std::uint32_t), "plan"), "plan"));
+            add(checked_mul(extra, checked_mul(hands0 + hands1, sizeof(double), "plan"), "plan"));
+            add(checked_mul(52, hands0 * sizeof(double), "plan"));
+            add(checked_mul(52, hands1 * sizeof(double), "plan"));
+        }
         return total;
     }
 
@@ -1613,6 +1721,11 @@ struct StreetBatchSolver::Engine
 
     void train_more(int count, Algorithm algorithm)
     {
+        check_usable();
+        if (config.threads > 1)
+        {
+            throw std::invalid_argument("multiple threads require the frozen street pass");
+        }
         if (algorithm != Algorithm::VanillaCfr && algorithm != Algorithm::CfrPlus)
         {
             throw std::invalid_argument("the public street tree implements vanilla CFR and CFR+");
@@ -1653,6 +1766,7 @@ struct StreetBatchSolver::Engine
 
     void ensure_average() const
     {
+        check_usable();
         if (average_ready)
         {
             return;
@@ -1915,6 +2029,7 @@ struct StreetBatchSolver::Engine
 
     double utility_of_response(int responding) const
     {
+        check_usable();
         ensure_ranks();
         const auto started = std::chrono::steady_clock::now();
         ensure_average();
@@ -2276,6 +2391,9 @@ struct StreetBatchSolver::Engine
         std::span<const double> amount,
         std::span<const std::uint32_t> ranks) const
     {
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
         const int hands = static_cast<int>(amount.size());
         if (ctx.order_buf.capacity() < amount.size()
             || ctx.pos_buf.capacity() < amount.size()
@@ -2320,6 +2438,11 @@ struct StreetBatchSolver::Engine
             ctx.card_prefix_buf[static_cast<std::size_t>(
                 hole_b[player][static_cast<std::size_t>(hand)] * span + index + 1)] += piece;
         }
+        if (profile_)
+        {
+            ctx.order_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+        }
     }
 
     double slice_reach(
@@ -2362,6 +2485,9 @@ struct StreetBatchSolver::Engine
         std::span<const double> opp_amount,
         std::span<double> ev) const
     {
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
         const int opp = 1 - hero;
         const std::pmr::vector<std::uint32_t>& hero_ranks = ranks_for(hero, turn, river);
         const std::pmr::vector<std::uint32_t>& opp_ranks = ranks_for(opp, turn, river);
@@ -2393,6 +2519,11 @@ struct StreetBatchSolver::Engine
             const double high_pay = hero == 0 ? lose_pay : win_pay;
             ev[static_cast<std::size_t>(hand)] = range_w[hero][static_cast<std::size_t>(hand)] * joint_scale
                 * (low_pay * worse_mass + high_pay * better_mass);
+        }
+        if (profile_)
+        {
+            ctx.showdown_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
         }
     }
 
@@ -2448,8 +2579,329 @@ struct StreetBatchSolver::Engine
         showdown_side(ctx, 1, turn, river, win_pay, lose_pay, ctx.amount_buf[0], ev1);
     }
 
+    void check_usable() const
+    {
+        if (failed_)
+        {
+            throw std::logic_error(
+                "street solver failed during a frozen pass and cannot continue");
+        }
+    }
+
+    void join_workers()
+    {
+        {
+            std::lock_guard<std::mutex> lock(pool_mutex_);
+            stop_ = true;
+        }
+        work_cv_.notify_all();
+        for (int index = 0; index < worker_count_; ++index)
+        {
+            if (workers_[index].joinable())
+            {
+                workers_[index].join();
+            }
+        }
+        worker_count_ = 0;
+    }
+
+    void setup_workers()
+    {
+        if (config.threads == 1)
+        {
+            return;
+        }
+        budget_->set_stage("workers");
+        for (int index = 1; index < config.threads; ++index)
+        {
+            void* storage = budget_->allocate(sizeof(WorkerContext), alignof(WorkerContext));
+            WorkerContext* ctx = nullptr;
+            try
+            {
+                ctx = new (storage) WorkerContext(heap_);
+                prepare_context(*ctx);
+                extra_contexts_[extra_count_++] = ctx;
+            }
+            catch (...)
+            {
+                if (ctx != nullptr)
+                {
+                    ctx->~WorkerContext();
+                }
+                budget_->deallocate(storage, sizeof(WorkerContext), alignof(WorkerContext));
+                destroy_extra_contexts();
+                throw;
+            }
+        }
+        budget_->set_stage("card_results");
+        result0_.assign(static_cast<std::size_t>(52 * n0), 0.0);
+        result1_.assign(static_cast<std::size_t>(52 * n1), 0.0);
+        try
+        {
+            for (int index = 0; index < config.threads - 1; ++index)
+            {
+                workers_[index] = std::thread([this, index] { worker_main(index + 1); });
+                worker_count_ = index + 1;
+            }
+        }
+        catch (...)
+        {
+            join_workers();
+            destroy_extra_contexts();
+            throw;
+        }
+    }
+
+    WorkerContext& context_for(int worker_index)
+    {
+        if (worker_index == 0)
+        {
+            return workspace;
+        }
+        return *extra_contexts_[worker_index - 1];
+    }
+
+    void run_chunk(int worker_index, int begin, int end)
+    {
+        if (worker_index > 0 && fail_tickets_.exchange(0) > 0)
+        {
+            throw std::runtime_error("injected worker failure");
+        }
+        if (begin == end)
+        {
+            return;
+        }
+        WorkerContext& ctx = context_for(worker_index);
+        Scratch& child = ctx.scratch[static_cast<std::size_t>(task_depth_)];
+        for (int index = begin; index < end; ++index)
+        {
+            const int card = active_cards_[index];
+            const int pause = delay_us_.load(std::memory_order_relaxed);
+            if (pause > 0)
+            {
+                const int scale = (card * 17) % 5;
+                if (scale > 0)
+                {
+                    std::this_thread::sleep_for(std::chrono::microseconds(pause * scale));
+                }
+            }
+            int next_turn = task_turn_;
+            int next_river = task_river_;
+            if (task_deal_ == 1)
+            {
+                next_turn = card;
+            }
+            else
+            {
+                next_river = card;
+            }
+            for (int hand = 0; hand < n0; ++hand)
+            {
+                child.pi0[static_cast<std::size_t>(hand)] = hand_supported(0, hand, next_turn, next_river)
+                    ? task_pi0_[hand] : 0.0;
+            }
+            for (int hand = 0; hand < n1; ++hand)
+            {
+                child.pi1[static_cast<std::size_t>(hand)] = hand_supported(1, hand, next_turn, next_river)
+                    ? task_pi1_[hand] : 0.0;
+            }
+            frozen_walk(
+                ctx, task_node_, next_turn, next_river, task_depth_, task_updating_, task_weight_, true);
+            const std::size_t ev0_at = static_cast<std::size_t>(card) * static_cast<std::size_t>(n0);
+            const std::size_t ev1_at = static_cast<std::size_t>(card) * static_cast<std::size_t>(n1);
+            std::copy(child.ev0.begin(), child.ev0.end(), result0_.begin() + static_cast<std::ptrdiff_t>(ev0_at));
+            std::copy(child.ev1.begin(), child.ev1.end(), result1_.begin() + static_cast<std::ptrdiff_t>(ev1_at));
+        }
+    }
+
+    void worker_main(int worker_index)
+    {
+        std::uint64_t seen = 0;
+        for (;;)
+        {
+            int begin = 0;
+            int end = 0;
+            {
+                std::unique_lock<std::mutex> lock(pool_mutex_);
+                work_cv_.wait(lock, [&] { return stop_ || epoch_ != seen; });
+                if (stop_)
+                {
+                    return;
+                }
+                seen = epoch_;
+                begin = chunk_begin_[worker_index];
+                end = chunk_end_[worker_index];
+            }
+            std::exception_ptr error;
+            try
+            {
+                run_chunk(worker_index, begin, end);
+            }
+            catch (...)
+            {
+                error = std::current_exception();
+            }
+            {
+                std::lock_guard<std::mutex> lock(pool_mutex_);
+                if (error && worker_error_ == nullptr)
+                {
+                    worker_error_ = error;
+                }
+                ++finished_;
+            }
+            done_cv_.notify_one();
+        }
+    }
+
+    void dispatch_chance()
+    {
+        {
+            std::lock_guard<std::mutex> lock(pool_mutex_);
+            worker_error_ = nullptr;
+            finished_ = 0;
+            ++epoch_;
+        }
+        work_cv_.notify_all();
+        std::exception_ptr caller_error;
+        try
+        {
+            run_chunk(0, chunk_begin_[0], chunk_end_[0]);
+        }
+        catch (...)
+        {
+            caller_error = std::current_exception();
+        }
+        std::exception_ptr worker_error;
+        {
+            std::unique_lock<std::mutex> lock(pool_mutex_);
+            done_cv_.wait(lock, [&] { return finished_ == worker_count_; });
+            worker_error = worker_error_;
+            worker_error_ = nullptr;
+        }
+        if (worker_error != nullptr || caller_error != nullptr)
+        {
+            failed_ = true;
+            std::rethrow_exception(worker_error != nullptr ? worker_error : caller_error);
+        }
+    }
+
+    // Descendant information sets of different cards are disjoint: each slot
+    // stores the public node and the dealt card. Workers write those entries
+    // directly. This node and its ancestors stay on the caller and are updated
+    // only after the join, in ascending card order.
+    void parallel_chance(
+        WorkerContext& ctx,
+        const Node& node,
+        int turn,
+        int river,
+        int depth,
+        int updating,
+        double weight_iter,
+        const double* pi0,
+        const double* pi1)
+    {
+        Scratch& here = ctx.scratch[static_cast<std::size_t>(depth)];
+        std::fill(here.ev0.begin(), here.ev0.end(), 0.0);
+        std::fill(here.ev1.begin(), here.ev1.end(), 0.0);
+        int denom = 52 - static_cast<int>(config.board.size()) - 4;
+        std::uint64_t dead = board_mask;
+        if (turn >= 0)
+        {
+            --denom;
+            dead |= std::uint64_t{1} << turn;
+        }
+        if (river >= 0)
+        {
+            --denom;
+            dead |= std::uint64_t{1} << river;
+        }
+        const double probability = 1.0 / static_cast<double>(denom);
+        bool active[52] = {};
+        active_count_ = 0;
+        for (int card = 0; card < 52; ++card)
+        {
+            if (((dead >> card) & 1u) != 0)
+            {
+                continue;
+            }
+            int next_turn = turn;
+            int next_river = river;
+            if (node.deal_which == 1)
+            {
+                next_turn = card;
+            }
+            else
+            {
+                next_river = card;
+            }
+            if (!card_reaches_pair(next_turn, next_river, pi0, pi1))
+            {
+                continue;
+            }
+            active[card] = true;
+            active_cards_[active_count_++] = card;
+        }
+        const int workers = config.threads;
+        const int base = active_count_ / workers;
+        const int remainder = active_count_ % workers;
+        int cursor = 0;
+        for (int worker = 0; worker < workers; ++worker)
+        {
+            const int count = base + (worker < remainder ? 1 : 0);
+            chunk_begin_[worker] = cursor;
+            chunk_end_[worker] = cursor + count;
+            cursor += count;
+        }
+        task_node_ = node.child[0];
+        task_turn_ = turn;
+        task_river_ = river;
+        task_depth_ = depth + 1;
+        task_updating_ = updating;
+        task_weight_ = weight_iter;
+        task_pi0_ = pi0;
+        task_pi1_ = pi1;
+        task_deal_ = node.deal_which;
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        dispatch_chance();
+        for (int card = 0; card < 52; ++card)
+        {
+            if (!active[card])
+            {
+                continue;
+            }
+            const double* child_ev0 = result0_.data()
+                + static_cast<std::size_t>(card) * static_cast<std::size_t>(n0);
+            const double* child_ev1 = result1_.data()
+                + static_cast<std::size_t>(card) * static_cast<std::size_t>(n1);
+            for (int hand = 0; hand < n0; ++hand)
+            {
+                here.ev0[static_cast<std::size_t>(hand)] +=
+                    probability * child_ev0[hand];
+            }
+            for (int hand = 0; hand < n1; ++hand)
+            {
+                here.ev1[static_cast<std::size_t>(hand)] +=
+                    probability * child_ev1[hand];
+            }
+        }
+        if (profile_)
+        {
+            ctx.chance_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+        }
+    }
+
     void frozen_walk(
-        WorkerContext& ctx, int node_index, int turn, int river, int depth, int updating, double weight_iter)
+        WorkerContext& ctx,
+        int node_index,
+        int turn,
+        int river,
+        int depth,
+        int updating,
+        double weight_iter,
+        bool serial_chance)
     {
         if (depth + 1 >= static_cast<int>(ctx.scratch.size()))
         {
@@ -2466,6 +2918,11 @@ struct StreetBatchSolver::Engine
         }
         if (node.chance)
         {
+            if (!serial_chance && config.threads > 1)
+            {
+                parallel_chance(ctx, node, turn, river, depth, updating, weight_iter, pi0, pi1);
+                return;
+            }
             std::fill(here.ev0.begin(), here.ev0.end(), 0.0);
             std::fill(here.ev1.begin(), here.ev1.end(), 0.0);
             int denom = 52 - static_cast<int>(config.board.size()) - 4;
@@ -2512,7 +2969,8 @@ struct StreetBatchSolver::Engine
                     child.pi1[static_cast<std::size_t>(h1)] = hand_supported(1, h1, next_turn, next_river)
                         ? pi1[h1] : 0.0;
                 }
-                frozen_walk(ctx, node.child[0], next_turn, next_river, depth + 1, updating, weight_iter);
+                frozen_walk(
+                    ctx, node.child[0], next_turn, next_river, depth + 1, updating, weight_iter, true);
                 for (int h0 = 0; h0 < n0; ++h0)
                 {
                     here.ev0[static_cast<std::size_t>(h0)] += probability * child.ev0[static_cast<std::size_t>(h0)];
@@ -2558,11 +3016,15 @@ struct StreetBatchSolver::Engine
                     child.pi1[static_cast<std::size_t>(h1)] = pi1[h1] * sigma[action];
                 }
             }
-            frozen_walk(ctx, node.child[action], turn, river, depth + 1, updating, weight_iter);
+            frozen_walk(
+                ctx, node.child[action], turn, river, depth + 1, updating, weight_iter, serial_chance);
             std::copy(child.ev0.begin(), child.ev0.end(), here.aev0.begin() + static_cast<std::size_t>(action * n0));
             std::copy(child.ev1.begin(), child.ev1.end(), here.aev1.begin() + static_cast<std::size_t>(action * n1));
         }
 
+        const auto decision_started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
         for (int h0 = 0; h0 < n0; ++h0)
         {
             if (!hand_supported(0, h0, turn, river))
@@ -2639,6 +3101,11 @@ struct StreetBatchSolver::Engine
                 here.ev1[static_cast<std::size_t>(h1)] = mix;
             }
         }
+        if (profile_)
+        {
+            ctx.decision_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - decision_started).count();
+        }
     }
 
     void freeze_sigma()
@@ -2676,7 +3143,7 @@ struct StreetBatchSolver::Engine
         freeze_sigma();
         std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
         std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
-        frozen_walk(workspace, 0, -1, -1, 0, updating, weight_iter);
+        frozen_walk(workspace, 0, -1, -1, 0, updating, weight_iter, false);
         if (algorithm == Algorithm::CfrPlus)
         {
             floor_player(updating);
@@ -2685,6 +3152,7 @@ struct StreetBatchSolver::Engine
 
     void train_frozen(int count, Algorithm algorithm)
     {
+        check_usable();
         if (algorithm != Algorithm::VanillaCfr && algorithm != Algorithm::CfrPlus)
         {
             throw std::invalid_argument("the frozen street pass implements vanilla CFR and CFR+");
@@ -2770,8 +3238,10 @@ struct StreetBatchSolver::Engine
         report.process_peak_working_set_bytes = process_peak_working_set_bytes();
         report.construction_seconds = construction_seconds_;
         report.cache_init_seconds = cache_init_seconds_;
+        report.worker_setup_seconds = worker_setup_seconds_;
         report.train_seconds = train_seconds_;
         report.evaluation_seconds = evaluation_seconds_;
+        report.thread_count = config.threads;
         for (const BudgetResource::Component& item : budget_->components())
         {
             if (item.bytes == 0)
@@ -2823,6 +3293,7 @@ StreetBatchSolver::~StreetBatchSolver()
 
 void StreetBatchSolver::run_iterations(int count, Algorithm algorithm)
 {
+    engine_->check_usable();
     engine_->reset();
     engine_->train_more(count, algorithm);
 }
@@ -2834,6 +3305,7 @@ void StreetBatchSolver::continue_iterations(int count, Algorithm algorithm)
 
 void StreetBatchSolver::run_frozen_iterations(int count, Algorithm algorithm)
 {
+    engine_->check_usable();
     engine_->reset();
     engine_->train_frozen(count, algorithm);
 }
@@ -2845,6 +3317,7 @@ void StreetBatchSolver::continue_frozen_iterations(int count, Algorithm algorith
 
 SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm algorithm)
 {
+    engine_->check_usable();
     const auto start = std::chrono::steady_clock::now();
     engine_->reset();
     int completed = 0;
@@ -2887,6 +3360,7 @@ SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm 
 
 SolveStats StreetBatchSolver::solve(const SolveConfig& config, Algorithm algorithm)
 {
+    engine_->check_usable();
     const auto start = std::chrono::steady_clock::now();
     engine_->reset();
     int completed = 0;
@@ -3011,6 +3485,65 @@ std::span<const double> StreetBatchSolver::regret_table() const
 std::span<const double> StreetBatchSolver::strategy_sum_table() const
 {
     return std::span<const double>(engine_->strategy_sum.data(), engine_->strategy_sum.size());
+}
+
+int StreetBatchSolver::thread_count() const
+{
+    return engine_->config.threads;
+}
+
+void StreetBatchSolver::enable_walk_profile(bool enabled)
+{
+    engine_->check_usable();
+    engine_->profile_ = enabled;
+    const auto clear = [](Engine::WorkerContext& ctx)
+    {
+        ctx.order_seconds = 0.0;
+        ctx.showdown_seconds = 0.0;
+        ctx.decision_seconds = 0.0;
+        ctx.chance_seconds = 0.0;
+    };
+    clear(engine_->workspace);
+    for (int index = 0; index < engine_->extra_count_; ++index)
+    {
+        clear(*engine_->extra_contexts_[index]);
+    }
+}
+
+StreetWalkProfile StreetBatchSolver::walk_profile() const
+{
+    StreetWalkProfile profile;
+    const auto add = [&](const Engine::WorkerContext& ctx)
+    {
+        profile.order_seconds += ctx.order_seconds;
+        profile.showdown_seconds += ctx.showdown_seconds;
+        profile.decision_seconds += ctx.decision_seconds;
+        profile.chance_seconds += ctx.chance_seconds;
+    };
+    add(engine_->workspace);
+    for (int index = 0; index < engine_->extra_count_; ++index)
+    {
+        add(*engine_->extra_contexts_[index]);
+    }
+    return profile;
+}
+
+void StreetBatchSolver::run_single_frozen_pass_for_test(int updating)
+{
+    engine_->check_usable();
+    engine_->average_ready = false;
+    engine_->ensure_ranks();
+    engine_->frozen_pass(updating, 1.0, Algorithm::CfrPlus);
+}
+
+void StreetBatchSolver::arm_worker_failure_for_test()
+{
+    engine_->fail_tickets_.store(1);
+}
+
+void StreetBatchSolver::arm_card_delay_for_test(int microseconds)
+{
+    engine_->delay_us_.store(microseconds);
 }
 
 std::vector<StreetStrategyEntry> StreetBatchSolver::average_strategy_entries() const

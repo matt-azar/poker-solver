@@ -32,13 +32,25 @@ At most eight actions are legal at one decision. `StreetGame` rejects a referenc
 
 The budget is the bytes the engine requests from its allocator, checked before that call. A container that grows is charged for the old block and the new block while both exist. Freeing a block releases the charge. If the upstream allocator throws, the charge is rolled back. Construction throws when a request would pass the limit, and the partial tree is freed. The solver does not drop hands, drop actions, sample cards, or raise the budget.
 
-Charged storage is the engine object, the public tree and its path and action strings, deal rows, slot indexes, regret, strategy-sum, average, and frozen-strategy tables, support, traversal scratch, showdown and best-response buffers, registration temporaries, and the rank-cache buffers. The rank cache is allocated for every legal runout before training, so a pass does not allocate it. `reserved_bytes` is unused reservation credit and is zero after construction. Each charged block includes the header the budget resource writes in front of the user pointer.
+Charged storage is the engine object, the public tree and its path and action strings, deal rows, slot indexes, regret, strategy-sum, average, and frozen-strategy tables, support, traversal scratch, showdown and best-response buffers, registration temporaries, the rank-cache buffers, and, when more than one thread is requested, each extra worker context and the card-result buffer. The rank cache is allocated for every legal runout before training, so a pass does not allocate it. `reserved_bytes` is unused reservation credit and is zero after construction. Each charged block includes the header the budget resource writes in front of the user pointer.
 
 `estimated_peak_bytes` is a plan: payload sizes, one block header per planned buffer, and one map node per runout. It is not the measured allocation. `allocated_bytes` and `peak_allocated_bytes` are the resource's live total and high-water mark. `regret_strategy_sum_bytes` is only the regret array plus the strategy-sum array.
 
-Outside the budget: process RSS, malloc bookkeeping, the caller's `StreetConfig` vectors after they are moved in, the budget resource's own stage table, and a later strategy export. The stage table is a few dozen name entries. It does not hold the tree.
+Outside the budget: process RSS, malloc bookkeeping, native thread stacks, the `std::thread` handles, the caller's `StreetConfig` vectors after they are moved in, the budget resource's own stage table, and a later strategy export. The stage table is a few dozen name entries. It does not hold the tree.
 
-Expanded terminals and expanded decisions are 64-bit counts of histories. They are not stored nodes. A full-range check-down on `Ah Kd 7c` has 1,271,256 deals, 2,517,086,880 expanded terminals, 5,151,129,312 expanded decision histories, and 5,197,920 stored information sets.
+Expanded terminals and expanded decisions are 64-bit counts of histories. They are not stored nodes, and the frozen walk does not visit them one by one. It walks the public tree with a vector of hands. A terminal value is a blocker-corrected sum over those hands. A full-range check-down on `Ah Kd 7c` has 1,271,256 deals, 2,517,086,880 expanded terminals, 5,151,129,312 expanded decision histories, and 5,197,920 stored information sets.
+
+## Frozen pass threads
+
+`--threads N` is the number of threads for the frozen pass, including the caller. The default is 1. One thread uses the serial chance loop. `N` must be an integer from 1 through 64. More than one thread requires `--frozen`; the per-deal walk stays serial. The explorer accepts the same `threads` field on a flop or a turn and rejects it on a river or when the frozen pass is off.
+
+The first future public card is the split. A turn splits river cards. A flop splits turn cards, and the worker that takes a turn card deals that card's rivers itself. Betting before that chance node stays on the caller. A later chance node, reached by a different line, is another batch after the previous one has joined. Workers do not start further batches.
+
+Scratch, action values, showdown reach, and the order and prefix buffers live in a `WorkerContext`. The caller has one. Evaluation uses that context and does not run during a pass. Each extra thread has its own context and a shared card-result buffer, both charged to the budget before any regret update. If they do not fit, construction throws the memory error and does not reduce the thread count. Native thread stacks and the thread handles are outside the budget. Workers do not allocate, free, or change the budget stage.
+
+At one chance node, the next cards have disjoint descendant information sets: a slot stores the public node and the cards already dealt. A worker writes those regret and strategy-sum entries directly. The caller updates the shared ancestors only after every task has joined, and adds the card values in ascending card order with the same chance weight as the serial loop. There is no atomic add and no second copy of the regret table. Own reach may be zero. Chance probabilities are not renormalized over the visited cards or divided by the thread count.
+
+Rank values are filled on the caller before the first pass. That cost is `cache_init_seconds`. Worker creation is `worker_setup_seconds`. Neither is folded into construction or training. A worker exception is captured, the other tasks are joined, and later training or evaluation throws rather than reporting a finished solve. The partial regrets are not rolled back.
 
 ## Checked values
 
@@ -53,7 +65,7 @@ On the flop `Ah Kd 7c`, queens versus jacks, check-only, the value matches the a
 ```sh
 street_solver
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1 --algorithm vanilla
-street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024
+street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024 --threads 4
 street_solver --board Ah,Kd,7c,4s --pot 100 --stack 300 --oop-range QcQd --ip-range JcJd --geometric --iterations 200
 street_solver --board Ah,Kd,7c --oop-donk 40c --oop-bets 1 --ip-bets 0.5 --no-all-in --max-raises 1 --iterations 1
 ```

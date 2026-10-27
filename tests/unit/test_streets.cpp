@@ -1287,3 +1287,279 @@ void run_street_workspace_tests()
     flop_b.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
     check_raw_tables("serial cfr+ flop", flop_a, flop_b);
 }
+
+double table_delta(
+    std::span<const double> left,
+    std::span<const double> right)
+{
+    double worst = 0.0;
+    const std::size_t count = std::min(left.size(), right.size());
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        const double scale = 1.0 + std::max(std::abs(left[index]), std::abs(right[index]));
+        worst = std::max(worst, std::abs(left[index] - right[index]) / scale);
+    }
+    return worst;
+}
+
+void check_thread_match(
+    const char* name,
+    poker::solver::StreetBatchSolver& left,
+    poker::solver::StreetBatchSolver& right)
+{
+    CHECK(left.regret_table().size() == right.regret_table().size());
+    CHECK(left.strategy_sum_table().size() == right.strategy_sum_table().size());
+    const double regret = table_delta(left.regret_table(), right.regret_table());
+    const double sum = table_delta(left.strategy_sum_table(), right.strategy_sum_table());
+    if (regret != 0.0 || sum != 0.0)
+    {
+        std::cerr << name << " relative delta regret " << regret
+                  << " strategy_sum " << sum << "\n";
+    }
+    CHECK(regret == 0.0);
+    CHECK(sum == 0.0);
+    const auto left_entries = left.average_strategy_entries();
+    const auto right_entries = right.average_strategy_entries();
+    CHECK(left_entries.size() == right_entries.size());
+    double worst_probability = 0.0;
+    const std::size_t entry_count = std::min(left_entries.size(), right_entries.size());
+    for (std::size_t index = 0; index < entry_count; ++index)
+    {
+        worst_probability = std::max(
+            worst_probability,
+            std::abs(left_entries[index].probability - right_entries[index].probability));
+    }
+    CHECK(worst_probability <= 1e-10);
+    CHECK_NEAR(left.expected_utility(), right.expected_utility(), 1e-8 * 100.0);
+    CHECK_NEAR(left.nash_gap(), right.nash_gap(), 1e-8 * 100.0);
+}
+
+StreetConfig betting_config(const std::vector<int>& board, const char* oop, const char* ip, int threads)
+{
+    StreetConfig config = check_only(board, oop, ip);
+    config.stack = 100;
+    config.pot = 100;
+    config.oop_bet_sizes = {0.5};
+    config.ip_bet_sizes = {0.5};
+    config.oop_raise_sizes = {0.5};
+    config.ip_raise_sizes = {0.5};
+    config.allow_all_in = true;
+    config.max_raises = 1;
+    config.threads = threads;
+    return config;
+}
+
+void expect_parallel_case(
+    const char* name,
+    const std::vector<int>& board,
+    const char* oop,
+    const char* ip,
+    poker::solver::Algorithm algorithm,
+    int iterations)
+{
+    StreetConfig serial = betting_config(board, oop, ip, 1);
+    StreetConfig two = betting_config(board, oop, ip, 2);
+    StreetConfig four = betting_config(board, oop, ip, 4);
+    poker::solver::StreetBatchSolver baseline(serial);
+    poker::solver::StreetBatchSolver pair(two);
+    poker::solver::StreetBatchSolver quad(four);
+    baseline.run_frozen_iterations(iterations, algorithm);
+    pair.run_frozen_iterations(iterations, algorithm);
+    quad.run_frozen_iterations(iterations, algorithm);
+    check_thread_match(name, baseline, pair);
+    check_thread_match(name, baseline, quad);
+}
+
+void run_street_parallel_tests()
+{
+    const std::vector<int> turn = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+    const std::vector<int> flop = {card("Ah"), card("Kd"), card("7c")};
+    const std::vector<int> tie_board = {card("Ah"), card("Kd"), card("Qh"), card("Jh")};
+    expect_parallel_case(
+        "weighted turn", turn, "AcAd:1,5c5d:3", "KsKc:2,QhQs:0.5",
+        poker::solver::Algorithm::CfrPlus, 3);
+    expect_parallel_case(
+        "weighted flop", flop, "QcQd:2,JsJd:1", "QcTc:1,JhTh:3",
+        poker::solver::Algorithm::CfrPlus, 2);
+    expect_parallel_case(
+        "tie turn", tie_board, "AcAd", "KsKc",
+        poker::solver::Algorithm::CfrPlus, 2);
+    expect_parallel_case(
+        "blocker turn", turn, "QcQd,JsJd", "QcTc",
+        poker::solver::Algorithm::VanillaCfr, 2);
+    expect_parallel_case(
+        "many workers", turn, "AcAd", "KsKc",
+        poker::solver::Algorithm::CfrPlus, 2);
+
+    {
+        StreetConfig wide = betting_config(turn, "AcAd", "KsKc", 64);
+        StreetConfig serial = betting_config(turn, "AcAd", "KsKc", 1);
+        poker::solver::StreetBatchSolver many(wide);
+        poker::solver::StreetBatchSolver one(serial);
+        CHECK(many.thread_count() == 64);
+        many.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+        one.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+        check_thread_match("64 threads", one, many);
+    }
+
+    {
+        StreetConfig config = betting_config(flop, "QcQd", "JcJd", 4);
+        poker::solver::StreetBatchSolver again_a(config);
+        poker::solver::StreetBatchSolver again_b(config);
+        again_a.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+        again_b.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+        check_thread_match("repeat", again_a, again_b);
+        poker::solver::StreetBatchSolver parts(config);
+        parts.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+        parts.continue_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+        check_thread_match("continuation", again_a, parts);
+        StreetConfig other = betting_config(flop, "QcQd", "JcJd", 2);
+        poker::solver::StreetBatchSolver mixed(other);
+        mixed.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+        check_thread_match("two versus four", again_a, mixed);
+    }
+
+    {
+        const std::vector<int> lock_board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
+        StreetConfig serial = betting_config(lock_board, "AhAd", "2c3d", 1);
+        StreetConfig quad = betting_config(lock_board, "AhAd", "2c3d", 4);
+        poker::solver::StreetBatchSolver one(serial);
+        poker::solver::StreetBatchSolver four(quad);
+        one.run_single_frozen_pass_for_test(0);
+        four.run_single_frozen_pass_for_test(0);
+        check_thread_match("oop pass", one, four);
+        bool oop_moved = false;
+        for (const poker::solver::StreetStrategyEntry& entry : four.average_strategy_entries())
+        {
+            double regret = 0.0;
+            CHECK(four.regret_value(entry.infoset, entry.action, regret));
+            if (entry.infoset.rfind("IP ", 0) == 0)
+            {
+                CHECK(regret == 0.0);
+            }
+            else if (regret != 0.0)
+            {
+                oop_moved = true;
+            }
+        }
+        CHECK(oop_moved);
+        const std::vector<double> oop_regret(
+            four.regret_table().begin(), four.regret_table().end());
+        four.run_single_frozen_pass_for_test(1);
+        const std::span<const double> after = four.regret_table();
+        // IP's pass floors only IP. OOP entries that were already nonnegative stay.
+        // Compare the full table with a one-thread pair of passes instead.
+        one.run_single_frozen_pass_for_test(1);
+        check_thread_match("both passes", one, four);
+        CHECK(oop_regret.size() == after.size());
+    }
+
+    {
+        StreetConfig config = check_only(turn, "AcAd", "KsKc");
+        config.threads = 4;
+        poker::solver::StreetBatchSolver delayed(config);
+        delayed.arm_card_delay_for_test(50);
+        StreetConfig serial = check_only(turn, "AcAd", "KsKc");
+        poker::solver::StreetBatchSolver plain(serial);
+        delayed.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+        plain.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+        check_thread_match("delayed cards", plain, delayed);
+    }
+
+    {
+        const std::vector<int> lock_board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
+        StreetConfig config = betting_config(lock_board, "AhAd", "2c3d", 2);
+        poker::solver::StreetBatchSolver solver(config);
+        solver.arm_worker_failure_for_test();
+        std::string failed;
+        try
+        {
+            solver.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+        }
+        catch (const std::runtime_error& error)
+        {
+            failed = error.what();
+        }
+        CHECK(failed.find("injected") != std::string::npos);
+        bool refused = false;
+        try
+        {
+            solver.continue_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+        }
+        catch (const std::logic_error& error)
+        {
+            refused = std::string(error.what()).find("cannot continue") != std::string::npos;
+        }
+        CHECK(refused);
+        bool utility_refused = false;
+        try
+        {
+            (void)solver.expected_utility();
+        }
+        catch (const std::logic_error&)
+        {
+            utility_refused = true;
+        }
+        CHECK(utility_refused);
+    }
+
+    {
+        StreetConfig bad = check_only(turn, "AcAd", "KsKc");
+        bad.threads = 0;
+        CHECK(throws_invalid([&] { poker::solver::StreetBatchSolver solver(bad); }));
+        StreetConfig sequential = betting_config(turn, "AcAd", "KsKc", 4);
+        poker::solver::StreetBatchSolver solver(sequential);
+        bool rejected = false;
+        try
+        {
+            solver.run_iterations(1, poker::solver::Algorithm::CfrPlus);
+        }
+        catch (const std::invalid_argument& error)
+        {
+            rejected = std::string(error.what()).find("frozen") != std::string::npos;
+        }
+        CHECK(rejected);
+    }
+
+    {
+        StreetConfig sample = check_only(turn, "22+", "22+");
+        sample.threads = 1;
+        sample.memory_mib = 1024;
+        poker::solver::StreetBatchSolver measured(sample);
+        const int tight = static_cast<int>(
+            measured.memory_report().peak_allocated_bytes / 1048576ull) + 1;
+        sample.threads = 64;
+        sample.memory_mib = tight;
+        poker::solver::CountingResource counter;
+        std::string denied;
+        try
+        {
+            poker::solver::StreetBatchSolver refused(sample, &counter);
+        }
+        catch (const std::invalid_argument& error)
+        {
+            denied = error.what();
+        }
+        CHECK(denied.find("memory budget") != std::string::npos);
+        CHECK(counter.current() == 0);
+        sample.threads = 1;
+        poker::solver::StreetBatchSolver accepted(sample);
+        accepted.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+        CHECK(std::isfinite(accepted.expected_utility()));
+    }
+
+    {
+        StreetConfig config = betting_config(turn, "AcAd", "KsKc", 4);
+        poker::solver::CountingResource counter;
+        poker::solver::StreetBatchSolver solver(config, &counter);
+        const std::uint64_t before = counter.current();
+        const std::uint64_t peak = counter.peak();
+        solver.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+        CHECK(counter.current() == before);
+        CHECK(counter.peak() == peak);
+        solver.continue_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+        CHECK(counter.current() == before);
+        CHECK(counter.peak() == peak);
+        CHECK(solver.memory_report().thread_count == 4);
+    }
+}

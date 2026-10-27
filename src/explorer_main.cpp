@@ -251,6 +251,7 @@ struct Job
     int iterations = 200;
     int samples = 5;
     int memory_mib = 1024;
+    int threads = 1;
     poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
 };
 
@@ -324,6 +325,21 @@ Job parse_job(const std::string& text)
             "memory_mib must be a positive integer number of mebibytes");
     }
     job.memory_mib = static_cast<int>(memory_raw);
+    const double threads_raw = read_number(text, "threads", 1);
+    if (!std::isfinite(threads_raw) || threads_raw < 1.0 || threads_raw != std::floor(threads_raw)
+        || threads_raw > 64.0)
+    {
+        throw std::invalid_argument("threads must be a positive integer from 1 through 64");
+    }
+    job.threads = static_cast<int>(threads_raw);
+    if (job.threads > 1 && job.board.size() == 5)
+    {
+        throw std::invalid_argument("multiple threads are only available on a frozen flop or turn");
+    }
+    if (job.threads > 1 && !job.frozen)
+    {
+        throw std::invalid_argument("multiple threads require the frozen street pass");
+    }
     job.all_in_threshold = read_number(text, "all_in_threshold", 0);
     job.accuracy = read_number(text, "accuracy", -1);
     job.max_raises = static_cast<int>(read_number(text, "max_raises", 2));
@@ -769,6 +785,7 @@ poker::streets::StreetConfig street_config(const Job& job)
     config.all_in_threshold = job.all_in_threshold;
     config.max_raises = job.max_raises;
     config.memory_mib = job.memory_mib;
+    config.threads = job.threads;
     return config;
 }
 

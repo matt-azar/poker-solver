@@ -30,7 +30,8 @@ void print_usage(const char* argv0)
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
-              << " [--accuracy 0.05] [--memory-mib N] [--reference] [--frozen]\n";
+              << " [--accuracy 0.05] [--memory-mib N] [--threads N]"
+              << " [--reference] [--frozen]\n";
 }
 
 std::string trim_copy(const std::string& text)
@@ -301,6 +302,25 @@ int main(int argc, char** argv)
                 }
                 config.memory_mib = static_cast<int>(value);
             }
+            else if (arg == "--threads")
+            {
+                const std::string text = need("--threads");
+                if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
+                {
+                    throw std::invalid_argument(
+                        "threads must be a positive integer from 1 through 64");
+                }
+                errno = 0;
+                char* end = nullptr;
+                const unsigned long long value = std::strtoull(text.c_str(), &end, 10);
+                if (end != text.c_str() + text.size() || errno == ERANGE || value == 0
+                    || value > 64ull)
+                {
+                    throw std::invalid_argument(
+                        "threads must be a positive integer from 1 through 64");
+                }
+                config.threads = static_cast<int>(value);
+            }
             else if (arg == "--algorithm")
             {
                 const std::string name = need("--algorithm");
@@ -336,6 +356,10 @@ int main(int argc, char** argv)
         if (config.ip_raise_sizes.empty() && config.ip_raise_multiples.empty())
         {
             config.ip_raise_sizes = config.ip_bet_sizes;
+        }
+        if (config.threads > 1 && !frozen)
+        {
+            throw std::invalid_argument("multiple threads require the frozen street pass (--frozen)");
         }
 
         poker::solver::SolveConfig solve_config;
@@ -402,10 +426,14 @@ int main(int argc, char** argv)
         if (!reference)
         {
             std::cout << "construction_seconds: " << memory.construction_seconds << "\n";
+            std::cout << "cache_init_seconds: " << memory.cache_init_seconds << "\n";
+            std::cout << "worker_setup_seconds: " << memory.worker_setup_seconds << "\n";
             std::cout << "train_seconds: " << memory.train_seconds << "\n";
             std::cout << "evaluation_seconds: " << memory.evaluation_seconds << "\n";
+            std::cout << "threads: " << memory.thread_count << "\n";
             std::cout << "total_seconds: "
-                      << (memory.construction_seconds + memory.train_seconds
+                      << (memory.construction_seconds + memory.cache_init_seconds
+                          + memory.worker_setup_seconds + memory.train_seconds
                           + memory.evaluation_seconds)
                       << "\n";
             std::cout << "memory_budget_bytes: " << memory.memory_budget_bytes << "\n";
