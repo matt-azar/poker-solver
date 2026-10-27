@@ -4,6 +4,7 @@
 #include "solver/street_batch.hpp"
 #include "solver/trainer.hpp"
 
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -22,24 +23,60 @@ void print_usage(const char* argv0)
               << " [--oop-bets 0.5,1] [--ip-bets 0.5,1]"
               << " [--oop-turn-bets 0.5] [--oop-river-bets 1]"
               << " [--ip-turn-bets 0.5] [--ip-river-bets 1]"
+              << " [--oop-donk 0.5,20c] [--pot-cap 1] [--no-three-bet]"
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--accuracy 0.05] [--reference] [--frozen]\n";
 }
 
-std::vector<double> parse_sizes(const std::string& text)
+std::string trim_copy(const std::string& text)
 {
-    std::vector<double> sizes;
+    std::size_t begin = 0;
+    while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])))
+    {
+        ++begin;
+    }
+    std::size_t end = text.size();
+    while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])))
+    {
+        --end;
+    }
+    return text.substr(begin, end - begin);
+}
+
+void parse_sizes(const std::string& text, std::vector<double>& fractions, std::vector<double>* multiples)
+{
     std::size_t start = 0;
     while (start < text.size())
     {
         const std::size_t comma = text.find(',', start);
-        const std::string piece = text.substr(
-            start, comma == std::string::npos ? std::string::npos : comma - start);
+        const std::string piece = trim_copy(text.substr(
+            start, comma == std::string::npos ? std::string::npos : comma - start));
         if (!piece.empty())
         {
-            sizes.push_back(std::atof(piece.c_str()));
+            const char last = piece[piece.size() - 1];
+            if (last == 'x' || last == 'X')
+            {
+                if (multiples == nullptr)
+                {
+                    throw std::invalid_argument("a bet size cannot be a multiple; put 3x on a raise list");
+                }
+                multiples->push_back(std::atof(piece.c_str()));
+            }
+            else if (last == 'c' || last == 'C')
+            {
+                const int chips = std::atoi(piece.c_str());
+                if (chips <= 0)
+                {
+                    throw std::invalid_argument("a fixed size must be a positive chip amount");
+                }
+                fractions.push_back(-static_cast<double>(chips));
+            }
+            else
+            {
+                fractions.push_back(std::atof(piece.c_str()));
+            }
         }
         if (comma == std::string::npos)
         {
@@ -47,7 +84,6 @@ std::vector<double> parse_sizes(const std::string& text)
         }
         start = comma + 1;
     }
-    return sizes;
 }
 
 std::vector<int> parse_board(const std::string& text)
@@ -144,35 +180,68 @@ int main(int argc, char** argv)
             }
             else if (arg == "--oop-bets")
             {
-                config.oop_bet_sizes = parse_sizes(need("--oop-bets"));
+                config.oop_bet_sizes.clear();
+                parse_sizes(need("--oop-bets"), config.oop_bet_sizes, nullptr);
             }
             else if (arg == "--ip-bets")
             {
-                config.ip_bet_sizes = parse_sizes(need("--ip-bets"));
+                config.ip_bet_sizes.clear();
+                parse_sizes(need("--ip-bets"), config.ip_bet_sizes, nullptr);
+            }
+            else if (arg == "--oop-raises")
+            {
+                config.oop_raise_sizes.clear();
+                config.oop_raise_multiples.clear();
+                parse_sizes(need("--oop-raises"), config.oop_raise_sizes, &config.oop_raise_multiples);
+            }
+            else if (arg == "--ip-raises")
+            {
+                config.ip_raise_sizes.clear();
+                config.ip_raise_multiples.clear();
+                parse_sizes(need("--ip-raises"), config.ip_raise_sizes, &config.ip_raise_multiples);
+            }
+            else if (arg == "--oop-donk")
+            {
+                config.oop_donk_sizes.clear();
+                parse_sizes(need("--oop-donk"), config.oop_donk_sizes, nullptr);
             }
             else if (arg == "--oop-flop-bets")
             {
-                config.oop_flop_bets = parse_sizes(need("--oop-flop-bets"));
+                config.oop_flop_bets.clear();
+                parse_sizes(need("--oop-flop-bets"), config.oop_flop_bets, nullptr);
             }
             else if (arg == "--oop-turn-bets")
             {
-                config.oop_turn_bets = parse_sizes(need("--oop-turn-bets"));
+                config.oop_turn_bets.clear();
+                parse_sizes(need("--oop-turn-bets"), config.oop_turn_bets, nullptr);
             }
             else if (arg == "--oop-river-bets")
             {
-                config.oop_river_bets = parse_sizes(need("--oop-river-bets"));
+                config.oop_river_bets.clear();
+                parse_sizes(need("--oop-river-bets"), config.oop_river_bets, nullptr);
             }
             else if (arg == "--ip-flop-bets")
             {
-                config.ip_flop_bets = parse_sizes(need("--ip-flop-bets"));
+                config.ip_flop_bets.clear();
+                parse_sizes(need("--ip-flop-bets"), config.ip_flop_bets, nullptr);
             }
             else if (arg == "--ip-turn-bets")
             {
-                config.ip_turn_bets = parse_sizes(need("--ip-turn-bets"));
+                config.ip_turn_bets.clear();
+                parse_sizes(need("--ip-turn-bets"), config.ip_turn_bets, nullptr);
             }
             else if (arg == "--ip-river-bets")
             {
-                config.ip_river_bets = parse_sizes(need("--ip-river-bets"));
+                config.ip_river_bets.clear();
+                parse_sizes(need("--ip-river-bets"), config.ip_river_bets, nullptr);
+            }
+            else if (arg == "--pot-cap")
+            {
+                config.pot_cap = std::atof(need("--pot-cap"));
+            }
+            else if (arg == "--no-three-bet")
+            {
+                config.allow_three_bet = false;
             }
             else if (arg == "--geometric")
             {
@@ -238,11 +307,11 @@ int main(int argc, char** argv)
             }
         }
 
-        if (config.oop_raise_sizes.empty())
+        if (config.oop_raise_sizes.empty() && config.oop_raise_multiples.empty())
         {
             config.oop_raise_sizes = config.oop_bet_sizes;
         }
-        if (config.ip_raise_sizes.empty())
+        if (config.ip_raise_sizes.empty() && config.ip_raise_multiples.empty())
         {
             config.ip_raise_sizes = config.ip_bet_sizes;
         }

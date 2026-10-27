@@ -27,6 +27,8 @@ struct BetState
     int committed = 0;
     int last_raise = 0;
     int num_raises = 0;
+    int prev_aggressor = -1;
+    int street_aggressor = -1;
     int acting = 0;
     int street = 0;
     int folded = -1;
@@ -93,6 +95,22 @@ const std::vector<double>& size_list(const streets::StreetConfig& config, int pl
 int round_chips(double fraction, int basis)
 {
     return static_cast<int>(std::llround(fraction * static_cast<double>(basis)));
+}
+
+int chips_from_spec(double spec, int basis)
+{
+    if (spec < 0.0)
+    {
+        return static_cast<int>(std::llround(-spec));
+    }
+    return round_chips(spec, basis);
+}
+
+const std::vector<double>& street_raises(const streets::StreetConfig& config, int player, int kind)
+{
+    return player == 0
+        ? (kind == 0 ? config.oop_flop_raises : kind == 1 ? config.oop_turn_raises : config.oop_river_raises)
+        : (kind == 0 ? config.ip_flop_raises : kind == 1 ? config.ip_turn_raises : config.ip_river_raises);
 }
 
 std::string chip_label(int code, int add, int street_total, bool all_in, bool facing)
@@ -168,6 +186,10 @@ Legal legal_actions(const streets::StreetConfig& config, const BetState& state)
         {
             return;
         }
+        if (!config.allow_three_bet && state.num_raises >= 2)
+        {
+            return;
+        }
         if (add > max_add)
         {
             if (!config.allow_all_in)
@@ -183,6 +205,19 @@ Legal legal_actions(const streets::StreetConfig& config, const BetState& state)
             if (committed_after > limit && add < max_add)
             {
                 add = max_add;
+            }
+        }
+        if (config.pot_cap > 0.0)
+        {
+            const int reference = facing ? state.pot + to_call : state.pot;
+            int max_by = round_chips(config.pot_cap, reference);
+            if (max_by < 1)
+            {
+                max_by = 1;
+            }
+            if (add - to_call > max_by)
+            {
+                add = to_call + max_by;
             }
         }
         const int raise_by = add - to_call;
@@ -201,10 +236,40 @@ Legal legal_actions(const streets::StreetConfig& config, const BetState& state)
     };
 
     const int basis = facing ? state.pot + to_call : state.pot;
-    for (double fraction : size_list(config, player, state.street, facing))
+    const bool donk = !facing && player == 0 && state.prev_aggressor == 1
+        && !config.oop_donk_sizes.empty();
+    const std::vector<double>& multiples = player == 0
+        ? config.oop_raise_multiples : config.ip_raise_multiples;
+    const bool only_multiples = facing && !multiples.empty()
+        && street_raises(config, player, street_kind(config, state.street)).empty()
+        && (player == 0 ? config.oop_raise_sizes : config.ip_raise_sizes).empty();
+    if (donk)
     {
-        const int sized = round_chips(fraction, basis);
-        consider(facing ? to_call + sized : sized);
+        for (double spec : config.oop_donk_sizes)
+        {
+            consider(chips_from_spec(spec, basis));
+        }
+    }
+    else if (!only_multiples)
+    {
+        for (double spec : size_list(config, player, state.street, facing))
+        {
+            const int sized = chips_from_spec(spec, basis);
+            consider(facing ? to_call + sized : sized);
+        }
+    }
+    if (facing)
+    {
+        for (double multiple : multiples)
+        {
+            if (multiple <= 0.0 || state.committed <= 0)
+            {
+                continue;
+            }
+            const int street_total = static_cast<int>(std::llround(
+                multiple * static_cast<double>(state.committed)));
+            consider(street_total - state.contrib[player]);
+        }
     }
     if (config.geometric)
     {
@@ -252,6 +317,8 @@ Legal legal_actions(const streets::StreetConfig& config, const BetState& state)
 
 void finish_street(const streets::StreetConfig& config, BetState& state)
 {
+    state.prev_aggressor = state.street_aggressor;
+    state.street_aggressor = -1;
     state.pending_check = false;
     state.acting = -1;
     if (state.street + 1 < betting_streets(config))
@@ -296,6 +363,7 @@ BetState apply_action(const streets::StreetConfig& config, BetState state, const
     state.last_raise = raise_by;
     state.committed = state.contrib[player];
     state.num_raises += 1;
+    state.street_aggressor = player;
     state.acting = 1 - player;
     return state;
 }
@@ -429,10 +497,18 @@ struct StreetBatchSolver::Engine
         {
             throw std::invalid_argument("all-in threshold must be nonnegative");
         }
+        if (config.pot_cap < 0.0)
+        {
+            throw std::invalid_argument("pot cap must be nonnegative");
+        }
     }
 
     int build_node(const BetState& state, const std::string& path, int depth)
     {
+        if (depth > 48)
+        {
+            throw std::logic_error("public street tree deeper than 48");
+        }
         if (state.terminal)
         {
             Node node;

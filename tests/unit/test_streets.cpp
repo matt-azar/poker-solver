@@ -251,6 +251,8 @@ void expect_street_batch(
 
 } // namespace
 
+void run_tree_rule_tests(const std::vector<int>& turn_board);
+
 void run_street_tests()
 {
     StreetConfig blocked;
@@ -260,6 +262,7 @@ void run_street_tests()
     CHECK(throws_invalid([&] { StreetGame game(blocked); }));
 
     const std::vector<int> turn_board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+    {
     const StreetGame queens(check_only(turn_board, "QcQd", "JcJd"));
     CHECK(queens.deal_count() == 1);
     const int rivers = 52 - 4 - 4;
@@ -562,4 +565,125 @@ void run_street_tests()
     CHECK_NEAR(frozen_value, 50.0, 1.0);
     CHECK(frozen_gap_400 < frozen_gap_20);
     CHECK(frozen_gap_400 < 1.0);
+    }
+
+    run_tree_rule_tests(turn_board);
+}
+
+void run_tree_rule_tests(const std::vector<int>& turn_board)
+{
+    {
+        StreetConfig fixed_chips;
+        fixed_chips.board = turn_board;
+        fixed_chips.pot = 100;
+        fixed_chips.stack = 300;
+        fixed_chips.oop = Range::parse("QcQd");
+        fixed_chips.ip = Range::parse("JcJd");
+        fixed_chips.oop_bet_sizes = {-20.0};
+        fixed_chips.ip_bet_sizes = {};
+        fixed_chips.allow_all_in = false;
+        fixed_chips.max_raises = 1;
+        {
+            const StreetGame fixed_game(fixed_chips);
+            const StreetGame::State fixed_open = fixed_game.child_chance(fixed_game.root(), 0);
+            CHECK(find_action(fixed_game, fixed_open, "Bet 20") >= 0);
+            CHECK(find_action(fixed_game, fixed_open, "Bet 100") < 0);
+        }
+        expect_street_batch(fixed_chips, poker::solver::Algorithm::VanillaCfr, 1, false);
+    }
+
+    {
+        StreetConfig multiple;
+        multiple.board = turn_board;
+        multiple.pot = 100;
+        multiple.stack = 800;
+        multiple.oop = Range::parse("QcQd");
+        multiple.ip = Range::parse("JcJd");
+        multiple.oop_bet_sizes = {0.5};
+        multiple.ip_bet_sizes = {};
+        multiple.ip_raise_multiples = {3.0};
+        multiple.allow_all_in = false;
+        multiple.max_raises = 2;
+        const StreetGame multiple_game(multiple);
+        StreetGame::State faced = multiple_game.child_chance(multiple_game.root(), 0);
+        faced = multiple_game.child_action(faced, find_action(multiple_game, faced, "Bet 50"));
+        CHECK(find_action(multiple_game, faced, "Raise to 150") >= 0);
+    }
+
+    {
+        StreetConfig capped;
+        capped.board = turn_board;
+        capped.pot = 100;
+        capped.stack = 500;
+        capped.oop = Range::parse("QcQd");
+        capped.ip = Range::parse("JcJd");
+        capped.oop_bet_sizes = {2.0};
+        capped.ip_bet_sizes = {};
+        capped.pot_cap = 1.0;
+        capped.allow_all_in = true;
+        capped.max_raises = 1;
+        const StreetGame capped_game(capped);
+        const StreetGame::State capped_open = capped_game.child_chance(capped_game.root(), 0);
+        CHECK(find_action(capped_game, capped_open, "Bet 100") >= 0);
+        CHECK(find_action(capped_game, capped_open, "Bet 200") < 0);
+        CHECK(find_action(capped_game, capped_open, "Bet 500 all-in") < 0);
+    }
+
+    {
+        StreetConfig no_three_bet;
+        no_three_bet.board = turn_board;
+        no_three_bet.pot = 100;
+        no_three_bet.stack = 800;
+        no_three_bet.oop = Range::parse("QcQd");
+        no_three_bet.ip = Range::parse("JcJd");
+        no_three_bet.oop_bet_sizes = {0.5};
+        no_three_bet.ip_bet_sizes = {0.5};
+        no_three_bet.oop_raise_sizes = {0.5};
+        no_three_bet.ip_raise_sizes = {0.5};
+        no_three_bet.allow_three_bet = false;
+        no_three_bet.allow_all_in = false;
+        no_three_bet.max_raises = 4;
+        const StreetGame no_three_game(no_three_bet);
+        StreetGame::State reraise = no_three_game.child_chance(no_three_game.root(), 0);
+        reraise = no_three_game.child_action(reraise, find_action(no_three_game, reraise, "Bet 50"));
+        const int raised = find_action(no_three_game, reraise, "Raise to 150");
+        CHECK(raised >= 0);
+        reraise = no_three_game.child_action(reraise, raised);
+        CHECK(no_three_game.action_count(no_three_game.infoset(reraise)) == 2);
+        CHECK(find_action(no_three_game, reraise, "Fold") >= 0);
+        CHECK(find_action(no_three_game, reraise, "Call") >= 0);
+    }
+
+    {
+        StreetConfig donk;
+        donk.board = {card("Ah"), card("Kd"), card("7c")};
+        donk.pot = 100;
+        donk.stack = 500;
+        donk.oop = Range::parse("QcQd");
+        donk.ip = Range::parse("JcJd");
+        donk.oop_bet_sizes = {1.0};
+        donk.ip_bet_sizes = {0.5};
+        donk.oop_donk_sizes = {-40.0};
+        donk.allow_all_in = false;
+        donk.max_raises = 1;
+        {
+            const StreetGame donk_game(donk);
+            StreetGame::State flop_open = donk_game.child_chance(donk_game.root(), 0);
+            flop_open = donk_game.child_action(flop_open, find_action(donk_game, flop_open, "Check"));
+            flop_open = donk_game.child_action(flop_open, find_action(donk_game, flop_open, "Bet 50"));
+            flop_open = donk_game.child_action(flop_open, find_action(donk_game, flop_open, "Call"));
+            CHECK(donk_game.is_chance(flop_open));
+            const StreetGame::State donk_turn = donk_game.child_chance(flop_open, 0);
+            CHECK(find_action(donk_game, donk_turn, "Bet 40") >= 0);
+            CHECK(find_action(donk_game, donk_turn, "Bet 200") < 0);
+            StreetGame::State checked = donk_game.child_chance(donk_game.root(), 0);
+            checked = donk_game.child_action(checked, find_action(donk_game, checked, "Check"));
+            checked = donk_game.child_action(checked, find_action(donk_game, checked, "Check"));
+            CHECK(donk_game.is_chance(checked));
+            const StreetGame::State probed = donk_game.child_chance(checked, 0);
+            CHECK(find_action(donk_game, probed, "Bet 100") >= 0);
+            CHECK(find_action(donk_game, probed, "Bet 40") < 0);
+        }
+        expect_street_batch(donk, poker::solver::Algorithm::VanillaCfr, 1, false);
+    }
 }

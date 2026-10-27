@@ -236,6 +236,11 @@ struct Job
     std::vector<double> ip_flop_bets{};
     std::vector<double> ip_turn_bets{};
     std::vector<double> ip_river_bets{};
+    std::vector<double> oop_donk{};
+    std::vector<double> oop_raise_multiples{};
+    std::vector<double> ip_raise_multiples{};
+    double pot_cap = 0.0;
+    bool allow_three_bet = true;
     bool allow_all_in = true;
     bool geometric = false;
     bool frozen = false;
@@ -301,6 +306,11 @@ Job parse_job(const std::string& text)
     job.ip_flop_bets = optional_sizes(text, "ip_flop_bets");
     job.ip_turn_bets = optional_sizes(text, "ip_turn_bets");
     job.ip_river_bets = optional_sizes(text, "ip_river_bets");
+    job.oop_donk = optional_sizes(text, "oop_donk");
+    job.oop_raise_multiples = optional_sizes(text, "oop_raise_multiples");
+    job.ip_raise_multiples = optional_sizes(text, "ip_raise_multiples");
+    job.pot_cap = read_number(text, "pot_cap", 0);
+    job.allow_three_bet = read_number(text, "allow_three_bet", 1) != 0.0;
     job.allow_all_in = read_number(text, "allow_all_in", 1) != 0.0;
     job.geometric = read_number(text, "geometric", 0) != 0.0;
     job.frozen = read_number(text, "frozen", 0) != 0.0;
@@ -739,6 +749,11 @@ poker::streets::StreetConfig street_config(const Job& job)
     config.ip_flop_bets = job.ip_flop_bets;
     config.ip_turn_bets = job.ip_turn_bets;
     config.ip_river_bets = job.ip_river_bets;
+    config.oop_donk_sizes = job.oop_donk;
+    config.oop_raise_multiples = job.oop_raise_multiples;
+    config.ip_raise_multiples = job.ip_raise_multiples;
+    config.pot_cap = job.pot_cap;
+    config.allow_three_bet = job.allow_three_bet;
     config.allow_all_in = job.allow_all_in;
     config.geometric = job.geometric;
     config.all_in_threshold = job.all_in_threshold;

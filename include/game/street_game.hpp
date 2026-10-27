@@ -47,13 +47,26 @@ struct StreetConfig
     std::vector<double> ip_flop_raises{};
     std::vector<double> ip_turn_raises{};
     std::vector<double> ip_river_raises{};
+    // OOP bets with these sizes when IP was the aggressor on the previous
+    // street. Empty keeps the normal bet list, including on the first street.
+    std::vector<double> oop_donk_sizes{};
+    // Facing a bet, a raise-to of this multiple of the opponent's street total.
+    // Used in addition to the raise list. A non-empty list with an empty raise
+    // list does not fall back to the bet sizes.
+    std::vector<double> oop_raise_multiples{};
+    std::vector<double> ip_raise_multiples{};
     // One extra size that splits the remaining stack into equal pot fractions
     // over the streets still to play. On the river that size is all-in.
     bool geometric = false;
     // A size that would commit more than this fraction of the starting stack
     // is replaced by all-in. Zero leaves every size as listed.
     double all_in_threshold = 0.0;
+    // A bet or raise increment larger than this multiple of the pot is cut
+    // down to the cap. Zero leaves no-limit sizing. One is pot-limit.
+    double pot_cap = 0.0;
     bool allow_all_in = true;
+    // False removes the re-raise after a bet and a raise.
+    bool allow_three_bet = true;
     int max_raises = 1;
     int first_to_act = 0;
 };
@@ -89,6 +102,8 @@ public:
         int committed = 0;
         int last_raise = 0;
         int num_raises = 0;
+        int prev_aggressor = -1;
+        int street_aggressor = -1;
         int acting = -1;
         int folded = -1;
         int n_hist = 0;
@@ -103,7 +118,7 @@ public:
     {
         validate_config();
         build_deals();
-        index(root(), "");
+        index(root(), "", 0);
     }
 
     int infoset_count() const
@@ -381,6 +396,22 @@ private:
         return static_cast<int>(std::llround(fraction * static_cast<double>(basis)));
     }
 
+    static int chips_from_spec(double spec, int basis)
+    {
+        if (spec < 0.0)
+        {
+            return static_cast<int>(std::llround(-spec));
+        }
+        return round_chips(spec, basis);
+    }
+
+    const std::vector<double>& street_raises(int player, int kind) const
+    {
+        return player == 0
+            ? (kind == 0 ? config_.oop_flop_raises : kind == 1 ? config_.oop_turn_raises : config_.oop_river_raises)
+            : (kind == 0 ? config_.ip_flop_raises : kind == 1 ? config_.ip_turn_raises : config_.ip_river_raises);
+    }
+
     void validate_config() const
     {
         if (config_.board.size() != 3 && config_.board.size() != 4)
@@ -407,6 +438,10 @@ private:
         if (config_.all_in_threshold < 0.0)
         {
             throw std::invalid_argument("all-in threshold must be nonnegative");
+        }
+        if (config_.pot_cap < 0.0)
+        {
+            throw std::invalid_argument("pot cap must be nonnegative");
         }
     }
 
@@ -605,6 +640,10 @@ private:
             {
                 return;
             }
+            if (!config_.allow_three_bet && state.num_raises >= 2)
+            {
+                return;
+            }
             if (add > max_add)
             {
                 if (!config_.allow_all_in)
@@ -620,6 +659,19 @@ private:
                 if (committed_after > limit && add < max_add)
                 {
                     add = max_add;
+                }
+            }
+            if (config_.pot_cap > 0.0)
+            {
+                const int reference = facing ? state.pot + to_call : state.pot;
+                int max_by = round_chips(config_.pot_cap, reference);
+                if (max_by < 1)
+                {
+                    max_by = 1;
+                }
+                if (add - to_call > max_by)
+                {
+                    add = to_call + max_by;
                 }
             }
             const int raise_by = add - to_call;
@@ -638,10 +690,40 @@ private:
         };
 
         const int basis = facing ? state.pot + to_call : state.pot;
-        for (double fraction : size_list(player, state.street, facing))
+        const bool donk = !facing && player == 0 && state.prev_aggressor == 1
+            && !config_.oop_donk_sizes.empty();
+        const std::vector<double>& multiples = player == 0
+            ? config_.oop_raise_multiples : config_.ip_raise_multiples;
+        const bool only_multiples = facing && !multiples.empty()
+            && street_raises(player, street_kind(state.street)).empty()
+            && (player == 0 ? config_.oop_raise_sizes : config_.ip_raise_sizes).empty();
+        if (donk)
         {
-            const int sized = round_chips(fraction, basis);
-            consider(facing ? to_call + sized : sized);
+            for (double spec : config_.oop_donk_sizes)
+            {
+                consider(chips_from_spec(spec, basis));
+            }
+        }
+        else if (!only_multiples)
+        {
+            for (double spec : size_list(player, state.street, facing))
+            {
+                const int sized = chips_from_spec(spec, basis);
+                consider(facing ? to_call + sized : sized);
+            }
+        }
+        if (facing)
+        {
+            for (double multiple : multiples)
+            {
+                if (multiple <= 0.0 || state.committed <= 0)
+                {
+                    continue;
+                }
+                const int street_total = static_cast<int>(std::llround(
+                    multiple * static_cast<double>(state.committed)));
+                consider(street_total - state.contrib[player]);
+            }
         }
         if (config_.geometric)
         {
@@ -689,6 +771,8 @@ private:
 
     void finish_street(State& state) const
     {
+        state.prev_aggressor = state.street_aggressor;
+        state.street_aggressor = -1;
         state.pending_check = false;
         state.acting = -1;
         if (state.street + 1 < betting_streets())
@@ -737,6 +821,7 @@ private:
         next.last_raise = raise_by;
         next.committed = next.contrib[player];
         next.num_raises += 1;
+        next.street_aggressor = player;
         next.acting = 1 - player;
         return next;
     }
@@ -810,8 +895,12 @@ private:
         infosets_.push_back(std::move(info));
     }
 
-    void index(const State& state, const std::string& path)
+    void index(const State& state, const std::string& path, int depth)
     {
+        if (depth > 64)
+        {
+            throw std::logic_error("street index exceeded 64 frames");
+        }
         if (state.terminal)
         {
             ++terminals_;
@@ -827,7 +916,7 @@ private:
             const int count = chance_count(state);
             for (int outcome = 0; outcome < count; ++outcome)
             {
-                index(child_chance(state, outcome), path);
+                index(child_chance(state, outcome), path, depth + 1);
             }
             return;
         }
@@ -842,7 +931,7 @@ private:
                 legal.code[action], legal.add[action], street_total, all_in,
                 state.committed > state.contrib[state.acting]);
             const std::string next_path = path.empty() ? action_text : path + "/" + action_text;
-            index(apply(state, legal, action), next_path);
+            index(apply(state, legal, action), next_path, depth + 1);
         }
     }
 

@@ -89,6 +89,8 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - A geometric size on the turn is the equal-fraction split of the stack, and the same size on the river is the rest of the stack
 - A turn size and a river size can differ, and two river cards offer the same actions
 - A bet that commits more than the all-in threshold becomes all-in, and a bet under the threshold stays as listed
+- A fixed chip size bets that many chips, a 3x raise raises to three times the bet, a pot cap of 1 cuts a larger size to the pot, and turning off the 3-bet leaves only fold and call after a raise
+- OOP uses the donk size after IP bets and OOP calls, and uses the normal bet size when the previous street checks through
 - The public turn and flop tree matches `StreetGame` action by action: check-down, a shared turn infoset with two hands, a different river size, and a geometric size. The largest strategy difference in those tests was 0
 - Continuing a fresh public street solver for 4 iterations matches one that was reset and run for those same 4 iterations
 - The frozen combo pass matches check-down equity on the turn and on the flop. On the nuts-versus-air turn lock, 400 CFR+ iterations reach a value within 1 chip of +50 and a smaller Nash gap than 20 iterations

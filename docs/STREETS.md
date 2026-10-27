@@ -12,6 +12,12 @@ The betting lines are the same on every turn card and every river card. A player
 
 Sizes are pot fractions. A list given for one street replaces the shared list on that street only. A street with no raise list of its own uses that street's bet list. The shared lists still apply where no street list is set.
 
+A negative size is a fixed chip amount: `-20`, or `20c` on the command line, bets 20 chips. A raise written `3x` raises to three times the opponent's street total. If that multiple list is set and the raise list is empty, the bet sizes are not reused as raises.
+
+OOP donk sizes are used only when IP bet or raised the previous street and OOP is first to act. A checked-through street leaves the normal bet sizes. The first street has no donk.
+
+`--pot-cap 1` cuts any larger bet or raise increment down to the pot, after calling when facing a bet. Zero leaves the size unchanged. `--no-three-bet` allows a bet and one raise, and removes the re-raise.
+
 A geometric size splits the chips still behind into equal pot fractions over the streets that remain, including the current one. With `S` streets left, pot `P`, and stack left `E`, the fraction is
 
 `( (1 + 2E/P) ^ (1/S) - 1 ) / 2`.
@@ -38,6 +44,7 @@ On the flop `Ah Kd 7c`, queens versus jacks, check-only, the value matches the a
 street_solver
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1 --algorithm vanilla
 street_solver --board Ah,Kd,7c,4s --pot 100 --stack 300 --oop-range QcQd --ip-range JcJd --geometric --iterations 200
+street_solver --board Ah,Kd,7c --oop-donk 40c --oop-bets 1 --ip-bets 0.5 --no-all-in --max-raises 1 --iterations 1
 ```
 
 The default is the turn lock above, solved on the public tree. `--reference` solves the same spot by walking `StreetGame`. The reported Nash gap is NashConv, not NashConv/2.

@@ -335,6 +335,9 @@ function updateSpot() {
   $("flop-row").hidden = count !== 3;
   $("turn-row").hidden = count > 4;
   $("river-row").hidden = count > 4;
+  $("donk-label").hidden = count > 4;
+  $("pot-cap").parentElement.hidden = count > 4;
+  $("no-three-bet").parentElement.hidden = count > 4;
   $("frozen").disabled = count === 5;
   if (count === 5) {
     $("frozen").checked = false;
@@ -396,6 +399,9 @@ $("setup").addEventListener("submit", async (event) => {
     ip_turn_bets: sizes($("ip-turn").value),
     oop_river_bets: sizes($("oop-river").value),
     ip_river_bets: sizes($("ip-river").value),
+    oop_donk: sizes($("oop-donk").value),
+    pot_cap: Number($("pot-cap").value) || 0,
+    allow_three_bet: $("no-three-bet").checked ? 0 : 1,
     geometric: $("geometric").checked ? 1 : 0,
     all_in_threshold: Number($("threshold").value) || 0,
     allow_all_in: $("all-in").checked ? 1 : 0,

@@ -108,7 +108,8 @@ button:disabled {
   gap: 12px;
 }
 
-.street-row[hidden] {
+.street-row[hidden],
+label[hidden] {
   display: none;
 }
 
