@@ -49,6 +49,18 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - Nash gap after 200 iterations is smaller than after 20, for both algorithms
 - Two vanilla runs of 15 iterations match
 
+**Hold'em fundamentals** (`tests/unit/test_holdem.cpp`)
+
+- Card ids 0..51, parse/format including `10h`, deck removal
+- Board sizes, duplicate cards, and private hands that use a board card
+- Wheel, six-high straight, royal flush, flush, full house, quads, two pair, and kicker order
+- Seven-card hands, including a straight that uses both hole cards
+- Board-only ties (quads on board, royal on board) and a hole card that wins with ace-high
+- All 1,326 combo indexes round-trip, and all 2,598,960 five-card hands are invariant to order
+- `AA`, `AKs`, `AKo`, `AK`, `QQ+`, dashed ranges, `random`, weights, and last-assignment-wins
+- Dead-card conditioning, ordered joint probabilities, and the uniform masses `1326 * 1225` and `1176 * 1081`
+- JSON array of 1,326 weights
+
 The default Leduc tree has 936 decision information sets. Solver reports include iteration count, runtime, memory, player-0 value, Nash gap, and the information-set count.
 
 Convergence is never treated as sufficient by itself: payoff accounting and exact best response are tested separately.

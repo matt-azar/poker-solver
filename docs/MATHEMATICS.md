@@ -121,3 +121,17 @@ It is zero at Nash. Some papers call **exploitability** NashConv/2; this project
 ## What convergence does and does not mean
 
 Shrinking Nash gap on Kuhn means the average profile is approaching a Nash equilibrium **of this Kuhn game**. It is not evidence about abstract Hold’em betting trees or unrestricted no-limit Texas Hold’em.
+
+## Hold'em showdown and hand distributions
+
+Phase 5 does not define a betting game. It defines the showdown order and the distribution over private hands used by a later tree.
+
+Hand categories are totally ordered: high card, pair, two pair, three of a kind, straight, flush, full house, four of a kind, straight flush. Within a category, five rank tiebreaks are compared from the most significant to the least. The wheel `A-2-3-4-5` uses the five as its straight rank, so its tiebreak is 3 and it loses to a six-high straight.
+
+A range is a nonnegative weight on each of the 1,326 unordered two-card hands. Given two ranges and a board, the joint distribution is over **ordered** pairs `(h0, h1)`:
+
+\[
+P(h_0, h_1) \propto w_0(h_0)\, w_1(h_1)
+\]
+
+when `h0`, `h1`, and the board are pairwise disjoint, and `P = 0` otherwise. The constant is the sum of those products. If that sum is zero, the distribution is empty rather than uniform. With both weights equal to 1 and an empty board, the sum is `1326 * C(50, 2) = 1326 * 1225`.

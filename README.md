@@ -2,9 +2,9 @@
 
 Heads-up no-limit Texas Hold'em GTO solver under incremental development. The core is C++20. Python bindings and a graphical explorer are planned later; they are not required to build or run the solver.
 
-**Current milestone:** Phase 4 — Leduc Hold'em on the shared CFR engine.
+**Current milestone:** Phase 5 — 52-card deck, seven-card evaluator, and 1,326-hand ranges. See [docs/HOLDEM.md](docs/HOLDEM.md).
 
-This repository does **not** yet solve Texas Hold'em. Convergence on Kuhn Poker is exact-game equilibrium for that toy game, not unrestricted no-limit Hold'em.
+This repository does **not** yet solve a Hold'em betting tree. Convergence on Kuhn Poker is exact-game equilibrium for that toy game, not unrestricted no-limit Hold'em.
 
 ## Requirements
 
@@ -61,15 +61,17 @@ Example flags: [`configs/kuhn_default.json`](configs/kuhn_default.json), [`confi
 ```text
 include/game/     Kuhn and Leduc rules
 include/solver/   CFR, CFR+, regret matching, best response
+include/poker/    Hold'em cards, hand evaluator, 1,326-hand ranges
 src/              Implementations and the kuhn_solver / leduc_solver CLIs
 tests/            In-repo harness + CTest
 docs/             Architecture, mathematics, testing, roadmap
 ```
 
-Directories `include/poker`, `python/`, and `ui/` are placeholders for later phases.
+Directories `python/` and `ui/` are placeholders for later phases.
 
 ## Documentation
 
+- [docs/HOLDEM.md](docs/HOLDEM.md)
 - [docs/LEDUC.md](docs/LEDUC.md)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/MATHEMATICS.md](docs/MATHEMATICS.md)

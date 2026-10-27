@@ -27,3 +27,7 @@ Same machine and compiler. Command: `build\Release\leduc_solver.exe --algorithm 
 | CFR+ | 1000 | 1.3089424 | 7.640e2 | -0.0862957760813 | 0.0921236987006 |
 
 Published solves put the equilibrium value near -0.0856. One thousand iterations is not a full solve. At this length, CFR+ is closer in value and vanilla CFR has the smaller Nash gap. The unit tests check the gap against a 20-iteration run of the same algorithm, where both gaps are still above 0.15 and then fall. See [LEDUC.md](LEDUC.md).
+
+## Five-card evaluator
+
+Same machine and compiler. `poker_solver_tests` evaluates all `C(52, 5) = 2,598,960` five-card hands in two card orders, which is 5,197,920 calls to `evaluate`. Measured time: 0.5565473 seconds, about 9.340e6 evaluations per second. The check is that reordering a hand does not change its value. It is not a solve and it does not include six- or seven-card subset enumeration.
