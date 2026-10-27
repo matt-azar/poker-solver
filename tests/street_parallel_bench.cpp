@@ -195,6 +195,31 @@ SpeedResult speed_case(const char* name, poker::streets::StreetConfig config, in
     return result;
 }
 
+void sample_case(const char* name, poker::streets::StreetConfig config, int threads)
+{
+    config.threads = threads;
+    poker::solver::StreetBatchSolver solver(config);
+    const poker::solver::StreetMemoryReport built = solver.memory_report();
+    solver.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+    const poker::solver::StreetMemoryReport warmed = solver.memory_report();
+    const double before = warmed.train_seconds;
+    const auto started = std::chrono::steady_clock::now();
+    solver.run_frozen_iterations(30, poker::solver::Algorithm::CfrPlus);
+    const double train = solver.memory_report().train_seconds - before;
+    std::cout << "sample " << name << " threads " << threads
+              << " construction " << built.construction_seconds
+              << " worker_setup " << built.worker_setup_seconds
+              << " cache_init " << warmed.cache_init_seconds
+              << " warmup_train " << before
+              << " train " << train
+              << " wall " << seconds_since(started)
+              << " allocated " << built.allocated_bytes
+              << " peak " << built.peak_allocated_bytes
+              << "\n";
+    require(warmed.cache_init_seconds > 0.0, "rank cache was not initialized");
+    require(train > 0.0, "empty training sample");
+}
+
 struct Snapshot
 {
     int iteration = 0;
@@ -587,6 +612,13 @@ int main(int argc, char** argv)
                 ? std::filesystem::path(argv[3])
                 : std::filesystem::path("build/parity-baseline");
             run_table_parity(target, dir);
+            return 0;
+        }
+        if (argc > 1 && std::string(argv[1]) == "sample")
+        {
+            const int threads = argc > 2 ? std::stoi(argv[2]) : 1;
+            sample_case("turn_half_pot", turn_config(), threads);
+            sample_case("flop_paired", flop_config(), threads);
             return 0;
         }
         const bool converge_only = argc > 1 && std::string(argv[1]) == "converge";
