@@ -1,7 +1,9 @@
 #include "game/river_game.hpp"
+#include "game/street_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
 #include "solver/river_batch.hpp"
+#include "solver/street_batch.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -219,63 +221,92 @@ std::vector<std::string> read_string_array(const std::string& text, const char* 
 
 struct Job
 {
-    poker::river::RiverConfig config;
+    std::vector<int> board;
+    int pot = 100;
+    int stack = 200;
+    poker::holdem::Range oop{};
+    poker::holdem::Range ip{};
+    std::vector<double> oop_bets{};
+    std::vector<double> ip_bets{};
+    std::vector<double> oop_raises{};
+    std::vector<double> ip_raises{};
+    std::vector<double> oop_flop_bets{};
+    std::vector<double> oop_turn_bets{};
+    std::vector<double> oop_river_bets{};
+    std::vector<double> ip_flop_bets{};
+    std::vector<double> ip_turn_bets{};
+    std::vector<double> ip_river_bets{};
+    bool allow_all_in = true;
+    bool geometric = false;
+    bool frozen = false;
+    double all_in_threshold = 0.0;
+    double accuracy = -1.0;
+    int max_raises = 2;
     int iterations = 200;
     int samples = 5;
     poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
 };
 
+std::vector<double> optional_sizes(const std::string& text, const char* key)
+{
+    if (find_key(text, key) == std::string::npos)
+    {
+        return {};
+    }
+    return read_number_array(text, key);
+}
+
 Job parse_job(const std::string& text)
 {
     Job job;
     const std::vector<std::string> board = read_string_array(text, "board");
-    if (board.empty())
+    const std::vector<std::string> cards = board.empty()
+        ? std::vector<std::string>{"Ah", "Kd", "7c", "4s", "2h"}
+        : board;
+    if (cards.size() < 3 || cards.size() > 5)
     {
-        job.config.board = {
-            poker::holdem::parse_card("Ah"),
-            poker::holdem::parse_card("Kd"),
-            poker::holdem::parse_card("7c"),
-            poker::holdem::parse_card("4s"),
-            poker::holdem::parse_card("2h")};
+        throw std::invalid_argument("board must contain 3, 4, or 5 cards");
     }
-    else
+    for (const std::string& card : cards)
     {
-        if (board.size() != 5)
-        {
-            throw std::invalid_argument("board must contain five cards");
-        }
-        for (int i = 0; i < 5; ++i)
-        {
-            job.config.board[static_cast<std::size_t>(i)] = poker::holdem::parse_card(board[static_cast<std::size_t>(i)]);
-        }
+        job.board.push_back(poker::holdem::parse_card(card));
     }
-    job.config.pot = static_cast<int>(read_number(text, "pot", 100));
-    job.config.stack = static_cast<int>(read_number(text, "stack", 200));
-    job.config.oop = poker::holdem::Range::parse(read_string(text, "oop_range", "AA"));
-    job.config.ip = poker::holdem::Range::parse(read_string(text, "ip_range", "KK"));
-    job.config.oop_bet_sizes = read_number_array(text, "oop_bets");
-    job.config.ip_bet_sizes = read_number_array(text, "ip_bets");
-    if (job.config.oop_bet_sizes.empty())
+    job.pot = static_cast<int>(read_number(text, "pot", 100));
+    job.stack = static_cast<int>(read_number(text, "stack", 200));
+    job.oop = poker::holdem::Range::parse(read_string(text, "oop_range", "AA"));
+    job.ip = poker::holdem::Range::parse(read_string(text, "ip_range", "KK"));
+    job.oop_bets = read_number_array(text, "oop_bets");
+    job.ip_bets = read_number_array(text, "ip_bets");
+    if (job.oop_bets.empty())
     {
-        job.config.oop_bet_sizes = {0.5, 1.0};
+        job.oop_bets = {0.5, 1.0};
     }
-    if (job.config.ip_bet_sizes.empty())
+    if (job.ip_bets.empty())
     {
-        job.config.ip_bet_sizes = {0.5, 1.0};
+        job.ip_bets = {0.5, 1.0};
     }
-    job.config.oop_raise_sizes = read_number_array(text, "oop_raises");
-    job.config.ip_raise_sizes = read_number_array(text, "ip_raises");
-    if (find_key(text, "oop_raises") == std::string::npos)
+    job.oop_raises = optional_sizes(text, "oop_raises");
+    job.ip_raises = optional_sizes(text, "ip_raises");
+    if (job.oop_raises.empty())
     {
-        job.config.oop_raise_sizes = job.config.oop_bet_sizes;
+        job.oop_raises = job.oop_bets;
     }
-    if (find_key(text, "ip_raises") == std::string::npos)
+    if (job.ip_raises.empty())
     {
-        job.config.ip_raise_sizes = job.config.ip_bet_sizes;
+        job.ip_raises = job.ip_bets;
     }
-    const double all_in = read_number(text, "allow_all_in", 1);
-    job.config.allow_all_in = all_in != 0.0;
-    job.config.max_raises = static_cast<int>(read_number(text, "max_raises", 2));
+    job.oop_flop_bets = optional_sizes(text, "oop_flop_bets");
+    job.oop_turn_bets = optional_sizes(text, "oop_turn_bets");
+    job.oop_river_bets = optional_sizes(text, "oop_river_bets");
+    job.ip_flop_bets = optional_sizes(text, "ip_flop_bets");
+    job.ip_turn_bets = optional_sizes(text, "ip_turn_bets");
+    job.ip_river_bets = optional_sizes(text, "ip_river_bets");
+    job.allow_all_in = read_number(text, "allow_all_in", 1) != 0.0;
+    job.geometric = read_number(text, "geometric", 0) != 0.0;
+    job.frozen = read_number(text, "frozen", 0) != 0.0;
+    job.all_in_threshold = read_number(text, "all_in_threshold", 0);
+    job.accuracy = read_number(text, "accuracy", -1);
+    job.max_raises = static_cast<int>(read_number(text, "max_raises", 2));
     job.iterations = static_cast<int>(read_number(text, "iterations", 200));
     job.samples = static_cast<int>(read_number(text, "samples", 5));
     const std::string algorithm = read_string(text, "algorithm", "cfr_plus");
@@ -295,6 +326,10 @@ Job parse_job(const std::string& text)
     {
         throw std::invalid_argument("iterations must be positive");
     }
+    if (job.frozen && job.board.size() == 5)
+    {
+        throw std::invalid_argument("the frozen pass is for a flop or a turn");
+    }
     if (job.samples < 1)
     {
         job.samples = 1;
@@ -304,6 +339,32 @@ Job parse_job(const std::string& text)
         job.samples = 20;
     }
     return job;
+}
+
+const char* spot_name(const Job& job)
+{
+    if (job.board.size() == 3)
+    {
+        return "flop";
+    }
+    if (job.board.size() == 4)
+    {
+        return "turn";
+    }
+    return "river";
+}
+
+const char* plays_name(const Job& job)
+{
+    if (job.board.size() == 3)
+    {
+        return "flop, turn, and river";
+    }
+    if (job.board.size() == 4)
+    {
+        return "turn and river";
+    }
+    return "river";
 }
 
 int rank_index(char rank)
@@ -369,9 +430,13 @@ std::string build_status(
     out += ",\"error\":";
     append_escaped(out, error);
     out += ",\"pot\":";
-    out += std::to_string(job.config.pot);
+    out += std::to_string(job.pot);
     out += ",\"stack\":";
-    out += std::to_string(job.config.stack);
+    out += std::to_string(job.stack);
+    out += ",\"spot\":";
+    append_escaped(out, spot_name(job));
+    out += ",\"plays\":";
+    append_escaped(out, plays_name(job));
     out += ",\"iterations\":";
     out += std::to_string(iterations_done);
     out += ",\"runtime_seconds\":";
@@ -383,13 +448,13 @@ std::string build_status(
     out += ",\"algorithm\":";
     append_escaped(out, poker::solver::algorithm_name(job.algorithm));
     out += ",\"board\":[";
-    for (int i = 0; i < 5; ++i)
+    for (std::size_t i = 0; i < job.board.size(); ++i)
     {
         if (i > 0)
         {
             out += ',';
         }
-        append_escaped(out, poker::holdem::format_card(job.config.board[static_cast<std::size_t>(i)]));
+        append_escaped(out, poker::holdem::format_card(job.board[i]));
     }
     out += "],\"gap_series\":[";
     for (std::size_t i = 0; i < sample_gaps.size(); ++i)
@@ -464,7 +529,7 @@ std::string build_status(
             int right = 0;
             poker::holdem::Range::combo_cards(combo, left, right);
             bool blocked = false;
-            for (int card : job.config.board)
+            for (int card : job.board)
             {
                 if (card == left || card == right)
                 {
@@ -497,8 +562,8 @@ std::string build_status(
             }
         }
     };
-    count_range(job.config.oop, 0);
-    count_range(job.config.ip, 1);
+    count_range(job.oop, 0);
+    count_range(job.ip, 1);
 
     std::vector<HandLine> open_lines;
     for (std::size_t i = 0; i < entries.size();)
@@ -511,7 +576,8 @@ std::string build_status(
         }
         const std::size_t bar = infoset.find(" | ");
         const std::string path = bar == std::string::npos ? "" : infoset.substr(bar + 3);
-        if (path == "open" && infoset.size() >= 8)
+        const bool root_open = path == "open" || path == "flop | open" || path == "turn | open";
+        if (root_open && infoset.size() >= 8)
         {
             HandLine line;
             line.player = infoset.substr(0, 3);
@@ -635,6 +701,67 @@ std::string build_status(
     return out;
 }
 
+poker::river::RiverConfig river_config(const Job& job)
+{
+    poker::river::RiverConfig config;
+    for (int i = 0; i < 5; ++i)
+    {
+        config.board[static_cast<std::size_t>(i)] = job.board[static_cast<std::size_t>(i)];
+    }
+    config.pot = job.pot;
+    config.stack = job.stack;
+    config.oop = job.oop;
+    config.ip = job.ip;
+    config.oop_bet_sizes = job.oop_bets;
+    config.ip_bet_sizes = job.ip_bets;
+    config.oop_raise_sizes = job.oop_raises;
+    config.ip_raise_sizes = job.ip_raises;
+    config.allow_all_in = job.allow_all_in;
+    config.max_raises = job.max_raises;
+    return config;
+}
+
+poker::streets::StreetConfig street_config(const Job& job)
+{
+    poker::streets::StreetConfig config;
+    config.board = job.board;
+    config.pot = job.pot;
+    config.stack = job.stack;
+    config.oop = job.oop;
+    config.ip = job.ip;
+    config.oop_bet_sizes = job.oop_bets;
+    config.ip_bet_sizes = job.ip_bets;
+    config.oop_raise_sizes = job.oop_raises;
+    config.ip_raise_sizes = job.ip_raises;
+    config.oop_flop_bets = job.oop_flop_bets;
+    config.oop_turn_bets = job.oop_turn_bets;
+    config.oop_river_bets = job.oop_river_bets;
+    config.ip_flop_bets = job.ip_flop_bets;
+    config.ip_turn_bets = job.ip_turn_bets;
+    config.ip_river_bets = job.ip_river_bets;
+    config.allow_all_in = job.allow_all_in;
+    config.geometric = job.geometric;
+    config.all_in_threshold = job.all_in_threshold;
+    config.max_raises = job.max_raises;
+    return config;
+}
+
+std::vector<poker::solver::RiverStrategyEntry> street_entries(
+    const std::vector<poker::solver::StreetStrategyEntry>& source)
+{
+    std::vector<poker::solver::RiverStrategyEntry> entries;
+    entries.reserve(source.size());
+    for (const poker::solver::StreetStrategyEntry& item : source)
+    {
+        poker::solver::RiverStrategyEntry entry;
+        entry.infoset = item.infoset;
+        entry.action = item.action;
+        entry.probability = item.probability;
+        entries.push_back(std::move(entry));
+    }
+    return entries;
+}
+
 void solve_job(Job job)
 {
     std::vector<int> sample_iterations;
@@ -648,34 +775,83 @@ void solve_job(Job job)
     const auto started = std::chrono::steady_clock::now();
     try
     {
-        poker::solver::RiverBatchSolver batch(job.config);
         const int chunk = std::max(1, job.iterations / job.samples);
-        while (done < job.iterations)
+        auto record = [&]()
         {
-            if (g_cancel.load())
-            {
-                cancelled = true;
-                break;
-            }
-            const int step = std::min(chunk, job.iterations - done);
-            batch.continue_iterations(step, job.algorithm);
-            done += step;
-            value = batch.expected_utility();
-            gap = batch.nash_gap();
-            sample_iterations.push_back(done);
-            sample_values.push_back(value);
-            sample_gaps.push_back(gap);
             const double seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - started).count();
             publish(build_status(
                 true, false, job, done, seconds, value, gap,
                 sample_iterations, sample_values, sample_gaps, entries, ""));
-        }
-        entries = batch.average_strategy_entries();
-        if (done > 0)
+        };
+        if (job.board.size() == 5)
         {
-            value = batch.expected_utility();
-            gap = batch.nash_gap();
+            poker::solver::RiverBatchSolver batch(river_config(job));
+            while (done < job.iterations)
+            {
+                if (g_cancel.load())
+                {
+                    cancelled = true;
+                    break;
+                }
+                const int step = std::min(chunk, job.iterations - done);
+                batch.continue_iterations(step, job.algorithm);
+                done += step;
+                value = batch.expected_utility();
+                gap = batch.nash_gap();
+                sample_iterations.push_back(done);
+                sample_values.push_back(value);
+                sample_gaps.push_back(gap);
+                record();
+                if (job.accuracy >= 0.0 && gap <= job.accuracy * static_cast<double>(job.pot))
+                {
+                    break;
+                }
+            }
+            entries = batch.average_strategy_entries();
+            if (done > 0)
+            {
+                value = batch.expected_utility();
+                gap = batch.nash_gap();
+            }
+        }
+        else
+        {
+            poker::solver::StreetBatchSolver batch(street_config(job));
+            while (done < job.iterations)
+            {
+                if (g_cancel.load())
+                {
+                    cancelled = true;
+                    break;
+                }
+                const int step = std::min(chunk, job.iterations - done);
+                if (job.frozen)
+                {
+                    batch.continue_frozen_iterations(step, job.algorithm);
+                }
+                else
+                {
+                    batch.continue_iterations(step, job.algorithm);
+                }
+                done += step;
+                value = batch.expected_utility();
+                gap = batch.nash_gap();
+                sample_iterations.push_back(done);
+                sample_values.push_back(value);
+                sample_gaps.push_back(gap);
+                record();
+                if (job.accuracy >= 0.0 && gap <= job.accuracy * static_cast<double>(job.pot))
+                {
+                    break;
+                }
+            }
+            entries = street_entries(batch.average_strategy_entries());
+            if (done > 0)
+            {
+                value = batch.expected_utility();
+                gap = batch.nash_gap();
+            }
         }
     }
     catch (const std::exception& error)
@@ -731,6 +907,7 @@ void send_response(socket_t client, int status, const std::string& type, const s
     std::string header = "HTTP/1.1 " + std::to_string(status) + " " + reason + "\r\n";
     header += "Content-Type: " + type + "\r\n";
     header += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+    header += "Cache-Control: no-store\r\n";
     header += "Connection: close\r\n\r\n";
     header += body;
     std::size_t sent = 0;

@@ -10,7 +10,7 @@ Phase 7 adds `poker::solver::RiverBatchSolver`. It keeps one copy of the public 
 
 Phase 8 adds `poker::streets::StreetGame` for a turn or a flop. Later cards are chance nodes. The regret update was not rewritten. See [STREETS.md](STREETS.md).
 
-Phase 9 adds the `explorer` program and the static files in `ui/`. The program links the river solver and serves the page. Nothing under `include/` includes `ui/`. See [EXPLORER.md](EXPLORER.md).
+Phase 9 adds the `explorer` program and the static files in `ui/`. A five-card board uses `RiverBatchSolver`. A flop or a turn uses `StreetBatchSolver`, so the later streets are dealt and bet in the same tree. Nothing under `include/` includes `ui/`. See [EXPLORER.md](EXPLORER.md).
 
 `Algorithm::LinearCfr` is a third weighting on `CfrTrainer`: iteration `t` scales both the new regret and the average strategy, and regrets are not floored. The public river tree does not implement it. See [HUNL.md](HUNL.md).
 
@@ -33,7 +33,7 @@ Phase 9 adds the `explorer` program and the static files in `ui/`. The program l
 | `poker::streets::StreetGame` | Reference turn or flop tree: one betting structure for every runout, sizes per street |
 | `poker::solver::StreetBatchSolver` | Same streets on one public betting tree, reusing each line on every runout |
 | `street_solver` | Command-line driver; public tree by default, `--reference` for `StreetGame` |
-| `explorer` | Local page. Serves `ui/` and calls `RiverBatchSolver` |
+| `explorer` | Local page. Serves `ui/`. A river calls `RiverBatchSolver`; a flop or a turn calls `StreetBatchSolver` |
 
 `expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker. It is not a second CFR implementation.
 

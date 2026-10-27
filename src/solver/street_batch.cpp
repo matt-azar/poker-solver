@@ -1527,6 +1527,11 @@ void StreetBatchSolver::run_frozen_iterations(int count, Algorithm algorithm)
     engine_->train_frozen(count, algorithm);
 }
 
+void StreetBatchSolver::continue_frozen_iterations(int count, Algorithm algorithm)
+{
+    engine_->train_frozen(count, algorithm);
+}
+
 SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm algorithm)
 {
     const auto start = std::chrono::steady_clock::now();

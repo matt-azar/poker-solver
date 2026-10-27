@@ -39,6 +39,7 @@ public:
     void run_iterations(int count, Algorithm algorithm);
     void continue_iterations(int count, Algorithm algorithm);
     void run_frozen_iterations(int count, Algorithm algorithm);
+    void continue_frozen_iterations(int count, Algorithm algorithm);
 
     double expected_utility() const;
     double p1_best_response_utility() const;

@@ -1,6 +1,6 @@
 # poker-solver
 
-Heads-up no-limit Texas Hold'em GTO solver under incremental development. The core is C++20. Python bindings and a graphical explorer are planned later; they are not required to build or run the solver.
+Heads-up no-limit Texas Hold'em GTO solver under incremental development. The core is C++20. Python bindings are planned later and are not required to build or run the solver. A local explorer is included.
 
 **Current milestone:** Phase 10 — the trees here are solved exactly, and unrestricted no-limit Hold'em is not. Linear CFR is measured on Kuhn. See [docs/HUNL.md](docs/HUNL.md).
 
@@ -73,7 +73,7 @@ tests/            In-repo harness + CTest
 docs/             Architecture, mathematics, testing, roadmap
 ```
 
-The `python/` directory is reserved for a later binding. `ui/` is the static river explorer.
+The `python/` directory is reserved for a later binding. `ui/` is the local explorer: a flop or a turn is one tree through the river, and ranges are painted on a 13×13 grid.
 
 ## Documentation
 

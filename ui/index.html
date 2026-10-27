@@ -3,22 +3,57 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>River explorer</title>
+  <title>Hold'em explorer</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
   <header>
-    <h1>River explorer</h1>
-    <p>Local heads-up river. The solver is the C++ engine; this page only displays it.</p>
+    <h1>Hold'em explorer</h1>
+    <p>Heads-up no-limit from the street you set through the river. A flop deals the turn and the river and bets all three streets in one tree. A turn deals the river and bets both streets. A full board is the river only, because the flop and the turn are already over. Paint a range on the grid. The C++ solver does the work; this page only sets the spot and shows the strategy.</p>
   </header>
+  <section class="pickers">
+    <div>
+      <h2>OOP range <span id="oop-count" class="count"></span></h2>
+      <div id="oop-pick" class="grid picker"></div>
+    </div>
+    <div>
+      <h2>IP range <span id="ip-count" class="count"></span></h2>
+      <div id="ip-pick" class="grid picker"></div>
+    </div>
+  </section>
+  <div class="range-tools">
+    <label>Paint weight <input id="weight" type="range" min="0" max="100" value="100"></label>
+    <strong id="weight-label">100%</strong>
+    <button type="button" id="clear-ranges">Clear ranges</button>
+    <span class="hint">Suited is above the pairs. Offsuit is below. Click toggles a cell. Drag paints the same weight. Cells blocked by the board stay grey.</span>
+  </div>
   <form id="setup">
-    <label>Board <input id="board" value="Ah Kd 7c 4s 2h"></label>
-    <label>OOP range <input id="oop" value="AA"></label>
-    <label>IP range <input id="ip" value="KK"></label>
+    <label class="wide">Board <input id="board" value="Ah Kd 7c 4s 2h" autocomplete="off"></label>
+    <p id="spot" class="wide hint">River</p>
+    <label class="wide">OOP text <input id="oop" value="AA" autocomplete="off"></label>
+    <label class="wide">IP text <input id="ip" value="KK" autocomplete="off"></label>
     <label>Pot <input id="pot" type="number" value="100"></label>
     <label>Stack <input id="stack" type="number" value="200"></label>
+    <label>Max raises <input id="max-raises" type="number" value="2" min="0"></label>
     <label>OOP bets <input id="oop-bets" value="0.5, 1"></label>
     <label>IP bets <input id="ip-bets" value="0.5, 1"></label>
+    <label>Accuracy <input id="accuracy" placeholder="fraction of the pot"></label>
+    <div id="flop-row" class="wide street-row" hidden>
+      <label>OOP flop <input id="oop-flop" placeholder="uses OOP bets"></label>
+      <label>IP flop <input id="ip-flop" placeholder="uses IP bets"></label>
+    </div>
+    <div id="turn-row" class="wide street-row" hidden>
+      <label>OOP turn <input id="oop-turn" placeholder="uses OOP bets"></label>
+      <label>IP turn <input id="ip-turn" placeholder="uses IP bets"></label>
+    </div>
+    <div id="river-row" class="wide street-row" hidden>
+      <label>OOP river <input id="oop-river" placeholder="uses OOP bets"></label>
+      <label>IP river <input id="ip-river" placeholder="uses IP bets"></label>
+    </div>
+    <label class="check"><input id="geometric" type="checkbox"> Geometric size</label>
+    <label>All-in threshold <input id="threshold" type="number" value="0" min="0" max="1" step="0.05"></label>
+    <label class="check"><input id="all-in" type="checkbox" checked> Allow all-in</label>
+    <label class="check"><input id="frozen" type="checkbox"> Frozen combo pass</label>
     <label>Iterations <input id="iterations" type="number" value="200"></label>
     <label>Algorithm
       <select id="algorithm">
@@ -34,12 +69,15 @@
   </form>
   <p id="message"></p>
   <section id="summary" hidden>
+    <div><span>Starts on</span><strong id="show-spot"></strong></div>
+    <div><span>Tree</span><strong id="show-plays"></strong></div>
     <div><span>Pot</span><strong id="show-pot"></strong></div>
     <div><span>Stack</span><strong id="show-stack"></strong></div>
     <div><span>Board</span><strong id="show-board"></strong></div>
     <div><span>Iterations</span><strong id="show-iterations"></strong></div>
     <div><span>OOP value</span><strong id="show-value"></strong></div>
     <div><span>Nash gap</span><strong id="show-gap"></strong></div>
+    <div><span>Gap / pot</span><strong id="show-fraction"></strong></div>
   </section>
   <section id="chart-wrap" hidden>
     <h2>Nash gap</h2>
@@ -47,11 +85,11 @@
   </section>
   <section class="grids">
     <div>
-      <h2>OOP open</h2>
+      <h2>OOP strategy</h2>
       <div id="oop-grid" class="grid"></div>
     </div>
     <div>
-      <h2>IP open</h2>
+      <h2>IP strategy</h2>
       <div id="ip-grid" class="grid"></div>
     </div>
   </section>

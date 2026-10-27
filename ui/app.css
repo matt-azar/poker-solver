@@ -74,10 +74,60 @@ button:disabled {
   font-size: 12px;
 }
 
-.grids {
+.pickers, .grids {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
+}
+
+.range-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.range-tools label {
+  min-width: 220px;
+}
+
+.count, .hint {
+  color: #5c564c;
+  font-weight: 400;
+  font-size: 13px;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.street-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.street-row[hidden] {
+  display: none;
+}
+
+.check {
+  flex-direction: row;
+  align-items: center;
+}
+
+.picker .cell.on {
+  color: #f4f0e6;
+}
+
+.picker .cell.blocked {
+  background: repeating-linear-gradient(-45deg, #ece7dc, #ece7dc 4px, #e2dcd0 4px, #e2dcd0 8px);
+  color: #b9b2a6;
+}
+
+.picker {
+  user-select: none;
 }
 
 .grid {
@@ -140,7 +190,7 @@ button:disabled {
 }
 
 @media (max-width: 800px) {
-  form, #summary, .grids {
+  form, #summary, .pickers, .grids, .street-row {
     grid-template-columns: 1fr;
   }
 }
