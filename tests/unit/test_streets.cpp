@@ -249,6 +249,89 @@ void expect_street_batch(
     CHECK_NEAR(batch.p2_best_response_utility(), stats.p2_best_response_utility, 1e-6);
 }
 
+double strategy_probability(
+    const std::vector<poker::solver::StreetStrategyEntry>& entries,
+    const char* player_and_hand,
+    const char* action_prefix,
+    bool facing_bet)
+{
+    double probability = -1.0;
+    const std::string hand(player_and_hand);
+    const std::string action(action_prefix);
+    for (const poker::solver::StreetStrategyEntry& entry : entries)
+    {
+        if (entry.infoset.find(hand) == std::string::npos)
+        {
+            continue;
+        }
+        if (entry.infoset.find("river") != std::string::npos)
+        {
+            continue;
+        }
+        const bool bet_line = entry.infoset.find("Bet") != std::string::npos;
+        if (bet_line != facing_bet)
+        {
+            continue;
+        }
+        if (entry.action.rfind(action, 0) != 0)
+        {
+            continue;
+        }
+        probability = entry.probability;
+    }
+    return probability;
+}
+
+// Kh Kd 7c 4s. OOP holds KcKs and 2c3d. IP holds AhAd. Pot 100, one hundred behind.
+// OOP can check or shove the turn. IP can fold or call. A check checks the river down.
+// The equilibrium bets every king, bluffs half the air, calls half the time, and is worth 25.
+void expect_turn_bluff_equilibrium()
+{
+    StreetConfig config;
+    config.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
+    config.pot = 100;
+    config.stack = 100;
+    config.oop = Range::parse("KcKs,2c3d");
+    config.ip = Range::parse("AhAd");
+    config.oop_turn_bets = {1.0};
+    config.allow_all_in = false;
+    config.max_raises = 1;
+    poker::solver::StreetBatchSolver frozen(config);
+    frozen.run_frozen_iterations(4000, poker::solver::Algorithm::CfrPlus);
+    const std::vector<poker::solver::StreetStrategyEntry> entries = frozen.average_strategy_entries();
+    const double bet_nuts = strategy_probability(entries, "OOP KcKs", "Bet", false);
+    const double bet_air = strategy_probability(entries, "OOP 2c3d", "Bet", false);
+    const double call = strategy_probability(entries, "IP AhAd", "Call", true);
+    const double value = frozen.expected_utility();
+    const double gap = frozen.nash_gap();
+    const double nuts_ev = 50.0 + bet_nuts * 100.0 * call;
+    const double air_ev = (1.0 - bet_air) * -50.0 + bet_air * (50.0 - 200.0 * call);
+    const double closed_form = 0.5 * nuts_ev + 0.5 * air_ev;
+    std::cout << "REPORT turn_bluff_equilibrium\n";
+    std::cout << "  bet_nuts " << bet_nuts << "\n";
+    std::cout << "  bet_air " << bet_air << "\n";
+    std::cout << "  call " << call << "\n";
+    std::cout << "  value " << value << "\n";
+    std::cout << "  closed_form " << closed_form << "\n";
+    std::cout << "  nash_gap " << gap << "\n";
+    CHECK(bet_nuts > 0.98);
+    CHECK(std::abs(bet_air - 0.5) < 0.05);
+    CHECK(std::abs(call - 0.5) < 0.05);
+    CHECK_NEAR(value, closed_form, 1e-6);
+    CHECK_NEAR(value, 25.0, 0.05);
+    CHECK(gap < 0.15);
+    CHECK(gap >= -1e-9);
+
+    const StreetGame game(config);
+    poker::solver::CfrTrainer<StreetGame> per_deal(game, poker::solver::Algorithm::CfrPlus);
+    per_deal.run_iterations(4000);
+    const poker::solver::SolveStats per_deal_stats = per_deal.evaluate();
+    std::cout << "  per_deal_value " << per_deal_stats.p1_expected_utility << "\n";
+    std::cout << "  per_deal_gap " << per_deal_stats.nash_gap << "\n";
+    CHECK_NEAR(per_deal_stats.p1_expected_utility, 25.0, 0.05);
+    CHECK(per_deal_stats.nash_gap < 0.15);
+}
+
 } // namespace
 
 void run_tree_rule_tests(const std::vector<int>& turn_board);
@@ -568,6 +651,7 @@ void run_street_tests()
     }
 
     run_tree_rule_tests(turn_board);
+    expect_turn_bluff_equilibrium();
 }
 
 void run_tree_rule_tests(const std::vector<int>& turn_board)

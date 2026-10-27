@@ -271,6 +271,7 @@ struct RiverBatchSolver::Engine
     std::vector<Node> nodes;
     std::vector<Slot> slots;
     std::vector<double> regret;
+    std::vector<double> pass_sigma;
     std::vector<double> strategy_sum;
     mutable std::vector<double> average;
     mutable bool average_ready = false;
@@ -427,6 +428,7 @@ struct RiverBatchSolver::Engine
             }
         }
         regret.assign(static_cast<std::size_t>(cursor), 0.0);
+        pass_sigma.assign(static_cast<std::size_t>(cursor), 0.0);
         strategy_sum.assign(static_cast<std::size_t>(cursor), 0.0);
         average.assign(static_cast<std::size_t>(cursor), 0.0);
     }
@@ -455,7 +457,7 @@ struct RiverBatchSolver::Engine
     }
 
     double cfr_deal(int node_index, double pi0, double pi1, double chance, int h0, int h1,
-                    int updating, double weight_iter, Algorithm algorithm)
+                    int updating, double weight_iter)
     {
         const Node& node = nodes[static_cast<std::size_t>(node_index)];
         if (node.terminal)
@@ -464,8 +466,7 @@ struct RiverBatchSolver::Engine
         }
         const int hand = node.player == 0 ? h0 : h1;
         const int base = node.hand_base + hand * node.n_actions;
-        double sigma[8];
-        regret_matching(regret.data() + base, sigma, node.n_actions);
+        const double* sigma = pass_sigma.data() + base;
         const bool update = updating < 0 || updating == node.player;
         if (update)
         {
@@ -479,12 +480,12 @@ struct RiverBatchSolver::Engine
             if (node.player == 0)
             {
                 action_utility[action] = cfr_deal(
-                    node.child[action], pi0 * sigma[action], pi1, chance, h0, h1, updating, weight_iter, algorithm);
+                    node.child[action], pi0 * sigma[action], pi1, chance, h0, h1, updating, weight_iter);
             }
             else
             {
                 action_utility[action] = cfr_deal(
-                    node.child[action], pi0, pi1 * sigma[action], chance, h0, h1, updating, weight_iter, algorithm);
+                    node.child[action], pi0, pi1 * sigma[action], chance, h0, h1, updating, weight_iter);
             }
             node_utility += sigma[action] * action_utility[action];
         }
@@ -496,15 +497,40 @@ struct RiverBatchSolver::Engine
                 const double instant = node.player == 0
                     ? (action_utility[action] - node_utility)
                     : (node_utility - action_utility[action]);
-                double& cumulative = regret[static_cast<std::size_t>(base + action)];
-                cumulative += opponent_reach * instant;
-                if (algorithm == Algorithm::CfrPlus && cumulative < 0.0)
+                regret[static_cast<std::size_t>(base + action)] += opponent_reach * instant;
+            }
+        }
+        return node_utility;
+    }
+
+    void freeze_sigma()
+    {
+        for (const Slot& slot : slots)
+        {
+            regret_matching(
+                regret.data() + slot.base,
+                pass_sigma.data() + slot.base,
+                slot.n_actions);
+        }
+    }
+
+    void floor_player(int player)
+    {
+        for (const Slot& slot : slots)
+        {
+            if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player != player)
+            {
+                continue;
+            }
+            for (int action = 0; action < slot.n_actions; ++action)
+            {
+                double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                if (cumulative < 0.0)
                 {
                     cumulative = 0.0;
                 }
             }
         }
-        return node_utility;
     }
 
     int trained = 0;
@@ -529,22 +555,27 @@ struct RiverBatchSolver::Engine
             ++trained;
             if (algorithm == Algorithm::VanillaCfr)
             {
+                freeze_sigma();
                 for (const Deal& deal : deals)
                 {
-                    cfr_deal(0, 1.0, 1.0, deal.probability, deal.h0, deal.h1, -1, 1.0, algorithm);
+                    cfr_deal(0, 1.0, 1.0, deal.probability, deal.h0, deal.h1, -1, 1.0);
                 }
             }
             else
             {
                 const double weight_iter = static_cast<double>(trained);
+                freeze_sigma();
                 for (const Deal& deal : deals)
                 {
-                    cfr_deal(0, 1.0, 1.0, deal.probability, deal.h0, deal.h1, 0, weight_iter, algorithm);
+                    cfr_deal(0, 1.0, 1.0, deal.probability, deal.h0, deal.h1, 0, weight_iter);
                 }
+                floor_player(0);
+                freeze_sigma();
                 for (const Deal& deal : deals)
                 {
-                    cfr_deal(0, 1.0, 1.0, deal.probability, deal.h0, deal.h1, 1, weight_iter, algorithm);
+                    cfr_deal(0, 1.0, 1.0, deal.probability, deal.h0, deal.h1, 1, weight_iter);
                 }
+                floor_player(1);
             }
         }
     }

@@ -365,6 +365,8 @@ public:
         const int entries = offset_.back();
         regret_.assign(static_cast<std::size_t>(entries), 0.0);
         strategy_sum_.assign(static_cast<std::size_t>(entries), 0.0);
+        pass_sigma_.assign(static_cast<std::size_t>(entries), 0.0);
+        pass_delta_.assign(static_cast<std::size_t>(entries), 0.0);
     }
 
     void run_iterations(int count)
@@ -374,18 +376,26 @@ public:
             ++iterations_completed_;
             if (algorithm_ == Algorithm::VanillaCfr)
             {
+                begin_pass();
                 cfr(game_.root(), 1.0, 1.0, 1.0, -1, 1.0);
+                end_pass();
             }
             else if (algorithm_ == Algorithm::LinearCfr)
             {
                 const double weight = static_cast<double>(iterations_completed_);
+                begin_pass();
                 cfr(game_.root(), 1.0, 1.0, 1.0, -1, weight);
+                end_pass();
             }
             else
             {
                 const double weight = static_cast<double>(iterations_completed_);
+                begin_pass();
                 cfr(game_.root(), 1.0, 1.0, 1.0, 0, weight);
+                end_pass();
+                begin_pass();
                 cfr(game_.root(), 1.0, 1.0, 1.0, 1, weight);
+                end_pass();
             }
         }
     }
@@ -523,12 +533,11 @@ private:
         const int base = offset_[static_cast<std::size_t>(infoset)];
         const bool update_this = updating_player < 0 || updating_player == actor;
 
-        std::array<double, kMaxActionsPerInfoset> sigma{};
-        regret_matching(regret_.data() + base, sigma.data(), count);
+        const double* sigma = pass_sigma_.data() + base;
         if (update_this)
         {
             const double reach = actor == 0 ? pi1 : pi2;
-            accumulate_average(strategy_sum_.data() + base, sigma.data(), count, weight * reach);
+            accumulate_average(strategy_sum_.data() + base, sigma, count, weight * reach);
         }
 
         std::array<double, kMaxActionsPerInfoset> action_utility{};
@@ -539,7 +548,7 @@ private:
             {
                 action_utility[static_cast<std::size_t>(action)] = cfr(
                     game_.child_action(state, action),
-                    pi1 * sigma[static_cast<std::size_t>(action)],
+                    pi1 * sigma[action],
                     pi2,
                     pi_chance,
                     updating_player,
@@ -550,13 +559,12 @@ private:
                 action_utility[static_cast<std::size_t>(action)] = cfr(
                     game_.child_action(state, action),
                     pi1,
-                    pi2 * sigma[static_cast<std::size_t>(action)],
+                    pi2 * sigma[action],
                     pi_chance,
                     updating_player,
                     weight);
             }
-            node_utility += sigma[static_cast<std::size_t>(action)]
-                * action_utility[static_cast<std::size_t>(action)];
+            node_utility += sigma[action] * action_utility[static_cast<std::size_t>(action)];
         }
 
         if (update_this)
@@ -567,16 +575,43 @@ private:
                 const double instantaneous = actor == 0
                     ? (action_utility[static_cast<std::size_t>(action)] - node_utility)
                     : (node_utility - action_utility[static_cast<std::size_t>(action)]);
-                double& cumulative = regret_[static_cast<std::size_t>(base + action)];
                 const double regret_weight = algorithm_ == Algorithm::LinearCfr ? weight : 1.0;
-                cumulative += regret_weight * opponent_reach * instantaneous;
-                if (algorithm_ == Algorithm::CfrPlus && cumulative < 0.0)
-                {
-                    cumulative = 0.0;
-                }
+                pass_delta_[static_cast<std::size_t>(base + action)] +=
+                    regret_weight * opponent_reach * instantaneous;
             }
         }
         return node_utility;
+    }
+
+    // One strategy for the whole pass. Later histories in the same information
+    // set do not see regrets written earlier in this pass.
+    void begin_pass()
+    {
+        std::fill(pass_delta_.begin(), pass_delta_.end(), 0.0);
+        const int infosets = game_.infoset_count();
+        for (int infoset = 0; infoset < infosets; ++infoset)
+        {
+            const int count = game_.action_count(infoset);
+            const int base = offset_[static_cast<std::size_t>(infoset)];
+            regret_matching(
+                regret_.data() + base,
+                pass_sigma_.data() + base,
+                count);
+        }
+    }
+
+    // Add the pass, then floor once. Flooring each history as it arrives is a
+    // different update from flooring the sum.
+    void end_pass()
+    {
+        for (std::size_t i = 0; i < regret_.size(); ++i)
+        {
+            regret_[i] += pass_delta_[i];
+            if (algorithm_ == Algorithm::CfrPlus && regret_[i] < 0.0)
+            {
+                regret_[i] = 0.0;
+            }
+        }
     }
 
     Game game_;
@@ -584,6 +619,8 @@ private:
     std::vector<int> offset_;
     std::vector<double> regret_;
     std::vector<double> strategy_sum_;
+    std::vector<double> pass_sigma_;
+    std::vector<double> pass_delta_;
     int iterations_completed_ = 0;
 };
 
