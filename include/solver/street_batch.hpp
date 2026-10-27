@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory_resource>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,8 @@ struct StreetMemoryReport
     std::uint64_t expanded_decisions = 0;
     std::uint64_t process_peak_working_set_bytes = 0;
     double construction_seconds = 0.0;
+    // Rank values written before the first pass. Separate from construction.
+    double cache_init_seconds = 0.0;
     double train_seconds = 0.0;
     double evaluation_seconds = 0.0;
     std::vector<StreetMemoryComponent> components;
@@ -55,6 +58,8 @@ struct StreetMemoryReport
 // contract. StreetGame remains the reference. Construction and the workspace
 // used by a pass stay inside StreetConfig::memory_mib. That budget is the
 // bytes the engine requests from its allocator, not an operating-system limit.
+// Scratch, action values, and showdown prefix buffers live in one serial
+// WorkerContext. Training and evaluation do not run at the same time.
 // upstream observes those requests. A null upstream uses the global new/delete
 // resource. Caller-owned inputs and returned strategy text stay outside it.
 class StreetBatchSolver
@@ -95,6 +100,8 @@ public:
     StreetMemoryReport memory_report() const;
 
     std::vector<StreetStrategyEntry> average_strategy_entries() const;
+    std::span<const double> regret_table() const;
+    std::span<const double> strategy_sum_table() const;
     bool set_regret(const std::string& infoset, const std::string& action, double value);
     bool regret_value(const std::string& infoset, const std::string& action, double& value) const;
 

@@ -1199,3 +1199,91 @@ void run_street_memory_tests()
     expect_memory_budget();
     expect_allocation_audit();
 }
+
+void check_raw_tables(
+    const char* name,
+    const poker::solver::StreetBatchSolver& left,
+    const poker::solver::StreetBatchSolver& right)
+{
+    const std::span<const double> left_regret = left.regret_table();
+    const std::span<const double> right_regret = right.regret_table();
+    const std::span<const double> left_sum = left.strategy_sum_table();
+    const std::span<const double> right_sum = right.strategy_sum_table();
+    CHECK(left_regret.size() == right_regret.size());
+    CHECK(left_sum.size() == right_sum.size());
+    double worst_regret = 0.0;
+    double worst_sum = 0.0;
+    const std::size_t regret_n = std::min(left_regret.size(), right_regret.size());
+    const std::size_t sum_n = std::min(left_sum.size(), right_sum.size());
+    for (std::size_t index = 0; index < regret_n; ++index)
+    {
+        worst_regret = std::max(
+            worst_regret, std::abs(left_regret[index] - right_regret[index]));
+    }
+    for (std::size_t index = 0; index < sum_n; ++index)
+    {
+        worst_sum = std::max(worst_sum, std::abs(left_sum[index] - right_sum[index]));
+    }
+    if (worst_regret != 0.0 || worst_sum != 0.0)
+    {
+        std::cerr << name << " raw-table delta regret " << worst_regret
+                  << " strategy_sum " << worst_sum << "\n";
+    }
+    CHECK(worst_regret == 0.0);
+    CHECK(worst_sum == 0.0);
+    CHECK_NEAR(left.expected_utility(), right.expected_utility(), 1e-8 * 100.0);
+    CHECK_NEAR(left.nash_gap(), right.nash_gap(), 1e-8 * 100.0);
+}
+
+void run_street_workspace_tests()
+{
+    const std::vector<int> turn = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+    StreetConfig betting = check_only(turn, "AcAd:1,5c5d:3", "KsKc,JhJs");
+    betting.stack = 100;
+    betting.pot = 100;
+    betting.oop_bet_sizes = {0.5};
+    betting.ip_bet_sizes = {0.5};
+    betting.oop_raise_sizes = {0.5};
+    betting.ip_raise_sizes = {0.5};
+    betting.allow_all_in = true;
+    betting.max_raises = 1;
+
+    {
+        poker::solver::StreetBatchSolver cold(betting);
+        CHECK(cold.memory_report().cache_init_seconds == 0.0);
+    }
+    poker::solver::StreetBatchSolver first(betting);
+    poker::solver::StreetBatchSolver second(betting);
+    first.run_frozen_iterations(3, poker::solver::Algorithm::CfrPlus);
+    second.run_frozen_iterations(3, poker::solver::Algorithm::CfrPlus);
+    CHECK(first.memory_report().cache_init_seconds > 0.0);
+    check_raw_tables("serial cfr+ turn", first, second);
+
+    poker::solver::StreetBatchSolver pieces(betting);
+    pieces.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+    pieces.continue_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+    poker::solver::StreetBatchSolver whole(betting);
+    whole.run_frozen_iterations(4, poker::solver::Algorithm::CfrPlus);
+    check_raw_tables("serial continuation", pieces, whole);
+
+    poker::solver::StreetBatchSolver vanilla_a(betting);
+    poker::solver::StreetBatchSolver vanilla_b(betting);
+    vanilla_a.run_frozen_iterations(2, poker::solver::Algorithm::VanillaCfr);
+    vanilla_b.run_frozen_iterations(2, poker::solver::Algorithm::VanillaCfr);
+    check_raw_tables("serial vanilla turn", vanilla_a, vanilla_b);
+
+    const std::vector<int> flop = {card("Ah"), card("Kd"), card("7c")};
+    StreetConfig flop_betting = check_only(flop, "QcQd", "JcJd");
+    flop_betting.stack = 100;
+    flop_betting.oop_bet_sizes = {0.5};
+    flop_betting.ip_bet_sizes = {0.5};
+    flop_betting.oop_raise_sizes = {0.5};
+    flop_betting.ip_raise_sizes = {0.5};
+    flop_betting.allow_all_in = true;
+    flop_betting.max_raises = 1;
+    poker::solver::StreetBatchSolver flop_a(flop_betting);
+    poker::solver::StreetBatchSolver flop_b(flop_betting);
+    flop_a.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+    flop_b.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+    check_raw_tables("serial cfr+ flop", flop_a, flop_b);
+}
