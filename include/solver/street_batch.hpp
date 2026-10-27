@@ -17,10 +17,10 @@ struct StreetStrategyEntry
     double probability = 0.0;
 };
 
-// Same CFR and CFR+ update as CfrTrainer<StreetGame>, including per-deal
-// order, runout order, and the CFR+ floor between deals. The betting
-// structure is stored once and reused on every turn and river card.
-// StreetGame remains the reference.
+// Same pass contract as CfrTrainer<StreetGame>. Each pass freezes regret
+// matching, sums that player's counterfactual regret, then CFR+ floors only
+// that player. The sequential walk and the frozen combo walk both use this
+// contract. StreetGame remains the reference.
 class StreetBatchSolver
 {
 public:
@@ -31,10 +31,8 @@ public:
     StreetBatchSolver& operator=(const StreetBatchSolver&) = delete;
 
     SolveStats solve(const SolveConfig& config, Algorithm algorithm);
-    // One pass over the public tree with the strategy held fixed for that pass.
-    // Regrets are summed across combos and runouts, then applied. This is not
-    // the per-deal update used by run_iterations, and it will not reproduce
-    // that update's strategy at a small iteration count.
+    // One public-tree pass per player. The strategy is frozen for the pass and
+    // CFR+ floors only the player who just accumulated regret.
     SolveStats solve_frozen(const SolveConfig& config, Algorithm algorithm);
     void run_iterations(int count, Algorithm algorithm);
     void continue_iterations(int count, Algorithm algorithm);
@@ -56,6 +54,8 @@ public:
     std::size_t memory_bytes_estimate() const;
 
     std::vector<StreetStrategyEntry> average_strategy_entries() const;
+    bool set_regret(const std::string& infoset, const std::string& action, double value);
+    bool regret_value(const std::string& infoset, const std::string& action, double& value) const;
 
 private:
     struct Engine;

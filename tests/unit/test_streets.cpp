@@ -7,6 +7,7 @@
 #include "solver/street_batch.hpp"
 #include "solver/trainer.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -249,15 +250,20 @@ void expect_street_batch(
     CHECK_NEAR(batch.p2_best_response_utility(), stats.p2_best_response_utility, 1e-6);
 }
 
-double strategy_probability(
-    const std::vector<poker::solver::StreetStrategyEntry>& entries,
-    const char* player_and_hand,
-    const char* action_prefix,
-    bool facing_bet)
+std::string combo_name(const char* a, const char* b)
 {
-    double probability = -1.0;
-    const std::string hand(player_and_hand);
-    const std::string action(action_prefix);
+    return Range::combo_text(Range::combo_index(card(a), card(b)));
+}
+
+bool one_turn_action(
+    const std::vector<poker::solver::StreetStrategyEntry>& entries,
+    const std::string& hand,
+    const char* action_prefix,
+    bool facing_bet,
+    double& probability)
+{
+    int matches = 0;
+    probability = -1.0;
     for (const poker::solver::StreetStrategyEntry& entry : entries)
     {
         if (entry.infoset.find(hand) == std::string::npos)
@@ -273,18 +279,110 @@ double strategy_probability(
         {
             continue;
         }
-        if (entry.action.rfind(action, 0) != 0)
+        if (entry.action.rfind(action_prefix, 0) != 0)
         {
             continue;
         }
         probability = entry.probability;
+        ++matches;
     }
-    return probability;
+    return matches == 1;
 }
 
-// Kh Kd 7c 4s. OOP holds KcKs and 2c3d. IP holds AhAd. Pot 100, one hundred behind.
-// OOP can check or shove the turn. IP can fold or call. A check checks the river down.
-// The equilibrium bets every king, bluffs half the air, calls half the time, and is worth 25.
+std::vector<poker::solver::StreetStrategyEntry> trainer_entries(
+    const StreetGame& game,
+    const poker::solver::CfrTrainer<StreetGame>& trainer)
+{
+    const std::vector<double> strategy = trainer.average_strategy();
+    const std::vector<int> offset = poker::solver::action_offsets(game);
+    std::vector<poker::solver::StreetStrategyEntry> entries;
+    for (int infoset = 0; infoset < game.infoset_count(); ++infoset)
+    {
+        const int count = game.action_count(infoset);
+        const int base = offset[static_cast<std::size_t>(infoset)];
+        for (int action = 0; action < count; ++action)
+        {
+            poker::solver::StreetStrategyEntry entry;
+            entry.infoset = game.infoset_label(infoset);
+            entry.action = game.action_label(infoset, action);
+            entry.probability = strategy[static_cast<std::size_t>(base + action)];
+            entries.push_back(std::move(entry));
+        }
+    }
+    return entries;
+}
+
+void check_bluff_profile(
+    const std::vector<poker::solver::StreetStrategyEntry>& entries,
+    double value,
+    double gap,
+    const char* tag)
+{
+    double bet_nuts = -1.0;
+    double bet_air = -1.0;
+    double call = -1.0;
+    const bool nuts_found = one_turn_action(
+        entries, "OOP " + combo_name("Kc", "Ks"), "Bet", false, bet_nuts);
+    const bool air_found = one_turn_action(
+        entries, "OOP " + combo_name("2c", "3d"), "Bet", false, bet_air);
+    const bool call_found = one_turn_action(
+        entries, "IP " + combo_name("Ah", "Ad"), "Call", true, call);
+    CHECK(nuts_found);
+    CHECK(air_found);
+    CHECK(call_found);
+    const double ev = 50.0 * bet_nuts * call + 50.0 * bet_air * (1.0 - 2.0 * call);
+    const double br0 = 50.0 * std::max(call, 1.0 - call);
+    const double min_ev = 50.0 * std::min(bet_air, bet_nuts - bet_air);
+    const double nash = (br0 - ev) + (ev - min_ev);
+    std::cout << "REPORT turn_bluff_" << tag << "\n";
+    std::cout << "  bet_nuts " << bet_nuts << "\n";
+    std::cout << "  bet_air " << bet_air << "\n";
+    std::cout << "  call " << call << "\n";
+    std::cout << "  value " << value << "\n";
+    std::cout << "  formula_ev " << ev << "\n";
+    std::cout << "  formula_nash " << nash << "\n";
+    std::cout << "  nash_gap " << gap << "\n";
+    CHECK(bet_nuts >= 0.9999);
+    CHECK(std::abs(bet_air - 0.5) <= 0.001);
+    CHECK(std::abs(call - 0.5) <= 0.001);
+    CHECK(std::abs(value - 25.0) <= 0.01);
+    CHECK(gap <= 0.1);
+    CHECK(gap >= -1e-9);
+    CHECK_NEAR(value, ev, 1e-8);
+    CHECK_NEAR(gap, nash, 1e-8);
+}
+
+void expect_strategy_parity(
+    const std::vector<poker::solver::StreetStrategyEntry>& frozen,
+    const std::vector<poker::solver::StreetStrategyEntry>& reference)
+{
+    std::map<std::string, double> by_key;
+    for (const poker::solver::StreetStrategyEntry& entry : reference)
+    {
+        by_key[entry.infoset + "\n" + entry.action] = entry.probability;
+    }
+    CHECK(frozen.size() == reference.size());
+    for (const poker::solver::StreetStrategyEntry& entry : frozen)
+    {
+        const auto found = by_key.find(entry.infoset + "\n" + entry.action);
+        CHECK(found != by_key.end());
+        if (found == by_key.end())
+        {
+            std::cerr << "missing frozen strategy " << entry.infoset << " " << entry.action << "\n";
+            continue;
+        }
+        if (std::abs(found->second - entry.probability) > 1e-8)
+        {
+            std::cerr << "strategy " << entry.infoset << " " << entry.action
+                      << " reference " << found->second
+                      << " frozen " << entry.probability << "\n";
+        }
+        CHECK_NEAR(found->second, entry.probability, 1e-8);
+    }
+}
+
+// Kh Kd 7c 4s. OOP holds KsKc and 3d2c. IP holds AhAd. Pot 100, one hundred behind.
+// OOP checks or shoves the turn. IP folds or calls. A check checks the river down.
 void expect_turn_bluff_equilibrium()
 {
     StreetConfig config;
@@ -296,40 +394,179 @@ void expect_turn_bluff_equilibrium()
     config.oop_turn_bets = {1.0};
     config.allow_all_in = false;
     config.max_raises = 1;
+
+    {
+        poker::solver::StreetBatchSolver frozen(config);
+        frozen.run_frozen_iterations(3, poker::solver::Algorithm::CfrPlus);
+        const StreetGame game(config);
+        poker::solver::CfrTrainer<StreetGame> per_deal(game, poker::solver::Algorithm::CfrPlus);
+        per_deal.run_iterations(3);
+        expect_strategy_parity(frozen.average_strategy_entries(), trainer_entries(game, per_deal));
+    }
+
     poker::solver::StreetBatchSolver frozen(config);
     frozen.run_frozen_iterations(4000, poker::solver::Algorithm::CfrPlus);
-    const std::vector<poker::solver::StreetStrategyEntry> entries = frozen.average_strategy_entries();
-    const double bet_nuts = strategy_probability(entries, "OOP KcKs", "Bet", false);
-    const double bet_air = strategy_probability(entries, "OOP 2c3d", "Bet", false);
-    const double call = strategy_probability(entries, "IP AhAd", "Call", true);
-    const double value = frozen.expected_utility();
-    const double gap = frozen.nash_gap();
-    const double nuts_ev = 50.0 + bet_nuts * 100.0 * call;
-    const double air_ev = (1.0 - bet_air) * -50.0 + bet_air * (50.0 - 200.0 * call);
-    const double closed_form = 0.5 * nuts_ev + 0.5 * air_ev;
-    std::cout << "REPORT turn_bluff_equilibrium\n";
-    std::cout << "  bet_nuts " << bet_nuts << "\n";
-    std::cout << "  bet_air " << bet_air << "\n";
-    std::cout << "  call " << call << "\n";
-    std::cout << "  value " << value << "\n";
-    std::cout << "  closed_form " << closed_form << "\n";
-    std::cout << "  nash_gap " << gap << "\n";
-    CHECK(bet_nuts > 0.98);
-    CHECK(std::abs(bet_air - 0.5) < 0.05);
-    CHECK(std::abs(call - 0.5) < 0.05);
-    CHECK_NEAR(value, closed_form, 1e-6);
-    CHECK_NEAR(value, 25.0, 0.05);
-    CHECK(gap < 0.15);
-    CHECK(gap >= -1e-9);
+    check_bluff_profile(
+        frozen.average_strategy_entries(),
+        frozen.expected_utility(),
+        frozen.nash_gap(),
+        "frozen");
 
     const StreetGame game(config);
     poker::solver::CfrTrainer<StreetGame> per_deal(game, poker::solver::Algorithm::CfrPlus);
     per_deal.run_iterations(4000);
-    const poker::solver::SolveStats per_deal_stats = per_deal.evaluate();
-    std::cout << "  per_deal_value " << per_deal_stats.p1_expected_utility << "\n";
-    std::cout << "  per_deal_gap " << per_deal_stats.nash_gap << "\n";
-    CHECK_NEAR(per_deal_stats.p1_expected_utility, 25.0, 0.05);
-    CHECK(per_deal_stats.nash_gap < 0.15);
+    const poker::solver::SolveStats stats = per_deal.evaluate();
+    check_bluff_profile(
+        trainer_entries(game, per_deal),
+        stats.p1_expected_utility,
+        stats.nash_gap,
+        "per_deal");
+    expect_strategy_parity(frozen.average_strategy_entries(), trainer_entries(game, per_deal));
+}
+
+void expect_support_hole()
+{
+    const std::vector<int> board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+    StreetConfig config = check_only(board, "QcQd,JsJd", "QcTc,JhTh");
+    poker::solver::StreetBatchSolver solver(config);
+    const std::vector<poker::solver::StreetStrategyEntry> entries = solver.average_strategy_entries();
+    const std::string blocked = "OOP " + combo_name("Qc", "Qd");
+    const std::string live = "OOP " + combo_name("Js", "Jd");
+    bool blocked_on_jh = false;
+    bool live_on_jh = false;
+    for (const poker::solver::StreetStrategyEntry& entry : entries)
+    {
+        if (entry.infoset.find("river Jh") == std::string::npos)
+        {
+            continue;
+        }
+        if (entry.infoset.find(blocked) != std::string::npos)
+        {
+            blocked_on_jh = true;
+        }
+        if (entry.infoset.find(live) != std::string::npos)
+        {
+            live_on_jh = true;
+        }
+    }
+    CHECK(!blocked_on_jh);
+    CHECK(live_on_jh);
+    solver.run_frozen_iterations(1, poker::solver::Algorithm::VanillaCfr);
+    CHECK(std::isfinite(solver.expected_utility()));
+    CHECK(std::isfinite(solver.nash_gap()));
+}
+
+std::string action_named(
+    const std::vector<poker::solver::StreetStrategyEntry>& entries,
+    const std::string& infoset,
+    const char* prefix)
+{
+    for (const poker::solver::StreetStrategyEntry& entry : entries)
+    {
+        if (entry.infoset == infoset && entry.action.rfind(prefix, 0) == 0)
+        {
+            return entry.action;
+        }
+    }
+    std::cerr << "missing action " << infoset << " " << prefix << "\n";
+    for (const poker::solver::StreetStrategyEntry& entry : entries)
+    {
+        if (entry.infoset.find("AhAd") != std::string::npos
+            || entry.infoset.find("3d2c") != std::string::npos)
+        {
+            std::cerr << "  " << entry.infoset << " / " << entry.action << "\n";
+        }
+    }
+    return {};
+}
+
+// Turn shove has probability zero, so the river after a check has no strategic
+// reach. Its counterfactual bet regret is still nonzero, and its average stays
+// uniform because the average weight is own reach.
+void expect_zero_own_reach()
+{
+    StreetConfig config;
+    config.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
+    config.pot = 100;
+    config.stack = 100;
+    config.oop = Range::parse("AhAd");
+    config.ip = Range::parse("2c3d");
+    config.oop_turn_bets = {1.0};
+    config.oop_river_bets = {1.0};
+    config.allow_all_in = false;
+    config.max_raises = 1;
+    poker::solver::StreetBatchSolver solver(config);
+    const std::vector<poker::solver::StreetStrategyEntry> entries = solver.average_strategy_entries();
+    const std::string turn_open = "OOP " + combo_name("Ah", "Ad") + " | turn | open";
+    const std::string turn_bet = action_named(entries, turn_open, "Bet");
+    const std::string river = "OOP " + combo_name("Ah", "Ad") + " | river 9c | Check/Check";
+    const std::string river_bet = action_named(entries, river, "Bet");
+    CHECK(!turn_bet.empty());
+    CHECK(!river_bet.empty());
+    CHECK(solver.set_regret(turn_open, "Check", 0.0));
+    CHECK(solver.set_regret(turn_open, turn_bet, 1.0));
+    solver.continue_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+    double regret = 0.0;
+    CHECK(solver.regret_value(river, river_bet, regret));
+    CHECK(regret > 1.0);
+    double probability = -1.0;
+    int matches = 0;
+    for (const poker::solver::StreetStrategyEntry& entry : solver.average_strategy_entries())
+    {
+        if (entry.infoset == river && entry.action == river_bet)
+        {
+            probability = entry.probability;
+            ++matches;
+        }
+    }
+    CHECK(matches == 1);
+    CHECK_NEAR(probability, 0.5, 1e-12);
+}
+
+// IP never calls, so the river after a call has zero opponent reach. OOP's own
+// reach is positive, and the average still records the frozen river strategy.
+void expect_average_without_opponent_reach()
+{
+    StreetConfig config;
+    config.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
+    config.pot = 100;
+    config.stack = 200;
+    config.oop = Range::parse("AhAd");
+    config.ip = Range::parse("2c3d");
+    config.oop_turn_bets = {0.5};
+    config.oop_river_bets = {0.25};
+    config.allow_all_in = false;
+    config.max_raises = 1;
+    poker::solver::StreetBatchSolver solver(config);
+    const std::vector<poker::solver::StreetStrategyEntry> entries = solver.average_strategy_entries();
+    const std::string oop = "OOP " + combo_name("Ah", "Ad");
+    const std::string ip = "IP " + combo_name("2c", "3d");
+    const std::string turn_open = oop + " | turn | open";
+    const std::string turn_bet = action_named(entries, turn_open, "Bet");
+    const std::string facing = ip + " | turn | " + turn_bet;
+    const std::string river = oop + " | river 9c | " + turn_bet + "/Call";
+    const std::string river_bet = action_named(entries, river, "Bet");
+    CHECK(!turn_bet.empty());
+    CHECK(!river_bet.empty());
+    CHECK(solver.set_regret(turn_open, "Check", 0.0));
+    CHECK(solver.set_regret(turn_open, turn_bet, 1.0));
+    CHECK(solver.set_regret(facing, "Fold", 1.0));
+    CHECK(solver.set_regret(facing, "Call", 0.0));
+    CHECK(solver.set_regret(river, "Check", 0.0));
+    CHECK(solver.set_regret(river, river_bet, 1.0));
+    solver.continue_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+    double probability = -1.0;
+    int matches = 0;
+    for (const poker::solver::StreetStrategyEntry& entry : solver.average_strategy_entries())
+    {
+        if (entry.infoset == river && entry.action == river_bet)
+        {
+            probability = entry.probability;
+            ++matches;
+        }
+    }
+    CHECK(matches == 1);
+    CHECK_NEAR(probability, 1.0, 1e-12);
 }
 
 } // namespace
@@ -651,6 +888,9 @@ void run_street_tests()
     }
 
     run_tree_rule_tests(turn_board);
+    expect_support_hole();
+    expect_zero_own_reach();
+    expect_average_without_opponent_reach();
     expect_turn_bluff_equilibrium();
 }
 

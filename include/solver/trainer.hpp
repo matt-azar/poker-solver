@@ -376,26 +376,18 @@ public:
             ++iterations_completed_;
             if (algorithm_ == Algorithm::VanillaCfr)
             {
-                begin_pass();
-                cfr(game_.root(), 1.0, 1.0, 1.0, -1, 1.0);
-                end_pass();
+                run_pass(-1, 1.0);
             }
             else if (algorithm_ == Algorithm::LinearCfr)
             {
                 const double weight = static_cast<double>(iterations_completed_);
-                begin_pass();
-                cfr(game_.root(), 1.0, 1.0, 1.0, -1, weight);
-                end_pass();
+                run_pass(-1, weight);
             }
             else
             {
                 const double weight = static_cast<double>(iterations_completed_);
-                begin_pass();
-                cfr(game_.root(), 1.0, 1.0, 1.0, 0, weight);
-                end_pass();
-                begin_pass();
-                cfr(game_.root(), 1.0, 1.0, 1.0, 1, weight);
-                end_pass();
+                run_pass(0, weight);
+                run_pass(1, weight);
             }
         }
     }
@@ -493,6 +485,30 @@ public:
     Algorithm algorithm() const
     {
         return algorithm_;
+    }
+
+    // One frozen pass. updating_player < 0 updates both players and does not floor.
+    // CFR+ calls this twice: player 0, then player 1, refreshing the snapshot in between.
+    void run_pass(int updating_player, double weight)
+    {
+        begin_pass();
+        cfr(game_.root(), 1.0, 1.0, 1.0, updating_player, weight);
+        end_pass(updating_player);
+    }
+
+    void assign_regret(int infoset, int action, double value)
+    {
+        if (infoset < 0 || infoset >= game_.infoset_count())
+        {
+            throw std::invalid_argument("regret infoset is out of range");
+        }
+        const int count = game_.action_count(infoset);
+        if (action < 0 || action >= count)
+        {
+            throw std::invalid_argument("regret action is out of range");
+        }
+        const int base = offset_[static_cast<std::size_t>(infoset)];
+        regret_[static_cast<std::size_t>(base + action)] = value;
     }
 
 private:
@@ -600,16 +616,35 @@ private:
         }
     }
 
-    // Add the pass, then floor once. Flooring each history as it arrives is a
-    // different update from flooring the sum.
-    void end_pass()
+    // Add this player's summed regret, then floor that player once.
+    // Vanilla and linear pass updating_player < 0 and keep signed regrets.
+    // The other player's table is left unchanged.
+    void end_pass(int updating_player)
     {
-        for (std::size_t i = 0; i < regret_.size(); ++i)
+        const int infosets = game_.infoset_count();
+        for (int infoset = 0; infoset < infosets; ++infoset)
         {
-            regret_[i] += pass_delta_[i];
-            if (algorithm_ == Algorithm::CfrPlus && regret_[i] < 0.0)
+            const int actor = game_.acting_player(infoset);
+            const bool active = updating_player < 0 || actor == updating_player;
+            const bool floor_this = algorithm_ == Algorithm::CfrPlus && active && updating_player >= 0;
+            const int count = game_.action_count(infoset);
+            const int base = offset_[static_cast<std::size_t>(infoset)];
+            for (int action = 0; action < count; ++action)
             {
-                regret_[i] = 0.0;
+                const std::size_t index = static_cast<std::size_t>(base + action);
+                if (!active)
+                {
+                    if (pass_delta_[index] != 0.0)
+                    {
+                        throw std::logic_error("inactive player accumulated regret during this pass");
+                    }
+                    continue;
+                }
+                regret_[index] += pass_delta_[index];
+                if (floor_this && regret_[index] < 0.0)
+                {
+                    regret_[index] = 0.0;
+                }
             }
         }
     }

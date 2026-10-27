@@ -111,10 +111,228 @@ double enumerated_p2_best_response(const std::vector<double>& mixed)
     return best;
 }
 
+// Chance hides the outcome. One infoset chooses A or B.
+// The two outcomes cancel, so a CFR+ pass that floors the sum leaves both
+// regrets at zero. Flooring each history first would not.
+class CancelGame
+{
+public:
+    struct State
+    {
+        int stage = 0;
+        int outcome = 0;
+        int action = 0;
+    };
+
+    int infoset_count() const
+    {
+        return 1;
+    }
+
+    State root() const
+    {
+        return {};
+    }
+
+    bool is_chance(const State& state) const
+    {
+        return state.stage == 0;
+    }
+
+    bool is_terminal(const State& state) const
+    {
+        return state.stage == 2;
+    }
+
+    double p1_utility(const State& state) const
+    {
+        const double pay[2][2] = {{-2.0, 2.0}, {2.0, -2.0}};
+        return pay[state.outcome][state.action];
+    }
+
+    int chance_count(const State& state) const
+    {
+        return state.stage == 0 ? 2 : 0;
+    }
+
+    double chance_probability(const State&, int) const
+    {
+        return 0.5;
+    }
+
+    State child_chance(const State&, int outcome) const
+    {
+        State next;
+        next.stage = 1;
+        next.outcome = outcome;
+        return next;
+    }
+
+    int infoset(const State&) const
+    {
+        return 0;
+    }
+
+    int acting_player(int) const
+    {
+        return 0;
+    }
+
+    int action_count(int) const
+    {
+        return 2;
+    }
+
+    State child_action(const State& state, int action) const
+    {
+        State next = state;
+        next.stage = 2;
+        next.action = action;
+        return next;
+    }
+};
+
+// Action 0 at the root is terminal. Action 1 leads to a later infoset of the
+// same player, then a player-1 infoset sits on the way there.
+class ZeroReachGame
+{
+public:
+    struct State
+    {
+        int node = 0;
+    };
+
+    int infoset_count() const
+    {
+        return 3;
+    }
+
+    State root() const
+    {
+        return {};
+    }
+
+    bool is_chance(const State&) const
+    {
+        return false;
+    }
+
+    bool is_terminal(const State& state) const
+    {
+        return state.node == 1 || state.node == 4 || state.node == 5 || state.node == 6;
+    }
+
+    double p1_utility(const State& state) const
+    {
+        if (state.node == 1)
+        {
+            return 1.0;
+        }
+        if (state.node == 4)
+        {
+            return -1.0;
+        }
+        if (state.node == 5)
+        {
+            return 5.0;
+        }
+        if (state.node == 6)
+        {
+            return -5.0;
+        }
+        return 0.0;
+    }
+
+    int chance_count(const State&) const
+    {
+        return 0;
+    }
+
+    double chance_probability(const State&, int) const
+    {
+        return 0.0;
+    }
+
+    State child_chance(const State& state, int) const
+    {
+        return state;
+    }
+
+    int infoset(const State& state) const
+    {
+        if (state.node == 2)
+        {
+            return 2;
+        }
+        if (state.node == 3)
+        {
+            return 1;
+        }
+        return 0;
+    }
+
+    int acting_player(int infoset) const
+    {
+        return infoset == 2 ? 1 : 0;
+    }
+
+    int action_count(int) const
+    {
+        return 2;
+    }
+
+    State child_action(const State& state, int action) const
+    {
+        State next;
+        if (state.node == 0)
+        {
+            next.node = action == 0 ? 1 : 2;
+        }
+        else if (state.node == 2)
+        {
+            next.node = action == 0 ? 3 : 4;
+        }
+        else
+        {
+            next.node = action == 0 ? 5 : 6;
+        }
+        return next;
+    }
+};
+
+void expect_pass_contract()
+{
+    poker::solver::CfrTrainer<CancelGame> plus(CancelGame{}, poker::solver::Algorithm::CfrPlus);
+    plus.run_pass(0, 1.0);
+    CHECK_NEAR(plus.regrets()[0], 0.0, 1e-12);
+    CHECK_NEAR(plus.regrets()[1], 0.0, 1e-12);
+
+    poker::solver::CfrTrainer<CancelGame> vanilla(CancelGame{}, poker::solver::Algorithm::VanillaCfr);
+    vanilla.assign_regret(0, 0, -3.0);
+    vanilla.run_pass(-1, 1.0);
+    CHECK_NEAR(vanilla.regrets()[0], -3.0, 1e-12);
+
+    poker::solver::CfrTrainer<ZeroReachGame> reach(ZeroReachGame{}, poker::solver::Algorithm::CfrPlus);
+    reach.assign_regret(0, 0, 1.0);
+    reach.assign_regret(2, 0, -4.0);
+    reach.run_pass(0, 1.0);
+    const std::vector<double>& regrets = reach.regrets();
+    CHECK_NEAR(regrets[0], 1.0, 1e-12);
+    CHECK_NEAR(regrets[1], 0.0, 1e-12);
+    CHECK_NEAR(regrets[2], 2.5, 1e-12);
+    CHECK_NEAR(regrets[3], 0.0, 1e-12);
+    CHECK_NEAR(regrets[4], -4.0, 1e-12);
+    CHECK_NEAR(regrets[5], 0.0, 1e-12);
+    CHECK_NEAR(reach.strategy_sum()[2], 0.0, 1e-12);
+    CHECK_NEAR(reach.strategy_sum()[3], 0.0, 1e-12);
+}
+
 } // namespace
 
 void run_cfr_tests()
 {
+    expect_pass_contract();
+
     {
         double regrets[2] = {-1.0, -4.0};
         double current[2] = {0.0, 0.0};
