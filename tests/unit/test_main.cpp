@@ -9,6 +9,7 @@ int main()
     run_cfr_tests();
     run_leduc_tests();
     run_holdem_tests();
+    run_river_tests();
 
     std::cout << "passed=" << g_passed << " failed=" << g_failures << "\n";
     return g_failures == 0 ? 0 : 1;

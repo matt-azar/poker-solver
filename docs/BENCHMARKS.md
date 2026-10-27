@@ -31,3 +31,14 @@ Published solves put the equilibrium value near -0.0856. One thousand iterations
 ## Five-card evaluator
 
 Same machine and compiler. `poker_solver_tests` evaluates all `C(52, 5) = 2,598,960` five-card hands in two card orders, which is 5,197,920 calls to `evaluate`. Measured time: 0.5565473 seconds, about 9.340e6 evaluations per second. The check is that reordering a hand does not change its value. It is not a solve and it does not include six- or seven-card subset enumeration.
+
+## River
+
+Same machine and compiler. Command: `river_solver --config configs/river_default.json`, and the same tree with `--iterations 2000`. `AA` versus `KK` on `Ah Kd 7c 4s 2h`, pot 100, stack 200, bet sizes 0.5 and 1.0, the same fractions for raises, all-in allowed, and two raises. Nine deals, 42 information sets, 126 decision nodes, 225 terminals. Memory estimate 1996 bytes is the regret table, strategy-sum table, and offset table. Aces always beat kings, so the out-of-position value of a perfect defense is +50.
+
+| Algorithm | Iterations | Runtime (s) | Iterations/s | Player 0 value | Nash gap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| CFR+ | 500 | 0.0209566 | 2.386e4 | 50.0013916447 | 0.00145265025502 |
+| CFR+ | 2000 | 0.076925 | 2.600e4 | 50.0000871092 | 9.09267588227e-05 |
+
+The unit-test toy (aces or fives versus kings, one all-in) is smaller: 4 information sets, 6 decision nodes, memory estimate 132 bytes. CFR+ for 4,000 iterations took 0.003934 seconds, about 1.017e6 iterations per second, and reached value 24.9999102275 with Nash gap 0.196997733488. The same algorithm at 40 iterations had gap 2.45089917903. These times enumerate every hand pair on every iteration. They will not hold for wide ranges. See [RIVER.md](RIVER.md).

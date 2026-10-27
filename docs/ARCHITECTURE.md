@@ -2,7 +2,9 @@
 
 Phase 4 adds six-card Leduc Hold'em on that same trainer. The regret update was not rewritten for the second game. See [LEDUC.md](LEDUC.md).
 
-Phase 5 adds a 52-card deck, a seven-card evaluator, and 1,326-hand ranges under `poker::holdem`. Those types are not a game tree and they do not call the trainer. See [HOLDEM.md](HOLDEM.md).
+Phase 5 adds a 52-card deck, a seven-card evaluator, and 1,326-hand ranges under `poker::holdem`. See [HOLDEM.md](HOLDEM.md).
+
+Phase 6 adds `poker::river::RiverGame`, a heads-up no-limit river on that trainer. Chance deals private hands from the two ranges. The regret update was not rewritten. See [RIVER.md](RIVER.md).
 
 ## Modules
 
@@ -17,6 +19,8 @@ Phase 5 adds a 52-card deck, a seven-card evaluator, and 1,326-hand ranges under
 | `KuhnCfrTrainer` | Vanilla-CFR wrapper kept for the original Kuhn entry point |
 | `kuhn_solver`, `leduc_solver` | Command-line drivers over `CfrTrainer` |
 | `poker::holdem` | Card ids, seven-card hand values, range weights, joint hand distribution |
+| `poker::river::RiverGame` | One-street no-limit tree: fixed board, range chance, pot-fraction bets |
+| `river_solver` | Command-line driver over `CfrTrainer<RiverGame>` |
 
 `expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker. It is not a second CFR implementation.
 
@@ -50,7 +54,7 @@ The Nash gap is \(u_1(\mathrm{BR}_1,\bar\sigma_2)+u_2(\bar\sigma_1,\mathrm{BR}_2
 
 ## Design limits
 
-- The CFR engine is used for Kuhn and Leduc. Hold'em cards and ranges exist; a Hold'em betting tree does not.
+- The CFR engine is used for Kuhn, Leduc, and a heads-up river with a fixed list of bet sizes. It does not offer every legal chip amount.
 - Best response is exact for trees of Kuhn’s size. It is not a sampled exploitability estimate, and it will not be cheap on a Hold’em tree.
 - Convergence here is equilibrium of this finite Kuhn tree, not of unrestricted no-limit Hold’em.
 - At most 8 actions per information set until the scratch arrays are widened.

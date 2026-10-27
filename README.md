@@ -2,9 +2,9 @@
 
 Heads-up no-limit Texas Hold'em GTO solver under incremental development. The core is C++20. Python bindings and a graphical explorer are planned later; they are not required to build or run the solver.
 
-**Current milestone:** Phase 5 — 52-card deck, seven-card evaluator, and 1,326-hand ranges. See [docs/HOLDEM.md](docs/HOLDEM.md).
+**Current milestone:** Phase 6 — heads-up river solver on the shared CFR engine. See [docs/RIVER.md](docs/RIVER.md).
 
-This repository does **not** yet solve a Hold'em betting tree. Convergence on Kuhn Poker is exact-game equilibrium for that toy game, not unrestricted no-limit Hold'em.
+Convergence on Kuhn, Leduc, or a fixed-size river tree is an equilibrium of that abstract game, not of unrestricted no-limit Hold'em.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The CLIs are `build\Release\kuhn_solver.exe` and `build\Release\leduc_solver.exe` (multi-config generators), or the same names without the `Release` directory for single-config generators.
+The CLIs are `build\Release\kuhn_solver.exe`, `build\Release\leduc_solver.exe`, and `build\Release\river_solver.exe` (multi-config generators), or the same names without the `Release` directory for single-config generators.
 
 ## Build (Windows MinGW or WSL2 / Linux)
 
@@ -47,22 +47,23 @@ cmake --build build-debug
 ```sh
 kuhn_solver --iterations 200000 --algorithm cfr_plus --print-strategies
 leduc_solver --iterations 1000 --algorithm cfr_plus
-leduc_solver --iterations 1000 --max-raises 2 --max-raises-round2 2
+river_solver --config configs/river_default.json
+river_solver --iterations 2000 --algorithm cfr_plus
 ```
 
-Kuhn chance is the six equally likely deals. Leduc chance deals two private cards and, if the hand continues, one board card. Neither solver uses an RNG. Rules and chip sizes for Leduc are in [docs/LEDUC.md](docs/LEDUC.md).
+Kuhn chance is the six equally likely deals. Leduc chance deals two private cards and, if the hand continues, one board card. The river solver deals private hands from the two ranges on a fixed board. None of the solvers uses an RNG. Rules are in [docs/LEDUC.md](docs/LEDUC.md) and [docs/RIVER.md](docs/RIVER.md).
 
 For Kuhn, the expected value of the first player approaches `-1/18`. The reported **Nash gap** is NashConv `u1(BR1, σ2) + u2(σ1, BR2)`. That is not NashConv/2. Leduc has no closed form in this repository; the tests check that its Nash gap falls.
 
-Example flags: [`configs/kuhn_default.json`](configs/kuhn_default.json), [`configs/leduc_default.json`](configs/leduc_default.json).
+Example flags: [`configs/kuhn_default.json`](configs/kuhn_default.json), [`configs/leduc_default.json`](configs/leduc_default.json), [`configs/river_default.json`](configs/river_default.json).
 
 ## Layout
 
 ```text
-include/game/     Kuhn and Leduc rules
+include/game/     Kuhn, Leduc, and the river betting tree
 include/solver/   CFR, CFR+, regret matching, best response
 include/poker/    Hold'em cards, hand evaluator, 1,326-hand ranges
-src/              Implementations and the kuhn_solver / leduc_solver CLIs
+src/              Implementations and the CLIs
 tests/            In-repo harness + CTest
 docs/             Architecture, mathematics, testing, roadmap
 ```
@@ -71,6 +72,7 @@ Directories `python/` and `ui/` are placeholders for later phases.
 
 ## Documentation
 
+- [docs/RIVER.md](docs/RIVER.md)
 - [docs/HOLDEM.md](docs/HOLDEM.md)
 - [docs/LEDUC.md](docs/LEDUC.md)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

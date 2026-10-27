@@ -135,3 +135,13 @@ P(h_0, h_1) \propto w_0(h_0)\, w_1(h_1)
 \]
 
 when `h0`, `h1`, and the board are pairwise disjoint, and `P = 0` otherwise. The constant is the sum of those products. If that sum is zero, the distribution is empty rather than uniform. With both weights equal to 1 and an empty board, the sum is `1326 * C(50, 2) = 1326 * 1225`.
+
+## River subgame
+
+The river tree uses that joint distribution as its only chance node. Player 0 is out of position. Both players have the same stack behind, and the pot was posted equally.
+
+Player 0's terminal utility is `pot / 2` plus the opponent's river investment when player 0 wins or the opponent folds, and the negation of `pot / 2` plus player 0's own river investment when player 0 loses or folds. A split pot is worth 0 once the river investments match. Uncalled chips are not added on top of that.
+
+An opening fraction `f` bets `round(f * pot)` chips. A raise fraction `f` increases the bet by `round(f * pot_after_the_call)`. The minimum later raise equals the previous full bet or raise. Details and a solved toy are in [RIVER.md](RIVER.md).
+
+One checked case: pot 100, one all-in, aces or fives against kings. The equilibrium value for the out-of-position player is +25, with aces always betting, fives betting half the time, and kings calling half the time. CFR+ at 4,000 iterations reached a value of 24.9999102275. The Nash gap fell from 2.45089917903 at 40 iterations to 0.196997733488. That gap is NashConv for this bet-size tree, not for every legal chip size.

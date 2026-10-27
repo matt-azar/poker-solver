@@ -61,6 +61,19 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - Dead-card conditioning, ordered joint probabilities, and the uniform masses `1326 * 1225` and `1176 * 1081`
 - JSON array of 1,326 weights
 
+**River** (`tests/unit/test_river.cpp`)
+
+- Blocked ranges leave no deals and are rejected
+- More than eight actions at one decision is rejected; seven bet sizes plus check is accepted
+- All-in sizes are capped at the stack, and disallowed all-ins are omitted
+- Two opponent hands that share the actor's hand and the public line share an information set
+- Check-down with the nuts is worth exactly half the pot and has Nash gap 0
+- A board that neither hand improves is a tie worth 0
+- Fold, call, and min-raise accounting, including an uncalled raise
+- Weighted deals use the ordered joint distribution
+- On the aces-or-fives versus kings toy, 4,000 CFR+ iterations move the value to +25, the bet and call frequencies toward the known mixture, and the Nash gap below the 40-iteration gap
+- CFR+ regrets stay non-negative, and a second 40-iteration run matches
+
 The default Leduc tree has 936 decision information sets. Solver reports include iteration count, runtime, memory, player-0 value, Nash gap, and the information-set count.
 
 Convergence is never treated as sufficient by itself: payoff accounting and exact best response are tested separately.
