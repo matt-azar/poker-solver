@@ -6,6 +6,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <span>
 #include <string>
@@ -314,10 +316,9 @@ std::vector<Snapshot> converge_case(
                 }
                 if (match == nullptr)
                 {
-                    std::cout << "parity " << name << " threads " << threads
-                              << " iteration " << done << " skipped\n";
+                    throw std::runtime_error(
+                        "incomplete parity checkpoint " + std::to_string(done));
                 }
-                else
                 {
                     const double regret_delta = relative_delta(match->regret, regret);
                     const double sum_delta = relative_delta(match->strategy_sum, sum);
@@ -351,6 +352,212 @@ void set_checkpoint_limit(int limit)
     g_checkpoint_limit = limit;
 }
 
+struct PinHeader
+{
+    char magic[8] = {'P', 'K', 'R', 'P', 'A', 'R', '1', '\0'};
+    std::int32_t iteration = 0;
+    std::int32_t pad = 0;
+    std::int64_t regret_n = 0;
+    std::int64_t sum_n = 0;
+    double ev = 0.0;
+    double br0 = 0.0;
+    double br1 = 0.0;
+    double nash = 0.0;
+};
+
+std::filesystem::path pin_path(const std::filesystem::path& dir, const char* name, int iteration)
+{
+    return dir / (std::string(name) + "_" + std::to_string(iteration) + ".bin");
+}
+
+void write_pin(const std::filesystem::path& path, const Snapshot& shot)
+{
+    PinHeader header;
+    header.iteration = shot.iteration;
+    header.regret_n = static_cast<std::int64_t>(shot.regret.size());
+    header.sum_n = static_cast<std::int64_t>(shot.strategy_sum.size());
+    header.ev = shot.ev;
+    header.br0 = shot.br0;
+    header.br1 = shot.br1;
+    header.nash = shot.nash;
+    std::ofstream out(path, std::ios::binary);
+    require(static_cast<bool>(out), "could not write parity snapshot");
+    out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    out.write(reinterpret_cast<const char*>(shot.regret.data()),
+        static_cast<std::streamsize>(shot.regret.size() * sizeof(double)));
+    out.write(reinterpret_cast<const char*>(shot.strategy_sum.data()),
+        static_cast<std::streamsize>(shot.strategy_sum.size() * sizeof(double)));
+    require(static_cast<bool>(out), "parity snapshot write failed");
+}
+
+Snapshot read_pin(const std::filesystem::path& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    require(static_cast<bool>(in), "incomplete parity checkpoint: missing " + path.string());
+    PinHeader header;
+    in.read(reinterpret_cast<char*>(&header), sizeof(header));
+    require(static_cast<bool>(in), "incomplete parity checkpoint: short header");
+    require(std::string(header.magic) == "PKRPAR1", "parity snapshot magic");
+    Snapshot shot;
+    shot.iteration = header.iteration;
+    shot.ev = header.ev;
+    shot.br0 = header.br0;
+    shot.br1 = header.br1;
+    shot.nash = header.nash;
+    shot.regret.resize(static_cast<std::size_t>(header.regret_n));
+    shot.strategy_sum.resize(static_cast<std::size_t>(header.sum_n));
+    in.read(reinterpret_cast<char*>(shot.regret.data()),
+        static_cast<std::streamsize>(shot.regret.size() * sizeof(double)));
+    in.read(reinterpret_cast<char*>(shot.strategy_sum.data()),
+        static_cast<std::streamsize>(shot.strategy_sum.size() * sizeof(double)));
+    require(static_cast<bool>(in), "incomplete parity checkpoint: short tables");
+    return shot;
+}
+
+bool want_pin(int iteration, int target)
+{
+    return iteration == 3 || iteration == 30 || iteration == 100 || iteration == 300
+        || iteration == target;
+}
+
+void match_snapshot(
+    const char* name,
+    int threads,
+    int done,
+    double pot,
+    const Snapshot& shot,
+    std::span<const double> regret,
+    std::span<const double> sum,
+    const std::vector<Snapshot>& reference,
+    const char* label)
+{
+    const Snapshot* match = nullptr;
+    for (const Snapshot& item : reference)
+    {
+        if (item.iteration == done)
+        {
+            match = &item;
+            break;
+        }
+    }
+    if (match == nullptr)
+    {
+        throw std::runtime_error("incomplete parity checkpoint " + std::to_string(done));
+    }
+    const double regret_delta = relative_delta(match->regret, regret);
+    const double sum_delta = relative_delta(match->strategy_sum, sum);
+    std::cout << "parity_run " << name << " threads " << threads
+              << " iteration " << done
+              << " " << label
+              << " regret " << regret_delta
+              << " strategy_sum " << sum_delta
+              << "\n";
+    require(regret_delta <= 1e-12, "regret table drifted");
+    require(sum_delta <= 1e-12, "strategy sum drifted");
+    require(std::abs(shot.ev - match->ev) <= 1e-8 * pot, "EV drifted");
+    require(std::abs(shot.nash - match->nash) <= 1e-8 * pot, "NashConv drifted");
+}
+
+std::vector<Snapshot> parity_solve(
+    const char* name,
+    poker::streets::StreetConfig config,
+    int threads,
+    int target,
+    const std::vector<Snapshot>* reference,
+    const std::vector<Snapshot>* baseline)
+{
+    config.threads = threads;
+    poker::solver::StreetBatchSolver solver(config);
+    std::cout << "parity_run " << name << " threads " << threads
+              << " target " << target
+              << " construction " << solver.memory_report().construction_seconds
+              << " worker_setup " << solver.memory_report().worker_setup_seconds
+              << " allocated " << solver.memory_report().allocated_bytes
+              << " peak " << solver.memory_report().peak_allocated_bytes
+              << "\n";
+    std::vector<Snapshot> saved;
+    for (int done = 0; done < target; )
+    {
+        solver.continue_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+        ++done;
+        if (!want_pin(done, target))
+        {
+            continue;
+        }
+        Snapshot shot;
+        shot.iteration = done;
+        shot.ev = solver.expected_utility();
+        shot.br0 = solver.p1_best_response_utility();
+        shot.br1 = solver.p2_best_response_utility();
+        shot.nash = shot.br0 + shot.br1;
+        const auto regret = solver.regret_table();
+        const auto sum = solver.strategy_sum_table();
+        shot.regret.assign(regret.begin(), regret.end());
+        shot.strategy_sum.assign(sum.begin(), sum.end());
+        std::cout << "parity_run " << name << " threads " << threads
+                  << " iteration " << done
+                  << " ev " << shot.ev
+                  << " nash " << shot.nash
+                  << " train " << solver.memory_report().train_seconds
+                  << " cache_init " << solver.memory_report().cache_init_seconds
+                  << "\n";
+        const double pot = static_cast<double>(config.pot);
+        if (reference != nullptr)
+        {
+            match_snapshot(name, threads, done, pot, shot, regret, sum, *reference, "same");
+        }
+        if (baseline != nullptr)
+        {
+            match_snapshot(name, threads, done, pot, shot, regret, sum, *baseline, "baseline");
+        }
+        saved.push_back(std::move(shot));
+    }
+    require(saved.size() >= 1 && saved.back().iteration == target, "parity stopped early");
+    return saved;
+}
+
+void run_table_parity(int target, const std::filesystem::path& dir)
+{
+    const bool have_baseline = std::filesystem::exists(pin_path(dir, "turn_half_pot", target));
+    if (!have_baseline)
+    {
+        std::filesystem::create_directories(dir);
+    }
+    const auto one_case = [&](const char* name, poker::streets::StreetConfig config)
+    {
+        std::vector<Snapshot> baseline;
+        if (have_baseline)
+        {
+            for (int iteration : {3, 30, 100, 300})
+            {
+                if (iteration > target)
+                {
+                    continue;
+                }
+                const std::filesystem::path path = pin_path(dir, name, iteration);
+                if (!std::filesystem::exists(path))
+                {
+                    throw std::runtime_error("incomplete parity checkpoint: missing " + path.string());
+                }
+                baseline.push_back(read_pin(path));
+            }
+        }
+        const std::vector<Snapshot> one = parity_solve(
+            name, config, 1, target, nullptr, have_baseline ? &baseline : nullptr);
+        if (!have_baseline)
+        {
+            for (const Snapshot& shot : one)
+            {
+                write_pin(pin_path(dir, name, shot.iteration), shot);
+            }
+        }
+        parity_solve(name, config, 4, target, &one, have_baseline ? &baseline : nullptr);
+    };
+    one_case("turn_half_pot", turn_config());
+    one_case("flop_paired", flop_config());
+    std::cout << "parity_run complete target " << target << "\n";
+}
+
 void converge_against_one_thread(const char* name, poker::streets::StreetConfig config, const int* threads, int count)
 {
     const std::vector<Snapshot> reference = converge_case(name, config, 1, nullptr);
@@ -373,6 +580,15 @@ int main(int argc, char** argv)
         std::cout << std::unitbuf;
         std::cout.setf(std::ios::fmtflags(0), std::ios::floatfield);
         std::cout.precision(12);
+        if (argc > 1 && std::string(argv[1]) == "parity")
+        {
+            const int target = argc > 2 ? std::stoi(argv[2]) : 300;
+            const std::filesystem::path dir = argc > 3
+                ? std::filesystem::path(argv[3])
+                : std::filesystem::path("build/parity-baseline");
+            run_table_parity(target, dir);
+            return 0;
+        }
         const bool converge_only = argc > 1 && std::string(argv[1]) == "converge";
         if (argc > 2)
         {

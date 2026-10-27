@@ -240,7 +240,7 @@ An instrumented three-iteration pass, with the timers on, so the training times 
 | Flop | 1 | 3.0705686 | 1.3039796 | 0.805276 | 0.5619667 | 0 |
 | Flop | 4 | 1.4128643 | 2.0323213 | 1.206818 | 0.9212747 | 1.2413234 |
 
-On one thread the turn spends 57 percent of training in showdown, and 39 percent in the rank order inside that showdown. Decisions are 17 percent. The flop spends 42 percent in showdown and 18 percent in decisions. The instrumented four-thread training times are 1.99x and 2.17x the instrumented one-thread times.
+On one thread the turn spends 57 percent of the profiled showdown-inclusive training section in showdown, and the nested order section is 39 percent of that training figure. Decisions are 17 percent. The flop's showdown section is 42 percent and decisions are 18 percent. These profile fields are summed elapsed durations. Order time is already inside showdown time, so the columns are not a partition of the training wall. The instrumented four-thread training times are 1.99x and 2.17x the instrumented one-thread times.
 
 ### Same-build agreement
 
