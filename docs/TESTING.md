@@ -38,7 +38,18 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - Strategy lies near Kuhn’s equilibrium family (bet King at \(3\alpha\), call Queen at \(\alpha + 1/3\))
 - Nash gap after 200,000 vanilla iterations is smaller than after 200 iterations
 
-Each solver test prints iteration count, runtime, memory estimate, player-1 value, Nash gap, and the average strategy.
+**Leduc** (`tests/unit/test_leduc.cpp`)
+
+- Six, then five, then four equally likely remaining cards, with dealt cards removed
+- An information set depends on the acting player's card and the public history, not the opponent's card
+- Fold, showdown, pair, and tie utilities
+- Every terminal in the default tree is zero-sum and has a consistent pot
+- Vanilla CFR and CFR+ both update regrets through `CfrTrainer<LeducGame>`
+- CFR+ regrets stay non-negative
+- Nash gap after 200 iterations is smaller than after 20, for both algorithms
+- Two vanilla runs of 15 iterations match
+
+The default Leduc tree has 936 decision information sets. Solver reports include iteration count, runtime, memory, player-0 value, Nash gap, and the information-set count.
 
 Convergence is never treated as sufficient by itself: payoff accounting and exact best response are tested separately.
 

@@ -28,6 +28,10 @@ add_executable(kuhn_solver src/main.cpp)
 target_link_libraries(kuhn_solver PRIVATE poker_solver_core)
 poker_set_warnings(kuhn_solver)
 
+add_executable(leduc_solver src/leduc_main.cpp)
+target_link_libraries(leduc_solver PRIVATE poker_solver_core)
+poker_set_warnings(leduc_solver)
+
 enable_testing()
 
 add_executable(poker_solver_tests
@@ -35,6 +39,7 @@ add_executable(poker_solver_tests
     tests/unit/test_smoke.cpp
     tests/unit/test_kuhn.cpp
     tests/unit/test_cfr.cpp
+    tests/unit/test_leduc.cpp
 )
 target_include_directories(poker_solver_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"

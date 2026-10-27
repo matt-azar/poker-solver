@@ -1,0 +1,11 @@
+{
+  "game": "leduc",
+  "algorithm": "cfr_plus",
+  "iterations": 1000,
+  "max_raises_round1": 2,
+  "max_raises_round2": 2,
+  "round1_raise": 2,
+  "round2_raise": 4,
+  "ante": 1,
+  "notes": "Standard six-card Leduc. See docs/LEDUC.md. Chance is enumerated. No RNG."
+}

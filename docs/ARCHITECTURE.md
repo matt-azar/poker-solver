@@ -1,6 +1,6 @@
 # Architecture
 
-Phase 3 solves Kuhn Poker with one CFR engine that is not tied to Kuhn’s 12 information sets. Vanilla CFR and CFR+ are two settings of that engine. The core library still has no Python or UI dependency.
+Phase 4 adds six-card Leduc Hold'em on that same trainer. The regret update was not rewritten for the second game. See [LEDUC.md](LEDUC.md).
 
 ## Modules
 
@@ -11,8 +11,9 @@ Phase 3 solves Kuhn Poker with one CFR engine that is not tied to Kuhn’s 12 in
 | `poker::solver::CfrTrainer<Game>` | Vanilla CFR and CFR+ for any type that models the interface |
 | `regret_matching` | Current strategy from cumulative regret; reach-weighted accumulation |
 | `compute_best_response` | Exact best response from the game tree, deepest information set first |
+| `poker::leduc::LeducGame` | Six-card Leduc: two streets, one board card, fixed-limit bets |
 | `KuhnCfrTrainer` | Vanilla-CFR wrapper kept for the original Kuhn entry point |
-| `kuhn_solver` | CLI over `CfrTrainer<KuhnGame>` |
+| `kuhn_solver`, `leduc_solver` | Command-line drivers over `CfrTrainer` |
 
 `expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker. It is not a second CFR implementation.
 
@@ -46,7 +47,7 @@ The Nash gap is \(u_1(\mathrm{BR}_1,\bar\sigma_2)+u_2(\bar\sigma_1,\mathrm{BR}_2
 
 ## Design limits
 
-- The engine is ready for another two-player zero-sum tree. Leduc is not implemented yet.
+- The engine is used for Kuhn and Leduc. Hold’em is not implemented yet.
 - Best response is exact for trees of Kuhn’s size. It is not a sampled exploitability estimate, and it will not be cheap on a Hold’em tree.
 - Convergence here is equilibrium of this finite Kuhn tree, not of unrestricted no-limit Hold’em.
 - At most 8 actions per information set until the scratch arrays are widened.

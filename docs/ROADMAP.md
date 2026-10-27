@@ -5,7 +5,7 @@
 | 1. Repository, CMake, tests | Complete |
 | 2. Kuhn Poker + vanilla CFR | Complete |
 | 3. Generalized CFR engine + CFR+ | Complete |
-| 4. Leduc Hold’em | Not started |
+| 4. Leduc Hold’em | Complete |
 | 5. Hold’em cards, evaluator, ranges | Not started |
 | 6. Heads-up river solver | Not started |
 | 7. Performance optimization | Not started |
@@ -13,11 +13,10 @@
 | 9. Graphical strategy explorer | Not started |
 | 10. Full HUNL research | Not started |
 
-Phase 3 is complete when Kuhn’s value still approaches \(-1/18\) and the Nash gap still falls, for both vanilla CFR and CFR+, through `CfrTrainer` rather than a Kuhn-only traversal.
+Phase 4 is complete when Leduc runs on `CfrTrainer` without a change to the regret update, chance and card removal are tested, information sets hide the opponent's card, terminal payoffs sum to zero, and the Nash gap falls.
 
-## Next work (Phase 4)
+## Next work (Phase 5)
 
-- Six-card Leduc: two copies of three ranks, one private card, one public card, two fixed-limit betting rounds
-- Document antes, bet sizes, and the raise cap
-- Reuse `CfrTrainer` without changing the regret update
-- Check chance probabilities, card removal, hidden-card information sets, zero-sum terminals, and a shrinking Nash gap
+- Cards 0..51 with rank and suit
+- A seven-card hand evaluator, tested on wheels, full houses, flushes, and board ties
+- 1,326-hand ranges, dead-card removal, and the joint distribution `w1(h1) w2(h2)` on disjoint hands

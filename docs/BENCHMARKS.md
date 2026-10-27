@@ -16,3 +16,14 @@ Measured with `build\Release\kuhn_solver.exe` on Windows 10.0.26200, MSVC 19.40.
 \(-1/18\) is -0.0555555555556. Both algorithms are within \(10^{-3}\) of that value by 10,000 iterations. The Nash gap (NashConv, not NashConv/2) drops below \(10^{-3}\) at 200,000 vanilla iterations and at 100,000 CFR+ iterations.
 
 CFR+ walks the tree twice per iteration (one pass for each player), so its iteration rate is lower. At 200,000 iterations its Nash gap is smaller than vanilla CFR’s. On this 12-information-set game the wall-clock advantage is small. These times are not a prediction for Leduc or Hold’em.
+
+## Leduc
+
+Same machine and compiler. Command: `build\Release\leduc_solver.exe --algorithm <name> --iterations N`. Default rules: ante 1, round-1 raise 2, round-2 raise 4, two raises per street. 936 decision information sets. Memory estimate 38692 bytes is the regret table, strategy-sum table, and offset table.
+
+| Algorithm | Iterations | Runtime (s) | Iterations/s | Player 0 value | Nash gap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| vanilla CFR | 1000 | 0.7050075 | 1.418e3 | -0.0891149365429 | 0.0537834490152 |
+| CFR+ | 1000 | 1.3089424 | 7.640e2 | -0.0862957760813 | 0.0921236987006 |
+
+Published solves put the equilibrium value near -0.0856. One thousand iterations is not a full solve. At this length, CFR+ is closer in value and vanilla CFR has the smaller Nash gap. The unit tests check the gap against a 20-iteration run of the same algorithm, where both gaps are still above 0.15 and then fall. See [LEDUC.md](LEDUC.md).
