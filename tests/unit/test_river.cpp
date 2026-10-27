@@ -581,4 +581,18 @@ void run_river_tests()
     std::cout << "  nash_gap " << wide_stats.nash_gap << "\n";
     CHECK(wide_stats.nash_gap >= 0.0);
     CHECK(wide_batch.infoset_count() > 100);
+
+    poker::solver::RiverBatchSolver continued(polar_config());
+    continued.continue_iterations(40, poker::solver::Algorithm::CfrPlus);
+    poker::solver::RiverBatchSolver restarted(polar_config());
+    restarted.run_iterations(40, poker::solver::Algorithm::CfrPlus);
+    const std::vector<poker::solver::RiverStrategyEntry> left_entries = continued.average_strategy_entries();
+    const std::vector<poker::solver::RiverStrategyEntry> right_entries = restarted.average_strategy_entries();
+    CHECK(left_entries.size() == right_entries.size());
+    for (std::size_t i = 0; i < left_entries.size(); ++i)
+    {
+        CHECK(left_entries[i].infoset == right_entries[i].infoset);
+        CHECK(left_entries[i].action == right_entries[i].action);
+        CHECK_NEAR(left_entries[i].probability, right_entries[i].probability, 1e-12);
+    }
 }

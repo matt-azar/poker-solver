@@ -86,6 +86,9 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - A turn bet that is called, then a river bet that is folded, loses `pot / 2` plus the folding player's investment
 - On that same lock, 400 CFR+ iterations move the value to +50 and the Nash gap below the 20-iteration gap
 - Flop check-down matches the average over every turn and river
+- Continuing a fresh public-tree solver for 40 iterations matches a solver that was reset and run for those same 40 iterations
+
+The river explorer is not part of `poker_solver_tests`. It was checked by opening `http://127.0.0.1:8765`, solving the default aces-versus-kings river, and reading the value, the ace-combo mixes, and a later betting line.
 
 The default Leduc tree has 936 decision information sets. Solver reports include iteration count, runtime, memory, player-0 value, Nash gap, and the information-set count.
 

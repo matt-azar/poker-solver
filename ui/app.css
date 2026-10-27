@@ -1,0 +1,146 @@
+:root {
+  color: #1c1915;
+  background: #f4f0e6;
+  font-family: "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 1100px;
+  padding: 24px;
+}
+
+h1, h2 {
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+header p, #message {
+  color: #5c564c;
+}
+
+form, #summary, section {
+  margin-top: 20px;
+}
+
+form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+input, select, button {
+  font: inherit;
+  padding: 8px;
+}
+
+button {
+  background: #1c1915;
+  color: #f4f0e6;
+  border: 0;
+}
+
+button:disabled {
+  background: #b9b2a6;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+}
+
+#summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+#summary div {
+  background: white;
+  padding: 12px;
+}
+
+#summary span {
+  display: block;
+  color: #5c564c;
+  font-size: 12px;
+}
+
+.grids {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 22px repeat(13, 1fr);
+  gap: 2px;
+  background: white;
+  padding: 8px;
+}
+
+.cell, .axis {
+  min-height: 28px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.axis {
+  color: #5c564c;
+}
+
+.cell {
+  background: #ece7dc;
+  border: 0;
+  color: #1c1915;
+  padding: 0;
+}
+
+.cell.in-range {
+  cursor: pointer;
+}
+
+.cell.selected {
+  outline: 2px solid #1c1915;
+}
+
+#chart {
+  width: 100%;
+  height: 180px;
+  background: white;
+}
+
+#line, #lines {
+  background: white;
+  padding: 12px;
+}
+
+.line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid #ece7dc;
+  font-variant-numeric: tabular-nums;
+}
+
+.mix {
+  margin-bottom: 8px;
+}
+
+@media (max-width: 800px) {
+  form, #summary, .grids {
+    grid-template-columns: 1fr;
+  }
+}

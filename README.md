@@ -2,7 +2,7 @@
 
 Heads-up no-limit Texas Hold'em GTO solver under incremental development. The core is C++20. Python bindings and a graphical explorer are planned later; they are not required to build or run the solver.
 
-**Current milestone:** Phase 8 — turn and flop trees deal the later cards and bet each street. See [docs/STREETS.md](docs/STREETS.md).
+**Current milestone:** Phase 9 — a local page configures and inspects a river solve. The CFR core does not include the page. See [docs/EXPLORER.md](docs/EXPLORER.md).
 
 Convergence on Kuhn, Leduc, or a fixed-size river tree is an equilibrium of that abstract game, not of unrestricted no-limit Hold'em.
 
@@ -25,7 +25,7 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The CLIs are `build\Release\kuhn_solver.exe`, `build\Release\leduc_solver.exe`, `build\Release\river_solver.exe`, and `build\Release\street_solver.exe` (multi-config generators), or the same names without the `Release` directory for single-config generators.
+The CLIs are `build\Release\kuhn_solver.exe`, `build\Release\leduc_solver.exe`, `build\Release\river_solver.exe`, `build\Release\street_solver.exe`, and `build\Release\explorer.exe` (multi-config generators), or the same names without the `Release` directory for single-config generators.
 
 ## Build (Windows MinGW or WSL2 / Linux)
 
@@ -51,7 +51,10 @@ river_solver --config configs/river_default.json
 river_solver --iterations 2000 --algorithm cfr_plus
 street_solver
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1
+explorer
 ```
+
+`explorer` listens on `http://127.0.0.1:8765`.
 
 Kuhn chance is the six equally likely deals. Leduc chance deals two private cards and, if the hand continues, one board card. The river solver deals private hands from the two ranges on a fixed board. The street solver does that on a turn or a flop and then deals the missing board cards. None of the solvers uses an RNG. Rules are in [docs/LEDUC.md](docs/LEDUC.md), [docs/RIVER.md](docs/RIVER.md), and [docs/STREETS.md](docs/STREETS.md).
 
@@ -70,10 +73,11 @@ tests/            In-repo harness + CTest
 docs/             Architecture, mathematics, testing, roadmap
 ```
 
-Directories `python/` and `ui/` are placeholders for later phases.
+The `python/` directory is reserved for a later binding. `ui/` is the static river explorer.
 
 ## Documentation
 
+- [docs/EXPLORER.md](docs/EXPLORER.md)
 - [docs/STREETS.md](docs/STREETS.md)
 - [docs/RIVER.md](docs/RIVER.md)
 - [docs/HOLDEM.md](docs/HOLDEM.md)

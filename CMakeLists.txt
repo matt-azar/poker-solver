@@ -44,6 +44,13 @@ add_executable(street_solver src/street_main.cpp)
 target_link_libraries(street_solver PRIVATE poker_solver_core)
 poker_set_warnings(street_solver)
 
+add_executable(explorer src/explorer_main.cpp)
+target_link_libraries(explorer PRIVATE poker_solver_core)
+if(WIN32)
+    target_link_libraries(explorer PRIVATE ws2_32)
+endif()
+poker_set_warnings(explorer)
+
 enable_testing()
 
 add_executable(poker_solver_tests

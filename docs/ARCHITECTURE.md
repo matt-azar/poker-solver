@@ -10,6 +10,8 @@ Phase 7 adds `poker::solver::RiverBatchSolver`. It keeps one copy of the public 
 
 Phase 8 adds `poker::streets::StreetGame` for a turn or a flop. Later cards are chance nodes. The regret update was not rewritten. See [STREETS.md](STREETS.md).
 
+Phase 9 adds the `explorer` program and the static files in `ui/`. The program links the river solver and serves the page. Nothing under `include/` includes `ui/`. See [EXPLORER.md](EXPLORER.md).
+
 ## Modules
 
 | Module | Role |
@@ -28,6 +30,7 @@ Phase 8 adds `poker::streets::StreetGame` for a turn or a flop. Later cards are 
 | `river_solver` | Command-line driver; public tree by default, `--reference` for the enumerator |
 | `poker::streets::StreetGame` | Turn or flop tree: later cards are chance, same pot-fraction bets |
 | `street_solver` | Command-line driver over `CfrTrainer<StreetGame>` |
+| `explorer` | Local page. Serves `ui/` and calls `RiverBatchSolver` |
 
 `expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker. It is not a second CFR implementation.
 

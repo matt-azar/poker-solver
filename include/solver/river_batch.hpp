@@ -31,6 +31,8 @@ public:
 
     SolveStats solve(const SolveConfig& config, Algorithm algorithm);
     void run_iterations(int count, Algorithm algorithm);
+    // Adds iterations on top of the tables already stored. A new solver starts at zero.
+    void continue_iterations(int count, Algorithm algorithm);
 
     double expected_utility() const;
     double p1_best_response_utility() const;

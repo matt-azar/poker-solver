@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>River explorer</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header>
+    <h1>River explorer</h1>
+    <p>Local heads-up river. The solver is the C++ engine; this page only displays it.</p>
+  </header>
+  <form id="setup">
+    <label>Board <input id="board" value="Ah Kd 7c 4s 2h"></label>
+    <label>OOP range <input id="oop" value="AA"></label>
+    <label>IP range <input id="ip" value="KK"></label>
+    <label>Pot <input id="pot" type="number" value="100"></label>
+    <label>Stack <input id="stack" type="number" value="200"></label>
+    <label>OOP bets <input id="oop-bets" value="0.5, 1"></label>
+    <label>IP bets <input id="ip-bets" value="0.5, 1"></label>
+    <label>Iterations <input id="iterations" type="number" value="200"></label>
+    <label>Algorithm
+      <select id="algorithm">
+        <option value="cfr_plus" selected>CFR+</option>
+        <option value="vanilla">Vanilla CFR</option>
+      </select>
+    </label>
+    <div class="actions">
+      <button type="submit" id="run">Solve</button>
+      <button type="button" id="stop" disabled>Stop</button>
+      <button type="button" id="export" disabled>Export JSON</button>
+    </div>
+  </form>
+  <p id="message"></p>
+  <section id="summary" hidden>
+    <div><span>Pot</span><strong id="show-pot"></strong></div>
+    <div><span>Stack</span><strong id="show-stack"></strong></div>
+    <div><span>Board</span><strong id="show-board"></strong></div>
+    <div><span>Iterations</span><strong id="show-iterations"></strong></div>
+    <div><span>OOP value</span><strong id="show-value"></strong></div>
+    <div><span>Nash gap</span><strong id="show-gap"></strong></div>
+  </section>
+  <section id="chart-wrap" hidden>
+    <h2>Nash gap</h2>
+    <svg id="chart" viewBox="0 0 640 180"></svg>
+  </section>
+  <section class="grids">
+    <div>
+      <h2>OOP open</h2>
+      <div id="oop-grid" class="grid"></div>
+    </div>
+    <div>
+      <h2>IP open</h2>
+      <div id="ip-grid" class="grid"></div>
+    </div>
+  </section>
+  <section id="detail" hidden>
+    <h2 id="detail-title">Hand</h2>
+    <p id="detail-meta"></p>
+    <div id="detail-hands"></div>
+  </section>
+  <section id="tree" hidden>
+    <h2>Tree</h2>
+    <label>History
+      <select id="path"></select>
+    </label>
+    <div id="lines"></div>
+  </section>
+  <script src="/app.js"></script>
+</body>
+</html>

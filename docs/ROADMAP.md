@@ -10,13 +10,13 @@
 | 6. Heads-up river solver | Complete |
 | 7. Performance optimization | Complete |
 | 8. Turn and flop solving | Complete |
-| 9. Graphical strategy explorer | Not started |
+| 9. Graphical strategy explorer | Complete |
 | 10. Full HUNL research | Not started |
 
-Phase 8 is complete: `StreetGame` deals the river after a turn, or the turn and the river after a flop, and bets on each street. Information sets omit the opponent's cards and any card not yet dealt. Check-down values match an independent runout average. See [STREETS.md](STREETS.md).
+Phase 9 is complete: `explorer` serves `ui/` on `127.0.0.1` and solves a river with `RiverBatchSolver`. The page sets the spot, runs or stops, and shows the matrix, the line, and the Nash gap. The CFR core does not include the page. See [EXPLORER.md](EXPLORER.md).
 
-## Next work (Phase 9)
+## Next work (Phase 10)
 
-- A local strategy explorer that does not link into the CFR core
-- Configure a river (board, ranges, pot, stacks, bet sizes), run it, and stop it
-- Inspect the average strategy, per-hand frequencies, and the Nash gap from that UI
+- Write down why unrestricted no-limit Hold'em is not solved by the trees in this repository
+- Compare one additional CFR weighting, with a measured run, against vanilla CFR on a game already solved here
+- Leave abstraction, sampling, subgame solving, and storage as research notes rather than a claimed full solve
