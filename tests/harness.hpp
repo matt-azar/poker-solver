@@ -34,4 +34,5 @@ void run_street_tests();
 void run_street_memory_tests();
 void run_street_workspace_tests();
 void run_street_parallel_tests();
+void run_street_showdown_tests();
 void run_budget_tests();

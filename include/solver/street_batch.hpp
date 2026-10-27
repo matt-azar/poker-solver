@@ -56,9 +56,28 @@ struct StreetMemoryReport
     std::vector<StreetMemoryComponent> components;
 };
 
-// Scoped times from an enabled walk profile. Showdown includes the sort and
-// prefix work. Chance time is the caller's wait and reduction at the first
-// public-card split. These are measurements, not part of the solve.
+// Cached order and the production worse/better masses for one hero.
+// Endpoints are indexes in the opponent's rank order.
+struct ShowdownSample
+{
+    std::vector<int> hero_card0;
+    std::vector<int> hero_card1;
+    std::vector<int> opponent_card0;
+    std::vector<int> opponent_card1;
+    std::vector<std::uint32_t> hero_rank;
+    std::vector<std::uint32_t> opponent_rank;
+    std::vector<int> order;
+    std::vector<int> position;
+    std::vector<int> worse_end;
+    std::vector<int> better_begin;
+    std::vector<double> worse_mass;
+    std::vector<double> better_mass;
+};
+
+// Summed elapsed section durations from an enabled walk profile, not CPU time.
+// Order time is nested inside showdown time. Adding the fields does not
+// produce a wall-time total. Chance time is the caller's wait and reduction
+// at the first public-card split. These are measurements, not part of the solve.
 struct StreetWalkProfile
 {
     double order_seconds = 0.0;
@@ -126,6 +145,14 @@ public:
     StreetWalkProfile walk_profile() const;
     // One CFR+ pass for one player. Descendants of the other player stay put.
     void run_single_frozen_pass_for_test(int updating);
+    int indexed_hands_for_test(int player) const;
+    // Production showdown masses for one hero, plus the cached order and the
+    // opponent-order endpoints. opponent_amount is one weight per opponent hand.
+    ShowdownSample sample_showdown_for_test(
+        int hero,
+        int turn,
+        int river,
+        std::span<const double> opponent_amount) const;
     void arm_worker_failure_for_test();
     void arm_card_delay_for_test(int microseconds);
     bool set_regret(const std::string& infoset, const std::string& action, double value);

@@ -1563,3 +1563,264 @@ void run_street_parallel_tests()
         CHECK(solver.memory_report().thread_count == 4);
     }
 }
+
+void run_street_showdown_tests()
+{
+    const auto oracle = [](
+        const poker::solver::ShowdownSample& sample,
+        int turn,
+        int river,
+        std::span<const double> amount,
+        std::size_t hand,
+        double& worse,
+        double& better,
+        double& tied)
+    {
+        worse = 0.0;
+        better = 0.0;
+        tied = 0.0;
+        const int c0 = sample.hero_card0[hand];
+        const int c1 = sample.hero_card1[hand];
+        const bool hero_dead = (turn >= 0 && (c0 == turn || c1 == turn))
+            || (river >= 0 && (c0 == river || c1 == river));
+        if (hero_dead)
+        {
+            return;
+        }
+        for (std::size_t opp = 0; opp < amount.size(); ++opp)
+        {
+            const int a = sample.opponent_card0[opp];
+            const int b = sample.opponent_card1[opp];
+            if (a == c0 || a == c1 || b == c0 || b == c1)
+            {
+                continue;
+            }
+            if (turn >= 0 && (a == turn || b == turn))
+            {
+                continue;
+            }
+            if (river >= 0 && (a == river || b == river))
+            {
+                continue;
+            }
+            const double weight = amount[opp];
+            if (sample.opponent_rank[opp] < sample.hero_rank[hand])
+            {
+                worse += weight;
+            }
+            else if (sample.opponent_rank[opp] > sample.hero_rank[hand])
+            {
+                better += weight;
+            }
+            else
+            {
+                tied += weight;
+            }
+        }
+    };
+
+    const auto dense = [](
+        const poker::solver::ShowdownSample& sample,
+        std::span<const double> amount,
+        std::size_t hand) -> std::pair<double, double>
+    {
+        const int hands = static_cast<int>(sample.order.size());
+        const int span = hands + 1;
+        std::vector<double> prefix(static_cast<std::size_t>(span), 0.0);
+        std::vector<double> by_card(static_cast<std::size_t>(52 * span), 0.0);
+        for (int index = 0; index < hands; ++index)
+        {
+            const int opp = sample.order[static_cast<std::size_t>(index)];
+            const double piece = amount[static_cast<std::size_t>(opp)];
+            prefix[static_cast<std::size_t>(index + 1)] = prefix[static_cast<std::size_t>(index)] + piece;
+            for (int card_id = 0; card_id < 52; ++card_id)
+            {
+                by_card[static_cast<std::size_t>(card_id * span + index + 1)] =
+                    by_card[static_cast<std::size_t>(card_id * span + index)];
+            }
+            by_card[static_cast<std::size_t>(
+                sample.opponent_card0[static_cast<std::size_t>(opp)] * span + index + 1)] += piece;
+            by_card[static_cast<std::size_t>(
+                sample.opponent_card1[static_cast<std::size_t>(opp)] * span + index + 1)] += piece;
+        }
+        const auto slice = [&](int begin, int end) -> double
+        {
+            if (end <= begin)
+            {
+                return 0.0;
+            }
+            const int c0 = sample.hero_card0[hand];
+            const int c1 = sample.hero_card1[hand];
+            double sum = prefix[static_cast<std::size_t>(end)] - prefix[static_cast<std::size_t>(begin)];
+            sum -= by_card[static_cast<std::size_t>(c0 * span + end)]
+                - by_card[static_cast<std::size_t>(c0 * span + begin)];
+            sum -= by_card[static_cast<std::size_t>(c1 * span + end)]
+                - by_card[static_cast<std::size_t>(c1 * span + begin)];
+            const int same = [&]() -> int
+            {
+                for (int opp = 0; opp < hands; ++opp)
+                {
+                    if (sample.opponent_card0[static_cast<std::size_t>(opp)] == c0
+                        && sample.opponent_card1[static_cast<std::size_t>(opp)] == c1)
+                    {
+                        return opp;
+                    }
+                }
+                return -1;
+            }();
+            if (same >= 0 && amount[static_cast<std::size_t>(same)] != 0.0)
+            {
+                const int at = sample.position[static_cast<std::size_t>(same)];
+                if (at >= begin && at < end)
+                {
+                    sum += amount[static_cast<std::size_t>(same)];
+                }
+            }
+            return sum;
+        };
+        return {
+            slice(0, sample.worse_end[hand]),
+            slice(sample.better_begin[hand], hands),
+        };
+    };
+
+    const auto check = [&](poker::solver::StreetBatchSolver& solver, int hero, int turn, int river, std::vector<double> amount)
+    {
+        const poker::solver::ShowdownSample sample = solver.sample_showdown_for_test(hero, turn, river, amount);
+        CHECK(sample.order.size() == amount.size());
+        std::vector<int> expect(sample.order.size());
+        for (int index = 0; index < static_cast<int>(expect.size()); ++index)
+        {
+            expect[static_cast<std::size_t>(index)] = index;
+        }
+        std::sort(expect.begin(), expect.end(), [&](int left, int right)
+        {
+            const std::uint32_t left_rank = sample.opponent_rank[static_cast<std::size_t>(left)];
+            const std::uint32_t right_rank = sample.opponent_rank[static_cast<std::size_t>(right)];
+            if (left_rank != right_rank)
+            {
+                return left_rank < right_rank;
+            }
+            return left < right;
+        });
+        for (std::size_t index = 0; index < expect.size(); ++index)
+        {
+            CHECK(sample.order[index] == expect[index]);
+            CHECK(sample.position[static_cast<std::size_t>(sample.order[index])] == static_cast<int>(index));
+        }
+        std::vector<std::uint32_t> sorted(expect.size());
+        for (std::size_t index = 0; index < expect.size(); ++index)
+        {
+            sorted[index] = sample.opponent_rank[static_cast<std::size_t>(sample.order[index])];
+        }
+        for (std::size_t hand = 0; hand < sample.hero_rank.size(); ++hand)
+        {
+            const std::uint32_t rank = sample.hero_rank[hand];
+            const int lower = static_cast<int>(
+                std::lower_bound(sorted.begin(), sorted.end(), rank) - sorted.begin());
+            const int upper = static_cast<int>(
+                std::upper_bound(sorted.begin(), sorted.end(), rank) - sorted.begin());
+            CHECK(sample.worse_end[hand] == lower);
+            CHECK(sample.better_begin[hand] == upper);
+            double worse = 0.0;
+            double better = 0.0;
+            double tied = 0.0;
+            oracle(sample, turn, river, amount, hand, worse, better, tied);
+            const int c0 = sample.hero_card0[hand];
+            const int c1 = sample.hero_card1[hand];
+            const bool hero_dead = (turn >= 0 && (c0 == turn || c1 == turn))
+                || (river >= 0 && (c0 == river || c1 == river));
+            if (hero_dead)
+            {
+                CHECK(sample.worse_mass[hand] == 0.0);
+                CHECK(sample.better_mass[hand] == 0.0);
+                continue;
+            }
+            const bool opp_blocked = [&]()
+            {
+                for (std::size_t opp = 0; opp < amount.size(); ++opp)
+                {
+                    const int a = sample.opponent_card0[opp];
+                    const int b = sample.opponent_card1[opp];
+                    if ((turn >= 0 && (a == turn || b == turn)) || (river >= 0 && (a == river || b == river)))
+                    {
+                        if (amount[opp] != 0.0)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }();
+            if (!opp_blocked)
+            {
+                CHECK(sample.worse_mass[hand] == worse);
+                CHECK(sample.better_mass[hand] == better);
+            }
+            const std::pair<double, double> from_dense = dense(sample, amount, hand);
+            CHECK(sample.worse_mass[hand] == from_dense.first);
+            CHECK(sample.better_mass[hand] == from_dense.second);
+            (void)tied;
+        }
+    };
+
+    StreetConfig config;
+    config.board = {card("Ah"), card("Kd"), card("7c")};
+    config.pot = 100;
+    config.stack = 100;
+    config.oop = Range::parse("AcAd:1,KsKc:3,QcQd:2,5c5d:0.5");
+    config.ip = Range::parse("AcAd:0.5,QhQs:4,JhTh:1,2c3d:2");
+    config.allow_all_in = false;
+    config.max_raises = 0;
+    config.memory_mib = 256;
+    poker::solver::StreetBatchSolver solver(config);
+    const int turn = card("9c");
+    const int river = card("2h");
+    auto amounts_for = [&](int player)
+    {
+        const int hands = solver.indexed_hands_for_test(player);
+        std::vector<double> amount(static_cast<std::size_t>(hands), 0.0);
+        for (int hand = 0; hand < hands; ++hand)
+        {
+            amount[static_cast<std::size_t>(hand)] = hand % 3 == 0 ? 0.0 : 0.25 * static_cast<double>(hand + 1);
+        }
+        return amount;
+    };
+    check(solver, 0, turn, river, amounts_for(1));
+    check(solver, 1, turn, river, amounts_for(0));
+    check(solver, 0, turn, card("Qc"), amounts_for(1));
+    {
+        std::vector<double> zeros(static_cast<std::size_t>(solver.indexed_hands_for_test(1)), 0.0);
+        check(solver, 0, turn, river, zeros);
+    }
+
+    StreetConfig tied;
+    tied.board = {card("Ah"), card("Ad"), card("Ac")};
+    tied.pot = 100;
+    tied.stack = 100;
+    tied.oop = Range::parse("2c3d:1.5,5c6d:0.25");
+    tied.ip = Range::parse("7c8d:3,9cTc:1");
+    tied.allow_all_in = false;
+    tied.max_raises = 0;
+    tied.memory_mib = 256;
+    poker::solver::StreetBatchSolver tie_solver(tied);
+    const int tie_turn = card("As");
+    const int tie_river = card("Kd");
+    std::vector<double> tie_amount(static_cast<std::size_t>(tie_solver.indexed_hands_for_test(1)), 0.0);
+    CHECK(tie_amount.size() >= 2);
+    tie_amount[0] = 0.0;
+    tie_amount[1] = 1.5;
+    check(tie_solver, 0, tie_turn, tie_river, tie_amount);
+    const poker::solver::ShowdownSample tied_sample = tie_solver.sample_showdown_for_test(0, tie_turn, tie_river, tie_amount);
+    bool saw_tie_interval = false;
+    for (std::size_t hand = 0; hand < tied_sample.worse_mass.size(); ++hand)
+    {
+        CHECK(tied_sample.worse_mass[hand] == 0.0);
+        CHECK(tied_sample.better_mass[hand] == 0.0);
+        if (tied_sample.better_begin[hand] > tied_sample.worse_end[hand])
+        {
+            saw_tie_interval = true;
+        }
+    }
+    CHECK(saw_tie_interval);
+}
