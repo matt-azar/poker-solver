@@ -290,4 +290,41 @@ void run_cfr_tests()
     CHECK(stopped.nash_gap <= stop_config.nash_gap_threshold);
     CHECK(stopped.runtime_seconds > 0.0);
     CHECK(stopped.memory_bytes_estimate > 0);
+
+    poker::solver::SolveConfig linear_config;
+    linear_config.max_iterations = 2000;
+    poker::solver::CfrTrainer<poker::kuhn::KuhnGame> linear(
+        poker::kuhn::KuhnGame{}, poker::solver::Algorithm::LinearCfr);
+    const auto linear_stats = linear.solve(linear_config);
+    const auto linear_strategy = linear.average_strategy();
+    report_solve("linear_cfr", linear_stats, linear_strategy);
+    poker::solver::CfrTrainer<poker::kuhn::KuhnGame> linear_again(
+        poker::kuhn::KuhnGame{}, poker::solver::Algorithm::LinearCfr);
+    linear_again.solve(linear_config);
+    const auto linear_again_strategy = linear_again.average_strategy();
+    for (std::size_t i = 0; i < linear_strategy.size(); ++i)
+    {
+        CHECK_NEAR(linear_strategy[i], linear_again_strategy[i], 1e-12);
+    }
+    poker::solver::CfrTrainer<poker::kuhn::KuhnGame> vanilla_same(
+        poker::kuhn::KuhnGame{}, poker::solver::Algorithm::VanillaCfr);
+    vanilla_same.solve(linear_config);
+    const auto vanilla_same_strategy = vanilla_same.average_strategy();
+    double strategy_gap = 0.0;
+    for (std::size_t i = 0; i < linear_strategy.size(); ++i)
+    {
+        strategy_gap += std::abs(linear_strategy[i] - vanilla_same_strategy[i]);
+    }
+    CHECK(strategy_gap > 1e-3);
+    bool negative_regret = false;
+    for (double regret : linear.regrets())
+    {
+        if (regret < -1e-8)
+        {
+            negative_regret = true;
+        }
+    }
+    CHECK(negative_regret);
+    CHECK_NEAR(linear_stats.p1_expected_utility, -1.0 / 18.0, 0.01);
+    CHECK(linear_stats.nash_gap < 0.05);
 }

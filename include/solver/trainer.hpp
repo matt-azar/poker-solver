@@ -17,7 +17,10 @@ namespace poker::solver
 enum class Algorithm
 {
     VanillaCfr,
-    CfrPlus
+    CfrPlus,
+    // Regret and the average strategy are both weighted by the iteration index.
+    // Regrets are not floored. Both players update in one traversal.
+    LinearCfr
 };
 
 struct SolveConfig
@@ -49,7 +52,15 @@ struct BestResponseResult
 
 inline const char* algorithm_name(Algorithm algorithm)
 {
-    return algorithm == Algorithm::CfrPlus ? "cfr_plus" : "vanilla_cfr";
+    if (algorithm == Algorithm::CfrPlus)
+    {
+        return "cfr_plus";
+    }
+    if (algorithm == Algorithm::LinearCfr)
+    {
+        return "linear_cfr";
+    }
+    return "vanilla_cfr";
 }
 
 // Two-player zero-sum extensive game with perfect recall.
@@ -365,6 +376,11 @@ public:
             {
                 cfr(game_.root(), 1.0, 1.0, 1.0, -1, 1.0);
             }
+            else if (algorithm_ == Algorithm::LinearCfr)
+            {
+                const double weight = static_cast<double>(iterations_completed_);
+                cfr(game_.root(), 1.0, 1.0, 1.0, -1, weight);
+            }
             else
             {
                 const double weight = static_cast<double>(iterations_completed_);
@@ -552,7 +568,8 @@ private:
                     ? (action_utility[static_cast<std::size_t>(action)] - node_utility)
                     : (node_utility - action_utility[static_cast<std::size_t>(action)]);
                 double& cumulative = regret_[static_cast<std::size_t>(base + action)];
-                cumulative += opponent_reach * instantaneous;
+                const double regret_weight = algorithm_ == Algorithm::LinearCfr ? weight : 1.0;
+                cumulative += regret_weight * opponent_reach * instantaneous;
                 if (algorithm_ == Algorithm::CfrPlus && cumulative < 0.0)
                 {
                     cumulative = 0.0;

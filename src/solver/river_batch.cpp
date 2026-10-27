@@ -519,6 +519,10 @@ struct RiverBatchSolver::Engine
 
     void train_more(int count, Algorithm algorithm)
     {
+        if (algorithm != Algorithm::VanillaCfr && algorithm != Algorithm::CfrPlus)
+        {
+            throw std::invalid_argument("the public river tree implements vanilla CFR and CFR+");
+        }
         average_ready = false;
         for (int step = 0; step < count; ++step)
         {

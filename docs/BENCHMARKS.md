@@ -17,6 +17,17 @@ Measured with `build\Release\kuhn_solver.exe` on Windows 10.0.26200, MSVC 19.40.
 
 CFR+ walks the tree twice per iteration (one pass for each player), so its iteration rate is lower. At 200,000 iterations its Nash gap is smaller than vanilla CFR’s. On this 12-information-set game the wall-clock advantage is small. These times are not a prediction for Leduc or Hold’em.
 
+## Linear CFR on Kuhn
+
+Same machine and compiler, measured together. `kuhn_solver --iterations 10000 --algorithm <name>`. Linear CFR weights iteration `t` on both the new regret and the average strategy. It does not floor regrets. Both players update in one pass.
+
+| Algorithm | Iterations | Runtime (s) | Iterations/s | \(u_1\) | Nash gap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| vanilla CFR | 10000 | 0.0140505 | 7.117e5 | -0.0555306025757 | 0.00297179826288 |
+| linear CFR | 10000 | 0.0166417 | 6.009e5 | -0.0555625698041 | 0.00591309307769 |
+
+Linear CFR is closer to \(-1/18\) at this length. Vanilla CFR has the smaller Nash gap. The 10,000-iteration vanilla row above is an older run of the same value and the same gap. See [HUNL.md](HUNL.md).
+
 ## Leduc
 
 Same machine and compiler. Command: `build\Release\leduc_solver.exe --algorithm <name> --iterations N`. Default rules: ante 1, round-1 raise 2, round-2 raise 4, two raises per street. 936 decision information sets. Memory estimate 38692 bytes is the regret table, strategy-sum table, and offset table.

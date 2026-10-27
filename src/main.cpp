@@ -15,7 +15,7 @@ namespace
 void print_usage(const char* argv0)
 {
     std::cerr << "Usage: " << argv0
-              << " [--iterations N] [--algorithm vanilla|cfr_plus]"
+              << " [--iterations N] [--algorithm vanilla|cfr_plus|linear]"
               << " [--gap-threshold X] [--eval-interval N]"
               << " [--print-strategies] [--json PATH]\n";
 }
@@ -111,6 +111,10 @@ int main(int argc, char** argv)
             else if (name == "cfr_plus" || name == "cfr+")
             {
                 algorithm = poker::solver::Algorithm::CfrPlus;
+            }
+            else if (name == "linear" || name == "linear_cfr")
+            {
+                algorithm = poker::solver::Algorithm::LinearCfr;
             }
             else
             {

@@ -12,6 +12,8 @@ Phase 8 adds `poker::streets::StreetGame` for a turn or a flop. Later cards are 
 
 Phase 9 adds the `explorer` program and the static files in `ui/`. The program links the river solver and serves the page. Nothing under `include/` includes `ui/`. See [EXPLORER.md](EXPLORER.md).
 
+`Algorithm::LinearCfr` is a third weighting on `CfrTrainer`: iteration `t` scales both the new regret and the average strategy, and regrets are not floored. The public river tree does not implement it. See [HUNL.md](HUNL.md).
+
 ## Modules
 
 | Module | Role |
@@ -50,7 +52,7 @@ Kuhn’s only chance node is the root deal: six equally likely ordered hands. Af
 
 Regrets and strategy sums are two `std::vector<double>` blocks. An offset table maps each information set to its first action. Kuhn has 12 information sets and 2 actions each, so 24 doubles per table. The inner CFR recursion uses stack arrays and does not allocate. The action-count scratch limit is 8 per information set.
 
-CFR+ stores the same tables. Negative cumulative regrets are replaced by zero after each update, and the average strategy is weighted by the iteration index. See [MATHEMATICS.md](MATHEMATICS.md).
+CFR+ stores the same tables. Negative cumulative regrets are replaced by zero after each update, and the average strategy is weighted by the iteration index. Linear CFR weights both the new regret and the average strategy by the iteration index and does not floor. See [MATHEMATICS.md](MATHEMATICS.md).
 
 ## Best response
 

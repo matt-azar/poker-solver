@@ -90,6 +90,13 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 
 The river explorer is not part of `poker_solver_tests`. It was checked by opening `http://127.0.0.1:8765`, solving the default aces-versus-kings river, and reading the value, the ace-combo mixes, and a later betting line.
 
+**Linear CFR** (`tests/unit/test_cfr.cpp`)
+
+- 2,000 iterations on Kuhn are deterministic
+- The average strategy is not the vanilla strategy at the same iteration count
+- At least one cumulative regret is negative
+- The player-1 value is within 0.01 of `-1/18`, and the Nash gap is below 0.05
+
 The default Leduc tree has 936 decision information sets. Solver reports include iteration count, runtime, memory, player-0 value, Nash gap, and the information-set count.
 
 Convergence is never treated as sufficient by itself: payoff accounting and exact best response are tested separately.

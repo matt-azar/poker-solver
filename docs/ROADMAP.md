@@ -11,12 +11,6 @@
 | 7. Performance optimization | Complete |
 | 8. Turn and flop solving | Complete |
 | 9. Graphical strategy explorer | Complete |
-| 10. Full HUNL research | Not started |
+| 10. Full HUNL research | Complete |
 
-Phase 9 is complete: `explorer` serves `ui/` on `127.0.0.1` and solves a river with `RiverBatchSolver`. The page sets the spot, runs or stops, and shows the matrix, the line, and the Nash gap. The CFR core does not include the page. See [EXPLORER.md](EXPLORER.md).
-
-## Next work (Phase 10)
-
-- Write down why unrestricted no-limit Hold'em is not solved by the trees in this repository
-- Compare one additional CFR weighting, with a measured run, against vanilla CFR on a game already solved here
-- Leave abstraction, sampling, subgame solving, and storage as research notes rather than a claimed full solve
+Phase 10 is a limit, not a solve. Unrestricted heads-up no-limit Hold'em is not computed by these trees. [HUNL.md](HUNL.md) records that, and records one measured alternative weighting, linear CFR, on Kuhn.

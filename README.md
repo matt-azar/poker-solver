@@ -2,7 +2,7 @@
 
 Heads-up no-limit Texas Hold'em GTO solver under incremental development. The core is C++20. Python bindings and a graphical explorer are planned later; they are not required to build or run the solver.
 
-**Current milestone:** Phase 9 — a local page configures and inspects a river solve. The CFR core does not include the page. See [docs/EXPLORER.md](docs/EXPLORER.md).
+**Current milestone:** Phase 10 — the trees here are solved exactly, and unrestricted no-limit Hold'em is not. Linear CFR is measured on Kuhn. See [docs/HUNL.md](docs/HUNL.md).
 
 Convergence on Kuhn, Leduc, or a fixed-size river tree is an equilibrium of that abstract game, not of unrestricted no-limit Hold'em.
 
@@ -77,6 +77,7 @@ The `python/` directory is reserved for a later binding. `ui/` is the static riv
 
 ## Documentation
 
+- [docs/HUNL.md](docs/HUNL.md)
 - [docs/EXPLORER.md](docs/EXPLORER.md)
 - [docs/STREETS.md](docs/STREETS.md)
 - [docs/RIVER.md](docs/RIVER.md)

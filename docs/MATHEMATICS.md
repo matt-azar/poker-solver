@@ -101,6 +101,10 @@ A player’s average is accumulated only on that player’s traversal, so the tw
 
 On Kuhn, both algorithms approach \(V=-1/18\). At equal iteration counts CFR+ eventually reports a smaller Nash gap. Each CFR+ iteration walks the tree twice, so a smaller gap does not by itself mean a shorter wall-clock solve. Measured times are in [BENCHMARKS.md](BENCHMARKS.md).
 
+## Linear CFR
+
+Linear CFR uses the vanilla schedule: one traversal updates both players. On iteration \(t\), starting at 1, the new regret and the average-strategy contribution are both multiplied by \(t\). Regrets are not floored. At 10,000 Kuhn iterations it is closer to \(-1/18\) than vanilla CFR, and vanilla CFR has the smaller Nash gap. It is a weighting, not a solution of unrestricted Hold'em. See [HUNL.md](HUNL.md).
+
 ## Best response and Nash gap
 
 With \(\bar\sigma_{-i}\) frozen, player \(i\) has six infosets and two actions, so 64 pure plans. The solver evaluates all of them. Let
