@@ -1,6 +1,7 @@
 #include "game/river_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
+#include "solver/river_batch.hpp"
 #include "solver/trainer.hpp"
 
 #include <array>
@@ -27,7 +28,7 @@ void print_usage(const char* argv0)
               << " [--first oop|ip]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--gap-threshold X] [--eval-interval N]"
-              << " [--print-strategies]\n";
+              << " [--print-strategies] [--reference]\n";
 }
 
 std::vector<double> parse_sizes(const std::string& text)
@@ -238,6 +239,7 @@ struct Options
     double gap_threshold = -1.0;
     int eval_interval = 1000;
     bool print_strategies = false;
+    bool reference = false;
     bool have_oop_raises = false;
     bool have_ip_raises = false;
     poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
@@ -474,6 +476,10 @@ int main(int argc, char** argv)
             {
                 options.print_strategies = true;
             }
+            else if (arg == "--reference")
+            {
+                options.reference = true;
+            }
             else if (arg == "--help" || arg == "-h")
             {
                 print_usage(argv[0]);
@@ -499,49 +505,91 @@ int main(int argc, char** argv)
             throw std::invalid_argument("iterations must be positive");
         }
 
-        const poker::river::RiverGame game(options.config);
         poker::solver::SolveConfig solve_config;
         solve_config.max_iterations = options.iterations;
         solve_config.nash_gap_threshold = options.gap_threshold;
         solve_config.eval_interval = options.eval_interval;
-        poker::solver::CfrTrainer<poker::river::RiverGame> trainer(game, options.algorithm);
-        const poker::solver::SolveStats stats = trainer.solve(solve_config);
-        const std::vector<double> strategy = trainer.average_strategy();
 
         std::cout.setf(std::ios::fmtflags(0), std::ios::floatfield);
         std::cout.precision(12);
         std::cout << "game: river\n";
         std::cout << "board: " << board_text(options.config.board) << "\n";
         std::cout << "algorithm: " << poker::solver::algorithm_name(options.algorithm) << "\n";
+        std::cout << "traversal: " << (options.reference ? "reference_enumerator" : "public_tree") << "\n";
         std::cout << "pot: " << options.config.pot << "\n";
         std::cout << "stack: " << options.config.stack << "\n";
-        std::cout << "deals: " << game.deal_count() << "\n";
-        std::cout << "infosets: " << game.infoset_count() << "\n";
-        std::cout << "decision_nodes: " << game.decision_node_count() << "\n";
-        std::cout << "terminals: " << game.terminal_count() << "\n";
-        std::cout << "iterations: " << stats.iterations << "\n";
-        std::cout << "runtime_seconds: " << stats.runtime_seconds << "\n";
-        std::cout << "memory_bytes_estimate: " << stats.memory_bytes_estimate << "\n";
-        std::cout << "player0_expected_utility: " << stats.p1_expected_utility << "\n";
-        std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
-        std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
-        std::cout << "nash_gap: " << stats.nash_gap << "\n";
-        std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
-        std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
 
-        if (options.print_strategies)
+        if (options.reference)
         {
-            const auto offsets = poker::solver::action_offsets(game);
-            std::cout << "average_strategy:\n";
-            for (int infoset = 0; infoset < game.infoset_count(); ++infoset)
+            const poker::river::RiverGame game(options.config);
+            poker::solver::CfrTrainer<poker::river::RiverGame> trainer(game, options.algorithm);
+            const poker::solver::SolveStats stats = trainer.solve(solve_config);
+            const std::vector<double> strategy = trainer.average_strategy();
+            std::cout << "deals: " << game.deal_count() << "\n";
+            std::cout << "infosets: " << game.infoset_count() << "\n";
+            std::cout << "decision_nodes: " << game.decision_node_count() << "\n";
+            std::cout << "terminals: " << game.terminal_count() << "\n";
+            std::cout << "iterations: " << stats.iterations << "\n";
+            std::cout << "runtime_seconds: " << stats.runtime_seconds << "\n";
+            std::cout << "memory_bytes_estimate: " << stats.memory_bytes_estimate << "\n";
+            std::cout << "player0_expected_utility: " << stats.p1_expected_utility << "\n";
+            std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
+            std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
+            std::cout << "nash_gap: " << stats.nash_gap << "\n";
+            std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
+            std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
+            if (options.print_strategies)
             {
-                std::cout << "  " << game.infoset_label(infoset) << ":";
-                const int count = game.action_count(infoset);
-                const int base = offsets[static_cast<std::size_t>(infoset)];
-                for (int action = 0; action < count; ++action)
+                const auto offsets = poker::solver::action_offsets(game);
+                std::cout << "average_strategy:\n";
+                for (int infoset = 0; infoset < game.infoset_count(); ++infoset)
                 {
-                    std::cout << " " << game.action_label(infoset, action) << "="
-                              << strategy[static_cast<std::size_t>(base + action)];
+                    std::cout << "  " << game.infoset_label(infoset) << ":";
+                    const int count = game.action_count(infoset);
+                    const int base = offsets[static_cast<std::size_t>(infoset)];
+                    for (int action = 0; action < count; ++action)
+                    {
+                        std::cout << " " << game.action_label(infoset, action) << "="
+                                  << strategy[static_cast<std::size_t>(base + action)];
+                    }
+                    std::cout << "\n";
+                }
+            }
+        }
+        else
+        {
+            poker::solver::RiverBatchSolver batch(options.config);
+            const poker::solver::SolveStats stats = batch.solve(solve_config, options.algorithm);
+            std::cout << "deals: " << batch.deal_count() << "\n";
+            std::cout << "infosets: " << batch.infoset_count() << "\n";
+            std::cout << "decision_nodes: " << batch.deal_count() * batch.public_decisions() << "\n";
+            std::cout << "terminals: " << batch.deal_count() * batch.public_terminals() << "\n";
+            std::cout << "iterations: " << stats.iterations << "\n";
+            std::cout << "runtime_seconds: " << stats.runtime_seconds << "\n";
+            std::cout << "memory_bytes_estimate: " << stats.memory_bytes_estimate << "\n";
+            std::cout << "player0_expected_utility: " << stats.p1_expected_utility << "\n";
+            std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
+            std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
+            std::cout << "nash_gap: " << stats.nash_gap << "\n";
+            std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
+            std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
+            if (options.print_strategies)
+            {
+                const std::vector<poker::solver::RiverStrategyEntry> entries = batch.average_strategy_entries();
+                std::cout << "average_strategy:\n";
+                std::string current;
+                for (const poker::solver::RiverStrategyEntry& entry : entries)
+                {
+                    if (entry.infoset != current)
+                    {
+                        if (!current.empty())
+                        {
+                            std::cout << "\n";
+                        }
+                        std::cout << "  " << entry.infoset << ":";
+                        current = entry.infoset;
+                    }
+                    std::cout << " " << entry.action << "=" << entry.probability;
                 }
                 std::cout << "\n";
             }

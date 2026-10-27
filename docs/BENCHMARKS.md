@@ -42,3 +42,25 @@ Same machine and compiler. Command: `river_solver --config configs/river_default
 | CFR+ | 2000 | 0.076925 | 2.600e4 | 50.0000871092 | 9.09267588227e-05 |
 
 The unit-test toy (aces or fives versus kings, one all-in) is smaller: 4 information sets, 6 decision nodes, memory estimate 132 bytes. CFR+ for 4,000 iterations took 0.003934 seconds, about 1.017e6 iterations per second, and reached value 24.9999102275 with Nash gap 0.196997733488. The same algorithm at 40 iterations had gap 2.45089917903. These times enumerate every hand pair on every iteration. They will not hold for wide ranges. See [RIVER.md](RIVER.md).
+
+## Public-tree river traversal
+
+Same machine and compiler, measured after `RiverBatchSolver` became the default. `runtime_seconds` is the regret loop. Wall time is the process from start to exit, so it includes tree construction and the final best-response pass. The reference rows use `river_solver --reference`. The public-tree rows use the default traversal. Strategies on the unit-test trees matched the reference with a maximum absolute difference of 0. The values below are from these CLI runs.
+
+`22+` versus `22+`, same board, pot, stack, and sizes as the table above, 30 vanilla CFR iterations. 3,684 deals, 882 information sets, 51,576 decision nodes, 92,100 terminals.
+
+| Traversal | Runtime (s) | Iterations/s | Wall (s) | Memory | Player 0 value | Nash gap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| reference enumerator | 0.2478413 | 1.210e2 | 4.8578796 | 41836 | -3.77420762001 | 3.69437852445 |
+| public tree | 0.068139 | 4.403e2 | 0.1083287 | 38304 | -3.77420762001 | 3.69437852445 |
+
+The regret loop is about 3.64 times faster. Wall clock is about 45 times faster because best response is one walk of the 14-node public tree instead of one full-tree walk per information set. Public-tree memory is the regret table plus the strategy-sum table (`2 * entries * 8` bytes) and omits the reference offset table.
+
+The default `AA` versus `KK` tree, CFR+, 500 iterations:
+
+| Traversal | Runtime (s) | Iterations/s | Wall (s) | Memory | Player 0 value | Nash gap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| reference enumerator | 0.0195573 | 2.557e4 | 0.0380295 | 1996 | 50.0013916447 | 0.00145265025502 |
+| public tree | 0.0037114 | 1.347e5 | 0.0206115 | 1824 | 50.0013916447 | 0.00145265025505 |
+
+The regret loop is about 5.27 times faster. The Nash gaps differ by `3e-14`, from adding the same best-response values in a different order. The 500-iteration row in the previous table is an earlier reference-enumerator run of this same tree.

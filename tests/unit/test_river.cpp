@@ -3,10 +3,13 @@
 #include "game/river_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
+#include "solver/river_batch.hpp"
 #include "solver/trainer.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -167,6 +170,87 @@ RiverConfig polar_config()
     config.allow_all_in = false;
     config.max_raises = 1;
     return config;
+}
+
+void expect_same_strategy(
+    const RiverConfig& config,
+    poker::solver::Algorithm algorithm,
+    int iterations,
+    bool compare_gap)
+{
+    const RiverGame game(config);
+    poker::solver::CfrTrainer<RiverGame> trainer(game, algorithm);
+    const auto started = std::chrono::steady_clock::now();
+    trainer.run_iterations(iterations);
+    const double reference_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - started).count();
+
+    poker::solver::RiverBatchSolver batch(config);
+    const auto fast_started = std::chrono::steady_clock::now();
+    batch.run_iterations(iterations, algorithm);
+    const double fast_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - fast_started).count();
+
+    const std::vector<double> strategy = trainer.average_strategy();
+    const std::vector<int> offset = poker::solver::action_offsets(game);
+    std::map<std::string, double> reference;
+    for (int infoset = 0; infoset < game.infoset_count(); ++infoset)
+    {
+        const int count = game.action_count(infoset);
+        const int base = offset[static_cast<std::size_t>(infoset)];
+        for (int action = 0; action < count; ++action)
+        {
+            reference[game.infoset_label(infoset) + "\n" + game.action_label(infoset, action)] =
+                strategy[static_cast<std::size_t>(base + action)];
+        }
+    }
+
+    const std::vector<poker::solver::RiverStrategyEntry> entries = batch.average_strategy_entries();
+    CHECK(static_cast<int>(entries.size()) == static_cast<int>(reference.size()));
+    CHECK(batch.infoset_count() == game.infoset_count());
+    CHECK(batch.regret_entries() == static_cast<int>(strategy.size()));
+    CHECK(batch.deal_count() == game.deal_count());
+    CHECK(batch.deal_count() * batch.public_decisions() == game.decision_node_count());
+    CHECK(batch.deal_count() * batch.public_terminals() == game.terminal_count());
+    double worst = 0.0;
+    for (const poker::solver::RiverStrategyEntry& entry : entries)
+    {
+        const std::string key = entry.infoset + "\n" + entry.action;
+        const auto found = reference.find(key);
+        CHECK(found != reference.end());
+        if (found == reference.end())
+        {
+            std::cerr << "missing strategy " << key << "\n";
+            continue;
+        }
+        const double gap = std::abs(found->second - entry.probability);
+        if (gap > worst)
+        {
+            worst = gap;
+        }
+        if (gap > 1e-8)
+        {
+            std::cerr << "strategy " << key << " reference " << found->second
+                      << " batch " << entry.probability << "\n";
+        }
+        CHECK(gap <= 1e-8);
+    }
+    std::cout << "REPORT river_batch_match\n";
+    std::cout << "  iterations " << iterations << "\n";
+    std::cout << "  deals " << game.deal_count() << "\n";
+    std::cout << "  infosets " << game.infoset_count() << "\n";
+    std::cout << "  reference_cfr_seconds " << reference_seconds << "\n";
+    std::cout << "  batch_cfr_seconds " << fast_seconds << "\n";
+    std::cout << "  max_strategy_abs_diff " << worst << "\n";
+    if (!compare_gap)
+    {
+        return;
+    }
+    const poker::solver::SolveStats stats = trainer.evaluate();
+    CHECK_NEAR(batch.expected_utility(), stats.p1_expected_utility, 1e-8);
+    CHECK_NEAR(batch.nash_gap(), stats.nash_gap, 1e-6);
+    CHECK_NEAR(batch.p1_best_response_utility(), stats.p1_best_response_utility, 1e-6);
+    CHECK_NEAR(batch.p2_best_response_utility(), stats.p2_best_response_utility, 1e-6);
 }
 
 } // namespace
@@ -446,4 +530,55 @@ void run_river_tests()
     std::cout << "  player0_expected_utility " << vanilla_stats.p1_expected_utility << "\n";
     std::cout << "  nash_gap " << vanilla_stats.nash_gap << "\n";
     std::cout << "  runtime_seconds " << vanilla_stats.runtime_seconds << "\n";
+
+    RiverConfig full;
+    set_board(full);
+    full.pot = 100;
+    full.stack = 200;
+    full.oop = Range::parse("AA");
+    full.ip = Range::parse("KK");
+    full.oop_bet_sizes = {0.5, 1.0};
+    full.ip_bet_sizes = {0.5, 1.0};
+    full.oop_raise_sizes = {0.5, 1.0};
+    full.ip_raise_sizes = {0.5, 1.0};
+    full.allow_all_in = true;
+    full.max_raises = 2;
+    expect_same_strategy(full, poker::solver::Algorithm::VanillaCfr, 12, true);
+    expect_same_strategy(full, poker::solver::Algorithm::CfrPlus, 12, true);
+    expect_same_strategy(polar_config(), poker::solver::Algorithm::VanillaCfr, 40, true);
+    expect_same_strategy(polar_config(), poker::solver::Algorithm::CfrPlus, 40, true);
+
+    RiverConfig wide;
+    set_board(wide);
+    wide.pot = 100;
+    wide.stack = 200;
+    wide.oop = Range::parse("22+");
+    wide.ip = Range::parse("22+");
+    wide.oop_bet_sizes = {0.5, 1.0};
+    wide.ip_bet_sizes = {0.5, 1.0};
+    wide.oop_raise_sizes = {0.5, 1.0};
+    wide.ip_raise_sizes = {0.5, 1.0};
+    wide.allow_all_in = true;
+    wide.max_raises = 2;
+    expect_same_strategy(wide, poker::solver::Algorithm::VanillaCfr, 3, false);
+
+    poker::solver::RiverBatchSolver wide_batch(wide);
+    poker::solver::SolveConfig wide_solve;
+    wide_solve.max_iterations = 30;
+    const auto wide_started = std::chrono::steady_clock::now();
+    const poker::solver::SolveStats wide_stats = wide_batch.solve(
+        wide_solve, poker::solver::Algorithm::VanillaCfr);
+    const double wide_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - wide_started).count();
+    std::cout << "REPORT river_batch_22_plus_vanilla_30\n";
+    std::cout << "  deals " << wide_batch.deal_count() << "\n";
+    std::cout << "  infosets " << wide_batch.infoset_count() << "\n";
+    std::cout << "  public_decisions " << wide_batch.public_decisions() << "\n";
+    std::cout << "  runtime_seconds " << wide_stats.runtime_seconds << "\n";
+    std::cout << "  wall_seconds " << wide_seconds << "\n";
+    std::cout << "  memory_bytes_estimate " << wide_stats.memory_bytes_estimate << "\n";
+    std::cout << "  player0_expected_utility " << wide_stats.p1_expected_utility << "\n";
+    std::cout << "  nash_gap " << wide_stats.nash_gap << "\n";
+    CHECK(wide_stats.nash_gap >= 0.0);
+    CHECK(wide_batch.infoset_count() > 100);
 }

@@ -73,6 +73,8 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - Weighted deals use the ordered joint distribution
 - On the aces-or-fives versus kings toy, 4,000 CFR+ iterations move the value to +25, the bet and call frequencies toward the known mixture, and the Nash gap below the 40-iteration gap
 - CFR+ regrets stay non-negative, and a second 40-iteration run matches
+- On `AA` versus `KK` and on the all-in toy, the public-tree solver matches the reference strategy to `1e-8` and the value and Nash gap to `1e-6`, for both vanilla CFR and CFR+
+- On `22+` versus `22+`, three vanilla iterations match the reference strategy to `1e-8` without running the reference best response; a separate 30-iteration public-tree solve reports its own gap
 
 The default Leduc tree has 936 decision information sets. Solver reports include iteration count, runtime, memory, player-0 value, Nash gap, and the information-set count.
 

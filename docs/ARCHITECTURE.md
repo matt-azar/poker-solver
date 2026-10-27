@@ -6,6 +6,8 @@ Phase 5 adds a 52-card deck, a seven-card evaluator, and 1,326-hand ranges under
 
 Phase 6 adds `poker::river::RiverGame`, a heads-up no-limit river on that trainer. Chance deals private hands from the two ranges. The regret update was not rewritten. See [RIVER.md](RIVER.md).
 
+Phase 7 adds `poker::solver::RiverBatchSolver`. It keeps one copy of the public betting tree and runs the same regret update, in the same deal order, including the CFR+ floor between deals. Best response is one bottom-up pass: each river information set is one player, one private hand, and one public history, so that pass matches deepest-first best response on `RiverGame`. `CfrTrainer<RiverGame>` remains the reference and is selected with `--reference`. Kuhn and Leduc still use only `CfrTrainer`.
+
 ## Modules
 
 | Module | Role |
@@ -19,8 +21,9 @@ Phase 6 adds `poker::river::RiverGame`, a heads-up no-limit river on that traine
 | `KuhnCfrTrainer` | Vanilla-CFR wrapper kept for the original Kuhn entry point |
 | `kuhn_solver`, `leduc_solver` | Command-line drivers over `CfrTrainer` |
 | `poker::holdem` | Card ids, seven-card hand values, range weights, joint hand distribution |
-| `poker::river::RiverGame` | One-street no-limit tree: fixed board, range chance, pot-fraction bets |
-| `river_solver` | Command-line driver over `CfrTrainer<RiverGame>` |
+| `poker::river::RiverGame` | Reference river tree: one copy of every hand pair |
+| `poker::solver::RiverBatchSolver` | Same river rules on one public tree, with one-pass best response |
+| `river_solver` | Command-line driver; public tree by default, `--reference` for the enumerator |
 
 `expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker. It is not a second CFR implementation.
 
@@ -55,7 +58,7 @@ The Nash gap is \(u_1(\mathrm{BR}_1,\bar\sigma_2)+u_2(\bar\sigma_1,\mathrm{BR}_2
 ## Design limits
 
 - The CFR engine is used for Kuhn, Leduc, and a heads-up river with a fixed list of bet sizes. It does not offer every legal chip amount.
-- Best response is exact for trees of Kuhn’s size. It is not a sampled exploitability estimate, and it will not be cheap on a Hold’em tree.
+- Best response is exact. On Kuhn and Leduc, and on the reference river, it walks the tree once per information set. On the public river tree it is one bottom-up pass over the same actions. It is not a sampled exploitability estimate.
 - Convergence here is equilibrium of this finite Kuhn tree, not of unrestricted no-limit Hold’em.
 - At most 8 actions per information set until the scratch arrays are widened.
 

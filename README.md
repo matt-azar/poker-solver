@@ -2,7 +2,7 @@
 
 Heads-up no-limit Texas Hold'em GTO solver under incremental development. The core is C++20. Python bindings and a graphical explorer are planned later; they are not required to build or run the solver.
 
-**Current milestone:** Phase 6 — heads-up river solver on the shared CFR engine. See [docs/RIVER.md](docs/RIVER.md).
+**Current milestone:** Phase 7 — the river solver stores the betting tree once. `CfrTrainer<RiverGame>` remains the reference (`--reference`). See [docs/RIVER.md](docs/RIVER.md) and [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 Convergence on Kuhn, Leduc, or a fixed-size river tree is an equilibrium of that abstract game, not of unrestricted no-limit Hold'em.
 
@@ -61,7 +61,7 @@ Example flags: [`configs/kuhn_default.json`](configs/kuhn_default.json), [`confi
 
 ```text
 include/game/     Kuhn, Leduc, and the river betting tree
-include/solver/   CFR, CFR+, regret matching, best response
+include/solver/   CFR, CFR+, regret matching, best response, public river tree
 include/poker/    Hold'em cards, hand evaluator, 1,326-hand ranges
 src/              Implementations and the CLIs
 tests/            In-repo harness + CTest
