@@ -89,6 +89,8 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - A geometric size on the turn is the equal-fraction split of the stack, and the same size on the river is the rest of the stack
 - A turn size and a river size can differ, and two river cards offer the same actions
 - A bet that commits more than the all-in threshold becomes all-in, and a bet under the threshold stays as listed
+- The public turn and flop tree matches `StreetGame` action by action: check-down, a shared turn infoset with two hands, a different river size, and a geometric size. The largest strategy difference in those tests was 0
+- Continuing a fresh public street solver for 4 iterations matches one that was reset and run for those same 4 iterations
 - Continuing a fresh public-tree solver for 40 iterations matches a solver that was reset and run for those same 40 iterations
 
 The river explorer is not part of `poker_solver_tests`. It was checked by opening `http://127.0.0.1:8765`, solving the default aces-versus-kings river, and reading the value, the ace-combo mixes, and a later betting line.

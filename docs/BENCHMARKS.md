@@ -93,3 +93,14 @@ street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --ma
 ```
 
 1,980 terminals, 4,052 information sets, runtime 0.0090838 seconds, value 41.6161616162, Nash gap 0. That value is the average of every turn and river. See [STREETS.md](STREETS.md).
+
+## Public-tree turn traversal
+
+Measured together on the turn lock above, Release, this machine. Both solvers report the same value and the same Nash gap. The public tree has 8 betting decisions. Unit tests on check-down, two hands that share a turn infoset, per-street sizes, a geometric size, and a check-only flop all matched `StreetGame` with maximum strategy difference 0.
+
+| Solver | Runtime (s) | Wall (s) | Memory | Player 0 value | Nash gap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `StreetGame` (`--reference`) | 0.7483883 | 0.7867865 | 5904 | 50.0016209123 | 0.00187032418952 |
+| Public tree | 0.5261684 | 0.6829143 | 5008 | 50.0016209123 | 0.00187032418952 |
+
+About 1.42× on the regret loop. The public-tree memory figure omits the reference offset table, which is the 896-byte difference. The earlier 0.517897 s row is a different run of the reference solver and is not this comparison.

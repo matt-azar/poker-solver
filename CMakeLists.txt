@@ -19,6 +19,7 @@ add_library(poker_solver_core STATIC
     src/solver/cfr.cpp
     src/solver/best_response.cpp
     src/solver/river_batch.cpp
+    src/solver/street_batch.cpp
     src/poker/card.cpp
     src/poker/hand_eval.cpp
     src/poker/range.cpp

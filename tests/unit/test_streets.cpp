@@ -4,10 +4,13 @@
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
+#include "solver/street_batch.hpp"
 #include "solver/trainer.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <iostream>
+#include <map>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -162,6 +165,88 @@ StreetConfig check_only(const std::vector<int>& board, const char* oop, const ch
     config.max_raises = 0;
     config.allow_all_in = false;
     return config;
+}
+
+void expect_street_batch(
+    const StreetConfig& config,
+    poker::solver::Algorithm algorithm,
+    int iterations,
+    bool compare_gap)
+{
+    const StreetGame game(config);
+    poker::solver::CfrTrainer<StreetGame> trainer(game, algorithm);
+    const auto started = std::chrono::steady_clock::now();
+    trainer.run_iterations(iterations);
+    const double reference_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - started).count();
+
+    poker::solver::StreetBatchSolver batch(config);
+    const auto fast_started = std::chrono::steady_clock::now();
+    batch.run_iterations(iterations, algorithm);
+    const double fast_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - fast_started).count();
+
+    const std::vector<double> strategy = trainer.average_strategy();
+    const std::vector<int> offset = poker::solver::action_offsets(game);
+    std::map<std::string, double> reference;
+    for (int infoset = 0; infoset < game.infoset_count(); ++infoset)
+    {
+        const int count = game.action_count(infoset);
+        const int base = offset[static_cast<std::size_t>(infoset)];
+        for (int action = 0; action < count; ++action)
+        {
+            reference[game.infoset_label(infoset) + "\n" + game.action_label(infoset, action)] =
+                strategy[static_cast<std::size_t>(base + action)];
+        }
+    }
+
+    const std::vector<poker::solver::StreetStrategyEntry> entries = batch.average_strategy_entries();
+    CHECK(static_cast<int>(entries.size()) == static_cast<int>(reference.size()));
+    CHECK(batch.infoset_count() == game.infoset_count());
+    CHECK(batch.regret_entries() == static_cast<int>(strategy.size()));
+    CHECK(batch.deal_count() == game.deal_count());
+    CHECK(batch.decision_node_count() == game.decision_node_count());
+    CHECK(batch.terminal_count() == game.terminal_count());
+    double worst = 0.0;
+    for (const poker::solver::StreetStrategyEntry& entry : entries)
+    {
+        const std::string key = entry.infoset + "\n" + entry.action;
+        const auto found = reference.find(key);
+        CHECK(found != reference.end());
+        if (found == reference.end())
+        {
+            std::cerr << "missing strategy " << key << "\n";
+            continue;
+        }
+        const double gap = std::abs(found->second - entry.probability);
+        if (gap > worst)
+        {
+            worst = gap;
+        }
+        if (gap > 1e-8)
+        {
+            std::cerr << "strategy " << key << " reference " << found->second
+                      << " batch " << entry.probability << "\n";
+        }
+        CHECK(gap <= 1e-8);
+    }
+    std::cout << "REPORT street_batch_match\n";
+    std::cout << "  iterations " << iterations << "\n";
+    std::cout << "  deals " << game.deal_count() << "\n";
+    std::cout << "  infosets " << game.infoset_count() << "\n";
+    std::cout << "  public_decisions " << batch.public_decisions() << "\n";
+    std::cout << "  reference_cfr_seconds " << reference_seconds << "\n";
+    std::cout << "  batch_cfr_seconds " << fast_seconds << "\n";
+    std::cout << "  max_strategy_abs_diff " << worst << "\n";
+    if (!compare_gap)
+    {
+        return;
+    }
+    const poker::solver::SolveStats stats = trainer.evaluate();
+    CHECK_NEAR(batch.expected_utility(), stats.p1_expected_utility, 1e-8);
+    CHECK_NEAR(batch.nash_gap(), stats.nash_gap, 1e-6);
+    CHECK_NEAR(batch.p1_best_response_utility(), stats.p1_best_response_utility, 1e-6);
+    CHECK_NEAR(batch.p2_best_response_utility(), stats.p2_best_response_utility, 1e-6);
 }
 
 } // namespace
@@ -378,4 +463,61 @@ void run_street_tests()
     const StreetGame kept(threshold);
     const StreetGame::State kept_open = kept.child_chance(kept.root(), 0);
     CHECK(find_action(kept, kept_open, "Bet 50") >= 0);
+
+    expect_street_batch(check_only(turn_board, "QcQd", "JcJd"), poker::solver::Algorithm::VanillaCfr, 1, true);
+
+    StreetConfig shared_bets;
+    shared_bets.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
+    shared_bets.pot = 100;
+    shared_bets.stack = 100;
+    shared_bets.oop = Range::parse("AcAd,5c5d");
+    shared_bets.ip = Range::parse("2c3d");
+    shared_bets.oop_bet_sizes = {1.0};
+    shared_bets.ip_bet_sizes = {1.0};
+    shared_bets.allow_all_in = false;
+    shared_bets.max_raises = 1;
+    expect_street_batch(shared_bets, poker::solver::Algorithm::CfrPlus, 12, true);
+
+    StreetConfig per_street = shared_bets;
+    per_street.oop = Range::parse("AcAd");
+    per_street.oop_bet_sizes = {0.5};
+    per_street.oop_turn_bets = {0.5};
+    per_street.oop_river_bets = {1.0};
+    per_street.ip_bet_sizes = {};
+    per_street.stack = 400;
+    expect_street_batch(per_street, poker::solver::Algorithm::VanillaCfr, 3, false);
+
+    StreetConfig geo_match;
+    geo_match.board = turn_board;
+    geo_match.pot = 100;
+    geo_match.stack = 300;
+    geo_match.oop = Range::parse("QcQd");
+    geo_match.ip = Range::parse("JcJd");
+    geo_match.geometric = true;
+    geo_match.allow_all_in = true;
+    geo_match.max_raises = 1;
+    expect_street_batch(geo_match, poker::solver::Algorithm::VanillaCfr, 2, false);
+
+    const std::vector<int> flop_only = {card("Ah"), card("Kd"), card("7c")};
+    expect_street_batch(check_only(flop_only, "QcQd", "JcJd"), poker::solver::Algorithm::VanillaCfr, 1, true);
+
+    CHECK(throws_invalid([&] {
+        poker::solver::StreetBatchSolver batch(check_only(turn_board, "QcQd", "JcJd"));
+        batch.run_iterations(1, poker::solver::Algorithm::LinearCfr);
+    }));
+
+    poker::solver::StreetBatchSolver continued(shared_bets);
+    poker::solver::StreetBatchSolver restarted(shared_bets);
+    continued.continue_iterations(2, poker::solver::Algorithm::CfrPlus);
+    continued.continue_iterations(2, poker::solver::Algorithm::CfrPlus);
+    restarted.run_iterations(4, poker::solver::Algorithm::CfrPlus);
+    const std::vector<poker::solver::StreetStrategyEntry> left = continued.average_strategy_entries();
+    const std::vector<poker::solver::StreetStrategyEntry> right = restarted.average_strategy_entries();
+    CHECK(left.size() == right.size());
+    for (std::size_t i = 0; i < left.size(); ++i)
+    {
+        CHECK(left[i].infoset == right[i].infoset);
+        CHECK(left[i].action == right[i].action);
+        CHECK_NEAR(left[i].probability, right[i].probability, 1e-12);
+    }
 }

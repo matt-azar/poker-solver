@@ -30,8 +30,9 @@ Phase 9 adds the `explorer` program and the static files in `ui/`. The program l
 | `poker::river::RiverGame` | Reference river tree: one copy of every hand pair |
 | `poker::solver::RiverBatchSolver` | Same river rules on one public tree, with one-pass best response |
 | `river_solver` | Command-line driver; public tree by default, `--reference` for the enumerator |
-| `poker::streets::StreetGame` | Turn or flop tree: one betting structure for every runout, sizes per street |
-| `street_solver` | Command-line driver over `CfrTrainer<StreetGame>` |
+| `poker::streets::StreetGame` | Reference turn or flop tree: one betting structure for every runout, sizes per street |
+| `poker::solver::StreetBatchSolver` | Same streets on one public betting tree, reusing each line on every runout |
+| `street_solver` | Command-line driver; public tree by default, `--reference` for `StreetGame` |
 | `explorer` | Local page. Serves `ui/` and calls `RiverBatchSolver` |
 
 `expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker. It is not a second CFR implementation.

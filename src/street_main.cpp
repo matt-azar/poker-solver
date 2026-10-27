@@ -1,6 +1,7 @@
 #include "game/street_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
+#include "solver/street_batch.hpp"
 #include "solver/trainer.hpp"
 
 #include <cstdlib>
@@ -24,7 +25,7 @@ void print_usage(const char* argv0)
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
-              << " [--accuracy 0.05]\n";
+              << " [--accuracy 0.05] [--reference]\n";
 }
 
 std::vector<double> parse_sizes(const std::string& text)
@@ -106,6 +107,7 @@ int main(int argc, char** argv)
         config.max_raises = 1;
         int iterations = 400;
         double accuracy = -1.0;
+        bool reference = false;
         poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
 
         for (int i = 1; i < argc; ++i)
@@ -183,6 +185,10 @@ int main(int argc, char** argv)
             {
                 accuracy = std::atof(need("--accuracy"));
             }
+            else if (arg == "--reference")
+            {
+                reference = true;
+            }
             else if (arg == "--all-in")
             {
                 config.allow_all_in = true;
@@ -236,7 +242,6 @@ int main(int argc, char** argv)
             config.ip_raise_sizes = config.ip_bet_sizes;
         }
 
-        const poker::streets::StreetGame game(config);
         poker::solver::SolveConfig solve_config;
         solve_config.max_iterations = iterations;
         if (accuracy >= 0.0)
@@ -244,20 +249,51 @@ int main(int argc, char** argv)
             solve_config.nash_gap_threshold = accuracy * static_cast<double>(config.pot);
             solve_config.eval_interval = 20;
         }
-        poker::solver::CfrTrainer<poker::streets::StreetGame> trainer(game, algorithm);
-        const poker::solver::SolveStats stats = trainer.solve(solve_config);
+        poker::solver::SolveStats stats;
+        int deals = 0;
+        int infosets = 0;
+        int decision_nodes = 0;
+        int terminals = 0;
+        int public_decisions = 0;
+        const char* solver_name = "public";
+        if (reference)
+        {
+            const poker::streets::StreetGame game(config);
+            poker::solver::CfrTrainer<poker::streets::StreetGame> trainer(game, algorithm);
+            stats = trainer.solve(solve_config);
+            deals = game.deal_count();
+            infosets = game.infoset_count();
+            decision_nodes = game.decision_node_count();
+            terminals = game.terminal_count();
+            solver_name = "reference";
+        }
+        else
+        {
+            poker::solver::StreetBatchSolver solver(config);
+            stats = solver.solve(solve_config, algorithm);
+            deals = solver.deal_count();
+            infosets = solver.infoset_count();
+            decision_nodes = solver.decision_node_count();
+            terminals = solver.terminal_count();
+            public_decisions = solver.public_decisions();
+        }
 
         std::cout.setf(std::ios::fmtflags(0), std::ios::floatfield);
         std::cout.precision(12);
         std::cout << "game: " << (config.board.size() == 3 ? "flop" : "turn") << "\n";
+        std::cout << "solver: " << solver_name << "\n";
         std::cout << "board: " << board_text(config.board) << "\n";
         std::cout << "algorithm: " << poker::solver::algorithm_name(algorithm) << "\n";
         std::cout << "pot: " << config.pot << "\n";
         std::cout << "stack: " << config.stack << "\n";
-        std::cout << "deals: " << game.deal_count() << "\n";
-        std::cout << "infosets: " << game.infoset_count() << "\n";
-        std::cout << "decision_nodes: " << game.decision_node_count() << "\n";
-        std::cout << "terminals: " << game.terminal_count() << "\n";
+        std::cout << "deals: " << deals << "\n";
+        std::cout << "infosets: " << infosets << "\n";
+        if (public_decisions > 0)
+        {
+            std::cout << "public_decisions: " << public_decisions << "\n";
+        }
+        std::cout << "decision_nodes: " << decision_nodes << "\n";
+        std::cout << "terminals: " << terminals << "\n";
         std::cout << "iterations: " << stats.iterations << "\n";
         std::cout << "runtime_seconds: " << stats.runtime_seconds << "\n";
         std::cout << "memory_bytes_estimate: " << stats.memory_bytes_estimate << "\n";

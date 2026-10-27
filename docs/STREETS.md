@@ -1,6 +1,6 @@
 # Turn and flop
 
-`StreetGame` is a heads-up no-limit tree on a 4-card turn or a 3-card flop. It uses `CfrTrainer` unchanged. `RiverGame` is still the one-street river. There is no hand bucketing and no RNG.
+`StreetGame` is a heads-up no-limit tree on a 4-card turn or a 3-card flop. `StreetBatchSolver` stores that betting structure once and reuses it on every runout. It applies the same CFR and CFR+ update as `CfrTrainer<StreetGame>`, in the same deal order and the same runout order. `street_solver` uses the public tree unless `--reference` is set. `RiverGame` is still the one-street river. There is no hand bucketing and no RNG.
 
 Chance deals an ordered hand pair from the joint distribution on the starting board, then the players bet. When the street ends without a fold, the next card is dealt uniformly from the cards that are not on the board and not in either hand. A turn tree deals the river. A flop tree deals the turn and then the river. A fold ends the hand. Chips already invested stay in the pot, and the next street starts with no bet to call.
 
@@ -40,4 +40,4 @@ street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --ma
 street_solver --board Ah,Kd,7c,4s --pot 100 --stack 300 --oop-range QcQd --ip-range JcJd --geometric --iterations 200
 ```
 
-The default is the turn lock above. The reported Nash gap is NashConv, not NashConv/2.
+The default is the turn lock above, solved on the public tree. `--reference` solves the same spot by walking `StreetGame`. The reported Nash gap is NashConv, not NashConv/2.
