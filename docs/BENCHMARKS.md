@@ -64,3 +64,21 @@ The default `AA` versus `KK` tree, CFR+, 500 iterations:
 | public tree | 0.0037114 | 1.347e5 | 0.0206115 | 1824 | 50.0013916447 | 0.00145265025505 |
 
 The regret loop is about 5.27 times faster. The Nash gaps differ by `3e-14`, from adding the same best-response values in a different order. The 500-iteration row in the previous table is an earlier reference-enumerator run of this same tree.
+
+## Turn and flop
+
+Same machine and compiler. `street_solver` with no arguments is `AhAd` versus `2c3d` on `Kh Kd 7c 4s`, pot 100, stack 100, one pot-sized bet, CFR+, 400 iterations. 1 deal, 223 information sets, 223 decision nodes, 177 terminals. Memory estimate 5904 bytes.
+
+| Algorithm | Iterations | Runtime (s) | Iterations/s | Player 0 value | Nash gap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| CFR+ | 400 | 0.517897 | 7.724e2 | 50.0016209123 | 0.00187032418952 |
+
+The equilibrium value of this tree is +50, because the out-of-position hand wins every river and a fold wins the same half-pot as a check-down. The Nash gap at 20 iterations, from the unit test, was 0.714285714286.
+
+Check-only queens versus jacks on the flop `Ah Kd 7c`, one vanilla iteration:
+
+```sh
+street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1 --algorithm vanilla
+```
+
+1,980 terminals, 4,052 information sets, runtime 0.0090838 seconds, value 41.6161616162, Nash gap 0. That value is the average of every turn and river. See [STREETS.md](STREETS.md).

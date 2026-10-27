@@ -147,3 +147,9 @@ An opening fraction `f` bets `round(f * pot)` chips. A raise fraction `f` increa
 `RiverBatchSolver` does not change that update. Deals are visited in joint-distribution order, and each deal updates regrets before the next deal starts. CFR+ still floors a regret at zero before the next deal. The average strategy is still accumulated once per visit, with weight `1` or the iteration index times the acting player's reach, and chance is not part of that weight. Because a river information set is exactly one private hand plus one public history, a single bottom-up pass that maximizes player 0's chips and minimizes them for player 1, breaking ties toward the lower action index, is the same best response as the deepest-first walk.
 
 One checked case: pot 100, one all-in, aces or fives against kings. The equilibrium value for the out-of-position player is +25, with aces always betting, fives betting half the time, and kings calling half the time. CFR+ at 4,000 iterations reached a value of 24.9999102275. The Nash gap fell from 2.45089917903 at 40 iterations to 0.196997733488. That gap is NashConv for this bet-size tree, not for every legal chip size.
+
+## Turn and flop
+
+A turn tree has one more chance node after the turn betting ends: the river, uniform over the remaining cards. A flop tree has two, the turn and then the river. Range weights enter only through the root hand distribution. A card that is not dealt yet is not part of the acting player's information. The chip rule is the river rule, with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
+
+On `Kh Kd 7c 4s`, aces against `2c3d` win every river, so check-down is worth +50. With one pot-sized bet, CFR+ for 400 iterations reached 50.0016209123 and a Nash gap of 0.00187032418952. On `Ah Kd 7c`, queens against jacks, the check-down value over all 1,980 runouts is 41.6161616162, and the solver matches it with Nash gap 0.

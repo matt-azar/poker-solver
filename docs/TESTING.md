@@ -76,6 +76,17 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - On `AA` versus `KK` and on the all-in toy, the public-tree solver matches the reference strategy to `1e-8` and the value and Nash gap to `1e-6`, for both vanilla CFR and CFR+
 - On `22+` versus `22+`, three vanilla iterations match the reference strategy to `1e-8` without running the reference best response; a separate 30-iteration public-tree solve reports its own gap
 
+**Turn and flop** (`tests/unit/test_streets.cpp`)
+
+- A blocked hand is rejected
+- Turn check-down matches an independent average over the remaining rivers, and the only strategy has Nash gap 0
+- Two opponent hands share the actor's information set on the turn and on a river card neither of them holds; two river cards do not
+- A weighted pair of hands uses the joint distribution, not an equal average of the two deals
+- Aces versus `2c3d` on `Kh Kd 7c 4s` win every river and check down for +50
+- A turn bet that is called, then a river bet that is folded, loses `pot / 2` plus the folding player's investment
+- On that same lock, 400 CFR+ iterations move the value to +50 and the Nash gap below the 20-iteration gap
+- Flop check-down matches the average over every turn and river
+
 The default Leduc tree has 936 decision information sets. Solver reports include iteration count, runtime, memory, player-0 value, Nash gap, and the information-set count.
 
 Convergence is never treated as sufficient by itself: payoff accounting and exact best response are tested separately.

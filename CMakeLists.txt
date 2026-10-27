@@ -40,6 +40,10 @@ add_executable(river_solver src/river_main.cpp)
 target_link_libraries(river_solver PRIVATE poker_solver_core)
 poker_set_warnings(river_solver)
 
+add_executable(street_solver src/street_main.cpp)
+target_link_libraries(street_solver PRIVATE poker_solver_core)
+poker_set_warnings(street_solver)
+
 enable_testing()
 
 add_executable(poker_solver_tests
@@ -50,6 +54,7 @@ add_executable(poker_solver_tests
     tests/unit/test_leduc.cpp
     tests/unit/test_holdem.cpp
     tests/unit/test_river.cpp
+    tests/unit/test_streets.cpp
 )
 target_include_directories(poker_solver_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"

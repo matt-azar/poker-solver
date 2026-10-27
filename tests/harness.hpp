@@ -30,3 +30,4 @@ void run_cfr_tests();
 void run_leduc_tests();
 void run_holdem_tests();
 void run_river_tests();
+void run_street_tests();
