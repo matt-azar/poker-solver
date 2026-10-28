@@ -72,6 +72,7 @@ add_executable(poker_solver_tests
     tests/unit/test_session.cpp
     tests/unit/test_explorer_http.cpp
     tests/unit/test_chance.cpp
+    tests/unit/test_action_ev.cpp
 )
 target_include_directories(poker_solver_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"

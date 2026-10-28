@@ -1826,12 +1826,13 @@ struct StreetBatchSolver::Engine
             std::chrono::steady_clock::now() - started).count();
     }
 
-    void ensure_average() const
+    // True when this call rebuilt the average. The caller owns the profile epoch.
+    bool ensure_average() const
     {
         check_usable();
         if (average_ready)
         {
-            return;
+            return false;
         }
         for (const Slot& slot : slots)
         {
@@ -1841,6 +1842,7 @@ struct StreetBatchSolver::Engine
                 slot.n_actions);
         }
         average_ready = true;
+        return true;
     }
 
     int stored_slot(const Node& node, int hand, int turn, int river) const
@@ -4094,6 +4096,492 @@ struct StreetBatchSolver::Engine
         }
         average_ready = true;
     }
+
+    void throw_if_cancelled(const std::atomic<bool>* cancel) const
+    {
+        if (cancel != nullptr && cancel->load(std::memory_order_relaxed))
+        {
+            throw StreetValueCancelled();
+        }
+    }
+
+    // Average-policy values. force is only the selected decision: that action is
+    // taken with probability 1, and every later decision mixes the average.
+    // Hero values are not multiplied by hero reach. Opponent reach is, so an
+    // opponent's mixed value is the sum of the already-scaled action values.
+    void average_value_walk(
+        WorkerContext& ctx,
+        int node_index,
+        int turn,
+        int river,
+        int depth,
+        bool force,
+        const std::atomic<bool>* cancel) const
+    {
+        throw_if_cancelled(cancel);
+        if (depth + 1 >= static_cast<int>(ctx.scratch.size()))
+        {
+            throw std::logic_error("street action values ran out of scratch");
+        }
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        Scratch& here = ctx.scratch[static_cast<std::size_t>(depth)];
+        const double* pi0 = here.pi0.data();
+        const double* pi1 = here.pi1.data();
+        if (node.terminal)
+        {
+            apply_terminal(ctx, node, turn, river, pi0, pi1, here.ev0, here.ev1);
+            return;
+        }
+        if (node.chance)
+        {
+            std::fill(here.ev0.begin(), here.ev0.end(), 0.0);
+            std::fill(here.ev1.begin(), here.ev1.end(), 0.0);
+            int denom = 52 - static_cast<int>(config.board.size()) - 4;
+            std::uint64_t dead = board_mask;
+            if (turn >= 0)
+            {
+                --denom;
+                dead |= std::uint64_t{1} << turn;
+            }
+            if (river >= 0)
+            {
+                --denom;
+                dead |= std::uint64_t{1} << river;
+            }
+            const double probability = 1.0 / static_cast<double>(denom);
+            Scratch& child = ctx.scratch[static_cast<std::size_t>(depth + 1)];
+            for (int card = 0; card < 52; ++card)
+            {
+                if (((dead >> card) & 1u) != 0)
+                {
+                    continue;
+                }
+                int next_turn = turn;
+                int next_river = river;
+                if (node.deal_which == 1)
+                {
+                    next_turn = card;
+                }
+                else
+                {
+                    next_river = card;
+                }
+                if (!card_reaches_pair(next_turn, next_river, pi0, pi1))
+                {
+                    continue;
+                }
+                for (int h0 = 0; h0 < n0; ++h0)
+                {
+                    child.pi0[static_cast<std::size_t>(h0)] = hand_supported(0, h0, next_turn, next_river)
+                        ? pi0[h0] : 0.0;
+                }
+                for (int h1 = 0; h1 < n1; ++h1)
+                {
+                    child.pi1[static_cast<std::size_t>(h1)] = hand_supported(1, h1, next_turn, next_river)
+                        ? pi1[h1] : 0.0;
+                }
+                average_value_walk(
+                    ctx, node.child[0], next_turn, next_river, depth + 1, false, cancel);
+                for (int h0 = 0; h0 < n0; ++h0)
+                {
+                    here.ev0[static_cast<std::size_t>(h0)] +=
+                        probability * child.ev0[static_cast<std::size_t>(h0)];
+                }
+                for (int h1 = 0; h1 < n1; ++h1)
+                {
+                    here.ev1[static_cast<std::size_t>(h1)] +=
+                        probability * child.ev1[static_cast<std::size_t>(h1)];
+                }
+            }
+            return;
+        }
+
+        Scratch& child = ctx.scratch[static_cast<std::size_t>(depth + 1)];
+        for (int action = 0; action < node.n_actions; ++action)
+        {
+            if (node.player == 0)
+            {
+                for (int h0 = 0; h0 < n0; ++h0)
+                {
+                    if (!hand_supported(0, h0, turn, river))
+                    {
+                        child.pi0[static_cast<std::size_t>(h0)] = 0.0;
+                        continue;
+                    }
+                    if (force)
+                    {
+                        child.pi0[static_cast<std::size_t>(h0)] = pi0[h0];
+                    }
+                    else
+                    {
+                        const int index = slot_index(node, h0, turn, river, pi0[h0]);
+                        const double played = average[static_cast<std::size_t>(
+                            slots[static_cast<std::size_t>(index)].base + action)];
+                        child.pi0[static_cast<std::size_t>(h0)] = pi0[h0] * played;
+                    }
+                }
+                std::copy(pi1, pi1 + n1, child.pi1.begin());
+            }
+            else
+            {
+                std::copy(pi0, pi0 + n0, child.pi0.begin());
+                for (int h1 = 0; h1 < n1; ++h1)
+                {
+                    if (!hand_supported(1, h1, turn, river))
+                    {
+                        child.pi1[static_cast<std::size_t>(h1)] = 0.0;
+                        continue;
+                    }
+                    if (force)
+                    {
+                        child.pi1[static_cast<std::size_t>(h1)] = pi1[h1];
+                    }
+                    else
+                    {
+                        const int index = slot_index(node, h1, turn, river, pi1[h1]);
+                        const double played = average[static_cast<std::size_t>(
+                            slots[static_cast<std::size_t>(index)].base + action)];
+                        child.pi1[static_cast<std::size_t>(h1)] = pi1[h1] * played;
+                    }
+                }
+            }
+            average_value_walk(
+                ctx, node.child[action], turn, river, depth + 1, false, cancel);
+            std::copy(
+                child.ev0.begin(), child.ev0.end(),
+                here.aev0.begin() + static_cast<std::size_t>(action * n0));
+            std::copy(
+                child.ev1.begin(), child.ev1.end(),
+                here.aev1.begin() + static_cast<std::size_t>(action * n1));
+        }
+        if (force)
+        {
+            return;
+        }
+
+        for (int h0 = 0; h0 < n0; ++h0)
+        {
+            if (!hand_supported(0, h0, turn, river))
+            {
+                here.ev0[static_cast<std::size_t>(h0)] = 0.0;
+                continue;
+            }
+            if (node.player == 0)
+            {
+                const int index = slot_index(node, h0, turn, river, pi0[h0]);
+                double mix = 0.0;
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    const double played = average[static_cast<std::size_t>(
+                        slots[static_cast<std::size_t>(index)].base + action)];
+                    mix += played * here.aev0[static_cast<std::size_t>(action * n0 + h0)];
+                }
+                here.ev0[static_cast<std::size_t>(h0)] = mix;
+            }
+            else
+            {
+                double mix = 0.0;
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    mix += here.aev0[static_cast<std::size_t>(action * n0 + h0)];
+                }
+                here.ev0[static_cast<std::size_t>(h0)] = mix;
+            }
+        }
+        for (int h1 = 0; h1 < n1; ++h1)
+        {
+            if (!hand_supported(1, h1, turn, river))
+            {
+                here.ev1[static_cast<std::size_t>(h1)] = 0.0;
+                continue;
+            }
+            if (node.player == 1)
+            {
+                const int index = slot_index(node, h1, turn, river, pi1[h1]);
+                double mix = 0.0;
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    const double played = average[static_cast<std::size_t>(
+                        slots[static_cast<std::size_t>(index)].base + action)];
+                    mix += played * here.aev1[static_cast<std::size_t>(action * n1 + h1)];
+                }
+                here.ev1[static_cast<std::size_t>(h1)] = mix;
+            }
+            else
+            {
+                double mix = 0.0;
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    mix += here.aev1[static_cast<std::size_t>(action * n1 + h1)];
+                }
+                here.ev1[static_cast<std::size_t>(h1)] = mix;
+            }
+        }
+    }
+
+    void replay_weights(
+        int node_index,
+        int turn,
+        int river,
+        std::vector<double>& q0,
+        std::vector<double>& q1) const
+    {
+        std::vector<int> chain;
+        for (int at = node_index; at >= 0; at = parent_link[static_cast<std::size_t>(at)].parent)
+        {
+            chain.push_back(at);
+            if (chain.size() > nodes.size())
+            {
+                throw std::logic_error("node parent cycle");
+            }
+        }
+        std::reverse(chain.begin(), chain.end());
+        if (chain.empty() || chain.front() != 0)
+        {
+            throw std::invalid_argument("unknown node");
+        }
+        q0.assign(range_w[0].begin(), range_w[0].end());
+        q1.assign(range_w[1].begin(), range_w[1].end());
+        int seen_turn = -1;
+        int seen_river = -1;
+        zero_unsupported(q0, 0, seen_turn, seen_river);
+        zero_unsupported(q1, 1, seen_turn, seen_river);
+        for (std::size_t step = 0; step + 1 < chain.size(); ++step)
+        {
+            const int current = chain[step];
+            const int next = chain[step + 1];
+            const Node& node = nodes[static_cast<std::size_t>(current)];
+            const ParentLink& edge = parent_link[static_cast<std::size_t>(next)];
+            if (edge.parent != current)
+            {
+                throw std::logic_error("node parent chain broke");
+            }
+            if (node.chance)
+            {
+                const int card = node.deal_which == 1 ? turn : river;
+                if (card < 0)
+                {
+                    throw std::invalid_argument("node card is dead or out of range");
+                }
+                zero_card(q0, 0, card);
+                zero_card(q1, 1, card);
+                if (node.deal_which == 1)
+                {
+                    seen_turn = card;
+                }
+                else
+                {
+                    seen_river = card;
+                }
+                zero_unsupported(q0, 0, seen_turn, seen_river);
+                zero_unsupported(q1, 1, seen_turn, seen_river);
+            }
+            else
+            {
+                const int action = edge.action;
+                std::vector<double>& acting = node.player == 0 ? q0 : q1;
+                for (int hand = 0; hand < static_cast<int>(acting.size()); ++hand)
+                {
+                    if (!hand_supported(node.player, hand, seen_turn, seen_river))
+                    {
+                        acting[static_cast<std::size_t>(hand)] = 0.0;
+                        continue;
+                    }
+                    const int slot = stored_slot(node, hand, seen_turn, seen_river);
+                    if (slot < 0)
+                    {
+                        throw std::logic_error("supported hand has no information set");
+                    }
+                    acting[static_cast<std::size_t>(hand)] *= average[static_cast<std::size_t>(
+                        slots[static_cast<std::size_t>(slot)].base + action)];
+                }
+            }
+        }
+        if (seen_turn != turn || seen_river != river)
+        {
+            throw std::invalid_argument("unknown node");
+        }
+    }
+
+    StreetActionValues compute_action_values(
+        const std::string& text,
+        const std::atomic<bool>* cancel) const
+    {
+        const auto started = std::chrono::steady_clock::now();
+        ensure_average();
+        ensure_ranks();
+        int node_index = 0;
+        int turn = -1;
+        int river = -1;
+        locate_node(text, node_index, turn, river);
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (node.chance || node.terminal)
+        {
+            throw std::invalid_argument("action values require a decision node");
+        }
+        std::vector<double> q0;
+        std::vector<double> q1;
+        replay_weights(node_index, turn, river, q0, q1);
+        const int actor = node.player;
+        const int opponent = 1 - actor;
+        const int hero_hands = actor == 0 ? n0 : n1;
+        const int opp_hands = opponent == 0 ? n0 : n1;
+        std::vector<double> strategic[2] = {
+            std::vector<double>(static_cast<std::size_t>(n0), 0.0),
+            std::vector<double>(static_cast<std::size_t>(n1), 0.0)};
+        const std::vector<double>* weight[2] = {&q0, &q1};
+        for (int player = 0; player < 2; ++player)
+        {
+            for (int hand = 0; hand < static_cast<int>(strategic[player].size()); ++hand)
+            {
+                const double prior = range_w[player][static_cast<std::size_t>(hand)];
+                if (prior > 0.0)
+                {
+                    strategic[player][static_cast<std::size_t>(hand)] =
+                        (*weight[player])[static_cast<std::size_t>(hand)] / prior;
+                }
+            }
+        }
+        StreetActionValues page;
+        page.node_id = text;
+        page.player = actor;
+        page.reach_defined = joint_mass_of(q0, q1) > 0.0;
+        page.actions.resize(static_cast<std::size_t>(node.n_actions));
+        for (int action = 0; action < node.n_actions; ++action)
+        {
+            page.actions[static_cast<std::size_t>(action)].assign(
+                node.action_labels[action].data(), node.action_labels[action].size());
+        }
+        page.combos.resize(static_cast<std::size_t>(hero_hands));
+        for (int hand = 0; hand < hero_hands; ++hand)
+        {
+            page.combos[static_cast<std::size_t>(hand)] = holdem::Range::combo_text(
+                combos[actor][static_cast<std::size_t>(hand)]);
+        }
+        page.ev_defined.assign(static_cast<std::size_t>(hero_hands), 0);
+        page.action_ev.assign(static_cast<std::size_t>(hero_hands * node.n_actions), 0.0);
+        page.mixed_ev.assign(static_cast<std::size_t>(hero_hands), 0.0);
+
+        double peak = 0.0;
+        for (int hand = 0; hand < opp_hands; ++hand)
+        {
+            peak = std::max(
+                peak,
+                range_w[opponent][static_cast<std::size_t>(hand)]
+                    * strategic[opponent][static_cast<std::size_t>(hand)]);
+        }
+        if (!(peak > 0.0))
+        {
+            page.query_seconds = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+            return page;
+        }
+        const double reach_scale = 1.0 / peak;
+        for (double& value : strategic[opponent])
+        {
+            value *= reach_scale;
+        }
+
+        Scratch& seeded = workspace.scratch[0];
+        if (actor == 0)
+        {
+            for (int hand = 0; hand < n0; ++hand)
+            {
+                seeded.pi0[static_cast<std::size_t>(hand)] =
+                    hand_supported(0, hand, turn, river) ? 1.0 : 0.0;
+            }
+            std::copy(strategic[1].begin(), strategic[1].end(), seeded.pi1.begin());
+        }
+        else
+        {
+            std::copy(strategic[0].begin(), strategic[0].end(), seeded.pi0.begin());
+            for (int hand = 0; hand < n1; ++hand)
+            {
+                seeded.pi1[static_cast<std::size_t>(hand)] =
+                    hand_supported(1, hand, turn, river) ? 1.0 : 0.0;
+            }
+        }
+        average_value_walk(workspace, node_index, turn, river, 0, true, cancel);
+
+        std::vector<double> amount(static_cast<std::size_t>(opp_hands), 0.0);
+        double total = 0.0;
+        double by_card[52] = {};
+        for (int hand = 0; hand < opp_hands; ++hand)
+        {
+            if (!hand_live(opponent, hand, turn, river))
+            {
+                continue;
+            }
+            const double piece = range_w[opponent][static_cast<std::size_t>(hand)]
+                * strategic[opponent][static_cast<std::size_t>(hand)];
+            if (piece == 0.0)
+            {
+                continue;
+            }
+            amount[static_cast<std::size_t>(hand)] = piece;
+            total += piece;
+            by_card[hole_a[opponent][static_cast<std::size_t>(hand)]] += piece;
+            by_card[hole_b[opponent][static_cast<std::size_t>(hand)]] += piece;
+        }
+        const Scratch& evaluated = workspace.scratch[0];
+        const std::pmr::vector<double>& raw = actor == 0 ? evaluated.aev0 : evaluated.aev1;
+        const int raw_stride = actor == 0 ? n0 : n1;
+        std::vector<double> marginal;
+        double hand_joint = 0.0;
+        const std::vector<double>& hero_weight = actor == 0 ? q0 : q1;
+        const std::vector<double>& opp_weight = actor == 0 ? q1 : q0;
+        marginals_of(hero_weight, actor, opp_weight, opponent, hand_joint, marginal);
+        double node_ev = 0.0;
+        bool node_ok = page.reach_defined;
+        for (int hand = 0; hand < hero_hands; ++hand)
+        {
+            if (!hand_supported(actor, hand, turn, river))
+            {
+                continue;
+            }
+            const double open = total - blocked_reach(actor, hand, by_card, amount);
+            const double prior = range_w[actor][static_cast<std::size_t>(hand)];
+            if (!(open > 0.0) || !(prior > 0.0))
+            {
+                if (page.reach_defined && marginal[static_cast<std::size_t>(hand)] > 0.0)
+                {
+                    node_ok = false;
+                }
+                continue;
+            }
+            const int slot = stored_slot(node, hand, turn, river);
+            if (slot < 0)
+            {
+                throw std::logic_error("supported hand has no information set");
+            }
+            const Slot& stored = slots[static_cast<std::size_t>(slot)];
+            double mixed = 0.0;
+            for (int action = 0; action < node.n_actions; ++action)
+            {
+                const double stored_raw = raw[static_cast<std::size_t>(action * raw_stride + hand)];
+                const double signed_raw = actor == 0 ? stored_raw : -stored_raw;
+                const double denom = prior * joint_scale * open;
+                const double conditional = signed_raw / denom;
+                page.action_ev[static_cast<std::size_t>(hand * node.n_actions + action)] = conditional;
+                const double played = average[static_cast<std::size_t>(stored.base + action)];
+                mixed += played * conditional;
+            }
+            page.ev_defined[static_cast<std::size_t>(hand)] = 1;
+            page.mixed_ev[static_cast<std::size_t>(hand)] = mixed;
+            if (page.reach_defined)
+            {
+                node_ev += marginal[static_cast<std::size_t>(hand)] * mixed;
+            }
+        }
+        page.node_ev_defined = node_ok;
+        if (node_ok)
+        {
+            page.node_ev = node_ev;
+        }
+        page.query_seconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
+        return page;
+    }
 };
 
 StreetBatchSolver::StreetBatchSolver(
@@ -4480,12 +4968,53 @@ StreetInspection StreetBatchSolver::inspect_node(const std::string& node_id) con
     return engine_->inspect_node(node_id);
 }
 
+StreetActionValues StreetBatchSolver::action_values(
+    const std::string& node_id,
+    const std::atomic<bool>* cancel) const
+{
+    std::lock_guard<std::mutex> lock(value_mu_);
+    if (engine_->ensure_average())
+    {
+        ++profile_epoch_;
+    }
+    if (value_cache_valid_ && value_cache_node_ == node_id && value_cache_epoch_ == profile_epoch_)
+    {
+        StreetActionValues cached = value_cache_;
+        cached.query_seconds = 0.0;
+        return cached;
+    }
+    StreetActionValues page = engine_->compute_action_values(node_id, cancel);
+    page.profile_epoch = profile_epoch_;
+    value_cache_node_ = node_id;
+    value_cache_epoch_ = profile_epoch_;
+    value_cache_ = page;
+    value_cache_valid_ = true;
+    return page;
+}
+
+std::uint64_t StreetBatchSolver::profile_epoch() const
+{
+    std::lock_guard<std::mutex> lock(value_mu_);
+    if (engine_->ensure_average())
+    {
+        ++profile_epoch_;
+    }
+    return profile_epoch_;
+}
+
+int StreetBatchSolver::completed_iterations() const
+{
+    return engine_->trained;
+}
+
 void StreetBatchSolver::set_average_for_test(
     const std::string& node_id,
     int hand,
     std::span<const double> probability)
 {
+    std::lock_guard<std::mutex> lock(value_mu_);
     engine_->set_average_for_test(node_id, hand, probability);
+    ++profile_epoch_;
 }
 
 std::vector<StreetStrategyEntry> StreetBatchSolver::average_strategy_entries() const

@@ -4,9 +4,12 @@
 #include "solver/budget_resource.hpp"
 #include "solver/trainer.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <memory_resource>
+#include <mutex>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -126,6 +129,40 @@ struct StreetInspection
     std::vector<StreetInspectCard> cards;
 };
 
+// The value query stopped because a newer query or a replacement solve asked it to.
+class StreetValueCancelled : public std::runtime_error
+{
+public:
+    StreetValueCancelled()
+        : std::runtime_error("value query cancelled")
+    {
+    }
+};
+
+// Conditional action values for one decision, under the stored average profile.
+// Chips are root-centered: the same terminal utility as the recorded solver EV.
+// ev_defined is independent of reach_defined. A zero-reach hand can still have
+// a counterfactual action value when some compatible opponent reach remains.
+struct StreetActionValues
+{
+    std::string node_id;
+    int player = -1;
+    std::string units = "chips";
+    std::string utility_basis = "root_centered";
+    bool reach_defined = false;
+    bool node_ev_defined = false;
+    double node_ev = 0.0;
+    std::uint64_t profile_epoch = 0;
+    double query_seconds = 0.0;
+    std::vector<std::string> actions;
+    std::vector<std::string> combos;
+    std::vector<char> ev_defined;
+    // Hand-major. Entry hand * actions + action is Q_i(h, a). Meaningful when ev_defined.
+    std::vector<double> action_ev;
+    // V_i(h) = sum_a average_probability(h, a) * Q_i(h, a). Meaningful when ev_defined.
+    std::vector<double> mixed_ev;
+};
+
 struct StreetWalkProfile
 {
     double order_seconds = 0.0;
@@ -190,6 +227,14 @@ public:
     void prepare_inspection() const;
     std::string root_node_id() const;
     StreetInspection inspect_node(const std::string& node_id) const;
+    // One subtree evaluation. Forces each legal action at this decision, then
+    // both players follow the average profile. Does not train or rewrite regrets.
+    // cancel may be null. A true flag throws StreetValueCancelled.
+    StreetActionValues action_values(
+        const std::string& node_id,
+        const std::atomic<bool>* cancel = nullptr) const;
+    std::uint64_t profile_epoch() const;
+    int completed_iterations() const;
     // Replace one structural hand's average at a node. Inspection reads this
     // profile instead of recomputing it.
     void set_average_for_test(
@@ -222,5 +267,13 @@ private:
     BudgetResource budget_;
     void* engine_storage_ = nullptr;
     Engine* engine_ = nullptr;
+    // One completed page. Queries share the evaluation scratch, so they take this lock.
+    // The profile epoch lives here, outside the engine budget.
+    mutable std::mutex value_mu_;
+    mutable std::uint64_t profile_epoch_ = 0;
+    mutable bool value_cache_valid_ = false;
+    mutable std::string value_cache_node_;
+    mutable std::uint64_t value_cache_epoch_ = 0;
+    mutable StreetActionValues value_cache_{};
 };
 } // namespace poker::solver
