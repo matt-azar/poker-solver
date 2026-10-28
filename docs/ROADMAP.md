@@ -22,9 +22,9 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 We already have a substantial tested foundation: Kuhn/Leduc reference games, river and street engines, pass-frozen CFR variants, active-player CFR+ flooring, correct counterfactual reach handling, compact blocker-aware showdowns, deterministic first-public-card parallelism, enforced engine allocation budgets, and node-scoped browsing. The current budget defaults to 1024 MiB and threads default to one.
 
-The latest Windows report is 408,504 assertions / zero failures. Independent GCC review of the previous chance-page commit passed 364,907 assertions; Windows HTTP tests are skipped there. Session-focused ThreadSanitizer passed 56 assertions on the review host. That run covered the session tests. Publication now builds the completed status before it stores a terminal phase or a queryable result. If that builder throws, the job stays running and the existing failure path can record it.
+The latest Windows report is 438,630 assertions / zero failures. Independent GCC review of the previous chance-page commit passed 364,907 assertions; Windows HTTP tests are skipped there. Session-focused ThreadSanitizer passed 56 assertions on the review host. That run covered the session tests. Publication now builds the completed status before it stores a terminal phase or a queryable result. If that builder throws, the job stays running and the existing failure path can record it.
 
-Completed-average conditional action EV is implemented for flop and turn decision nodes. The river page does not request it. Saved solve files, continuation workflows, node locks, broad analysis tools, full tree editing, tournament/rake utilities, production packaging, and preflop remain substantial work. No head-to-head Pio performance or solution-quality equivalence has been established.
+Completed-average conditional action EV is implemented for flop and turn decision nodes. The profile cache follows training, reset, continuation, and explicit average edits. A tiny compatible opponent is summed directly when blocked mass would cancel it. The value worker joins on shutdown and drops its engine reference before the reader count reaches zero. The river page does not request values. M1 stays open until those checks pass; the equity and range study screen is next and has not been started. Saved solve files, continuation workflows, node locks, broad analysis tools, full tree editing, tournament/rake utilities, production packaging, and preflop remain substantial work. No head-to-head Pio performance or solution-quality equivalence has been established.
 
 Full-range check-down measures whether a large tree fits and runs. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them.
 
@@ -73,7 +73,7 @@ Implement the separate detailed EV specification already delivered. Force the se
 
 Preserve explicit player signs and the existing root-centered net-chip utility. Keep actual reach and counterfactual EV availability distinct. Expose the query explicitly; ordinary status and navigation stay cheap. Show per-combo action EV and mixed EV, with correct weighted group aggregation and visible units.
 
-**Gate:** independent pair-and-runout oracle agreement, exact turn-bluff fixtures, root EV reconstruction, no table mutation, bounded query workspace, stale-response and lifetime tests. No new 300-iteration campaign unless solver behavior changes.
+**Gate:** independent pair-and-runout oracle agreement, exact turn-bluff fixtures, root EV reconstruction, no table mutation, bounded query workspace, stale-response and lifetime tests. The profile epoch follows mutations, tiny compatible mass uses a direct sum, and the value worker joins on shutdown. No new 300-iteration campaign unless solver behavior changes. M1 stays open until those checks pass.
 
 ### M2 — Range and equity analysis with a useful study screen
 

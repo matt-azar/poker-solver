@@ -168,7 +168,7 @@ At a decision for player \(i\), public history \(H\), and board \(B\), write \(q
 D_i(h)=\sum_g q_{\mathrm{opp}}(g)
 \]
 
-over opponent hands \(g\) that are compatible with \(h\) and \(B\). When \(h\) is structurally supported and \(D_i(h)>0\),
+over opponent hands \(g\) that are compatible with \(h\) and \(B\). The query forms that sum by subtracting blocked opponent mass from the total when the subtraction is stable. When the subtraction cancels, including when a blocked opponent dominates a tiny compatible hand, the query adds the compatible hands directly. The same rule covers the showdown win and lose buckets and the posterior marginals used for the node value and for chance weights. A negative residual is not a reach. Structural support stays separate from that floating-point residual. The CFR update arithmetic is unchanged. When \(h\) is structurally supported and \(D_i(h)>0\),
 
 \[
 Q_i(h,a)=\sum_g \frac{q_{\mathrm{opp}}(g)}{D_i(h)}\, E[U_i \mid H, B, h, g, \text{force } a, \text{ then follow the average}].

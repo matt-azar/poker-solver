@@ -20,6 +20,7 @@ add_library(poker_solver_core STATIC
     src/solver/best_response.cpp
     src/solver/river_batch.cpp
     src/solver/street_batch.cpp
+    src/explorer/value_worker.cpp
     src/poker/card.cpp
     src/poker/hand_eval.cpp
     src/poker/range.cpp
@@ -73,6 +74,7 @@ add_executable(poker_solver_tests
     tests/unit/test_explorer_http.cpp
     tests/unit/test_chance.cpp
     tests/unit/test_action_ev.cpp
+    tests/unit/test_value_worker.cpp
 )
 target_include_directories(poker_solver_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"

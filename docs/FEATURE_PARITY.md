@@ -7,7 +7,7 @@ States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 | Family | Status | Milestone | Evidence in this repository | Limitation |
 | --- | --- | --- | --- | --- |
 | Heads-up postflop CFR, chance, blocker handling, best responses | partial | M0, M6 | Kuhn, Leduc, river, and street tests; public-tree solvers; blocker-aware showdown | No Pio solution-quality comparison. The CI workflow has not been executed on a GitHub runner from this checkout |
-| Conditional combo and action EV | missing | M1 | Specified in the roadmap | Numerical evaluator is not in a committed revision |
+| Conditional combo and action EV | partial | M1 | Flop and turn decision query, oracle tests, and the values HTTP path | River page and generic export stay without values. M1 stays open until the review checks on profile invalidation, tiny compatible mass, and value-worker shutdown pass |
 | Equity, action ranges, distributions, hand categories | partial | M2 | Node browse, action frequencies, chance-card marginals | No equity mode, categories, or range-composition report |
 | Weighted range editing and range libraries | partial | M2–M3 | 13×13 paint, weights, text ranges | No libraries, folders, undo, or import/export beyond the range text |
 | Configurable betting trees and visual line editing | partial | M3 | Per-street sizes, geometric sizes, caps, donk sizes, all-in threshold | No visual line editor or versioned canonical configuration file |

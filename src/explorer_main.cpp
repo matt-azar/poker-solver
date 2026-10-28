@@ -1,4 +1,5 @@
 #include "explorer/session.hpp"
+#include "explorer/value_worker.hpp"
 #include "game/river_game.hpp"
 #include "game/street_game.hpp"
 #include "poker/card.hpp"
@@ -53,7 +54,7 @@ static void close_socket(socket_t socket)
 }
 #endif
 
-namespace
+namespace explorer_detail
 {
 
 std::thread g_worker;
@@ -61,30 +62,9 @@ poker::explorer::Session g_session;
 std::string g_ui_root = "ui";
 
 // One action-value query. The accept loop only queues it. Status and node
-// pages stay on the accept thread. A newer node or a new solve sets the cancel
-// flag; the walk checks that flag at each public node.
-std::mutex g_value_mu;
-std::condition_variable g_value_cv;
-std::thread g_value_thread;
-std::once_flag g_value_once;
-std::atomic<bool> g_value_cancel{false};
-bool g_value_stop = false;
-bool g_value_pending = false;
-bool g_value_inflight = false;
-bool g_value_has_result = false;
-bool g_value_result_ok = false;
-std::uint64_t g_value_serial = 0;
-std::uint64_t g_value_solution = 0;
-std::uint64_t g_value_job = 0;
-std::string g_value_node;
-std::uint64_t g_value_inflight_serial = 0;
-std::uint64_t g_value_inflight_solution = 0;
-std::uint64_t g_value_inflight_job = 0;
-std::string g_value_inflight_node;
-std::uint64_t g_value_result_serial = 0;
-std::uint64_t g_value_result_solution = 0;
-std::string g_value_result_node;
-std::string g_value_result_body;
+// pages stay on the accept thread. A newer node or a new solve cancels the
+// walk at the next public node. The worker is joined on server teardown.
+poker::explorer::ValueWorker* g_values = nullptr;
 
 void append_escaped(std::string& out, const std::string& text)
 {
@@ -1269,122 +1249,6 @@ std::string json_action_values(
     return out;
 }
 
-void value_thread_main()
-{
-    while (true)
-    {
-        std::uint64_t serial = 0;
-        std::uint64_t solution_id = 0;
-        std::uint64_t job_id = 0;
-        std::string node_id;
-        {
-            std::unique_lock<std::mutex> lock(g_value_mu);
-            g_value_inflight = false;
-            g_value_cv.wait(lock, [] { return g_value_stop || g_value_pending; });
-            if (g_value_stop && !g_value_pending)
-            {
-                return;
-            }
-            if (!g_value_pending)
-            {
-                continue;
-            }
-            serial = g_value_serial;
-            solution_id = g_value_solution;
-            job_id = g_value_job;
-            node_id = g_value_node;
-            g_value_pending = false;
-            g_value_cancel.store(false);
-            g_value_inflight = true;
-            g_value_inflight_serial = serial;
-            g_value_inflight_solution = solution_id;
-            g_value_inflight_job = job_id;
-            g_value_inflight_node = node_id;
-        }
-
-        std::string body;
-        bool ok = false;
-        bool discard = false;
-        bool holding_reader = false;
-        try
-        {
-            std::shared_ptr<void> borrowed = g_session.borrow(solution_id);
-            if (!borrowed)
-            {
-                discard = true;
-            }
-            else
-            {
-                holding_reader = true;
-                if (g_value_cancel.load())
-                {
-                    throw poker::solver::StreetValueCancelled();
-                }
-                const std::shared_ptr<HeldSolution> held = std::static_pointer_cast<HeldSolution>(borrowed);
-                if (!held->street)
-                {
-                    throw std::invalid_argument("this solution has no street nodes");
-                }
-                const poker::solver::StreetActionValues page = held->street->action_values(node_id, &g_value_cancel);
-                if (g_value_cancel.load() || g_session.current_solution() != solution_id)
-                {
-                    discard = true;
-                }
-                else
-                {
-                    body = json_action_values(page, solution_id, job_id, g_session.generation());
-                    ok = true;
-                }
-            }
-        }
-        catch (const poker::solver::StreetValueCancelled&)
-        {
-            discard = true;
-        }
-        catch (const std::exception& error)
-        {
-            if (g_value_cancel.load() || g_session.current_solution() != solution_id)
-            {
-                discard = true;
-            }
-            else
-            {
-                body = json_value_error(error.what(), solution_id, job_id, node_id, g_session.generation());
-            }
-        }
-        if (holding_reader)
-        {
-            g_session.release_reader();
-        }
-        std::lock_guard<std::mutex> lock(g_value_mu);
-        g_value_inflight = false;
-        if (discard || g_value_serial != serial || g_value_pending)
-        {
-            continue;
-        }
-        g_value_has_result = true;
-        g_value_result_ok = ok;
-        g_value_result_serial = serial;
-        g_value_result_solution = solution_id;
-        g_value_result_node = node_id;
-        g_value_result_body = std::move(body);
-    }
-}
-
-void ensure_value_thread()
-{
-    std::call_once(g_value_once, [] { g_value_thread = std::thread(value_thread_main); });
-}
-
-void cancel_value_work()
-{
-    std::lock_guard<std::mutex> lock(g_value_mu);
-    g_value_cancel.store(true);
-    g_value_pending = false;
-    ++g_value_serial;
-    g_value_has_result = false;
-}
-
 void send_response(
     socket_t client,
     int status,
@@ -1399,40 +1263,16 @@ void respond_value_query(
     const std::string& node_id,
     std::chrono::steady_clock::time_point started)
 {
-    ensure_value_thread();
     const std::uint64_t generation = g_session.generation();
-    std::string body;
-    int status = 202;
-    {
-        std::lock_guard<std::mutex> lock(g_value_mu);
-        const bool finished = g_value_has_result && g_value_result_solution == solution_id
-            && g_value_result_node == node_id && !g_value_pending && !g_value_inflight;
-        const bool same_inflight = g_value_inflight && g_value_inflight_solution == solution_id
-            && g_value_inflight_node == node_id && !g_value_pending;
-        const bool same_pending = g_value_pending && g_value_solution == solution_id && g_value_node == node_id;
-        if (finished)
-        {
-            body = g_value_result_body;
-            status = g_value_result_ok ? 200 : 400;
-        }
-        else if (same_inflight || same_pending)
-        {
-            const std::uint64_t pending_job = same_pending ? g_value_job : g_value_inflight_job;
-            body = json_value_pending(solution_id, pending_job, node_id, generation);
-        }
-        else
-        {
-            ++g_value_serial;
-            g_value_pending = true;
-            g_value_cancel.store(true);
-            g_value_solution = solution_id;
-            g_value_job = job_id;
-            g_value_node = node_id;
-            g_value_has_result = false;
-            g_value_cv.notify_one();
-            body = json_value_pending(solution_id, job_id, node_id, generation);
-        }
-    }
+    poker::explorer::ValueRequest request;
+    request.solution_id = solution_id;
+    request.job_id = job_id;
+    request.node_id = node_id;
+    const poker::explorer::ValueReply reply = g_values->submit(request);
+    const int status = reply.ready ? (reply.ok ? 200 : 400) : 202;
+    const std::string body = reply.ready
+        ? reply.body
+        : json_value_pending(solution_id, reply.job_id, node_id, generation);
     const double handler_seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - started).count();
     send_response(
@@ -1821,25 +1661,13 @@ void handle_client(socket_t client)
             send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
             return;
         }
-        struct Reader
-        {
-            bool active = false;
-            ~Reader()
-            {
-                if (active)
-                {
-                    g_session.release_reader();
-                }
-            }
-        } reader;
-        std::shared_ptr<void> borrowed = g_session.borrow(id);
-        if (!borrowed)
+        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        if (!lease)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
             return;
         }
-        reader.active = true;
-        const std::shared_ptr<HeldSolution> held = std::static_pointer_cast<HeldSolution>(borrowed);
+        std::shared_ptr<HeldSolution> held = std::static_pointer_cast<HeldSolution>(lease.resource());
         try
         {
             if (tail.rfind("nodes/", 0) == 0)
@@ -1870,8 +1698,8 @@ void handle_client(socket_t client)
                     }
                     const std::uint64_t solution_id = held->id;
                     const std::uint64_t job_id = held->job_id;
-                    reader.active = false;
-                    g_session.release_reader();
+                    held.reset();
+                    lease.release();
                     respond_value_query(client, solution_id, job_id, node_path, query_started);
                     return;
                 }
@@ -1977,7 +1805,10 @@ void handle_client(socket_t client)
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
         }
-        cancel_value_work();
+        if (g_values != nullptr)
+        {
+            g_values->cancel();
+        }
         try
         {
             Job job = parse_job(body);
@@ -2122,10 +1953,52 @@ void choose_ui_root()
     }
 }
 
-} // namespace
-
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
+    poker::explorer::ValueWorker values(
+        g_session,
+        [](const std::shared_ptr<void>& resource,
+            const poker::explorer::ValueRequest& request,
+            const std::atomic<bool>& cancel)
+        {
+            if (cancel.load())
+            {
+                throw poker::solver::StreetValueCancelled();
+            }
+            const std::shared_ptr<HeldSolution> held = std::static_pointer_cast<HeldSolution>(resource);
+            if (!held->street)
+            {
+                throw std::invalid_argument("this solution has no street nodes");
+            }
+            const poker::solver::StreetActionValues page = held->street->action_values(request.node_id, &cancel);
+            if (cancel.load() || g_session.current_solution() != request.solution_id)
+            {
+                throw poker::solver::StreetValueCancelled();
+            }
+            return json_action_values(page, request.solution_id, request.job_id, g_session.generation());
+        },
+        [](const std::string& what, const poker::explorer::ValueRequest& request)
+        {
+            return json_value_error(
+                what, request.solution_id, request.job_id, request.node_id, g_session.generation());
+        });
+    g_values = &values;
+    struct Teardown
+    {
+        ~Teardown()
+        {
+            if (g_values != nullptr)
+            {
+                g_values->shutdown();
+                g_values = nullptr;
+            }
+            if (g_worker.joinable())
+            {
+                g_worker.join();
+            }
+        }
+    } teardown;
+
     int port = 8765;
     for (int i = 1; i < argc; ++i)
     {
@@ -2184,4 +2057,11 @@ int main(int argc, char** argv)
         handle_client(client);
         close_socket(client);
     }
+}
+
+} // namespace explorer_detail
+
+int main(int argc, char** argv)
+{
+    return explorer_detail::run(argc, argv);
 }

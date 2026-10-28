@@ -234,6 +234,12 @@ public:
         }
     }
 
+    int reader_count() const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        return readers_;
+    }
+
     void wait_until_quiet()
     {
         std::unique_lock<std::mutex> lock(mu_);
@@ -276,6 +282,70 @@ private:
         "{\"running\":false,\"cancelled\":false,\"error\":\"\",\"solution_id\":null,"
         "\"root_node_id\":null,\"job_id\":null,\"status_generation\":0}";
     std::function<void()> release_hook_;
+};
+
+// Drops the borrowed engine before it tells a replacement that the session is quiet.
+class ReaderLease
+{
+public:
+    ReaderLease() = default;
+
+    ReaderLease(Session& session, std::shared_ptr<void> resource)
+        : session_(resource ? &session : nullptr)
+        , resource_(std::move(resource))
+    {
+    }
+
+    ~ReaderLease()
+    {
+        release();
+    }
+
+    ReaderLease(const ReaderLease&) = delete;
+    ReaderLease& operator=(const ReaderLease&) = delete;
+
+    ReaderLease(ReaderLease&& other) noexcept
+        : session_(other.session_)
+        , resource_(std::move(other.resource_))
+    {
+        other.session_ = nullptr;
+    }
+
+    ReaderLease& operator=(ReaderLease&& other) noexcept
+    {
+        if (this != &other)
+        {
+            release();
+            session_ = other.session_;
+            resource_ = std::move(other.resource_);
+            other.session_ = nullptr;
+        }
+        return *this;
+    }
+
+    explicit operator bool() const
+    {
+        return static_cast<bool>(resource_);
+    }
+
+    const std::shared_ptr<void>& resource() const
+    {
+        return resource_;
+    }
+
+    void release()
+    {
+        resource_.reset();
+        if (session_ != nullptr)
+        {
+            session_->release_reader();
+            session_ = nullptr;
+        }
+    }
+
+private:
+    Session* session_ = nullptr;
+    std::shared_ptr<void> resource_;
 };
 
 } // namespace poker::explorer
