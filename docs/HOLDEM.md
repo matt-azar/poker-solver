@@ -29,7 +29,7 @@ A card id is `rank * 4 + suit`.
 8. Four of a kind
 9. Straight flush
 
-An ace-high straight flush is a royal flush. It is the top straight flush, not its own category. `A-2-3-4-5` is a straight whose tiebreak is the five (rank 3), so it loses to a six-high straight and to every higher straight. `A-K-2` is not a straight. Suits never break a tie except by making a flush or a straight flush. When neither private hand improves the board, the two hands compare equal.
+An ace-high straight flush is a royal flush, the top straight flush. `A-2-3-4-5` is a straight whose tiebreak is the five (rank 3), so it loses to a six-high straight and to every higher straight. `A-K-2` is not a straight. Suits break a tie only by making a flush or a straight flush. When neither private hand improves the board, the two hands compare equal.
 
 ## Combos
 
@@ -70,4 +70,4 @@ Hands are ordered: the first component is player 0 and the second is player 1. A
 sum w0(h0) w1(h1)
 ```
 
-over those legal ordered pairs. `joint_distribution` divides each product by that mass. If the mass is zero the result is empty. It is not a distribution over unordered pairs of hands. With both ranges uniform and no board, the mass is `1326 * 1225`, because `C(50, 2) = 1225` hands remain after one private hand is removed.
+over those legal ordered pairs. `joint_distribution` divides each product by that mass. If the mass is zero the result is empty. The distribution is over ordered pairs of hands. With both ranges uniform and no board, the mass is `1326 * 1225`, because `C(50, 2) = 1225` hands remain after one private hand is removed.

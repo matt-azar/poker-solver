@@ -24,7 +24,7 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 
 - All-negative regrets → uniform
 - Mixed positive regrets → normalized positive regrets
-- Reach-weighted average accumulation on a hand-constructed two-action path (not Kuhn equilibrium tables)
+- Reach-weighted average accumulation on a hand-constructed two-action path
 
 **Mathematical validation**
 
@@ -41,7 +41,7 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 **Leduc** (`tests/unit/test_leduc.cpp`)
 
 - Six, then five, then four equally likely remaining cards, with dealt cards removed
-- An information set depends on the acting player's card and the public history, not the opponent's card
+- An information set is the acting player's card and the public history
 - Fold, showdown, pair, and tie utilities
 - Every terminal in the default tree is zero-sum and has a consistent pot
 - Vanilla CFR and CFR+ both update regrets through `CfrTrainer<LeducGame>`
@@ -81,7 +81,7 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - A blocked hand is rejected
 - Turn check-down matches an independent average over the remaining rivers, and the only strategy has Nash gap 0
 - Two opponent hands share the actor's information set on the turn and on a river card neither of them holds; two river cards do not
-- A weighted pair of hands uses the joint distribution, not an equal average of the two deals
+- A weighted pair of hands uses the joint distribution
 - Aces versus `2c3d` on `Kh Kd 7c 4s` win every river and check down for +50
 - A turn bet that is called, then a river bet that is folded, loses `pot / 2` plus the folding player's investment
 - On that same lock, 400 CFR+ iterations move the value to +50 and the Nash gap below the 20-iteration gap
@@ -103,17 +103,17 @@ On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 - Expanded terminal and decision counts on that flop are 64-bit products of the deal count and the runout count
 - Continuing a fresh public-tree solver for 40 iterations matches a solver that was reset and run for those same 40 iterations
 
-`street_memory_bench` repeats the uniform full-range check-down on the turn and the flop and checks the centered value. It is not a CTest test and it has no wall-time limit. `street_betting_bench` continues one frozen CFR+ solve through the checkpoints in [BENCHMARKS.md](BENCHMARKS.md) and is also outside CTest. Each case stops after ten minutes of wall time. `street_parallel_bench` times 1, 2, 4, and 8 frozen threads on those two betting trees and is outside CTest as well.
+`street_memory_bench` repeats the uniform full-range check-down on the turn and the flop and checks the centered value. It runs outside CTest and has no wall-time limit. `street_betting_bench` continues one frozen CFR+ solve through the checkpoints in [BENCHMARKS.md](BENCHMARKS.md) and is also outside CTest. Each case stops after ten minutes of wall time. `street_parallel_bench` times 1, 2, 4, and 8 frozen threads on those two betting trees and is outside CTest as well.
 
-The street tests also compare one, two, four, and 64 frozen threads on small turn and flop trees. The raw regret and strategy-sum tables match, including a weighted range, a tied board, a shared card, a vanilla pass, a delayed card order, and a solve continued in pieces. One player's pass leaves the other player's regrets unchanged. A worker exception joins the batch and then refuses another pass or an evaluation. A thread count of 0 is rejected. More than one thread on the per-deal walk is rejected. A 64-thread request that does not fit the measured budget throws, releases the charge, and a one-thread solve of that budget still runs. The first frozen pass and the next one do not allocate. On the two betting trees in [BENCHMARKS.md](BENCHMARKS.md), two, four, and eight threads matched the one-thread raw tables at iterations 3, 30, and 100. ThreadSanitizer was not run. WSL g++ 11.4.0 is available, and the build was skipped because the machine was on battery. The card-delay stress is a Windows test, not a sanitizer run.
+The street tests also compare one, two, four, and 64 frozen threads on small turn and flop trees. The raw regret and strategy-sum tables match, including a weighted range, a tied board, a shared card, a vanilla pass, a delayed card order, and a solve continued in pieces. One player's pass leaves the other player's regrets unchanged. A worker exception joins the batch and then refuses another pass or an evaluation. A thread count of 0 is rejected. More than one thread on the per-deal walk is rejected. A 64-thread request that does not fit the measured budget throws, releases the charge, and a one-thread solve of that budget still runs. The first frozen pass and the next one do not allocate. On the two betting trees in [BENCHMARKS.md](BENCHMARKS.md), two, four, and eight threads matched the one-thread raw tables at iterations 3, 30, and 100. ThreadSanitizer was not run. WSL g++ 11.4.0 is available, and the build was skipped because the machine was on battery. The card-delay stress is a Windows test.
 
-An independent review of `e2ad8df` reported GCC 13.3.0 Release at 337,238 assertions and 0 failures. The Windows suite has one more assertion. That review's `street_memory_bench` reproduced the full-range check-down values, with engine heap 60,888,693 bytes on the turn and 418,369,763 bytes on the flop. A focused ThreadSanitizer run, GCC with `-O1 -g -fsanitize=thread -fno-omit-frame-pointer -pthread` on the core sources and `test_streets.cpp`, called `run_street_workspace_tests` and `run_street_parallel_tests` under `TSAN_OPTIONS=halt_on_error=1`. It passed 2,443 assertions with no race reports. That covers those tests, not every workload.
+An independent review of `e2ad8df` reported GCC 13.3.0 Release at 337,238 assertions and 0 failures. The Windows suite has one more assertion. That review's `street_memory_bench` reproduced the full-range check-down values, with engine heap 60,888,693 bytes on the turn and 418,369,763 bytes on the flop. A focused ThreadSanitizer run, GCC with `-O1 -g -fsanitize=thread -fno-omit-frame-pointer -pthread` on the core sources and `test_streets.cpp`, called `run_street_workspace_tests` and `run_street_parallel_tests` under `TSAN_OPTIONS=halt_on_error=1`. It passed 2,443 assertions with no race reports. That run covers those tests.
 
-An independent review of `29cf58f` reported GCC 13.3.0 Release at 337,820 assertions and 0 failures. The Windows suite after the compact kernel was 337,821 assertions and 0 failures. The same review's focused ThreadSanitizer build used those flags on the core sources and `test_streets.cpp`, and the test called `run_street_workspace_tests`, `run_street_parallel_tests`, and `run_street_showdown_tests`. It passed 3,025 assertions with no race reports. That is still those street tests, not the whole suite. Linux engine heap on the full-range check-down was 62,647,533 and 81,082,053 bytes on the turn at one and four threads, and 531,364,379 and 550,581,875 bytes on the flop. The Windows heaps and the reset-30 comparison are in [BENCHMARKS.md](BENCHMARKS.md). Bit-exact agreement with the `e2ad8df` pins holds through iteration 300 on both betting trees at one and four threads.
+An independent review of `29cf58f` reported GCC 13.3.0 Release at 337,820 assertions and 0 failures. The Windows suite after the compact kernel was 337,821 assertions and 0 failures. The same review's focused ThreadSanitizer build used those flags on the core sources and `test_streets.cpp`, and the test called `run_street_workspace_tests`, `run_street_parallel_tests`, and `run_street_showdown_tests`. It passed 3,025 assertions with no race reports. That run covers those street tests. Linux engine heap on the full-range check-down was 62,647,533 and 81,082,053 bytes on the turn at one and four threads, and 531,364,379 and 550,581,875 bytes on the flop. The Windows heaps and the reset-30 comparison are in [BENCHMARKS.md](BENCHMARKS.md). Bit-exact agreement with the `e2ad8df` pins holds through iteration 300 on both betting trees at one and four threads.
 
-The Windows suite after the chance-page and frequency pass is 364,982 assertions and 0 failures. That count includes the session state machine, a local explorer process on port 18765, and the chance-page oracle. An independent review of `70ccabc` reported GCC 13.3.0 Release at 346,787 assertions and 0 failures, and a focused ThreadSanitizer run at 11,992 assertions with no race reports. That sanitizer run covered the core sources and `test_streets.cpp`, including inspection. It did not cover the HTTP session. A later attempt to run the session state machine under WSL g++ 11.4.0 with `-fsanitize=thread` aborted before the test with `unexpected memory mapping`. The session tests passed in the Windows suite. That is not a ThreadSanitizer result.
+The Windows suite after the chance-page and frequency pass is 364,982 assertions and 0 failures. That count includes the session state machine, a local explorer process on port 18765, and the chance-page oracle. An independent review of `70ccabc` reported GCC 13.3.0 Release at 346,787 assertions and 0 failures, and a focused ThreadSanitizer run at 11,992 assertions with no race reports. That sanitizer run covered the core sources and `test_streets.cpp`, including inspection. It did not cover the HTTP session. A later attempt to run the session state machine under WSL g++ 11.4.0 with `-fsanitize=thread` aborted before the test with `unexpected memory mapping`. The session tests passed in the Windows suite.
 
-The session tests drive stop and publication with gates. A stop before construction, during a chunk, and after the chunk but before publication publishes nothing. A stop after `commit_success` returns already complete and the solution stays borrowable. A stop for the finished job does not set the stop flag on its replacement. A failed constructor or publication leaves the job failed, not running, and `borrow` returns nothing. A replacement waits out a held reader, and a weak pointer to the old resource is expired at the release hook before the next construction flag is set.
+The session tests drive stop and publication with gates. A stop before construction, during a chunk, and after the chunk but before publication publishes nothing. A stop after `commit_success` returns already complete and the solution stays borrowable. A stop for the finished job does not set the stop flag on its replacement. A failed constructor or publication leaves the job failed, and `borrow` returns nothing. A replacement waits out a held reader, and a weak pointer to the old resource is expired at the release hook before the next construction flag is set.
 
 The HTTP test launches `explorer.exe --port 18765` and stops that process handle when the test ends. On `Kh Kd 7c 4s 2h`, `AhAd` versus `2c3d`, pot 100, empty bet arrays, all-in off, three river iterations, status and export both report iterations 3 and value 50. The same agreement holds for a one-iteration frozen turn of that matchup. `s18446744073709551617`, `s1x`, and `s+1` return 400. `s2` while `s1` is current returns 404. Stopping the finished river job returns `complete` and the export remains. A node id with an overflowing index returns 400. Leading zeros in `p00.t-1.r-1` select the root.
 
@@ -121,20 +121,20 @@ Chance weights on a weighted flop and a weighted turn match an independent pair-
 
 `node tests/ui/browse.test.js` checks the group frequencies and the stale-response guard. One hand with Check 0.20, Bet 50 0.30, and Bet 100 0.50 reports total aggression 0.80. A slower JSON body that belongs to an older selection is not applied, including an error body. An older status generation is ignored.
 
-One frozen iteration, pot 100, stack 100, bet 0.5, all-in, one raise, 1024 MiB, one thread. The full-range turn `Ah Kd 7c 4s` returned a status of 827 bytes, value 15.1234567901, Nash gap 81.2343664183, engine allocated and peak 143,384,982 bytes, process RSS 184,279,040. The root page was 86,174 bytes in 0.0282 seconds, the first action 86,174 bytes in 0.0136 seconds, and the chance page 3,404 bytes in 0.0018 seconds with 48 cards whose weights sum to 1. The paired flop `Ah Kd 7c`, `QQ,JJ,TT,99` versus the same range, returned a status of 831 bytes, value 16.2637174211, Nash gap 89.2478513202, engine allocated and peak 176,211,150 bytes, process RSS 184,565,760. Its root was 2,214 bytes in 0.0057 seconds, the first action 2,214 bytes in 0.0036 seconds, and the chance page 3,468 bytes in 0.0033 seconds with 49 cards whose weights sum to 1. A follow-up read of that flop chance page reported query 0.0000243 seconds and serialization 0.0000676 seconds. These are measurements, not suite limits. The earlier full-range kernel heaps in [BENCHMARKS.md](BENCHMARKS.md) stay as recorded.
+One frozen iteration, pot 100, stack 100, bet 0.5, all-in, one raise, 1024 MiB, one thread. The full-range turn `Ah Kd 7c 4s` returned a status of 827 bytes, value 15.1234567901, Nash gap 81.2343664183, engine allocated and peak 143,384,982 bytes, process RSS 184,279,040. The root page was 86,174 bytes in 0.0282 seconds, the first action 86,174 bytes in 0.0136 seconds, and the chance page 3,404 bytes in 0.0018 seconds with 48 cards whose weights sum to 1. The paired flop `Ah Kd 7c`, `QQ,JJ,TT,99` versus the same range, returned a status of 831 bytes, value 16.2637174211, Nash gap 89.2478513202, engine allocated and peak 176,211,150 bytes, process RSS 184,565,760. Its root was 2,214 bytes in 0.0057 seconds, the first action 2,214 bytes in 0.0036 seconds, and the chance page 3,468 bytes in 0.0033 seconds with 49 cards whose weights sum to 1. A follow-up read of that flop chance page reported query 0.0000243 seconds and serialization 0.0000676 seconds. These are measurements from that run. The earlier full-range kernel heaps in [BENCHMARKS.md](BENCHMARKS.md) stay as recorded.
 
 The explorer page at `http://127.0.0.1:8765` solved that paired flop for one frozen iteration. The root frequency menu listed Bet or raise, Check, Bet 50, and Bet 100 all-in. Bet 50 opened the IP node, whose menu listed Fold and Call. Selecting Fold showed `6 combos, Fold 0.500`. The turn card `2c` was labeled with weight 0.022 and opened the turn decision.
 
 **Linear CFR** (`tests/unit/test_cfr.cpp`)
 
 - 2,000 iterations on Kuhn are deterministic
-- The average strategy is not the vanilla strategy at the same iteration count
+- The average strategy differs from vanilla CFR at the same iteration count
 - At least one cumulative regret is negative
 - The player-1 value is within 0.01 of `-1/18`, and the Nash gap is below 0.05
 
 The default Leduc tree has 936 decision information sets. Solver reports include iteration count, runtime, memory, player-0 value, Nash gap, and the information-set count.
 
-Convergence is never treated as sufficient by itself: payoff accounting and exact best response are tested separately.
+Payoff accounting and exact best response are tested separately from the Nash gap.
 
 ## CLI smoke
 
@@ -142,4 +142,4 @@ Convergence is never treated as sufficient by itself: payoff accounting and exac
 kuhn_solver --iterations 1000 --print-strategies
 ```
 
-Should print a Nash gap and a player-1 value; it will not yet be tightly converged at 1,000 iterations.
+Should print a Nash gap and a player-1 value. At 1,000 iterations the gap is still wide.

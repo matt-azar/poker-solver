@@ -1,6 +1,6 @@
 # Leduc Hold'em
 
-This is the two-player game from Southey et al., "Bayes' Bluff" (UAI 2005), with the same chip sizes as the default OpenSpiel `leduc_poker` game. It is a multi-street game used to test the shared CFR engine. It is not Texas Hold'em.
+This is the two-player game from Southey et al., "Bayes' Bluff" (UAI 2005), with the same chip sizes as the default OpenSpiel `leduc_poker` game. It is a multi-street game used to test the shared CFR engine.
 
 ## Cards
 

@@ -1,8 +1,8 @@
 ## Kuhn vanilla CFR and CFR+
 
-The table below is historical. It was measured when CFR+ floored each regret during the traversal. The current update freezes the strategy for a pass and floors only the player who just finished that pass. Those rows are not the current solver.
+The table below is historical. It was measured when CFR+ floored each regret during the traversal. The current update freezes the strategy for a pass and floors only the player who just finished that pass.
 
-Historical measurement: `build\Release\kuhn_solver.exe` on Windows 10.0.26200, MSVC 19.40.33811.0, Release, x64. Runtime is the regret-update loop. Memory is the regret table, the strategy-sum table, and the information-set offset table: `2 * 24 * 8 + 13 * 4` = 436 bytes. It is not process RSS.
+Historical measurement: `build\Release\kuhn_solver.exe` on Windows 10.0.26200, MSVC 19.40.33811.0, Release, x64. Runtime is the regret-update loop. Memory is the regret table, the strategy-sum table, and the information-set offset table: `2 * 24 * 8 + 13 * 4` = 436 bytes.
 
 | Algorithm | Iterations | Runtime (s) | Iterations/s | \(u_1\) | Nash gap |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -15,13 +15,13 @@ Historical measurement: `build\Release\kuhn_solver.exe` on Windows 10.0.26200, M
 | CFR+ | 100000 | 0.3687451 | 2.712e5 | -0.055595601859 | 0.000967395475419 |
 | CFR+ | 200000 | 0.6254145 | 3.198e5 | -0.0555838196919 | 0.000683744741163 |
 
-\(-1/18\) is -0.0555555555556. Both algorithms are within \(10^{-3}\) of that value by 10,000 iterations. The Nash gap (NashConv, not NashConv/2) drops below \(10^{-3}\) at 200,000 vanilla iterations and at 100,000 CFR+ iterations.
+\(-1/18\) is -0.0555555555556. Both algorithms are within \(10^{-3}\) of that value by 10,000 iterations. The Nash gap (NashConv) drops below \(10^{-3}\) at 200,000 vanilla iterations and at 100,000 CFR+ iterations.
 
-CFR+ walks the tree twice per iteration (one pass for each player), so its iteration rate is lower. At 200,000 iterations its Nash gap is smaller than vanilla CFR’s. On this 12-information-set game the wall-clock advantage is small. These times are not a prediction for Leduc or Hold’em.
+CFR+ walks the tree twice per iteration (one pass for each player), so its iteration rate is lower. At 200,000 iterations its Nash gap is smaller than vanilla CFR’s. On this 12-information-set game the wall-clock advantage is small.
 
 ## Kuhn after the pass-level floor
 
-Same machine and compiler, Release, from `poker_solver_tests` in this change (parent `9e0d87d`). Runtime is the regret-update loop inside the unit test, not a separate `kuhn_solver` invocation. Memory is still 436 bytes. At 200,000 iterations the CFR+ Nash gap is smaller than the vanilla gap. That comparison is this Kuhn measurement only.
+Same machine and compiler, Release, from `poker_solver_tests` in this change (parent `9e0d87d`). Runtime is the regret-update loop inside the unit test. Memory is still 436 bytes. At 200,000 iterations the CFR+ Nash gap is smaller than the vanilla gap. That comparison is this Kuhn measurement only.
 
 | Algorithm | Iterations | Runtime (s) | \(u_1\) | Nash gap |
 | --- | ---: | ---: | ---: | ---: |
@@ -29,7 +29,7 @@ Same machine and compiler, Release, from `poker_solver_tests` in this change (pa
 | CFR+ | 200000 | 0.6515666 | -0.055555555546 | 2.63026537634e-06 |
 | linear CFR | 2000 | 0.0034519 | -0.055423756632 | 0.0110188373994 |
 
-\(-1/18\) is -0.0555555555556. Linear CFR does not floor. The 2,000-iteration linear row is not a replacement for the historical 10,000-iteration row.
+\(-1/18\) is -0.0555555555556. Linear CFR does not floor. The 2,000-iteration linear row uses the current schedule. The historical 10,000-iteration row is above.
 
 ## Linear CFR on Kuhn
 
@@ -51,11 +51,11 @@ Same machine and compiler. Command: `build\Release\leduc_solver.exe --algorithm 
 | vanilla CFR | 1000 | 0.7050075 | 1.418e3 | -0.0891149365429 | 0.0537834490152 |
 | CFR+ | 1000 | 1.3089424 | 7.640e2 | -0.0862957760813 | 0.0921236987006 |
 
-Published solves put the equilibrium value near -0.0856. One thousand iterations is not a full solve. At this length, CFR+ is closer in value and vanilla CFR has the smaller Nash gap. The unit tests check the gap against a 20-iteration run of the same algorithm, where both gaps are still above 0.15 and then fall. See [LEDUC.md](LEDUC.md).
+Published solves put the equilibrium value near -0.0856. One thousand iterations leaves a Nash gap around 0.05 to 0.09. At this length, CFR+ is closer in value and vanilla CFR has the smaller Nash gap. The unit tests check the gap against a 20-iteration run of the same algorithm, where both gaps are still above 0.15 and then fall. See [LEDUC.md](LEDUC.md).
 
 ## Five-card evaluator
 
-Same machine and compiler. `poker_solver_tests` evaluates all `C(52, 5) = 2,598,960` five-card hands in two card orders, which is 5,197,920 calls to `evaluate`. Measured time: 0.5565473 seconds, about 9.340e6 evaluations per second. The check is that reordering a hand does not change its value. It is not a solve and it does not include six- or seven-card subset enumeration.
+Same machine and compiler. `poker_solver_tests` evaluates all `C(52, 5) = 2,598,960` five-card hands in two card orders, which is 5,197,920 calls to `evaluate`. Measured time: 0.5565473 seconds, about 9.340e6 evaluations per second. The check confirms that reordering a hand keeps the same value. The timed work is those 5,197,920 five-card calls.
 
 ## River
 
@@ -66,7 +66,7 @@ Same machine and compiler. Command: `river_solver --config configs/river_default
 | CFR+ | 500 | 0.0209566 | 2.386e4 | 50.0013916447 | 0.00145265025502 |
 | CFR+ | 2000 | 0.076925 | 2.600e4 | 50.0000871092 | 9.09267588227e-05 |
 
-The unit-test toy (aces or fives versus kings, one all-in) is smaller: 4 information sets, 6 decision nodes, memory estimate 132 bytes. CFR+ for 4,000 iterations took 0.003934 seconds, about 1.017e6 iterations per second, and reached value 24.9999102275 with Nash gap 0.196997733488. The same algorithm at 40 iterations had gap 2.45089917903. These times enumerate every hand pair on every iteration. They will not hold for wide ranges. See [RIVER.md](RIVER.md).
+The unit-test toy (aces or fives versus kings, one all-in) is smaller: 4 information sets, 6 decision nodes, memory estimate 132 bytes. CFR+ for 4,000 iterations took 0.003934 seconds, about 1.017e6 iterations per second, and reached value 24.9999102275 with Nash gap 0.196997733488. The same algorithm at 40 iterations had gap 2.45089917903. These times enumerate every hand pair on every iteration. See [RIVER.md](RIVER.md).
 
 ## Public-tree river traversal
 
@@ -79,7 +79,7 @@ Same machine and compiler, measured after `RiverBatchSolver` became the default.
 | reference enumerator | 0.2478413 | 1.210e2 | 4.8578796 | 41836 | -3.77420762001 | 3.69437852445 |
 | public tree | 0.068139 | 4.403e2 | 0.1083287 | 38304 | -3.77420762001 | 3.69437852445 |
 
-The regret loop is about 3.64 times faster. Wall clock is about 45 times faster because best response is one walk of the 14-node public tree instead of one full-tree walk per information set. Public-tree memory is the regret table plus the strategy-sum table (`2 * entries * 8` bytes) and omits the reference offset table.
+The regret loop is about 3.64 times faster. Wall clock is about 45 times faster because best response is one walk of the 14-node public tree. The reference walk visits the full tree once per information set. Public-tree memory is the regret table plus the strategy-sum table (`2 * entries * 8` bytes) and omits the reference offset table.
 
 The default `AA` versus `KK` tree, CFR+, 500 iterations:
 
@@ -127,7 +127,7 @@ The earlier frozen numbers that used a 0.05 exploration mixture are historical a
 
 ## Full-range check-down
 
-`build\Release\street_memory_bench.exe`, Release, MSVC 19.40, Windows 10.0.26200, x64, Intel Core i7-10510U. One frozen CFR+ iteration, uniform random ranges, no all-in, max raises 0, pot 100, stack 100, budget 1024 MiB. Tolerance is `1e-8 * pot` = `1e-6` chips. Both cases are inside it. Values and expanded counts match the run from before the allocation-resource change. Byte totals below are measured requests, not that earlier plan. Expanded counts are histories, not stored nodes. `estimated_peak_bytes` is the labeled plan. `allocated_bytes` and `peak_allocated_bytes` are the resource's live total and high-water mark. `reserved_bytes` is zero. `regret_strategy_sum_bytes` is the regret array plus the strategy-sum array. `process_peak_working_set_bytes` is process RSS. `solve` runtime is training plus the final value and best-response evaluation. Construction is separate. Wall time is the whole bench case.
+`build\Release\street_memory_bench.exe`, Release, MSVC 19.40, Windows 10.0.26200, x64, Intel Core i7-10510U. One frozen CFR+ iteration, uniform random ranges, no all-in, max raises 0, pot 100, stack 100, budget 1024 MiB. Tolerance is `1e-8 * pot` = `1e-6` chips. Both cases are inside it. Values and expanded counts match the run from before the allocation-resource change. Byte totals below are measured requests. Expanded counts are histories. `estimated_peak_bytes` is the labeled plan. `allocated_bytes` and `peak_allocated_bytes` are the resource's live total and high-water mark. `reserved_bytes` is zero. `regret_strategy_sum_bytes` is the regret array plus the strategy-sum array. `process_peak_working_set_bytes` is process RSS. `solve` runtime is training plus the final value and best-response evaluation. Construction is separate. Wall time is the whole bench case.
 
 | | Turn `Ah Kd 7c 4s` | Flop `Ah Kd 7c` |
 | --- | ---: | ---: |
@@ -225,13 +225,13 @@ Four threads is 1.68x on the turn and 1.84x on the flop. That is past the 1.5x g
 
 One thread allocates 2,720 bytes more than commit `027e652` on both trees (141,624,990 versus 141,622,270 on the turn, 171,120,018 versus 171,117,298 on the flop). Those bytes are the idle thread-pool members. The regret and strategy-sum arrays are unchanged: 28,479,744 and 52,091,904. Two threads add about 7.2 MiB on the full-range turn and 165 KiB on the paired flop. Eight threads add about 45.0 MiB and 1.0 MiB. The flop add is small because the worker scratch follows the hand count.
 
-Process peak RSS in the timing process had already been raised by the instrumented solves, so those prints are not a per-thread RSS. A fresh one-thread turn process later reported 147,394,560 bytes, next to 147,513,344 at `027e652`.
+Process peak RSS in the timing process includes the earlier instrumented solves. A fresh one-thread turn process later reported 147,394,560 bytes, next to 147,513,344 at `027e652`.
 
-The one-thread flop median, 31.87 s for a warm block of 30, is not the same measurement as the 40.43 s cumulative training time at iteration 30 above. The cumulative figure includes the cold start. It is not a claim that the walk got faster.
+The one-thread flop median, 31.87 s, is a warm block of 30. The 40.43 s figure above is cumulative training through iteration 30, including the cold start.
 
 ### Where the one-thread time goes
 
-An instrumented three-iteration pass, with the timers on, so the training times below include that overhead and are not the medians above. `chance_seconds` is zero on one thread because that timer is the caller's wait at a parallel split. With four threads it is caller wall, including the child walks. Showdown and order times with more than one thread are summed across threads and can exceed the training wall.
+An instrumented three-iteration pass, with the timers on. The training times below include that overhead. The medians above leave it out. `chance_seconds` is zero on one thread because that timer is the caller's wait at a parallel split. With four threads it is caller wall, including the child walks. Showdown and order times with more than one thread are summed across threads and can exceed the training wall.
 
 | Case | Threads | Train (s) | Showdown (s) | Order (s) | Decision (s) | Chance (s) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -240,17 +240,17 @@ An instrumented three-iteration pass, with the timers on, so the training times 
 | Flop | 1 | 3.0705686 | 1.3039796 | 0.805276 | 0.5619667 | 0 |
 | Flop | 4 | 1.4128643 | 2.0323213 | 1.206818 | 0.9212747 | 1.2413234 |
 
-On one thread the turn spends 57 percent of the profiled showdown-inclusive training section in showdown, and the nested order section is 39 percent of that training figure. Decisions are 17 percent. The flop's showdown section is 42 percent and decisions are 18 percent. These profile fields are summed elapsed durations. Order time is already inside showdown time, so the columns are not a partition of the training wall. The instrumented four-thread training times are 1.99x and 2.17x the instrumented one-thread times.
+On one thread the turn spends 57 percent of the profiled showdown-inclusive training section in showdown, and the nested order section is 39 percent of that training figure. Decisions are 17 percent. The flop's showdown section is 42 percent and decisions are 18 percent. These profile fields are summed elapsed durations. Order time is already inside showdown time, so the columns overlap. The instrumented four-thread training times are 1.99x and 2.17x the instrumented one-thread times.
 
 ### Same-build agreement
 
 On both betting trees, two, four, and eight threads matched the one-thread raw regret table and the raw strategy-sum table at iterations 3, 30, and 100. The relative delta was 0. Player-0 EV, both best responses, and NashConv matched the rows in the betting table at iterations 0, 1, 3, 10, 30, and 100. NashConv/pot first reached 0.01 at iteration 100, the same checkpoint as `027e652`. Iteration 300 was not part of that paired run.
 
-An earlier eight-thread flop did reach iteration 300: player-0 EV `-1.94346200025`, NashConv `0.0726697317224`, NashConv/pot `0.000726697317224`, training 231.2164908 s, evaluation 34.6194937 s, wall 267.174506 s, cache init 0.8201007 s. Those scalars match the iteration-300 flop row above. The raw tables were not compared at 300, because the one-thread reference in that process had stopped at iteration 187. A printed construction time of 912 s in that process is a suspend, not solver work. The laptop was later unplugged, and the lid was closed.
+An earlier eight-thread flop did reach iteration 300: player-0 EV `-1.94346200025`, NashConv `0.0726697317224`, NashConv/pot `0.000726697317224`, training 231.2164908 s, evaluation 34.6194937 s, wall 267.174506 s, cache init 0.8201007 s. Those scalars match the iteration-300 flop row above. The one-thread reference in that process had stopped at iteration 187, so iteration 300 has no paired raw tables. A printed construction time of 912 s in that process is a suspend. The laptop was later unplugged, and the lid was closed.
 
-The paired run to iteration 100 was after that sustained load. One-thread training to iteration 100 was 202.0960753 s on the turn and 239.4912473 s on the flop, against 77.4923685 s and 122.2273693 s at `027e652`. A clock sample in that window was 1803 MHz on the Samsung power plan. The same binary's warm 30-iteration block, above, still matched the older turn training time, so this gap is the machine, not a one-thread regression in the walk. Against that slower one-thread, training to iteration 100 scaled by 1.47x, 2.48x, and 4.32x on the turn at 2, 4, and 8 threads, and by 2.55x, 4.82x, and 6.12x on the flop. Those ratios use the slowed one-thread. The 30-iteration medians are the speedup to cite.
+The paired run to iteration 100 was after that sustained load. One-thread training to iteration 100 was 202.0960753 s on the turn and 239.4912473 s on the flop, against 77.4923685 s and 122.2273693 s at `027e652`. A clock sample in that window was 1803 MHz on the Samsung power plan. The same binary's warm 30-iteration block, above, still matched the older turn training time, so this gap is the machine. Against that slower one-thread, training to iteration 100 scaled by 1.47x, 2.48x, and 4.32x on the turn at 2, 4, and 8 threads, and by 2.55x, 4.82x, and 6.12x on the flop. Those ratios use the slowed one-thread. The 30-iteration medians are the speedup to cite.
 
-ThreadSanitizer was not run. WSL Ubuntu g++ 11.4.0 is installed. The sanitizer build was not started: the machine is on battery after the lid was closed. The timing stress that did run sleeps a different amount on each card and still matched the one-thread raw tables. That is not a ThreadSanitizer result.
+ThreadSanitizer was not run. WSL Ubuntu g++ 11.4.0 is installed. The sanitizer build was not started: the machine is on battery after the lid was closed. The timing stress that did run sleeps a different amount on each card and still matched the one-thread raw tables.
 
 `street_memory_bench` was not repeated in this iteration. The full-range check-down figures above stay the `027e652` measurements. The unit suite's last full run, with the parallel tests included, was 337,239 assertions and 0 failures. Debug traces were removed after that run and the suite was not started again.
 
@@ -258,9 +258,9 @@ ThreadSanitizer was not run. WSL Ubuntu g++ 11.4.0 is installed. The sanitizer b
 
 `ce99f13` replaces each worker's dense 52-wide showdown prefix with a compact prefix over the cards that appear in the runout. `29cf58f` is that kernel plus the `sample` timing mode. The raw regret and strategy-sum tables of `29cf58f` matched the `e2ad8df` pins, and matched that build's own one-thread tables, at iterations 3, 30, 100, and 300. Both betting trees, one thread and four threads. Every relative regret delta and strategy-sum delta was 0. At iteration 300 the turn value is `-2.18915110333` and NashConv is `0.0559933168262`. The flop value is `-1.94346200025` and NashConv is `0.0726697317224`. The pins are the gitignored `PKRPAR1` files under `build/parity-baseline/`.
 
-A separate plugged-in sample, one process per configuration, continued training through iteration 300. Those are single samples, not the alternating protocol below. Turn, one thread: 12.55 s to iteration 30, 38.39 s to 100, 103.11 s to 300, cache init 0.290 s, allocated 143,384,278. Turn, four threads: 6.58 s, 22.29 s, 67.73 s, cache init 0.230 s, allocated 161,818,798. Flop, one thread: 21.80 s, 73.15 s, 221.14 s, cache init 0.225 s, allocated 176,209,546. Flop, four threads: 11.23 s, 38.38 s, 114.84 s, cache init 0.207 s, allocated 176,635,618. The older `027e652` one-thread times to iteration 300 were 236.9 s on the turn and 353.0 s on the flop, on a different session. They are not paired with these samples.
+A separate plugged-in sample, one process per configuration, continued training through iteration 300. Those are single samples. The alternating protocol is below. Turn, one thread: 12.55 s to iteration 30, 38.39 s to 100, 103.11 s to 300, cache init 0.290 s, allocated 143,384,278. Turn, four threads: 6.58 s, 22.29 s, 67.73 s, cache init 0.230 s, allocated 161,818,798. Flop, one thread: 21.80 s, 73.15 s, 221.14 s, cache init 0.225 s, allocated 176,209,546. Flop, four threads: 11.23 s, 38.38 s, 114.84 s, cache init 0.207 s, allocated 176,635,618. The older `027e652` one-thread times to iteration 300 were 236.9 s on the turn and 353.0 s on the flop, on a different session. They come from a different session.
 
-The four-thread medians from the cool `e2ad8df` block stay the threading result: turn 23.564511 s versus 14.0271184 s (1.680x), flop 31.8706521 s versus 17.3644758 s (1.836x). That block compared thread counts inside one kernel. It is not the kernel comparison below.
+The four-thread medians from the cool `e2ad8df` block stay the threading result: turn 23.564511 s versus 14.0271184 s (1.680x), flop 31.8706521 s versus 17.3644758 s (1.836x). That block compared thread counts inside one kernel. The kernel comparison is the next section.
 
 ### Reset-30 warm-cache comparison
 

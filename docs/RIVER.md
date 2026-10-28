@@ -2,7 +2,7 @@
 
 `RiverGame` is one no-limit betting street on a fixed five-card board. `CfrTrainer<RiverGame>` is the reference enumerator. `RiverBatchSolver` is the default: one public betting tree, the same per-deal regret update, and one best-response walk. Pass `--reference` to use the enumerator. Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 is out of position, player 1 is in position, and a pair of hands is legal only when the four private cards and the board are disjoint. There is no RNG.
 
-This is an equilibrium of the configured bet-size tree. It is not an equilibrium of unrestricted no-limit Hold'em, where every chip amount is legal.
+This is an equilibrium of the configured bet-size tree.
 
 ## Chips
 
@@ -41,7 +41,7 @@ Check-down is worth +50 with aces and -50 with fives. A fold to the all-in wins 
 - Kings call with probability 1/2.
 - Player 0's value is +25.
 
-`tests/unit/test_river.cpp` checks this profile. It is not hard-coded into the solver.
+`tests/unit/test_river.cpp` checks this profile. The solver computes it.
 
 ## Command line
 
@@ -52,4 +52,4 @@ river_solver --board Ah,Kd,7c,4s,2h --pot 100 --stack 200 --oop-range AA --ip-ra
 river_solver --reference --iterations 30 --algorithm vanilla --oop-range 22+ --ip-range 22+
 ```
 
-The reported Nash gap is NashConv, `u0(BR0) + u1(BR1)`, not NashConv/2. Player 0 is out of position.
+The reported Nash gap is NashConv, `u0(BR0) + u1(BR1)`. Player 0 is out of position.

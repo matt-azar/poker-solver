@@ -1,18 +1,18 @@
 # Architecture
 
-Phase 4 adds six-card Leduc Hold'em on that same trainer. The regret update was not rewritten for the second game. See [LEDUC.md](LEDUC.md).
+Phase 4 adds six-card Leduc Hold'em on that same trainer. See [LEDUC.md](LEDUC.md).
 
 Phase 5 adds a 52-card deck, a seven-card evaluator, and 1,326-hand ranges under `poker::holdem`. See [HOLDEM.md](HOLDEM.md).
 
-Phase 6 adds `poker::river::RiverGame`, a heads-up no-limit river on that trainer. Chance deals private hands from the two ranges. The regret update was not rewritten. See [RIVER.md](RIVER.md).
+Phase 6 adds `poker::river::RiverGame`, a heads-up no-limit river on that trainer. Chance deals private hands from the two ranges. The same regret update trains it. See [RIVER.md](RIVER.md).
 
-Phase 7 adds `poker::solver::RiverBatchSolver`. It keeps one copy of the public betting tree and runs the same regret update, in the same deal order. A pass freezes regret matching. CFR+ floors one player after that player's deals, not between deals. Best response is one bottom-up pass: each river information set is one player, one private hand, and one public history, so that pass matches deepest-first best response on `RiverGame`. `CfrTrainer<RiverGame>` remains the reference and is selected with `--reference`. Kuhn and Leduc still use only `CfrTrainer`.
+Phase 7 adds `poker::solver::RiverBatchSolver`. It keeps one copy of the public betting tree and runs the same regret update, in the same deal order. A pass freezes regret matching. CFR+ floors one player after that player's deals. Best response is one bottom-up pass: each river information set is one player, one private hand, and one public history, so that pass matches deepest-first best response on `RiverGame`. `CfrTrainer<RiverGame>` remains the reference and is selected with `--reference`. Kuhn and Leduc still use only `CfrTrainer`.
 
-Phase 8 adds `poker::streets::StreetGame` for a turn or a flop. Later cards are chance nodes. The regret update was not rewritten. See [STREETS.md](STREETS.md).
+Phase 8 adds `poker::streets::StreetGame` for a turn or a flop. Later cards are chance nodes. The same regret update trains it. See [STREETS.md](STREETS.md).
 
 Phase 9 adds the `explorer` program and the static files in `ui/`. A five-card board uses `RiverBatchSolver`. A flop or a turn uses `StreetBatchSolver`, so the later streets are dealt and bet in the same tree. Nothing under `include/` includes `ui/`. See [EXPLORER.md](EXPLORER.md).
 
-`Algorithm::LinearCfr` is a third weighting on `CfrTrainer`: iteration `t` scales both the new regret and the average strategy, and regrets are not floored. The public river tree does not implement it. See [HUNL.md](HUNL.md).
+`Algorithm::LinearCfr` is a third weighting on `CfrTrainer`: iteration `t` scales both the new regret and the average strategy, and regrets stay signed. The public river tree uses vanilla CFR and CFR+. See [HUNL.md](HUNL.md).
 
 ## Modules
 
@@ -35,7 +35,7 @@ Phase 9 adds the `explorer` program and the static files in `ui/`. A five-card b
 | `street_solver` | Command-line driver; public tree by default, `--reference` for `StreetGame` |
 | `explorer` | Local page. Serves `ui/`. A river calls `RiverBatchSolver`; a flop or a turn calls `StreetBatchSolver` |
 
-`expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker. It is not a second CFR implementation.
+`expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker.
 
 ## Extensive-game interface
 
@@ -45,36 +45,36 @@ A game type provides a small `State` and these operations:
 - `chance_count`, `chance_probability`, `child_chance`
 - `infoset`, `acting_player`, `action_count`, `child_action`
 
-Player 1’s utility is in net chips. Player 2’s utility is the negation. `acting_player` is 0 or 1. Actions are local indexes, not a global action id. The concept `ExtensiveGame` checks this at compile time.
+Player 1’s utility is in net chips. Player 2’s utility is the negation. `acting_player` is 0 or 1. Actions are local indexes. The concept `ExtensiveGame` checks this at compile time.
 
 Kuhn’s only chance node is the root deal: six equally likely ordered hands. After that, `State` holds the deal and the public `Sequence`. The information set is still `(player, private card, public sequence)`.
 
 ## Solver storage
 
-Regrets and strategy sums are two `std::vector<double>` blocks. An offset table maps each information set to its first action. Kuhn has 12 information sets and 2 actions each, so 24 doubles per table. The inner CFR recursion uses stack arrays and does not allocate. The action-count scratch limit is 8 per information set.
+Regrets and strategy sums are two `std::vector<double>` blocks. An offset table maps each information set to its first action. Kuhn has 12 information sets and 2 actions each, so 24 doubles per table. The inner CFR recursion uses stack arrays. The action-count scratch limit is 8 per information set.
 
-CFR+ stores the same tables. Negative cumulative regrets are replaced by zero once, after the updating player's pass has summed its counterfactual regret. The opponent's table is left unchanged. The average strategy is weighted by the iteration index. Linear CFR weights both the new regret and the average strategy by the iteration index and does not floor. See [MATHEMATICS.md](MATHEMATICS.md).
+CFR+ stores the same tables. Negative cumulative regrets are replaced by zero once, after the updating player's pass has summed its counterfactual regret. The opponent's table is left unchanged. The average strategy is weighted by the iteration index. Linear CFR weights both the new regret and the average strategy by the iteration index and leaves regrets signed. See [MATHEMATICS.md](MATHEMATICS.md).
 
 ## Best response
 
 `compute_best_response` walks every information set of the responding player from the deepest public decision back to the root. At each set it sums opponent-and-chance-weighted continuation values and keeps the action with the larger sum. Ties keep the lower action index. The continuation already uses the chosen action at every deeper set.
 
-The Nash gap is \(u_1(\mathrm{BR}_1,\bar\sigma_2)+u_2(\bar\sigma_1,\mathrm{BR}_2)\). Tests also enumerate all 64 pure plans per Kuhn player and require the same values. That enumeration is a Kuhn-only check, not the solver used for new games.
+The Nash gap is \(u_1(\mathrm{BR}_1,\bar\sigma_2)+u_2(\bar\sigma_1,\mathrm{BR}_2)\). Tests also enumerate all 64 pure plans per Kuhn player and require the same values. That enumeration checks Kuhn.
 
 ## Stopping
 
-`SolveConfig` sets a maximum iteration count and an optional Nash-gap threshold. The threshold is used only when it is non-negative and `eval_interval` is positive. Runtime reported by `solve` is the regret-update loop, including any gap checks that can end the run early. The final gap measurement after a fixed iteration count is not included in that timer.
+`SolveConfig` sets a maximum iteration count and an optional Nash-gap threshold. The threshold is used only when it is non-negative and `eval_interval` is positive. Runtime reported by `solve` is the regret-update loop, including any gap checks that can end the run early.
 
 ## Design limits
 
-- The CFR engine is used for Kuhn, Leduc, a heads-up river, and a heads-up turn or flop with a fixed list of bet sizes. It does not offer every legal chip amount.
-- Best response is exact. On Kuhn and Leduc, and on the reference river, it walks the tree once per information set. On the public river tree it is one bottom-up pass over the same actions. It is not a sampled exploitability estimate.
-- Convergence here is equilibrium of this finite Kuhn tree, not of unrestricted no-limit Hold’em.
+- The CFR engine solves Kuhn, Leduc, a heads-up river, and a heads-up turn or flop with a fixed list of bet sizes.
+- Best response is exact. On Kuhn and Leduc, and on the reference river, it walks the tree once per information set. On the public river tree it is one bottom-up pass over the same actions.
+- Convergence here is an equilibrium of this finite Kuhn tree.
 - At most 8 actions per information set until the scratch arrays are widened.
 
 ## Kuhn public sequences
 
-Betting is one round with unit antes and unit bets. Public history is `Sequence`, not a string of hidden cards.
+Betting is one round with unit antes and unit bets. Public history is `Sequence`.
 
 - `Empty` — P1 Check or Bet
 - `Check` — P2 Check or Bet
@@ -95,7 +95,7 @@ An infoset key is `(player, private_card, public_sequence)`. The opponent’s ca
 
 ## Memory layout
 
-Regrets and strategy sums live in the generic trainer, not in Kuhn-specific arrays. See the solver-storage section above.
+Regrets and strategy sums live in the generic trainer. See the solver-storage section above.
 
 ## Utilities
 
