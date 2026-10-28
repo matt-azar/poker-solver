@@ -26,6 +26,18 @@ One street left, that fraction is all-in. PioSOLVER's geometric size is this spl
 
 An all-in threshold is a fraction of the starting stack. A size that would commit more than that fraction is replaced by all-in, when all-ins are allowed. Zero leaves every listed size unchanged.
 
+Two listed sizes that round to the same chip amount are one action. A raise increment smaller than the previous raise is omitted. The first bet of a street only has to add at least one chip. An all-in shorter than the minimum raise is kept when all-ins are allowed, and omitted when they are not.
+
+## Canonical configuration
+
+`format_street_config` writes one `street-config 1` document for a `StreetConfig`. `parse_street_config` reads that document. Formatting the parsed value again produces the same text. A `StreetGame` built from the parsed config has the same deals, information sets, decisions, terminals, and opening action labels as a game built from the original.
+
+The first line is `street-config 1`. Each later line is one field. Scalar fields are always written, in this order: `board`, `pot`, `stack`, `oop-range`, `ip-range`, `first-to-act`, `max-raises`, `allow-all-in`, `allow-three-bet`, `geometric`, `all-in-threshold`, `pot-cap`, `memory-mib`, `threads`. An empty size list is omitted. A missing size field means an empty list. Size fields that are present follow the member order in `StreetConfig`, then `oop-donk`, `oop-raise-multiples`, and `ip-raise-multiples`.
+
+A range is a combo list in combo-index order. A negative size is a chip amount and is written `20c`. A nonnegative size is a pot fraction. Raise multiples are plain numbers on their own fields. Flags are `0` or `1`. The document ends with a newline and uses LF endings.
+
+An unknown field, a repeated field, extra space, or a version other than 1 is rejected. The parser does not build the tree. `StreetGame` still rejects a board that is not three or four cards, a nonpositive pot, and a range pair with no legal hands. `street_solver` does not read this document yet.
+
 `--accuracy 0.05` stops when the Nash gap divided by the pot is at or below 0.05. The printed Nash gap is NashConv. The fraction of the pot is printed beside it.
 
 At most eight actions are legal at one decision. `StreetGame` rejects a reference enumeration above 200,000 terminals and tells the caller to use the batch solver. `StreetBatchSolver` does not use that cap, and it does not cap expanded histories. Its limit is `StreetConfig::memory_mib`, default 1024. One mebibyte is 1,048,576 bytes. Zero is rejected.

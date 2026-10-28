@@ -1,5 +1,6 @@
 #include "harness.hpp"
 
+#include "game/street_config_text.hpp"
 #include "game/street_game.hpp"
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
@@ -8,6 +9,7 @@
 #include "solver/trainer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -573,6 +575,7 @@ void expect_average_without_opponent_reach()
 } // namespace
 
 void run_tree_rule_tests(const std::vector<int>& turn_board);
+void expect_canonical_street_config();
 
 std::uint64_t component_bytes(
     const poker::solver::StreetMemoryReport& report,
@@ -996,6 +999,7 @@ void run_street_tests()
     }
 
     run_tree_rule_tests(turn_board);
+    expect_canonical_street_config();
     expect_support_hole();
     expect_zero_own_reach();
     expect_average_without_opponent_reach();
@@ -1118,6 +1122,250 @@ void run_tree_rule_tests(const std::vector<int>& turn_board)
         }
         expect_street_batch(donk, poker::solver::Algorithm::VanillaCfr, 1, false);
     }
+}
+
+bool same_numbers(const std::vector<double>& left, const std::vector<double>& right)
+{
+    if (left.size() != right.size())
+    {
+        return false;
+    }
+    for (std::size_t index = 0; index < left.size(); ++index)
+    {
+        if (left[index] != right[index])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool same_range(const Range& left, const Range& right)
+{
+    const std::array<double, 1326>& a = left.weights();
+    const std::array<double, 1326>& b = right.weights();
+    for (std::size_t index = 0; index < a.size(); ++index)
+    {
+        if (a[index] != b[index])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool same_config(const StreetConfig& left, const StreetConfig& right)
+{
+    return left.board == right.board && left.pot == right.pot && left.stack == right.stack
+        && same_range(left.oop, right.oop) && same_range(left.ip, right.ip)
+        && same_numbers(left.oop_bet_sizes, right.oop_bet_sizes)
+        && same_numbers(left.ip_bet_sizes, right.ip_bet_sizes)
+        && same_numbers(left.oop_raise_sizes, right.oop_raise_sizes)
+        && same_numbers(left.ip_raise_sizes, right.ip_raise_sizes)
+        && same_numbers(left.oop_flop_bets, right.oop_flop_bets)
+        && same_numbers(left.oop_turn_bets, right.oop_turn_bets)
+        && same_numbers(left.oop_river_bets, right.oop_river_bets)
+        && same_numbers(left.ip_flop_bets, right.ip_flop_bets)
+        && same_numbers(left.ip_turn_bets, right.ip_turn_bets)
+        && same_numbers(left.ip_river_bets, right.ip_river_bets)
+        && same_numbers(left.oop_flop_raises, right.oop_flop_raises)
+        && same_numbers(left.oop_turn_raises, right.oop_turn_raises)
+        && same_numbers(left.oop_river_raises, right.oop_river_raises)
+        && same_numbers(left.ip_flop_raises, right.ip_flop_raises)
+        && same_numbers(left.ip_turn_raises, right.ip_turn_raises)
+        && same_numbers(left.ip_river_raises, right.ip_river_raises)
+        && same_numbers(left.oop_donk_sizes, right.oop_donk_sizes)
+        && same_numbers(left.oop_raise_multiples, right.oop_raise_multiples)
+        && same_numbers(left.ip_raise_multiples, right.ip_raise_multiples)
+        && left.geometric == right.geometric
+        && left.all_in_threshold == right.all_in_threshold
+        && left.pot_cap == right.pot_cap
+        && left.allow_all_in == right.allow_all_in
+        && left.allow_three_bet == right.allow_three_bet
+        && left.max_raises == right.max_raises
+        && left.first_to_act == right.first_to_act
+        && left.memory_mib == right.memory_mib
+        && left.threads == right.threads;
+}
+
+void expect_same_opening(const StreetGame& left, const StreetGame& right)
+{
+    CHECK(left.deal_count() == right.deal_count());
+    CHECK(left.infoset_count() == right.infoset_count());
+    CHECK(left.decision_node_count() == right.decision_node_count());
+    CHECK(left.terminal_count() == right.terminal_count());
+    const StreetGame::State left_open = left.child_chance(left.root(), 0);
+    const StreetGame::State right_open = right.child_chance(right.root(), 0);
+    const int left_id = left.infoset(left_open);
+    const int right_id = right.infoset(right_open);
+    CHECK(left.action_count(left_id) == right.action_count(right_id));
+    const int count = left.action_count(left_id);
+    for (int action = 0; action < count; ++action)
+    {
+        CHECK(left.action_label(left_id, action) == right.action_label(right_id, action));
+    }
+}
+
+void expect_canonical_street_config()
+{
+    StreetConfig config;
+    config.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+    config.pot = 100;
+    config.stack = 300;
+    config.oop = Range::parse("QcQd:2");
+    config.ip = Range::parse("JcJd");
+    config.oop_bet_sizes = {0.5, -20.0};
+    config.oop_donk_sizes = {-40.0};
+    config.ip_raise_multiples = {3.0};
+    config.oop_turn_bets = {0.25};
+    config.pot_cap = 1.0;
+    config.allow_all_in = false;
+    config.max_raises = 1;
+    config.memory_mib = 1024;
+    config.threads = 1;
+
+    const std::string text = poker::streets::format_street_config(config);
+    const char* expected =
+        "street-config 1\n"
+        "board Ah Kd 7c 4s\n"
+        "pot 100\n"
+        "stack 300\n"
+        "oop-range QdQc:2\n"
+        "ip-range JdJc:1\n"
+        "first-to-act 0\n"
+        "max-raises 1\n"
+        "allow-all-in 0\n"
+        "allow-three-bet 1\n"
+        "geometric 0\n"
+        "all-in-threshold 0\n"
+        "pot-cap 1\n"
+        "memory-mib 1024\n"
+        "threads 1\n"
+        "oop-bets 0.5 20c\n"
+        "oop-turn-bets 0.25\n"
+        "oop-donk 40c\n"
+        "ip-raise-multiples 3\n";
+    if (text != expected)
+    {
+        std::cerr << "canonical street config:\n" << text;
+    }
+    CHECK(text == expected);
+
+    const StreetConfig parsed = poker::streets::parse_street_config(text);
+    CHECK(same_config(config, parsed));
+    CHECK(poker::streets::format_street_config(parsed) == text);
+
+    const StreetGame original(config);
+    const StreetGame rebuilt(parsed);
+    expect_same_opening(original, rebuilt);
+
+    const std::string tiny = poker::streets::format_street_config([&] {
+        StreetConfig scaled = config;
+        scaled.oop_bet_sizes = {1e-200};
+        scaled.oop_donk_sizes.clear();
+        scaled.ip_raise_multiples.clear();
+        scaled.oop_turn_bets.clear();
+        scaled.allow_all_in = true;
+        return scaled;
+    }());
+    const StreetConfig scaled_back = poker::streets::parse_street_config(tiny);
+    CHECK(scaled_back.oop_bet_sizes.size() == 1);
+    CHECK(scaled_back.oop_bet_sizes[0] == 1e-200);
+    CHECK(poker::streets::format_street_config(scaled_back) == tiny);
+
+    const char* swapped =
+        "street-config 1\n"
+        "ip-range JdJc:1\n"
+        "oop-range QcQd:2\n"
+        "board Ah Kd 7c 4s\n"
+        "stack 300\n"
+        "pot 100\n"
+        "threads 1\n"
+        "memory-mib 1024\n"
+        "pot-cap 1\n"
+        "all-in-threshold 0\n"
+        "geometric 0\n"
+        "allow-three-bet 1\n"
+        "allow-all-in 0\n"
+        "max-raises 1\n"
+        "first-to-act 0\n"
+        "oop-donk 40c\n"
+        "oop-bets 0.5 20c\n"
+        "oop-turn-bets 0.25\n"
+        "ip-raise-multiples 3\n";
+    CHECK(poker::streets::format_street_config(poker::streets::parse_street_config(swapped)) == text);
+
+    CHECK(throws_invalid([] { poker::streets::parse_street_config("street-config 2\n"); }));
+    CHECK(!throws_invalid([] { poker::streets::parse_street_config("street-config 1\n"); }));
+    CHECK(throws_invalid([] { poker::streets::parse_street_config("street-config 1"); }));
+    CHECK(throws_invalid([] {
+        poker::streets::parse_street_config("street-config 1\npot 100\npot 100\n");
+    }));
+    CHECK(throws_invalid([] {
+        poker::streets::parse_street_config("street-config 1\noop-bets 3x\n");
+    }));
+    CHECK(throws_invalid([] {
+        poker::streets::parse_street_config("street-config 1\noop-bets 0c\n");
+    }));
+    CHECK(throws_invalid([] {
+        poker::streets::parse_street_config("street-config 1\nunknown 1\n");
+    }));
+    CHECK(!throws_invalid([] {
+        poker::streets::parse_street_config("street-config 1\nboard Ah Kd\npot 100\nstack 100\n");
+    }));
+    CHECK(throws_invalid([] {
+        const StreetConfig short_board = poker::streets::parse_street_config(
+            "street-config 1\nboard Ah Kd\npot 100\nstack 100\n"
+            "oop-range QcQd\nip-range JcJd\n");
+        StreetGame game(short_board);
+    }));
+
+    StreetConfig merged;
+    merged.board = config.board;
+    merged.pot = 100;
+    merged.stack = 300;
+    merged.oop = Range::parse("QcQd");
+    merged.ip = Range::parse("JcJd");
+    merged.oop_bet_sizes = {0.5, -50.0};
+    merged.allow_all_in = false;
+    merged.max_raises = 1;
+    const StreetGame merged_game(merged);
+    const StreetGame::State merged_open = merged_game.child_chance(merged_game.root(), 0);
+    CHECK(find_action(merged_game, merged_open, "Bet 50") >= 0);
+    CHECK(merged_game.action_count(merged_game.infoset(merged_open)) == 2);
+
+    StreetConfig minimum;
+    minimum.board = config.board;
+    minimum.pot = 100;
+    minimum.stack = 500;
+    minimum.oop = Range::parse("QcQd");
+    minimum.ip = Range::parse("JcJd");
+    minimum.oop_bet_sizes = {0.5};
+    minimum.ip_raise_sizes = {0.1, 1.0};
+    minimum.allow_all_in = false;
+    minimum.max_raises = 2;
+    const StreetGame minimum_game(minimum);
+    StreetGame::State faced = minimum_game.child_chance(minimum_game.root(), 0);
+    faced = minimum_game.child_action(faced, find_action(minimum_game, faced, "Bet 50"));
+    CHECK(find_action(minimum_game, faced, "Raise to 250") >= 0);
+    CHECK(minimum_game.action_count(minimum_game.infoset(faced)) == 3);
+
+    StreetConfig short_stack = minimum;
+    short_stack.stack = 80;
+    short_stack.oop_bet_sizes = {-50.0};
+    short_stack.ip_raise_sizes = {0.1};
+    short_stack.allow_all_in = true;
+    const StreetGame short_game(short_stack);
+    StreetGame::State short_faced = short_game.child_chance(short_game.root(), 0);
+    short_faced = short_game.child_action(short_faced, find_action(short_game, short_faced, "Bet 50"));
+    CHECK(find_action(short_game, short_faced, "Raise to 80 all-in") >= 0);
+    CHECK(short_game.action_count(short_game.infoset(short_faced)) == 3);
+    short_stack.allow_all_in = false;
+    const StreetGame no_shove(short_stack);
+    StreetGame::State called = no_shove.child_chance(no_shove.root(), 0);
+    called = no_shove.child_action(called, find_action(no_shove, called, "Bet 50"));
+    CHECK(find_action(no_shove, called, "Raise to 80 all-in") < 0);
+    CHECK(no_shove.action_count(no_shove.infoset(called)) == 2);
 }
 
 void expect_allocation_audit()
