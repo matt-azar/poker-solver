@@ -24,6 +24,10 @@ int fail(poker::holdem::EquityFailure failure, const std::string& message)
     {
         return 4;
     }
+    if (failure == poker::holdem::EquityFailure::NumericalRange)
+    {
+        return 5;
+    }
     return 1;
 }
 

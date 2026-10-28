@@ -22,7 +22,7 @@ range equity = sum of m0(h) * E0(h)
 
 Positive-weight combos are returned in ascending combo index, including board-blocked and unsupported rows with `defined == false`. Zero-weight combos are omitted. A later counterfactual query for an omitted hand needs its own interface. An empty legal joint returns success with `joint_defined == false`. It does not invent a uniform range or a zero equity.
 
-Invalid boards, invalid range syntax, nonfinite or negative weights, cancellation, and an exceeded work limit are different errors (`EquityFailure`).
+Invalid boards, invalid range syntax, nonfinite or negative weights, cancellation, an exceeded work limit, and a finite input whose derived mass is not a finite double are different errors (`EquityFailure`). A structurally empty legal joint is success. An underflowed or overflowed product is not.
 
 ## API
 
@@ -48,7 +48,7 @@ equity_calculator --board "Kh Kd 7c 4s" \
   --max-pair-runouts 1000000 --json
 ```
 
-Range text is the existing `Range::parse` syntax. Exit 0 prints the result. Exit 1 is invalid input, 2 is an invalid weight, 3 is the work limit, and 4 is cancellation.
+Range text is the existing `Range::parse` syntax. Exit 0 prints the result. Exit 1 is invalid input, 2 is an invalid weight, 3 is the work limit, 4 is cancellation, and 5 is a numerical-range failure. Exit 5 writes the diagnostic to stderr and does not print a result.
 
 On this Windows machine the command above printed:
 
@@ -76,7 +76,11 @@ This module does not use `BudgetResource` or the street solver's 1024 MiB engine
 
 ## Numerical limits
 
-Enumeration is complete. Pair outcomes use integer win, tie, and loss counts. Compatible mass is the direct sum of compatible opponent input weights. Hand and range totals use compensated summation of nonnegative terms. A non-finite aggregate or combo result throws `EquityFailure::InvalidWeight`.
+Enumeration is complete. Pair outcomes use integer win, tie, and loss counts. Compatible mass is the direct sum of compatible opponent input weights, never a blocked-total subtraction. Before those products, each player is divided by its largest participating weight. Marginal and equity ratios use the scaled weights, so a uniform factor such as `1e-200` or `1e200` on either side matches the unit-weight result. Reported `input_weight` and `compatible_mass` stay in the original unnormalized units.
+
+`EquityFailure::InvalidWeight` is only a malformed or nonfinite input weight. `EquityFailure::NumericalRange` (CLI exit 5) means the inputs are finite and at least one legal pair exists, but a scaled weight, the restored compatible mass, or a joint contribution is not a finite positive double. That includes the product of three `1e308` opponent weights, which cannot be stored as one compatible mass, and a participating weight that would become zero when divided by its range's largest weight. The failure is an error. It does not return `joint_defined: false` or a partial JSON result.
+
+A single opponent weight of `1e308` is representable and is accepted. `long double` is not used to widen the product: on this MSVC toolchain it has the same width as `double`.
 
 Rounding `1 + 1e-18` to `1` is ordinary double-precision behavior. Losing `AhAd`'s only compatible opponent because `AhAc` has weight 1 is a different defect: subtracting the blocked weight from a total that has already rounded `1 + epsilon` to `1` yields zero and drops the hand. This calculator does not do that subtraction. On `Kh Kd 7c 4s`, OOP `AhAd,9c9d`, IP `AhAc:1,2c3d:epsilon`:
 
@@ -91,11 +95,15 @@ The oracle in `tests/equity/test_equity.cpp` stores each pair's runout results, 
 
 ## Tests
 
-`equity_tests` is its own executable and CTest target. It does not use the shared harness. Fresh directory `build-review`, MSVC 19.40.33811.0, Visual Studio 17 2022, Release. CTest: `poker_solver_tests` passed in 23.40 seconds, `equity_tests` passed in 0.46 seconds, 2 of 2. Direct totals: `equity_tests` `passed=570 failed=0`; an isolated `poker_solver_tests` run `passed=438630 failed=0`. HTTP cases ran on this Windows host. `node tests/ui/browse.test.js` printed `browse tests passed`. One earlier direct suite run reported `passed=438629 failed=1` at `test_value_worker.cpp:149` (`reader_count() == 0`). The isolated rerun was clean. Equity code does not call that worker.
+`equity_tests` is its own executable and CTest target. It does not use the shared harness. Directory `build-review`, MSVC 19.40.33811.0, Visual Studio 17 2022, Release. Direct total after the scale correction: `equity_tests` `passed=771 failed=0`.
 
-Debug `equity_tests` compiled with `/EHsc /fsanitize=address` and run with `clang_rt.asan_dynamic-x86_64.dll` on `PATH` reported `passed=570 failed=0`. Passing `/fsanitize=address` only as a link option is ignored by `link.exe` and is not a sanitizer pass; that earlier binary failed to start with `STATUS_DLL_NOT_FOUND`. UBSan was not run. The development suite was not run under ASan.
+The same Release `equity_calculator` reproduces the two review inputs on `Kh Kd 7c 4s 2h`. `AhAd:1e-200` against `2c3d:1e-200` exits 0 with `joint_defined` true, OOP equity 1, IP equity 0, and both marginals 1. Input weights and compatible masses stay at the parsed `1e-200` value (`9.9999999999999998e-201`). Before the correction this request exited 0 with `legal_pairs` 1, `joint_defined` false, null overall equities, and an `AhAd` marginal of 0. `AhAd` against `2c3d:1e308,5c6d:1e308,8c9d:1e308` now exits 5 with `equity numerical range exceeded: compatible mass is not representable` and no JSON. Before the correction it exited 0 with `legal_pairs` 3 and `joint_defined` false. `AhAd` against `AhAc` on that river still exits 0 with `legal_pairs` 0 and `joint_defined` false.
 
-Coverage includes river certainty, a royal-flush tie, 990 and 44 completions, blockers, the `AhAd`/`AhAc`/`2c3d` fixture at `1e-12` and `1e-18`, rescaling, a changed hero prior, undefined joints, invalid input, player swap, suit permutation, posterior and equity identities, weighted reconstruction against an unweighted average, work-limit boundaries, deterministic cancellation, unchanged inputs, and seeded sparse ranges.
+Debug `equity_tests` compiled with `/EHsc /fsanitize=address` and run with `clang_rt.asan_dynamic-x86_64.dll` on `PATH` reported `passed=771 failed=0`. That is the supported sanitizer on this host. `link.exe` warned LNK4300 and ignored `/INCREMENTAL` because of the sanitizer metadata. Passing `/fsanitize=address` only as a link option is ignored by `link.exe` and is not a sanitizer pass. UBSan is not available on this MSVC. The development suite was not run under ASan.
+
+Coverage includes river certainty, a royal-flush tie, 990 and 44 completions, blockers, the `AhAd`/`AhAc`/`2c3d` fixture at `1e-12` and `1e-18`, ordinary rescaling, uniform and one-sided `1e-200` and `1e200` scales compared with the known `AhAd` versus `2c3d` result, one representable `1e308` opponent, the three-weight `1e308` rejection, a dynamic range that would drop a compatible hand, a genuine empty joint, a changed hero prior, invalid input, player swap, suit permutation, posterior and equity identities, weighted reconstruction against an unweighted average, work-limit boundaries, deterministic cancellation, unchanged inputs, and seeded sparse ranges.
+
+One earlier direct development-suite run, before this correction, reported `passed=438629 failed=1` at `test_value_worker.cpp:149` (`reader_count() == 0` immediately after resubmitting node A). Resubmitting A is a new request on the current solution, so the worker may borrow before that assertion. An isolated rerun was clean and is not the fix. Equity code does not call that worker, and this commit does not change that test.
 
 ## Later M2 adapter
 

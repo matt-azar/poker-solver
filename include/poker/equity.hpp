@@ -23,7 +23,9 @@ enum class EquityFailure
     InvalidInput,
     InvalidWeight,
     WorkLimit,
-    Cancelled
+    Cancelled,
+    // Finite inputs whose joint exists, but a derived weight, mass, or ratio is not a finite double.
+    NumericalRange
 };
 
 class EquityError : public std::runtime_error

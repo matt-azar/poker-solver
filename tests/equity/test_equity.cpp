@@ -46,6 +46,7 @@ using poker::holdem::ShowdownEquity;
 using poker::holdem::ShowdownEquityOptions;
 using poker::holdem::kComboCount;
 using poker::holdem::kDeckSize;
+using poker::holdem::measure_showdown_work;
 using poker::holdem::parse_equity_board;
 using poker::holdem::parse_equity_range;
 using poker::holdem::showdown_equity;
@@ -487,6 +488,81 @@ void test_rescaling_and_prior()
     expect_matches(heavy, reference_equity(board, parse_equity_range("AhAd:3,3c3d:1"), parse_equity_range("9c9d")), 1e-12);
 }
 
+void expect_known_river(const ShowdownEquity& equity, double oop_weight, double ip_weight)
+{
+    CHECK(equity.joint_defined);
+    CHECK(equity.work.legal_pairs == 1);
+    CHECK(equity.player0.defined && equity.player1.defined);
+    CHECK(equity.player0.equity == 1.0);
+    CHECK(equity.player1.equity == 0.0);
+    CHECK(equity.player0.win == 1.0 && equity.player0.tie == 0.0 && equity.player0.loss == 0.0);
+    CHECK(equity.player1.win == 0.0 && equity.player1.tie == 0.0 && equity.player1.loss == 1.0);
+    CHECK(equity.player0.equity + equity.player1.equity == 1.0);
+    const ComboShowdown* aces = find_combo(equity.player0.combos, combo_of("AhAd"));
+    const ComboShowdown* offsuit = find_combo(equity.player1.combos, combo_of("2c3d"));
+    CHECK(aces != nullptr && aces->defined);
+    CHECK(aces->input_weight == oop_weight);
+    CHECK(aces->compatible_mass == ip_weight);
+    CHECK(aces->marginal == 1.0);
+    CHECK(aces->equity == 1.0);
+    CHECK(aces->win + aces->tie + aces->loss == 1.0);
+    CHECK(offsuit != nullptr && offsuit->defined);
+    CHECK(offsuit->input_weight == ip_weight);
+    CHECK(offsuit->compatible_mass == oop_weight);
+    CHECK(offsuit->marginal == 1.0);
+    CHECK(offsuit->equity == 0.0);
+    CHECK(offsuit->win + offsuit->tie + offsuit->loss == 1.0);
+    const std::string json = showdown_equity_json(equity, parse_equity_board("Kh Kd 7c 4s 2h"), 0.0);
+    CHECK(json.find("\"joint_defined\":true") != std::string::npos);
+    CHECK(json.find("\"equity\":null") == std::string::npos);
+    CHECK(json.find("inf") == std::string::npos);
+    CHECK(json.find("nan") == std::string::npos);
+}
+
+void test_extreme_scale()
+{
+    const std::vector<int> board = parse_equity_board("Kh Kd 7c 4s 2h");
+    const double tiny = std::stod("1e-200");
+    const double huge = std::stod("1e200");
+    const double largest = std::stod("1e308");
+    const ShowdownEquity unit = showdown_equity(board, parse_equity_range("AhAd"), parse_equity_range("2c3d"));
+    expect_known_river(unit, 1.0, 1.0);
+    expect_known_river(
+        showdown_equity(board, parse_equity_range("AhAd:1e-200"), parse_equity_range("2c3d:1e-200")), tiny, tiny);
+    expect_known_river(
+        showdown_equity(board, parse_equity_range("AhAd:1e200"), parse_equity_range("2c3d:1e200")), huge, huge);
+    expect_known_river(
+        showdown_equity(board, parse_equity_range("AhAd:1e-200"), parse_equity_range("2c3d")), tiny, 1.0);
+    expect_known_river(
+        showdown_equity(board, parse_equity_range("AhAd"), parse_equity_range("2c3d:1e-200")), 1.0, tiny);
+    expect_known_river(
+        showdown_equity(board, parse_equity_range("AhAd:1e200"), parse_equity_range("2c3d")), huge, 1.0);
+    expect_known_river(
+        showdown_equity(board, parse_equity_range("AhAd"), parse_equity_range("2c3d:1e200")), 1.0, huge);
+    expect_known_river(
+        showdown_equity(board, parse_equity_range("AhAd"), parse_equity_range("2c3d:1e308")), 1.0, largest);
+
+    const Range overflow_ip = parse_equity_range("2c3d:1e308,5c6d:1e308,8c9d:1e308");
+    const Range aces = parse_equity_range("AhAd");
+    CHECK(measure_showdown_work(board, aces, overflow_ip).legal_pairs == 3);
+    const EquityError overflow = expect_failure(EquityFailure::NumericalRange, [&] {
+        showdown_equity(board, aces, overflow_ip);
+    });
+    const std::string overflow_text = overflow.what();
+    CHECK(overflow_text.find("numerical range") != std::string::npos);
+    CHECK(overflow_text.find("joint_defined") == std::string::npos);
+
+    expect_failure(EquityFailure::NumericalRange, [&] {
+        showdown_equity(board, parse_equity_range("AhAd:1e308,3c3d:1e-200"), parse_equity_range("2c2d"));
+    });
+
+    const ShowdownEquity blocked = showdown_equity(board, aces, parse_equity_range("AhAc"));
+    CHECK(!blocked.joint_defined);
+    CHECK(blocked.work.legal_pairs == 0);
+    CHECK(!blocked.player0.defined);
+    CHECK(showdown_equity_json(blocked, board, 0.0).find("\"joint_defined\":false") != std::string::npos);
+}
+
 void test_undefined_and_invalid()
 {
     const std::vector<int> board = parse_equity_board("Kh Kd 7c 4s 2h");
@@ -760,6 +836,7 @@ int main()
     test_asymmetric_oracle();
     test_tiny_compatible_mass();
     test_rescaling_and_prior();
+    test_extreme_scale();
     test_undefined_and_invalid();
     test_swap_suits_and_identities();
     test_work_limit_and_cancellation();

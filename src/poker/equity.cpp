@@ -34,6 +34,7 @@ struct HandRef
     int card1 = 0;
     double weight = 0.0;
     bool blocked = false;
+    bool supported = false;
 };
 
 struct Bin
@@ -170,6 +171,105 @@ std::uint64_t count_legal_pairs(const std::vector<HandRef>& left, const std::vec
         }
     }
     return pairs;
+}
+
+void mark_supported(std::vector<HandRef>& left, std::vector<HandRef>& right)
+{
+    for (HandRef& hero : left)
+    {
+        if (hero.blocked)
+        {
+            continue;
+        }
+        for (HandRef& villain : right)
+        {
+            if (villain.blocked || shares_card(hero, villain))
+            {
+                continue;
+            }
+            hero.supported = true;
+            villain.supported = true;
+        }
+    }
+}
+
+// Divide by the largest participating weight so a uniform scale change stays near 1.
+// A positive compatible weight that underflows to zero is rejected rather than dropped.
+double scaled_weight(double weight, double scale)
+{
+    const double scaled = weight / scale;
+    if (!std::isfinite(scaled) || !(scaled > 0.0))
+    {
+        fail(
+            EquityFailure::NumericalRange,
+            "equity numerical range exceeded: a compatible weight is lost when normalized");
+    }
+    return scaled;
+}
+
+double participant_scale(const std::vector<HandRef>& hands)
+{
+    double scale = 0.0;
+    for (const HandRef& hand : hands)
+    {
+        if (hand.supported && hand.weight > scale)
+        {
+            scale = hand.weight;
+        }
+    }
+    if (!(scale > 0.0) || !std::isfinite(scale))
+    {
+        fail(EquityFailure::NumericalRange, "equity numerical range exceeded: no finite scale for a legal joint");
+    }
+    for (const HandRef& hand : hands)
+    {
+        if (hand.supported)
+        {
+            scaled_weight(hand.weight, scale);
+        }
+    }
+    return scale;
+}
+
+void require_representable_side(
+    const std::vector<HandRef>& heroes,
+    const std::vector<HandRef>& villains,
+    double hero_scale,
+    double villain_scale)
+{
+    Accumulator joint;
+    bool any = false;
+    for (const HandRef& hero : heroes)
+    {
+        if (!hero.supported)
+        {
+            continue;
+        }
+        Accumulator mass;
+        for (const HandRef& villain : villains)
+        {
+            if (!villain.supported || shares_card(hero, villain))
+            {
+                continue;
+            }
+            mass.add(scaled_weight(villain.weight, villain_scale));
+        }
+        const double scaled_mass = mass.value();
+        const double original_mass = scaled_mass * villain_scale;
+        const double term = scaled_weight(hero.weight, hero_scale) * scaled_mass;
+        if (!std::isfinite(scaled_mass) || !(scaled_mass > 0.0) || !std::isfinite(original_mass) || !(original_mass > 0.0)
+            || !std::isfinite(term) || !(term > 0.0))
+        {
+            fail(EquityFailure::NumericalRange, "equity numerical range exceeded: compatible mass is not representable");
+        }
+        joint.add(term);
+        any = true;
+    }
+    const double total = joint.value();
+    if (!any || !std::isfinite(total) || !(total > 0.0))
+    {
+        fail(EquityFailure::NumericalRange, "equity numerical range exceeded: joint mass is not representable");
+    }
 }
 
 std::uint64_t checked_product(std::uint64_t pairs, std::uint64_t completions)
@@ -331,10 +431,28 @@ void add_outcome(Bin& bin, double opponent_weight, double win, double tie, doubl
     bin.mass.add(opponent_weight);
 }
 
-PlayerShowdown finish_player(const std::vector<HandRef>& hands, const std::vector<Bin>* bins)
+double finite_ratio(double numerator, double denominator)
+{
+    const double value = numerator / denominator;
+    if (!std::isfinite(value))
+    {
+        fail(EquityFailure::NumericalRange, "equity numerical range exceeded: a showdown fraction is not representable");
+    }
+    return value;
+}
+
+// bins == nullptr is a structurally empty joint: success, with every row undefined.
+// A positive joint that cannot be represented throws NumericalRange instead of returning that shape.
+PlayerShowdown finish_player(
+    const std::vector<HandRef>& hands,
+    const std::vector<Bin>* bins,
+    double own_scale,
+    double opponent_scale)
 {
     PlayerShowdown player;
     player.combos.reserve(hands.size());
+    std::vector<double> joint_terms;
+    joint_terms.reserve(hands.size());
     Accumulator joint;
     for (const HandRef& hand : hands)
     {
@@ -343,28 +461,41 @@ PlayerShowdown finish_player(const std::vector<HandRef>& hands, const std::vecto
         row.combo = Range::combo_text(hand.index);
         row.input_weight = hand.weight;
         const Bin* bin = bins == nullptr ? nullptr : &(*bins)[static_cast<std::size_t>(hand.index)];
-        const double mass = bin == nullptr ? 0.0 : bin->mass.value();
-        if (hand.blocked || bin == nullptr || !(mass > 0.0))
+        if (bins == nullptr || !hand.supported || bin == nullptr)
         {
             row.defined = false;
+            joint_terms.push_back(0.0);
+            player.combos.push_back(row);
+            continue;
         }
-        else
+        const double scaled_mass = bin->mass.value();
+        const double original_mass = scaled_mass * opponent_scale;
+        const double term = scaled_weight(hand.weight, own_scale) * scaled_mass;
+        if (!std::isfinite(scaled_mass) || !(scaled_mass > 0.0) || !std::isfinite(original_mass) || !(original_mass > 0.0)
+            || !std::isfinite(term) || !(term > 0.0))
         {
-            row.defined = true;
-            row.compatible_mass = mass;
-            row.win = bin->win.value() / mass;
-            row.tie = bin->tie.value() / mass;
-            row.loss = bin->loss.value() / mass;
-            row.equity = bin->equity.value() / mass;
-            joint.add(hand.weight * mass);
+            fail(EquityFailure::NumericalRange, "equity numerical range exceeded: compatible mass is not representable");
         }
+        row.defined = true;
+        row.compatible_mass = original_mass;
+        row.win = finite_ratio(bin->win.value(), scaled_mass);
+        row.tie = finite_ratio(bin->tie.value(), scaled_mass);
+        row.loss = finite_ratio(bin->loss.value(), scaled_mass);
+        row.equity = finite_ratio(bin->equity.value(), scaled_mass);
+        joint.add(term);
+        joint_terms.push_back(term);
         player.combos.push_back(row);
     }
 
-    const double z = joint.value();
-    if (!(z > 0.0))
+    if (bins == nullptr)
     {
         return player;
+    }
+
+    const double z = joint.value();
+    if (!std::isfinite(z) || !(z > 0.0))
+    {
+        fail(EquityFailure::NumericalRange, "equity numerical range exceeded: joint mass is not representable");
     }
 
     player.defined = true;
@@ -372,13 +503,18 @@ PlayerShowdown finish_player(const std::vector<HandRef>& hands, const std::vecto
     Accumulator tie;
     Accumulator loss;
     Accumulator equity;
-    for (ComboShowdown& row : player.combos)
+    for (std::size_t i = 0; i < player.combos.size(); ++i)
     {
+        ComboShowdown& row = player.combos[i];
         if (!row.defined)
         {
             continue;
         }
-        row.marginal = (row.input_weight * row.compatible_mass) / z;
+        row.marginal = joint_terms[i] / z;
+        if (!std::isfinite(row.marginal))
+        {
+            fail(EquityFailure::NumericalRange, "equity numerical range exceeded: a marginal is not representable");
+        }
         win.add(row.marginal * row.win);
         tie.add(row.marginal * row.tie);
         loss.add(row.marginal * row.loss);
@@ -390,19 +526,7 @@ PlayerShowdown finish_player(const std::vector<HandRef>& hands, const std::vecto
     player.equity = equity.value();
     if (!std::isfinite(player.win) || !std::isfinite(player.tie) || !std::isfinite(player.loss) || !std::isfinite(player.equity))
     {
-        fail(EquityFailure::InvalidWeight, "invalid equity weight: showdown aggregate is not finite");
-    }
-    for (const ComboShowdown& row : player.combos)
-    {
-        if (!row.defined)
-        {
-            continue;
-        }
-        if (!std::isfinite(row.compatible_mass) || !std::isfinite(row.marginal) || !std::isfinite(row.win)
-            || !std::isfinite(row.tie) || !std::isfinite(row.loss) || !std::isfinite(row.equity))
-        {
-            fail(EquityFailure::InvalidWeight, "invalid equity weight: showdown combo result is not finite");
-        }
+        fail(EquityFailure::NumericalRange, "equity numerical range exceeded: a showdown aggregate is not representable");
     }
     return player;
 }
@@ -469,8 +593,8 @@ ShowdownEquity showdown_equity(
     const Range& player1,
     const ShowdownEquityOptions& options)
 {
-    const std::vector<HandRef> hands0 = prepared_hands(board, player0);
-    const std::vector<HandRef> hands1 = prepared_hands(board, player1);
+    std::vector<HandRef> hands0 = prepared_hands(board, player0);
+    std::vector<HandRef> hands1 = prepared_hands(board, player1);
     check_cancel(options);
 
     ShowdownEquity result;
@@ -487,61 +611,61 @@ ShowdownEquity showdown_equity(
             options.max_pair_runouts);
     }
 
-    const std::uint64_t dead = board_mask(board);
-    std::vector<Bin> bins0;
-    std::vector<Bin> bins1;
-    if (result.work.legal_pairs > 0)
+    if (result.work.legal_pairs == 0)
     {
-        bins0.resize(static_cast<std::size_t>(kComboCount));
-        bins1.resize(static_cast<std::size_t>(kComboCount));
-        for (const HandRef& hero : hands0)
+        result.player0 = finish_player(hands0, nullptr, 1.0, 1.0);
+        result.player1 = finish_player(hands1, nullptr, 1.0, 1.0);
+        result.joint_defined = false;
+        return result;
+    }
+
+    mark_supported(hands0, hands1);
+    const double scale0 = participant_scale(hands0);
+    const double scale1 = participant_scale(hands1);
+    require_representable_side(hands0, hands1, scale0, scale1);
+    require_representable_side(hands1, hands0, scale1, scale0);
+
+    const std::uint64_t dead = board_mask(board);
+    std::vector<Bin> bins0(static_cast<std::size_t>(kComboCount));
+    std::vector<Bin> bins1(static_cast<std::size_t>(kComboCount));
+    for (const HandRef& hero : hands0)
+    {
+        if (!hero.supported)
         {
-            if (hero.blocked)
+            continue;
+        }
+        for (const HandRef& villain : hands1)
+        {
+            if (!villain.supported || shares_card(hero, villain))
             {
                 continue;
             }
-            for (const HandRef& villain : hands1)
-            {
-                if (villain.blocked || shares_card(hero, villain))
-                {
-                    continue;
-                }
-                check_cancel(options);
-                const PairScore score = score_pair(hero, villain, board, dead, options);
-                add_outcome(
-                    bins0[static_cast<std::size_t>(hero.index)],
-                    villain.weight,
-                    score.win,
-                    score.tie,
-                    score.loss,
-                    score.equity);
-                add_outcome(
-                    bins1[static_cast<std::size_t>(villain.index)],
-                    hero.weight,
-                    score.loss,
-                    score.tie,
-                    score.win,
-                    score.villain_equity);
-            }
+            check_cancel(options);
+            const PairScore score = score_pair(hero, villain, board, dead, options);
+            add_outcome(
+                bins0[static_cast<std::size_t>(hero.index)],
+                scaled_weight(villain.weight, scale1),
+                score.win,
+                score.tie,
+                score.loss,
+                score.equity);
+            add_outcome(
+                bins1[static_cast<std::size_t>(villain.index)],
+                scaled_weight(hero.weight, scale0),
+                score.loss,
+                score.tie,
+                score.win,
+                score.villain_equity);
         }
     }
 
-    result.player0 = finish_player(hands0, bins0.empty() ? nullptr : &bins0);
-    result.player1 = finish_player(hands1, bins1.empty() ? nullptr : &bins1);
-    result.joint_defined = result.player0.defined && result.player1.defined;
-    if (!result.joint_defined)
+    result.player0 = finish_player(hands0, &bins0, scale0, scale1);
+    result.player1 = finish_player(hands1, &bins1, scale1, scale0);
+    if (!result.player0.defined || !result.player1.defined)
     {
-        result.player0.defined = false;
-        result.player1.defined = false;
-        result.player0.win = 0.0;
-        result.player0.tie = 0.0;
-        result.player0.loss = 0.0;
-        result.player0.equity = 0.0;
-        result.player1.win = 0.0;
-        result.player1.tie = 0.0;
-        result.player1.loss = 0.0;
-        result.player1.equity = 0.0;
+        fail(EquityFailure::NumericalRange, "equity numerical range exceeded: a legal joint was not representable");
     }
+    result.joint_defined = true;
     return result;
 }
 
