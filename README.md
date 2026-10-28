@@ -89,7 +89,10 @@ The `python/` directory is reserved for a later binding. `ui/` is the local expl
 - [docs/TESTING.md](docs/TESTING.md)
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
 - [docs/ROADMAP.md](docs/ROADMAP.md)
+- [docs/FEATURE_PARITY.md](docs/FEATURE_PARITY.md)
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+This project is under development. No public license is currently granted for this version. See [LICENSE](LICENSE).
+
+Earlier commits remain in the Git history with the license text they were written with.

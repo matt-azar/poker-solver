@@ -1,0 +1,16 @@
+---
+description: Do not add or change licensing terms without explicit approval
+alwaysApply: true
+---
+
+# Licensing
+
+Do not add, remove, or change licensing terms, copyright notices, SPDX identifiers, or license metadata unless Matt Azar explicitly approves that change in the current request.
+
+- Do not select or apply a public license, including MIT.
+- `UNLICENSED` means no license is granted. `Unlicense` is a public-domain dedication. Do not substitute one for the other.
+- If a package manifest is added, set its license field to `UNLICENSED` until a license is explicitly approved.
+- Leave third-party copyright notices, license texts, and attribution in place. Do not apply the project notice to third-party code.
+- Do not rewrite Git history to remove earlier license text.
+
+The current project notice is `LICENSE`. Earlier commits keep the text they were written with.

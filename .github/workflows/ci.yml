@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Production targets
+        run: cmake --build build --config Release --target kuhn_solver --target leduc_solver --target river_solver --target street_solver --target explorer
+      - name: Unit tests
+        run: cmake --build build --config Release --target poker_solver_tests
+      - name: CTest
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: JavaScript
+        run: node tests/ui/browse.test.js
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Production targets
+        run: cmake --build build --target kuhn_solver --target leduc_solver --target river_solver --target street_solver --target explorer
+      - name: Unit tests
+        run: cmake --build build --target poker_solver_tests
+      - name: CTest
+        run: ctest --test-dir build --output-on-failure
+      - name: JavaScript
+        run: node tests/ui/browse.test.js
+
+  linux-sanitizer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ASAN_OPTIONS: halt_on_error=1:detect_leaks=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: |
+          cmake -S . -B build-san \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+      - name: Unit tests
+        run: cmake --build build-san --target poker_solver_tests
+      - name: CTest
+        run: ctest --test-dir build-san --output-on-failure
