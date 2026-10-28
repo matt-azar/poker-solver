@@ -1867,7 +1867,7 @@ struct StreetBatchSolver::Engine
         const double* pi1 = here.pi1.data();
         if (node.terminal)
         {
-            apply_terminal(ctx, node, turn, river, pi0, pi1, here.ev0, here.ev1);
+            apply_terminal(ctx, node, turn, river, pi0, pi1, here.ev0, here.ev1, false);
             return;
         }
         if (node.chance)
@@ -2556,6 +2556,67 @@ struct StreetBatchSolver::Engine
         }
     }
 
+    // Subtraction is trusted only when the remainder dominates rounding of the inputs.
+    // A zero result is trusted only when both inputs are zero. A negative residual is not.
+    bool difference_is_stable(double total, double removed, double difference) const
+    {
+        if (!std::isfinite(total) || !std::isfinite(removed) || !std::isfinite(difference))
+        {
+            return false;
+        }
+        if (difference < 0.0)
+        {
+            return false;
+        }
+        if (difference == 0.0)
+        {
+            return total == 0.0 && removed == 0.0;
+        }
+        const double scale = std::max(total, std::abs(removed));
+        return difference > scale * 1e-3;
+    }
+
+    bool shares_hole(int hero, int hero_hand, int opponent, int opponent_hand) const
+    {
+        const int c0 = hole_a[hero][static_cast<std::size_t>(hero_hand)];
+        const int c1 = hole_b[hero][static_cast<std::size_t>(hero_hand)];
+        const int o0 = hole_a[opponent][static_cast<std::size_t>(opponent_hand)];
+        const int o1 = hole_b[opponent][static_cast<std::size_t>(opponent_hand)];
+        return o0 == c0 || o0 == c1 || o1 == c0 || o1 == c1;
+    }
+
+    double direct_compatible_mass(int hero, int hand, int opponent, std::span<const double> opp_amount) const
+    {
+        double sum = 0.0;
+        for (int other = 0; other < static_cast<int>(opp_amount.size()); ++other)
+        {
+            const double piece = opp_amount[static_cast<std::size_t>(other)];
+            if (!(piece > 0.0) || shares_hole(hero, hand, opponent, other))
+            {
+                continue;
+            }
+            sum += piece;
+        }
+        return sum;
+    }
+
+    double stable_compatible_mass(
+        int hero,
+        int hand,
+        int opponent,
+        double total,
+        const double* by_card,
+        std::span<const double> opp_amount) const
+    {
+        const double blocked = blocked_reach(hero, hand, by_card, opp_amount);
+        const double open = total - blocked;
+        if (difference_is_stable(total, blocked, open))
+        {
+            return open;
+        }
+        return direct_compatible_mass(hero, hand, opponent, opp_amount);
+    }
+
     double blocked_reach(int hero, int hand, const double* by_card, std::span<const double> opp_amount) const
     {
         const int c0 = hole_a[hero][static_cast<std::size_t>(hand)];
@@ -2731,6 +2792,38 @@ struct StreetBatchSolver::Engine
         return sum;
     }
 
+    void direct_rank_masses(
+        const RunoutRanks& table,
+        int hero,
+        int hand,
+        std::span<const double> opp_amount,
+        double& worse_mass,
+        double& better_mass) const
+    {
+        const int opponent = 1 - hero;
+        const int worse = table.worse_end[hero][static_cast<std::size_t>(hand)];
+        const int after_tie = table.better_begin[hero][static_cast<std::size_t>(hand)];
+        worse_mass = 0.0;
+        better_mass = 0.0;
+        for (int other = 0; other < static_cast<int>(opp_amount.size()); ++other)
+        {
+            const double piece = opp_amount[static_cast<std::size_t>(other)];
+            if (!(piece > 0.0) || shares_hole(hero, hand, opponent, other))
+            {
+                continue;
+            }
+            const int at = table.pos[opponent][static_cast<std::size_t>(other)];
+            if (at < worse)
+            {
+                worse_mass += piece;
+            }
+            else if (at >= after_tie)
+            {
+                better_mass += piece;
+            }
+        }
+    }
+
     void showdown_side(
         WorkerContext& ctx,
         int hero,
@@ -2739,7 +2832,8 @@ struct StreetBatchSolver::Engine
         double win_pay,
         double lose_pay,
         std::span<const double> opp_amount,
-        std::span<double> ev) const
+        std::span<double> ev,
+        bool stable) const
     {
         const auto started = profile_
             ? std::chrono::steady_clock::now()
@@ -2749,6 +2843,17 @@ struct StreetBatchSolver::Engine
         order_reach(ctx, opp, opp_amount, table);
         const int hero_hands = static_cast<int>(ev.size());
         const int opp_hands = static_cast<int>(opp_amount.size());
+        double amount_total = 0.0;
+        if (stable)
+        {
+            for (double piece : opp_amount)
+            {
+                if (piece > 0.0)
+                {
+                    amount_total += piece;
+                }
+            }
+        }
         for (int hand = 0; hand < hero_hands; ++hand)
         {
             if (!hand_live(hero, hand, turn, river))
@@ -2774,12 +2879,21 @@ struct StreetBatchSolver::Engine
             const int opp_hand = hand_of[opp][static_cast<std::size_t>(holdem::Range::combo_index(c0, c1))];
             const int add_hand = opp_hand >= 0 && opp_amount[static_cast<std::size_t>(opp_hand)] != 0.0
                 ? opp_hand : -1;
-            const double worse_mass = slice_reach(
+            double worse_mass = slice_reach(
                 ctx, table, opp, 0, worse, c0, c1, 0, 0, cut0_worse, cut1_worse,
                 add_hand, opp_amount, table.pos[opp]);
-            const double better_mass = slice_reach(
+            double better_mass = slice_reach(
                 ctx, table, opp, after_tie, opp_hands, c0, c1, cut0_better, cut1_better, len0, len1,
                 add_hand, opp_amount, table.pos[opp]);
+            if (stable)
+            {
+                const bool worse_ok = difference_is_stable(amount_total, amount_total - worse_mass, worse_mass);
+                const bool better_ok = difference_is_stable(amount_total, amount_total - better_mass, better_mass);
+                if (!worse_ok || !better_ok)
+                {
+                    direct_rank_masses(table, hero, hand, opp_amount, worse_mass, better_mass);
+                }
+            }
             const double low_pay = hero == 0 ? win_pay : lose_pay;
             const double high_pay = hero == 0 ? lose_pay : win_pay;
             ev[static_cast<std::size_t>(hand)] = range_w[hero][static_cast<std::size_t>(hand)] * joint_scale
@@ -2800,7 +2914,8 @@ struct StreetBatchSolver::Engine
         const double* pi0,
         const double* pi1,
         std::span<double> ev0,
-        std::span<double> ev1) const
+        std::span<double> ev1,
+        bool stable) const
     {
         double total0 = 0.0;
         double total1 = 0.0;
@@ -2821,7 +2936,9 @@ struct StreetBatchSolver::Engine
                     ev0[static_cast<std::size_t>(hand)] = 0.0;
                     continue;
                 }
-                const double open = total1 - blocked_reach(0, hand, by1, ctx.amount_buf[1]);
+                const double open = stable
+                    ? stable_compatible_mass(0, hand, 1, total1, by1, ctx.amount_buf[1])
+                    : total1 - blocked_reach(0, hand, by1, ctx.amount_buf[1]);
                 ev0[static_cast<std::size_t>(hand)] =
                     pay * range_w[0][static_cast<std::size_t>(hand)] * joint_scale * open;
             }
@@ -2832,7 +2949,9 @@ struct StreetBatchSolver::Engine
                     ev1[static_cast<std::size_t>(hand)] = 0.0;
                     continue;
                 }
-                const double open = total0 - blocked_reach(1, hand, by0, ctx.amount_buf[0]);
+                const double open = stable
+                    ? stable_compatible_mass(1, hand, 0, total0, by0, ctx.amount_buf[0])
+                    : total0 - blocked_reach(1, hand, by0, ctx.amount_buf[0]);
                 ev1[static_cast<std::size_t>(hand)] =
                     pay * range_w[1][static_cast<std::size_t>(hand)] * joint_scale * open;
             }
@@ -2840,8 +2959,8 @@ struct StreetBatchSolver::Engine
         }
         const double win_pay = half + static_cast<double>(node.contrib[1]);
         const double lose_pay = -(half + static_cast<double>(node.contrib[0]));
-        showdown_side(ctx, 0, turn, river, win_pay, lose_pay, ctx.amount_buf[1], ev0);
-        showdown_side(ctx, 1, turn, river, win_pay, lose_pay, ctx.amount_buf[0], ev1);
+        showdown_side(ctx, 0, turn, river, win_pay, lose_pay, ctx.amount_buf[1], ev0, stable);
+        showdown_side(ctx, 1, turn, river, win_pay, lose_pay, ctx.amount_buf[0], ev1, stable);
     }
 
     void check_usable() const
@@ -3178,7 +3297,7 @@ struct StreetBatchSolver::Engine
         const double* pi1 = here.pi1.data();
         if (node.terminal)
         {
-            apply_terminal(ctx, node, turn, river, pi0, pi1, here.ev0, here.ev1);
+            apply_terminal(ctx, node, turn, river, pi0, pi1, here.ev0, here.ev1, false);
             return;
         }
         if (node.chance)
@@ -3736,7 +3855,11 @@ struct StreetBatchSolver::Engine
             {
                 blocked -= right[static_cast<std::size_t>(same)];
             }
-            joint += weight * (total - blocked);
+            const double open = total - blocked;
+            const double mass = difference_is_stable(total, blocked, open)
+                ? open
+                : direct_compatible_mass(0, hand, 1, right);
+            joint += weight * mass;
         }
         return joint;
     }
@@ -3775,7 +3898,11 @@ struct StreetBatchSolver::Engine
             {
                 blocked -= opponent[static_cast<std::size_t>(same)];
             }
-            const double piece = reach[static_cast<std::size_t>(hand)] * (total - blocked);
+            const double open = total - blocked;
+            const double mass = difference_is_stable(total, blocked, open)
+                ? open
+                : direct_compatible_mass(player, hand, opponent_player, opponent);
+            const double piece = reach[static_cast<std::size_t>(hand)] * mass;
             marginal[static_cast<std::size_t>(hand)] = piece;
             joint += piece;
         }
@@ -4140,7 +4267,7 @@ struct StreetBatchSolver::Engine
         const double* pi1 = here.pi1.data();
         if (node.terminal)
         {
-            apply_terminal(ctx, node, turn, river, pi0, pi1, here.ev0, here.ev1);
+            apply_terminal(ctx, node, turn, river, pi0, pi1, here.ev0, here.ev1, true);
             return;
         }
         if (node.chance)
@@ -4550,7 +4677,8 @@ struct StreetBatchSolver::Engine
             {
                 continue;
             }
-            const double open = total - blocked_reach(actor, hand, by_card, amount);
+            const double open = stable_compatible_mass(
+                actor, hand, opponent, total, by_card, amount);
             const double prior = range_w[actor][static_cast<std::size_t>(hand)];
             if (!(open > 0.0) || !(prior > 0.0))
             {

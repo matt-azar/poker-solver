@@ -980,6 +980,262 @@ void test_profile_revision_drops_stale_values()
     expect_same_defined_values(repaired, fresh_frozen(config, 2));
 }
 
+StreetConfig checkdown_config(const char* oop, const char* ip, int board_cards)
+{
+    StreetConfig config;
+    config.board = {card_id("Kh"), card_id("Kd"), card_id("7c")};
+    if (board_cards >= 4)
+    {
+        config.board.push_back(card_id("4s"));
+    }
+    config.pot = 100;
+    config.stack = 100;
+    config.oop = Range::parse(oop);
+    config.ip = Range::parse(ip);
+    config.allow_all_in = false;
+    config.max_raises = 0;
+    config.memory_mib = 64;
+    return config;
+}
+
+double defined_action(const StreetActionValues& page, const std::string& combo, const char* action)
+{
+    const int hand = find_hand(page.combos, combo);
+    const int chosen = find_action(page.actions, action);
+    CHECK(hand >= 0);
+    CHECK(chosen >= 0);
+    CHECK(page.ev_defined[static_cast<std::size_t>(hand)] != 0);
+    const double value = page_action(page, hand, chosen);
+    CHECK(std::isfinite(value));
+    return value;
+}
+
+void test_tiny_compatible_mass()
+{
+    const char* epsilons[] = {"1e-12", "1e-18"};
+    for (const char* epsilon : epsilons)
+    {
+        const std::string ip = std::string("AhAc:1,2c3d:") + epsilon;
+        StreetConfig config = checkdown_config("AhAd,9c9d", ip.c_str(), 4);
+        StreetBatchSolver solver(config);
+        solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+        const StreetActionValues page = solver.action_values(solver.root_node_id());
+        CHECK_NEAR(defined_action(page, combo_name("Ah", "Ad"), "Check"), 50.0, 1e-9);
+        CHECK(std::isfinite(page.node_ev));
+        const double stored = solver.expected_utility();
+        CHECK(page.node_ev_defined);
+        CHECK_NEAR(page.node_ev, stored, 1e-9);
+        expect_oracle(config, solver, solver.root_node_id(), 1e-9);
+
+        const StreetInspection root = solver.inspect_node(solver.root_node_id());
+        const int check = find_action(
+            [&]()
+            {
+                std::vector<std::string> labels;
+                for (const auto& action : root.actions)
+                {
+                    labels.push_back(action.label);
+                }
+                return labels;
+            }(),
+            "Check");
+        CHECK(check >= 0);
+        const StreetActionValues ip_page = solver.action_values(root.actions[static_cast<std::size_t>(check)].child_id);
+        CHECK(ip_page.player == 1);
+        CHECK_NEAR(defined_action(ip_page, combo_name("2c", "3d"), "Check"), -50.0, 1e-9);
+        CHECK(std::isfinite(defined_action(ip_page, combo_name("Ah", "Ac"), "Check")));
+
+        const std::string swapped_oop = std::string("AhAd:1,2c3d:") + epsilon;
+        StreetConfig swapped = checkdown_config(swapped_oop.c_str(), "AhAc,9c9d", 4);
+        StreetBatchSolver swapped_solver(swapped);
+        swapped_solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+        const StreetInspection swapped_root = swapped_solver.inspect_node(swapped_solver.root_node_id());
+        int swapped_check = -1;
+        for (int index = 0; index < static_cast<int>(swapped_root.actions.size()); ++index)
+        {
+            if (swapped_root.actions[static_cast<std::size_t>(index)].label.rfind("Check", 0) == 0)
+            {
+                swapped_check = index;
+            }
+        }
+        CHECK(swapped_check >= 0);
+        const std::string swapped_id = swapped_root.actions[static_cast<std::size_t>(swapped_check)].child_id;
+        const StreetActionValues swapped_ip = swapped_solver.action_values(swapped_id);
+        CHECK(swapped_ip.player == 1);
+        CHECK_NEAR(defined_action(swapped_ip, combo_name("Ah", "Ac"), "Check"), 50.0, 1e-9);
+        expect_oracle(swapped, swapped_solver, swapped_id, 1e-9);
+    }
+
+    {
+        StreetConfig win_blocked = checkdown_config("AhAd", "AhKc:1,2c3d:1e-18", 4);
+        StreetBatchSolver solver(win_blocked);
+        solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+        const StreetActionValues page = solver.action_values(solver.root_node_id());
+        CHECK_NEAR(defined_action(page, combo_name("Ah", "Ad"), "Check"), 50.0, 1e-9);
+        expect_oracle(win_blocked, solver, solver.root_node_id(), 1e-9);
+    }
+    {
+        StreetConfig lose_blocked = checkdown_config("9c9d", "9c2c:1,AhAc:1e-18", 4);
+        StreetBatchSolver solver(lose_blocked);
+        solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+        const StreetActionValues page = solver.action_values(solver.root_node_id());
+        const double nines = defined_action(page, combo_name("9c", "9d"), "Check");
+        CHECK(nines < -40.0);
+        CHECK(nines > -50.0);
+        expect_oracle(lose_blocked, solver, solver.root_node_id(), 1e-9);
+    }
+    {
+        StreetConfig none = checkdown_config("AhAd,9c9d", "AhAc", 4);
+        StreetBatchSolver solver(none);
+        solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+        const StreetActionValues page = solver.action_values(solver.root_node_id());
+        const int blocked = find_hand(page.combos, combo_name("Ah", "Ad"));
+        if (blocked >= 0)
+        {
+            CHECK(page.ev_defined[static_cast<std::size_t>(blocked)] == 0);
+        }
+        expect_oracle(none, solver, solver.root_node_id(), 1e-9);
+    }
+    {
+        StreetConfig base = checkdown_config("AhAd,9c9d", "AhAc:1,2c3d:1e-12", 4);
+        StreetConfig scaled = checkdown_config("AhAd,9c9d", "AhAc:2,2c3d:2e-12", 4);
+        StreetConfig heavier = checkdown_config("AhAd:4,9c9d:1", "AhAc:1,2c3d:1e-12", 4);
+        StreetBatchSolver base_solver(base);
+        StreetBatchSolver scaled_solver(scaled);
+        StreetBatchSolver heavier_solver(heavier);
+        base_solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+        scaled_solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+        heavier_solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+        const double base_ev = defined_action(
+            base_solver.action_values(base_solver.root_node_id()), combo_name("Ah", "Ad"), "Check");
+        CHECK_NEAR(
+            defined_action(scaled_solver.action_values(scaled_solver.root_node_id()), combo_name("Ah", "Ad"), "Check"),
+            base_ev,
+            1e-9);
+        CHECK_NEAR(
+            defined_action(heavier_solver.action_values(heavier_solver.root_node_id()), combo_name("Ah", "Ad"), "Check"),
+            base_ev,
+            1e-9);
+    }
+    {
+        StreetConfig flop = checkdown_config("AhAd,9c9d", "AhAc:1,2c3d:1e-18", 3);
+        StreetBatchSolver solver(flop);
+        solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+        expect_oracle(flop, solver, solver.root_node_id(), 1e-9);
+        StreetInspection cursor = solver.inspect_node(solver.root_node_id());
+        std::string chance_id;
+        for (int step = 0; step < 8; ++step)
+        {
+            if (cursor.kind == "chance")
+            {
+                chance_id = cursor.node_id;
+                break;
+            }
+            if (cursor.kind != "decision" || cursor.actions.empty())
+            {
+                break;
+            }
+            cursor = solver.inspect_node(cursor.actions[0].child_id);
+        }
+        CHECK(cursor.kind == "chance");
+        CHECK(cursor.reach_defined);
+        double weight_sum = 0.0;
+        for (const auto& card : cursor.cards)
+        {
+            CHECK(card.weight_defined);
+            CHECK(std::isfinite(card.weight));
+            CHECK(card.weight >= -1e-12);
+            weight_sum += card.weight;
+        }
+        CHECK_NEAR(weight_sum, 1.0, 1e-9);
+        CHECK(!chance_id.empty());
+        cursor = solver.inspect_node(cursor.cards[0].child_id);
+        for (int step = 0; step < 6 && cursor.kind != "decision"; ++step)
+        {
+            if (cursor.kind == "chance" && !cursor.cards.empty())
+            {
+                cursor = solver.inspect_node(cursor.cards[0].child_id);
+            }
+            else if (cursor.kind == "decision" && !cursor.actions.empty())
+            {
+                cursor = solver.inspect_node(cursor.actions[0].child_id);
+            }
+            else
+            {
+                break;
+            }
+        }
+        CHECK(cursor.kind == "decision");
+        CHECK(cursor.board.size() > flop.board.size());
+        expect_oracle(flop, solver, cursor.node_id, 1e-8);
+    }
+    {
+        StreetConfig config = checkdown_config("AhAd,9c9d", "AhAc:1,2c3d:1e-18", 4);
+        config.oop_turn_bets = {1.0};
+        config.ip_turn_bets = {1.0};
+        config.max_raises = 1;
+        StreetBatchSolver solver(config);
+        solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+        const std::string root = solver.root_node_id();
+        set_named_average(solver, root, combo_name("Ah", "Ad"), {{"Check", 1.0}, {"Bet", 0.0}});
+        set_named_average(solver, root, combo_name("9c", "9d"), {{"Check", 1.0}, {"Bet", 0.0}});
+        const StreetActionValues page = solver.action_values(root);
+        const int aces = find_hand(page.combos, combo_name("Ah", "Ad"));
+        const int bet = find_action(page.actions, "Bet");
+        CHECK(aces >= 0 && bet >= 0);
+        CHECK(page.ev_defined[static_cast<std::size_t>(aces)] != 0);
+        CHECK(std::isfinite(page_action(page, aces, bet)));
+        expect_oracle(config, solver, root, 1e-9);
+
+        set_named_average(solver, root, combo_name("Ah", "Ad"), {{"Check", 0.0}, {"Bet", 1.0}});
+        set_named_average(solver, root, combo_name("9c", "9d"), {{"Check", 0.0}, {"Bet", 1.0}});
+        const StreetInspection opening = solver.inspect_node(root);
+        const int check_index = find_action(
+            [&]()
+            {
+                std::vector<std::string> labels;
+                for (const auto& action : opening.actions)
+                {
+                    labels.push_back(action.label);
+                }
+                return labels;
+            }(),
+            "Check");
+        CHECK(check_index >= 0);
+        const StreetInspection response = solver.inspect_node(
+            opening.actions[static_cast<std::size_t>(check_index)].child_id);
+        CHECK(response.player == 1);
+        set_named_average(solver, response.node_id, combo_name("Ah", "Ac"), {{"Check", 0.0}, {"Bet", 1.0}});
+        set_named_average(solver, response.node_id, combo_name("2c", "3d"), {{"Check", 0.0}, {"Bet", 1.0}});
+        const int ip_bet = find_action(
+            [&]()
+            {
+                std::vector<std::string> labels;
+                for (const auto& action : response.actions)
+                {
+                    labels.push_back(action.label);
+                }
+                return labels;
+            }(),
+            "Bet");
+        CHECK(ip_bet >= 0);
+        StreetInspection later = solver.inspect_node(response.actions[static_cast<std::size_t>(ip_bet)].child_id);
+        CHECK(later.kind == "decision");
+        CHECK(later.player == 0);
+        CHECK(!later.reach_defined);
+        const StreetActionValues defined = solver.action_values(later.node_id);
+        const int hero = find_hand(defined.combos, combo_name("Ah", "Ad"));
+        CHECK(hero >= 0);
+        CHECK(defined.ev_defined[static_cast<std::size_t>(hero)] != 0);
+        CHECK(!defined.node_ev_defined);
+        for (int action = 0; action < static_cast<int>(defined.actions.size()); ++action)
+        {
+            CHECK(std::isfinite(page_action(defined, hero, action)));
+        }
+        expect_oracle(config, solver, later.node_id, 1e-8);
+    }
+}
+
 } // namespace
 
 void run_action_value_tests()
@@ -989,4 +1245,5 @@ void run_action_value_tests()
     test_zero_reach_is_separate_from_ev();
     test_weighted_blockers_ties_and_flop();
     test_profile_revision_drops_stale_values();
+    test_tiny_compatible_mass();
 }
