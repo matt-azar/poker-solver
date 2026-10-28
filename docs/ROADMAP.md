@@ -24,6 +24,6 @@ PioSOLVER solves an action abstraction of heads-up no-limit Hold'em, not every l
 3. The explorer solves a flop, a turn, or a river, and ranges are painted on a 13×13 grid. Node locking is still open.
 4. Nested saves. Solve a flop, keep the reaching ranges, re-solve one turn card, then one river. That is a subgame with the ranges it was given, not a safe gadget.
 5. Preflop with a listed set of flops. Blinds, a short bet list, and the postflop solver on each listed flop. Isomorphic flops come after a measured subset.
-6. A narrower regret type, if a test still shows the Nash gap falling. The frozen pass already takes a thread count. Evaluation, DCFR, and a different showdown algorithm are still open.
+6. A narrower regret type, if a test still shows the Nash gap falling. The frozen pass already takes a thread count, and the showdown walk uses the compact card prefixes. Evaluation and DCFR are still open. The paired reset-30 comparison of that kernel against `e2ad8df` is in [BENCHMARKS.md](BENCHMARKS.md).
 
 Unrestricted heads-up no-limit, with every chip size legal, stays out of reach. A solved tree is an equilibrium of the sizes that were offered.

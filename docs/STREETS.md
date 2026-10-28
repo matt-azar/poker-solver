@@ -50,7 +50,7 @@ Scratch, action values, and the showdown reach buffers live in a `WorkerContext`
 
 At one chance node, the next cards have disjoint descendant information sets: a slot stores the public node and the cards already dealt. A worker writes those regret and strategy-sum entries directly. The caller updates the shared ancestors only after every task has joined, and adds the card values in ascending card order with the same chance weight as the serial loop. There is no atomic add and no second copy of the regret table. Own reach may be zero. Chance probabilities are not renormalized over the visited cards or divided by the thread count.
 
-Rank values are filled on the caller before the first pass. That cost is `cache_init_seconds`. Worker creation is `worker_setup_seconds`. Neither is folded into construction or training. A worker exception is captured, the other tasks are joined, and later training or evaluation throws rather than reporting a finished solve. The partial regrets are not rolled back.
+Rank values are filled on the caller before the first pass. That cost is `cache_init_seconds`. Worker creation is `worker_setup_seconds`. Neither is folded into construction or training. On the full-range flop check-down that fill is about 12 seconds on the Windows run in [BENCHMARKS.md](BENCHMARKS.md). The warm training loop after the cache exists is a separate number. A worker exception is captured, the other tasks are joined, and later training or evaluation throws rather than reporting a finished solve. The partial regrets are not rolled back.
 
 ## Checked values
 

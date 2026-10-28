@@ -198,26 +198,34 @@ SpeedResult speed_case(const char* name, poker::streets::StreetConfig config, in
 void sample_case(const char* name, poker::streets::StreetConfig config, int threads)
 {
     config.threads = threads;
+    const auto total_started = std::chrono::steady_clock::now();
     poker::solver::StreetBatchSolver solver(config);
     const poker::solver::StreetMemoryReport built = solver.memory_report();
+    // Warm the caches. This call resets, trains one iteration, and returns.
     solver.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
     const poker::solver::StreetMemoryReport warmed = solver.memory_report();
     const double before = warmed.train_seconds;
     const auto started = std::chrono::steady_clock::now();
+    // Reset, then train 30 iterations. The rank cache stays warm.
     solver.run_frozen_iterations(30, poker::solver::Algorithm::CfrPlus);
-    const double train = solver.memory_report().train_seconds - before;
+    const poker::solver::StreetMemoryReport done = solver.memory_report();
+    const double train = done.train_seconds - before;
     std::cout << "sample " << name << " threads " << threads
+              << " protocol reset-30-warm-cache"
               << " construction " << built.construction_seconds
               << " worker_setup " << built.worker_setup_seconds
               << " cache_init " << warmed.cache_init_seconds
               << " warmup_train " << before
               << " train " << train
-              << " wall " << seconds_since(started)
+              << " train_wall " << seconds_since(started)
+              << " evaluation " << done.evaluation_seconds
+              << " total_wall " << seconds_since(total_started)
               << " allocated " << built.allocated_bytes
               << " peak " << built.peak_allocated_bytes
               << "\n";
     require(warmed.cache_init_seconds > 0.0, "rank cache was not initialized");
     require(train > 0.0, "empty training sample");
+    require(done.evaluation_seconds == 0.0, "reset-30 sample evaluated");
 }
 
 struct Snapshot

@@ -253,3 +253,27 @@ The paired run to iteration 100 was after that sustained load. One-thread traini
 ThreadSanitizer was not run. WSL Ubuntu g++ 11.4.0 is installed. The sanitizer build was not started: the machine is on battery after the lid was closed. The timing stress that did run sleeps a different amount on each card and still matched the one-thread raw tables. That is not a ThreadSanitizer result.
 
 `street_memory_bench` was not repeated in this iteration. The full-range check-down figures above stay the `027e652` measurements. The unit suite's last full run, with the parallel tests included, was 337,239 assertions and 0 failures. Debug traces were removed after that run and the suite was not started again.
+
+### Compact showdown kernel
+
+`ce99f13` replaces each worker's dense 52-wide showdown prefix with a compact prefix over the cards that appear in the runout. `29cf58f` is that kernel plus the `sample` timing mode. The raw regret and strategy-sum tables of `29cf58f` matched the `e2ad8df` pins, and matched that build's own one-thread tables, at iterations 3, 30, 100, and 300. Both betting trees, one thread and four threads. Every relative regret delta and strategy-sum delta was 0. At iteration 300 the turn value is `-2.18915110333` and NashConv is `0.0559933168262`. The flop value is `-1.94346200025` and NashConv is `0.0726697317224`. The pins are the gitignored `PKRPAR1` files under `build/parity-baseline/`.
+
+A separate plugged-in sample, one process per configuration, continued training through iteration 300. Those are single samples, not the alternating protocol below. Turn, one thread: 12.55 s to iteration 30, 38.39 s to 100, 103.11 s to 300, cache init 0.290 s, allocated 143,384,278. Turn, four threads: 6.58 s, 22.29 s, 67.73 s, cache init 0.230 s, allocated 161,818,798. Flop, one thread: 21.80 s, 73.15 s, 221.14 s, cache init 0.225 s, allocated 176,209,546. Flop, four threads: 11.23 s, 38.38 s, 114.84 s, cache init 0.207 s, allocated 176,635,618. The older `027e652` one-thread times to iteration 300 were 236.9 s on the turn and 353.0 s on the flop, on a different session. They are not paired with these samples.
+
+The four-thread medians from the cool `e2ad8df` block stay the threading result: turn 23.564511 s versus 14.0271184 s (1.680x), flop 31.8706521 s versus 17.3644758 s (1.836x). That block compared thread counts inside one kernel. It is not the kernel comparison below.
+
+### Reset-30 warm-cache comparison
+
+Both binaries ran `street_parallel_bench sample`. The sample warms the rank cache with one `run_frozen_iterations(1)`, then calls `run_frozen_iterations(30)`. The second call resets regrets, strategy sums, and the iteration count. It does not clear the rank cache. The timed `train` field is those 30 iterations. The printed protocol is `reset-30-warm-cache`. `evaluation` is 0 because the sample does not call best response. The laptop was plugged in on the Samsung plan. MSVC 19.40 Release. Three alternating pairs at one thread, then three at four threads. No pair was repeated.
+
+Train seconds, one thread, turn: baseline 22.2793234, 23.1801817, 22.7569621 (median 22.7569621, range 0.9008583); compact 10.4686055, 11.0140881, 12.4674001 (median 11.0140881, range 1.9987946). Median ratio 2.066.
+
+Train seconds, one thread, flop: baseline 29.5676292, 30.6268292, 30.1863002 (median 30.1863002, range 1.0592000); compact 22.7656245, 23.1476113, 22.3264889 (median 22.7656245, range 0.8211224). Median ratio 1.326.
+
+Train seconds, four threads, turn: baseline 16.4120198, 12.6797935, 13.6891522 (median 13.6891522, range 3.7322263); compact 6.7948993, 8.0956419, 10.8009056 (median 8.0956419, range 4.0060063). Median ratio 1.691. The range is wide. The three baseline samples still sit above the three compact samples.
+
+Train seconds, four threads, flop: baseline 18.6798585, 22.4444654, 22.4279414 (median 22.4279414, range 3.7646069); compact 13.0653449, 12.4450668, 15.5560509 (median 13.0653449, range 3.1109841). Median ratio 1.717. The range is wide. The samples do not overlap.
+
+Allocated bytes equalled peak on every sample. Turn, one thread: baseline 141,624,990, compact 143,384,278. Flop, one thread: 171,120,018 and 176,209,546. Turn, four threads: 161,454,222 and 161,818,798. Flop, four threads: 171,576,258 and 176,635,618.
+
+The full-range check-down cache fill is a different cost. On the plugged-in Windows run of `29cf58f`, `street_memory_bench` reported cache init 0.297 s on the turn and 12.039 s on the flop at one thread, and 0.317 s and 12.426 s at four threads. The training block after that fill was 0.034 s and 2.004 s at one thread. A warm 30-iteration betting-tree gain is not that cold fill. Engine heap on that run, allocated equal to peak: turn 62,645,166 and 81,079,686 bytes; flop 531,424,158 and 550,641,654 bytes. The independent Linux review of the same commit reported 62,647,533 and 81,082,053 on the turn, and 531,364,379 and 550,581,875 on the flop. Values were unchanged: turn `1.9567680809e-15`, NashConv `8.64586180427e-15`; flop `1.28230759344e-14`, NashConv `1.43912659567e-14`.
