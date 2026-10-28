@@ -11,7 +11,7 @@ States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 | Equity, action ranges, distributions, hand categories | partial | M2 | Node browse, action frequencies, chance-card marginals | No equity mode, categories, or range-composition report |
 | Weighted range editing and range libraries | partial | M2–M3 | 13×13 paint, weights, text ranges | No libraries, folders, undo, or import/export beyond the range text |
 | Configurable betting trees and visual line editing | partial | M3 | Per-street sizes, geometric sizes, caps, donk sizes, all-in threshold | No visual line editor or versioned canonical configuration file |
-| Stop-and-keep, pause, continue, accuracy stopping | partial | M4 | Cancel-and-discard, gap threshold on the trainer | Stop-and-keep and resume of the same regret state are unspecified in the product |
+| Stop-and-keep, pause, continue, accuracy stopping | partial | M4 | Cancel-and-discard on a new solve. `POST /api/solutions/{id}/continue` adds iterations on the same solution id. A stop during that continuation keeps the finished chunks | Pause is absent. A stop before the first publication still discards the new solve |
 | Full saves, checkpoints, compact saves, lazy load | missing | M5, M10 | — | No solve file format |
 | Broad betting-tree scale and competitive convergence | partial | M6 | Opt-in benches in [BENCHMARKS.md](BENCHMARKS.md) | No matched Pio timing or quality run |
 | Node locking and constrained re-solving | missing | M7 | — | — |

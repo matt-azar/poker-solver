@@ -130,6 +130,48 @@ public:
         ++generation_;
     }
 
+    struct Claim
+    {
+        bool allowed = false;
+        std::uint64_t job_id = 0;
+    };
+
+    // Waits until no reader holds the completed solution, then takes exclusive
+    // training ownership. The solution id and the engine stay. Borrow fails
+    // until the continuation is published again.
+    Claim claim_completed(std::uint64_t solution_id)
+    {
+        std::unique_lock<std::mutex> lock(mu_);
+        if (phase_ != Phase::Completed || solution_id == 0 || solution_id != solution_id_ || !resource_)
+        {
+            return {};
+        }
+        quiet_.wait(lock, [&]() { return readers_ == 0; });
+        if (phase_ != Phase::Completed || solution_id != solution_id_ || !resource_)
+        {
+            return {};
+        }
+        job_id_ = next_job_++;
+        phase_ = Phase::Running;
+        stop_ = false;
+        ++generation_;
+        Claim claim;
+        claim.allowed = true;
+        claim.job_id = job_id_;
+        return claim;
+    }
+
+    // The continuation thread is the only user. This does not take a reader.
+    std::shared_ptr<void> training_resource(std::uint64_t job_id) const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running || !resource_)
+        {
+            return {};
+        }
+        return resource_;
+    }
+
     // Reserves a solution id. Publication still has to pass commit_success.
     Permit prepare_success(std::uint64_t job_id)
     {
@@ -179,6 +221,39 @@ public:
         status_ = std::move(next_status);
         generation_ = next_generation;
         return true;
+    }
+
+    // Publishes more training on the same solution. A stop keeps the chunks
+    // that finished. make(generation) runs under the lock and must not call back in.
+    template <typename Make>
+    bool commit_continuation(std::uint64_t job_id, Make&& make)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running)
+        {
+            return false;
+        }
+        const std::uint64_t next_generation = generation_ + 1;
+        std::string next_status = make(next_generation);
+        phase_ = Phase::Completed;
+        stop_ = false;
+        status_ = std::move(next_status);
+        generation_ = next_generation;
+        return true;
+    }
+
+    // An exception while continuing leaves the existing engine queryable.
+    void abort_continuation(std::uint64_t job_id, std::string status)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running)
+        {
+            return;
+        }
+        phase_ = Phase::Completed;
+        stop_ = false;
+        status_ = std::move(status);
+        ++generation_;
     }
 
     void finish_cancelled(std::uint64_t job_id, std::string status)

@@ -86,6 +86,9 @@ if(WIN32)
 endif()
 add_dependencies(poker_solver_tests explorer)
 poker_set_warnings(poker_solver_tests)
+if(MSVC)
+    target_link_options(poker_solver_tests PRIVATE "/STACK:8388608")
+endif()
 
 add_test(NAME poker_solver_tests COMMAND poker_solver_tests)
 

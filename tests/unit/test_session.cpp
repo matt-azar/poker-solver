@@ -5,6 +5,7 @@
 #include "poker/range.hpp"
 #include "solver/street_batch.hpp"
 
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
@@ -417,6 +418,53 @@ void test_node_identifiers_do_not_alias()
     CHECK(root.hands.size() == canonical.hands.size());
 }
 
+void test_continuation_keeps_the_same_solution()
+{
+    poker::explorer::Session session;
+    std::shared_ptr<void> retiring;
+    const std::uint64_t job = session.begin(retiring);
+    const auto permit = session.prepare_success(job);
+    CHECK(session.commit_success(
+        job, std::make_shared<int>(7), permit.solution_id,
+        [](std::uint64_t, bool) { return std::string("done"); }));
+    std::shared_ptr<void> borrowed = session.borrow(permit.solution_id);
+    CHECK(borrowed != nullptr);
+    poker::explorer::Session::Claim claim;
+    bool committed = false;
+    std::thread trainer([&]() {
+        claim = session.claim_completed(permit.solution_id);
+        if (claim.allowed)
+        {
+            session.request_stop(claim.job_id);
+            committed = session.commit_continuation(claim.job_id, [](std::uint64_t) { return std::string("kept"); });
+        }
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    session.release_reader();
+    trainer.join();
+    CHECK(claim.allowed);
+    CHECK(committed);
+    CHECK(session.phase() == poker::explorer::Phase::Completed);
+    CHECK(session.current_solution() == permit.solution_id);
+    CHECK(session.status() == "kept");
+    std::shared_ptr<void> again = session.borrow(permit.solution_id);
+    CHECK(again != nullptr);
+    CHECK(*std::static_pointer_cast<int>(again) == 7);
+    session.release_reader();
+    CHECK(!session.claim_completed(permit.solution_id + 1).allowed);
+    CHECK(session.phase() == poker::explorer::Phase::Completed);
+    const auto second = session.claim_completed(permit.solution_id);
+    CHECK(second.allowed);
+    CHECK(!session.borrow(permit.solution_id));
+    CHECK(!session.commit_continuation(second.job_id + 1, [](std::uint64_t) { return std::string("no"); }));
+    CHECK(session.phase() == poker::explorer::Phase::Running);
+    session.abort_continuation(second.job_id, "restored");
+    CHECK(session.phase() == poker::explorer::Phase::Completed);
+    CHECK(session.current_solution() == permit.solution_id);
+    CHECK(session.borrow(permit.solution_id) != nullptr);
+    session.release_reader();
+}
+
 } // namespace
 
 void run_session_tests()
@@ -433,4 +481,5 @@ void run_session_tests()
     test_publication_mismatch_stays_running_until_failed();
     test_replacement_drops_old_engine_before_construct();
     test_node_identifiers_do_not_alias();
+    test_continuation_keeps_the_same_solution();
 }

@@ -1520,6 +1520,148 @@ void solve_job(std::uint64_t job_id, Job job)
     }
 }
 
+void continue_job(std::uint64_t job_id, int extra)
+{
+    const std::shared_ptr<HeldSolution> held =
+        std::static_pointer_cast<HeldSolution>(g_session.training_resource(job_id));
+    if (!held || (!held->street && !held->river))
+    {
+        g_session.abort_continuation(
+            job_id,
+            "{\"running\":false,\"cancelled\":false,\"error\":\"missing solution\",\"solution_id\":null}");
+        return;
+    }
+    const auto started = std::chrono::steady_clock::now();
+    int done = held->iterations;
+    if (extra > std::numeric_limits<int>::max() - done)
+    {
+        StatusDraft draft = draft_for(
+            held->job, job_id, done, held->runtime_seconds, true,
+            held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+            held->sample_iterations, held->sample_values, held->sample_gaps,
+            held->has_memory ? &held->memory : nullptr);
+        draft.error = "iteration count overflow";
+        draft.solution_id = held->id;
+        draft.root_id = held->root_id;
+        g_session.abort_continuation(job_id, build_status(draft));
+        return;
+    }
+    const int target = done + extra;
+    double value = held->value;
+    double p1 = held->p1_best_response;
+    double p2 = held->p2_best_response;
+    double gap = held->nash_gap;
+    const int samples = std::max(1, held->job.samples);
+    const int chunk = std::max(1, extra / samples);
+    const auto seconds_now = [&]()
+    {
+        return held->runtime_seconds
+            + std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    };
+    try
+    {
+        while (done < target)
+        {
+            if (g_session.stop_requested(job_id))
+            {
+                break;
+            }
+            const int step = std::min(chunk, target - done);
+            if (held->street)
+            {
+                if (held->job.frozen)
+                {
+                    held->street->continue_frozen_iterations(step, held->job.algorithm);
+                }
+                else
+                {
+                    held->street->continue_iterations(step, held->job.algorithm);
+                }
+                value = held->street->expected_utility();
+                p1 = held->street->p1_best_response_utility();
+                p2 = held->street->p2_best_response_utility();
+            }
+            else
+            {
+                held->river->continue_iterations(step, held->job.algorithm);
+                value = held->river->expected_utility();
+                p1 = held->river->p1_best_response_utility();
+                p2 = held->river->p2_best_response_utility();
+            }
+            gap = p1 + p2;
+            done += step;
+            held->sample_iterations.push_back(done);
+            held->sample_values.push_back(value);
+            held->sample_gaps.push_back(gap);
+            if (g_session.stop_requested(job_id))
+            {
+                break;
+            }
+            poker::solver::StreetMemoryReport memory{};
+            const poker::solver::StreetMemoryReport* memory_ptr = nullptr;
+            if (held->street)
+            {
+                memory = held->street->memory_report();
+                memory_ptr = &memory;
+            }
+            StatusDraft progress = draft_for(
+                held->job, job_id, done, seconds_now(), true, value, p1, p2, gap,
+                held->sample_iterations, held->sample_values, held->sample_gaps, memory_ptr);
+            progress.running = true;
+            progress.solution_id = held->id;
+            progress.root_id = held->root_id;
+            g_session.set_progress(job_id, build_status(progress));
+            if (held->job.accuracy >= 0.0 && gap <= held->job.accuracy * static_cast<double>(held->job.pot))
+            {
+                break;
+            }
+        }
+        const double seconds = seconds_now();
+        held->iterations = done;
+        held->runtime_seconds = seconds;
+        held->value = value;
+        held->p1_best_response = p1;
+        held->p2_best_response = p2;
+        held->nash_gap = gap;
+        held->job_id = job_id;
+        if (held->street)
+        {
+            held->street->prepare_inspection();
+            held->memory = held->street->memory_report();
+            held->has_memory = true;
+        }
+        StatusDraft success = draft_for(
+            held->job, job_id, done, seconds, true, value, p1, p2, gap,
+            held->sample_iterations, held->sample_values, held->sample_gaps,
+            held->has_memory ? &held->memory : nullptr);
+        success.solution_id = held->id;
+        success.root_id = held->root_id;
+        const bool published = g_session.commit_continuation(job_id, [&](std::uint64_t generation)
+        {
+            StatusDraft draft = success;
+            draft.generation = generation;
+            return build_status(draft);
+        });
+        if (!published && g_session.phase() == poker::explorer::Phase::Running)
+        {
+            StatusDraft draft = success;
+            draft.error = "failed to publish the continuation";
+            g_session.abort_continuation(job_id, build_status(draft));
+        }
+    }
+    catch (const std::exception& error)
+    {
+        StatusDraft draft = draft_for(
+            held->job, job_id, done, seconds_now(), true, value, p1, p2, gap,
+            held->sample_iterations, held->sample_values, held->sample_gaps,
+            held->has_memory ? &held->memory : nullptr);
+        draft.error = error.what();
+        draft.solution_id = held->id;
+        draft.root_id = held->root_id;
+        g_session.abort_continuation(job_id, build_status(draft));
+    }
+}
+
 std::string read_file(const std::string& path)
 {
     std::ifstream input(path, std::ios::binary);
@@ -1641,6 +1783,102 @@ void handle_client(socket_t client)
     if (line.rfind("GET /api/status", 0) == 0)
     {
         send_response(client, 200, "application/json", g_session.status());
+        return;
+    }
+    if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/continue ") != std::string::npos)
+    {
+        if (g_session.running())
+        {
+            send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
+            return;
+        }
+        const std::string prefix = "POST /api/solutions/";
+        const std::string rest = line.substr(prefix.size());
+        const std::size_t slash = rest.find('/');
+        std::uint64_t id = 0;
+        if (slash == std::string::npos || !parse_prefixed_id(rest.substr(0, slash), 's', id))
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
+            return;
+        }
+        const double requested = read_number(body, "iterations", 0.0);
+        const int extra = static_cast<int>(requested);
+        if (extra < 1 || extra > 1000000000 || static_cast<double>(extra) != requested)
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"iterations must be a positive integer\"}");
+            return;
+        }
+        if (g_values != nullptr)
+        {
+            g_values->cancel();
+        }
+        if (g_worker.joinable())
+        {
+            g_worker.join();
+        }
+        const poker::explorer::Session::Claim claim = g_session.claim_completed(id);
+        if (!claim.allowed)
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+            return;
+        }
+        try
+        {
+            const std::shared_ptr<HeldSolution> held =
+                std::static_pointer_cast<HeldSolution>(g_session.training_resource(claim.job_id));
+            if (!held)
+            {
+                g_session.abort_continuation(
+                    claim.job_id,
+                    "{\"running\":false,\"cancelled\":false,\"error\":\"missing solution\",\"solution_id\":null}");
+                send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+                return;
+            }
+            StatusDraft starting = draft_for(
+                held->job, claim.job_id, held->iterations, held->runtime_seconds, true,
+                held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+                held->sample_iterations, held->sample_values, held->sample_gaps,
+                held->has_memory ? &held->memory : nullptr);
+            starting.running = true;
+            starting.solution_id = held->id;
+            starting.root_id = held->root_id;
+            g_session.set_progress(claim.job_id, build_status(starting));
+            g_worker = std::thread([job_id = claim.job_id, extra]() { continue_job(job_id, extra); });
+        }
+        catch (const std::exception& error)
+        {
+            const std::shared_ptr<HeldSolution> held =
+                std::static_pointer_cast<HeldSolution>(g_session.training_resource(claim.job_id));
+            if (held)
+            {
+                StatusDraft failed = draft_for(
+                    held->job, claim.job_id, held->iterations, held->runtime_seconds, true,
+                    held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+                    held->sample_iterations, held->sample_values, held->sample_gaps,
+                    held->has_memory ? &held->memory : nullptr);
+                failed.error = error.what();
+                failed.solution_id = held->id;
+                failed.root_id = held->root_id;
+                g_session.abort_continuation(claim.job_id, build_status(failed));
+            }
+            else
+            {
+                g_session.abort_continuation(
+                    claim.job_id,
+                    "{\"running\":false,\"cancelled\":false,\"error\":\"continuation failed\",\"solution_id\":null}");
+            }
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += "}";
+            send_response(client, 400, "application/json", payload);
+            return;
+        }
+        std::string accepted = "{\"running\":true,\"job_id\":";
+        append_escaped(accepted, "j" + std::to_string(claim.job_id));
+        accepted += ",\"solution_id\":";
+        append_escaped(accepted, "s" + std::to_string(id));
+        accepted += "}";
+        send_response(client, 202, "application/json", accepted);
         return;
     }
     if (line.rfind("GET /api/solutions/", 0) == 0)

@@ -32,12 +32,15 @@ Solution ids are `sN` and job ids are `jN`. Parsing uses the whole token. An ove
 
 Stop and publication share one state machine. `POST /api/stop` accepts an optional `{"job_id":"jN"}`. Omitting it stops the current job. The result is `accepted`, `complete`, or `stale`. A stop accepted before publication finishes the in-flight numerical work, marks the job cancelled, and publishes no solution. A stop after publication leaves the completed result in place. A stop for an old job does not cancel the job that replaced it. A constructor failure, a thread-launch failure, or a publication failure ends in the failed state. A failed or cancelled job has no queryable solution. Replacing a solution waits until current readers finish, drops the old engine, and only then builds the next one.
 
+`POST /api/solutions/{id}/continue` with `{"iterations":N}` trains N more iterations on that published solution. The solution id stays. Regrets, average weights, and the iteration count continue from the stored state. The same algorithm and frozen setting are used. The request cancels an in-flight value query and waits until no reader holds the engine, then browsing is suspended until the continuation is published. A stop during the continuation keeps the chunks that finished and leaves that same solution in place. An exception leaves the engine queryable and records the error. A missing solution is 404. A non-positive iteration count is 400. A continuation while a solve is running is 409.
+
 The page then shows:
 
 - The street, pot, stack, board, out-of-position value, the Nash gap, and the gap as a fraction of the pot
 - A Nash-gap chart across the samples taken during the run
 - A 13×13 strategy matrix for the player to act, separate from the range grids. The frequency menu defaults to the total of every bet and raise. It also lists each action at the node. A cell's color is the selected frequency. The denominator is the group's marginal reach. Positive reach with no aggression shows 0. A group with no reach shows the frequency as undefined. A cell lists the suit combos and every action's probability
 - Buttons for the legal actions, or for the next public card. Each button loads that node. A river still lists histories from its one export
+- **Continue** adds the iteration-box count to the published solution. **Stop** during that run keeps the finished chunks. **Stop** during a new solve still publishes nothing
 - **Calculate EVs** on a flop or turn decision. The label is chips, root-centered, including earlier investments. Per-combo rows show each action's conditional EV and the mixed EV. A group line weights those by the current marginals
 - Export writes the node on screen, or the river export. A node export carries values only after they were calculated for that same node
 

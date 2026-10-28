@@ -441,6 +441,34 @@ $("setup").addEventListener("submit", async (event) => {
   refresh();
 });
 
+$("continue").addEventListener("click", async () => {
+  if (!solutionId) {
+    return;
+  }
+  $("message").textContent = "Continuing…";
+  $("run").disabled = true;
+  $("continue").disabled = true;
+  $("stop").disabled = false;
+  const response = await fetch("/api/solutions/" + solutionId + "/continue", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({iterations: Number($("iterations").value)})
+  });
+  if (!response.ok && response.status !== 202) {
+    const failed = await response.json().catch(() => ({error: response.statusText}));
+    $("message").textContent = failed.error || "Continue failed";
+    $("run").disabled = false;
+    $("continue").disabled = false;
+    $("stop").disabled = true;
+    return;
+  }
+  if (poll) {
+    clearInterval(poll);
+  }
+  poll = setInterval(refresh, 250);
+  refresh();
+});
+
 $("stop").addEventListener("click", async () => {
   await fetch("/api/stop", {method: "POST"});
   $("message").textContent = "Stopping after the current sample…";
@@ -508,6 +536,7 @@ async function refresh() {
     $("run").disabled = false;
     $("stop").disabled = true;
   }
+  $("continue").disabled = Boolean(status.running) || !status.solution_id;
   $("export").disabled = !(currentNode || riverExport);
 }
 
@@ -982,3 +1011,4 @@ function renderLines(status) {
 readText("oop", $("oop").value);
 readText("ip", $("ip").value);
 updateSpot();
+refresh();

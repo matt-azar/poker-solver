@@ -433,6 +433,36 @@ void run_explorer_http_tests()
     CHECK(http_exchange("GET", "/api/solutions/" + solution + "/nodes/p0.t-1.r-1/values", "", old_values));
     CHECK(old_values.status == 404);
 
+    HttpResult continued;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solutions/" + street_solution + "/continue",
+        "{\"iterations\":1}",
+        continued));
+    CHECK(continued.status == 202);
+    CHECK(json_string(continued.body, "solution_id") == street_solution);
+    HttpResult continued_status;
+    CHECK(wait_for_completion(continued_status));
+    CHECK(json_string(continued_status.body, "solution_id") == street_solution);
+    double continued_iterations = 0.0;
+    double continued_ev = 0.0;
+    CHECK(json_number(continued_status.body, "iterations", continued_iterations));
+    CHECK(continued_iterations == 2.0);
+    CHECK(json_number(continued_status.body, "player0_expected_utility", continued_ev));
+    CHECK_NEAR(continued_ev, 50.0, 1e-6);
+    HttpResult continued_export;
+    CHECK(http_exchange("GET", "/api/solutions/" + street_solution + "/export", "", continued_export));
+    CHECK(continued_export.status == 200);
+    double export_iterations = 0.0;
+    CHECK(json_number(continued_export.body, "iterations", export_iterations));
+    CHECK(export_iterations == 2.0);
+    HttpResult bad_continue;
+    CHECK(http_exchange("POST", "/api/solutions/" + street_solution + "/continue", "{\"iterations\":0}", bad_continue));
+    CHECK(bad_continue.status == 400);
+    HttpResult missing_continue;
+    CHECK(http_exchange("POST", "/api/solutions/s99/continue", "{\"iterations\":1}", missing_continue));
+    CHECK(missing_continue.status == 404);
+
     WSACleanup();
 #else
     std::cerr << "SKIP explorer HTTP tests: Windows-only in this suite\n";

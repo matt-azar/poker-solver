@@ -146,9 +146,9 @@ void test_newer_node_supersedes_paused_walk()
     CHECK(ready.body == "B");
     const ValueReply stale = worker.submit(first);
     CHECK(!stale.ready || stale.body != "A");
-    CHECK(session.reader_count() == 0);
     worker.shutdown();
     CHECK(!worker.live());
+    CHECK(session.reader_count() == 0);
 }
 
 void test_replacement_destroys_engine_before_the_next_one()
