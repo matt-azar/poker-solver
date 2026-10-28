@@ -187,6 +187,46 @@ bool json_number(const std::string& body, const std::string& key, double& value)
     return end != body.c_str() + cursor;
 }
 
+std::string json_array_string(const std::string& body, const std::string& key)
+{
+    const std::string pattern = "\"" + key + "\":[";
+    const std::size_t at = body.find(pattern);
+    if (at == std::string::npos)
+    {
+        return {};
+    }
+    const std::size_t quote = body.find('"', at + pattern.size());
+    if (quote == std::string::npos)
+    {
+        return {};
+    }
+    std::size_t cursor = quote + 1;
+    std::string value;
+    while (cursor < body.size() && body[cursor] != '"')
+    {
+        value.push_back(body[cursor]);
+        ++cursor;
+    }
+    return value;
+}
+
+bool wait_for_values(const std::string& path, HttpResult& result)
+{
+    for (int attempt = 0; attempt < 200; ++attempt)
+    {
+        if (!http_exchange("GET", path, "", result))
+        {
+            return false;
+        }
+        if (result.status != 202)
+        {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
+}
+
 bool wait_for_completion(HttpResult& status)
 {
     for (int attempt = 0; attempt < 200; ++attempt)
@@ -280,6 +320,14 @@ void run_explorer_http_tests()
     const std::string solution = json_string(status.body, "solution_id");
     CHECK(http_exchange("GET", "/api/solutions/" + solution + "/export", "", exported));
     check_agreement(status, exported, 50.0, true);
+    HttpResult river_values;
+    CHECK(http_exchange(
+        "GET",
+        "/api/solutions/" + solution + "/nodes/p0.t-1.r-1/values",
+        "",
+        river_values));
+    CHECK(river_values.status == 400);
+    CHECK(river_values.body.find("no street nodes") != std::string::npos);
 
     HttpResult stopped;
     CHECK(http_exchange("POST", "/api/stop", "{\"job_id\":\"" + river_job + "\"}", stopped));
@@ -321,6 +369,56 @@ void run_explorer_http_tests()
     CHECK(http_exchange("GET", "/api/solutions/" + street_solution + "/export", "", street_export));
     check_agreement(street_status, street_export, 0.0, false);
     CHECK(street_export.body.find("\"root_node_id\":\"p0.t-1.r-1\"") != std::string::npos);
+    const std::string root = json_string(street_status.body, "root_node_id");
+    CHECK(root == "p0.t-1.r-1");
+    const std::string values_path = "/api/solutions/" + street_solution + "/nodes/" + root + "/values";
+    HttpResult values;
+    CHECK(wait_for_values(values_path, values));
+    CHECK(values.status == 200);
+    CHECK(values.body.find("\"pending\":false") != std::string::npos);
+    CHECK(values.body.find("\"utility_basis\":\"root_centered\"") != std::string::npos);
+    CHECK(values.body.find("\"units\":\"chips\"") != std::string::npos);
+    CHECK(values.body.find("\"player\":0") != std::string::npos);
+    double node_ev = 0.0;
+    double query_seconds = 0.0;
+    CHECK(json_number(values.body, "node_ev", node_ev));
+    CHECK_NEAR(node_ev, 50.0, 1e-6);
+    CHECK(json_number(values.body, "query_seconds", query_seconds));
+    CHECK(query_seconds >= 0.0);
+    HttpResult root_page;
+    CHECK(http_exchange("GET", "/api/solutions/" + street_solution + "/nodes/" + root, "", root_page));
+    CHECK(root_page.status == 200);
+    const std::string ip_id = json_array_string(root_page.body, "children");
+    CHECK(!ip_id.empty());
+    HttpResult ip_page;
+    CHECK(http_exchange("GET", "/api/solutions/" + street_solution + "/nodes/" + ip_id, "", ip_page));
+    CHECK(ip_page.status == 200);
+    const std::string chance_id = json_array_string(ip_page.body, "children");
+    CHECK(!chance_id.empty());
+    HttpResult chance_page;
+    CHECK(http_exchange("GET", "/api/solutions/" + street_solution + "/nodes/" + chance_id, "", chance_page));
+    CHECK(chance_page.status == 200);
+    CHECK(chance_page.body.find("\"kind\":\"chance\"") != std::string::npos);
+    HttpResult chance_values;
+    CHECK(http_exchange(
+        "GET",
+        "/api/solutions/" + street_solution + "/nodes/" + chance_id + "/values",
+        "",
+        chance_values));
+    CHECK(chance_values.status == 400);
+    CHECK(chance_values.body.find("decision node") != std::string::npos);
+    HttpResult values_again;
+    CHECK(http_exchange("GET", values_path, "", values_again));
+    CHECK(values_again.status == 200);
+    CHECK(values_again.body == values.body);
+    HttpResult status_after;
+    CHECK(http_exchange("GET", "/api/status", "", status_after));
+    CHECK(status_after.body == street_status.body);
+    HttpResult export_after;
+    CHECK(http_exchange("GET", "/api/solutions/" + street_solution + "/export", "", export_after));
+    CHECK(export_after.body == street_export.body);
+    CHECK(export_after.body.find("\"action_ev\"") == std::string::npos);
+    CHECK(export_after.body.find("\"utility_basis\"") == std::string::npos);
     HttpResult node_overflow;
     CHECK(http_exchange(
         "GET",
@@ -331,9 +429,12 @@ void run_explorer_http_tests()
     HttpResult old_river;
     CHECK(http_exchange("GET", "/api/solutions/" + solution + "/export", "", old_river));
     CHECK(old_river.status == 404);
+    HttpResult old_values;
+    CHECK(http_exchange("GET", "/api/solutions/" + solution + "/nodes/p0.t-1.r-1/values", "", old_values));
+    CHECK(old_values.status == 404);
 
     WSACleanup();
 #else
-    std::cout << "explorer HTTP tests run on Windows\n";
+    std::cerr << "SKIP explorer HTTP tests: Windows-only in this suite\n";
 #endif
 }

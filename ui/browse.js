@@ -90,3 +90,45 @@ function frequencyOf(cell, mode) {
   }
   return cell.actionMass[Number(mode)] / cell.marginalSum;
 }
+
+// Posterior-weighted. Each hand contributes its own mixed value, m(h) * V(h).
+// A zero-mass group stays null even when the counterfactual hand values exist.
+function groupEv(node, values, cell) {
+  if (!node || !node.reach_defined || !values || values.pending || !cell) {
+    return null;
+  }
+  if (values.node_id && node.node_id && values.node_id !== node.node_id) {
+    return null;
+  }
+  const combos = values.combos || node.combos || [];
+  let mass = 0;
+  let mixed = 0;
+  const action = (node.actions || []).map(() => 0);
+  for (const hand of cell.hands || []) {
+    const nodeIndex = (node.combos || []).indexOf(hand.combo);
+    const valueIndex = combos.indexOf(hand.combo);
+    if (nodeIndex < 0 || valueIndex < 0) {
+      continue;
+    }
+    const marginal = Number(node.marginal[nodeIndex]);
+    if (!(marginal > 0)) {
+      continue;
+    }
+    if (!values.ev_defined || !values.ev_defined[valueIndex]) {
+      return null;
+    }
+    const row = values.action_ev[valueIndex] || [];
+    mass += marginal;
+    mixed += marginal * Number(values.value[valueIndex]);
+    action.forEach((_, index) => {
+      action[index] += marginal * Number(row[index]);
+    });
+  }
+  if (!(mass > 0)) {
+    return null;
+  }
+  return {
+    mixed: mixed / mass,
+    action: action.map((entry) => entry / mass)
+  };
+}

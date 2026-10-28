@@ -12,6 +12,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
@@ -58,6 +59,32 @@ namespace
 std::thread g_worker;
 poker::explorer::Session g_session;
 std::string g_ui_root = "ui";
+
+// One action-value query. The accept loop only queues it. Status and node
+// pages stay on the accept thread. A newer node or a new solve sets the cancel
+// flag; the walk checks that flag at each public node.
+std::mutex g_value_mu;
+std::condition_variable g_value_cv;
+std::thread g_value_thread;
+std::once_flag g_value_once;
+std::atomic<bool> g_value_cancel{false};
+bool g_value_stop = false;
+bool g_value_pending = false;
+bool g_value_inflight = false;
+bool g_value_has_result = false;
+bool g_value_result_ok = false;
+std::uint64_t g_value_serial = 0;
+std::uint64_t g_value_solution = 0;
+std::uint64_t g_value_job = 0;
+std::string g_value_node;
+std::uint64_t g_value_inflight_serial = 0;
+std::uint64_t g_value_inflight_solution = 0;
+std::uint64_t g_value_inflight_job = 0;
+std::string g_value_inflight_node;
+std::uint64_t g_value_result_serial = 0;
+std::uint64_t g_value_result_solution = 0;
+std::string g_value_result_node;
+std::string g_value_result_body;
 
 void append_escaped(std::string& out, const std::string& text)
 {
@@ -1095,6 +1122,327 @@ std::string json_inspection(
     return out;
 }
 
+std::string value_identity(
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    const std::string& node_id,
+    std::uint64_t generation)
+{
+    std::string out = "\"solution_id\":";
+    append_escaped(out, "s" + std::to_string(solution_id));
+    out += ",\"job_id\":";
+    append_escaped(out, "j" + std::to_string(job_id));
+    out += ",\"node_id\":";
+    append_escaped(out, node_id);
+    out += ",\"status_generation\":";
+    out += std::to_string(generation);
+    return out;
+}
+
+std::string json_value_pending(
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    const std::string& node_id,
+    std::uint64_t generation)
+{
+    return "{\"pending\":true," + value_identity(solution_id, job_id, node_id, generation) + "}";
+}
+
+std::string json_value_error(
+    const std::string& message,
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    const std::string& node_id,
+    std::uint64_t generation)
+{
+    std::string out = "{\"pending\":false,\"error\":";
+    append_escaped(out, message);
+    out += ',';
+    out += value_identity(solution_id, job_id, node_id, generation);
+    out += '}';
+    return out;
+}
+
+std::string json_action_values(
+    const poker::solver::StreetActionValues& page,
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    std::uint64_t generation)
+{
+    const std::size_t hands = page.combos.size();
+    const std::size_t actions = page.actions.size();
+    std::string out = "{\"pending\":false,";
+    out += value_identity(solution_id, job_id, page.node_id, generation);
+    out += ",\"player\":";
+    out += std::to_string(page.player);
+    out += ",\"units\":";
+    append_escaped(out, page.units);
+    out += ",\"utility_basis\":";
+    append_escaped(out, page.utility_basis);
+    out += ",\"reach_defined\":";
+    out += page.reach_defined ? "true" : "false";
+    out += ",\"node_ev_defined\":";
+    out += page.node_ev_defined ? "true" : "false";
+    out += ",\"node_ev\":";
+    if (page.node_ev_defined)
+    {
+        out += format_number(page.node_ev);
+    }
+    else
+    {
+        out += "null";
+    }
+    out += ",\"actions\":[";
+    for (std::size_t i = 0; i < actions; ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        append_escaped(out, page.actions[i]);
+    }
+    out += "],\"combos\":[";
+    for (std::size_t i = 0; i < hands; ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        append_escaped(out, page.combos[i]);
+    }
+    out += "],\"ev_defined\":[";
+    for (std::size_t i = 0; i < hands; ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        const bool defined = i < page.ev_defined.size() && page.ev_defined[i] != 0;
+        out += defined ? "true" : "false";
+    }
+    out += "],\"action_ev\":[";
+    for (std::size_t hand = 0; hand < hands; ++hand)
+    {
+        if (hand > 0)
+        {
+            out += ',';
+        }
+        const bool defined = hand < page.ev_defined.size() && page.ev_defined[hand] != 0;
+        if (!defined)
+        {
+            out += "null";
+            continue;
+        }
+        out += '[';
+        for (std::size_t action = 0; action < actions; ++action)
+        {
+            if (action > 0)
+            {
+                out += ',';
+            }
+            const std::size_t index = hand * actions + action;
+            const double value = index < page.action_ev.size() ? page.action_ev[index] : 0.0;
+            out += format_number(value);
+        }
+        out += ']';
+    }
+    out += "],\"value\":[";
+    for (std::size_t hand = 0; hand < hands; ++hand)
+    {
+        if (hand > 0)
+        {
+            out += ',';
+        }
+        const bool defined = hand < page.ev_defined.size() && page.ev_defined[hand] != 0;
+        if (!defined || hand >= page.mixed_ev.size())
+        {
+            out += "null";
+        }
+        else
+        {
+            out += format_number(page.mixed_ev[hand]);
+        }
+    }
+    out += "],\"query_seconds\":";
+    out += format_number(page.query_seconds);
+    out += '}';
+    return out;
+}
+
+void value_thread_main()
+{
+    while (true)
+    {
+        std::uint64_t serial = 0;
+        std::uint64_t solution_id = 0;
+        std::uint64_t job_id = 0;
+        std::string node_id;
+        {
+            std::unique_lock<std::mutex> lock(g_value_mu);
+            g_value_inflight = false;
+            g_value_cv.wait(lock, [] { return g_value_stop || g_value_pending; });
+            if (g_value_stop && !g_value_pending)
+            {
+                return;
+            }
+            if (!g_value_pending)
+            {
+                continue;
+            }
+            serial = g_value_serial;
+            solution_id = g_value_solution;
+            job_id = g_value_job;
+            node_id = g_value_node;
+            g_value_pending = false;
+            g_value_cancel.store(false);
+            g_value_inflight = true;
+            g_value_inflight_serial = serial;
+            g_value_inflight_solution = solution_id;
+            g_value_inflight_job = job_id;
+            g_value_inflight_node = node_id;
+        }
+
+        std::string body;
+        bool ok = false;
+        bool discard = false;
+        bool holding_reader = false;
+        try
+        {
+            std::shared_ptr<void> borrowed = g_session.borrow(solution_id);
+            if (!borrowed)
+            {
+                discard = true;
+            }
+            else
+            {
+                holding_reader = true;
+                if (g_value_cancel.load())
+                {
+                    throw poker::solver::StreetValueCancelled();
+                }
+                const std::shared_ptr<HeldSolution> held = std::static_pointer_cast<HeldSolution>(borrowed);
+                if (!held->street)
+                {
+                    throw std::invalid_argument("this solution has no street nodes");
+                }
+                const poker::solver::StreetActionValues page = held->street->action_values(node_id, &g_value_cancel);
+                if (g_value_cancel.load() || g_session.current_solution() != solution_id)
+                {
+                    discard = true;
+                }
+                else
+                {
+                    body = json_action_values(page, solution_id, job_id, g_session.generation());
+                    ok = true;
+                }
+            }
+        }
+        catch (const poker::solver::StreetValueCancelled&)
+        {
+            discard = true;
+        }
+        catch (const std::exception& error)
+        {
+            if (g_value_cancel.load() || g_session.current_solution() != solution_id)
+            {
+                discard = true;
+            }
+            else
+            {
+                body = json_value_error(error.what(), solution_id, job_id, node_id, g_session.generation());
+            }
+        }
+        if (holding_reader)
+        {
+            g_session.release_reader();
+        }
+        std::lock_guard<std::mutex> lock(g_value_mu);
+        g_value_inflight = false;
+        if (discard || g_value_serial != serial || g_value_pending)
+        {
+            continue;
+        }
+        g_value_has_result = true;
+        g_value_result_ok = ok;
+        g_value_result_serial = serial;
+        g_value_result_solution = solution_id;
+        g_value_result_node = node_id;
+        g_value_result_body = std::move(body);
+    }
+}
+
+void ensure_value_thread()
+{
+    std::call_once(g_value_once, [] { g_value_thread = std::thread(value_thread_main); });
+}
+
+void cancel_value_work()
+{
+    std::lock_guard<std::mutex> lock(g_value_mu);
+    g_value_cancel.store(true);
+    g_value_pending = false;
+    ++g_value_serial;
+    g_value_has_result = false;
+}
+
+void send_response(
+    socket_t client,
+    int status,
+    const std::string& type,
+    const std::string& body,
+    const std::string& extra_headers);
+
+void respond_value_query(
+    socket_t client,
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    const std::string& node_id,
+    std::chrono::steady_clock::time_point started)
+{
+    ensure_value_thread();
+    const std::uint64_t generation = g_session.generation();
+    std::string body;
+    int status = 202;
+    {
+        std::lock_guard<std::mutex> lock(g_value_mu);
+        const bool finished = g_value_has_result && g_value_result_solution == solution_id
+            && g_value_result_node == node_id && !g_value_pending && !g_value_inflight;
+        const bool same_inflight = g_value_inflight && g_value_inflight_solution == solution_id
+            && g_value_inflight_node == node_id && !g_value_pending;
+        const bool same_pending = g_value_pending && g_value_solution == solution_id && g_value_node == node_id;
+        if (finished)
+        {
+            body = g_value_result_body;
+            status = g_value_result_ok ? 200 : 400;
+        }
+        else if (same_inflight || same_pending)
+        {
+            const std::uint64_t pending_job = same_pending ? g_value_job : g_value_inflight_job;
+            body = json_value_pending(solution_id, pending_job, node_id, generation);
+        }
+        else
+        {
+            ++g_value_serial;
+            g_value_pending = true;
+            g_value_cancel.store(true);
+            g_value_solution = solution_id;
+            g_value_job = job_id;
+            g_value_node = node_id;
+            g_value_has_result = false;
+            g_value_cv.notify_one();
+            body = json_value_pending(solution_id, job_id, node_id, generation);
+        }
+    }
+    const double handler_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - started).count();
+    send_response(
+        client,
+        status,
+        "application/json",
+        body,
+        "X-Query-Seconds: " + format_number(handler_seconds) + "\r\n");
+}
+
 StatusDraft draft_for(
     const Job& job,
     std::uint64_t job_id,
@@ -1501,8 +1849,33 @@ void handle_client(socket_t client)
                     send_response(client, 400, "application/json", "{\"error\":\"this solution has no street nodes\"}");
                     return;
                 }
+                std::string node_path = tail.substr(6);
+                const bool want_values = node_path.size() >= 7 && node_path.ends_with("/values");
+                if (want_values)
+                {
+                    node_path.resize(node_path.size() - 7);
+                }
                 const auto query_started = std::chrono::steady_clock::now();
-                const poker::solver::StreetInspection view = held->street->inspect_node(tail.substr(6));
+                if (want_values)
+                {
+                    const poker::solver::StreetInspection view = held->street->inspect_node(node_path);
+                    if (view.kind != "decision")
+                    {
+                        send_response(
+                            client,
+                            400,
+                            "application/json",
+                            "{\"error\":\"action values require a decision node\"}");
+                        return;
+                    }
+                    const std::uint64_t solution_id = held->id;
+                    const std::uint64_t job_id = held->job_id;
+                    reader.active = false;
+                    g_session.release_reader();
+                    respond_value_query(client, solution_id, job_id, node_path, query_started);
+                    return;
+                }
+                const poker::solver::StreetInspection view = held->street->inspect_node(node_path);
                 const double query_seconds = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - query_started).count();
                 const auto serialize_started = std::chrono::steady_clock::now();
@@ -1604,6 +1977,7 @@ void handle_client(socket_t client)
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
         }
+        cancel_value_work();
         try
         {
             Job job = parse_job(body);
@@ -1696,8 +2070,12 @@ void handle_client(socket_t client)
 std::string executable_directory()
 {
 #ifdef _WIN32
-    char buffer[1024];
+    char buffer[4096];
     const DWORD length = GetModuleFileNameA(nullptr, buffer, static_cast<DWORD>(sizeof(buffer)));
+    if (length == 0 || length >= sizeof(buffer))
+    {
+        return ".";
+    }
     std::string path(buffer, buffer + length);
     const std::size_t slash = path.find_last_of("\\/");
     if (slash == std::string::npos)
@@ -1706,7 +2084,19 @@ std::string executable_directory()
     }
     return path.substr(0, slash);
 #else
-    return ".";
+    char buffer[4096];
+    const ssize_t length = ::readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(buffer) - 1)
+    {
+        return ".";
+    }
+    std::string path(buffer, buffer + static_cast<std::size_t>(length));
+    const std::size_t slash = path.find_last_of('/');
+    if (slash == std::string::npos)
+    {
+        return ".";
+    }
+    return path.substr(0, slash);
 #endif
 }
 
@@ -1716,8 +2106,10 @@ void choose_ui_root()
     const std::string candidates[] = {
         "ui",
         exe + "\\ui",
+        exe + "\\..\\ui",
         exe + "\\..\\..\\ui",
         exe + "/ui",
+        exe + "/../ui",
         exe + "/../../ui"};
     for (const std::string& candidate : candidates)
     {

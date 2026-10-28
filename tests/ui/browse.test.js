@@ -6,7 +6,7 @@ const context = {console};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("ui/browse.js", "utf8"), context);
 
-const {groupHands, frequencyOf, shouldApply, nextGeneration} = context;
+const {groupHands, frequencyOf, groupEv, shouldApply, nextGeneration} = context;
 
 function cellOf(node, text) {
   const cell = groupHands(node).find((item) => item.text === text);
@@ -88,6 +88,38 @@ const undefinedReach = {
   strategy: [[0, 1]]
 };
 assert.strictEqual(frequencyOf(cellOf(undefinedReach, "TT"), "aggression"), null);
+
+const split = {
+  node_id: "n",
+  reach_defined: true,
+  actions: ["A", "B"],
+  combos: ["AhKh", "AsKs"],
+  marginal: [0.5, 0.5],
+  strategy: [[1, 0], [0, 1]]
+};
+const splitValues = {
+  node_id: "n",
+  pending: false,
+  ev_defined: [true, true],
+  action_ev: [[10, 0], [0, 10]],
+  value: [10, 10]
+};
+const splitEv = groupEv(split, splitValues, cellOf(split, "AKs"));
+assert.ok(Math.abs(splitEv.mixed - 10) < 1e-12);
+assert.ok(Math.abs(splitEv.action[0] - 5) < 1e-12);
+assert.ok(Math.abs(splitEv.action[1] - 5) < 1e-12);
+
+const zeroMass = {
+  node_id: "n",
+  reach_defined: true,
+  actions: ["A", "B"],
+  combos: ["AhKh", "AsKs"],
+  marginal: [0, 0],
+  strategy: [[1, 0], [0, 1]]
+};
+assert.strictEqual(groupEv(zeroMass, splitValues, cellOf(zeroMass, "AKs")), null);
+assert.strictEqual(groupEv(split, Object.assign({}, splitValues, {pending: true}), cellOf(split, "AKs")), null);
+assert.strictEqual(groupEv(Object.assign({}, split, {reach_defined: false}), splitValues, cellOf(split, "AKs")), null);
 
 async function main() {
 const renders = [];

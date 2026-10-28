@@ -157,3 +157,29 @@ One checked case: pot 100, one all-in, aces or fives against kings. The equilibr
 A turn tree has one more chance node after the turn betting ends: the river, uniform over the remaining cards. A flop tree has two, the turn and then the river. Range weights enter only through the root hand distribution. The acting player's information is the cards already dealt and the public betting. The chip rule is the river rule, with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
 
 On `Kh Kd 7c 4s`, aces against `2c3d` win every river, so check-down is worth +50. With one pot-sized bet, CFR+ for 400 iterations reached 50.0016209123 and a Nash gap of 0.00187032418952. On `Ah Kd 7c`, queens against jacks, the check-down value over all 1,980 runouts is 41.6161616162, and the solver matches it with Nash gap 0.
+
+## Conditional action values
+
+These values are read from a finished flop or turn solve. They do not train, and they do not use the current regret matching. The profile is the stored average.
+
+At a decision for player \(i\), public history \(H\), and board \(B\), write \(q_{\mathrm{opp}}(g)\) for the opponent's input weight times the average-policy probabilities along the history. Hands that cannot exist on \(B\) are removed. For a hero hand \(h\),
+
+\[
+D_i(h)=\sum_g q_{\mathrm{opp}}(g)
+\]
+
+over opponent hands \(g\) that are compatible with \(h\) and \(B\). When \(h\) is structurally supported and \(D_i(h)>0\),
+
+\[
+Q_i(h,a)=\sum_g \frac{q_{\mathrm{opp}}(g)}{D_i(h)}\, E[U_i \mid H, B, h, g, \text{force } a, \text{ then follow the average}].
+\]
+
+Future cards are dealt from the deck that remains for that fixed pair. Forcing \(a\) does not multiply the result by the average probability of \(a\). A legal action with probability zero still has a continuation value. Later decisions, for both players, follow the average. This is not a best response and it does not maximize future choices.
+
+\(U_i\) is the existing root-centered terminal utility in chips, with \(U_1=-U_0\). The number includes chips already invested. Folding is worth \(-(initial\ pot/2 + that\ player's\ cumulative\ contribution)\). A tie is 0. The stored root EV is player 0's expected utility. At an in-position decision the reported value is the negation of the player-0 amount the terminal kernel stores.
+
+If \(D_i(h)=0\), \(Q_i(h,a)\) is undefined. The query does not invent a uniform opponent range. A hand that is off the board, or otherwise structurally unsupported, is undefined and is not looked up. Hero's own strategic reach can be zero while \(D_i(h)>0\); the counterfactual continuation is still defined. A public node with zero joint reach can still have those hand values. Reach-defined and EV-defined are separate.
+
+The mixed hand value is \(V_i(h)=\sum_a \bar\sigma_i(h,a)\, Q_i(h,a)\).
+
+Where the posterior marginal \(m_i(h)\) exists, the node value is \(\sum_h m_i(h)\, V_i(h)\). At the root this is the stored EV from the actor's side: player 0's utility when OOP acts, and its negation when IP acts. A group's mixed value is the same average over the hands in the group. The group's value for a forced action \(a\) averages \(Q_i(h,a)\) with those same marginals. That is the value of forcing \(a\) for the hands that reach the node. It is not the value conditional on seeing \(a\) played. A group with no posterior mass has a null aggregate even when the individual counterfactual values exist. Those aggregates are not NashConv, cumulative regret, or a best-response gain.

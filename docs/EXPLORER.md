@@ -8,7 +8,7 @@ From the repository root:
 explorer
 ```
 
-Open `http://127.0.0.1:8765`. The server listens on `127.0.0.1` only. `--port` changes the port. Static files come from `ui/`.
+Open `http://127.0.0.1:8765`. The server listens on `127.0.0.1` only. `--port` changes the port. Static files come from `ui/` in the working directory, or from `ui/` next to the executable and one or two directories above it. On Linux that directory is the parent of `/proc/self/exe`.
 
 The board length chooses where the hand starts. Three cards solve the flop, the turn, and the river in one tree: the turn and the river are dealt inside that tree, and each street is bet. Four cards solve the turn and the river the same way. Five cards are the river only, because the flop and the turn have already been dealt. Five cards use the river public tree. Three or four cards use the turn and flop public tree. Painting a range writes the same text the solver already parses: `AA`, `AKs`, `AKo:0.5`, `QQ+`, `22-77`, `ATs+`. A weight slider sets the next paint. Clicking a cell that already has that weight clears it. Dragging paints the chosen weight across cells. Cards on the board are grey and cannot be selected.
 
@@ -20,6 +20,12 @@ A completed solve keeps one record: the configuration, the iterations that finis
 
 An absent `oop_bets` or `ip_bets` key still defaults to `0.5, 1`. A present empty array stays empty, so a check-only tree can be requested. All-in remains its own switch.
 
+`GET /api/solutions/{id}/nodes/{node_id}/values` is a separate request. Status polls and ordinary node pages do not compute it. The node must be a decision on a flop or turn solve. A chance or terminal node, and a river solve, return 400. An expired solution returns 404. The body names the solution, the job, the node, and the status generation. `units` is `chips` and `utility_basis` is `root_centered`: the same net chips as the recorded solver EV, including earlier investments. Combo and action order match the node page. `ev_defined` is per hand. Undefined action values and mixed values are null. `node_ev` is the posterior-weighted mixed value, or null when that average is undefined. A zero-reach hand can still be defined when some compatible opponent reach remains.
+
+The accept loop does not walk the tree. A new node returns 202 with `pending: true` until the one background query finishes, then 200. A repeat for that same node and profile returns the stored page, and `query_seconds` stays the walk time. `X-Query-Seconds` is only the time spent in the handler. A newer node, or `POST /api/solve`, cancels the walk. The worker borrows the solution, so a replacement waits until that borrow is released, and a result is kept only when the solution id is unchanged. One page is retained. The generic `/export` stays strategy-only. The on-screen export includes values only when they belong to that exact node and solution.
+
+The page shows **Calculate EVs** on a decision. It does not fetch values while painting the grid or polling status. The note states the chip basis. A selected group shows the posterior-weighted mixed EV and the value of forcing each action. A group with no reaching mass stays undefined. Pending, failed, and undefined states stay visible. A reply is discarded when its selection, solution, or status generation is stale.
+
 Solution ids are `sN` and job ids are `jN`. Parsing uses the whole token. An overflowing, truncated, signed, or otherwise malformed id is HTTP 400. A well-formed id for any other solution is HTTP 404. Leading zeros that denote the same number select that number; `s00` is solution 0. Published solution ids start at 1. Node components use the same complete parse. A node index below 0 or past the tree is an unknown node.
 
 Stop and publication share one state machine. `POST /api/stop` accepts an optional `{"job_id":"jN"}`. Omitting it stops the current job. The result is `accepted`, `complete`, or `stale`. A stop accepted before publication finishes the in-flight numerical work, marks the job cancelled, and publishes no solution. A stop after publication leaves the completed result in place. A stop for an old job does not cancel the job that replaced it. A constructor failure, a thread-launch failure, or a publication failure ends in the failed state. A failed or cancelled job has no queryable solution. Replacing a solution waits until current readers finish, drops the old engine, and only then builds the next one.
@@ -30,6 +36,7 @@ The page then shows:
 - A Nash-gap chart across the samples taken during the run
 - A 13×13 strategy matrix for the player to act, separate from the range grids. The frequency menu defaults to the total of every bet and raise. It also lists each action at the node. A cell's color is the selected frequency. The denominator is the group's marginal reach. Positive reach with no aggression shows 0. A group with no reach shows the frequency as undefined. A cell lists the suit combos and every action's probability
 - Buttons for the legal actions, or for the next public card. Each button loads that node. A river still lists histories from its one export
-- Export writes the node on screen, or the river export
+- **Calculate EVs** on a flop or turn decision. The label is chips, root-centered, including earlier investments. Per-combo rows show each action's conditional EV and the mixed EV. A group line weights those by the current marginals
+- Export writes the node on screen, or the river export. A node export carries values only after they were calculated for that same node
 
 The default spot is aces versus kings on `Ah Kd 7c 4s 2h`. That is the same tree as `configs/river_default.json`, with 200 iterations instead of 500. A flop or a turn sends `memory_mib` (default 1024) and `threads` (default 1). The memory field is the street solver's heap budget. Threads above 1 are the frozen pass only; a river or a non-frozen request with more than one thread is rejected before the solve starts. If the tree does not fit, the page keeps running and shows the budget error. The 200,000-terminal limit belongs to the `StreetGame` reference enumerator.

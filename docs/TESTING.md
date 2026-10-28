@@ -9,6 +9,22 @@ ctest --test-dir build --output-on-failure
 
 On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 
+Build the solver and explorer binaries without compiling tests or benchmarks:
+
+```sh
+cmake --build build --config Release --target kuhn_solver --target leduc_solver --target river_solver --target street_solver --target explorer
+```
+
+Omit `--config Release` on a single-config generator. A plain `cmake --build build` still compiles the test binary and the benchmark binaries. The benchmarks stay outside CTest.
+
+JavaScript checks, from the repository root:
+
+```sh
+node tests/ui/browse.test.js
+```
+
+On platforms other than Windows, the HTTP cases print `SKIP explorer HTTP tests: Windows-only in this suite` and the rest of `poker_solver_tests` still runs. CTest has one entry for that binary, so the skip is a log line. [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) builds the production targets, runs this C++ suite, and runs the JavaScript file on Windows and Linux. A second Linux job repeats the C++ suite under AddressSanitizer and UndefinedBehaviorSanitizer. The benchmark executables are not part of that workflow.
+
 ## Categories (Phase 2)
 
 **Game correctness** (`tests/unit/test_kuhn.cpp`)
@@ -119,7 +135,13 @@ The HTTP test launches `explorer.exe --port 18765` and stops that process handle
 
 Chance weights on a weighted flop and a weighted turn match an independent pair-and-card enumeration and sum to 1 over the undealt cards. A hand that always holds a card gives that card weight 0. A joint reach of 1e-18 still defines the marginals and the card weights. Forcing OOP to keep only AdAc and IP to keep only AcKh leaves both of those reaches positive and the child joint at 0, with null card weights. Inspecting the root, an action child, and a chance node does not change the regret table or the strategy-sum table.
 
-`node tests/ui/browse.test.js` checks the group frequencies and the stale-response guard. One hand with Check 0.20, Bet 50 0.30, and Bet 100 0.50 reports total aggression 0.80. A slower JSON body that belongs to an older selection is not applied, including an error body. An older status generation is ignored.
+`node tests/ui/browse.test.js` checks the group frequencies and the stale-response guard. One hand with Check 0.20, Bet 50 0.30, and Bet 100 0.50 reports total aggression 0.80. A slower JSON body that belongs to an older selection is not applied, including an error body. An older status generation is ignored. Two equally weighted suited broadway combos, one always taking action A and the other always taking action B, each with mixed EV 10, have group mixed EV 10. The same group's forced-action values are 5 and 5. A group whose marginals are zero has a null aggregate.
+
+The Windows suite after conditional action EV is 408,504 assertions and 0 failures. That count includes the publication tests, the action-value oracle, and the values HTTP cases. Publication builds the status string before it stores a terminal phase. A throw on the accepted path and on the cancelled path leaves the job running, and the following failure record publishes nothing. The action-value tests cover the turn bluff, an in-position sign change, scale invariance, a zero hero reach with a defined continuation, a zero opponent denominator, blockers, a tie, a flop, and a later-street decision. A chance node is rejected. Regret, strategy sum, average strategy, iteration count, and evaluation time are unchanged by a query. The HTTP case is the one-iteration frozen check-down of `AhAd` versus `2c3d` on `Kh Kd 7c 4s`. The root value is 50. A second read returns the same body. Status and export are byte-for-byte unchanged, and the export has no action values. A chance node returns 400. A river solve returns 400. The replaced solution returns 404.
+
+One frozen iteration, pot 100, stack 100, bet 0.5, all-in, one raise, 1024 MiB, one thread. On the full-range turn `Ah Kd 7c 4s` the root conditional values took 0.1227594 seconds and the repeat took 0. The values JSON, with solution `s1`, job `j1`, and status generation 1, was 80,322 bytes. The root value was 15.1234567901, matching the stored EV, and the Nash gap was 81.2343664183. Engine allocated and peak stayed 143,384,982 bytes. Process RSS was 149,512,192 before the query and 150,056,960 after. The first river decision, `p3.t-1.r0`, took 0.0016188 seconds and was 77,848 bytes; the repeat took 0. On the paired flop `Ah Kd 7c`, `QQ,JJ,TT,99` versus the same range, the root took 0.3370098 seconds and the repeat took 0. That same JSON shape was 2,042 bytes. The value was 16.2637174211 and the Nash gap was 89.2478513202. Engine allocated and peak stayed 176,211,150 bytes. Process RSS was 183,361,536 before the query and 183,365,632 after. The first turn decision, `p3.t0.r-1`, took 0.0035858 seconds and was 2,053 bytes; the repeat took 0. Evaluation seconds were unchanged on both trees. The retained page and its profile epoch sit outside the engine budget. These are measurements from that run. The timing tables in [BENCHMARKS.md](BENCHMARKS.md) stay as recorded.
+
+This Windows run did not use ThreadSanitizer or AddressSanitizer. MSVC does not provide ThreadSanitizer. The earlier WSL g++ 11.4.0 ThreadSanitizer attempt aborted at startup with `unexpected memory mapping`, so the new evaluator, its scratch lock, and the publication fix were not run under a sanitizer here. The Windows Release suite covers those paths.
 
 One frozen iteration, pot 100, stack 100, bet 0.5, all-in, one raise, 1024 MiB, one thread. The full-range turn `Ah Kd 7c 4s` returned a status of 827 bytes, value 15.1234567901, Nash gap 81.2343664183, engine allocated and peak 143,384,982 bytes, process RSS 184,279,040. The root page was 86,174 bytes in 0.0282 seconds, the first action 86,174 bytes in 0.0136 seconds, and the chance page 3,404 bytes in 0.0018 seconds with 48 cards whose weights sum to 1. The paired flop `Ah Kd 7c`, `QQ,JJ,TT,99` versus the same range, returned a status of 831 bytes, value 16.2637174211, Nash gap 89.2478513202, engine allocated and peak 176,211,150 bytes, process RSS 184,565,760. Its root was 2,214 bytes in 0.0057 seconds, the first action 2,214 bytes in 0.0036 seconds, and the chance page 3,468 bytes in 0.0033 seconds with 49 cards whose weights sum to 1. A follow-up read of that flop chance page reported query 0.0000243 seconds and serialization 0.0000676 seconds. These are measurements from that run. The earlier full-range kernel heaps in [BENCHMARKS.md](BENCHMARKS.md) stay as recorded.
 

@@ -190,6 +190,18 @@ label[hidden] {
   margin-bottom: 8px;
 }
 
+#ev-note {
+  color: #5c564c;
+  font-size: 13px;
+}
+
+#node-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
 @media (max-width: 800px) {
   form, #summary, .pickers, .grids, .street-row {
     grid-template-columns: 1fr;

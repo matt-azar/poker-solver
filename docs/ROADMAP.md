@@ -22,20 +22,20 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 We already have a substantial tested foundation: Kuhn/Leduc reference games, river and street engines, pass-frozen CFR variants, active-player CFR+ flooring, correct counterfactual reach handling, compact blocker-aware showdowns, deterministic first-public-card parallelism, enforced engine allocation budgets, and node-scoped browsing. The current budget defaults to 1024 MiB and threads default to one.
 
-The latest Windows report is 364,982 assertions / zero failures. Independent GCC review of this commit passed 364,907 assertions; Windows HTTP tests are skipped there. Session-focused ThreadSanitizer passed 56 assertions on the review host. That run covered the session tests. There is still a confirmed publication exception-safety defect: serialization can throw after the session has already marked a solution completed. Fix that first.
+The latest Windows report is 408,504 assertions / zero failures. Independent GCC review of the previous chance-page commit passed 364,907 assertions; Windows HTTP tests are skipped there. Session-focused ThreadSanitizer passed 56 assertions on the review host. That run covered the session tests. Publication now builds the completed status before it stores a terminal phase or a queryable result. If that builder throws, the job stays running and the existing failure path can record it.
 
-Completed-average conditional action EV is specified but not implemented. Saved solve files, continuation workflows, node locks, broad analysis tools, full tree editing, tournament/rake utilities, production packaging, and preflop remain substantial work. No head-to-head Pio performance or solution-quality equivalence has been established.
+Completed-average conditional action EV is implemented for flop and turn decision nodes. The river page does not request it. Saved solve files, continuation workflows, node locks, broad analysis tools, full tree editing, tournament/rake utilities, production packaging, and preflop remain substantial work. No head-to-head Pio performance or solution-quality equivalence has been established.
 
 Full-range check-down measures whether a large tree fits and runs. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them.
 
 ## 3. Feature coverage ledger
 
-Create `docs/FEATURE_PARITY.md` as the living inventory. Each leaf feature needs: reference version/source, observed behavior, current status, milestone, acceptance test/demo, limitations, and evidence commit. Use states `unverified`, `missing`, `partial`, `verified`, and `not applicable with explanation`. Give every option inside a family its own row.
+The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf feature needs: reference version/source, observed behavior, current status, milestone, acceptance test/demo, limitations, and evidence commit. Use states `unverified`, `missing`, `partial`, `verified`, and `not applicable with explanation`. Give every option inside a family its own row.
 
 | Feature family | Current position | Delivery |
 |---|---|---|
 | Heads-up postflop CFR, chance, blocker handling, best responses | Established foundation; continue independent tests | M0, M6 |
-| Conditional combo/action EV; both-player values | Specified, pending | M1 |
+| Conditional combo/action EV; both-player values | Flop and turn decision nodes | M1 |
 | Equity, action ranges, distributions, hand categories | Limited browsing foundation | M2 |
 | Weighted range editing, range libraries, board input | Basic configuration; complete visual workflow needed | M2–M3 |
 | Configurable betting trees and visual line editing | Basic parameters exist | M3 |
@@ -57,6 +57,8 @@ The audit must also inspect small utilities: standalone equity calculator, prefl
 
 ### M0 — Preserve the baseline and make publication atomic
 
+The publication exception-safety fix is in the session. CI pins, the parity ledger, and the reference-product workflow in this milestone are still open.
+
 Implement the already specified exception-safety fix: construct potentially throwing completed-status data before committing result ownership or terminal phase. Test throwing publication callbacks on both acceptance and cancellation paths. Preserve stop-before-publication, stop-after-completion, stale-job handling, retirement-before-replacement, and reader lifetime rules.
 
 Pin compiler/build, configuration hashes, test fixtures, metric conventions, and benchmark protocols. Establish CI for Windows Release and Linux Release, plus targeted sanitizer jobs on supported hosts. Report skipped tests explicitly. Begin the parity ledger and record a short reference-product workflow for each feature family.
@@ -64,6 +66,8 @@ Pin compiler/build, configuration hashes, test fixtures, metric conventions, and
 **Gate:** publication failure exposes no result; current numerical/UI/session tests pass.
 
 ### M1 — Conditional action EV
+
+Flop and turn decision nodes return these values. The river page does not, and a generic export stays strategy-only.
 
 Implement the separate detailed EV specification already delivered. Force the selected legal action once, then follow the completed average strategy for both players. Support zero-probability actions and supported hands with zero own strategic reach. Normalize by compatible opponent reach; zero opponent support leaves the value undefined.
 

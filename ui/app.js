@@ -7,6 +7,9 @@ let nodeToken = 0;
 let seenGeneration = -1;
 let currentNode = null;
 let riverExport = null;
+let nodeValues = null;
+let valueToken = 0;
+let valuePoll = null;
 let selected = null;
 let drag = null;
 
@@ -443,10 +446,19 @@ $("stop").addEventListener("click", async () => {
   $("message").textContent = "Stopping after the current sample…";
 });
 
+$("calculate-ev").addEventListener("click", () => {
+  calculateEv();
+});
+
 $("export").addEventListener("click", () => {
-  const payload = currentNode || riverExport;
+  let payload = currentNode || riverExport;
   if (!payload) {
     return;
+  }
+  if (currentNode && nodeValues && !nodeValues.pending
+      && nodeValues.node_id === currentNode.node_id
+      && nodeValues.solution_id === currentNode.solution_id) {
+    payload = Object.assign({}, currentNode, {values: nodeValues});
   }
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"});
   const link = document.createElement("a");
@@ -476,12 +488,14 @@ async function refresh() {
     currentNode = null;
     riverExport = null;
     nodeToken += 1;
+    clearValues();
   }
   render(status);
   if (!status.running && status.solution_id && status.solution_id !== solutionId) {
     solutionId = status.solution_id;
     currentNode = null;
     riverExport = null;
+    clearValues();
     if (status.root_node_id) {
       loadNode(status.root_node_id);
     } else {
@@ -505,7 +519,21 @@ async function readBody(response) {
   }
 }
 
+function clearValues() {
+  nodeValues = null;
+  valueToken += 1;
+  if (valuePoll) {
+    clearInterval(valuePoll);
+    valuePoll = null;
+  }
+  const note = $("ev-note");
+  if (note) {
+    note.textContent = "";
+  }
+}
+
 async function loadNode(nodeId) {
+  clearValues();
   const token = ++nodeToken;
   const solution = solutionId;
   const response = await fetch("/api/solutions/" + solution + "/nodes/" + nodeId);
@@ -596,6 +624,10 @@ function render(status) {
   $("node-actions").innerHTML = "";
   $("node-line").textContent = "";
   $("node-meta").textContent = "";
+  $("calculate-ev").hidden = true;
+  if (!valuePoll) {
+    $("ev-note").textContent = "";
+  }
   renderLines(view);
 }
 
@@ -612,6 +644,12 @@ function renderNode(node) {
       : "deal a card";
   const host = $("node-actions");
   host.innerHTML = "";
+  $("calculate-ev").hidden = node.kind !== "decision";
+  if (!valuePoll) {
+    $("ev-note").textContent = nodeValues && nodeValues.node_id === node.node_id && !nodeValues.pending
+      ? evSummary(nodeValues)
+      : "";
+  }
   fillFrequency(node);
   if (node.kind === "decision") {
     node.actions.forEach((label, index) => {
@@ -731,15 +769,58 @@ function axis(text) {
   return node;
 }
 
+function formatChips(value) {
+  return Number(value).toFixed(3);
+}
+
+function evSummary(values) {
+  const nodeEv = values.node_ev_defined ? formatChips(values.node_ev) + " chips" : "undefined";
+  return "Node EV " + nodeEv + ". Chips, root-centered, including earlier investments.";
+}
+
+function handEv(combo) {
+  if (!nodeValues || !currentNode || nodeValues.pending || nodeValues.node_id !== currentNode.node_id) {
+    return null;
+  }
+  const index = (nodeValues.combos || []).indexOf(combo);
+  if (index < 0) {
+    return null;
+  }
+  if (!nodeValues.ev_defined[index]) {
+    return {defined: false};
+  }
+  return {
+    defined: true,
+    actions: nodeValues.action_ev[index],
+    mixed: nodeValues.value[index]
+  };
+}
+
 function showCell(player, cell, button) {
   selected = {player, text: cell.text};
   document.querySelectorAll("#oop-grid .cell.selected, #ip-grid .cell.selected").forEach((node) => node.classList.remove("selected"));
   button.classList.add("selected");
+  paintDetail(player, cell);
+}
+
+function paintDetail(player, cell) {
   $("detail").hidden = false;
   $("detail-title").textContent = player + " " + cell.text;
   const frequency = cell.bet === null || cell.bet === undefined ? "undefined" : Number(cell.bet).toFixed(3);
   const mode = $("frequency") ? ($("frequency").value || "aggression") : "aggression";
-  $("detail-meta").textContent = cell.range_combos + " combos, " + frequencyLabel(mode, currentNode || {actions: []}) + " " + frequency;
+  let text = cell.range_combos + " combos, " + frequencyLabel(mode, currentNode || {actions: []}) + " " + frequency;
+  if (currentNode && nodeValues && !nodeValues.pending && nodeValues.node_id === currentNode.node_id) {
+    const grouped = groupEv(currentNode, nodeValues, cell);
+    if (!grouped) {
+      text += ". Group EV undefined";
+    } else {
+      text += ". Group EV " + formatChips(grouped.mixed);
+      (currentNode.actions || []).forEach((label, index) => {
+        text += ". If " + label + " is forced, " + formatChips(grouped.action[index]);
+      });
+    }
+  }
+  $("detail-meta").textContent = text;
   const host = $("detail-hands");
   host.innerHTML = "";
   (cell.hands || []).forEach((hand) => {
@@ -759,8 +840,100 @@ function showCell(player, cell, button) {
       row.appendChild(probability);
       block.appendChild(row);
     });
+    const values = handEv(hand.combo);
+    if (values && !values.defined) {
+      const row = document.createElement("div");
+      row.className = "line";
+      row.textContent = "EV undefined";
+      block.appendChild(row);
+    } else if (values && values.defined) {
+      (currentNode.actions || []).forEach((label, index) => {
+        const row = document.createElement("div");
+        row.className = "line";
+        const name = document.createElement("span");
+        name.textContent = label + " EV";
+        const amount = document.createElement("span");
+        amount.textContent = formatChips(values.actions[index]);
+        row.appendChild(name);
+        row.appendChild(amount);
+        block.appendChild(row);
+      });
+      const mixed = document.createElement("div");
+      mixed.className = "line";
+      const name = document.createElement("span");
+      name.textContent = "Mixed EV";
+      const amount = document.createElement("span");
+      amount.textContent = formatChips(values.mixed);
+      mixed.appendChild(name);
+      mixed.appendChild(amount);
+      block.appendChild(mixed);
+    }
     host.appendChild(block);
   });
+}
+
+async function calculateEv() {
+  if (!currentNode || currentNode.kind !== "decision" || !solutionId) {
+    return;
+  }
+  const token = ++valueToken;
+  const solution = solutionId;
+  const nodeId = currentNode.node_id;
+  if (valuePoll) {
+    clearInterval(valuePoll);
+    valuePoll = null;
+  }
+  $("ev-note").textContent = "Calculating EVs…";
+  const tick = async () => {
+    let response;
+    try {
+      response = await fetch("/api/solutions/" + solution + "/nodes/" + nodeId + "/values");
+    } catch (error) {
+      if (!shouldApply(token, valueToken, solution, solutionId)) {
+        return;
+      }
+      $("ev-note").textContent = "EV request failed";
+      clearInterval(valuePoll);
+      valuePoll = null;
+      return;
+    }
+    const body = await readBody(response);
+    if (!shouldApply(token, valueToken, solution, solutionId)) {
+      return;
+    }
+    if (typeof body.status_generation === "number" && nextGeneration(body, seenGeneration) === null) {
+      clearInterval(valuePoll);
+      valuePoll = null;
+      return;
+    }
+    if (body.pending) {
+      $("ev-note").textContent = "Calculating EVs…";
+      return;
+    }
+    if ((body.solution_id && body.solution_id !== solution) || (body.node_id && body.node_id !== nodeId)) {
+      return;
+    }
+    if (!response.ok) {
+      $("ev-note").textContent = body.error || "EV request failed";
+      clearInterval(valuePoll);
+      valuePoll = null;
+      return;
+    }
+    nodeValues = body;
+    clearInterval(valuePoll);
+    valuePoll = null;
+    if (currentNode) {
+      renderNode(currentNode);
+    }
+    if (selected && currentNode) {
+      const cell = groupHands(currentNode).find((item) => item.text === selected.text);
+      if (cell) {
+        paintDetail(selected.player, cell);
+      }
+    }
+  };
+  valuePoll = setInterval(tick, 250);
+  tick();
 }
 
 function lineOf(infoset) {
