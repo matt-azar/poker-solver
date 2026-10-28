@@ -1826,7 +1826,8 @@ struct StreetBatchSolver::Engine
             std::chrono::steady_clock::now() - started).count();
     }
 
-    // True when this call rebuilt the average. The caller owns the profile epoch.
+    // True when this call rebuilt the average from the stored sums.
+    // Rebuilding does not change the profile epoch. Training and edits do.
     bool ensure_average() const
     {
         check_usable();
@@ -3529,6 +3530,16 @@ struct StreetBatchSolver::Engine
         return "p0.t-1.r-1";
     }
 
+    // Leading zeros and other accepted spellings name the same public node.
+    std::string canonical_node_id(const std::string& text) const
+    {
+        int node = 0;
+        int turn = -1;
+        int river = -1;
+        locate_node(text, node, turn, river);
+        return node_id(node, turn, river);
+    }
+
     bool parse_node_id(const std::string& text, int& node, int& turn, int& river) const
     {
         auto read_number = [&](std::size_t& cursor, int& value) -> bool
@@ -4618,8 +4629,16 @@ StreetBatchSolver::~StreetBatchSolver()
     }
 }
 
+void StreetBatchSolver::note_profile_mutation()
+{
+    std::lock_guard<std::mutex> lock(value_mu_);
+    ++profile_epoch_;
+    value_cache_valid_ = false;
+}
+
 void StreetBatchSolver::run_iterations(int count, Algorithm algorithm)
 {
+    note_profile_mutation();
     engine_->check_usable();
     engine_->reset();
     engine_->train_more(count, algorithm);
@@ -4627,11 +4646,13 @@ void StreetBatchSolver::run_iterations(int count, Algorithm algorithm)
 
 void StreetBatchSolver::continue_iterations(int count, Algorithm algorithm)
 {
+    note_profile_mutation();
     engine_->train_more(count, algorithm);
 }
 
 void StreetBatchSolver::run_frozen_iterations(int count, Algorithm algorithm)
 {
+    note_profile_mutation();
     engine_->check_usable();
     engine_->reset();
     engine_->train_frozen(count, algorithm);
@@ -4639,11 +4660,13 @@ void StreetBatchSolver::run_frozen_iterations(int count, Algorithm algorithm)
 
 void StreetBatchSolver::continue_frozen_iterations(int count, Algorithm algorithm)
 {
+    note_profile_mutation();
     engine_->train_frozen(count, algorithm);
 }
 
 SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm algorithm)
 {
+    note_profile_mutation();
     engine_->check_usable();
     const auto start = std::chrono::steady_clock::now();
     engine_->reset();
@@ -4687,6 +4710,7 @@ SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm 
 
 SolveStats StreetBatchSolver::solve(const SolveConfig& config, Algorithm algorithm)
 {
+    note_profile_mutation();
     engine_->check_usable();
     const auto start = std::chrono::steady_clock::now();
     engine_->reset();
@@ -4937,6 +4961,7 @@ ShowdownSample StreetBatchSolver::sample_showdown_for_test(
 
 void StreetBatchSolver::run_single_frozen_pass_for_test(int updating)
 {
+    note_profile_mutation();
     engine_->check_usable();
     engine_->average_ready = false;
     engine_->ensure_ranks();
@@ -4973,21 +4998,33 @@ StreetActionValues StreetBatchSolver::action_values(
     const std::atomic<bool>* cancel) const
 {
     std::lock_guard<std::mutex> lock(value_mu_);
-    if (engine_->ensure_average())
-    {
-        ++profile_epoch_;
-    }
-    if (value_cache_valid_ && value_cache_node_ == node_id && value_cache_epoch_ == profile_epoch_)
+    engine_->ensure_average();
+    const std::string canonical = engine_->canonical_node_id(node_id);
+    if (value_cache_valid_ && value_cache_node_ == canonical && value_cache_epoch_ == profile_epoch_)
     {
         StreetActionValues cached = value_cache_;
+        cached.node_id = node_id;
         cached.query_seconds = 0.0;
         return cached;
     }
     StreetActionValues page = engine_->compute_action_values(node_id, cancel);
     page.profile_epoch = profile_epoch_;
-    value_cache_node_ = node_id;
-    value_cache_epoch_ = profile_epoch_;
-    value_cache_ = page;
+    page.node_id = node_id;
+    if (fail_cache_commit_)
+    {
+        fail_cache_commit_ = false;
+        value_cache_valid_ = false;
+        throw std::bad_alloc();
+    }
+    // Stage the replacement first. A throw while copying it leaves the previous
+    // page unpublished, and the flag stays false until the key and page are both stored.
+    StreetActionValues staged = page;
+    std::string staged_node = canonical;
+    const std::uint64_t staged_epoch = profile_epoch_;
+    value_cache_valid_ = false;
+    value_cache_node_ = std::move(staged_node);
+    value_cache_epoch_ = staged_epoch;
+    value_cache_ = std::move(staged);
     value_cache_valid_ = true;
     return page;
 }
@@ -4995,11 +5032,13 @@ StreetActionValues StreetBatchSolver::action_values(
 std::uint64_t StreetBatchSolver::profile_epoch() const
 {
     std::lock_guard<std::mutex> lock(value_mu_);
-    if (engine_->ensure_average())
-    {
-        ++profile_epoch_;
-    }
     return profile_epoch_;
+}
+
+void StreetBatchSolver::arm_value_cache_failure_for_test()
+{
+    std::lock_guard<std::mutex> lock(value_mu_);
+    fail_cache_commit_ = true;
 }
 
 int StreetBatchSolver::completed_iterations() const
@@ -5013,8 +5052,9 @@ void StreetBatchSolver::set_average_for_test(
     std::span<const double> probability)
 {
     std::lock_guard<std::mutex> lock(value_mu_);
-    engine_->set_average_for_test(node_id, hand, probability);
     ++profile_epoch_;
+    value_cache_valid_ = false;
+    engine_->set_average_for_test(node_id, hand, probability);
 }
 
 std::vector<StreetStrategyEntry> StreetBatchSolver::average_strategy_entries() const

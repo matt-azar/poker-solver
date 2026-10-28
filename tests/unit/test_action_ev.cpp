@@ -5,9 +5,11 @@
 #include "poker/range.hpp"
 #include "solver/street_batch.hpp"
 
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -17,9 +19,12 @@ namespace
 {
 
 using poker::holdem::Range;
+using poker::solver::Algorithm;
+using poker::solver::SolveConfig;
 using poker::solver::StreetActionValues;
 using poker::solver::StreetBatchSolver;
 using poker::solver::StreetInspection;
+using poker::solver::StreetValueCancelled;
 using poker::streets::StreetConfig;
 using poker::streets::StreetGame;
 
@@ -784,6 +789,197 @@ void test_weighted_blockers_ties_and_flop()
     CHECK(rejected);
 }
 
+void expect_same_defined_values(const StreetActionValues& left, const StreetActionValues& right)
+{
+    CHECK(left.player == right.player);
+    CHECK(left.actions == right.actions);
+    CHECK(left.combos == right.combos);
+    CHECK(left.ev_defined == right.ev_defined);
+    CHECK(left.reach_defined == right.reach_defined);
+    CHECK(left.node_ev_defined == right.node_ev_defined);
+    if (left.node_ev_defined && right.node_ev_defined)
+    {
+        CHECK_NEAR(left.node_ev, right.node_ev, 1e-8);
+    }
+    CHECK(left.mixed_ev.size() == right.mixed_ev.size());
+    CHECK(left.action_ev.size() == right.action_ev.size());
+    const int actions = static_cast<int>(left.actions.size());
+    for (int hand = 0; hand < static_cast<int>(left.ev_defined.size()); ++hand)
+    {
+        if (left.ev_defined[static_cast<std::size_t>(hand)] == 0)
+        {
+            continue;
+        }
+        CHECK_NEAR(left.mixed_ev[static_cast<std::size_t>(hand)], right.mixed_ev[static_cast<std::size_t>(hand)], 1e-8);
+        for (int action = 0; action < actions; ++action)
+        {
+            CHECK_NEAR(page_action(left, hand, action), page_action(right, hand, action), 1e-8);
+        }
+    }
+}
+
+StreetActionValues fresh_frozen(const StreetConfig& config, int iterations)
+{
+    StreetBatchSolver reference(config);
+    reference.run_frozen_iterations(iterations, Algorithm::CfrPlus);
+    return reference.action_values(reference.root_node_id());
+}
+
+void test_profile_revision_drops_stale_values()
+{
+    const StreetConfig config = bluff_config("1", "1");
+    StreetBatchSolver solver(config);
+    solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+    const std::string root = solver.root_node_id();
+    const StreetActionValues first = solver.action_values(root);
+    CHECK_NEAR(first.node_ev, fresh_frozen(config, 1).node_ev, 1e-8);
+    const std::uint64_t epoch = solver.profile_epoch();
+    const StreetActionValues repeat = solver.action_values(root);
+    CHECK(repeat.query_seconds == 0.0);
+    CHECK(solver.profile_epoch() == epoch);
+
+    solver.continue_frozen_iterations(29, Algorithm::CfrPlus);
+    CHECK(solver.profile_epoch() != epoch);
+    (void)solver.expected_utility();
+    (void)solver.average_strategy_entries();
+    solver.prepare_inspection();
+    (void)solver.profile_epoch();
+    (void)solver.inspect_node(root);
+    const StreetActionValues continued = solver.action_values(root);
+    CHECK(continued.query_seconds != 0.0);
+    expect_same_defined_values(continued, fresh_frozen(config, 30));
+    const StreetActionValues continued_again = solver.action_values("p00.t-1.r-1");
+    CHECK(continued_again.query_seconds == 0.0);
+    CHECK(continued_again.node_id == "p00.t-1.r-1");
+    expect_same_defined_values(continued_again, continued);
+
+    StreetBatchSolver sequential(config);
+    sequential.run_iterations(1, Algorithm::CfrPlus);
+    const StreetActionValues sequential_first = sequential.action_values(sequential.root_node_id());
+    sequential.continue_iterations(4, Algorithm::CfrPlus);
+    (void)sequential.expected_utility();
+    const StreetActionValues sequential_continued = sequential.action_values(sequential.root_node_id());
+    CHECK(sequential_continued.query_seconds != 0.0);
+    StreetBatchSolver sequential_fresh(config);
+    sequential_fresh.run_iterations(5, Algorithm::CfrPlus);
+    expect_same_defined_values(
+        sequential_continued, sequential_fresh.action_values(sequential_fresh.root_node_id()));
+    CHECK(std::abs(sequential_continued.node_ev - sequential_first.node_ev) > 1e-6);
+
+    StreetBatchSolver reset_solver(config);
+    reset_solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+    (void)reset_solver.action_values(reset_solver.root_node_id());
+    reset_solver.run_frozen_iterations(5, Algorithm::CfrPlus);
+    expect_same_defined_values(
+        reset_solver.action_values(reset_solver.root_node_id()), fresh_frozen(config, 5));
+
+    SolveConfig solved;
+    solved.max_iterations = 4;
+    solved.nash_gap_threshold = -1.0;
+    StreetBatchSolver frozen_solve(config);
+    frozen_solve.solve_frozen(solved, Algorithm::CfrPlus);
+    (void)frozen_solve.inspect_node(frozen_solve.root_node_id());
+    expect_same_defined_values(
+        frozen_solve.action_values(frozen_solve.root_node_id()), fresh_frozen(config, 4));
+    StreetBatchSolver sequential_solve(config);
+    sequential_solve.solve(solved, Algorithm::CfrPlus);
+    StreetBatchSolver sequential_solved_fresh(config);
+    sequential_solved_fresh.run_iterations(4, Algorithm::CfrPlus);
+    expect_same_defined_values(
+        sequential_solve.action_values(sequential_solve.root_node_id()),
+        sequential_solved_fresh.action_values(sequential_solved_fresh.root_node_id()));
+
+    StreetBatchSolver edited(config);
+    edited.run_frozen_iterations(1, Algorithm::CfrPlus);
+    const StreetActionValues before_edit = edited.action_values(edited.root_node_id());
+    const std::uint64_t before_epoch = edited.profile_epoch();
+    set_named_average(edited, edited.root_node_id(), combo_name("Kc", "Ks"), {{"Check", 0.0}, {"Bet", 1.0}});
+    CHECK(edited.profile_epoch() != before_epoch);
+    const StreetActionValues after_edit = edited.action_values(edited.root_node_id());
+    CHECK(after_edit.query_seconds != 0.0);
+    CHECK(std::abs(after_edit.node_ev - before_edit.node_ev) > 1e-6);
+
+    const StreetInspection edited_root = edited.inspect_node(edited.root_node_id());
+    const int edited_bet = find_action(
+        [&]()
+        {
+            std::vector<std::string> labels;
+            for (const auto& action : edited_root.actions)
+            {
+                labels.push_back(action.label);
+            }
+            return labels;
+        }(),
+        "Bet");
+    CHECK(edited_bet >= 0);
+    const std::string facing = edited_root.actions[static_cast<std::size_t>(edited_bet)].child_id;
+    std::atomic<bool> cancel{true};
+    bool cancelled = false;
+    try
+    {
+        (void)edited.action_values(facing, &cancel);
+    }
+    catch (const StreetValueCancelled&)
+    {
+        cancelled = true;
+    }
+    CHECK(cancelled);
+    const StreetActionValues after_cancel = edited.action_values(edited.root_node_id());
+    CHECK(after_cancel.query_seconds == 0.0);
+    expect_same_defined_values(after_cancel, after_edit);
+    const StreetActionValues facing_page = edited.action_values(facing);
+    CHECK(facing_page.query_seconds != 0.0);
+    CHECK(facing_page.player == 1);
+
+    StreetBatchSolver published(config);
+    published.run_frozen_iterations(1, Algorithm::CfrPlus);
+    const std::string published_root = published.root_node_id();
+    (void)published.action_values(published_root);
+    StreetInspection cursor = published.inspect_node(published_root);
+    std::string chance_id;
+    for (int step = 0; step < 8 && chance_id.empty(); ++step)
+    {
+        if (cursor.kind == "chance")
+        {
+            chance_id = cursor.node_id;
+            break;
+        }
+        if (cursor.kind != "decision" || cursor.actions.empty())
+        {
+            break;
+        }
+        cursor = published.inspect_node(cursor.actions[0].child_id);
+    }
+    CHECK(!chance_id.empty());
+    bool rejected = false;
+    try
+    {
+        (void)published.action_values(chance_id);
+    }
+    catch (const std::invalid_argument&)
+    {
+        rejected = true;
+    }
+    CHECK(rejected);
+    CHECK(published.action_values(published_root).query_seconds == 0.0);
+
+    published.arm_value_cache_failure_for_test();
+    published.continue_frozen_iterations(1, Algorithm::CfrPlus);
+    bool failed = false;
+    try
+    {
+        (void)published.action_values(published_root);
+    }
+    catch (const std::bad_alloc&)
+    {
+        failed = true;
+    }
+    CHECK(failed);
+    const StreetActionValues repaired = published.action_values(published_root);
+    CHECK(repaired.query_seconds != 0.0);
+    expect_same_defined_values(repaired, fresh_frozen(config, 2));
+}
+
 } // namespace
 
 void run_action_value_tests()
@@ -792,4 +988,5 @@ void run_action_value_tests()
     test_scale_and_prior_do_not_change_action_ev();
     test_zero_reach_is_separate_from_ev();
     test_weighted_blockers_ties_and_flop();
+    test_profile_revision_drops_stale_values();
 }
