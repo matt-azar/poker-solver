@@ -242,6 +242,70 @@ void test_failure_is_terminal()
     CHECK(!session.running());
 }
 
+void test_throwing_publication_stays_running()
+{
+    poker::explorer::Session session;
+    std::shared_ptr<void> retiring;
+    const std::uint64_t job = begin_job(session, retiring);
+    const auto permit = session.prepare_success(job);
+    const std::uint64_t generation = session.generation();
+    bool threw = false;
+    try
+    {
+        session.commit_success(
+            job, std::make_shared<int>(1), permit.solution_id,
+            [](std::uint64_t, bool) -> std::string { throw std::runtime_error("make"); });
+    }
+    catch (const std::runtime_error&)
+    {
+        threw = true;
+    }
+    CHECK(threw);
+    CHECK(session.phase() == poker::explorer::Phase::Running);
+    CHECK(session.generation() == generation);
+    CHECK(!session.borrow(permit.solution_id));
+    session.finish_failed(job, "{\"error\":\"publish\"}");
+    CHECK(session.phase() == poker::explorer::Phase::Failed);
+    CHECK(session.status().find("publish") != std::string::npos);
+    CHECK(!session.borrow(permit.solution_id));
+}
+
+void test_throwing_publication_on_cancel_stays_running()
+{
+    poker::explorer::Session session;
+    std::shared_ptr<void> retiring;
+    const std::uint64_t job = begin_job(session, retiring);
+    const auto permit = session.prepare_success(job);
+    CHECK(session.request_stop(job) == poker::explorer::StopResult::Accepted);
+    const std::uint64_t generation = session.generation();
+    bool threw = false;
+    try
+    {
+        session.commit_success(
+            job, std::make_shared<int>(1), permit.solution_id,
+            [](std::uint64_t, bool accepted) -> std::string
+            {
+                if (!accepted)
+                {
+                    throw std::runtime_error("make");
+                }
+                return std::string("ok");
+            });
+    }
+    catch (const std::runtime_error&)
+    {
+        threw = true;
+    }
+    CHECK(threw);
+    CHECK(session.phase() == poker::explorer::Phase::Running);
+    CHECK(session.generation() == generation);
+    CHECK(!session.borrow(permit.solution_id));
+    session.finish_failed(job, "{\"error\":\"publish\"}");
+    CHECK(session.phase() == poker::explorer::Phase::Failed);
+    CHECK(!session.running());
+    CHECK(!session.borrow(permit.solution_id));
+}
+
 void test_publication_mismatch_stays_running_until_failed()
 {
     poker::explorer::Session session;
@@ -364,6 +428,8 @@ void run_session_tests()
     test_stop_after_complete();
     test_stale_stop_does_not_cancel_replacement();
     test_failure_is_terminal();
+    test_throwing_publication_stays_running();
+    test_throwing_publication_on_cancel_stays_running();
     test_publication_mismatch_stays_running_until_failed();
     test_replacement_drops_old_engine_before_construct();
     test_node_identifiers_do_not_alias();

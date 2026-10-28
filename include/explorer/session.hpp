@@ -146,6 +146,8 @@ public:
     }
 
     // make(generation, accepted) runs under the lock and must not call back in.
+    // The status string is built before any terminal phase or result is stored.
+    // If make throws, the job stays Running and finish_failed can still record it.
     template <typename Make>
     bool commit_success(
         std::uint64_t job_id,
@@ -158,20 +160,24 @@ public:
         {
             return false;
         }
-        ++generation_;
-        if (stop_)
+        const std::uint64_t next_generation = generation_ + 1;
+        const bool accepted = !stop_;
+        std::string next_status = make(next_generation, accepted);
+        if (!accepted)
         {
             phase_ = Phase::Cancelled;
             resource_.reset();
             solution_id_ = 0;
             pending_solution_ = 0;
-            status_ = make(generation_, false);
+            status_ = std::move(next_status);
+            generation_ = next_generation;
             return false;
         }
         resource_ = std::move(resource);
         solution_id_ = solution_id;
         phase_ = Phase::Completed;
-        status_ = make(generation_, true);
+        status_ = std::move(next_status);
+        generation_ = next_generation;
         return true;
     }
 
