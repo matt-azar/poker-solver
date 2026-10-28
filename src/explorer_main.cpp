@@ -1,3 +1,4 @@
+#include "explorer/session.hpp"
 #include "game/river_game.hpp"
 #include "game/street_game.hpp"
 #include "poker/card.hpp"
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -20,6 +22,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -51,14 +55,9 @@ static void close_socket(socket_t socket)
 namespace
 {
 
-std::mutex g_mu;
 std::thread g_worker;
-std::atomic<bool> g_running{false};
-std::atomic<bool> g_cancel{false};
-std::atomic<int> g_readers{0};
-std::string g_status = "{\"running\":false,\"solution_id\":null,\"root_node_id\":null}";
+poker::explorer::Session g_session;
 std::string g_ui_root = "ui";
-std::uint64_t g_next_solution = 1;
 
 void append_escaped(std::string& out, const std::string& text)
 {
@@ -262,14 +261,23 @@ struct Job
 struct HeldSolution
 {
     std::uint64_t id = 0;
+    std::uint64_t job_id = 0;
     std::shared_ptr<poker::solver::StreetBatchSolver> street;
     std::shared_ptr<poker::solver::RiverBatchSolver> river;
     std::string root_id;
-    poker::solver::StreetMemoryReport memory;
+    bool has_memory = false;
+    poker::solver::StreetMemoryReport memory{};
     Job job;
+    int iterations = 0;
+    double runtime_seconds = 0.0;
+    double value = 0.0;
+    double p1_best_response = 0.0;
+    double p2_best_response = 0.0;
+    double nash_gap = 0.0;
+    std::vector<int> sample_iterations;
+    std::vector<double> sample_values;
+    std::vector<double> sample_gaps;
 };
-
-std::shared_ptr<HeldSolution> g_solution;
 
 std::vector<double> optional_sizes(const std::string& text, const char* key)
 {
@@ -299,13 +307,15 @@ Job parse_job(const std::string& text)
     job.stack = static_cast<int>(read_number(text, "stack", 200));
     job.oop = poker::holdem::Range::parse(read_string(text, "oop_range", "AA"));
     job.ip = poker::holdem::Range::parse(read_string(text, "ip_range", "KK"));
+    const bool oop_bets_present = find_key(text, "oop_bets") != std::string::npos;
+    const bool ip_bets_present = find_key(text, "ip_bets") != std::string::npos;
     job.oop_bets = read_number_array(text, "oop_bets");
     job.ip_bets = read_number_array(text, "ip_bets");
-    if (job.oop_bets.empty())
+    if (!oop_bets_present)
     {
         job.oop_bets = {0.5, 1.0};
     }
-    if (job.ip_bets.empty())
+    if (!ip_bets_present)
     {
         job.ip_bets = {0.5, 1.0};
     }
@@ -455,36 +465,72 @@ struct HandLine
     std::vector<std::pair<std::string, double>> actions;
 };
 
-void publish(const std::string& json)
+struct StatusDraft
 {
-    std::lock_guard<std::mutex> lock(g_mu);
-    g_status = json;
+    bool running = false;
+    bool cancelled = false;
+    std::string error;
+    const Job* job = nullptr;
+    int iterations = 0;
+    bool has_runtime = false;
+    double runtime_seconds = 0.0;
+    bool has_value = false;
+    double value = 0.0;
+    bool has_br = false;
+    double p1_best_response = 0.0;
+    double p2_best_response = 0.0;
+    bool has_gap = false;
+    double nash_gap = 0.0;
+    const std::vector<int>* sample_iterations = nullptr;
+    const std::vector<double>* sample_values = nullptr;
+    const std::vector<double>* sample_gaps = nullptr;
+    std::uint64_t job_id = 0;
+    std::uint64_t solution_id = 0;
+    std::uint64_t generation = 0;
+    std::string root_id;
+    const poker::solver::StreetMemoryReport* memory = nullptr;
+    bool include_strategy = false;
+    const std::vector<poker::solver::RiverStrategyEntry>* entries = nullptr;
+};
+
+void append_optional(std::string& out, bool present, double value)
+{
+    if (!present)
+    {
+        out += "null";
+        return;
+    }
+    out += format_number(value);
 }
 
-std::string build_status(
-    bool running,
-    bool cancelled,
-    const Job& job,
-    int iterations_done,
-    double runtime_seconds,
-    double value,
-    double gap,
-    const std::vector<int>& sample_iterations,
-    const std::vector<double>& sample_values,
-    const std::vector<double>& sample_gaps,
-    const std::vector<poker::solver::RiverStrategyEntry>& entries,
-    const std::string& error,
-    const std::string& solution_id = {},
-    const std::string& root_id = {},
-    const poker::solver::StreetMemoryReport* memory = nullptr,
-    bool include_strategy = false)
+std::string build_status(const StatusDraft& draft)
 {
+    const Job& job = *draft.job;
+    const std::vector<int> empty_iterations;
+    const std::vector<double> empty_values;
+    const std::vector<poker::solver::RiverStrategyEntry> empty_entries;
+    const std::vector<int>& sample_iterations = draft.sample_iterations ? *draft.sample_iterations : empty_iterations;
+    const std::vector<double>& sample_values = draft.sample_values ? *draft.sample_values : empty_values;
+    const std::vector<double>& sample_gaps = draft.sample_gaps ? *draft.sample_gaps : empty_values;
+    const std::vector<poker::solver::RiverStrategyEntry>& entries = draft.entries ? *draft.entries : empty_entries;
+    const poker::solver::StreetMemoryReport* memory = draft.memory;
     std::string out = "{\"running\":";
-    out += running ? "true" : "false";
+    out += draft.running ? "true" : "false";
     out += ",\"cancelled\":";
-    out += cancelled ? "true" : "false";
+    out += draft.cancelled ? "true" : "false";
     out += ",\"error\":";
-    append_escaped(out, error);
+    append_escaped(out, draft.error);
+    out += ",\"job_id\":";
+    if (draft.job_id == 0)
+    {
+        out += "null";
+    }
+    else
+    {
+        append_escaped(out, "j" + std::to_string(draft.job_id));
+    }
+    out += ",\"status_generation\":";
+    out += std::to_string(draft.generation);
     out += ",\"pot\":";
     out += std::to_string(job.pot);
     out += ",\"stack\":";
@@ -494,13 +540,25 @@ std::string build_status(
     out += ",\"plays\":";
     append_escaped(out, plays_name(job));
     out += ",\"iterations\":";
-    out += std::to_string(iterations_done);
+    out += std::to_string(draft.iterations);
+    out += ",\"iterations_requested\":";
+    out += std::to_string(job.iterations);
+    out += ",\"frozen\":";
+    out += job.frozen ? "true" : "false";
+    out += ",\"memory_mib\":";
+    out += std::to_string(job.memory_mib);
+    out += ",\"max_raises\":";
+    out += std::to_string(job.max_raises);
     out += ",\"runtime_seconds\":";
-    out += format_number(runtime_seconds);
+    append_optional(out, draft.has_runtime, draft.runtime_seconds);
     out += ",\"player0_expected_utility\":";
-    out += format_number(value);
+    append_optional(out, draft.has_value, draft.value);
+    out += ",\"p1_best_response\":";
+    append_optional(out, draft.has_br, draft.p1_best_response);
+    out += ",\"p2_best_response\":";
+    append_optional(out, draft.has_br, draft.p2_best_response);
     out += ",\"nash_gap\":";
-    out += format_number(gap);
+    append_optional(out, draft.has_gap, draft.nash_gap);
     out += ",\"algorithm\":";
     append_escaped(out, poker::solver::algorithm_name(job.algorithm));
     out += ",\"board\":[";
@@ -528,44 +586,44 @@ std::string build_status(
         out += '}';
     }
     out += "],\"solution_id\":";
-    if (solution_id.empty())
+    if (draft.solution_id == 0)
     {
         out += "null";
     }
     else
     {
-        append_escaped(out, solution_id);
+        append_escaped(out, "s" + std::to_string(draft.solution_id));
     }
     out += ",\"root_node_id\":";
-    if (root_id.empty())
+    if (draft.root_id.empty())
     {
         out += "null";
     }
     else
     {
-        append_escaped(out, root_id);
+        append_escaped(out, draft.root_id);
     }
     out += ",\"engine_allocated\":";
-    out += std::to_string(memory == nullptr ? 0 : memory->allocated_bytes);
+    out += memory == nullptr ? "null" : std::to_string(memory->allocated_bytes);
     out += ",\"engine_peak\":";
-    out += std::to_string(memory == nullptr ? 0 : memory->peak_allocated_bytes);
+    out += memory == nullptr ? "null" : std::to_string(memory->peak_allocated_bytes);
     out += ",\"engine_reserved\":";
-    out += std::to_string(memory == nullptr ? 0 : memory->reserved_bytes);
+    out += memory == nullptr ? "null" : std::to_string(memory->reserved_bytes);
     out += ",\"process_rss\":";
-    out += std::to_string(memory == nullptr ? 0 : memory->process_peak_working_set_bytes);
+    out += memory == nullptr ? "null" : std::to_string(memory->process_peak_working_set_bytes);
     out += ",\"cache_init_seconds\":";
-    out += format_number(memory == nullptr ? 0.0 : memory->cache_init_seconds);
+    append_optional(out, memory != nullptr, memory == nullptr ? 0.0 : memory->cache_init_seconds);
     out += ",\"construction_seconds\":";
-    out += format_number(memory == nullptr ? 0.0 : memory->construction_seconds);
+    append_optional(out, memory != nullptr, memory == nullptr ? 0.0 : memory->construction_seconds);
     out += ",\"worker_setup_seconds\":";
-    out += format_number(memory == nullptr ? 0.0 : memory->worker_setup_seconds);
+    append_optional(out, memory != nullptr, memory == nullptr ? 0.0 : memory->worker_setup_seconds);
     out += ",\"train_seconds\":";
-    out += format_number(memory == nullptr ? 0.0 : memory->train_seconds);
+    append_optional(out, memory != nullptr, memory == nullptr ? 0.0 : memory->train_seconds);
     out += ",\"evaluation_seconds\":";
-    out += format_number(memory == nullptr ? 0.0 : memory->evaluation_seconds);
+    append_optional(out, memory != nullptr, memory == nullptr ? 0.0 : memory->evaluation_seconds);
     out += ",\"threads\":";
-    out += std::to_string(memory == nullptr ? job.threads : memory->thread_count);
-    if (!include_strategy)
+    out += std::to_string(job.threads);
+    if (!draft.include_strategy)
     {
         out += '}';
         return out;
@@ -868,34 +926,33 @@ std::vector<poker::solver::RiverStrategyEntry> street_entries(
     return entries;
 }
 
-std::string solution_token(std::uint64_t id)
+bool parse_prefixed_id(std::string_view text, char prefix, std::uint64_t& id)
 {
-    return "s" + std::to_string(id);
-}
-
-bool parse_solution_token(const std::string& text, std::uint64_t& id)
-{
-    if (text.size() < 2 || text[0] != 's')
+    if (text.size() < 2 || text[0] != prefix)
     {
         return false;
     }
-    id = 0;
-    for (std::size_t index = 1; index < text.size(); ++index)
+    const char* first = text.data() + 1;
+    const char* last = text.data() + text.size();
+    if (*first == '+' || *first == '-')
     {
-        if (text[index] < '0' || text[index] > '9')
-        {
-            return false;
-        }
-        id = id * 10 + static_cast<std::uint64_t>(text[index] - '0');
+        return false;
     }
-    return true;
+    const std::from_chars_result parsed = std::from_chars(first, last, id);
+    return parsed.ec == std::errc() && parsed.ptr == last;
 }
 
 std::string json_inspection(
     const poker::solver::StreetInspection& view,
-    const poker::solver::StreetMemoryReport& memory)
+    const poker::solver::StreetMemoryReport& memory,
+    std::uint64_t solution_id,
+    std::uint64_t job_id)
 {
-    std::string out = "{\"kind\":";
+    std::string out = "{\"solution_id\":";
+    append_escaped(out, "s" + std::to_string(solution_id));
+    out += ",\"job_id\":";
+    append_escaped(out, "j" + std::to_string(job_id));
+    out += ",\"kind\":";
     append_escaped(out, view.kind);
     out += ",\"node_id\":";
     append_escaped(out, view.node_id);
@@ -1038,153 +1095,241 @@ std::string json_inspection(
     return out;
 }
 
-void solve_job(Job job)
+StatusDraft draft_for(
+    const Job& job,
+    std::uint64_t job_id,
+    int done,
+    double seconds,
+    bool evaluated,
+    double value,
+    double p1,
+    double p2,
+    double gap,
+    const std::vector<int>& sample_iterations,
+    const std::vector<double>& sample_values,
+    const std::vector<double>& sample_gaps,
+    const poker::solver::StreetMemoryReport* memory)
+{
+    StatusDraft draft;
+    draft.job = &job;
+    draft.job_id = job_id;
+    draft.iterations = done;
+    draft.has_runtime = true;
+    draft.runtime_seconds = seconds;
+    draft.has_value = evaluated;
+    draft.value = value;
+    draft.has_br = evaluated;
+    draft.p1_best_response = p1;
+    draft.p2_best_response = p2;
+    draft.has_gap = evaluated;
+    draft.nash_gap = gap;
+    draft.sample_iterations = &sample_iterations;
+    draft.sample_values = &sample_values;
+    draft.sample_gaps = &sample_gaps;
+    draft.memory = memory;
+    draft.generation = g_session.generation() + 1;
+    return draft;
+}
+
+void solve_job(std::uint64_t job_id, Job job)
 {
     std::vector<int> sample_iterations;
     std::vector<double> sample_values;
     std::vector<double> sample_gaps;
-    const std::vector<poker::solver::RiverStrategyEntry> no_entries;
     double value = 0.0;
+    double p1 = 0.0;
+    double p2 = 0.0;
     double gap = 0.0;
     int done = 0;
-    bool cancelled = false;
+    bool evaluated = false;
     const auto started = std::chrono::steady_clock::now();
+    const auto seconds_now = [&]()
+    {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    };
+    const auto remember = [&](double utility, double response0, double response1)
+    {
+        value = utility;
+        p1 = response0;
+        p2 = response1;
+        gap = response0 + response1;
+        evaluated = true;
+        sample_iterations.push_back(done);
+        sample_values.push_back(value);
+        sample_gaps.push_back(gap);
+    };
     try
     {
-        const int chunk = std::max(1, job.iterations / job.samples);
-        if (job.board.size() == 5)
+        if (g_session.stop_requested(job_id))
         {
-            auto batch = std::make_shared<poker::solver::RiverBatchSolver>(river_config(job));
-            while (done < job.iterations)
-            {
-                if (g_cancel.load())
-                {
-                    cancelled = true;
-                    break;
-                }
-                const int step = std::min(chunk, job.iterations - done);
-                batch->continue_iterations(step, job.algorithm);
-                done += step;
-                value = batch->expected_utility();
-                gap = batch->nash_gap();
-                sample_iterations.push_back(done);
-                sample_values.push_back(value);
-                sample_gaps.push_back(gap);
-                const double seconds = std::chrono::duration<double>(
-                    std::chrono::steady_clock::now() - started).count();
-                publish(build_status(
-                    true, false, job, done, seconds, value, gap,
-                    sample_iterations, sample_values, sample_gaps, no_entries, ""));
-                if (job.accuracy >= 0.0 && gap <= job.accuracy * static_cast<double>(job.pot))
-                {
-                    break;
-                }
-            }
-            if (!cancelled && done > 0)
-            {
-                value = batch->expected_utility();
-                gap = batch->nash_gap();
-                auto held = std::make_shared<HeldSolution>();
-                held->river = std::move(batch);
-                held->job = job;
-                std::string token;
-                {
-                    std::lock_guard<std::mutex> lock(g_mu);
-                    held->id = g_next_solution++;
-                    token = solution_token(held->id);
-                    g_solution = held;
-                }
-                const double seconds = std::chrono::duration<double>(
-                    std::chrono::steady_clock::now() - started).count();
-                publish(build_status(
-                    false, false, job, done, seconds, value, gap,
-                    sample_iterations, sample_values, sample_gaps, no_entries, "",
-                    token, "", nullptr, false));
-                g_running = false;
-                return;
-            }
+            g_session.finish_cancelled(job_id, build_status(draft_for(
+                job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
+                sample_iterations, sample_values, sample_gaps, nullptr)));
+            return;
+        }
+        const int chunk = std::max(1, job.iterations / job.samples);
+        std::shared_ptr<poker::solver::RiverBatchSolver> river;
+        std::shared_ptr<poker::solver::StreetBatchSolver> street;
+        poker::solver::StreetMemoryReport street_memory{};
+        const bool street_tree = job.board.size() != 5;
+        const poker::solver::StreetMemoryReport* memory_ptr = nullptr;
+        if (street_tree)
+        {
+            street = std::make_shared<poker::solver::StreetBatchSolver>(street_config(job));
+            street_memory = street->memory_report();
+            memory_ptr = &street_memory;
         }
         else
         {
-            auto batch = std::make_shared<poker::solver::StreetBatchSolver>(street_config(job));
-            while (done < job.iterations)
+            river = std::make_shared<poker::solver::RiverBatchSolver>(river_config(job));
+        }
+        while (done < job.iterations)
+        {
+            if (g_session.stop_requested(job_id))
             {
-                if (g_cancel.load())
-                {
-                    cancelled = true;
-                    break;
-                }
-                const int step = std::min(chunk, job.iterations - done);
+                StatusDraft draft = draft_for(
+                    job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
+                    sample_iterations, sample_values, sample_gaps, memory_ptr);
+                draft.cancelled = true;
+                g_session.finish_cancelled(job_id, build_status(draft));
+                return;
+            }
+            const int step = std::min(chunk, job.iterations - done);
+            if (street_tree)
+            {
                 if (job.frozen)
                 {
-                    batch->continue_frozen_iterations(step, job.algorithm);
+                    street->continue_frozen_iterations(step, job.algorithm);
                 }
                 else
                 {
-                    batch->continue_iterations(step, job.algorithm);
-                }
-                done += step;
-                value = batch->expected_utility();
-                gap = batch->nash_gap();
-                sample_iterations.push_back(done);
-                sample_values.push_back(value);
-                sample_gaps.push_back(gap);
-                const poker::solver::StreetMemoryReport report = batch->memory_report();
-                const double seconds = std::chrono::duration<double>(
-                    std::chrono::steady_clock::now() - started).count();
-                publish(build_status(
-                    true, false, job, done, seconds, value, gap,
-                    sample_iterations, sample_values, sample_gaps, no_entries, "",
-                    "", "", &report, false));
-                if (job.accuracy >= 0.0 && gap <= job.accuracy * static_cast<double>(job.pot))
-                {
-                    break;
+                    street->continue_iterations(step, job.algorithm);
                 }
             }
-            if (!cancelled && done > 0)
+            else
             {
-                batch->prepare_inspection();
-                value = batch->expected_utility();
-                gap = batch->nash_gap();
-                auto held = std::make_shared<HeldSolution>();
-                held->street = std::move(batch);
-                held->root_id = held->street->root_node_id();
-                held->memory = held->street->memory_report();
-                held->job = job;
-                std::string token;
-                {
-                    std::lock_guard<std::mutex> lock(g_mu);
-                    held->id = g_next_solution++;
-                    token = solution_token(held->id);
-                    g_solution = held;
-                }
-                const double seconds = std::chrono::duration<double>(
-                    std::chrono::steady_clock::now() - started).count();
-                publish(build_status(
-                    false, false, job, done, seconds, value, gap,
-                    sample_iterations, sample_values, sample_gaps, no_entries, "",
-                    token, held->root_id, &held->memory, false));
-                g_running = false;
+                river->continue_iterations(step, job.algorithm);
+            }
+            done += step;
+            if (street_tree)
+            {
+                remember(street->expected_utility(), street->p1_best_response_utility(), street->p2_best_response_utility());
+                street_memory = street->memory_report();
+            }
+            else
+            {
+                remember(river->expected_utility(), river->p1_best_response_utility(), river->p2_best_response_utility());
+            }
+            if (g_session.stop_requested(job_id))
+            {
+                StatusDraft draft = draft_for(
+                    job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
+                    sample_iterations, sample_values, sample_gaps, memory_ptr);
+                draft.cancelled = true;
+                g_session.finish_cancelled(job_id, build_status(draft));
                 return;
             }
+            StatusDraft progress = draft_for(
+                job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
+                sample_iterations, sample_values, sample_gaps, memory_ptr);
+            progress.running = true;
+            g_session.set_progress(job_id, build_status(progress));
+            if (job.accuracy >= 0.0 && gap <= job.accuracy * static_cast<double>(job.pot))
+            {
+                break;
+            }
+        }
+        if (done == 0 || g_session.stop_requested(job_id))
+        {
+            StatusDraft draft = draft_for(
+                job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
+                sample_iterations, sample_values, sample_gaps, memory_ptr);
+            draft.cancelled = true;
+            g_session.finish_cancelled(job_id, build_status(draft));
+            return;
+        }
+        auto held = std::make_shared<HeldSolution>();
+        held->job = job;
+        held->job_id = job_id;
+        held->iterations = done;
+        held->runtime_seconds = seconds_now();
+        held->value = value;
+        held->p1_best_response = p1;
+        held->p2_best_response = p2;
+        held->nash_gap = gap;
+        held->sample_iterations = sample_iterations;
+        held->sample_values = sample_values;
+        held->sample_gaps = sample_gaps;
+        if (street_tree)
+        {
+            street->prepare_inspection();
+            held->street = std::move(street);
+            held->root_id = held->street->root_node_id();
+            held->memory = held->street->memory_report();
+            held->has_memory = true;
+            street_memory = held->memory;
+        }
+        else
+        {
+            held->river = std::move(river);
+        }
+        if (g_session.stop_requested(job_id))
+        {
+            StatusDraft draft = draft_for(
+                job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
+                sample_iterations, sample_values, sample_gaps, held->has_memory ? &held->memory : nullptr);
+            draft.cancelled = true;
+            g_session.finish_cancelled(job_id, build_status(draft));
+            return;
+        }
+        const poker::explorer::Session::Permit permit = g_session.prepare_success(job_id);
+        if (!permit.allowed)
+        {
+            StatusDraft draft = draft_for(
+                job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
+                sample_iterations, sample_values, sample_gaps, held->has_memory ? &held->memory : nullptr);
+            draft.cancelled = true;
+            g_session.finish_cancelled(job_id, build_status(draft));
+            return;
+        }
+        held->id = permit.solution_id;
+        StatusDraft success = draft_for(
+            job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
+            held->sample_iterations, held->sample_values, held->sample_gaps,
+            held->has_memory ? &held->memory : nullptr);
+        success.solution_id = permit.solution_id;
+        success.root_id = held->root_id;
+        const bool published = g_session.commit_success(job_id, held, permit.solution_id, [&](std::uint64_t generation, bool accepted)
+        {
+            StatusDraft draft = success;
+            draft.generation = generation;
+            draft.cancelled = !accepted;
+            if (!accepted)
+            {
+                draft.solution_id = 0;
+                draft.root_id.clear();
+            }
+            return build_status(draft);
+        });
+        if (!published && g_session.phase() == poker::explorer::Phase::Running)
+        {
+            StatusDraft draft = success;
+            draft.generation = g_session.generation() + 1;
+            draft.error = "failed to publish the solve";
+            draft.solution_id = 0;
+            draft.root_id.clear();
+            g_session.finish_failed(job_id, build_status(draft));
         }
     }
     catch (const std::exception& error)
     {
-        const double seconds = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - started).count();
-        publish(build_status(
-            false, cancelled, job, done, seconds, value, gap,
-            sample_iterations, sample_values, sample_gaps, no_entries, error.what()));
-        g_running = false;
-        return;
+        StatusDraft draft = draft_for(
+            job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
+            sample_iterations, sample_values, sample_gaps, nullptr);
+        draft.error = error.what();
+        draft.cancelled = g_session.stop_requested(job_id);
+        g_session.finish_failed(job_id, build_status(draft));
     }
-    const double seconds = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - started).count();
-    publish(build_status(
-        false, cancelled, job, done, seconds, value, gap,
-        sample_iterations, sample_values, sample_gaps, no_entries, ""));
-    g_running = false;
 }
 
 std::string read_file(const std::string& path)
@@ -1301,12 +1446,7 @@ void handle_client(socket_t client)
 
     if (line.rfind("GET /api/status", 0) == 0)
     {
-        std::string status;
-        {
-            std::lock_guard<std::mutex> lock(g_mu);
-            status = g_status;
-        }
-        send_response(client, 200, "application/json", status);
+        send_response(client, 200, "application/json", g_session.status());
         return;
     }
     if (line.rfind("GET /api/solutions/", 0) == 0)
@@ -1322,7 +1462,7 @@ void handle_client(socket_t client)
         const std::string token = rest.substr(0, slash);
         const std::string tail = rest.substr(slash + 1, space - slash - 1);
         std::uint64_t id = 0;
-        if (!parse_solution_token(token, id))
+        if (!parse_prefixed_id(token, 's', id))
         {
             send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
             return;
@@ -1334,22 +1474,18 @@ void handle_client(socket_t client)
             {
                 if (active)
                 {
-                    g_readers.fetch_sub(1);
+                    g_session.release_reader();
                 }
             }
         } reader;
-        std::shared_ptr<HeldSolution> held;
+        std::shared_ptr<void> borrowed = g_session.borrow(id);
+        if (!borrowed)
         {
-            std::lock_guard<std::mutex> lock(g_mu);
-            if (!g_solution || g_solution->id != id)
-            {
-                send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
-                return;
-            }
-            held = g_solution;
-            g_readers.fetch_add(1);
-            reader.active = true;
+            send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+            return;
         }
+        reader.active = true;
+        const std::shared_ptr<HeldSolution> held = std::static_pointer_cast<HeldSolution>(borrowed);
         try
         {
             if (tail.rfind("nodes/", 0) == 0)
@@ -1360,13 +1496,12 @@ void handle_client(socket_t client)
                     return;
                 }
                 const poker::solver::StreetInspection view = held->street->inspect_node(tail.substr(6));
-                send_response(client, 200, "application/json", json_inspection(view, held->memory));
+                send_response(client, 200, "application/json", json_inspection(view, held->memory, held->id, held->job_id));
                 return;
             }
             if (tail == "export")
             {
                 std::vector<poker::solver::RiverStrategyEntry> entries;
-                const poker::solver::StreetMemoryReport* memory = nullptr;
                 if (held->river)
                 {
                     entries = held->river->average_strategy_entries();
@@ -1374,11 +1509,18 @@ void handle_client(socket_t client)
                 else
                 {
                     entries = street_entries(held->street->average_strategy_entries());
-                    memory = &held->memory;
                 }
-                send_response(client, 200, "application/json", build_status(
-                    false, false, held->job, 0, 0.0, 0.0, 0.0, {}, {}, {}, entries, "",
-                    token, held->root_id, memory, true));
+                StatusDraft draft = draft_for(
+                    held->job, held->job_id, held->iterations, held->runtime_seconds, true,
+                    held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+                    held->sample_iterations, held->sample_values, held->sample_gaps,
+                    held->has_memory ? &held->memory : nullptr);
+                draft.solution_id = held->id;
+                draft.root_id = held->root_id;
+                draft.generation = g_session.generation();
+                draft.include_strategy = true;
+                draft.entries = &entries;
+                send_response(client, 200, "application/json", build_status(draft));
                 return;
             }
             send_response(client, 400, "application/json", "{\"error\":\"bad solution path\"}");
@@ -1394,13 +1536,55 @@ void handle_client(socket_t client)
     }
     if (line.rfind("POST /api/stop", 0) == 0)
     {
-        g_cancel = true;
-        send_response(client, 200, "application/json", "{\"stopping\":true}");
+        std::uint64_t job_id = g_session.current_job();
+        if (find_key(body, "job_id") != std::string::npos)
+        {
+            const std::string token = read_string(body, "job_id", "");
+            if (!parse_prefixed_id(token, 'j', job_id))
+            {
+                send_response(client, 400, "application/json", "{\"error\":\"bad job id\"}");
+                return;
+            }
+        }
+        const poker::explorer::StopResult result = g_session.request_stop(job_id);
+        std::string payload = "{\"result\":";
+        if (result == poker::explorer::StopResult::Accepted)
+        {
+            payload += "\"accepted\"";
+        }
+        else if (result == poker::explorer::StopResult::AlreadyComplete)
+        {
+            payload += "\"complete\",\"solution_id\":";
+            const std::uint64_t solution = g_session.current_solution();
+            if (solution == 0)
+            {
+                payload += "null";
+            }
+            else
+            {
+                append_escaped(payload, "s" + std::to_string(solution));
+            }
+        }
+        else
+        {
+            payload += "\"stale\"";
+        }
+        payload += ",\"job_id\":";
+        if (job_id == 0)
+        {
+            payload += "null";
+        }
+        else
+        {
+            append_escaped(payload, "j" + std::to_string(job_id));
+        }
+        payload += "}";
+        send_response(client, 200, "application/json", payload);
         return;
     }
     if (line.rfind("POST /api/solve", 0) == 0)
     {
-        if (g_running.load())
+        if (g_session.running())
         {
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
@@ -1412,31 +1596,48 @@ void handle_client(socket_t client)
             {
                 g_worker.join();
             }
-            std::shared_ptr<HeldSolution> retiring;
+            std::shared_ptr<void> retiring;
+            const std::uint64_t job_id = g_session.begin(retiring);
+            StatusDraft starting;
+            starting.running = true;
+            starting.job = &job;
+            starting.job_id = job_id;
+            starting.generation = g_session.generation() + 1;
+            g_session.set_progress(job_id, build_status(starting));
+            try
             {
-                std::lock_guard<std::mutex> lock(g_mu);
-                retiring = std::move(g_solution);
-            }
-            g_cancel = false;
-            g_running = true;
-            publish(build_status(true, false, job, 0, 0.0, 0.0, 0.0, {}, {}, {}, {}, ""));
-            g_worker = std::thread([job, retiring]() mutable
-            {
-                while (g_readers.load() > 0)
+                g_worker = std::thread([job, retiring = std::move(retiring), job_id]() mutable
                 {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                }
+                    g_session.wait_until_quiet();
+                    retiring.reset();
+                    g_session.notify_released();
+                    solve_job(job_id, std::move(job));
+                });
+            }
+            catch (const std::exception& error)
+            {
+                g_session.wait_until_quiet();
                 retiring.reset();
-                solve_job(job);
-            });
-            send_response(client, 202, "application/json", "{\"running\":true}");
+                StatusDraft failed;
+                failed.job = &job;
+                failed.job_id = job_id;
+                failed.error = error.what();
+                failed.generation = g_session.generation() + 1;
+                g_session.finish_failed(job_id, build_status(failed));
+                throw;
+            }
+            std::string accepted = "{\"running\":true,\"job_id\":";
+            append_escaped(accepted, "j" + std::to_string(job_id));
+            accepted += "}";
+            send_response(client, 202, "application/json", accepted);
         }
         catch (const std::exception& error)
         {
             std::string payload = "{\"error\":";
             append_escaped(payload, error.what());
             payload += "}";
-            send_response(client, 400, "application/json", payload);
+            const int status = std::string(error.what()) == "a solve is already running" ? 409 : 400;
+            send_response(client, status, "application/json", payload);
         }
         return;
     }

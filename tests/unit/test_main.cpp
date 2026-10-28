@@ -22,6 +22,8 @@ int main()
     run_street_parallel_tests();
     run_street_showdown_tests();
     run_street_inspect_tests();
+    run_session_tests();
+    run_explorer_http_tests();
     }
     catch (const std::exception& error)
     {

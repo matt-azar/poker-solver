@@ -16,6 +16,14 @@ Empty per-street size boxes use the shared bet list. A geometric size, an all-in
 
 A finished flop or turn stays on the server as one solution. Status polls report the job, the value, the Nash gap, and the engine heap. They do not include strategy rows. The page then asks for the root node, and each button asks for that child only. A new solve expires the previous solution id. A river still uses one explicit strategy export after the solve finishes. The ordinary export button writes the node currently on screen, or that river export.
 
+A completed solve keeps one record: the configuration, the iterations that finished, the runtime, the out-of-position value, both best-response values, the Nash gap, the sample series, and the street memory report when the tree has one. Status and export are written from that record. A metric that was not computed is JSON null. A river export has no engine-heap report, so those fields are null. A node response names the solution id and the job id and stays limited to that node.
+
+An absent `oop_bets` or `ip_bets` key still defaults to `0.5, 1`. A present empty array stays empty, so a check-only tree can be requested. All-in remains its own switch.
+
+Solution ids are `sN` and job ids are `jN`. Parsing uses the whole token. An overflowing, truncated, signed, or otherwise malformed id is HTTP 400. A well-formed id that is not the current solution is HTTP 404. Leading zeros that denote the same number select that number; `s00` is solution 0, which is never a published id. Node components use the same complete parse. A node index below 0 or past the tree is an unknown node.
+
+Stop and publication share one state machine. `POST /api/stop` accepts an optional `{"job_id":"jN"}`. Omitting it stops the current job. The result is `accepted`, `complete`, or `stale`. A stop accepted before publication finishes the in-flight numerical work, marks the job cancelled, and publishes no solution. A stop after publication leaves the completed result in place. A stop for an old job does not cancel the job that replaced it. A constructor failure, a thread-launch failure, or a publication failure ends in the failed state. A failed or cancelled job has no queryable solution. Replacing a solution waits until current readers finish, drops the old engine, and only then builds the next one.
+
 The page then shows:
 
 - The street, pot, stack, board, out-of-position value, the Nash gap, and the gap as a fraction of the pot

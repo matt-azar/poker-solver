@@ -37,3 +37,5 @@ void run_street_parallel_tests();
 void run_street_showdown_tests();
 void run_street_inspect_tests();
 void run_budget_tests();
+void run_session_tests();
+void run_explorer_http_tests();

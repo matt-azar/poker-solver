@@ -1,0 +1,275 @@
+#pragma once
+
+#include <condition_variable>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+namespace poker::explorer
+{
+
+enum class Phase
+{
+    Idle,
+    Running,
+    Completed,
+    Cancelled,
+    Failed
+};
+
+enum class StopResult
+{
+    Accepted,
+    AlreadyComplete,
+    Stale
+};
+
+// One solve at a time. Stop acceptance and successful publication share this
+// mutex. Status text is stored here; callers format it before the call and
+// must not re-enter the session from a status callback.
+class Session
+{
+public:
+    struct Permit
+    {
+        bool allowed = false;
+        std::uint64_t solution_id = 0;
+    };
+
+    std::uint64_t begin(std::shared_ptr<void>& retiring)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (phase_ == Phase::Running)
+        {
+            throw std::runtime_error("a solve is already running");
+        }
+        retiring = std::move(resource_);
+        resource_.reset();
+        solution_id_ = 0;
+        pending_solution_ = 0;
+        job_id_ = next_job_++;
+        phase_ = Phase::Running;
+        stop_ = false;
+        ++generation_;
+        return job_id_;
+    }
+
+    StopResult request_stop(std::uint64_t job_id)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_)
+        {
+            return StopResult::Stale;
+        }
+        if (phase_ == Phase::Completed)
+        {
+            return StopResult::AlreadyComplete;
+        }
+        if (phase_ != Phase::Running)
+        {
+            return StopResult::Stale;
+        }
+        stop_ = true;
+        return StopResult::Accepted;
+    }
+
+    bool stop_requested(std::uint64_t job_id) const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        return job_id == job_id_ && stop_;
+    }
+
+    bool running() const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        return phase_ == Phase::Running;
+    }
+
+    Phase phase() const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        return phase_;
+    }
+
+    std::uint64_t current_job() const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        return job_id_;
+    }
+
+    std::uint64_t current_solution() const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        return solution_id_;
+    }
+
+    std::uint64_t generation() const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        return generation_;
+    }
+
+    std::string status() const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        return status_;
+    }
+
+    void set_progress(std::uint64_t job_id, std::string status)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running || stop_)
+        {
+            return;
+        }
+        status_ = std::move(status);
+        ++generation_;
+    }
+
+    // Reserves a solution id. Publication still has to pass commit_success.
+    Permit prepare_success(std::uint64_t job_id)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        Permit permit;
+        if (job_id != job_id_ || phase_ != Phase::Running || stop_)
+        {
+            return permit;
+        }
+        pending_solution_ = next_solution_++;
+        permit.allowed = true;
+        permit.solution_id = pending_solution_;
+        return permit;
+    }
+
+    // make(generation, accepted) runs under the lock and must not call back in.
+    template <typename Make>
+    bool commit_success(
+        std::uint64_t job_id,
+        std::shared_ptr<void> resource,
+        std::uint64_t solution_id,
+        Make&& make)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running || solution_id != pending_solution_)
+        {
+            return false;
+        }
+        ++generation_;
+        if (stop_)
+        {
+            phase_ = Phase::Cancelled;
+            resource_.reset();
+            solution_id_ = 0;
+            pending_solution_ = 0;
+            status_ = make(generation_, false);
+            return false;
+        }
+        resource_ = std::move(resource);
+        solution_id_ = solution_id;
+        phase_ = Phase::Completed;
+        status_ = make(generation_, true);
+        return true;
+    }
+
+    void finish_cancelled(std::uint64_t job_id, std::string status)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running)
+        {
+            return;
+        }
+        phase_ = Phase::Cancelled;
+        stop_ = true;
+        resource_.reset();
+        solution_id_ = 0;
+        status_ = std::move(status);
+        ++generation_;
+    }
+
+    void finish_failed(std::uint64_t job_id, std::string status)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running)
+        {
+            return;
+        }
+        phase_ = Phase::Failed;
+        resource_.reset();
+        solution_id_ = 0;
+        status_ = std::move(status);
+        ++generation_;
+    }
+
+    std::shared_ptr<void> borrow(std::uint64_t solution_id)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (phase_ != Phase::Completed || solution_id == 0 || solution_id != solution_id_ || !resource_)
+        {
+            return {};
+        }
+        ++readers_;
+        return resource_;
+    }
+
+    void release_reader()
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (readers_ > 0)
+        {
+            --readers_;
+        }
+        if (readers_ == 0)
+        {
+            quiet_.notify_all();
+        }
+    }
+
+    void wait_until_quiet()
+    {
+        std::unique_lock<std::mutex> lock(mu_);
+        quiet_.wait(lock, [&]() { return readers_ == 0; });
+    }
+
+    void set_release_hook(std::function<void()> hook)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        release_hook_ = std::move(hook);
+    }
+
+    void notify_released()
+    {
+        std::function<void()> hook;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            hook = release_hook_;
+        }
+        if (hook)
+        {
+            hook();
+        }
+    }
+
+private:
+    mutable std::mutex mu_;
+    std::condition_variable quiet_;
+    Phase phase_ = Phase::Idle;
+    bool stop_ = false;
+    std::uint64_t job_id_ = 0;
+    std::uint64_t next_job_ = 1;
+    std::uint64_t solution_id_ = 0;
+    std::uint64_t next_solution_ = 1;
+    std::uint64_t pending_solution_ = 0;
+    std::uint64_t generation_ = 0;
+    int readers_ = 0;
+    std::shared_ptr<void> resource_;
+    std::string status_ =
+        "{\"running\":false,\"cancelled\":false,\"error\":\"\",\"solution_id\":null,"
+        "\"root_node_id\":null,\"job_id\":null,\"status_generation\":0}";
+    std::function<void()> release_hook_;
+};
+
+} // namespace poker::explorer

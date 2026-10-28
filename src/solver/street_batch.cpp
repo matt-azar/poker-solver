@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -19,6 +20,7 @@
 #include <numeric>
 #include <span>
 #include <stdexcept>
+#include <system_error>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -3519,31 +3521,24 @@ struct StreetBatchSolver::Engine
     {
         auto read_number = [&](std::size_t& cursor, int& value) -> bool
         {
-            if (cursor >= text.size())
+            if (cursor >= text.size() || text[cursor] == '+')
             {
                 return false;
             }
-            int sign = 1;
-            if (text[cursor] == '-')
-            {
-                sign = -1;
-                ++cursor;
-            }
-            if (cursor >= text.size() || text[cursor] < '0' || text[cursor] > '9')
+            long long parsed = 0;
+            const char* first = text.data() + cursor;
+            const char* last = text.data() + text.size();
+            const std::from_chars_result result = std::from_chars(first, last, parsed);
+            if (result.ec != std::errc() || result.ptr == first)
             {
                 return false;
             }
-            int number = 0;
-            while (cursor < text.size() && text[cursor] >= '0' && text[cursor] <= '9')
+            if (parsed < std::numeric_limits<int>::min() || parsed > std::numeric_limits<int>::max())
             {
-                number = number * 10 + (text[cursor] - '0');
-                ++cursor;
-                if (number > 10000000)
-                {
-                    return false;
-                }
+                return false;
             }
-            value = sign * number;
+            cursor = static_cast<std::size_t>(result.ptr - text.data());
+            value = static_cast<int>(parsed);
             return true;
         };
         std::size_t cursor = 0;

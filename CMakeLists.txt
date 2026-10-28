@@ -69,12 +69,18 @@ add_executable(poker_solver_tests
     tests/unit/test_river.cpp
     tests/unit/test_streets.cpp
     tests/unit/test_budget.cpp
+    tests/unit/test_session.cpp
+    tests/unit/test_explorer_http.cpp
 )
 target_include_directories(poker_solver_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 target_link_libraries(poker_solver_tests PRIVATE poker_solver_core)
+if(WIN32)
+    target_link_libraries(poker_solver_tests PRIVATE ws2_32)
+endif()
+add_dependencies(poker_solver_tests explorer)
 poker_set_warnings(poker_solver_tests)
 
 add_test(NAME poker_solver_tests COMMAND poker_solver_tests)
