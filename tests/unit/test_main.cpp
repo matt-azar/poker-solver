@@ -24,6 +24,7 @@ int main()
     run_street_inspect_tests();
     run_session_tests();
     run_explorer_http_tests();
+    run_street_chance_tests();
     }
     catch (const std::exception& error)
     {

@@ -1361,7 +1361,12 @@ std::string content_type(const std::string& path)
     return "application/octet-stream";
 }
 
-void send_response(socket_t client, int status, const std::string& type, const std::string& body)
+void send_response(
+    socket_t client,
+    int status,
+    const std::string& type,
+    const std::string& body,
+    const std::string& extra_headers = {})
 {
     const char* reason = status == 200 ? "OK"
         : status == 202 ? "Accepted"
@@ -1372,6 +1377,7 @@ void send_response(socket_t client, int status, const std::string& type, const s
     header += "Content-Type: " + type + "\r\n";
     header += "Content-Length: " + std::to_string(body.size()) + "\r\n";
     header += "Cache-Control: no-store\r\n";
+    header += extra_headers;
     header += "Connection: close\r\n\r\n";
     header += body;
     std::size_t sent = 0;
@@ -1495,8 +1501,17 @@ void handle_client(socket_t client)
                     send_response(client, 400, "application/json", "{\"error\":\"this solution has no street nodes\"}");
                     return;
                 }
+                const auto query_started = std::chrono::steady_clock::now();
                 const poker::solver::StreetInspection view = held->street->inspect_node(tail.substr(6));
-                send_response(client, 200, "application/json", json_inspection(view, held->memory, held->id, held->job_id));
+                const double query_seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - query_started).count();
+                const auto serialize_started = std::chrono::steady_clock::now();
+                const std::string payload = json_inspection(view, held->memory, held->id, held->job_id);
+                const double serialize_seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - serialize_started).count();
+                std::string timing = "X-Query-Seconds: " + format_number(query_seconds) + "\r\n";
+                timing += "X-Serialize-Seconds: " + format_number(serialize_seconds) + "\r\n";
+                send_response(client, 200, "application/json", payload, timing);
                 return;
             }
             if (tail == "export")
@@ -1650,6 +1665,10 @@ void handle_client(socket_t client)
     else if (line.rfind("GET /app.js", 0) == 0)
     {
         path = "/app.js";
+    }
+    else if (line.rfind("GET /browse.js", 0) == 0)
+    {
+        path = "/browse.js";
     }
     else if (line.rfind("GET / ", 0) == 0 || line.rfind("GET /index.html", 0) == 0)
     {

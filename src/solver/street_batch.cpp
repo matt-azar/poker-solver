@@ -740,8 +740,16 @@ struct StreetBatchSolver::Engine
     BudgetResource* budget_ = nullptr;
     std::pmr::memory_resource* heap_ = nullptr;
     std::pmr::vector<int> combos[2];
+    struct ParentLink
+    {
+        int parent = -1;
+        int action = -1;
+        bool from_chance = false;
+    };
+
     std::pmr::vector<Deal> deals;
     std::pmr::vector<Node> nodes;
+    std::pmr::vector<ParentLink> parent_link;
     std::pmr::vector<Slot> slots;
     std::pmr::vector<int> decision_ids;
     std::pmr::vector<double> regret;
@@ -822,6 +830,7 @@ struct StreetBatchSolver::Engine
         , combos{std::pmr::vector<int>(heap_), std::pmr::vector<int>(heap_)}
         , deals(heap_)
         , nodes(heap_)
+        , parent_link(heap_)
         , slots(heap_)
         , decision_ids(heap_)
         , regret(heap_)
@@ -852,6 +861,7 @@ struct StreetBatchSolver::Engine
         root.acting = config.first_to_act;
         root.street = 0;
         build_node(root, "", 0);
+        index_parents();
         count_and_index_hands();
         set_hand_counts();
         visit_slots(false);
@@ -3765,6 +3775,42 @@ struct StreetBatchSolver::Engine
         }
     }
 
+    void index_parents()
+    {
+        budget_->set_stage("parents");
+        parent_link.assign(nodes.size(), ParentLink{});
+        for (int index = 0; index < static_cast<int>(nodes.size()); ++index)
+        {
+            const Node& node = nodes[static_cast<std::size_t>(index)];
+            const auto claim = [&](int child, int action, bool from_chance)
+            {
+                if (child < 0)
+                {
+                    return;
+                }
+                ParentLink& link = parent_link[static_cast<std::size_t>(child)];
+                if (link.parent >= 0)
+                {
+                    throw std::logic_error("public node has two parents");
+                }
+                link.parent = index;
+                link.action = action;
+                link.from_chance = from_chance;
+            };
+            if (node.chance)
+            {
+                claim(node.child[0], -1, true);
+            }
+            else if (!node.terminal)
+            {
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    claim(node.child[action], action, false);
+                }
+            }
+        }
+    }
+
     StreetInspection inspect_node(const std::string& text) const
     {
         ensure_average();
@@ -3772,50 +3818,8 @@ struct StreetBatchSolver::Engine
         int target_turn = -1;
         int target_river = -1;
         locate_node(text, node_index, target_turn, target_river);
-        struct Link
-        {
-            int parent = -1;
-            int action = -1;
-            bool from_chance = false;
-        };
-        std::vector<Link> link(nodes.size());
-        for (int index = 0; index < static_cast<int>(nodes.size()); ++index)
-        {
-            const Node& node = nodes[static_cast<std::size_t>(index)];
-            if (node.chance)
-            {
-                const int child = node.child[0];
-                if (child < 0)
-                {
-                    continue;
-                }
-                if (link[static_cast<std::size_t>(child)].parent >= 0)
-                {
-                    throw std::logic_error("public node has two parents");
-                }
-                link[static_cast<std::size_t>(child)].parent = index;
-                link[static_cast<std::size_t>(child)].from_chance = true;
-            }
-            else if (!node.terminal)
-            {
-                for (int action = 0; action < node.n_actions; ++action)
-                {
-                    const int child = node.child[action];
-                    if (child < 0)
-                    {
-                        continue;
-                    }
-                    if (link[static_cast<std::size_t>(child)].parent >= 0)
-                    {
-                        throw std::logic_error("public node has two parents");
-                    }
-                    link[static_cast<std::size_t>(child)].parent = index;
-                    link[static_cast<std::size_t>(child)].action = action;
-                }
-            }
-        }
         std::vector<int> chain;
-        for (int at = node_index; at >= 0; at = link[static_cast<std::size_t>(at)].parent)
+        for (int at = node_index; at >= 0; at = parent_link[static_cast<std::size_t>(at)].parent)
         {
             chain.push_back(at);
             if (chain.size() > nodes.size())
@@ -3841,7 +3845,7 @@ struct StreetBatchSolver::Engine
             const int current = chain[step];
             const int next = chain[step + 1];
             const Node& node = nodes[static_cast<std::size_t>(current)];
-            const Link& edge = link[static_cast<std::size_t>(next)];
+            const ParentLink& edge = parent_link[static_cast<std::size_t>(next)];
             if (edge.parent != current)
             {
                 throw std::logic_error("node parent chain broke");
@@ -3946,61 +3950,39 @@ struct StreetBatchSolver::Engine
             {
                 dealt[seen_river] = true;
             }
-            double weight[52] = {};
-            double weight_total = 0.0;
+            double occupied[52] = {};
+            int board_count = 0;
+            int next_cards = 0;
             if (view.reach_defined)
             {
-                for (int hero = 0; hero < n0; ++hero)
+                double marginal_joint = 0.0;
+                std::vector<double> marginal0;
+                std::vector<double> marginal1;
+                marginals_of(q0, 0, q1, 1, marginal_joint, marginal0);
+                marginals_of(q1, 1, q0, 0, marginal_joint, marginal1);
+                for (int hand = 0; hand < n0; ++hand)
                 {
-                    const double left = q0[static_cast<std::size_t>(hero)];
-                    if (left == 0.0)
+                    const double weight = marginal0[static_cast<std::size_t>(hand)];
+                    occupied[hole_a[0][static_cast<std::size_t>(hand)]] += weight;
+                    occupied[hole_b[0][static_cast<std::size_t>(hand)]] += weight;
+                }
+                for (int hand = 0; hand < n1; ++hand)
+                {
+                    const double weight = marginal1[static_cast<std::size_t>(hand)];
+                    occupied[hole_a[1][static_cast<std::size_t>(hand)]] += weight;
+                    occupied[hole_b[1][static_cast<std::size_t>(hand)]] += weight;
+                }
+                for (int card = 0; card < 52; ++card)
+                {
+                    if (dealt[card])
                     {
-                        continue;
+                        ++board_count;
                     }
-                    for (int villain = 0; villain < n1; ++villain)
-                    {
-                        const double right = q1[static_cast<std::size_t>(villain)];
-                        if (right == 0.0)
-                        {
-                            continue;
-                        }
-                        const int cards[4] = {
-                            hole_a[0][static_cast<std::size_t>(hero)],
-                            hole_b[0][static_cast<std::size_t>(hero)],
-                            hole_a[1][static_cast<std::size_t>(villain)],
-                            hole_b[1][static_cast<std::size_t>(villain)],
-                        };
-                        if (cards[0] == cards[2] || cards[0] == cards[3]
-                            || cards[1] == cards[2] || cards[1] == cards[3])
-                        {
-                            continue;
-                        }
-                        bool open[52] = {};
-                        int remaining = 0;
-                        for (int card = 0; card < 52; ++card)
-                        {
-                            open[card] = !dealt[card]
-                                && card != cards[0] && card != cards[1]
-                                && card != cards[2] && card != cards[3];
-                            if (open[card])
-                            {
-                                ++remaining;
-                            }
-                        }
-                        if (remaining == 0)
-                        {
-                            continue;
-                        }
-                        const double piece = left * right / static_cast<double>(remaining);
-                        for (int card = 0; card < 52; ++card)
-                        {
-                            if (open[card])
-                            {
-                                weight[card] += piece;
-                            }
-                        }
-                        weight_total += left * right;
-                    }
+                }
+                next_cards = 52 - board_count - 4;
+                if (next_cards <= 0)
+                {
+                    throw std::logic_error("chance node has no next card");
                 }
             }
             const int child = node.child[0];
@@ -4015,10 +3997,10 @@ struct StreetBatchSolver::Engine
                 const int next_turn = node.deal_which == 1 ? card : seen_turn;
                 const int next_river = node.deal_which == 1 ? seen_river : card;
                 choice.child_id = node_id(child, next_turn, next_river);
-                choice.weight_defined = view.reach_defined && weight_total > 0.0;
+                choice.weight_defined = view.reach_defined;
                 if (choice.weight_defined)
                 {
-                    choice.weight = weight[card] / weight_total;
+                    choice.weight = (1.0 - occupied[card]) / static_cast<double>(next_cards);
                 }
                 view.cards.push_back(std::move(choice));
             }

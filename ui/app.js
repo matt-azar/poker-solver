@@ -4,6 +4,7 @@ let latest = null;
 let poll = null;
 let solutionId = null;
 let nodeToken = 0;
+let seenGeneration = -1;
 let currentNode = null;
 let riverExport = null;
 let selected = null;
@@ -455,10 +456,20 @@ $("export").addEventListener("click", () => {
 });
 
 $("path").addEventListener("change", () => renderLines(riverExport || {}));
+$("frequency").addEventListener("change", () => {
+  if (currentNode && currentNode.kind === "decision") {
+    renderNode(currentNode);
+  }
+});
 
 async function refresh() {
   const response = await fetch("/api/status");
   const status = await response.json();
+  const generation = nextGeneration(status, seenGeneration);
+  if (generation === null) {
+    return;
+  }
+  seenGeneration = generation;
   latest = status;
   if (status.running && solutionId) {
     solutionId = null;
@@ -486,19 +497,27 @@ async function refresh() {
   $("export").disabled = !(currentNode || riverExport);
 }
 
+async function readBody(response) {
+  try {
+    return await response.json();
+  } catch (error) {
+    return {error: response.statusText || "unreadable response"};
+  }
+}
+
 async function loadNode(nodeId) {
   const token = ++nodeToken;
   const solution = solutionId;
   const response = await fetch("/api/solutions/" + solution + "/nodes/" + nodeId);
-  if (token !== nodeToken || solution !== solutionId) {
+  const body = await readBody(response);
+  if (!shouldApply(token, nodeToken, solution, solutionId)) {
     return;
   }
   if (!response.ok) {
-    const failed = await response.json().catch(() => ({error: response.statusText}));
-    $("message").textContent = failed.error || "Node request failed";
+    $("message").textContent = body.error || "Node request failed";
     return;
   }
-  currentNode = await response.json();
+  currentNode = body;
   riverExport = null;
   renderNode(currentNode);
   $("export").disabled = false;
@@ -508,15 +527,15 @@ async function loadRiverExport() {
   const token = ++nodeToken;
   const solution = solutionId;
   const response = await fetch("/api/solutions/" + solution + "/export");
-  if (token !== nodeToken || solution !== solutionId) {
+  const body = await readBody(response);
+  if (!shouldApply(token, nodeToken, solution, solutionId)) {
     return;
   }
   if (!response.ok) {
-    const failed = await response.json().catch(() => ({error: response.statusText}));
-    $("message").textContent = failed.error || "Export failed";
+    $("message").textContent = body.error || "Export failed";
     return;
   }
-  riverExport = await response.json();
+  riverExport = body;
   currentNode = null;
   render(latest);
   $("export").disabled = false;
@@ -542,10 +561,16 @@ function render(status) {
   $("show-stack").textContent = status.stack;
   $("show-board").textContent = (status.board || []).join(" ");
   $("show-iterations").textContent = String(status.iterations);
-  $("show-value").textContent = Number(status.player0_expected_utility).toFixed(4);
-  $("show-gap").textContent = Number(status.nash_gap).toPrecision(4);
+  $("show-value").textContent = status.player0_expected_utility === null || status.player0_expected_utility === undefined
+    ? "—"
+    : Number(status.player0_expected_utility).toFixed(4);
+  $("show-gap").textContent = status.nash_gap === null || status.nash_gap === undefined
+    ? "—"
+    : Number(status.nash_gap).toPrecision(4);
   const pot = Number(status.pot) || 1;
-  $("show-fraction").textContent = (Number(status.nash_gap) / pot).toPrecision(3);
+  $("show-fraction").textContent = status.nash_gap === null || status.nash_gap === undefined
+    ? "—"
+    : (Number(status.nash_gap) / pot).toPrecision(3);
   drawChart(status.gap_series || []);
   if (currentNode) {
     renderNode(currentNode);
@@ -587,6 +612,7 @@ function renderNode(node) {
       : "deal a card";
   const host = $("node-actions");
   host.innerHTML = "";
+  fillFrequency(node);
   if (node.kind === "decision") {
     node.actions.forEach((label, index) => {
       const button = document.createElement("button");
@@ -595,7 +621,7 @@ function renderNode(node) {
       button.addEventListener("click", () => loadNode(node.children[index]));
       host.appendChild(button);
     });
-    const matrix = matrixFromNode(node);
+    const matrix = matrixFromNode(node, $("frequency").value || "aggression");
     if (node.player === 0) {
       drawGrid("oop-grid", matrix, "OOP");
       drawGrid("ip-grid", [], "IP");
@@ -617,41 +643,40 @@ function renderNode(node) {
   });
 }
 
-function matrixFromNode(node) {
-  const aggressive = node.actions.findIndex((label) => label.startsWith("Bet") || label.startsWith("Raise"));
-  const cells = new Map();
-  node.combos.forEach((combo, index) => {
-    const high = ranks.indexOf(combo[0]);
-    const low = ranks.indexOf(combo[2]);
-    const suited = combo[1] === combo[3];
-    let row = high;
-    let column = low;
-    if (combo[0] !== combo[2] && suited) {
-      row = Math.min(high, low);
-      column = Math.max(high, low);
-    } else if (combo[0] !== combo[2]) {
-      row = Math.max(high, low);
-      column = Math.min(high, low);
+function fillFrequency(node) {
+  const select = $("frequency");
+  const label = $("frequency-label");
+  if (!select || node.kind !== "decision") {
+    if (label) {
+      label.hidden = true;
     }
-    const key = row + ":" + column;
-    if (!cells.has(key)) {
-      cells.set(key, {row, col: column, text: pairName(row, column), hands: [], marginal: 0, betMass: 0, defined: node.reach_defined});
-    }
-    const cell = cells.get(key);
-    const strategy = node.strategy[index];
-    const marginal = node.reach_defined ? Number(node.marginal[index]) : 0;
-    const actions = strategy ? node.actions.map((action, actionIndex) => ({action, probability: strategy[actionIndex]})) : [];
-    cell.hands.push({combo, actions});
-    cell.range_combos = cell.hands.length;
-    if (node.reach_defined && strategy && aggressive >= 0) {
-      cell.marginal += marginal;
-      cell.betMass += marginal * strategy[aggressive];
-    }
+    return;
+  }
+  const previous = select.value || "aggression";
+  const options = frequencyOptions(node);
+  select.innerHTML = "";
+  options.forEach((option) => {
+    const item = document.createElement("option");
+    item.value = option.id;
+    item.textContent = option.label;
+    select.appendChild(item);
   });
-  return [...cells.values()].map((cell) => ({
+  if ([...select.options].some((option) => option.value === previous)) {
+    select.value = previous;
+  }
+  label.hidden = false;
+}
+
+function matrixFromNode(node, mode) {
+  return groupHands(node).map((cell) => ({
     ...cell,
-    bet: !cell.defined || cell.marginal === 0 ? null : cell.betMass / cell.marginal
+    bet: frequencyOf(cell, mode || "aggression")
   }));
+}
+
+function frequencyLabel(mode, node) {
+  const match = frequencyOptions(node).find((option) => option.id === mode);
+  return match ? match.label : "Bet or raise";
 }
 
 function drawChart(series) {
@@ -713,7 +738,8 @@ function showCell(player, cell, button) {
   $("detail").hidden = false;
   $("detail-title").textContent = player + " " + cell.text;
   const frequency = cell.bet === null || cell.bet === undefined ? "undefined" : Number(cell.bet).toFixed(3);
-  $("detail-meta").textContent = cell.range_combos + " combos, bet frequency " + frequency;
+  const mode = $("frequency") ? ($("frequency").value || "aggression") : "aggression";
+  $("detail-meta").textContent = cell.range_combos + " combos, " + frequencyLabel(mode, currentNode || {actions: []}) + " " + frequency;
   const host = $("detail-hands");
   host.innerHTML = "";
   (cell.hands || []).forEach((hand) => {

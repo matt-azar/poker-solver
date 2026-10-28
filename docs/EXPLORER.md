@@ -16,7 +16,7 @@ Empty per-street size boxes use the shared bet list. A geometric size, an all-in
 
 A finished flop or turn stays on the server as one solution. Status polls report the job, the value, the Nash gap, and the engine heap. They do not include strategy rows. The page then asks for the root node, and each button asks for that child only. A new solve expires the previous solution id. A river still uses one explicit strategy export after the solve finishes. The ordinary export button writes the node currently on screen, or that river export.
 
-A completed solve keeps one record: the configuration, the iterations that finished, the runtime, the out-of-position value, both best-response values, the Nash gap, the sample series, and the street memory report when the tree has one. Status and export are written from that record. A metric that was not computed is JSON null. A river export has no engine-heap report, so those fields are null. A node response names the solution id and the job id and stays limited to that node.
+A completed solve keeps one record: the configuration, the iterations that finished, the runtime, the out-of-position value, both best-response values, the Nash gap, the sample series, and the street memory report when the tree has one. Status and export are written from that record. A metric that was not computed is JSON null. A river export has no engine-heap report, so those fields are null. A node response names the solution id and the job id and stays limited to that node. A chance node lists every undealt card. Its weight is the current average-profile probability of that card, from the two players' marginals, in time linear in the hand counts. At zero joint reach the weights are null. Node responses include `X-Query-Seconds` and `X-Serialize-Seconds` for that page.
 
 An absent `oop_bets` or `ip_bets` key still defaults to `0.5, 1`. A present empty array stays empty, so a check-only tree can be requested. All-in remains its own switch.
 
@@ -28,7 +28,7 @@ The page then shows:
 
 - The street, pot, stack, board, out-of-position value, the Nash gap, and the gap as a fraction of the pot
 - A Nash-gap chart across the samples taken during the run
-- A 13×13 strategy matrix for the player to act, separate from the range grids. Color is the reach-weighted bet or raise frequency. When the line has no reach, that frequency is undefined. A cell lists the suit combos and each action's probability
+- A 13×13 strategy matrix for the player to act, separate from the range grids. The frequency menu defaults to the total of every bet and raise. It also lists each action at the node. A cell's color is the selected frequency. The denominator is the group's marginal reach and does not depend on which action is selected. Positive reach with no aggression shows 0. A group with no reach shows the frequency as undefined. A cell lists the suit combos and every action's probability
 - Buttons for the legal actions, or for the next public card. Each button loads that node. A river still lists histories from its one export
 - Export writes the node on screen, or the river export
 

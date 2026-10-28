@@ -39,3 +39,4 @@ void run_street_inspect_tests();
 void run_budget_tests();
 void run_session_tests();
 void run_explorer_http_tests();
+void run_street_chance_tests();
