@@ -2,7 +2,7 @@
 
 Heads-up no-limit Texas Hold'em GTO solver under incremental development. The core is C++20. Python bindings are planned later and are not required to build or run the solver. A local explorer is included.
 
-**Current milestone:** Phase 10 — the trees here are solved exactly, and unrestricted no-limit Hold'em is not. Linear CFR is measured on Kuhn. See [docs/HUNL.md](docs/HUNL.md).
+**Current milestone:** The kernel through the old Phase 10 is the foundation. The active plan is Release A, a dependable postflop study tool. The next implementation milestone is M0, then the already specified conditional-action-EV work. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/HUNL.md](docs/HUNL.md).
 
 Convergence on Kuhn, Leduc, or a fixed-size river tree is an equilibrium of that abstract game, not of unrestricted no-limit Hold'em.
 
