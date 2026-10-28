@@ -83,6 +83,49 @@ struct ShowdownSample
 // Order time is nested inside showdown time. Adding the fields does not
 // produce a wall-time total. Chance time is the caller's wait and reduction
 // at the first public-card split. These are measurements, not part of the solve.
+// One public node inside a finished street solve. Identifiers are opaque and
+// valid only for this solver. A decision carries the acting player's hands.
+// Chance carries the legal next cards. Marginal is the card-removal posterior.
+// When reach_defined is false the joint mass is zero and marginals are unused.
+struct StreetInspectAction
+{
+    std::string label;
+    std::string child_id;
+};
+
+struct StreetInspectHand
+{
+    std::string combo;
+    double reach = 0.0;
+    double marginal = 0.0;
+    bool structural = false;
+    std::vector<double> strategy;
+};
+
+struct StreetInspectCard
+{
+    std::string card;
+    std::string child_id;
+    bool weight_defined = false;
+    double weight = 0.0;
+};
+
+struct StreetInspection
+{
+    std::string node_id;
+    std::string kind;
+    std::string line;
+    std::string place;
+    std::vector<std::string> board;
+    int player = -1;
+    int folded = -1;
+    bool reach_defined = false;
+    double joint = 0.0;
+    std::vector<StreetInspectAction> actions;
+    std::vector<StreetInspectHand> hands;
+    std::vector<StreetInspectCard> cards;
+};
+
 struct StreetWalkProfile
 {
     double order_seconds = 0.0;
@@ -143,6 +186,16 @@ public:
     StreetMemoryReport memory_report() const;
 
     std::vector<StreetStrategyEntry> average_strategy_entries() const;
+    // Normalize the average profile once. Later node queries only read it.
+    void prepare_inspection() const;
+    std::string root_node_id() const;
+    StreetInspection inspect_node(const std::string& node_id) const;
+    // Replace one structural hand's average at a node. Inspection reads this
+    // profile instead of recomputing it.
+    void set_average_for_test(
+        const std::string& node_id,
+        int hand,
+        std::span<const double> probability);
     std::span<const double> regret_table() const;
     std::span<const double> strategy_sum_table() const;
     int thread_count() const;

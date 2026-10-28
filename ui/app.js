@@ -2,6 +2,10 @@ const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
 const order = "AKQJT98765432";
 let latest = null;
 let poll = null;
+let solutionId = null;
+let nodeToken = 0;
+let currentNode = null;
+let riverExport = null;
 let selected = null;
 let drag = null;
 
@@ -439,30 +443,83 @@ $("stop").addEventListener("click", async () => {
 });
 
 $("export").addEventListener("click", () => {
-  if (!latest) {
+  const payload = currentNode || riverExport;
+  if (!payload) {
     return;
   }
-  const blob = new Blob([JSON.stringify(latest, null, 2)], {type: "application/json"});
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"});
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "strategy.json";
+  link.download = currentNode ? "node.json" : "strategy.json";
   link.click();
 });
 
-$("path").addEventListener("change", () => renderLines(latest));
+$("path").addEventListener("change", () => renderLines(riverExport || {}));
 
 async function refresh() {
   const response = await fetch("/api/status");
   const status = await response.json();
   latest = status;
+  if (status.running && solutionId) {
+    solutionId = null;
+    currentNode = null;
+    riverExport = null;
+    nodeToken += 1;
+  }
   render(status);
+  if (!status.running && status.solution_id && status.solution_id !== solutionId) {
+    solutionId = status.solution_id;
+    currentNode = null;
+    riverExport = null;
+    if (status.root_node_id) {
+      loadNode(status.root_node_id);
+    } else {
+      loadRiverExport();
+    }
+  }
   if (!status.running && poll) {
     clearInterval(poll);
     poll = null;
     $("run").disabled = false;
     $("stop").disabled = true;
-    $("export").disabled = !status.entries;
   }
+  $("export").disabled = !(currentNode || riverExport);
+}
+
+async function loadNode(nodeId) {
+  const token = ++nodeToken;
+  const solution = solutionId;
+  const response = await fetch("/api/solutions/" + solution + "/nodes/" + nodeId);
+  if (token !== nodeToken || solution !== solutionId) {
+    return;
+  }
+  if (!response.ok) {
+    const failed = await response.json().catch(() => ({error: response.statusText}));
+    $("message").textContent = failed.error || "Node request failed";
+    return;
+  }
+  currentNode = await response.json();
+  riverExport = null;
+  renderNode(currentNode);
+  $("export").disabled = false;
+}
+
+async function loadRiverExport() {
+  const token = ++nodeToken;
+  const solution = solutionId;
+  const response = await fetch("/api/solutions/" + solution + "/export");
+  if (token !== nodeToken || solution !== solutionId) {
+    return;
+  }
+  if (!response.ok) {
+    const failed = await response.json().catch(() => ({error: response.statusText}));
+    $("message").textContent = failed.error || "Export failed";
+    return;
+  }
+  riverExport = await response.json();
+  currentNode = null;
+  render(latest);
+  $("export").disabled = false;
 }
 
 function render(status) {
@@ -490,12 +547,17 @@ function render(status) {
   const pot = Number(status.pot) || 1;
   $("show-fraction").textContent = (Number(status.nash_gap) / pot).toPrecision(3);
   drawChart(status.gap_series || []);
-  drawGrid("oop-grid", status.oop_matrix || [], "OOP");
-  drawGrid("ip-grid", status.ip_matrix || [], "IP");
+  if (currentNode) {
+    renderNode(currentNode);
+    return;
+  }
+  const view = riverExport || {};
+  drawGrid("oop-grid", view.oop_matrix || [], "OOP");
+  drawGrid("ip-grid", view.ip_matrix || [], "IP");
   const path = $("path");
   const previous = path.value;
   path.innerHTML = "";
-  (status.paths || []).forEach((item) => {
+  (view.paths || []).forEach((item) => {
     const option = document.createElement("option");
     option.value = item;
     option.textContent = item;
@@ -504,8 +566,92 @@ function render(status) {
   if ([...path.options].some((option) => option.value === previous)) {
     path.value = previous;
   }
-  $("tree").hidden = (status.paths || []).length === 0;
-  renderLines(status);
+  $("path-label").hidden = (view.paths || []).length === 0;
+  $("tree").hidden = status.running || (view.paths || []).length === 0;
+  $("node-actions").innerHTML = "";
+  $("node-line").textContent = "";
+  $("node-meta").textContent = "";
+  renderLines(view);
+}
+
+function renderNode(node) {
+  $("tree").hidden = false;
+  $("path-label").hidden = true;
+  $("lines").innerHTML = "";
+  $("node-line").textContent = (node.place ? node.place + " · " : "") + (node.line || "");
+  const who = node.player === 0 ? "OOP" : node.player === 1 ? "IP" : "";
+  $("node-meta").textContent = node.kind === "decision"
+    ? who + (node.reach_defined ? "" : " · reach undefined")
+    : node.kind === "terminal"
+      ? (node.folded === null || node.folded === undefined ? "showdown" : "fold " + node.folded)
+      : "deal a card";
+  const host = $("node-actions");
+  host.innerHTML = "";
+  if (node.kind === "decision") {
+    node.actions.forEach((label, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", () => loadNode(node.children[index]));
+      host.appendChild(button);
+    });
+    const matrix = matrixFromNode(node);
+    if (node.player === 0) {
+      drawGrid("oop-grid", matrix, "OOP");
+      drawGrid("ip-grid", [], "IP");
+    } else {
+      drawGrid("oop-grid", [], "OOP");
+      drawGrid("ip-grid", matrix, "IP");
+    }
+  } else {
+    drawGrid("oop-grid", [], "OOP");
+    drawGrid("ip-grid", [], "IP");
+  }
+  (node.cards || []).forEach((choice) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    const weight = choice.weight === null || choice.weight === undefined ? "" : " " + Number(choice.weight).toFixed(3);
+    button.textContent = choice.card + weight;
+    button.addEventListener("click", () => loadNode(choice.child_id));
+    host.appendChild(button);
+  });
+}
+
+function matrixFromNode(node) {
+  const aggressive = node.actions.findIndex((label) => label.startsWith("Bet") || label.startsWith("Raise"));
+  const cells = new Map();
+  node.combos.forEach((combo, index) => {
+    const high = ranks.indexOf(combo[0]);
+    const low = ranks.indexOf(combo[2]);
+    const suited = combo[1] === combo[3];
+    let row = high;
+    let column = low;
+    if (combo[0] !== combo[2] && suited) {
+      row = Math.min(high, low);
+      column = Math.max(high, low);
+    } else if (combo[0] !== combo[2]) {
+      row = Math.max(high, low);
+      column = Math.min(high, low);
+    }
+    const key = row + ":" + column;
+    if (!cells.has(key)) {
+      cells.set(key, {row, col: column, text: pairName(row, column), hands: [], marginal: 0, betMass: 0, defined: node.reach_defined});
+    }
+    const cell = cells.get(key);
+    const strategy = node.strategy[index];
+    const marginal = node.reach_defined ? Number(node.marginal[index]) : 0;
+    const actions = strategy ? node.actions.map((action, actionIndex) => ({action, probability: strategy[actionIndex]})) : [];
+    cell.hands.push({combo, actions});
+    cell.range_combos = cell.hands.length;
+    if (node.reach_defined && strategy && aggressive >= 0) {
+      cell.marginal += marginal;
+      cell.betMass += marginal * strategy[aggressive];
+    }
+  });
+  return [...cells.values()].map((cell) => ({
+    ...cell,
+    bet: !cell.defined || cell.marginal === 0 ? null : cell.betMass / cell.marginal
+  }));
 }
 
 function drawChart(series) {
@@ -541,7 +687,7 @@ function drawGrid(id, cells, player) {
       button.textContent = name;
       if (cell && (cell.range_combos > 0 || (cell.hands && cell.hands.length))) {
         button.classList.add("in-range");
-        const bet = cell.bet || 0;
+        const bet = cell.bet === null || cell.bet === undefined ? 0 : cell.bet;
         button.style.background = "rgb(" + Math.round(236 - 180 * bet) + "," + Math.round(231 - 80 * bet) + "," + Math.round(220 - 160 * bet) + ")";
         button.addEventListener("click", () => showCell(player, cell, button));
       }
@@ -566,7 +712,8 @@ function showCell(player, cell, button) {
   button.classList.add("selected");
   $("detail").hidden = false;
   $("detail-title").textContent = player + " " + cell.text;
-  $("detail-meta").textContent = cell.range_combos + " combos in range, open bet frequency " + Number(cell.bet).toFixed(3);
+  const frequency = cell.bet === null || cell.bet === undefined ? "undefined" : Number(cell.bet).toFixed(3);
+  $("detail-meta").textContent = cell.range_combos + " combos, bet frequency " + frequency;
   const host = $("detail-hands");
   host.innerHTML = "";
   (cell.hands || []).forEach((hand) => {

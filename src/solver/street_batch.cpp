@@ -3505,6 +3505,618 @@ struct StreetBatchSolver::Engine
         }
         return report;
     }
+
+    std::string root_node_id() const
+    {
+        if (nodes.empty())
+        {
+            throw std::logic_error("street tree is empty");
+        }
+        return "p0.t-1.r-1";
+    }
+
+    bool parse_node_id(const std::string& text, int& node, int& turn, int& river) const
+    {
+        auto read_number = [&](std::size_t& cursor, int& value) -> bool
+        {
+            if (cursor >= text.size())
+            {
+                return false;
+            }
+            int sign = 1;
+            if (text[cursor] == '-')
+            {
+                sign = -1;
+                ++cursor;
+            }
+            if (cursor >= text.size() || text[cursor] < '0' || text[cursor] > '9')
+            {
+                return false;
+            }
+            int number = 0;
+            while (cursor < text.size() && text[cursor] >= '0' && text[cursor] <= '9')
+            {
+                number = number * 10 + (text[cursor] - '0');
+                ++cursor;
+                if (number > 10000000)
+                {
+                    return false;
+                }
+            }
+            value = sign * number;
+            return true;
+        };
+        std::size_t cursor = 0;
+        if (text.empty() || text[cursor] != 'p')
+        {
+            return false;
+        }
+        ++cursor;
+        if (!read_number(cursor, node) || cursor >= text.size() || text[cursor] != '.')
+        {
+            return false;
+        }
+        ++cursor;
+        if (cursor >= text.size() || text[cursor] != 't')
+        {
+            return false;
+        }
+        ++cursor;
+        if (!read_number(cursor, turn) || cursor >= text.size() || text[cursor] != '.')
+        {
+            return false;
+        }
+        ++cursor;
+        if (cursor >= text.size() || text[cursor] != 'r')
+        {
+            return false;
+        }
+        ++cursor;
+        return read_number(cursor, river) && cursor == text.size();
+    }
+
+    std::string node_id(int node, int turn, int river) const
+    {
+        return "p" + std::to_string(node) + ".t" + std::to_string(turn) + ".r" + std::to_string(river);
+    }
+
+    bool card_on_board(int card) const
+    {
+        for (int dealt : config.board)
+        {
+            if (dealt == card)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void locate_node(const std::string& text, int& node, int& turn, int& river) const
+    {
+        if (!parse_node_id(text, node, turn, river)
+            || node < 0
+            || static_cast<std::size_t>(node) >= nodes.size())
+        {
+            throw std::invalid_argument("unknown node");
+        }
+        const Node& found = nodes[static_cast<std::size_t>(node)];
+        bool want_turn = false;
+        bool want_river = false;
+        if (found.chance)
+        {
+            if (found.deal_which == 1)
+            {
+                want_turn = false;
+                want_river = false;
+            }
+            else if (config.board.size() == 3)
+            {
+                want_turn = true;
+                want_river = false;
+            }
+        }
+        else if (found.terminal)
+        {
+            if (config.board.size() == 3)
+            {
+                want_turn = found.street >= 1;
+                want_river = found.street >= 2;
+            }
+            else
+            {
+                want_river = found.street >= 1;
+            }
+        }
+        else if (config.board.size() == 4)
+        {
+            want_river = found.card_mode == 1;
+        }
+        else if (found.card_mode == 1)
+        {
+            want_turn = true;
+        }
+        else if (found.card_mode == 2)
+        {
+            want_turn = true;
+            want_river = true;
+        }
+        if (want_turn && want_river && turn == river)
+        {
+            throw std::invalid_argument("node card is duplicated");
+        }
+        auto require_card = [&](int card, bool wanted)
+        {
+            if (!wanted)
+            {
+                if (card != -1)
+                {
+                    throw std::invalid_argument("node does not use that card");
+                }
+                return;
+            }
+            if (card < 0 || card >= 52 || card_on_board(card))
+            {
+                throw std::invalid_argument("node card is dead or out of range");
+            }
+        };
+        require_card(turn, want_turn);
+        require_card(river, want_river);
+    }
+
+    void zero_unsupported(std::vector<double>& reach, int player, int turn, int river) const
+    {
+        for (int hand = 0; hand < static_cast<int>(reach.size()); ++hand)
+        {
+            if (!hand_supported(player, hand, turn, river))
+            {
+                reach[static_cast<std::size_t>(hand)] = 0.0;
+            }
+        }
+    }
+
+    void zero_card(std::vector<double>& reach, int player, int card) const
+    {
+        for (int hand = 0; hand < static_cast<int>(reach.size()); ++hand)
+        {
+            if (hole_a[player][static_cast<std::size_t>(hand)] == card
+                || hole_b[player][static_cast<std::size_t>(hand)] == card)
+            {
+                reach[static_cast<std::size_t>(hand)] = 0.0;
+            }
+        }
+    }
+
+    double joint_mass_of(const std::vector<double>& left, const std::vector<double>& right) const
+    {
+        double total = 0.0;
+        double by_card[52] = {};
+        for (int hand = 0; hand < static_cast<int>(right.size()); ++hand)
+        {
+            const double weight = right[static_cast<std::size_t>(hand)];
+            if (weight == 0.0)
+            {
+                continue;
+            }
+            total += weight;
+            by_card[hole_a[1][static_cast<std::size_t>(hand)]] += weight;
+            by_card[hole_b[1][static_cast<std::size_t>(hand)]] += weight;
+        }
+        double joint = 0.0;
+        for (int hand = 0; hand < static_cast<int>(left.size()); ++hand)
+        {
+            const double weight = left[static_cast<std::size_t>(hand)];
+            if (weight == 0.0)
+            {
+                continue;
+            }
+            const int card0 = hole_a[0][static_cast<std::size_t>(hand)];
+            const int card1 = hole_b[0][static_cast<std::size_t>(hand)];
+            double blocked = by_card[card0] + by_card[card1];
+            const int same = hand_of[1][static_cast<std::size_t>(holdem::Range::combo_index(card0, card1))];
+            if (same >= 0)
+            {
+                blocked -= right[static_cast<std::size_t>(same)];
+            }
+            joint += weight * (total - blocked);
+        }
+        return joint;
+    }
+
+    void marginals_of(
+        const std::vector<double>& reach,
+        int player,
+        const std::vector<double>& opponent,
+        int opponent_player,
+        double& joint,
+        std::vector<double>& marginal) const
+    {
+        double total = 0.0;
+        double by_card[52] = {};
+        for (int hand = 0; hand < static_cast<int>(opponent.size()); ++hand)
+        {
+            const double weight = opponent[static_cast<std::size_t>(hand)];
+            if (weight == 0.0)
+            {
+                continue;
+            }
+            total += weight;
+            by_card[hole_a[opponent_player][static_cast<std::size_t>(hand)]] += weight;
+            by_card[hole_b[opponent_player][static_cast<std::size_t>(hand)]] += weight;
+        }
+        joint = 0.0;
+        marginal.assign(reach.size(), 0.0);
+        for (int hand = 0; hand < static_cast<int>(reach.size()); ++hand)
+        {
+            const int card0 = hole_a[player][static_cast<std::size_t>(hand)];
+            const int card1 = hole_b[player][static_cast<std::size_t>(hand)];
+            double blocked = by_card[card0] + by_card[card1];
+            const int same = hand_of[opponent_player][static_cast<std::size_t>(
+                holdem::Range::combo_index(card0, card1))];
+            if (same >= 0)
+            {
+                blocked -= opponent[static_cast<std::size_t>(same)];
+            }
+            const double piece = reach[static_cast<std::size_t>(hand)] * (total - blocked);
+            marginal[static_cast<std::size_t>(hand)] = piece;
+            joint += piece;
+        }
+        if (joint > 0.0)
+        {
+            for (double& value : marginal)
+            {
+                value /= joint;
+            }
+        }
+    }
+
+    StreetInspection inspect_node(const std::string& text) const
+    {
+        ensure_average();
+        int node_index = 0;
+        int target_turn = -1;
+        int target_river = -1;
+        locate_node(text, node_index, target_turn, target_river);
+        struct Link
+        {
+            int parent = -1;
+            int action = -1;
+            bool from_chance = false;
+        };
+        std::vector<Link> link(nodes.size());
+        for (int index = 0; index < static_cast<int>(nodes.size()); ++index)
+        {
+            const Node& node = nodes[static_cast<std::size_t>(index)];
+            if (node.chance)
+            {
+                const int child = node.child[0];
+                if (child < 0)
+                {
+                    continue;
+                }
+                if (link[static_cast<std::size_t>(child)].parent >= 0)
+                {
+                    throw std::logic_error("public node has two parents");
+                }
+                link[static_cast<std::size_t>(child)].parent = index;
+                link[static_cast<std::size_t>(child)].from_chance = true;
+            }
+            else if (!node.terminal)
+            {
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    const int child = node.child[action];
+                    if (child < 0)
+                    {
+                        continue;
+                    }
+                    if (link[static_cast<std::size_t>(child)].parent >= 0)
+                    {
+                        throw std::logic_error("public node has two parents");
+                    }
+                    link[static_cast<std::size_t>(child)].parent = index;
+                    link[static_cast<std::size_t>(child)].action = action;
+                }
+            }
+        }
+        std::vector<int> chain;
+        for (int at = node_index; at >= 0; at = link[static_cast<std::size_t>(at)].parent)
+        {
+            chain.push_back(at);
+            if (chain.size() > nodes.size())
+            {
+                throw std::logic_error("node parent cycle");
+            }
+        }
+        std::reverse(chain.begin(), chain.end());
+        if (chain.empty() || chain.front() != 0)
+        {
+            throw std::invalid_argument("unknown node");
+        }
+
+        std::vector<double> q0(range_w[0].begin(), range_w[0].end());
+        std::vector<double> q1(range_w[1].begin(), range_w[1].end());
+        int seen_turn = -1;
+        int seen_river = -1;
+        zero_unsupported(q0, 0, seen_turn, seen_river);
+        zero_unsupported(q1, 1, seen_turn, seen_river);
+        std::string line;
+        for (std::size_t step = 0; step + 1 < chain.size(); ++step)
+        {
+            const int current = chain[step];
+            const int next = chain[step + 1];
+            const Node& node = nodes[static_cast<std::size_t>(current)];
+            const Link& edge = link[static_cast<std::size_t>(next)];
+            if (edge.parent != current)
+            {
+                throw std::logic_error("node parent chain broke");
+            }
+            if (node.chance)
+            {
+                const int card = node.deal_which == 1 ? target_turn : target_river;
+                if (card < 0)
+                {
+                    throw std::invalid_argument("node card is dead or out of range");
+                }
+                zero_card(q0, 0, card);
+                zero_card(q1, 1, card);
+                if (node.deal_which == 1)
+                {
+                    seen_turn = card;
+                }
+                else
+                {
+                    seen_river = card;
+                }
+                zero_unsupported(q0, 0, seen_turn, seen_river);
+                zero_unsupported(q1, 1, seen_turn, seen_river);
+            }
+            else
+            {
+                const int action = edge.action;
+                std::vector<double>& acting = node.player == 0 ? q0 : q1;
+                for (int hand = 0; hand < static_cast<int>(acting.size()); ++hand)
+                {
+                    if (!hand_supported(node.player, hand, seen_turn, seen_river))
+                    {
+                        acting[static_cast<std::size_t>(hand)] = 0.0;
+                        continue;
+                    }
+                    const int slot = stored_slot(node, hand, seen_turn, seen_river);
+                    if (slot < 0)
+                    {
+                        throw std::logic_error("supported hand has no information set");
+                    }
+                    acting[static_cast<std::size_t>(hand)] *= average[static_cast<std::size_t>(
+                        slots[static_cast<std::size_t>(slot)].base + action)];
+                }
+                const std::string label(
+                    node.action_labels[action].data(), node.action_labels[action].size());
+                if (line.empty())
+                {
+                    line = label;
+                }
+                else
+                {
+                    line.push_back('/');
+                    line += label;
+                }
+            }
+        }
+        if (seen_turn != target_turn || seen_river != target_river)
+        {
+            throw std::invalid_argument("unknown node");
+        }
+
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        StreetInspection view;
+        view.node_id = text;
+        view.line = line.empty() ? "open" : line;
+        for (int card : config.board)
+        {
+            view.board.push_back(holdem::format_card(card));
+        }
+        if (seen_turn >= 0)
+        {
+            view.board.push_back(holdem::format_card(seen_turn));
+        }
+        if (seen_river >= 0)
+        {
+            view.board.push_back(holdem::format_card(seen_river));
+        }
+        const double joint = joint_mass_of(q0, q1);
+        view.joint = joint;
+        view.reach_defined = joint > 0.0;
+        if (node.terminal)
+        {
+            view.kind = "terminal";
+            view.folded = node.folded;
+            view.place = place_text(node.street, seen_turn, seen_river);
+            return view;
+        }
+        if (node.chance)
+        {
+            view.kind = "chance";
+            view.place = node.deal_which == 1 ? "deal turn" : "deal river";
+            bool dealt[52] = {};
+            for (int card : config.board)
+            {
+                dealt[card] = true;
+            }
+            if (seen_turn >= 0)
+            {
+                dealt[seen_turn] = true;
+            }
+            if (seen_river >= 0)
+            {
+                dealt[seen_river] = true;
+            }
+            double weight[52] = {};
+            double weight_total = 0.0;
+            if (view.reach_defined)
+            {
+                for (int hero = 0; hero < n0; ++hero)
+                {
+                    const double left = q0[static_cast<std::size_t>(hero)];
+                    if (left == 0.0)
+                    {
+                        continue;
+                    }
+                    for (int villain = 0; villain < n1; ++villain)
+                    {
+                        const double right = q1[static_cast<std::size_t>(villain)];
+                        if (right == 0.0)
+                        {
+                            continue;
+                        }
+                        const int cards[4] = {
+                            hole_a[0][static_cast<std::size_t>(hero)],
+                            hole_b[0][static_cast<std::size_t>(hero)],
+                            hole_a[1][static_cast<std::size_t>(villain)],
+                            hole_b[1][static_cast<std::size_t>(villain)],
+                        };
+                        if (cards[0] == cards[2] || cards[0] == cards[3]
+                            || cards[1] == cards[2] || cards[1] == cards[3])
+                        {
+                            continue;
+                        }
+                        bool open[52] = {};
+                        int remaining = 0;
+                        for (int card = 0; card < 52; ++card)
+                        {
+                            open[card] = !dealt[card]
+                                && card != cards[0] && card != cards[1]
+                                && card != cards[2] && card != cards[3];
+                            if (open[card])
+                            {
+                                ++remaining;
+                            }
+                        }
+                        if (remaining == 0)
+                        {
+                            continue;
+                        }
+                        const double piece = left * right / static_cast<double>(remaining);
+                        for (int card = 0; card < 52; ++card)
+                        {
+                            if (open[card])
+                            {
+                                weight[card] += piece;
+                            }
+                        }
+                        weight_total += left * right;
+                    }
+                }
+            }
+            const int child = node.child[0];
+            for (int card = 0; card < 52; ++card)
+            {
+                if (dealt[card])
+                {
+                    continue;
+                }
+                StreetInspectCard choice;
+                choice.card = holdem::format_card(card);
+                const int next_turn = node.deal_which == 1 ? card : seen_turn;
+                const int next_river = node.deal_which == 1 ? seen_river : card;
+                choice.child_id = node_id(child, next_turn, next_river);
+                choice.weight_defined = view.reach_defined && weight_total > 0.0;
+                if (choice.weight_defined)
+                {
+                    choice.weight = weight[card] / weight_total;
+                }
+                view.cards.push_back(std::move(choice));
+            }
+            return view;
+        }
+
+        view.kind = "decision";
+        view.player = node.player;
+        view.place = place_text(node.street, seen_turn, seen_river);
+        if (!node.path.empty())
+        {
+            view.line.assign(node.path.data(), node.path.size());
+        }
+        for (int action = 0; action < node.n_actions; ++action)
+        {
+            StreetInspectAction item;
+            item.label.assign(node.action_labels[action].data(), node.action_labels[action].size());
+            item.child_id = node_id(node.child[action], seen_turn, seen_river);
+            view.actions.push_back(std::move(item));
+        }
+        const std::vector<double>& reach = node.player == 0 ? q0 : q1;
+        const std::vector<double>& other = node.player == 0 ? q1 : q0;
+        double hand_joint = 0.0;
+        std::vector<double> marginal;
+        marginals_of(reach, node.player, other, 1 - node.player, hand_joint, marginal);
+        view.joint = hand_joint;
+        view.reach_defined = hand_joint > 0.0;
+        const int hands = node.player == 0 ? n0 : n1;
+        view.hands.resize(static_cast<std::size_t>(hands));
+        for (int hand = 0; hand < hands; ++hand)
+        {
+            StreetInspectHand row;
+            const int combo = combos[node.player][static_cast<std::size_t>(hand)];
+            row.combo = holdem::Range::combo_text(combo);
+            row.structural = hand_supported(node.player, hand, seen_turn, seen_river);
+            row.reach = row.structural ? reach[static_cast<std::size_t>(hand)] : 0.0;
+            if (view.reach_defined)
+            {
+                row.marginal = marginal[static_cast<std::size_t>(hand)];
+            }
+            if (row.structural)
+            {
+                const int slot = stored_slot(node, hand, seen_turn, seen_river);
+                if (slot < 0)
+                {
+                    throw std::logic_error("supported hand has no information set");
+                }
+                const Slot& stored = slots[static_cast<std::size_t>(slot)];
+                row.strategy.resize(static_cast<std::size_t>(stored.n_actions));
+                for (int action = 0; action < stored.n_actions; ++action)
+                {
+                    row.strategy[static_cast<std::size_t>(action)] =
+                        average[static_cast<std::size_t>(stored.base + action)];
+                }
+            }
+            view.hands[static_cast<std::size_t>(hand)] = std::move(row);
+        }
+        return view;
+    }
+
+    void set_average_for_test(const std::string& text, int hand, std::span<const double> probability)
+    {
+        ensure_average();
+        int node_index = 0;
+        int turn = -1;
+        int river = -1;
+        locate_node(text, node_index, turn, river);
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (node.chance || node.terminal)
+        {
+            throw std::invalid_argument("average applies to a decision node");
+        }
+        const int hands = node.player == 0 ? n0 : n1;
+        if (hand < 0 || hand >= hands || static_cast<int>(probability.size()) != node.n_actions)
+        {
+            throw std::invalid_argument("average hand or action count");
+        }
+        if (!hand_supported(node.player, hand, turn, river))
+        {
+            throw std::invalid_argument("hand has no information set on this node");
+        }
+        const int slot = stored_slot(node, hand, turn, river);
+        if (slot < 0)
+        {
+            throw std::logic_error("supported hand has no information set");
+        }
+        const Slot& stored = slots[static_cast<std::size_t>(slot)];
+        for (int action = 0; action < stored.n_actions; ++action)
+        {
+            average[static_cast<std::size_t>(stored.base + action)] = probability[static_cast<std::size_t>(action)];
+        }
+        average_ready = true;
+    }
 };
 
 StreetBatchSolver::StreetBatchSolver(
@@ -3874,6 +4486,29 @@ void StreetBatchSolver::arm_worker_failure_for_test()
 void StreetBatchSolver::arm_card_delay_for_test(int microseconds)
 {
     engine_->delay_us_.store(microseconds);
+}
+
+void StreetBatchSolver::prepare_inspection() const
+{
+    engine_->ensure_average();
+}
+
+std::string StreetBatchSolver::root_node_id() const
+{
+    return engine_->root_node_id();
+}
+
+StreetInspection StreetBatchSolver::inspect_node(const std::string& node_id) const
+{
+    return engine_->inspect_node(node_id);
+}
+
+void StreetBatchSolver::set_average_for_test(
+    const std::string& node_id,
+    int hand,
+    std::span<const double> probability)
+{
+    engine_->set_average_for_test(node_id, hand, probability);
 }
 
 std::vector<StreetStrategyEntry> StreetBatchSolver::average_strategy_entries() const

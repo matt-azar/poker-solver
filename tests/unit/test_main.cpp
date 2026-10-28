@@ -21,6 +21,7 @@ int main()
     run_street_workspace_tests();
     run_street_parallel_tests();
     run_street_showdown_tests();
+    run_street_inspect_tests();
     }
     catch (const std::exception& error)
     {

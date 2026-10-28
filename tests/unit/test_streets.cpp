@@ -1869,3 +1869,286 @@ void run_street_showdown_tests()
     }
     CHECK(saw_tie_interval);
 }
+
+void run_street_inspect_tests()
+{
+    StreetConfig config;
+    config.board = {card("Ah"), card("Kd"), card("7c")};
+    config.pot = 100;
+    config.stack = 100;
+    config.oop = Range::parse("AcAd:1,9c9d:2,QcQd:0.5");
+    config.ip = Range::parse("AcAd:0.5,QhQs:3,JhTh:1");
+    config.oop_bet_sizes = {0.5};
+    config.ip_bet_sizes = {0.5};
+    config.allow_all_in = false;
+    config.max_raises = 1;
+    config.memory_mib = 256;
+    poker::solver::StreetBatchSolver solver(config);
+    solver.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+    solver.prepare_inspection();
+    const std::string root_id = solver.root_node_id();
+    CHECK(root_id == "p0.t-1.r-1");
+    const std::vector<poker::solver::StreetStrategyEntry> entries = solver.average_strategy_entries();
+    CHECK(!entries.empty());
+    std::map<std::string, std::vector<const poker::solver::StreetStrategyEntry*>> by_infoset;
+    for (const poker::solver::StreetStrategyEntry& entry : entries)
+    {
+        by_infoset[entry.infoset].push_back(&entry);
+    }
+
+    std::vector<std::string> pending;
+    pending.push_back(root_id);
+    std::map<std::string, int> seen;
+    int decisions = 0;
+    int chances = 0;
+    bool saw_blocked = false;
+    std::string chance_sample;
+    std::string river_sample;
+    while (!pending.empty())
+    {
+        const std::string id = pending.back();
+        pending.pop_back();
+        if (seen.find(id) != seen.end())
+        {
+            continue;
+        }
+        seen.emplace(id, 1);
+        const poker::solver::StreetInspection view = solver.inspect_node(id);
+        CHECK(view.node_id == id);
+        if (view.kind == "decision")
+        {
+            ++decisions;
+            if (river_sample.empty() && id.find(".r-1") == std::string::npos)
+            {
+                river_sample = id;
+            }
+            CHECK(view.player == 0 || view.player == 1);
+            CHECK(!view.actions.empty());
+            CHECK(view.actions.size() <= 8);
+            CHECK(view.hands.size() <= 1326);
+            double strategy_mass = 0.0;
+            for (const poker::solver::StreetInspectHand& hand : view.hands)
+            {
+                if (!hand.structural)
+                {
+                    CHECK(hand.strategy.empty());
+                    CHECK(hand.reach == 0.0);
+                    if (view.place.rfind("turn ", 0) == 0)
+                    {
+                        saw_blocked = true;
+                    }
+                    continue;
+                }
+                CHECK(hand.strategy.size() == view.actions.size());
+                double sum = 0.0;
+                for (double probability : hand.strategy)
+                {
+                    sum += probability;
+                }
+                CHECK_NEAR(sum, 1.0, 1e-12);
+                const std::string who = view.player == 0 ? "OOP " : "IP ";
+                const std::string infoset = who + hand.combo + " | " + view.place + " | " + view.line;
+                const auto found = by_infoset.find(infoset);
+                CHECK(found != by_infoset.end());
+                if (found != by_infoset.end())
+                {
+                    CHECK(found->second.size() == view.actions.size());
+                    for (const poker::solver::StreetStrategyEntry* entry : found->second)
+                    {
+                        bool matched = false;
+                        for (std::size_t action = 0; action < view.actions.size(); ++action)
+                        {
+                            if (entry->action == view.actions[action].label)
+                            {
+                                CHECK(entry->probability == hand.strategy[action]);
+                                matched = true;
+                            }
+                        }
+                        CHECK(matched);
+                    }
+                }
+                strategy_mass += hand.marginal;
+            }
+            if (view.reach_defined)
+            {
+                CHECK(view.joint > 0.0);
+                CHECK_NEAR(strategy_mass, 1.0, 1e-9);
+            }
+            for (const poker::solver::StreetInspectAction& action : view.actions)
+            {
+                pending.push_back(action.child_id);
+            }
+        }
+        else if (view.kind == "chance")
+        {
+            ++chances;
+            CHECK(view.cards.size() <= 52);
+            double weight = 0.0;
+            for (const poker::solver::StreetInspectCard& choice : view.cards)
+            {
+                CHECK(choice.card != "Ah");
+                CHECK(choice.card != "Kd");
+                CHECK(choice.card != "7c");
+                if (choice.weight_defined)
+                {
+                    weight += choice.weight;
+                }
+            }
+            if (!view.cards.empty() && view.cards.front().weight_defined)
+            {
+                CHECK_NEAR(weight, 1.0, 1e-9);
+            }
+            int queued = 0;
+            for (const poker::solver::StreetInspectCard& choice : view.cards)
+            {
+                if (queued >= 2 && choice.card != "Ac" && choice.card != "2c" && choice.card != "Qc")
+                {
+                    continue;
+                }
+                if (chance_sample.empty())
+                {
+                    chance_sample = choice.child_id;
+                }
+                pending.push_back(choice.child_id);
+                ++queued;
+            }
+        }
+        else
+        {
+            CHECK(view.kind == "terminal");
+            CHECK(view.hands.empty());
+            CHECK(view.actions.empty());
+        }
+    }
+    CHECK(decisions > 0);
+    CHECK(chances > 0);
+    CHECK(seen.size() > 10);
+
+    const poker::solver::StreetInspection root = solver.inspect_node(root_id);
+    CHECK(root.reach_defined);
+    CHECK(root.player == 0);
+    {
+        const std::pair<int, double> opponent[] = {
+            {Range::combo_index(card("Ac"), card("Ad")), 0.5},
+            {Range::combo_index(card("Qh"), card("Qs")), 3.0},
+            {Range::combo_index(card("Jh"), card("Th")), 1.0},
+        };
+        double oracle_joint = 0.0;
+        std::vector<double> oracle(root.hands.size(), 0.0);
+        for (std::size_t hero = 0; hero < root.hands.size(); ++hero)
+        {
+            int a = 0;
+            int b = 0;
+            bool parsed = false;
+            for (int index = 0; index < 1326; ++index)
+            {
+                if (Range::combo_text(index) == root.hands[hero].combo)
+                {
+                    Range::combo_cards(index, a, b);
+                    parsed = true;
+                }
+            }
+            CHECK(parsed);
+            double compatible = 0.0;
+            for (const auto& opp : opponent)
+            {
+                int c = 0;
+                int d = 0;
+                Range::combo_cards(opp.first, c, d);
+                if (a == c || a == d || b == c || b == d)
+                {
+                    continue;
+                }
+                compatible += opp.second;
+            }
+            const double piece = root.hands[hero].reach * compatible;
+            oracle[hero] = piece;
+            oracle_joint += piece;
+        }
+        CHECK(oracle_joint > 0.0);
+        CHECK_NEAR(root.joint, oracle_joint, 1e-9);
+        for (std::size_t hero = 0; hero < root.hands.size(); ++hero)
+        {
+            CHECK_NEAR(root.hands[hero].marginal, oracle[hero] / oracle_joint, 1e-12);
+        }
+    }
+
+    CHECK(throws_invalid([&]() { solver.inspect_node("p0.t" + std::to_string(card("Ah")) + ".r-1"); }));
+    CHECK(throws_invalid([&]() { solver.inspect_node("nope"); }));
+    CHECK(!chance_sample.empty());
+    CHECK(!river_sample.empty());
+    {
+        const std::size_t turn_at = chance_sample.find(".t");
+        const std::size_t river_at = chance_sample.find(".r");
+        CHECK(turn_at != std::string::npos && river_at != std::string::npos);
+        const std::string dead = chance_sample.substr(0, turn_at) + ".t" + std::to_string(card("Ah")) + chance_sample.substr(river_at);
+        CHECK(throws_invalid([&]() { solver.inspect_node(dead); }));
+        const std::size_t river_turn = river_sample.find(".t");
+        const std::size_t river_card = river_sample.find(".r");
+        CHECK(river_turn != std::string::npos && river_card != std::string::npos);
+        const std::string turn_text = river_sample.substr(river_turn + 2, river_card - (river_turn + 2));
+        const std::string duplicate = river_sample.substr(0, river_card) + ".r" + turn_text;
+        CHECK(throws_invalid([&]() { solver.inspect_node(duplicate); }));
+    }
+
+    const poker::solver::StreetInspection opening = solver.inspect_node(root_id);
+    CHECK(!opening.actions.empty());
+    std::vector<double> pure(opening.actions.size(), 0.0);
+    pure[0] = 0.0;
+    if (pure.size() > 1)
+    {
+        pure[1] = 1.0;
+    }
+    else
+    {
+        pure[0] = 1.0;
+    }
+    CHECK(opening.actions.size() > 1);
+    {
+        for (int hand = 0; hand < static_cast<int>(opening.hands.size()); ++hand)
+        {
+            if (opening.hands[static_cast<std::size_t>(hand)].structural)
+            {
+                solver.set_average_for_test(root_id, hand, pure);
+            }
+        }
+        const poker::solver::StreetInspection blocked_line = solver.inspect_node(opening.actions[0].child_id);
+        CHECK(!blocked_line.reach_defined);
+        CHECK(blocked_line.joint == 0.0);
+        for (const poker::solver::StreetInspectHand& hand : blocked_line.hands)
+        {
+            if (hand.structural)
+            {
+                CHECK(!hand.strategy.empty());
+            }
+            CHECK(hand.marginal == 0.0);
+        }
+    }
+
+    StreetConfig tied;
+    tied.board = {card("Ah"), card("Ad"), card("Ac")};
+    tied.pot = 80;
+    tied.stack = 80;
+    tied.oop = Range::parse("2c3d:1.5,5c6d:0.25");
+    tied.ip = Range::parse("7c8d:3,9cTc:1");
+    tied.allow_all_in = false;
+    tied.max_raises = 0;
+    tied.memory_mib = 256;
+    poker::solver::StreetBatchSolver tie_solver(tied);
+    tie_solver.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
+    const poker::solver::StreetInspection tie_root = tie_solver.inspect_node(tie_solver.root_node_id());
+    CHECK(tie_root.kind == "decision");
+    CHECK(tie_root.reach_defined);
+    CHECK(tie_root.hands.size() >= 2);
+    for (const poker::solver::StreetInspectHand& hand : tie_root.hands)
+    {
+        CHECK(hand.structural);
+        double sum = 0.0;
+        for (double probability : hand.strategy)
+        {
+            sum += probability;
+        }
+        CHECK_NEAR(sum, 1.0, 1e-12);
+    }
+    CHECK(saw_blocked);
+}

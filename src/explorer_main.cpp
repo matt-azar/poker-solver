@@ -10,10 +10,12 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -53,8 +55,10 @@ std::mutex g_mu;
 std::thread g_worker;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_cancel{false};
-std::string g_status = "{\"running\":false}";
+std::atomic<int> g_readers{0};
+std::string g_status = "{\"running\":false,\"solution_id\":null,\"root_node_id\":null}";
 std::string g_ui_root = "ui";
+std::uint64_t g_next_solution = 1;
 
 void append_escaped(std::string& out, const std::string& text)
 {
@@ -254,6 +258,18 @@ struct Job
     int threads = 1;
     poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
 };
+
+struct HeldSolution
+{
+    std::uint64_t id = 0;
+    std::shared_ptr<poker::solver::StreetBatchSolver> street;
+    std::shared_ptr<poker::solver::RiverBatchSolver> river;
+    std::string root_id;
+    poker::solver::StreetMemoryReport memory;
+    Job job;
+};
+
+std::shared_ptr<HeldSolution> g_solution;
 
 std::vector<double> optional_sizes(const std::string& text, const char* key)
 {
@@ -457,7 +473,11 @@ std::string build_status(
     const std::vector<double>& sample_values,
     const std::vector<double>& sample_gaps,
     const std::vector<poker::solver::RiverStrategyEntry>& entries,
-    const std::string& error)
+    const std::string& error,
+    const std::string& solution_id = {},
+    const std::string& root_id = {},
+    const poker::solver::StreetMemoryReport* memory = nullptr,
+    bool include_strategy = false)
 {
     std::string out = "{\"running\":";
     out += running ? "true" : "false";
@@ -507,7 +527,50 @@ std::string build_status(
         out += format_number(sample_gaps[i]);
         out += '}';
     }
-    out += "],\"paths\":[";
+    out += "],\"solution_id\":";
+    if (solution_id.empty())
+    {
+        out += "null";
+    }
+    else
+    {
+        append_escaped(out, solution_id);
+    }
+    out += ",\"root_node_id\":";
+    if (root_id.empty())
+    {
+        out += "null";
+    }
+    else
+    {
+        append_escaped(out, root_id);
+    }
+    out += ",\"engine_allocated\":";
+    out += std::to_string(memory == nullptr ? 0 : memory->allocated_bytes);
+    out += ",\"engine_peak\":";
+    out += std::to_string(memory == nullptr ? 0 : memory->peak_allocated_bytes);
+    out += ",\"engine_reserved\":";
+    out += std::to_string(memory == nullptr ? 0 : memory->reserved_bytes);
+    out += ",\"process_rss\":";
+    out += std::to_string(memory == nullptr ? 0 : memory->process_peak_working_set_bytes);
+    out += ",\"cache_init_seconds\":";
+    out += format_number(memory == nullptr ? 0.0 : memory->cache_init_seconds);
+    out += ",\"construction_seconds\":";
+    out += format_number(memory == nullptr ? 0.0 : memory->construction_seconds);
+    out += ",\"worker_setup_seconds\":";
+    out += format_number(memory == nullptr ? 0.0 : memory->worker_setup_seconds);
+    out += ",\"train_seconds\":";
+    out += format_number(memory == nullptr ? 0.0 : memory->train_seconds);
+    out += ",\"evaluation_seconds\":";
+    out += format_number(memory == nullptr ? 0.0 : memory->evaluation_seconds);
+    out += ",\"threads\":";
+    out += std::to_string(memory == nullptr ? job.threads : memory->thread_count);
+    if (!include_strategy)
+    {
+        out += '}';
+        return out;
+    }
+    out += ",\"paths\":[";
     std::vector<std::string> paths;
     for (const poker::solver::RiverStrategyEntry& entry : entries)
     {
@@ -805,12 +868,182 @@ std::vector<poker::solver::RiverStrategyEntry> street_entries(
     return entries;
 }
 
+std::string solution_token(std::uint64_t id)
+{
+    return "s" + std::to_string(id);
+}
+
+bool parse_solution_token(const std::string& text, std::uint64_t& id)
+{
+    if (text.size() < 2 || text[0] != 's')
+    {
+        return false;
+    }
+    id = 0;
+    for (std::size_t index = 1; index < text.size(); ++index)
+    {
+        if (text[index] < '0' || text[index] > '9')
+        {
+            return false;
+        }
+        id = id * 10 + static_cast<std::uint64_t>(text[index] - '0');
+    }
+    return true;
+}
+
+std::string json_inspection(
+    const poker::solver::StreetInspection& view,
+    const poker::solver::StreetMemoryReport& memory)
+{
+    std::string out = "{\"kind\":";
+    append_escaped(out, view.kind);
+    out += ",\"node_id\":";
+    append_escaped(out, view.node_id);
+    out += ",\"line\":";
+    append_escaped(out, view.line);
+    out += ",\"place\":";
+    append_escaped(out, view.place);
+    out += ",\"player\":";
+    out += view.player < 0 ? "null" : std::to_string(view.player);
+    out += ",\"folded\":";
+    out += view.kind == "terminal" && view.folded >= 0 ? std::to_string(view.folded) : "null";
+    out += ",\"reach_defined\":";
+    out += view.reach_defined ? "true" : "false";
+    out += ",\"joint\":";
+    out += format_number(view.joint);
+    out += ",\"board\":[";
+    for (std::size_t i = 0; i < view.board.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        append_escaped(out, view.board[i]);
+    }
+    out += "],\"actions\":[";
+    for (std::size_t i = 0; i < view.actions.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        append_escaped(out, view.actions[i].label);
+    }
+    out += "],\"children\":[";
+    for (std::size_t i = 0; i < view.actions.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        append_escaped(out, view.actions[i].child_id);
+    }
+    out += "],\"combos\":[";
+    for (std::size_t i = 0; i < view.hands.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        append_escaped(out, view.hands[i].combo);
+    }
+    out += "],\"reach\":[";
+    for (std::size_t i = 0; i < view.hands.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        out += format_number(view.hands[i].reach);
+    }
+    out += "],\"marginal\":";
+    if (!view.reach_defined)
+    {
+        out += "null";
+    }
+    else
+    {
+        out += '[';
+        for (std::size_t i = 0; i < view.hands.size(); ++i)
+        {
+            if (i > 0)
+            {
+                out += ',';
+            }
+            out += format_number(view.hands[i].marginal);
+        }
+        out += ']';
+    }
+    out += ",\"structural\":[";
+    for (std::size_t i = 0; i < view.hands.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        out += view.hands[i].structural ? "1" : "0";
+    }
+    out += "],\"strategy\":[";
+    for (std::size_t i = 0; i < view.hands.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        if (!view.hands[i].structural)
+        {
+            out += "null";
+            continue;
+        }
+        out += '[';
+        for (std::size_t action = 0; action < view.hands[i].strategy.size(); ++action)
+        {
+            if (action > 0)
+            {
+                out += ',';
+            }
+            out += format_number(view.hands[i].strategy[action]);
+        }
+        out += ']';
+    }
+    out += "],\"cards\":[";
+    for (std::size_t i = 0; i < view.cards.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        out += "{\"card\":";
+        append_escaped(out, view.cards[i].card);
+        out += ",\"child_id\":";
+        append_escaped(out, view.cards[i].child_id);
+        out += ",\"weight\":";
+        if (view.cards[i].weight_defined)
+        {
+            out += format_number(view.cards[i].weight);
+        }
+        else
+        {
+            out += "null";
+        }
+        out += '}';
+    }
+    out += "],\"engine_allocated\":";
+    out += std::to_string(memory.allocated_bytes);
+    out += ",\"engine_peak\":";
+    out += std::to_string(memory.peak_allocated_bytes);
+    out += ",\"process_rss\":";
+    out += std::to_string(memory.process_peak_working_set_bytes);
+    out += '}';
+    return out;
+}
+
 void solve_job(Job job)
 {
     std::vector<int> sample_iterations;
     std::vector<double> sample_values;
     std::vector<double> sample_gaps;
-    std::vector<poker::solver::RiverStrategyEntry> entries;
+    const std::vector<poker::solver::RiverStrategyEntry> no_entries;
     double value = 0.0;
     double gap = 0.0;
     int done = 0;
@@ -819,17 +1052,9 @@ void solve_job(Job job)
     try
     {
         const int chunk = std::max(1, job.iterations / job.samples);
-        auto record = [&]()
-        {
-            const double seconds = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - started).count();
-            publish(build_status(
-                true, false, job, done, seconds, value, gap,
-                sample_iterations, sample_values, sample_gaps, entries, ""));
-        };
         if (job.board.size() == 5)
         {
-            poker::solver::RiverBatchSolver batch(river_config(job));
+            auto batch = std::make_shared<poker::solver::RiverBatchSolver>(river_config(job));
             while (done < job.iterations)
             {
                 if (g_cancel.load())
@@ -838,29 +1063,50 @@ void solve_job(Job job)
                     break;
                 }
                 const int step = std::min(chunk, job.iterations - done);
-                batch.continue_iterations(step, job.algorithm);
+                batch->continue_iterations(step, job.algorithm);
                 done += step;
-                value = batch.expected_utility();
-                gap = batch.nash_gap();
+                value = batch->expected_utility();
+                gap = batch->nash_gap();
                 sample_iterations.push_back(done);
                 sample_values.push_back(value);
                 sample_gaps.push_back(gap);
-                record();
+                const double seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - started).count();
+                publish(build_status(
+                    true, false, job, done, seconds, value, gap,
+                    sample_iterations, sample_values, sample_gaps, no_entries, ""));
                 if (job.accuracy >= 0.0 && gap <= job.accuracy * static_cast<double>(job.pot))
                 {
                     break;
                 }
             }
-            entries = batch.average_strategy_entries();
-            if (done > 0)
+            if (!cancelled && done > 0)
             {
-                value = batch.expected_utility();
-                gap = batch.nash_gap();
+                value = batch->expected_utility();
+                gap = batch->nash_gap();
+                auto held = std::make_shared<HeldSolution>();
+                held->river = std::move(batch);
+                held->job = job;
+                std::string token;
+                {
+                    std::lock_guard<std::mutex> lock(g_mu);
+                    held->id = g_next_solution++;
+                    token = solution_token(held->id);
+                    g_solution = held;
+                }
+                const double seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - started).count();
+                publish(build_status(
+                    false, false, job, done, seconds, value, gap,
+                    sample_iterations, sample_values, sample_gaps, no_entries, "",
+                    token, "", nullptr, false));
+                g_running = false;
+                return;
             }
         }
         else
         {
-            poker::solver::StreetBatchSolver batch(street_config(job));
+            auto batch = std::make_shared<poker::solver::StreetBatchSolver>(street_config(job));
             while (done < job.iterations)
             {
                 if (g_cancel.load())
@@ -871,29 +1117,55 @@ void solve_job(Job job)
                 const int step = std::min(chunk, job.iterations - done);
                 if (job.frozen)
                 {
-                    batch.continue_frozen_iterations(step, job.algorithm);
+                    batch->continue_frozen_iterations(step, job.algorithm);
                 }
                 else
                 {
-                    batch.continue_iterations(step, job.algorithm);
+                    batch->continue_iterations(step, job.algorithm);
                 }
                 done += step;
-                value = batch.expected_utility();
-                gap = batch.nash_gap();
+                value = batch->expected_utility();
+                gap = batch->nash_gap();
                 sample_iterations.push_back(done);
                 sample_values.push_back(value);
                 sample_gaps.push_back(gap);
-                record();
+                const poker::solver::StreetMemoryReport report = batch->memory_report();
+                const double seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - started).count();
+                publish(build_status(
+                    true, false, job, done, seconds, value, gap,
+                    sample_iterations, sample_values, sample_gaps, no_entries, "",
+                    "", "", &report, false));
                 if (job.accuracy >= 0.0 && gap <= job.accuracy * static_cast<double>(job.pot))
                 {
                     break;
                 }
             }
-            entries = street_entries(batch.average_strategy_entries());
-            if (done > 0)
+            if (!cancelled && done > 0)
             {
-                value = batch.expected_utility();
-                gap = batch.nash_gap();
+                batch->prepare_inspection();
+                value = batch->expected_utility();
+                gap = batch->nash_gap();
+                auto held = std::make_shared<HeldSolution>();
+                held->street = std::move(batch);
+                held->root_id = held->street->root_node_id();
+                held->memory = held->street->memory_report();
+                held->job = job;
+                std::string token;
+                {
+                    std::lock_guard<std::mutex> lock(g_mu);
+                    held->id = g_next_solution++;
+                    token = solution_token(held->id);
+                    g_solution = held;
+                }
+                const double seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - started).count();
+                publish(build_status(
+                    false, false, job, done, seconds, value, gap,
+                    sample_iterations, sample_values, sample_gaps, no_entries, "",
+                    token, held->root_id, &held->memory, false));
+                g_running = false;
+                return;
             }
         }
     }
@@ -903,7 +1175,7 @@ void solve_job(Job job)
             std::chrono::steady_clock::now() - started).count();
         publish(build_status(
             false, cancelled, job, done, seconds, value, gap,
-            sample_iterations, sample_values, sample_gaps, entries, error.what()));
+            sample_iterations, sample_values, sample_gaps, no_entries, error.what()));
         g_running = false;
         return;
     }
@@ -911,7 +1183,7 @@ void solve_job(Job job)
         std::chrono::steady_clock::now() - started).count();
     publish(build_status(
         false, cancelled, job, done, seconds, value, gap,
-        sample_iterations, sample_values, sample_gaps, entries, ""));
+        sample_iterations, sample_values, sample_gaps, no_entries, ""));
     g_running = false;
 }
 
@@ -946,7 +1218,11 @@ std::string content_type(const std::string& path)
 
 void send_response(socket_t client, int status, const std::string& type, const std::string& body)
 {
-    const char* reason = status == 200 ? "OK" : status == 202 ? "Accepted" : status == 409 ? "Conflict" : "Bad Request";
+    const char* reason = status == 200 ? "OK"
+        : status == 202 ? "Accepted"
+        : status == 404 ? "Not Found"
+        : status == 409 ? "Conflict"
+        : "Bad Request";
     std::string header = "HTTP/1.1 " + std::to_string(status) + " " + reason + "\r\n";
     header += "Content-Type: " + type + "\r\n";
     header += "Content-Length: " + std::to_string(body.size()) + "\r\n";
@@ -1033,6 +1309,89 @@ void handle_client(socket_t client)
         send_response(client, 200, "application/json", status);
         return;
     }
+    if (line.rfind("GET /api/solutions/", 0) == 0)
+    {
+        const std::string rest = line.substr(std::string("GET /api/solutions/").size());
+        const std::size_t slash = rest.find('/');
+        const std::size_t space = rest.find(' ');
+        if (slash == std::string::npos || space == std::string::npos || slash > space)
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution path\"}");
+            return;
+        }
+        const std::string token = rest.substr(0, slash);
+        const std::string tail = rest.substr(slash + 1, space - slash - 1);
+        std::uint64_t id = 0;
+        if (!parse_solution_token(token, id))
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
+            return;
+        }
+        struct Reader
+        {
+            bool active = false;
+            ~Reader()
+            {
+                if (active)
+                {
+                    g_readers.fetch_sub(1);
+                }
+            }
+        } reader;
+        std::shared_ptr<HeldSolution> held;
+        {
+            std::lock_guard<std::mutex> lock(g_mu);
+            if (!g_solution || g_solution->id != id)
+            {
+                send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+                return;
+            }
+            held = g_solution;
+            g_readers.fetch_add(1);
+            reader.active = true;
+        }
+        try
+        {
+            if (tail.rfind("nodes/", 0) == 0)
+            {
+                if (!held->street)
+                {
+                    send_response(client, 400, "application/json", "{\"error\":\"this solution has no street nodes\"}");
+                    return;
+                }
+                const poker::solver::StreetInspection view = held->street->inspect_node(tail.substr(6));
+                send_response(client, 200, "application/json", json_inspection(view, held->memory));
+                return;
+            }
+            if (tail == "export")
+            {
+                std::vector<poker::solver::RiverStrategyEntry> entries;
+                const poker::solver::StreetMemoryReport* memory = nullptr;
+                if (held->river)
+                {
+                    entries = held->river->average_strategy_entries();
+                }
+                else
+                {
+                    entries = street_entries(held->street->average_strategy_entries());
+                    memory = &held->memory;
+                }
+                send_response(client, 200, "application/json", build_status(
+                    false, false, held->job, 0, 0.0, 0.0, 0.0, {}, {}, {}, entries, "",
+                    token, held->root_id, memory, true));
+                return;
+            }
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution path\"}");
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += "}";
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
     if (line.rfind("POST /api/stop", 0) == 0)
     {
         g_cancel = true;
@@ -1053,10 +1412,23 @@ void handle_client(socket_t client)
             {
                 g_worker.join();
             }
+            std::shared_ptr<HeldSolution> retiring;
+            {
+                std::lock_guard<std::mutex> lock(g_mu);
+                retiring = std::move(g_solution);
+            }
             g_cancel = false;
             g_running = true;
             publish(build_status(true, false, job, 0, 0.0, 0.0, 0.0, {}, {}, {}, {}, ""));
-            g_worker = std::thread(solve_job, std::move(job));
+            g_worker = std::thread([job, retiring]() mutable
+            {
+                while (g_readers.load() > 0)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                retiring.reset();
+                solve_job(job);
+            });
             send_response(client, 202, "application/json", "{\"running\":true}");
         }
         catch (const std::exception& error)
