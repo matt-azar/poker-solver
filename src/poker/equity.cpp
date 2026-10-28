@@ -1,0 +1,674 @@
+#include "poker/equity.hpp"
+
+#include "poker/card.hpp"
+#include "poker/hand_eval.hpp"
+
+#include <charconv>
+#include <cmath>
+
+namespace poker::holdem
+{
+namespace
+{
+
+struct Accumulator
+{
+    double sum = 0.0;
+    double compensation = 0.0;
+
+    void add(double value)
+    {
+        const double adjusted = value - compensation;
+        const double next = sum + adjusted;
+        compensation = (next - sum) - adjusted;
+        sum = next;
+    }
+
+    double value() const { return sum; }
+};
+
+struct HandRef
+{
+    int index = 0;
+    int card0 = 0;
+    int card1 = 0;
+    double weight = 0.0;
+    bool blocked = false;
+};
+
+struct Bin
+{
+    Accumulator win;
+    Accumulator tie;
+    Accumulator loss;
+    Accumulator equity;
+    Accumulator mass;
+};
+
+[[noreturn]] void fail(EquityFailure failure, const std::string& message)
+{
+    throw EquityError(failure, message);
+}
+
+void check_cancel(const ShowdownEquityOptions& options)
+{
+    if (options.cancel_poll != nullptr && options.cancel_poll(options.cancel_context))
+    {
+        fail(EquityFailure::Cancelled, "equity calculation cancelled");
+    }
+}
+
+void validate_equity_board(std::span<const int> board)
+{
+    if (board.size() < 3 || board.size() > 5)
+    {
+        fail(EquityFailure::InvalidInput, "invalid equity input: equity board must contain 3, 4, or 5 distinct cards");
+    }
+    for (std::size_t i = 0; i < board.size(); ++i)
+    {
+        if (!valid_card(board[i]))
+        {
+            fail(EquityFailure::InvalidInput, "invalid equity input: equity board contains an invalid card");
+        }
+        for (std::size_t j = 0; j < i; ++j)
+        {
+            if (board[i] == board[j])
+            {
+                fail(EquityFailure::InvalidInput, "invalid equity input: equity board contains a duplicate card");
+            }
+        }
+    }
+}
+
+void validate_weights(const Range& range)
+{
+    const std::array<double, kComboCount>& weights = range.weights();
+    for (double weight : weights)
+    {
+        if (!std::isfinite(weight) || weight < 0.0)
+        {
+            fail(EquityFailure::InvalidWeight, "invalid equity weight: a range weight must be finite and nonnegative");
+        }
+    }
+}
+
+std::uint64_t completions_for(std::size_t board_count)
+{
+    if (board_count == 5)
+    {
+        return 1;
+    }
+    if (board_count == 4)
+    {
+        return 44;
+    }
+    return 990;
+}
+
+std::uint64_t board_mask(std::span<const int> board)
+{
+    std::uint64_t mask = 0;
+    for (int card : board)
+    {
+        mask |= std::uint64_t{1} << card;
+    }
+    return mask;
+}
+
+bool blocked_by(int card0, int card1, std::uint64_t dead)
+{
+    const std::uint64_t hand = (std::uint64_t{1} << card0) | (std::uint64_t{1} << card1);
+    return (hand & dead) != 0;
+}
+
+bool shares_card(const HandRef& left, const HandRef& right)
+{
+    return left.card0 == right.card0 || left.card0 == right.card1 || left.card1 == right.card0
+        || left.card1 == right.card1;
+}
+
+std::vector<HandRef> collect_hands(const Range& range, std::uint64_t dead)
+{
+    std::vector<HandRef> hands;
+    for (int index = 0; index < kComboCount; ++index)
+    {
+        const double weight = range.weight(index);
+        if (!(weight > 0.0))
+        {
+            continue;
+        }
+        HandRef hand;
+        hand.index = index;
+        Range::combo_cards(index, hand.card0, hand.card1);
+        hand.weight = weight;
+        hand.blocked = blocked_by(hand.card0, hand.card1, dead);
+        hands.push_back(hand);
+    }
+    return hands;
+}
+
+std::uint64_t count_legal_pairs(const std::vector<HandRef>& left, const std::vector<HandRef>& right)
+{
+    std::uint64_t pairs = 0;
+    for (const HandRef& hero : left)
+    {
+        if (hero.blocked)
+        {
+            continue;
+        }
+        for (const HandRef& villain : right)
+        {
+            if (villain.blocked || shares_card(hero, villain))
+            {
+                continue;
+            }
+            if (pairs == UINT64_MAX)
+            {
+                fail(EquityFailure::WorkLimit, "equity work limit exceeded: pair count overflow");
+            }
+            ++pairs;
+        }
+    }
+    return pairs;
+}
+
+std::uint64_t checked_product(std::uint64_t pairs, std::uint64_t completions)
+{
+    if (pairs != 0 && completions > UINT64_MAX / pairs)
+    {
+        fail(EquityFailure::WorkLimit, "equity work limit exceeded: pair-runout count overflow");
+    }
+    return pairs * completions;
+}
+
+double fraction(int count, int total)
+{
+    if (count <= 0)
+    {
+        return 0.0;
+    }
+    if (count >= total)
+    {
+        return 1.0;
+    }
+    return static_cast<double>(count) / static_cast<double>(total);
+}
+
+double equity_fraction(int wins, int ties, int total)
+{
+    if (wins >= total)
+    {
+        return 1.0;
+    }
+    if (ties >= total)
+    {
+        return 0.5;
+    }
+    if (wins == 0 && ties == 0)
+    {
+        return 0.0;
+    }
+    return (static_cast<double>(wins) + 0.5 * static_cast<double>(ties)) / static_cast<double>(total);
+}
+
+struct PairScore
+{
+    double win = 0.0;
+    double tie = 0.0;
+    double loss = 0.0;
+    double equity = 0.0;
+    double villain_equity = 0.0;
+};
+
+PairScore score_pair(
+    const HandRef& hero,
+    const HandRef& villain,
+    std::span<const int> board,
+    std::uint64_t dead_board,
+    const ShowdownEquityOptions& options)
+{
+    const std::uint64_t dead = dead_board | (std::uint64_t{1} << hero.card0) | (std::uint64_t{1} << hero.card1)
+        | (std::uint64_t{1} << villain.card0) | (std::uint64_t{1} << villain.card1);
+    int available[49];
+    int available_count = 0;
+    for (int card = 0; card < kDeckSize; ++card)
+    {
+        if ((dead & (std::uint64_t{1} << card)) == 0)
+        {
+            available[available_count++] = card;
+        }
+    }
+
+    int full[5];
+    const int board_count = static_cast<int>(board.size());
+    for (int i = 0; i < board_count; ++i)
+    {
+        full[i] = board[static_cast<std::size_t>(i)];
+    }
+
+    int wins = 0;
+    int ties = 0;
+    int losses = 0;
+    int scored = 0;
+    const auto accept = [&](int river_a, int river_b) {
+        if (board_count <= 3)
+        {
+            full[3] = river_a;
+            full[4] = river_b;
+        }
+        else if (board_count == 4)
+        {
+            full[4] = river_a;
+        }
+        const int comparison = compare_showdown(
+            hero.card0,
+            hero.card1,
+            villain.card0,
+            villain.card1,
+            std::span<const int>(full, 5));
+        if (comparison > 0)
+        {
+            ++wins;
+        }
+        else if (comparison < 0)
+        {
+            ++losses;
+        }
+        else
+        {
+            ++ties;
+        }
+        ++scored;
+        if (scored % 16 == 0)
+        {
+            check_cancel(options);
+        }
+    };
+
+    if (board_count == 5)
+    {
+        accept(0, 0);
+    }
+    else if (board_count == 4)
+    {
+        for (int i = 0; i < available_count; ++i)
+        {
+            accept(available[i], 0);
+        }
+    }
+    else
+    {
+        for (int i = 0; i < available_count; ++i)
+        {
+            for (int j = i + 1; j < available_count; ++j)
+            {
+                accept(available[i], available[j]);
+            }
+        }
+    }
+
+    const int expected = board_count == 5 ? 1 : (board_count == 4 ? 44 : 990);
+    if (scored != expected || wins + ties + losses != expected)
+    {
+        throw std::logic_error("showdown completion count mismatch");
+    }
+
+    PairScore score;
+    score.win = fraction(wins, expected);
+    score.tie = fraction(ties, expected);
+    score.loss = fraction(losses, expected);
+    score.equity = equity_fraction(wins, ties, expected);
+    score.villain_equity = equity_fraction(losses, ties, expected);
+    return score;
+}
+
+void add_outcome(Bin& bin, double opponent_weight, double win, double tie, double loss, double equity)
+{
+    bin.win.add(opponent_weight * win);
+    bin.tie.add(opponent_weight * tie);
+    bin.loss.add(opponent_weight * loss);
+    bin.equity.add(opponent_weight * equity);
+    bin.mass.add(opponent_weight);
+}
+
+PlayerShowdown finish_player(const std::vector<HandRef>& hands, const std::vector<Bin>* bins)
+{
+    PlayerShowdown player;
+    player.combos.reserve(hands.size());
+    Accumulator joint;
+    for (const HandRef& hand : hands)
+    {
+        ComboShowdown row;
+        row.index = hand.index;
+        row.combo = Range::combo_text(hand.index);
+        row.input_weight = hand.weight;
+        const Bin* bin = bins == nullptr ? nullptr : &(*bins)[static_cast<std::size_t>(hand.index)];
+        const double mass = bin == nullptr ? 0.0 : bin->mass.value();
+        if (hand.blocked || bin == nullptr || !(mass > 0.0))
+        {
+            row.defined = false;
+        }
+        else
+        {
+            row.defined = true;
+            row.compatible_mass = mass;
+            row.win = bin->win.value() / mass;
+            row.tie = bin->tie.value() / mass;
+            row.loss = bin->loss.value() / mass;
+            row.equity = bin->equity.value() / mass;
+            joint.add(hand.weight * mass);
+        }
+        player.combos.push_back(row);
+    }
+
+    const double z = joint.value();
+    if (!(z > 0.0))
+    {
+        return player;
+    }
+
+    player.defined = true;
+    Accumulator win;
+    Accumulator tie;
+    Accumulator loss;
+    Accumulator equity;
+    for (ComboShowdown& row : player.combos)
+    {
+        if (!row.defined)
+        {
+            continue;
+        }
+        row.marginal = (row.input_weight * row.compatible_mass) / z;
+        win.add(row.marginal * row.win);
+        tie.add(row.marginal * row.tie);
+        loss.add(row.marginal * row.loss);
+        equity.add(row.marginal * row.equity);
+    }
+    player.win = win.value();
+    player.tie = tie.value();
+    player.loss = loss.value();
+    player.equity = equity.value();
+    return player;
+}
+
+std::string format_number(double value)
+{
+    char buffer[64];
+    const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general, 17);
+    if (result.ec != std::errc{})
+    {
+        return "0";
+    }
+    return std::string(buffer, result.ptr);
+}
+
+void append_number_or_null(std::string& out, bool defined, double value)
+{
+    if (!defined)
+    {
+        out += "null";
+        return;
+    }
+    out += format_number(value);
+}
+
+std::vector<HandRef> prepared_hands(std::span<const int> board, const Range& range)
+{
+    validate_equity_board(board);
+    validate_weights(range);
+    return collect_hands(range, board_mask(board));
+}
+
+} // namespace
+
+EquityError::EquityError(
+    EquityFailure failure,
+    const std::string& message,
+    std::uint64_t required_pair_runouts,
+    std::uint64_t allowed_pair_runouts)
+    : std::runtime_error(message)
+    , failure_(failure)
+    , required_(required_pair_runouts)
+    , allowed_(allowed_pair_runouts)
+{
+}
+
+ShowdownWork measure_showdown_work(
+    std::span<const int> board,
+    const Range& player0,
+    const Range& player1)
+{
+    const std::vector<HandRef> hands0 = prepared_hands(board, player0);
+    const std::vector<HandRef> hands1 = prepared_hands(board, player1);
+    ShowdownWork work;
+    work.legal_pairs = count_legal_pairs(hands0, hands1);
+    work.completions_per_pair = completions_for(board.size());
+    work.pair_runouts = checked_product(work.legal_pairs, work.completions_per_pair);
+    return work;
+}
+
+ShowdownEquity showdown_equity(
+    std::span<const int> board,
+    const Range& player0,
+    const Range& player1,
+    const ShowdownEquityOptions& options)
+{
+    const std::vector<HandRef> hands0 = prepared_hands(board, player0);
+    const std::vector<HandRef> hands1 = prepared_hands(board, player1);
+    check_cancel(options);
+
+    ShowdownEquity result;
+    result.work.legal_pairs = count_legal_pairs(hands0, hands1);
+    result.work.completions_per_pair = completions_for(board.size());
+    result.work.pair_runouts = checked_product(result.work.legal_pairs, result.work.completions_per_pair);
+    if (result.work.pair_runouts > options.max_pair_runouts)
+    {
+        throw EquityError(
+            EquityFailure::WorkLimit,
+            "equity work limit exceeded: required " + std::to_string(result.work.pair_runouts)
+                + " pair-runouts, allowed " + std::to_string(options.max_pair_runouts),
+            result.work.pair_runouts,
+            options.max_pair_runouts);
+    }
+
+    const std::uint64_t dead = board_mask(board);
+    std::vector<Bin> bins0;
+    std::vector<Bin> bins1;
+    if (result.work.legal_pairs > 0)
+    {
+        bins0.resize(static_cast<std::size_t>(kComboCount));
+        bins1.resize(static_cast<std::size_t>(kComboCount));
+        for (const HandRef& hero : hands0)
+        {
+            if (hero.blocked)
+            {
+                continue;
+            }
+            for (const HandRef& villain : hands1)
+            {
+                if (villain.blocked || shares_card(hero, villain))
+                {
+                    continue;
+                }
+                check_cancel(options);
+                const PairScore score = score_pair(hero, villain, board, dead, options);
+                add_outcome(
+                    bins0[static_cast<std::size_t>(hero.index)],
+                    villain.weight,
+                    score.win,
+                    score.tie,
+                    score.loss,
+                    score.equity);
+                add_outcome(
+                    bins1[static_cast<std::size_t>(villain.index)],
+                    hero.weight,
+                    score.loss,
+                    score.tie,
+                    score.win,
+                    score.villain_equity);
+            }
+        }
+    }
+
+    result.player0 = finish_player(hands0, bins0.empty() ? nullptr : &bins0);
+    result.player1 = finish_player(hands1, bins1.empty() ? nullptr : &bins1);
+    result.joint_defined = result.player0.defined && result.player1.defined;
+    if (!result.joint_defined)
+    {
+        result.player0.defined = false;
+        result.player1.defined = false;
+        result.player0.win = 0.0;
+        result.player0.tie = 0.0;
+        result.player0.loss = 0.0;
+        result.player0.equity = 0.0;
+        result.player1.win = 0.0;
+        result.player1.tie = 0.0;
+        result.player1.loss = 0.0;
+        result.player1.equity = 0.0;
+    }
+    return result;
+}
+
+std::vector<int> parse_equity_board(std::string_view text)
+{
+    std::vector<int> cards;
+    std::size_t cursor = 0;
+    while (cursor < text.size())
+    {
+        while (cursor < text.size() && (text[cursor] == ' ' || text[cursor] == ',' || text[cursor] == '\t'))
+        {
+            ++cursor;
+        }
+        if (cursor >= text.size())
+        {
+            break;
+        }
+        std::size_t end = cursor;
+        while (end < text.size() && text[end] != ' ' && text[end] != ',' && text[end] != '\t')
+        {
+            ++end;
+        }
+        try
+        {
+            cards.push_back(parse_card(text.substr(cursor, end - cursor)));
+        }
+        catch (const std::invalid_argument& error)
+        {
+            fail(EquityFailure::InvalidInput, std::string("invalid equity input: ") + error.what());
+        }
+        cursor = end;
+    }
+    validate_equity_board(cards);
+    return cards;
+}
+
+Range parse_equity_range(std::string_view text)
+{
+    try
+    {
+        Range range = Range::parse(text);
+        validate_weights(range);
+        return range;
+    }
+    catch (const EquityError&)
+    {
+        throw;
+    }
+    catch (const std::invalid_argument& error)
+    {
+        const std::string message = error.what();
+        if (message.find("weight") != std::string::npos)
+        {
+            fail(EquityFailure::InvalidWeight, "invalid equity weight: " + message);
+        }
+        fail(EquityFailure::InvalidInput, "invalid equity input: " + message);
+    }
+}
+
+void append_combo(std::string& out, const ComboShowdown& row)
+{
+    out += "{\"combo\":\"";
+    out += row.combo;
+    out += "\",\"index\":";
+    out += std::to_string(row.index);
+    out += ",\"input_weight\":";
+    out += format_number(row.input_weight);
+    out += ",\"defined\":";
+    out += row.defined ? "true" : "false";
+    out += ",\"compatible_mass\":";
+    append_number_or_null(out, row.defined, row.compatible_mass);
+    out += ",\"marginal\":";
+    append_number_or_null(out, row.defined, row.marginal);
+    out += ",\"win\":";
+    append_number_or_null(out, row.defined, row.win);
+    out += ",\"tie\":";
+    append_number_or_null(out, row.defined, row.tie);
+    out += ",\"loss\":";
+    append_number_or_null(out, row.defined, row.loss);
+    out += ",\"equity\":";
+    append_number_or_null(out, row.defined, row.equity);
+    out += '}';
+}
+
+void append_player(std::string& out, const PlayerShowdown& player)
+{
+    out += "{\"equity\":";
+    append_number_or_null(out, player.defined, player.equity);
+    out += ",\"win\":";
+    append_number_or_null(out, player.defined, player.win);
+    out += ",\"tie\":";
+    append_number_or_null(out, player.defined, player.tie);
+    out += ",\"loss\":";
+    append_number_or_null(out, player.defined, player.loss);
+    out += ",\"combos\":[";
+    for (std::size_t i = 0; i < player.combos.size(); ++i)
+    {
+        if (i != 0)
+        {
+            out += ',';
+        }
+        append_combo(out, player.combos[i]);
+    }
+    out += "]}";
+}
+
+std::string showdown_equity_json(
+    const ShowdownEquity& equity,
+    std::span<const int> board,
+    double elapsed_seconds)
+{
+    std::string out;
+    out += "{\"model\":\"";
+    out += kEquityModel;
+    out += "\",\"units\":\"";
+    out += kEquityUnits;
+    out += "\",\"tie_share\":0.5,\"board\":[";
+    for (std::size_t i = 0; i < board.size(); ++i)
+    {
+        if (i != 0)
+        {
+            out += ',';
+        }
+        out += '"';
+        out += format_card(board[i]);
+        out += '"';
+    }
+    out += "],\"joint_defined\":";
+    out += equity.joint_defined ? "true" : "false";
+    out += ",\"legal_pairs\":";
+    out += std::to_string(equity.work.legal_pairs);
+    out += ",\"completions_per_pair\":";
+    out += std::to_string(equity.work.completions_per_pair);
+    out += ",\"pair_runouts\":";
+    out += std::to_string(equity.work.pair_runouts);
+    out += ",\"elapsed_seconds\":";
+    out += format_number(elapsed_seconds);
+    out += ",\"players\":[";
+    append_player(out, equity.player0);
+    out += ',';
+    append_player(out, equity.player1);
+    out += "]}";
+    return out;
+}
+
+} // namespace poker::holdem
