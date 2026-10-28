@@ -427,8 +427,20 @@ void test_tiny_compatible_mass()
         CHECK(hero->defined);
         CHECK(hero->equity == 1.0);
         CHECK(hero->win == 1.0);
+        CHECK(std::isfinite(hero->equity));
         CHECK(hero->compatible_mass == std::stod(epsilon));
         CHECK(hero->marginal > 0.0);
+        const ComboShowdown* nines = find_combo(equity.player0.combos, combo_of("9c9d"));
+        const ComboShowdown* blocked = find_combo(equity.player1.combos, combo_of("AhAc"));
+        const ComboShowdown* tiny = find_combo(equity.player1.combos, combo_of("2c3d"));
+        CHECK(nines != nullptr && nines->defined && std::isfinite(nines->equity));
+        CHECK(blocked != nullptr && blocked->defined);
+        CHECK(blocked->compatible_mass == 1.0);
+        CHECK(std::isfinite(blocked->equity));
+        CHECK(tiny != nullptr && tiny->defined);
+        CHECK(tiny->compatible_mass == 2.0);
+        CHECK(std::isfinite(equity.player0.equity));
+        CHECK(std::isfinite(equity.player1.equity));
         expect_matches(equity, reference_equity(board, oop, ip), 1e-12);
     }
 }

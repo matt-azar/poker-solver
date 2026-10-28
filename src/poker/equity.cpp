@@ -388,6 +388,22 @@ PlayerShowdown finish_player(const std::vector<HandRef>& hands, const std::vecto
     player.tie = tie.value();
     player.loss = loss.value();
     player.equity = equity.value();
+    if (!std::isfinite(player.win) || !std::isfinite(player.tie) || !std::isfinite(player.loss) || !std::isfinite(player.equity))
+    {
+        fail(EquityFailure::InvalidWeight, "invalid equity weight: showdown aggregate is not finite");
+    }
+    for (const ComboShowdown& row : player.combos)
+    {
+        if (!row.defined)
+        {
+            continue;
+        }
+        if (!std::isfinite(row.compatible_mass) || !std::isfinite(row.marginal) || !std::isfinite(row.win)
+            || !std::isfinite(row.tie) || !std::isfinite(row.loss) || !std::isfinite(row.equity))
+        {
+            fail(EquityFailure::InvalidWeight, "invalid equity weight: showdown combo result is not finite");
+        }
+    }
     return player;
 }
 
