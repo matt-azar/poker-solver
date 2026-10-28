@@ -35,6 +35,8 @@ struct HandRef
     double weight = 0.0;
     bool blocked = false;
     bool supported = false;
+    // Largest compatible opponent weight. Conditional fractions use this, not the range maximum.
+    double opponent_scale = 0.0;
 };
 
 struct Bin
@@ -43,7 +45,10 @@ struct Bin
     Accumulator tie;
     Accumulator loss;
     Accumulator equity;
-    Accumulator mass;
+    // Opponent weights divided by this hand's own largest compatible opponent.
+    Accumulator scaled_mass;
+    // Direct sum of the original opponent weights.
+    Accumulator original_mass;
 };
 
 [[noreturn]] void fail(EquityFailure failure, const std::string& message)
@@ -231,6 +236,33 @@ double participant_scale(const std::vector<HandRef>& hands)
     return scale;
 }
 
+void assign_opponent_scales(std::vector<HandRef>& heroes, const std::vector<HandRef>& villains)
+{
+    for (HandRef& hero : heroes)
+    {
+        hero.opponent_scale = 0.0;
+        if (!hero.supported)
+        {
+            continue;
+        }
+        for (const HandRef& villain : villains)
+        {
+            if (!villain.supported || shares_card(hero, villain))
+            {
+                continue;
+            }
+            if (villain.weight > hero.opponent_scale)
+            {
+                hero.opponent_scale = villain.weight;
+            }
+        }
+        if (!(hero.opponent_scale > 0.0) || !std::isfinite(hero.opponent_scale))
+        {
+            fail(EquityFailure::NumericalRange, "equity numerical range exceeded: no finite scale for a legal joint");
+        }
+    }
+}
+
 void require_representable_side(
     const std::vector<HandRef>& heroes,
     const std::vector<HandRef>& villains,
@@ -252,18 +284,23 @@ void require_representable_side(
             {
                 continue;
             }
-            mass.add(scaled_weight(villain.weight, villain_scale));
+            mass.add(villain.weight);
+            // The largest opponent of this hand normalizes to 1. A smaller one may be subnormal.
+            scaled_weight(villain.weight, hero.opponent_scale);
         }
-        const double scaled_mass = mass.value();
-        const double original_mass = scaled_mass * villain_scale;
-        const double term = scaled_weight(hero.weight, hero_scale) * scaled_mass;
-        if (!std::isfinite(scaled_mass) || !(scaled_mass > 0.0) || !std::isfinite(original_mass) || !(original_mass > 0.0)
-            || !std::isfinite(term) || !(term > 0.0))
+        const double original_mass = mass.value();
+        const double mass_unit = original_mass / villain_scale;
+        const double term = scaled_weight(hero.weight, hero_scale) * mass_unit;
+        if (!std::isfinite(original_mass) || !(original_mass > 0.0) || !std::isfinite(mass_unit) || mass_unit < 0.0
+            || !std::isfinite(term) || term < 0.0)
         {
             fail(EquityFailure::NumericalRange, "equity numerical range exceeded: compatible mass is not representable");
         }
-        joint.add(term);
-        any = true;
+        if (term > 0.0)
+        {
+            joint.add(term);
+            any = true;
+        }
     }
     const double total = joint.value();
     if (!any || !std::isfinite(total) || !(total > 0.0))
@@ -422,13 +459,32 @@ PairScore score_pair(
     return score;
 }
 
-void add_outcome(Bin& bin, double opponent_weight, double win, double tie, double loss, double equity)
+// unit_weight is opponent_weight / this hand's largest compatible opponent. That largest
+// opponent is exactly 1, so its fraction is stored unchanged. A global range scale would
+// turn another hand's only opponent into a subnormal and make unit_weight * fraction a
+// different positive number.
+double scale_fraction(double unit_weight, double fraction)
 {
-    bin.win.add(opponent_weight * win);
-    bin.tie.add(opponent_weight * tie);
-    bin.loss.add(opponent_weight * loss);
-    bin.equity.add(opponent_weight * equity);
-    bin.mass.add(opponent_weight);
+    if (unit_weight == 1.0)
+    {
+        return fraction;
+    }
+    const double product = unit_weight * fraction;
+    if (!std::isfinite(product))
+    {
+        fail(EquityFailure::NumericalRange, "equity numerical range exceeded: a showdown fraction is not representable");
+    }
+    return product;
+}
+
+void add_outcome(Bin& bin, double opponent_weight, double unit_weight, double win, double tie, double loss, double equity)
+{
+    bin.win.add(scale_fraction(unit_weight, win));
+    bin.tie.add(scale_fraction(unit_weight, tie));
+    bin.loss.add(scale_fraction(unit_weight, loss));
+    bin.equity.add(scale_fraction(unit_weight, equity));
+    bin.scaled_mass.add(unit_weight);
+    bin.original_mass.add(opponent_weight);
 }
 
 double finite_ratio(double numerator, double denominator)
@@ -468,11 +524,12 @@ PlayerShowdown finish_player(
             player.combos.push_back(row);
             continue;
         }
-        const double scaled_mass = bin->mass.value();
-        const double original_mass = scaled_mass * opponent_scale;
-        const double term = scaled_weight(hand.weight, own_scale) * scaled_mass;
+        const double scaled_mass = bin->scaled_mass.value();
+        const double original_mass = bin->original_mass.value();
+        const double mass_unit = original_mass / opponent_scale;
+        const double term = scaled_weight(hand.weight, own_scale) * mass_unit;
         if (!std::isfinite(scaled_mass) || !(scaled_mass > 0.0) || !std::isfinite(original_mass) || !(original_mass > 0.0)
-            || !std::isfinite(term) || !(term > 0.0))
+            || !std::isfinite(mass_unit) || mass_unit < 0.0 || !std::isfinite(term) || term < 0.0)
         {
             fail(EquityFailure::NumericalRange, "equity numerical range exceeded: compatible mass is not representable");
         }
@@ -622,6 +679,8 @@ ShowdownEquity showdown_equity(
     mark_supported(hands0, hands1);
     const double scale0 = participant_scale(hands0);
     const double scale1 = participant_scale(hands1);
+    assign_opponent_scales(hands0, hands1);
+    assign_opponent_scales(hands1, hands0);
     require_representable_side(hands0, hands1, scale0, scale1);
     require_representable_side(hands1, hands0, scale1, scale0);
 
@@ -644,14 +703,16 @@ ShowdownEquity showdown_equity(
             const PairScore score = score_pair(hero, villain, board, dead, options);
             add_outcome(
                 bins0[static_cast<std::size_t>(hero.index)],
-                scaled_weight(villain.weight, scale1),
+                villain.weight,
+                scaled_weight(villain.weight, hero.opponent_scale),
                 score.win,
                 score.tie,
                 score.loss,
                 score.equity);
             add_outcome(
                 bins1[static_cast<std::size_t>(villain.index)],
-                scaled_weight(hero.weight, scale0),
+                hero.weight,
+                scaled_weight(hero.weight, villain.opponent_scale),
                 score.loss,
                 score.tie,
                 score.win,

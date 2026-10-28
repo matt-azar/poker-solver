@@ -563,6 +563,69 @@ void test_extreme_scale()
     CHECK(showdown_equity_json(blocked, board, 0.0).find("\"joint_defined\":false") != std::string::npos);
 }
 
+void test_blocked_heavy_opponent_keeps_conditional_equity()
+{
+    const std::vector<int> board = parse_equity_board("Kh Kd 7c 4s");
+    const double win = 2.0 / 44.0;
+    const double loss = 42.0 / 44.0;
+    const double tiny = std::stod("1e-200");
+    for (const char* heavy : {"1e121", "1e123"})
+    {
+        const double heavy_weight = std::stod(heavy);
+        const Range oop = parse_equity_range("AhAd,9c9d");
+        const Range ip = parse_equity_range(std::string("9c2c:") + heavy + ",AhAc:1e-200");
+        const ShowdownEquity equity = showdown_equity(board, oop, ip);
+        CHECK(equity.joint_defined);
+        CHECK(equity.work.legal_pairs == 2);
+        const ComboShowdown* nines = find_combo(equity.player0.combos, combo_of("9c9d"));
+        const ComboShowdown* aces = find_combo(equity.player0.combos, combo_of("AhAd"));
+        const ComboShowdown* offsuit = find_combo(equity.player1.combos, combo_of("9c2c"));
+        const ComboShowdown* suited = find_combo(equity.player1.combos, combo_of("AhAc"));
+        CHECK(nines != nullptr && nines->defined);
+        CHECK(nines->input_weight == 1.0);
+        CHECK(nines->compatible_mass == tiny);
+        CHECK(nines->equity == win);
+        CHECK(nines->win == win);
+        CHECK(nines->tie == 0.0);
+        CHECK(nines->loss == loss);
+        CHECK(nines->win + nines->tie + nines->loss == 1.0);
+        CHECK(nines->marginal == tiny / heavy_weight);
+        CHECK(aces != nullptr && aces->defined);
+        CHECK(aces->compatible_mass == heavy_weight);
+        CHECK(aces->equity == 1.0);
+        CHECK(aces->win == 1.0);
+        CHECK(aces->marginal == 1.0);
+        CHECK(offsuit != nullptr && offsuit->defined);
+        CHECK(offsuit->input_weight == heavy_weight);
+        CHECK(offsuit->compatible_mass == 1.0);
+        CHECK(offsuit->equity == 0.0);
+        CHECK(suited != nullptr && suited->defined);
+        CHECK(suited->input_weight == tiny);
+        CHECK(suited->compatible_mass == 1.0);
+        CHECK(suited->equity == loss);
+        CHECK(suited->win == loss);
+        CHECK(suited->loss == win);
+        double marginals = 0.0;
+        double reconstructed = 0.0;
+        for (const ComboShowdown& row : equity.player0.combos)
+        {
+            if (!row.defined)
+            {
+                continue;
+            }
+            CHECK(std::isfinite(row.marginal));
+            CHECK(std::isfinite(row.equity));
+            marginals += row.marginal;
+            reconstructed += row.marginal * row.equity;
+        }
+        CHECK_NEAR(marginals, 1.0, 1e-12);
+        CHECK_NEAR(reconstructed, equity.player0.equity, 1e-12);
+        CHECK_NEAR(equity.player0.equity + equity.player1.equity, 1.0, 1e-12);
+        CHECK(std::isfinite(equity.player0.win) && std::isfinite(equity.player0.tie) && std::isfinite(equity.player0.loss));
+        CHECK_NEAR(equity.player0.win + equity.player0.tie + equity.player0.loss, 1.0, 1e-12);
+    }
+}
+
 void test_undefined_and_invalid()
 {
     const std::vector<int> board = parse_equity_board("Kh Kd 7c 4s 2h");
@@ -837,6 +900,7 @@ int main()
     test_tiny_compatible_mass();
     test_rescaling_and_prior();
     test_extreme_scale();
+    test_blocked_heavy_opponent_keeps_conditional_equity();
     test_undefined_and_invalid();
     test_swap_suits_and_identities();
     test_work_limit_and_cancellation();
