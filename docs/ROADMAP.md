@@ -6,6 +6,8 @@ Planning baseline: October 27, 2026. Repository: matt-azar/poker-solver, branch 
 
 Build a reliable heads-up NLHE study application with the solving, analysis, automation, persistence, training, and interface capabilities of PioSolver/PioViewer. Target functional and workflow parity in our own design and implementation. The final target includes postflop and the Edge-style preflop workflow.
 
+The finished product is used through a modern, easy-to-use GUI. Numerical correctness and engine scale are required; they are incomplete until a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train without a terminal or developer tools. The current local explorer is the study surface for early milestones. A coherent desktop interface remains a release requirement.
+
 Freeze the initial comparison target at the documented PioSolver 3.11 release. Its release notes include custom trainer themes and multiline training scenarios [S1]. Pio's manual covers a partial product [S2]. This is a complete implementation roadmap. Exhaustive feature parity requires a version-pinned, hands-on menu and workflow audit. Mark unverified details unverified. “All features” means the audited list.
 
 Separate three releases:
@@ -48,7 +50,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Scriptable engine, durable batch queue, exports | Basic endpoints/CLI; production coverage missing | M9 |
 | Drill trainer, packs, session statistics, hand histories | Missing | M11 |
 | Preflop solver, weighted flop subsets, chart editor | Missing | M12 |
-| Side-by-side grids, custom layouts, shortcuts, themes, localization | Basic web explorer | Across milestones; close in M13 |
+| Modern study GUI: layouts, two-player grids, shortcuts, themes, localization | Basic web explorer | Land with each feature; finish in M13 |
 | Stable delivery, help, upgrade/recovery, complete validation | Development workflow | Continuous; M13 release gate |
 
 The audit must also inspect small utilities: standalone equity calculator, preflop chart image export, clipboard formats, all-lines/line-frequency views, strategy simplification tools, range selection predicates, links/bookmarks, report exports, settings persistence, and diagnostics. Determine exact reference behavior before claiming each utility matches. Compare desktop Pro and Edge. PioCloud hosting, commercial licensing, and proprietary file compatibility enter the ledger only after an explicit scope decision.
@@ -191,11 +193,11 @@ Provide preflop grid views, range export, chart creation/images, subset manageme
 
 Finish the feature ledger against an actual pinned reference installation. Walk every relevant menu, dialog, configuration field and complete user journey. Record evidence and close discrepancies; a missing reference installation leaves the audit open.
 
-Ship a coherent application: setup/library, tree builder, solve monitor, analysis browser, range explorer, scenarios/locks, reports/queue, trainer, settings/help. Add resizable saved layouts, two-player grids, consistent bet colors, suit palettes, scalable text, tooltips explaining units, accessible focus order, shortcuts, localization and documentation. Include saved-solution/node bookmarks and deep links with explicit revision identity. Pio's browser/layout and URI features provide reference workflows [S13, S14].
+Ship a coherent application used through a modern, easy-to-use GUI: setup/library, tree builder, solve monitor, analysis browser, range explorer, scenarios/locks, reports/queue, trainer, settings/help. Add resizable saved layouts, two-player grids, consistent bet colors, suit palettes, scalable text, tooltips explaining units, accessible focus order, shortcuts, localization and documentation. Include saved-solution/node bookmarks and deep links with explicit revision identity. Pio's browser/layout and URI features provide reference workflows [S13, S14]. The interface is a product surface: fast to learn, dense enough for daily study, and complete enough that the CLI is optional.
 
-Deliver an installer/package for the primary platform, versioned settings, upgrade migration, crash diagnostics, clean shutdown, offline operation and testable uninstall behavior. Keep the local analysis server bound to the intended interface; validate imported files and control requests. Land packaging and UI polish with the features they belong to.
+Deliver an installer/package for the primary platform, versioned settings, upgrade migration, crash diagnostics, clean shutdown, offline operation and testable uninstall behavior. Keep the local analysis server bound to the intended interface; validate imported files and control requests. Land packaging and GUI work with the features they belong to. Early explorer screens stay reviewable. The finished interface is the M13 surface.
 
-**Gate:** a fresh-machine user can install, configure a game, solve to a stated quality, inspect a rare runout, save/reopen/resume, lock and compare a scenario, queue reports, and complete a drill without a terminal. Every parity-ledger item has evidence or a prominently stated limitation. Full reference parity requires every required ledger item to be resolved.
+**Gate:** a fresh-machine user can install, configure a game, solve to a stated quality, inspect a rare runout, save/reopen/resume, lock and compare a scenario, queue reports, and complete a drill in the GUI, without a terminal. Every parity-ledger item has evidence or a prominently stated limitation. Full reference parity requires every required ledger item to be resolved.
 
 ## 5. Cross-cutting contracts
 
@@ -227,7 +229,7 @@ Start now with the existing three-commit EV plan: publication fix; numerical eva
 
 For each milestone: write a small specification, identify invariants and failure modes, implement reviewable commits, run relevant checks, demonstrate the user workflow, then update the ledger with exact evidence. Keep changes on the development branch unless explicitly instructed otherwise. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 
-Estimate each milestone after its design spike. Product work, exact solver scale, general-sum modes, compact reconstruction, and preflop have different uncertainty. Track actual cycle time and revise forecasts at release gates. The tested CFR kernel is the foundation. The analysis product is the remaining work.
+Estimate each milestone after its design spike. Product work, exact solver scale, general-sum modes, compact reconstruction, and preflop have different uncertainty. Track actual cycle time and revise forecasts at release gates. The tested CFR kernel is the foundation. The remaining work is the analysis product and a modern, easy-to-use GUI that presents it.
 
 ## 8. Sources and reference boundaries
 
