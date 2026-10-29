@@ -23,6 +23,13 @@ function nextGeneration(body, seen) {
   return body.status_generation;
 }
 
+function solutionNeedsReload(status, solutionId, continuationPending) {
+  if (!status || status.running || !status.solution_id) {
+    return false;
+  }
+  return status.solution_id !== solutionId || continuationPending === true;
+}
+
 function groupHands(node) {
   const cells = new Map();
   (node.combos || []).forEach((combo, index) => {

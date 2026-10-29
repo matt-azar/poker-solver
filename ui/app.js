@@ -3,6 +3,7 @@ const order = "AKQJT98765432";
 let latest = null;
 let poll = null;
 let solutionId = null;
+let continuationPending = false;
 let nodeToken = 0;
 let seenGeneration = -1;
 let currentNode = null;
@@ -462,6 +463,8 @@ $("continue").addEventListener("click", async () => {
     $("stop").disabled = true;
     return;
   }
+  dropDisplayedSolution();
+  continuationPending = true;
   if (poll) {
     clearInterval(poll);
   }
@@ -512,14 +515,11 @@ async function refresh() {
   seenGeneration = generation;
   latest = status;
   if (status.running && solutionId) {
-    solutionId = null;
-    currentNode = null;
-    riverExport = null;
-    nodeToken += 1;
-    clearValues();
+    dropDisplayedSolution();
   }
   render(status);
-  if (!status.running && status.solution_id && status.solution_id !== solutionId) {
+  if (solutionNeedsReload(status, solutionId, continuationPending)) {
+    continuationPending = false;
     solutionId = status.solution_id;
     currentNode = null;
     riverExport = null;
@@ -546,6 +546,20 @@ async function readBody(response) {
   } catch (error) {
     return {error: response.statusText || "unreadable response"};
   }
+}
+
+function dropDisplayedSolution() {
+  solutionId = null;
+  currentNode = null;
+  riverExport = null;
+  nodeToken += 1;
+  clearValues();
+  $("export").disabled = true;
+  $("node-actions").innerHTML = "";
+  $("node-line").textContent = "";
+  $("node-meta").textContent = "";
+  drawGrid("oop-grid", [], "OOP");
+  drawGrid("ip-grid", [], "IP");
 }
 
 function clearValues() {

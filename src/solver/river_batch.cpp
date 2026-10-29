@@ -834,6 +834,11 @@ void RiverBatchSolver::continue_iterations(int count, Algorithm algorithm)
     engine_->train_more(count, algorithm);
 }
 
+int RiverBatchSolver::completed_iterations() const
+{
+    return engine_->trained;
+}
+
 SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorithm)
 {
     const auto start = std::chrono::steady_clock::now();

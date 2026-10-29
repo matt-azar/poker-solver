@@ -1,5 +1,6 @@
 #include "harness.hpp"
 
+#include "explorer/retained_training.hpp"
 #include "explorer/session.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
@@ -465,6 +466,44 @@ void test_continuation_keeps_the_same_solution()
     session.release_reader();
 }
 
+void test_failed_continuation_keeps_engine_progress()
+{
+    poker::explorer::RetainedTraining retained;
+    retained.job_id = 1;
+    retained.iterations = 1;
+    retained.value = 12.5;
+    retained.nash_gap = 75.0;
+    retained.sample_iterations.push_back(1);
+    retained.sample_values.push_back(12.5);
+    retained.sample_gaps.push_back(75.0);
+    poker::explorer::TrainingSnapshot engine;
+    engine.iterations = 6;
+    engine.value = 24.9873241595;
+    engine.p1_best_response = 10.0;
+    engine.p2_best_response = 14.9873241595;
+    engine.nash_gap = 24.9873241595;
+    poker::explorer::remember_completed_training(retained, 4, 0.25, engine);
+    CHECK(retained.iterations == 6);
+    CHECK(retained.job_id == 4);
+    CHECK(retained.runtime_seconds == 0.25);
+    CHECK(retained.value == engine.value);
+    CHECK(retained.sample_iterations.size() == 1);
+    CHECK(retained.sample_iterations.back() == 1);
+    poker::explorer::append_completed_sample(retained, engine);
+    CHECK(retained.sample_iterations.size() == 2);
+    CHECK(retained.sample_values.size() == 2);
+    CHECK(retained.sample_gaps.size() == 2);
+    CHECK(retained.sample_iterations.back() == 6);
+    CHECK(retained.sample_values.back() == engine.value);
+    CHECK(retained.sample_gaps.back() == engine.nash_gap);
+    CHECK(retained.iterations + 1 == 7);
+    poker::explorer::remember_completed_training(retained, 9, 1.0, engine);
+    CHECK(retained.job_id == 4);
+    CHECK(retained.runtime_seconds == 0.25);
+    poker::explorer::append_completed_sample(retained, engine);
+    CHECK(retained.sample_iterations.size() == 2);
+}
+
 } // namespace
 
 void run_session_tests()
@@ -482,4 +521,5 @@ void run_session_tests()
     test_replacement_drops_old_engine_before_construct();
     test_node_identifiers_do_not_alias();
     test_continuation_keeps_the_same_solution();
+    test_failed_continuation_keeps_engine_progress();
 }

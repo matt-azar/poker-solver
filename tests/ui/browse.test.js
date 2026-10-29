@@ -6,7 +6,7 @@ const context = {console};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("ui/browse.js", "utf8"), context);
 
-const {groupHands, frequencyOf, groupEv, shouldApply, nextGeneration} = context;
+const {groupHands, frequencyOf, groupEv, shouldApply, nextGeneration, solutionNeedsReload} = context;
 
 function cellOf(node, text) {
   const cell = groupHands(node).find((item) => item.text === text);
@@ -178,6 +178,13 @@ seen = nextGeneration({status_generation: 4}, seen);
 assert.strictEqual(seen, 4);
 assert.strictEqual(nextGeneration({status_generation: 3}, seen), null);
 assert.strictEqual(nextGeneration({status_generation: 4}, seen), 4);
+
+const finished = {running: false, solution_id: "s1"};
+assert.strictEqual(solutionNeedsReload(finished, "s1", true), true);
+assert.strictEqual(solutionNeedsReload(finished, "s1", false), false);
+assert.strictEqual(solutionNeedsReload(finished, "s2", false), true);
+assert.strictEqual(solutionNeedsReload({running: true, solution_id: "s1"}, null, true), false);
+assert.strictEqual(solutionNeedsReload({running: false, solution_id: null}, null, true), false);
 
 console.log("browse tests passed");
 }

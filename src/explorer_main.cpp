@@ -1,3 +1,4 @@
+#include "explorer/retained_training.hpp"
 #include "explorer/session.hpp"
 #include "explorer/value_worker.hpp"
 #include "game/river_game.hpp"
@@ -1520,6 +1521,122 @@ void solve_job(std::uint64_t job_id, Job job)
     }
 }
 
+poker::explorer::TrainingSnapshot completed_snapshot(
+    const HeldSolution& held,
+    int done,
+    double value,
+    double p1,
+    double p2,
+    double gap)
+{
+    poker::explorer::TrainingSnapshot snapshot;
+    snapshot.iterations = done;
+    snapshot.value = value;
+    snapshot.p1_best_response = p1;
+    snapshot.p2_best_response = p2;
+    snapshot.nash_gap = gap;
+    int trained = done;
+    if (held.street)
+    {
+        trained = held.street->completed_iterations();
+    }
+    else if (held.river)
+    {
+        trained = held.river->completed_iterations();
+    }
+    snapshot.iterations = trained;
+    if (trained == done)
+    {
+        return snapshot;
+    }
+    try
+    {
+        if (held.street)
+        {
+            snapshot.value = held.street->expected_utility();
+            snapshot.p1_best_response = held.street->p1_best_response_utility();
+            snapshot.p2_best_response = held.street->p2_best_response_utility();
+        }
+        else if (held.river)
+        {
+            snapshot.value = held.river->expected_utility();
+            snapshot.p1_best_response = held.river->p1_best_response_utility();
+            snapshot.p2_best_response = held.river->p2_best_response_utility();
+        }
+        snapshot.nash_gap = snapshot.p1_best_response + snapshot.p2_best_response;
+    }
+    catch (const std::exception&)
+    {
+        snapshot.value = held.value;
+        snapshot.p1_best_response = held.p1_best_response;
+        snapshot.p2_best_response = held.p2_best_response;
+        snapshot.nash_gap = held.nash_gap;
+    }
+    return snapshot;
+}
+
+poker::explorer::RetainedTraining take_retained(HeldSolution& held)
+{
+    poker::explorer::RetainedTraining retained;
+    retained.job_id = held.job_id;
+    retained.iterations = held.iterations;
+    retained.runtime_seconds = held.runtime_seconds;
+    retained.value = held.value;
+    retained.p1_best_response = held.p1_best_response;
+    retained.p2_best_response = held.p2_best_response;
+    retained.nash_gap = held.nash_gap;
+    retained.sample_iterations.swap(held.sample_iterations);
+    retained.sample_values.swap(held.sample_values);
+    retained.sample_gaps.swap(held.sample_gaps);
+    return retained;
+}
+
+void store_retained(HeldSolution& held, poker::explorer::RetainedTraining& retained)
+{
+    held.job_id = retained.job_id;
+    held.iterations = retained.iterations;
+    held.runtime_seconds = retained.runtime_seconds;
+    held.value = retained.value;
+    held.p1_best_response = retained.p1_best_response;
+    held.p2_best_response = retained.p2_best_response;
+    held.nash_gap = retained.nash_gap;
+    held.sample_iterations.swap(retained.sample_iterations);
+    held.sample_values.swap(retained.sample_values);
+    held.sample_gaps.swap(retained.sample_gaps);
+}
+
+void adopt_completed_training(
+    HeldSolution& held,
+    std::uint64_t job_id,
+    double seconds,
+    const poker::explorer::TrainingSnapshot& snapshot)
+{
+    const int previous = held.iterations;
+    poker::explorer::RetainedTraining retained = take_retained(held);
+    try
+    {
+        poker::explorer::remember_completed_training(retained, job_id, seconds, snapshot);
+        poker::explorer::append_completed_sample(retained, snapshot);
+    }
+    catch (const std::bad_alloc&)
+    {
+    }
+    store_retained(held, retained);
+    if (!held.street || snapshot.iterations == previous)
+    {
+        return;
+    }
+    try
+    {
+        held.street->prepare_inspection();
+        held.memory = held.street->memory_report();
+        held.has_memory = true;
+    }
+    catch (const std::exception&)
+    {
+    }
+}
+
 void continue_job(std::uint64_t job_id, int extra)
 {
     const std::shared_ptr<HeldSolution> held =
@@ -1560,6 +1677,10 @@ void continue_job(std::uint64_t job_id, int extra)
     };
     try
     {
+        const std::size_t chunks = static_cast<std::size_t>((extra + chunk - 1) / chunk);
+        held->sample_iterations.reserve(held->sample_iterations.size() + chunks);
+        held->sample_values.reserve(held->sample_values.size() + chunks);
+        held->sample_gaps.reserve(held->sample_gaps.size() + chunks);
         while (done < target)
         {
             if (g_session.stop_requested(job_id))
@@ -1651,8 +1772,12 @@ void continue_job(std::uint64_t job_id, int extra)
     }
     catch (const std::exception& error)
     {
+        const poker::explorer::TrainingSnapshot snapshot =
+            completed_snapshot(*held, done, value, p1, p2, gap);
+        adopt_completed_training(*held, job_id, seconds_now(), snapshot);
         StatusDraft draft = draft_for(
-            held->job, job_id, done, seconds_now(), true, value, p1, p2, gap,
+            held->job, held->job_id, held->iterations, held->runtime_seconds, true,
+            held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
             held->sample_iterations, held->sample_values, held->sample_gaps,
             held->has_memory ? &held->memory : nullptr);
         draft.error = error.what();
@@ -1801,13 +1926,23 @@ void handle_client(socket_t client)
             send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
             return;
         }
-        const double requested = read_number(body, "iterations", 0.0);
-        const int extra = static_cast<int>(requested);
-        if (extra < 1 || extra > 1000000000 || static_cast<double>(extra) != requested)
+        double requested = 0.0;
+        try
+        {
+            requested = read_number(body, "iterations", 0.0);
+        }
+        catch (const std::exception&)
         {
             send_response(client, 400, "application/json", "{\"error\":\"iterations must be a positive integer\"}");
             return;
         }
+        if (!std::isfinite(requested) || requested < 1.0 || requested > 1000000000.0
+            || std::floor(requested) != requested)
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"iterations must be a positive integer\"}");
+            return;
+        }
+        const int extra = static_cast<int>(requested);
         if (g_values != nullptr)
         {
             g_values->cancel();
