@@ -1,4 +1,5 @@
 build/
+worktrees/
 out/
 cmake-build-*/
 .vs/

@@ -1,6 +1,6 @@
 # Feature parity ledger
 
-Planning date: October 28, 2026. Branch: `cursor/kuhn-vanilla-cfr`. The comparison target is the documented PioSolver 3.11 release. A hands-on menu audit of a pinned installation is still open, so leaf options are not split yet and no row is `verified` against that installation.
+Planning date: October 28, 2026. Branch: `main`. The comparison target is the documented PioSolver 3.11 release. A hands-on menu audit of a pinned installation is still open, so leaf options are not split yet and no row is `verified` against that installation.
 
 States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 

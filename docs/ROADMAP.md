@@ -1,6 +1,6 @@
 # Roadmap to a complete Pio-like solver
 
-Planning baseline: October 27, 2026. Repository: matt-azar/poker-solver, branch `cursor/kuhn-vanilla-cfr`, reviewed through `2d6738657aa0ec78aa208aaf37c909459bbe8cb5`. Cursor implements; ChatGPT supplies mathematical review, milestone specifications, and independent verification. This roadmap supplements the conditional-action-EV specification. Each milestone is its own pass.
+Planning baseline: October 27, 2026. Repository: matt-azar/poker-solver, branch `main`, reviewed through `2d6738657aa0ec78aa208aaf37c909459bbe8cb5`. Cursor implements; ChatGPT supplies mathematical review, milestone specifications, and independent verification. This roadmap supplements the conditional-action-EV specification. Each milestone is its own pass.
 
 ## 1. What “finished” means
 
