@@ -1,0 +1,33 @@
+{
+  "id": "smoke_resource",
+  "role": "diagnostic",
+  "binary": "street_solver",
+  "why": "Full-range flop with a 1 MiB engine budget. Construction should report that the memory budget was exceeded. Used only to show a resource-rejection record.",
+  "study_inputs_note": "Diagnostic only. The 1 MiB figure is the engine allocation budget.",
+  "pot": 100,
+  "effective_stack": 100,
+  "board": "Ah Kd 7c",
+  "oop_range": "random",
+  "ip_range": "random",
+  "algorithm": "cfr_plus",
+  "iteration_cap": 1,
+  "threads": 1,
+  "memory_mib": 1,
+  "eval_interval": null,
+  "quality_target_nashconv_over_pot": 0.001,
+  "wall_seconds": 120,
+  "argv": [
+    "--board", "Ah,Kd,7c",
+    "--pot", "100",
+    "--stack", "100",
+    "--oop-range", "random",
+    "--ip-range", "random",
+    "--no-all-in",
+    "--max-raises", "0",
+    "--iterations", "1",
+    "--algorithm", "cfr_plus",
+    "--frozen",
+    "--memory-mib", "1",
+    "--threads", "1"
+  ]
+}
