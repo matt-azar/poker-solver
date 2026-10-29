@@ -1,0 +1,22 @@
+{
+  "id": "smoke_invalid",
+  "role": "diagnostic",
+  "binary": "river_solver",
+  "why": "Unknown flag. The river CLI prints usage and exits 2. Used only to show an invalid-input record.",
+  "study_inputs_note": "Diagnostic only. Not a solve.",
+  "pot": null,
+  "effective_stack": null,
+  "board": null,
+  "oop_range": null,
+  "ip_range": null,
+  "algorithm": null,
+  "iteration_cap": null,
+  "threads": null,
+  "memory_mib": null,
+  "eval_interval": null,
+  "quality_target_nashconv_over_pot": 0.001,
+  "wall_seconds": 30,
+  "argv": [
+    "--not-a-real-flag"
+  ]
+}
