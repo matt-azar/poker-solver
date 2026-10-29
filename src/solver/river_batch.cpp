@@ -814,6 +814,51 @@ struct RiverBatchSolver::Engine
         }
         return sum;
     }
+
+    bool same_combos(const std::vector<int>& stored, const std::vector<int>& live) const
+    {
+        return stored == live;
+    }
+
+    TrainingTables export_tables() const
+    {
+        TrainingTables tables;
+        tables.iterations = trained;
+        tables.oop_combos = combos[0];
+        tables.ip_combos = combos[1];
+        tables.slot_actions.reserve(slots.size());
+        for (const Slot& slot : slots)
+        {
+            tables.slot_actions.push_back(static_cast<std::uint16_t>(slot.n_actions));
+        }
+        tables.regret = regret;
+        tables.strategy_sum = strategy_sum;
+        return tables;
+    }
+
+    void install_tables(const TrainingTables& tables)
+    {
+        if (tables.iterations < 0
+            || !same_combos(tables.oop_combos, combos[0])
+            || !same_combos(tables.ip_combos, combos[1])
+            || tables.slot_actions.size() != slots.size()
+            || tables.regret.size() != regret.size()
+            || tables.strategy_sum.size() != strategy_sum.size())
+        {
+            throw std::invalid_argument("training tables do not match this tree");
+        }
+        for (std::size_t index = 0; index < slots.size(); ++index)
+        {
+            if (tables.slot_actions[index] != static_cast<std::uint16_t>(slots[index].n_actions))
+            {
+                throw std::invalid_argument("training tables do not match this tree");
+            }
+        }
+        regret = tables.regret;
+        strategy_sum = tables.strategy_sum;
+        trained = tables.iterations;
+        average_ready = false;
+    }
 };
 
 RiverBatchSolver::RiverBatchSolver(river::RiverConfig config)
@@ -837,6 +882,21 @@ void RiverBatchSolver::continue_iterations(int count, Algorithm algorithm)
 int RiverBatchSolver::completed_iterations() const
 {
     return engine_->trained;
+}
+
+const river::RiverConfig& RiverBatchSolver::config() const
+{
+    return engine_->config;
+}
+
+TrainingTables RiverBatchSolver::training_tables() const
+{
+    return engine_->export_tables();
+}
+
+void RiverBatchSolver::install_training_tables(const TrainingTables& tables)
+{
+    engine_->install_tables(tables);
 }
 
 SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorithm)

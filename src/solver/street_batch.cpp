@@ -1,5 +1,6 @@
 #include "solver/street_batch.hpp"
 
+#include "game/street_config_text.hpp"
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
@@ -4721,6 +4722,384 @@ struct StreetBatchSolver::Engine
             std::chrono::steady_clock::now() - started).count();
         return page;
     }
+
+    struct Continuation
+    {
+        bool defined = false;
+        double ev = 0.0;
+    };
+
+    Continuation player_continuation(
+        int node_index,
+        int turn,
+        int river,
+        const std::vector<double>& q0,
+        const std::vector<double>& q1,
+        int player,
+        const std::atomic<bool>* cancel) const
+    {
+        const int opponent = 1 - player;
+        const int hero_hands = player == 0 ? n0 : n1;
+        const int opp_hands = opponent == 0 ? n0 : n1;
+        const std::vector<double>& hero_q = player == 0 ? q0 : q1;
+        const std::vector<double>& opp_q = player == 0 ? q1 : q0;
+        std::vector<double> strategic[2] = {
+            std::vector<double>(static_cast<std::size_t>(n0), 0.0),
+            std::vector<double>(static_cast<std::size_t>(n1), 0.0)};
+        const std::vector<double>* weight[2] = {&q0, &q1};
+        for (int who = 0; who < 2; ++who)
+        {
+            for (int hand = 0; hand < static_cast<int>(strategic[who].size()); ++hand)
+            {
+                const double prior = range_w[who][static_cast<std::size_t>(hand)];
+                if (prior > 0.0)
+                {
+                    strategic[who][static_cast<std::size_t>(hand)] =
+                        (*weight[who])[static_cast<std::size_t>(hand)] / prior;
+                }
+            }
+        }
+        double peak = 0.0;
+        for (int hand = 0; hand < opp_hands; ++hand)
+        {
+            peak = std::max(
+                peak,
+                range_w[opponent][static_cast<std::size_t>(hand)]
+                    * strategic[opponent][static_cast<std::size_t>(hand)]);
+        }
+        Continuation result;
+        if (!(peak > 0.0))
+        {
+            return result;
+        }
+        const double reach_scale = 1.0 / peak;
+        for (double& value : strategic[opponent])
+        {
+            value *= reach_scale;
+        }
+        Scratch& seeded = workspace.scratch[0];
+        if (player == 0)
+        {
+            for (int hand = 0; hand < n0; ++hand)
+            {
+                seeded.pi0[static_cast<std::size_t>(hand)] =
+                    hand_supported(0, hand, turn, river) ? 1.0 : 0.0;
+            }
+            std::copy(strategic[1].begin(), strategic[1].end(), seeded.pi1.begin());
+        }
+        else
+        {
+            std::copy(strategic[0].begin(), strategic[0].end(), seeded.pi0.begin());
+            for (int hand = 0; hand < n1; ++hand)
+            {
+                seeded.pi1[static_cast<std::size_t>(hand)] =
+                    hand_supported(1, hand, turn, river) ? 1.0 : 0.0;
+            }
+        }
+        average_value_walk(workspace, node_index, turn, river, 0, false, cancel);
+        std::vector<double> amount(static_cast<std::size_t>(opp_hands), 0.0);
+        double total = 0.0;
+        double by_card[52] = {};
+        for (int hand = 0; hand < opp_hands; ++hand)
+        {
+            if (!hand_live(opponent, hand, turn, river))
+            {
+                continue;
+            }
+            const double piece = range_w[opponent][static_cast<std::size_t>(hand)]
+                * strategic[opponent][static_cast<std::size_t>(hand)];
+            if (piece == 0.0)
+            {
+                continue;
+            }
+            amount[static_cast<std::size_t>(hand)] = piece;
+            total += piece;
+            by_card[hole_a[opponent][static_cast<std::size_t>(hand)]] += piece;
+            by_card[hole_b[opponent][static_cast<std::size_t>(hand)]] += piece;
+        }
+        const Scratch& evaluated = workspace.scratch[0];
+        const std::pmr::vector<double>& raw = player == 0 ? evaluated.ev0 : evaluated.ev1;
+        std::vector<double> marginal;
+        double hand_joint = 0.0;
+        marginals_of(hero_q, player, opp_q, opponent, hand_joint, marginal);
+        if (!(hand_joint > 0.0))
+        {
+            return result;
+        }
+        double node_ev = 0.0;
+        bool node_ok = true;
+        bool any = false;
+        for (int hand = 0; hand < hero_hands; ++hand)
+        {
+            if (!hand_supported(player, hand, turn, river))
+            {
+                continue;
+            }
+            const double open = stable_compatible_mass(
+                player, hand, opponent, total, by_card, amount);
+            const double prior = range_w[player][static_cast<std::size_t>(hand)];
+            if (!(open > 0.0) || !(prior > 0.0))
+            {
+                if (marginal[static_cast<std::size_t>(hand)] > 0.0)
+                {
+                    node_ok = false;
+                }
+                continue;
+            }
+            const double stored_raw = raw[static_cast<std::size_t>(hand)];
+            const double signed_raw = player == 0 ? stored_raw : -stored_raw;
+            node_ev += marginal[static_cast<std::size_t>(hand)]
+                * (signed_raw / (prior * joint_scale * open));
+            any = true;
+        }
+        result.defined = node_ok && any;
+        if (result.defined)
+        {
+            result.ev = node_ev;
+        }
+        return result;
+    }
+
+    bool same_combos(const std::vector<int>& stored, const std::pmr::vector<int>& live) const
+    {
+        if (stored.size() != live.size())
+        {
+            return false;
+        }
+        for (std::size_t index = 0; index < stored.size(); ++index)
+        {
+            if (stored[index] != live[index])
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    TrainingTables export_tables() const
+    {
+        TrainingTables tables;
+        tables.iterations = trained;
+        tables.oop_combos.assign(combos[0].begin(), combos[0].end());
+        tables.ip_combos.assign(combos[1].begin(), combos[1].end());
+        tables.slot_actions.reserve(slots.size());
+        for (const Slot& slot : slots)
+        {
+            tables.slot_actions.push_back(static_cast<std::uint16_t>(slot.n_actions));
+        }
+        tables.regret.assign(regret.begin(), regret.end());
+        tables.strategy_sum.assign(strategy_sum.begin(), strategy_sum.end());
+        return tables;
+    }
+
+    void install_tables(const TrainingTables& tables)
+    {
+        check_usable();
+        if (tables.iterations < 0
+            || !same_combos(tables.oop_combos, combos[0])
+            || !same_combos(tables.ip_combos, combos[1])
+            || tables.slot_actions.size() != slots.size()
+            || tables.regret.size() != regret.size()
+            || tables.strategy_sum.size() != strategy_sum.size())
+        {
+            throw std::invalid_argument("training tables do not match this tree");
+        }
+        for (std::size_t index = 0; index < slots.size(); ++index)
+        {
+            if (tables.slot_actions[index] != static_cast<std::uint16_t>(slots[index].n_actions))
+            {
+                throw std::invalid_argument("training tables do not match this tree");
+            }
+        }
+        std::copy(tables.regret.begin(), tables.regret.end(), regret.begin());
+        std::copy(tables.strategy_sum.begin(), tables.strategy_sum.end(), strategy_sum.begin());
+        trained = tables.iterations;
+        average_ready = false;
+    }
+
+    std::string weighted_range(int player, const std::vector<double>& reach) const
+    {
+        std::string text;
+        for (int hand = 0; hand < static_cast<int>(reach.size()); ++hand)
+        {
+            const double weight = reach[static_cast<std::size_t>(hand)];
+            if (!(weight > 0.0))
+            {
+                continue;
+            }
+            if (!text.empty())
+            {
+                text.push_back(',');
+            }
+            text += holdem::Range::combo_text(combos[player][static_cast<std::size_t>(hand)]);
+            text.push_back(':');
+            text += streets::format_number(weight);
+        }
+        return text;
+    }
+
+    StreetRunoutValues compute_runout_values(
+        const std::string& text,
+        const std::atomic<bool>* cancel) const
+    {
+        const auto started = std::chrono::steady_clock::now();
+        ensure_average();
+        ensure_ranks();
+        int node_index = 0;
+        int turn = -1;
+        int river = -1;
+        locate_node(text, node_index, turn, river);
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (!node.chance)
+        {
+            throw std::invalid_argument("runout values require a chance node");
+        }
+        std::vector<double> q0;
+        std::vector<double> q1;
+        replay_weights(node_index, turn, river, q0, q1);
+        StreetRunoutValues page;
+        page.node_id = text;
+        const bool reach_defined = joint_mass_of(q0, q1) > 0.0;
+        bool dealt[52] = {};
+        for (int card : config.board)
+        {
+            dealt[card] = true;
+        }
+        if (turn >= 0)
+        {
+            dealt[turn] = true;
+        }
+        if (river >= 0)
+        {
+            dealt[river] = true;
+        }
+        double occupied[52] = {};
+        int next_cards = 0;
+        if (reach_defined)
+        {
+            double marginal_joint = 0.0;
+            std::vector<double> marginal0;
+            std::vector<double> marginal1;
+            marginals_of(q0, 0, q1, 1, marginal_joint, marginal0);
+            marginals_of(q1, 1, q0, 0, marginal_joint, marginal1);
+            for (int hand = 0; hand < n0; ++hand)
+            {
+                const double weight = marginal0[static_cast<std::size_t>(hand)];
+                occupied[hole_a[0][static_cast<std::size_t>(hand)]] += weight;
+                occupied[hole_b[0][static_cast<std::size_t>(hand)]] += weight;
+            }
+            for (int hand = 0; hand < n1; ++hand)
+            {
+                const double weight = marginal1[static_cast<std::size_t>(hand)];
+                occupied[hole_a[1][static_cast<std::size_t>(hand)]] += weight;
+                occupied[hole_b[1][static_cast<std::size_t>(hand)]] += weight;
+            }
+            int board_count = 0;
+            for (int card = 0; card < 52; ++card)
+            {
+                if (dealt[card])
+                {
+                    ++board_count;
+                }
+            }
+            next_cards = 52 - board_count - 4;
+            if (next_cards <= 0)
+            {
+                throw std::logic_error("chance node has no next card");
+            }
+        }
+        const int child = node.child[0];
+        bool parent_ok = reach_defined;
+        double parent_oop = 0.0;
+        double parent_ip = 0.0;
+        for (int card = 0; card < 52; ++card)
+        {
+            if (dealt[card])
+            {
+                continue;
+            }
+            throw_if_cancelled(cancel);
+            StreetRunoutCard row;
+            row.card = holdem::format_card(card);
+            const int next_turn = node.deal_which == 1 ? card : turn;
+            const int next_river = node.deal_which == 1 ? river : card;
+            row.child_id = node_id(child, next_turn, next_river);
+            row.probability_defined = reach_defined;
+            if (reach_defined)
+            {
+                row.probability = (1.0 - occupied[card]) / static_cast<double>(next_cards);
+            }
+            if (reach_defined && row.probability > 0.0)
+            {
+                std::vector<double> child_q0 = q0;
+                std::vector<double> child_q1 = q1;
+                zero_card(child_q0, 0, card);
+                zero_card(child_q1, 1, card);
+                zero_unsupported(child_q0, 0, next_turn, next_river);
+                zero_unsupported(child_q1, 1, next_turn, next_river);
+                const Continuation oop = player_continuation(
+                    child, next_turn, next_river, child_q0, child_q1, 0, cancel);
+                const Continuation ip = player_continuation(
+                    child, next_turn, next_river, child_q0, child_q1, 1, cancel);
+                row.ev_defined = oop.defined && ip.defined;
+                if (row.ev_defined)
+                {
+                    row.oop_ev = oop.ev;
+                    row.ip_ev = ip.ev;
+                    parent_oop += row.probability * row.oop_ev;
+                    parent_ip += row.probability * row.ip_ev;
+                }
+                else
+                {
+                    parent_ok = false;
+                }
+            }
+            else if (reach_defined && row.probability == 0.0)
+            {
+                row.ev_defined = false;
+            }
+            else
+            {
+                parent_ok = false;
+            }
+            page.cards.push_back(std::move(row));
+        }
+        page.parent_ev_defined = parent_ok;
+        if (parent_ok)
+        {
+            page.parent_oop_ev = parent_oop;
+            page.parent_ip_ev = parent_ip;
+        }
+        page.query_seconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
+        return page;
+    }
+
+    StreetReachWeights compute_reaching_weights(const std::string& text) const
+    {
+        ensure_average();
+        int node_index = 0;
+        int turn = -1;
+        int river = -1;
+        locate_node(text, node_index, turn, river);
+        std::vector<double> q0;
+        std::vector<double> q1;
+        replay_weights(node_index, turn, river, q0, q1);
+        StreetReachWeights weights;
+        weights.node_id = text;
+        weights.board = config.board;
+        if (turn >= 0)
+        {
+            weights.board.push_back(turn);
+        }
+        if (river >= 0)
+        {
+            weights.board.push_back(river);
+        }
+        weights.oop = weighted_range(0, q0);
+        weights.ip = weighted_range(1, q1);
+        return weights;
+    }
 };
 
 StreetBatchSolver::StreetBatchSolver(
@@ -5155,6 +5534,39 @@ StreetActionValues StreetBatchSolver::action_values(
     value_cache_ = std::move(staged);
     value_cache_valid_ = true;
     return page;
+}
+
+StreetRunoutValues StreetBatchSolver::runout_values(
+    const std::string& node_id,
+    const std::atomic<bool>* cancel) const
+{
+    std::lock_guard<std::mutex> lock(value_mu_);
+    StreetRunoutValues page = engine_->compute_runout_values(node_id, cancel);
+    page.profile_epoch = profile_epoch_;
+    page.node_id = node_id;
+    return page;
+}
+
+StreetReachWeights StreetBatchSolver::reaching_weights(const std::string& node_id) const
+{
+    std::lock_guard<std::mutex> lock(value_mu_);
+    return engine_->compute_reaching_weights(node_id);
+}
+
+const streets::StreetConfig& StreetBatchSolver::config() const
+{
+    return engine_->config;
+}
+
+TrainingTables StreetBatchSolver::training_tables() const
+{
+    return engine_->export_tables();
+}
+
+void StreetBatchSolver::install_training_tables(const TrainingTables& tables)
+{
+    note_profile_mutation();
+    engine_->install_tables(tables);
 }
 
 std::uint64_t StreetBatchSolver::profile_epoch() const

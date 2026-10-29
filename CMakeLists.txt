@@ -21,6 +21,7 @@ add_library(poker_solver_core STATIC
     src/solver/river_batch.cpp
     src/solver/street_batch.cpp
     src/explorer/value_worker.cpp
+    src/explorer/checkpoint.cpp
     src/poker/card.cpp
     src/poker/hand_eval.cpp
     src/poker/range.cpp
@@ -34,6 +35,8 @@ if(WIN32)
 endif()
 target_link_libraries(poker_solver_core PUBLIC Threads::Threads)
 poker_set_warnings(poker_solver_core)
+
+include(cmake/EquityTargets.cmake)
 
 add_executable(kuhn_solver src/main.cpp)
 target_link_libraries(kuhn_solver PRIVATE poker_solver_core)
@@ -52,7 +55,7 @@ target_link_libraries(street_solver PRIVATE poker_solver_core)
 poker_set_warnings(street_solver)
 
 add_executable(explorer src/explorer_main.cpp)
-target_link_libraries(explorer PRIVATE poker_solver_core)
+target_link_libraries(explorer PRIVATE poker_solver_core poker_equity)
 if(WIN32)
     target_link_libraries(explorer PRIVATE ws2_32)
 endif()
@@ -75,12 +78,13 @@ add_executable(poker_solver_tests
     tests/unit/test_chance.cpp
     tests/unit/test_action_ev.cpp
     tests/unit/test_value_worker.cpp
+    tests/unit/test_checkpoint.cpp
 )
 target_include_directories(poker_solver_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
-target_link_libraries(poker_solver_tests PRIVATE poker_solver_core)
+target_link_libraries(poker_solver_tests PRIVATE poker_solver_core poker_equity)
 if(WIN32)
     target_link_libraries(poker_solver_tests PRIVATE ws2_32)
 endif()

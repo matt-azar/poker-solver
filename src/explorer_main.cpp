@@ -1,8 +1,12 @@
+#include "explorer/checkpoint.hpp"
 #include "explorer/retained_training.hpp"
 #include "explorer/session.hpp"
 #include "explorer/value_worker.hpp"
+#include "game/river_config_text.hpp"
 #include "game/river_game.hpp"
+#include "game/street_config_text.hpp"
 #include "game/street_game.hpp"
+#include "poker/equity.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
 #include "solver/river_batch.hpp"
@@ -133,12 +137,28 @@ std::string read_string(const std::string& text, const char* key, const std::str
     std::string value;
     for (std::size_t i = cursor + 1; i < text.size(); ++i)
     {
-        if (text[i] == '\\' && i + 1 < text.size())
-        {
-            value.push_back(text[i + 1]);
-            ++i;
-            continue;
-        }
+            if (text[i] == '\\' && i + 1 < text.size())
+            {
+                const char escaped = text[i + 1];
+                if (escaped == 'n')
+                {
+                    value.push_back('\n');
+                }
+                else if (escaped == 'r')
+                {
+                    value.push_back('\r');
+                }
+                else if (escaped == 't')
+                {
+                    value.push_back('\t');
+                }
+                else
+                {
+                    value.push_back(escaped);
+                }
+                ++i;
+                continue;
+            }
         if (text[i] == '"')
         {
             return value;
@@ -1250,6 +1270,78 @@ std::string json_action_values(
     return out;
 }
 
+std::string json_runout_values(
+    const poker::solver::StreetRunoutValues& page,
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    std::uint64_t generation)
+{
+    std::string out = "{\"pending\":false,\"kind\":\"runout\",";
+    out += value_identity(solution_id, job_id, page.node_id, generation);
+    out += ",\"units\":";
+    append_escaped(out, page.units);
+    out += ",\"utility_basis\":";
+    append_escaped(out, page.utility_basis);
+    out += ",\"parent_ev_defined\":";
+    out += page.parent_ev_defined ? "true" : "false";
+    out += ",\"parent_oop_ev\":";
+    append_optional(out, page.parent_ev_defined, page.parent_oop_ev);
+    out += ",\"parent_ip_ev\":";
+    append_optional(out, page.parent_ev_defined, page.parent_ip_ev);
+    out += ",\"cards\":[";
+    for (std::size_t index = 0; index < page.cards.size(); ++index)
+    {
+        const poker::solver::StreetRunoutCard& card = page.cards[index];
+        if (index > 0)
+        {
+            out += ',';
+        }
+        out += "{\"card\":";
+        append_escaped(out, card.card);
+        out += ",\"child_id\":";
+        append_escaped(out, card.child_id);
+        out += ",\"probability_defined\":";
+        out += card.probability_defined ? "true" : "false";
+        out += ",\"probability\":";
+        append_optional(out, card.probability_defined, card.probability);
+        out += ",\"ev_defined\":";
+        out += card.ev_defined ? "true" : "false";
+        out += ",\"oop_ev\":";
+        append_optional(out, card.ev_defined, card.oop_ev);
+        out += ",\"ip_ev\":";
+        append_optional(out, card.ev_defined, card.ip_ev);
+        out += '}';
+    }
+    out += "],\"query_seconds\":";
+    out += format_number(page.query_seconds);
+    out += '}';
+    return out;
+}
+
+std::string json_node_equity(
+    const poker::solver::StreetNodeEquity& page,
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    std::uint64_t generation)
+{
+    std::string out = "{\"pending\":false,\"kind\":\"equity\",";
+    out += value_identity(solution_id, job_id, page.node_id, generation);
+    out += ",\"units\":";
+    append_escaped(out, page.units);
+    out += ",\"model\":";
+    append_escaped(out, page.model);
+    out += ",\"defined\":";
+    out += page.defined ? "true" : "false";
+    out += ",\"oop_equity\":";
+    append_optional(out, page.defined, page.oop_equity);
+    out += ",\"ip_equity\":";
+    append_optional(out, page.defined, page.ip_equity);
+    out += ",\"query_seconds\":";
+    out += format_number(page.query_seconds);
+    out += '}';
+    return out;
+}
+
 void send_response(
     socket_t client,
     int status,
@@ -1262,13 +1354,15 @@ void respond_value_query(
     std::uint64_t solution_id,
     std::uint64_t job_id,
     const std::string& node_id,
-    std::chrono::steady_clock::time_point started)
+    std::chrono::steady_clock::time_point started,
+    const std::string& kind)
 {
     const std::uint64_t generation = g_session.generation();
     poker::explorer::ValueRequest request;
     request.solution_id = solution_id;
     request.job_id = job_id;
     request.node_id = node_id;
+    request.kind = kind;
     const poker::explorer::ValueReply reply = g_values->submit(request);
     const int status = reply.ready ? (reply.ok ? 200 : 400) : 202;
     const std::string body = reply.ready
@@ -1372,15 +1466,77 @@ void solve_job(std::uint64_t job_id, Job job)
         {
             river = std::make_shared<poker::solver::RiverBatchSolver>(river_config(job));
         }
-        while (done < job.iterations)
+        const auto publish_stopped = [&]()
         {
-            if (g_session.stop_requested(job_id))
+            if (done <= 0)
             {
                 StatusDraft draft = draft_for(
                     job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
                     sample_iterations, sample_values, sample_gaps, memory_ptr);
                 draft.cancelled = true;
                 g_session.finish_cancelled(job_id, build_status(draft));
+                return;
+            }
+            auto kept_solution = std::make_shared<HeldSolution>();
+            kept_solution->job = job;
+            kept_solution->job_id = job_id;
+            kept_solution->iterations = done;
+            kept_solution->runtime_seconds = seconds_now();
+            kept_solution->value = value;
+            kept_solution->p1_best_response = p1;
+            kept_solution->p2_best_response = p2;
+            kept_solution->nash_gap = gap;
+            kept_solution->sample_iterations = sample_iterations;
+            kept_solution->sample_values = sample_values;
+            kept_solution->sample_gaps = sample_gaps;
+            if (street_tree)
+            {
+                street->prepare_inspection();
+                kept_solution->street = street;
+                kept_solution->root_id = street->root_node_id();
+                kept_solution->memory = street->memory_report();
+                kept_solution->has_memory = true;
+                street_memory = kept_solution->memory;
+            }
+            else
+            {
+                kept_solution->river = river;
+            }
+            const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+            StatusDraft kept = draft_for(
+                job, job_id, done, kept_solution->runtime_seconds, true, value, p1, p2, gap,
+                kept_solution->sample_iterations, kept_solution->sample_values, kept_solution->sample_gaps,
+                kept_solution->has_memory ? &kept_solution->memory : nullptr);
+            kept.cancelled = true;
+            if (!kept_permit.allowed)
+            {
+                g_session.finish_cancelled(job_id, build_status(kept));
+                return;
+            }
+            kept_solution->id = kept_permit.solution_id;
+            kept.solution_id = kept_permit.solution_id;
+            kept.root_id = kept_solution->root_id;
+            const bool published = g_session.commit_kept(
+                job_id, kept_solution, kept_permit.solution_id, [&](std::uint64_t generation)
+                {
+                    StatusDraft draft = kept;
+                    draft.generation = generation;
+                    return build_status(draft);
+                });
+            if (!published && g_session.phase() == poker::explorer::Phase::Running)
+            {
+                StatusDraft draft = kept;
+                draft.error = "failed to keep the solve";
+                draft.solution_id = 0;
+                draft.root_id.clear();
+                g_session.finish_failed(job_id, build_status(draft));
+            }
+        };
+        while (done < job.iterations)
+        {
+            if (g_session.stop_requested(job_id))
+            {
+                publish_stopped();
                 return;
             }
             const int step = std::min(chunk, job.iterations - done);
@@ -1411,11 +1567,7 @@ void solve_job(std::uint64_t job_id, Job job)
             }
             if (g_session.stop_requested(job_id))
             {
-                StatusDraft draft = draft_for(
-                    job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
-                    sample_iterations, sample_values, sample_gaps, memory_ptr);
-                draft.cancelled = true;
-                g_session.finish_cancelled(job_id, build_status(draft));
+                publish_stopped();
                 return;
             }
             StatusDraft progress = draft_for(
@@ -1430,11 +1582,7 @@ void solve_job(std::uint64_t job_id, Job job)
         }
         if (done == 0 || g_session.stop_requested(job_id))
         {
-            StatusDraft draft = draft_for(
-                job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
-                sample_iterations, sample_values, sample_gaps, memory_ptr);
-            draft.cancelled = true;
-            g_session.finish_cancelled(job_id, build_status(draft));
+            publish_stopped();
             return;
         }
         auto held = std::make_shared<HeldSolution>();
@@ -1464,16 +1612,53 @@ void solve_job(std::uint64_t job_id, Job job)
         }
         if (g_session.stop_requested(job_id))
         {
-            StatusDraft draft = draft_for(
+            const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+            StatusDraft kept = draft_for(
                 job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
-                sample_iterations, sample_values, sample_gaps, held->has_memory ? &held->memory : nullptr);
-            draft.cancelled = true;
-            g_session.finish_cancelled(job_id, build_status(draft));
+                held->sample_iterations, held->sample_values, held->sample_gaps,
+                held->has_memory ? &held->memory : nullptr);
+            kept.cancelled = true;
+            if (!kept_permit.allowed)
+            {
+                g_session.finish_cancelled(job_id, build_status(kept));
+                return;
+            }
+            held->id = kept_permit.solution_id;
+            kept.solution_id = kept_permit.solution_id;
+            kept.root_id = held->root_id;
+            g_session.commit_kept(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
+            {
+                StatusDraft draft = kept;
+                draft.generation = generation;
+                return build_status(draft);
+            });
             return;
         }
         const poker::explorer::Session::Permit permit = g_session.prepare_success(job_id);
         if (!permit.allowed)
         {
+            if (g_session.stop_requested(job_id))
+            {
+                const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+                StatusDraft kept = draft_for(
+                    job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
+                    held->sample_iterations, held->sample_values, held->sample_gaps,
+                    held->has_memory ? &held->memory : nullptr);
+                kept.cancelled = true;
+                if (kept_permit.allowed)
+                {
+                    held->id = kept_permit.solution_id;
+                    kept.solution_id = kept_permit.solution_id;
+                    kept.root_id = held->root_id;
+                    g_session.commit_kept(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
+                    {
+                        StatusDraft draft = kept;
+                        draft.generation = generation;
+                        return build_status(draft);
+                    });
+                    return;
+                }
+            }
             StatusDraft draft = draft_for(
                 job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
                 sample_iterations, sample_values, sample_gaps, held->has_memory ? &held->memory : nullptr);
@@ -1892,6 +2077,192 @@ std::string receive_request(socket_t client)
     return request;
 }
 
+constexpr std::uint64_t kMaxCheckpointBytes = 2ull * 1024ull * 1024ull * 1024ull;
+
+std::uint8_t algorithm_code(poker::solver::Algorithm algorithm)
+{
+    if (algorithm == poker::solver::Algorithm::VanillaCfr)
+    {
+        return 0;
+    }
+    if (algorithm == poker::solver::Algorithm::CfrPlus)
+    {
+        return 1;
+    }
+    return 2;
+}
+
+poker::solver::Algorithm algorithm_from_code(std::uint8_t code)
+{
+    if (code == 0)
+    {
+        return poker::solver::Algorithm::VanillaCfr;
+    }
+    if (code == 1)
+    {
+        return poker::solver::Algorithm::CfrPlus;
+    }
+    if (code == 2)
+    {
+        return poker::solver::Algorithm::LinearCfr;
+    }
+    throw std::invalid_argument("checkpoint algorithm is unknown");
+}
+
+Job job_from_street(const poker::streets::StreetConfig& config)
+{
+    Job job;
+    job.board = config.board;
+    job.pot = config.pot;
+    job.stack = config.stack;
+    job.oop = config.oop;
+    job.ip = config.ip;
+    job.oop_bets = config.oop_bet_sizes;
+    job.ip_bets = config.ip_bet_sizes;
+    job.oop_raises = config.oop_raise_sizes;
+    job.ip_raises = config.ip_raise_sizes;
+    job.oop_flop_bets = config.oop_flop_bets;
+    job.oop_turn_bets = config.oop_turn_bets;
+    job.oop_river_bets = config.oop_river_bets;
+    job.ip_flop_bets = config.ip_flop_bets;
+    job.ip_turn_bets = config.ip_turn_bets;
+    job.ip_river_bets = config.ip_river_bets;
+    job.oop_donk = config.oop_donk_sizes;
+    job.oop_raise_multiples = config.oop_raise_multiples;
+    job.ip_raise_multiples = config.ip_raise_multiples;
+    job.pot_cap = config.pot_cap;
+    job.allow_three_bet = config.allow_three_bet;
+    job.allow_all_in = config.allow_all_in;
+    job.geometric = config.geometric;
+    job.all_in_threshold = config.all_in_threshold;
+    job.max_raises = config.max_raises;
+    job.memory_mib = config.memory_mib;
+    job.threads = config.threads;
+    return job;
+}
+
+Job job_from_river(const poker::river::RiverConfig& config)
+{
+    Job job;
+    job.board.assign(config.board.begin(), config.board.end());
+    job.pot = config.pot;
+    job.stack = config.stack;
+    job.oop = config.oop;
+    job.ip = config.ip;
+    job.oop_bets = config.oop_bet_sizes;
+    job.ip_bets = config.ip_bet_sizes;
+    job.oop_raises = config.oop_raise_sizes;
+    job.ip_raises = config.ip_raise_sizes;
+    job.allow_all_in = config.allow_all_in;
+    job.max_raises = config.max_raises;
+    return job;
+}
+
+poker::explorer::CheckpointDocument checkpoint_from_held(const HeldSolution& held)
+{
+    poker::explorer::CheckpointDocument document;
+    document.algorithm = algorithm_code(held.job.algorithm);
+    document.frozen = held.job.frozen;
+    document.samples = std::max(1, held.job.samples);
+    document.accuracy = held.job.accuracy;
+    document.value = held.value;
+    document.p1_best_response = held.p1_best_response;
+    document.p2_best_response = held.p2_best_response;
+    document.nash_gap = held.nash_gap;
+    document.runtime_seconds = held.runtime_seconds;
+    document.sample_iterations = held.sample_iterations;
+    document.sample_values = held.sample_values;
+    document.sample_gaps = held.sample_gaps;
+    if (held.street)
+    {
+        document.kind = 1;
+        document.config_text = poker::streets::format_street_config(held.street->config());
+        document.tables = held.street->training_tables();
+    }
+    else if (held.river)
+    {
+        document.kind = 2;
+        document.config_text = poker::river::format_river_config(held.river->config());
+        document.tables = held.river->training_tables();
+    }
+    else
+    {
+        throw std::invalid_argument("solution has no solver");
+    }
+    return document;
+}
+
+std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::CheckpointDocument& document)
+{
+    auto held = std::make_shared<HeldSolution>();
+    held->iterations = document.tables.iterations;
+    held->runtime_seconds = document.runtime_seconds;
+    held->value = document.value;
+    held->p1_best_response = document.p1_best_response;
+    held->p2_best_response = document.p2_best_response;
+    held->nash_gap = document.nash_gap;
+    held->sample_iterations = document.sample_iterations;
+    held->sample_values = document.sample_values;
+    held->sample_gaps = document.sample_gaps;
+    if (document.kind == 1)
+    {
+        const poker::streets::StreetConfig config = poker::streets::parse_street_config(document.config_text);
+        held->job = job_from_street(config);
+        held->street = std::make_shared<poker::solver::StreetBatchSolver>(config);
+        held->street->install_training_tables(document.tables);
+        held->street->prepare_inspection();
+        held->root_id = held->street->root_node_id();
+        held->memory = held->street->memory_report();
+        held->has_memory = true;
+    }
+    else if (document.kind == 2)
+    {
+        const poker::river::RiverConfig config = poker::river::parse_river_config(document.config_text);
+        held->job = job_from_river(config);
+        held->river = std::make_shared<poker::solver::RiverBatchSolver>(config);
+        held->river->install_training_tables(document.tables);
+    }
+    else
+    {
+        throw std::invalid_argument("checkpoint kind is not a street or river solve");
+    }
+    held->job.algorithm = algorithm_from_code(document.algorithm);
+    held->job.frozen = document.frozen;
+    held->job.samples = document.samples;
+    held->job.accuracy = document.accuracy;
+    held->job.iterations = document.tables.iterations;
+    if (held->iterations != document.tables.iterations)
+    {
+        throw std::invalid_argument("checkpoint iteration count does not match the tables");
+    }
+    return held;
+}
+
+std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
+{
+    std::uint64_t solution_id = 0;
+    std::string status;
+    const bool installed = g_session.install_completed(held, solution_id, [&](std::uint64_t generation, std::uint64_t id)
+    {
+        held->id = id;
+        StatusDraft draft = draft_for(
+            held->job, 0, held->iterations, held->runtime_seconds, true,
+            held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+            held->sample_iterations, held->sample_values, held->sample_gaps,
+            held->has_memory ? &held->memory : nullptr);
+        draft.solution_id = id;
+        draft.root_id = held->root_id;
+        draft.generation = generation;
+        status = build_status(draft);
+        return status;
+    });
+    if (!installed)
+    {
+        throw std::runtime_error("a solve is already running");
+    }
+    return status;
+}
+
 void handle_client(socket_t client)
 {
     const std::string request = receive_request(client);
@@ -2016,6 +2387,206 @@ void handle_client(socket_t client)
         send_response(client, 202, "application/json", accepted);
         return;
     }
+    if (line.rfind("POST /api/config", 0) == 0)
+    {
+        try
+        {
+            const std::string text = read_string(body, "text", "");
+            std::string payload = "{\"kind\":";
+            if (text.rfind("street-config ", 0) == 0)
+            {
+                const poker::streets::StreetConfig config = poker::streets::parse_street_config(text);
+                const Job job = job_from_street(config);
+                payload += "\"street\"";
+                payload += ",\"board\":[";
+                for (std::size_t index = 0; index < job.board.size(); ++index)
+                {
+                    if (index > 0)
+                    {
+                        payload += ',';
+                    }
+                    append_escaped(payload, poker::holdem::format_card(job.board[index]));
+                }
+                payload += "],\"pot\":";
+                payload += std::to_string(job.pot);
+                payload += ",\"stack\":";
+                payload += std::to_string(job.stack);
+                payload += ",\"oop_range\":";
+                append_escaped(payload, job.oop.to_combo_list());
+                payload += ",\"ip_range\":";
+                append_escaped(payload, job.ip.to_combo_list());
+                payload += ",\"max_raises\":";
+                payload += std::to_string(job.max_raises);
+                payload += ",\"allow_all_in\":";
+                payload += job.allow_all_in ? "true" : "false";
+                payload += ",\"allow_three_bet\":";
+                payload += job.allow_three_bet ? "true" : "false";
+                payload += ",\"geometric\":";
+                payload += job.geometric ? "true" : "false";
+                payload += ",\"pot_cap\":";
+                payload += format_number(job.pot_cap);
+                payload += ",\"all_in_threshold\":";
+                payload += format_number(job.all_in_threshold);
+                payload += ",\"memory_mib\":";
+                payload += std::to_string(job.memory_mib);
+                payload += ",\"threads\":";
+                payload += std::to_string(job.threads);
+                const auto write_sizes = [&](const char* key, const std::vector<double>& sizes)
+                {
+                    payload += ",\"";
+                    payload += key;
+                    payload += "\":[";
+                    for (std::size_t index = 0; index < sizes.size(); ++index)
+                    {
+                        if (index > 0)
+                        {
+                            payload += ',';
+                        }
+                        payload += format_number(sizes[index]);
+                    }
+                    payload += ']';
+                };
+                write_sizes("oop_bets", job.oop_bets);
+                write_sizes("ip_bets", job.ip_bets);
+                write_sizes("oop_flop_bets", job.oop_flop_bets);
+                write_sizes("ip_flop_bets", job.ip_flop_bets);
+                write_sizes("oop_turn_bets", job.oop_turn_bets);
+                write_sizes("ip_turn_bets", job.ip_turn_bets);
+                write_sizes("oop_river_bets", job.oop_river_bets);
+                write_sizes("ip_river_bets", job.ip_river_bets);
+                write_sizes("oop_donk", job.oop_donk);
+                payload += '}';
+            }
+            else if (text.rfind("river-config ", 0) == 0)
+            {
+                const poker::river::RiverConfig config = poker::river::parse_river_config(text);
+                const Job job = job_from_river(config);
+                payload += "\"river\",\"board\":[";
+                for (std::size_t index = 0; index < job.board.size(); ++index)
+                {
+                    if (index > 0)
+                    {
+                        payload += ',';
+                    }
+                    append_escaped(payload, poker::holdem::format_card(job.board[index]));
+                }
+                payload += "],\"pot\":";
+                payload += std::to_string(job.pot);
+                payload += ",\"stack\":";
+                payload += std::to_string(job.stack);
+                payload += ",\"oop_range\":";
+                append_escaped(payload, job.oop.to_combo_list());
+                payload += ",\"ip_range\":";
+                append_escaped(payload, job.ip.to_combo_list());
+                payload += ",\"max_raises\":";
+                payload += std::to_string(job.max_raises);
+                payload += ",\"allow_all_in\":";
+                payload += job.allow_all_in ? "true" : "false";
+                payload += ",\"oop_bets\":[";
+                for (std::size_t index = 0; index < job.oop_bets.size(); ++index)
+                {
+                    if (index > 0)
+                    {
+                        payload += ',';
+                    }
+                    payload += format_number(job.oop_bets[index]);
+                }
+                payload += "],\"ip_bets\":[";
+                for (std::size_t index = 0; index < job.ip_bets.size(); ++index)
+                {
+                    if (index > 0)
+                    {
+                        payload += ',';
+                    }
+                    payload += format_number(job.ip_bets[index]);
+                }
+                payload += "]}";
+            }
+            else
+            {
+                throw std::invalid_argument("configuration must start with street-config 1 or river-config 1");
+            }
+            send_response(client, 200, "application/json", payload);
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += "}";
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
+    if (line.rfind("POST /api/open", 0) == 0)
+    {
+        if (g_session.running())
+        {
+            send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
+            return;
+        }
+        try
+        {
+            const std::string path = read_string(body, "path", "");
+            if (path.empty())
+            {
+                throw std::invalid_argument("path is required");
+            }
+            if (g_values != nullptr)
+            {
+                g_values->cancel();
+            }
+            const poker::explorer::CheckpointDocument document =
+                poker::explorer::read_checkpoint(path, kMaxCheckpointBytes);
+            const std::shared_ptr<HeldSolution> held = solution_from_checkpoint(document);
+            send_response(client, 200, "application/json", publish_loaded(held));
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += "}";
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
+    if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/save ") != std::string::npos)
+    {
+        const std::string prefix = "POST /api/solutions/";
+        const std::string rest = line.substr(prefix.size());
+        const std::size_t slash = rest.find('/');
+        std::uint64_t id = 0;
+        if (slash == std::string::npos || !parse_prefixed_id(rest.substr(0, slash), 's', id))
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
+            return;
+        }
+        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        if (!lease)
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+            return;
+        }
+        try
+        {
+            const std::string path = read_string(body, "path", "");
+            if (path.empty())
+            {
+                throw std::invalid_argument("path is required");
+            }
+            const std::shared_ptr<HeldSolution> held =
+                std::static_pointer_cast<HeldSolution>(lease.resource());
+            poker::explorer::write_checkpoint(path, checkpoint_from_held(*held));
+            send_response(client, 200, "application/json", "{\"saved\":true}");
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += "}";
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
     if (line.rfind("GET /api/solutions/", 0) == 0)
     {
         const std::string rest = line.substr(std::string("GET /api/solutions/").size());
@@ -2051,16 +2622,27 @@ void handle_client(socket_t client)
                     return;
                 }
                 std::string node_path = tail.substr(6);
-                const bool want_values = node_path.size() >= 7 && node_path.ends_with("/values");
-                if (want_values)
+                std::string query_kind;
+                if (node_path.size() >= 8 && node_path.ends_with("/runouts"))
                 {
+                    query_kind = "runout";
+                    node_path.resize(node_path.size() - 8);
+                }
+                else if (node_path.size() >= 7 && node_path.ends_with("/equity"))
+                {
+                    query_kind = "equity";
+                    node_path.resize(node_path.size() - 7);
+                }
+                else if (node_path.size() >= 7 && node_path.ends_with("/values"))
+                {
+                    query_kind = "actions";
                     node_path.resize(node_path.size() - 7);
                 }
                 const auto query_started = std::chrono::steady_clock::now();
-                if (want_values)
+                if (!query_kind.empty())
                 {
                     const poker::solver::StreetInspection view = held->street->inspect_node(node_path);
-                    if (view.kind != "decision")
+                    if (query_kind == "actions" && view.kind != "decision")
                     {
                         send_response(
                             client,
@@ -2069,11 +2651,20 @@ void handle_client(socket_t client)
                             "{\"error\":\"action values require a decision node\"}");
                         return;
                     }
+                    if (query_kind == "runout" && view.kind != "chance")
+                    {
+                        send_response(
+                            client,
+                            400,
+                            "application/json",
+                            "{\"error\":\"runout values require a chance node\"}");
+                        return;
+                    }
                     const std::uint64_t solution_id = held->id;
                     const std::uint64_t job_id = held->job_id;
                     held.reset();
                     lease.release();
-                    respond_value_query(client, solution_id, job_id, node_path, query_started);
+                    respond_value_query(client, solution_id, job_id, node_path, query_started, query_kind);
                     return;
                 }
                 const poker::solver::StreetInspection view = held->street->inspect_node(node_path);
@@ -2086,6 +2677,30 @@ void handle_client(socket_t client)
                 std::string timing = "X-Query-Seconds: " + format_number(query_seconds) + "\r\n";
                 timing += "X-Serialize-Seconds: " + format_number(serialize_seconds) + "\r\n";
                 send_response(client, 200, "application/json", payload, timing);
+                return;
+            }
+            if (tail == "equity")
+            {
+                if (!held->river)
+                {
+                    send_response(
+                        client,
+                        400,
+                        "application/json",
+                        "{\"error\":\"street equity is requested on a node\"}");
+                    return;
+                }
+                const std::uint64_t solution_id = held->id;
+                const std::uint64_t job_id = held->job_id;
+                held.reset();
+                lease.release();
+                respond_value_query(
+                    client,
+                    solution_id,
+                    job_id,
+                    "root",
+                    std::chrono::steady_clock::now(),
+                    "equity");
                 return;
             }
             if (tail == "export")
@@ -2339,9 +2954,83 @@ int run(int argc, char** argv)
                 throw poker::solver::StreetValueCancelled();
             }
             const std::shared_ptr<HeldSolution> held = std::static_pointer_cast<HeldSolution>(resource);
+            if (request.kind == "equity" && held->river)
+            {
+                poker::solver::StreetNodeEquity page;
+                page.node_id = "root";
+                page.units = poker::holdem::kEquityUnits;
+                page.model = poker::holdem::kEquityModel;
+                const auto started = std::chrono::steady_clock::now();
+                poker::holdem::ShowdownEquityOptions options;
+                options.cancel_poll = [](void* context)
+                {
+                    return static_cast<const std::atomic<bool>*>(context)->load(std::memory_order_relaxed);
+                };
+                options.cancel_context = const_cast<std::atomic<bool>*>(&cancel);
+                const poker::holdem::ShowdownEquity equity = poker::holdem::showdown_equity(
+                    held->job.board, held->job.oop, held->job.ip, options);
+                page.defined = equity.joint_defined && equity.player0.defined && equity.player1.defined;
+                if (page.defined)
+                {
+                    page.oop_equity = equity.player0.equity;
+                    page.ip_equity = equity.player1.equity;
+                }
+                page.query_seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - started).count();
+                if (cancel.load() || g_session.current_solution() != request.solution_id)
+                {
+                    throw poker::solver::StreetValueCancelled();
+                }
+                return json_node_equity(page, request.solution_id, request.job_id, g_session.generation());
+            }
             if (!held->street)
             {
                 throw std::invalid_argument("this solution has no street nodes");
+            }
+            if (request.kind == "runout")
+            {
+                const poker::solver::StreetRunoutValues page = held->street->runout_values(request.node_id, &cancel);
+                if (cancel.load() || g_session.current_solution() != request.solution_id)
+                {
+                    throw poker::solver::StreetValueCancelled();
+                }
+                return json_runout_values(page, request.solution_id, request.job_id, g_session.generation());
+            }
+            if (request.kind == "equity")
+            {
+                const auto started = std::chrono::steady_clock::now();
+                const poker::solver::StreetReachWeights weights = held->street->reaching_weights(request.node_id);
+                poker::solver::StreetNodeEquity page;
+                page.node_id = request.node_id;
+                page.units = poker::holdem::kEquityUnits;
+                page.model = poker::holdem::kEquityModel;
+                if (!weights.oop.empty() && !weights.ip.empty())
+                {
+                    poker::holdem::ShowdownEquityOptions options;
+                    options.cancel_poll = [](void* context)
+                    {
+                        return static_cast<const std::atomic<bool>*>(context)->load(std::memory_order_relaxed);
+                    };
+                    options.cancel_context = const_cast<std::atomic<bool>*>(&cancel);
+                    const poker::holdem::ShowdownEquity equity = poker::holdem::showdown_equity(
+                        weights.board,
+                        poker::holdem::Range::parse(weights.oop),
+                        poker::holdem::Range::parse(weights.ip),
+                        options);
+                    page.defined = equity.joint_defined && equity.player0.defined && equity.player1.defined;
+                    if (page.defined)
+                    {
+                        page.oop_equity = equity.player0.equity;
+                        page.ip_equity = equity.player1.equity;
+                    }
+                }
+                page.query_seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - started).count();
+                if (cancel.load() || g_session.current_solution() != request.solution_id)
+                {
+                    throw poker::solver::StreetValueCancelled();
+                }
+                return json_node_equity(page, request.solution_id, request.job_id, g_session.generation());
             }
             const poker::solver::StreetActionValues page = held->street->action_values(request.node_id, &cancel);
             if (cancel.load() || g_session.current_solution() != request.solution_id)

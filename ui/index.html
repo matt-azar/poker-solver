@@ -66,10 +66,14 @@
         <option value="vanilla">Vanilla CFR</option>
       </select>
     </label>
+    <label class="wide">Solution file <input id="solution-path" placeholder="Save or open a .psol file" autocomplete="off"></label>
+    <label class="wide">Configuration file <input id="config-file" type="file" accept=".txt,text/plain"></label>
     <div class="actions">
       <button type="submit" id="run">Solve</button>
       <button type="button" id="continue" disabled>Continue</button>
       <button type="button" id="stop" disabled>Stop</button>
+      <button type="button" id="save-solution" disabled>Save</button>
+      <button type="button" id="open-solution">Open</button>
       <button type="button" id="export" disabled>Export JSON</button>
     </div>
   </form>
@@ -113,7 +117,11 @@
     </label>
     <div id="node-actions"></div>
     <button type="button" id="calculate-ev" hidden>Calculate EVs</button>
+    <button type="button" id="compare-runouts" hidden>Compare runouts</button>
+    <button type="button" id="node-equity" hidden>Check-down equity</button>
     <p id="ev-note"></p>
+    <p id="equity-note"></p>
+    <div id="runout"></div>
     <label id="path-label">History
       <select id="path"></select>
     </label>

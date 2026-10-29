@@ -42,11 +42,11 @@ ValueReply ValueWorker::submit(const ValueRequest& request)
     }
     ensure_started();
     const bool finished = has_result_ && result_solution_ == request.solution_id && result_node_ == request.node_id
-        && !pending_ && !inflight_;
+        && result_kind_ == request.kind && !pending_ && !inflight_;
     const bool same_inflight = inflight_ && inflight_request_.solution_id == request.solution_id
-        && inflight_request_.node_id == request.node_id && !pending_;
+        && inflight_request_.node_id == request.node_id && inflight_request_.kind == request.kind && !pending_;
     const bool same_pending = pending_ && pending_request_.solution_id == request.solution_id
-        && pending_request_.node_id == request.node_id;
+        && pending_request_.node_id == request.node_id && pending_request_.kind == request.kind;
     if (finished)
     {
         reply.ready = true;
@@ -180,6 +180,7 @@ void ValueWorker::thread_main()
         result_ok_ = ok;
         result_solution_ = request.solution_id;
         result_node_ = request.node_id;
+        result_kind_ = request.kind;
         result_body_ = std::move(body);
     }
 }

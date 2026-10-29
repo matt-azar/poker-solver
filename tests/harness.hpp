@@ -42,3 +42,4 @@ void run_explorer_http_tests();
 void run_street_chance_tests();
 void run_action_value_tests();
 void run_value_worker_tests();
+void run_checkpoint_tests();

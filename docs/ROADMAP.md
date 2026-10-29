@@ -24,9 +24,11 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 We already have a substantial tested foundation: Kuhn/Leduc reference games, river and street engines, pass-frozen CFR variants, active-player CFR+ flooring, correct counterfactual reach handling, compact blocker-aware showdowns, deterministic first-public-card parallelism, enforced engine allocation budgets, and node-scoped browsing. The current budget defaults to 1024 MiB and threads default to one.
 
-The latest Windows report is 438,630 assertions / zero failures. Independent GCC review of the previous chance-page commit passed 364,907 assertions; Windows HTTP tests are skipped there. Session-focused ThreadSanitizer passed 56 assertions on the review host. That run covered the session tests. Publication now builds the completed status before it stores a terminal phase or a queryable result. If that builder throws, the job stays running and the existing failure path can record it.
+A flop, a turn, and a river are one betting tree with two, one, or zero cards still to come. The current code splits that tree by build order. `StreetBatchSolver` solves a three-card or four-card board and deals the later cards in the same tree. `RiverBatchSolver` solves a five-card board. `StreetGame` rejects a five-card board. The explorer selects the engine from the board length. `RiverGame` stays the reference enumerator for the five-card tree. M6 moves the production river path into the shared tree. `river_solver` remains a product entry point until a five-card solve on that tree matches `RiverGame` on strategies, values, and best response. Kuhn and Leduc stay on `CfrTrainer`.
 
-Completed-average conditional action EV is implemented for flop and turn decision nodes. The profile cache follows training, reset, continuation, and explicit average edits. A tiny compatible opponent is summed directly when blocked mass would cancel it. The value worker joins on shutdown and drops its engine reference before the reader count reaches zero. The river page does not request values. M1 stays open until those checks pass; the equity and range study screen is next and has not been started. Saved solve files, continuation workflows, node locks, broad analysis tools, full tree editing, tournament/rake utilities, production packaging, and preflop remain substantial work. No head-to-head Pio performance or solution-quality equivalence has been established.
+The latest Windows report is 438,860 assertions / zero failures. Independent GCC review of the previous chance-page commit passed 364,907 assertions; Windows HTTP tests are skipped there. Session-focused ThreadSanitizer passed 56 assertions on the review host. That run covered the session tests. Publication now builds the completed status before it stores a terminal phase or a queryable result. If that builder throws, the job stays running and the existing failure path can record it.
+
+Completed-average conditional action EV is implemented for flop and turn decision nodes. The profile cache follows training, reset, continuation, and explicit average edits. A stop after at least one completed iteration keeps that solve. A versioned solution file can be saved, closed, reopened, and continued. A chance node can list every legal next card with its conditional probability and both players' continuation EVs. Check-down equity is available from the strategy-conditioned reaches at a node and is labeled separately from chip EV. Hand categories, node locks, compact saves, tournament/rake utilities, production packaging, and preflop remain substantial work. No head-to-head Pio performance or solution-quality equivalence has been established.
 
 Full-range check-down measures whether a large tree fits and runs. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them.
 
@@ -36,7 +38,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 
 | Feature family | Current position | Delivery |
 |---|---|---|
-| Heads-up postflop CFR, chance, blocker handling, best responses | Established foundation; continue independent tests | M0, M6 |
+| Heads-up postflop CFR, chance, blocker handling, best responses | Established foundation. Flop/turn and river are separate production engines until M6 joins a five-card board to the shared tree | M0, M6 |
 | Conditional combo/action EV; both-player values | Flop and turn decision nodes | M1 |
 | Equity, action ranges, distributions, hand categories | Limited browsing foundation | M2 |
 | Weighted range editing, range libraries, board input | Basic configuration; complete visual workflow needed | M2–M3 |
@@ -123,9 +125,11 @@ Evaluate algorithm alternatives such as discounted or predictive regret methods,
 
 Investigate exact suit isomorphisms, compact slot indexing, memory layout, SIMD, task granularity, best-response parallelism and reduced-precision storage. Exact symmetry reduction must respect board, weighted ranges, locks and incentives; arbitrary suit-asymmetric inputs can destroy a symmetry. Approximate bucketing is its own labeled mode. Exact postflop cards remain the default.
 
-Address stored-index limits with checked wider/segmented representations when required. Keep the small enumerator as an oracle. Scale the batch solver, and publish a hardware profile for each supported tree size, including which trees fit in 1 GiB.
+Address stored-index limits with checked wider/segmented representations when required. Keep the small enumerator as an oracle. Scale one batch solver, and publish a hardware profile for each supported tree size, including which trees fit in 1 GiB.
 
-**Gate:** each optimization passes an appropriate oracle/parity gate and budget failure tests. Algebra-preserving kernel changes should retain pins; algorithm and precision changes are compared on solution quality. Publish same-machine paired measurements, including evaluation cost and variance. Multi-size full-range betting trees must converge within a declared hardware envelope before broad practical parity is claimed.
+Solve a five-card board in that same production tree. Cards still to come are two, one, or zero. A turn tree already solves a river after each river card; the standalone river solver is that subtree entered with the turn card known. `RiverGame` remains the oracle for the zero-card case, on the same footing as `--reference` against `StreetGame`. Remove `river_solver` as a product entry point after the pinned five-card fixtures match that oracle. Do this before scaling the flop/turn kernel and the river kernel as two products.
+
+**Gate:** each optimization passes an appropriate oracle/parity gate and budget failure tests. A five-card public tree matches `RiverGame` on the pinned river fixtures before `river_solver` is removed as a product entry point. Algebra-preserving kernel changes should retain pins; algorithm and precision changes are compared on solution quality. Publish same-machine paired measurements, including evaluation cost and variance. Multi-size full-range betting trees must converge within a declared hardware envelope before broad practical parity is claimed.
 
 ### M7 — Strategy editing, node locking and constrained re-solving
 
@@ -223,9 +227,9 @@ Choose explicit release service-level targets after measuring a representative c
 
 ## 7. Dependencies and execution policy for Cursor
 
-The main path is M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after all required features land.
+The main path is M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0 and includes joining the five-card production path to the shared postflop tree before the two current kernels are scaled separately. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after all required features land.
 
-Start now with the existing three-commit EV plan: publication fix; numerical evaluator plus oracle tests; opt-in API/UI. The next deliveries are range and equity analysis, tree configuration, solve continuation, and full saves.
+Check-down equity, stop-and-keep, one resumable solution file, and runout EV comparison are implemented and covered by the unit tests. They are not a completed M2 or a Pio parity claim. Hand categories, node locking, and compact saves are still ahead.
 
 For each milestone: write a small specification, identify invariants and failure modes, implement reviewable commits, run relevant checks, demonstrate the user workflow, then update the ledger with exact evidence. Keep changes on the development branch unless explicitly instructed otherwise. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 

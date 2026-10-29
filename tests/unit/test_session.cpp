@@ -506,8 +506,48 @@ void test_failed_continuation_keeps_engine_progress()
 
 } // namespace
 
+void test_kept_stop_publishes_the_resource()
+{
+    poker::explorer::Session session;
+    std::shared_ptr<void> retiring;
+    const std::uint64_t job = session.begin(retiring);
+    CHECK(session.request_stop(job) == poker::explorer::StopResult::Accepted);
+    const poker::explorer::Session::Permit permit = session.prepare_kept(job);
+    CHECK(permit.allowed);
+    auto resource = std::make_shared<int>(7);
+    const bool published = session.commit_kept(
+        job,
+        resource,
+        permit.solution_id,
+        [](std::uint64_t) { return std::string("{\"kept\":true}"); });
+    CHECK(published);
+    CHECK(session.phase() == poker::explorer::Phase::Completed);
+    CHECK(session.current_solution() == permit.solution_id);
+    {
+        poker::explorer::ReaderLease lease(session, session.borrow(permit.solution_id));
+        CHECK(static_cast<bool>(lease));
+        CHECK(*std::static_pointer_cast<int>(lease.resource()) == 7);
+    }
+    std::uint64_t replaced = 0;
+    CHECK(session.install_completed(
+        std::make_shared<int>(3),
+        replaced,
+        [](std::uint64_t, std::uint64_t) { return std::string("{\"loaded\":true}"); }));
+    CHECK(replaced != 0);
+    CHECK(session.current_solution() == replaced);
+    std::shared_ptr<void> retiring_again;
+    const std::uint64_t running = session.begin(retiring_again);
+    std::uint64_t ignored = 0;
+    CHECK(!session.install_completed(
+        std::make_shared<int>(1),
+        ignored,
+        [](std::uint64_t, std::uint64_t) { return std::string("{}"); }));
+    session.finish_cancelled(running, "cancelled");
+}
+
 void run_session_tests()
 {
+    test_kept_stop_publishes_the_resource();
     test_stop_before_construct();
     test_stop_during_chunk();
     test_stop_before_publication();

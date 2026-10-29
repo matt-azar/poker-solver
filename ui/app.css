@@ -202,6 +202,22 @@ label[hidden] {
   margin: 8px 0;
 }
 
+table.runout {
+  border-collapse: collapse;
+  margin: 8px 0 12px;
+}
+
+table.runout th,
+table.runout td {
+  border-bottom: 1px solid #d9d3c7;
+  padding: 4px 10px;
+  text-align: left;
+}
+
+table.runout th {
+  cursor: pointer;
+}
+
 @media (max-width: 800px) {
   form, #summary, .pickers, .grids, .street-row {
     grid-template-columns: 1fr;

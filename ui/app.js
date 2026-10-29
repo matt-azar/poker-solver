@@ -481,6 +481,12 @@ $("calculate-ev").addEventListener("click", () => {
   calculateEv();
 });
 
+$("save-solution").addEventListener("click", saveSolution);
+$("open-solution").addEventListener("click", openSolution);
+$("config-file").addEventListener("change", loadConfigFile);
+$("compare-runouts").addEventListener("click", compareRunouts);
+$("node-equity").addEventListener("click", calculateEquity);
+
 $("export").addEventListener("click", () => {
   let payload = currentNode || riverExport;
   if (!payload) {
@@ -537,6 +543,7 @@ async function refresh() {
     $("stop").disabled = true;
   }
   $("continue").disabled = Boolean(status.running) || !status.solution_id;
+  $("save-solution").disabled = Boolean(status.running) || !status.solution_id;
   $("export").disabled = !(currentNode || riverExport);
 }
 
@@ -572,6 +579,14 @@ function clearValues() {
   const note = $("ev-note");
   if (note) {
     note.textContent = "";
+  }
+  const equity = $("equity-note");
+  if (equity) {
+    equity.textContent = "";
+  }
+  const runout = $("runout");
+  if (runout) {
+    runout.innerHTML = "";
   }
 }
 
@@ -668,6 +683,8 @@ function render(status) {
   $("node-line").textContent = "";
   $("node-meta").textContent = "";
   $("calculate-ev").hidden = true;
+  $("compare-runouts").hidden = true;
+  $("node-equity").hidden = !riverExport;
   if (!valuePoll) {
     $("ev-note").textContent = "";
   }
@@ -688,6 +705,8 @@ function renderNode(node) {
   const host = $("node-actions");
   host.innerHTML = "";
   $("calculate-ev").hidden = node.kind !== "decision";
+  $("compare-runouts").hidden = node.kind !== "chance";
+  $("node-equity").hidden = false;
   if (!valuePoll) {
     $("ev-note").textContent = nodeValues && nodeValues.node_id === node.node_id && !nodeValues.pending
       ? evSummary(nodeValues)
@@ -977,6 +996,257 @@ async function calculateEv() {
   };
   valuePoll = setInterval(tick, 250);
   tick();
+}
+
+function joinSizes(values) {
+  return (values || []).map((value) => String(value)).join(", ");
+}
+
+async function saveSolution() {
+  if (!solutionId) {
+    return;
+  }
+  const path = $("solution-path").value.trim();
+  if (!path) {
+    $("message").textContent = "Enter a solution file path";
+    return;
+  }
+  const response = await fetch("/api/solutions/" + solutionId + "/save", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({path})
+  });
+  const body = await readBody(response);
+  $("message").textContent = response.ok ? "Saved " + path : (body.error || "Save failed");
+}
+
+async function openSolution() {
+  const path = $("solution-path").value.trim();
+  if (!path) {
+    $("message").textContent = "Enter a solution file path";
+    return;
+  }
+  const response = await fetch("/api/open", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({path})
+  });
+  const body = await readBody(response);
+  if (!response.ok) {
+    $("message").textContent = body.error || "Open failed";
+    return;
+  }
+  seenGeneration = body.status_generation || seenGeneration;
+  latest = body;
+  solutionId = null;
+  continuationPending = true;
+  render(body);
+  if (solutionNeedsReload(body, solutionId, continuationPending)) {
+    continuationPending = false;
+    solutionId = body.solution_id;
+    currentNode = null;
+    riverExport = null;
+    clearValues();
+    if (body.root_node_id) {
+      loadNode(body.root_node_id);
+    } else {
+      loadRiverExport();
+    }
+  }
+  $("message").textContent = "Opened " + path;
+  $("save-solution").disabled = !body.solution_id;
+  $("continue").disabled = !body.solution_id;
+}
+
+async function loadConfigFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) {
+    return;
+  }
+  const text = await file.text();
+  const response = await fetch("/api/config", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({text})
+  });
+  const body = await readBody(response);
+  if (!response.ok) {
+    $("message").textContent = body.error || "Configuration failed";
+    return;
+  }
+  $("board").value = (body.board || []).join(" ");
+  $("oop").value = body.oop_range || "";
+  $("ip").value = body.ip_range || "";
+  $("pot").value = body.pot;
+  $("stack").value = body.stack;
+  $("max-raises").value = body.max_raises;
+  $("all-in").checked = Boolean(body.allow_all_in);
+  if (body.kind === "street") {
+    $("oop-bets").value = joinSizes(body.oop_bets);
+    $("ip-bets").value = joinSizes(body.ip_bets);
+    $("oop-flop").value = joinSizes(body.oop_flop_bets);
+    $("ip-flop").value = joinSizes(body.ip_flop_bets);
+    $("oop-turn").value = joinSizes(body.oop_turn_bets);
+    $("ip-turn").value = joinSizes(body.ip_turn_bets);
+    $("oop-river").value = joinSizes(body.oop_river_bets);
+    $("ip-river").value = joinSizes(body.ip_river_bets);
+    $("oop-donk").value = joinSizes(body.oop_donk);
+    $("pot-cap").value = body.pot_cap;
+    $("no-three-bet").checked = body.allow_three_bet === false;
+    $("geometric").checked = Boolean(body.geometric);
+    $("threshold").value = body.all_in_threshold;
+    $("memory-mib").value = body.memory_mib;
+    $("threads").value = body.threads;
+  } else {
+    $("oop-bets").value = joinSizes(body.oop_bets);
+    $("ip-bets").value = joinSizes(body.ip_bets);
+  }
+  updateSpot();
+  $("message").textContent = "Loaded " + body.kind + " configuration";
+}
+
+function renderRunout(page) {
+  const host = $("runout");
+  if (!host) {
+    return;
+  }
+  host.innerHTML = "";
+  if (!page || page.pending) {
+    return;
+  }
+  const note = document.createElement("p");
+  note.textContent = "Runout EV is in chips, root-centered. OOP and IP are each player's own chips.";
+  host.appendChild(note);
+  const table = document.createElement("table");
+  table.className = "runout";
+  const head = document.createElement("tr");
+  ["Card", "Probability", "OOP EV", "IP EV"].forEach((label, index) => {
+    const cell = document.createElement("th");
+    cell.textContent = label;
+    cell.addEventListener("click", () => {
+      const rows = [...page.cards];
+      const key = ["card", "probability", "oop_ev", "ip_ev"][index];
+      rows.sort((left, right) => {
+        const a = left[key];
+        const b = right[key];
+        if (a === null || a === undefined) {
+          return 1;
+        }
+        if (b === null || b === undefined) {
+          return -1;
+        }
+        return a < b ? -1 : a > b ? 1 : 0;
+      });
+      renderRunout(Object.assign({}, page, {cards: rows}));
+    });
+    head.appendChild(cell);
+  });
+  table.appendChild(head);
+  (page.cards || []).forEach((card) => {
+    const row = document.createElement("tr");
+    const name = document.createElement("td");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = card.card;
+    button.addEventListener("click", () => loadNode(card.child_id));
+    name.appendChild(button);
+    const probability = document.createElement("td");
+    probability.textContent = card.probability_defined ? Number(card.probability).toFixed(4) : "undefined";
+    const oop = document.createElement("td");
+    oop.textContent = card.ev_defined ? formatChips(card.oop_ev) : "undefined";
+    const ip = document.createElement("td");
+    ip.textContent = card.ev_defined ? formatChips(card.ip_ev) : "undefined";
+    row.appendChild(name);
+    row.appendChild(probability);
+    row.appendChild(oop);
+    row.appendChild(ip);
+    table.appendChild(row);
+  });
+  host.appendChild(table);
+  if (page.parent_ev_defined) {
+    const parent = document.createElement("p");
+    parent.textContent = "Weighted parent EV  OOP " + formatChips(page.parent_oop_ev)
+      + "  IP " + formatChips(page.parent_ip_ev);
+    host.appendChild(parent);
+  }
+}
+
+async function pollStudy(path, token, solution, nodeId, onReady) {
+  if (valuePoll) {
+    clearInterval(valuePoll);
+    valuePoll = null;
+  }
+  const tick = async () => {
+    let response;
+    try {
+      response = await fetch(path);
+    } catch (error) {
+      if (!shouldApply(token, valueToken, solution, solutionId)) {
+        return;
+      }
+      $("ev-note").textContent = "Study request failed";
+      clearInterval(valuePoll);
+      valuePoll = null;
+      return;
+    }
+    const body = await readBody(response);
+    if (!shouldApply(token, valueToken, solution, solutionId)) {
+      return;
+    }
+    if (body.pending) {
+      return;
+    }
+    clearInterval(valuePoll);
+    valuePoll = null;
+    if (!response.ok) {
+      $("ev-note").textContent = body.error || "Study request failed";
+      return;
+    }
+    onReady(body);
+  };
+  valuePoll = setInterval(tick, 250);
+  tick();
+}
+
+function compareRunouts() {
+  if (!currentNode || currentNode.kind !== "chance" || !solutionId) {
+    return;
+  }
+  const token = ++valueToken;
+  const solution = solutionId;
+  const nodeId = currentNode.node_id;
+  $("ev-note").textContent = "Comparing runouts…";
+  pollStudy(
+    "/api/solutions/" + solution + "/nodes/" + nodeId + "/runouts",
+    token,
+    solution,
+    nodeId,
+    (body) => {
+      $("ev-note").textContent = "Runout comparison uses the stored average strategy.";
+      renderRunout(body);
+    });
+}
+
+function calculateEquity() {
+  if (!solutionId) {
+    return;
+  }
+  const token = ++valueToken;
+  const solution = solutionId;
+  const nodeId = currentNode ? currentNode.node_id : "root";
+  const path = currentNode
+    ? "/api/solutions/" + solution + "/nodes/" + nodeId + "/equity"
+    : "/api/solutions/" + solution + "/equity";
+  $("equity-note").textContent = "Calculating check-down equity…";
+  pollStudy(path, token, solution, nodeId, (body) => {
+    if (!body.defined) {
+      $("equity-note").textContent = "Check-down equity is undefined for this node.";
+      return;
+    }
+    $("equity-note").textContent = "Check-down equity, fraction of the pot. OOP "
+      + Number(body.oop_equity).toFixed(4) + " · IP " + Number(body.ip_equity).toFixed(4)
+      + ". This is not chip EV.";
+  });
 }
 
 function lineOf(infoset) {

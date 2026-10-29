@@ -3,6 +3,7 @@
 #include "game/street_game.hpp"
 #include "solver/budget_resource.hpp"
 #include "solver/trainer.hpp"
+#include "solver/training_state.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -163,6 +164,55 @@ struct StreetActionValues
     std::vector<double> mixed_ev;
 };
 
+// One legal next card at a chance node, under the stored average profile.
+// A zero card probability leaves the conditional EV undefined.
+// OOP and IP chips are each player's own root-centered chips, so they sum to zero.
+struct StreetRunoutCard
+{
+    std::string card;
+    std::string child_id;
+    bool probability_defined = false;
+    double probability = 0.0;
+    bool ev_defined = false;
+    double oop_ev = 0.0;
+    double ip_ev = 0.0;
+};
+
+struct StreetRunoutValues
+{
+    std::string node_id;
+    std::string units = "chips";
+    std::string utility_basis = "root_centered";
+    bool parent_ev_defined = false;
+    double parent_oop_ev = 0.0;
+    double parent_ip_ev = 0.0;
+    std::uint64_t profile_epoch = 0;
+    double query_seconds = 0.0;
+    std::vector<StreetRunoutCard> cards;
+};
+
+// Strategy-conditioned reaching weights at one node, before compatible-pair
+// normalization. These are the inputs for check-down equity, not marginals.
+struct StreetReachWeights
+{
+    std::string node_id;
+    std::vector<int> board;
+    std::string oop;
+    std::string ip;
+};
+
+// Check-down equity at one node. A fraction of the pot, distinct from chip EV.
+struct StreetNodeEquity
+{
+    std::string node_id;
+    std::string units = "fraction of the pot";
+    std::string model = "check-down";
+    bool defined = false;
+    double oop_equity = 0.0;
+    double ip_equity = 0.0;
+    double query_seconds = 0.0;
+};
+
 struct StreetWalkProfile
 {
     double order_seconds = 0.0;
@@ -237,6 +287,15 @@ public:
     StreetActionValues action_values(
         const std::string& node_id,
         const std::atomic<bool>* cancel = nullptr) const;
+    // Every legal next card at a turn or river chance node.
+    StreetRunoutValues runout_values(
+        const std::string& node_id,
+        const std::atomic<bool>* cancel = nullptr) const;
+    StreetReachWeights reaching_weights(const std::string& node_id) const;
+    const streets::StreetConfig& config() const;
+    TrainingTables training_tables() const;
+    // Rebuilds nothing. The tree must already match the combo order and action counts.
+    void install_training_tables(const TrainingTables& tables);
     std::uint64_t profile_epoch() const;
     // The next successful evaluation throws before its page can replace the cache.
     void arm_value_cache_failure_for_test();

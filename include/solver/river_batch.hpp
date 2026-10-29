@@ -2,6 +2,7 @@
 
 #include "game/river_game.hpp"
 #include "solver/trainer.hpp"
+#include "solver/training_state.hpp"
 
 #include <memory>
 #include <string>
@@ -36,6 +37,9 @@ public:
     // Adds iterations on top of the tables already stored. A new solver starts at zero.
     void continue_iterations(int count, Algorithm algorithm);
     int completed_iterations() const;
+    const river::RiverConfig& config() const;
+    TrainingTables training_tables() const;
+    void install_training_tables(const TrainingTables& tables);
 
     double expected_utility() const;
     double p1_best_response_utility() const;

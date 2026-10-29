@@ -1,6 +1,6 @@
 # Check-down showdown equity
 
-Standalone exact equity for a flop, turn, or river. Branch `cursor/exact-equity-core`, rebased onto development `27236ac1f8d2ae42aa3130b48351c484a85d8585` and not merged. This is the numerical foundation for roadmap M2. It does not edit ranges, build a betting tree, or read solver state.
+Standalone exact equity for a flop, turn, or river. The library, `equity_calculator`, and `equity_tests` are on the development line with the street-configuration and continuation work. The explorer calls it with strategy-conditioned reaching weights. It does not edit ranges, build a betting tree, or read solver state. The default work limit can reject a full-range river. This is not a claim of Pio equity parity.
 
 ## Model
 

@@ -223,6 +223,73 @@ public:
         return true;
     }
 
+    // Publication of a solve that already finished at least one iteration when stop
+    // was requested. commit_success still discards a stopped job. This path keeps it.
+    Permit prepare_kept(std::uint64_t job_id)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        Permit permit;
+        if (job_id != job_id_ || phase_ != Phase::Running)
+        {
+            return permit;
+        }
+        pending_solution_ = next_solution_++;
+        permit.allowed = true;
+        permit.solution_id = pending_solution_;
+        return permit;
+    }
+
+    template <typename Make>
+    bool commit_kept(
+        std::uint64_t job_id,
+        std::shared_ptr<void> resource,
+        std::uint64_t solution_id,
+        Make&& make)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running || solution_id != pending_solution_)
+        {
+            return false;
+        }
+        const std::uint64_t next_generation = generation_ + 1;
+        std::string next_status = make(next_generation);
+        resource_ = std::move(resource);
+        solution_id_ = solution_id;
+        phase_ = Phase::Completed;
+        stop_ = false;
+        status_ = std::move(next_status);
+        generation_ = next_generation;
+        return true;
+    }
+
+    // Replaces a quiet completed or idle solution. Refuses while training is running.
+    // make(generation, solution_id) runs under the lock and must not call back in.
+    template <typename Make>
+    bool install_completed(std::shared_ptr<void> resource, std::uint64_t& solution_id, Make&& make)
+    {
+        std::unique_lock<std::mutex> lock(mu_);
+        if (phase_ == Phase::Running)
+        {
+            return false;
+        }
+        quiet_.wait(lock, [&]() { return readers_ == 0; });
+        if (phase_ == Phase::Running || !resource)
+        {
+            return false;
+        }
+        solution_id_ = next_solution_++;
+        pending_solution_ = 0;
+        resource_ = std::move(resource);
+        phase_ = Phase::Completed;
+        stop_ = false;
+        job_id_ = 0;
+        const std::uint64_t next_generation = generation_ + 1;
+        status_ = make(next_generation, solution_id_);
+        generation_ = next_generation;
+        solution_id = solution_id_;
+        return true;
+    }
+
     // Publishes more training on the same solution. A stop keeps the chunks
     // that finished. make(generation) runs under the lock and must not call back in.
     template <typename Make>

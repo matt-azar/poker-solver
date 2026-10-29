@@ -19,6 +19,8 @@ struct ValueRequest
     std::uint64_t solution_id = 0;
     std::uint64_t job_id = 0;
     std::string node_id;
+    // "actions", "runout", or "equity". Results for one kind do not satisfy another.
+    std::string kind = "actions";
 };
 
 struct ValueReply
@@ -79,6 +81,7 @@ private:
     std::uint64_t inflight_serial_ = 0;
     std::uint64_t result_solution_ = 0;
     std::string result_node_;
+    std::string result_kind_;
     std::string result_body_;
 };
 

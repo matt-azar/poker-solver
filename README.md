@@ -55,7 +55,7 @@ street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in 
 explorer
 ```
 
-`explorer` listens on `http://127.0.0.1:8765`.
+`explorer` listens on `http://127.0.0.1:8765`. Solve, then use Save and Open on a `.psol` file to close the process and resume the same regrets and strategy sums. On a chance node, Compare runouts lists every legal next card. Check-down equity is a fraction of the pot and is separate from chip EV. `equity_calculator` is the standalone enumerator; its default work limit can reject a full-range river.
 
 Kuhn chance is the six equally likely deals. Leduc chance deals two private cards and, if the hand continues, one board card. The river solver deals private hands from the two ranges on a fixed board. The street solver does that on a turn or a flop and then deals the missing board cards. `street_solver` uses one public betting tree; `--reference` walks `StreetGame` instead. `--memory-mib` sets the street solver's allocation budget in mebibytes. The default is 1024. That budget counts bytes the solver requests from its allocator. `--threads N` sets the frozen-pass thread count, including the caller. The default is 1, and a count above 1 requires `--frozen`. None of the solvers uses an RNG. Rules are in [docs/LEDUC.md](docs/LEDUC.md), [docs/RIVER.md](docs/RIVER.md), and [docs/STREETS.md](docs/STREETS.md).
 
