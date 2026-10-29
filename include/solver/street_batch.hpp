@@ -246,10 +246,24 @@ public:
     StreetBatchSolver(const StreetBatchSolver&) = delete;
     StreetBatchSolver& operator=(const StreetBatchSolver&) = delete;
 
-    SolveStats solve(const SolveConfig& config, Algorithm algorithm);
+    // Called after an accuracy check with the iterations completed so far.
+    // The stats iteration count and runtime are not filled in yet.
+    using SolveProgress = void (*)(int iterations, const SolveStats& stats, void* context);
+
+    SolveStats solve(
+        const SolveConfig& config,
+        Algorithm algorithm,
+        SolveProgress progress = nullptr,
+        void* progress_context = nullptr);
     // One public-tree pass per player. The strategy is frozen for the pass and
     // CFR+ floors only the player who just accumulated regret.
-    SolveStats solve_frozen(const SolveConfig& config, Algorithm algorithm);
+    SolveStats solve_frozen(
+        const SolveConfig& config,
+        Algorithm algorithm,
+        SolveProgress progress = nullptr,
+        void* progress_context = nullptr);
+    // Write the rank cache before training. Later passes do not fill it again.
+    void initialize_rank_cache();
     void run_iterations(int count, Algorithm algorithm);
     void continue_iterations(int count, Algorithm algorithm);
     void run_frozen_iterations(int count, Algorithm algorithm);

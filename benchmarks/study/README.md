@@ -67,6 +67,10 @@ A called half-pot turn bet leaves 350 behind and a pot of 200, so the river stil
 
 Useful because the frozen turn pass separates construction, rank-cache fill, training, and evaluation on a range-versus-range tree.
 
+### `turn_srp_river_betting_to_target`
+
+The same tree, ranges, sizes, frozen pass, thread count, and engine budget as `turn_srp_river_betting`. The iteration cap is 8000 and the wall is 3600 seconds. `--accuracy 0.001` still stops early when NashConv/pot is at most 0.001. This case measures cold time to that target. It is role `scale`, so `--cases reference` does not run it, and it does not replace the 400-iteration reference.
+
 ### `flop_srp_one_size`
 
 Board `Js 8h 3h`, pot 100, effective stack 500. OOP is `JJ+` plus suited broadways and connectors, with `AJo` at weight 0.5. IP is `TT+`, `AJs+`, `KQs`, a partial `QJs`, and weighted `KJo` / `ATs`. The ranges are not the same, and they are not `QQ,JJ,TT,99`. One half-pot bet is used on the flop, the turn, and the river. The raise is an explicit 0.75 pot. All-in is on. `max-raises` is 2. CFR+, frozen pass, 1 thread, engine budget 4096 MiB, iteration cap 400, accuracy 0.001, evaluation cadence 20.
@@ -119,11 +123,17 @@ Other runner flags:
 - `--dry-run` writes the argument arrays and does not start a process
 - `--cases` accepts `reference` (the default), `smoke`, `all`, or comma-separated ids
 
-Raw stdout, stderr, `results.json`, and `summary.md` are written to the output directory. `benchmarks/study/out/` is gitignored by `benchmarks/study/.gitignore`. Do not commit those logs.
+Raw stdout, stderr, `results.json`, and `summary.md` are written to the output directory. `benchmarks/study/out/` is gitignored by `benchmarks/study/.gitignore`. Do not commit those logs. The committed record of hardware, source revision, outcomes, and timings is `benchmarks/study/RESULTS.md`.
+
+## Flushed phases
+
+`street_solver` writes `phase:` records to stdout and flushes each one. The records are `start`, `construction`, `cache_init`, `training`, `checkpoint`, and `final`. A checkpoint is one accuracy evaluation. The runner keeps the last value of each key, so a killed process still yields the last flushed phase. `phase: final` is a completed report. Any other phase means the process was interrupted. A checkpoint's iteration count is the last finished accuracy check, not an iteration still in progress. Construction does not print cache, train, or evaluation clocks. Those clocks are zero until their phase has run, and printing them early would look like a measurement.
+
+`street_solver --reference` prints `start` and `final` only. The reference walk has no construction or cache split.
 
 ## CLI gaps
 
-Follow-ups for the solver CLIs. This suite does not patch them.
+Follow-ups for the solver CLIs:
 
 - `street_solver --accuracy` hardcodes `eval_interval` to 20. The cadence cannot be changed.
 - `river_solver --gap-threshold` is an absolute Nash gap in chips. The river CLI does not print `nash_gap_fraction_of_pot`.

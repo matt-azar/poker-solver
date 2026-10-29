@@ -130,6 +130,64 @@ std::string board_text(const std::vector<int>& board)
     return text;
 }
 
+void prepare_report_format()
+{
+    std::cout.setf(std::ios::fmtflags(0), std::ios::floatfield);
+    std::cout.precision(12);
+}
+
+void print_memory(const poker::solver::StreetMemoryReport& memory, bool include_solve_clocks)
+{
+    std::cout << "construction_seconds: " << memory.construction_seconds << "\n";
+    std::cout << "worker_setup_seconds: " << memory.worker_setup_seconds << "\n";
+    if (include_solve_clocks)
+    {
+        std::cout << "cache_init_seconds: " << memory.cache_init_seconds << "\n";
+        std::cout << "train_seconds: " << memory.train_seconds << "\n";
+        std::cout << "evaluation_seconds: " << memory.evaluation_seconds << "\n";
+    }
+    std::cout << "threads: " << memory.thread_count << "\n";
+    std::cout << "total_seconds: "
+              << (memory.construction_seconds + memory.cache_init_seconds
+                  + memory.worker_setup_seconds + memory.train_seconds
+                  + memory.evaluation_seconds)
+              << "\n";
+    std::cout << "memory_budget_bytes: " << memory.memory_budget_bytes << "\n";
+    std::cout << "allocated_bytes: " << memory.allocated_bytes << "\n";
+    std::cout << "peak_allocated_bytes: " << memory.peak_allocated_bytes << "\n";
+    std::cout << "reserved_bytes: " << memory.reserved_bytes << "\n";
+    std::cout << "estimated_peak_bytes: " << memory.estimated_peak_bytes << "\n";
+    std::cout << "regret_strategy_sum_bytes: " << memory.regret_strategy_sum_bytes << "\n";
+    std::cout << "process_peak_working_set_bytes: "
+              << memory.process_peak_working_set_bytes << "\n";
+}
+
+struct CheckpointContext
+{
+    poker::solver::StreetBatchSolver* solver = nullptr;
+    int pot = 0;
+};
+
+void print_checkpoint(int iterations, const poker::solver::SolveStats& stats, void* raw)
+{
+    const CheckpointContext* context = static_cast<const CheckpointContext*>(raw);
+    const poker::solver::StreetMemoryReport memory = context->solver->memory_report();
+    std::cout << "phase: checkpoint\n";
+    std::cout << "iterations: " << iterations << "\n";
+    std::cout << "pot: " << context->pot << "\n";
+    print_memory(memory, true);
+    std::cout << "player0_expected_utility: " << stats.p1_expected_utility << "\n";
+    std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
+    std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
+    std::cout << "nash_gap: " << stats.nash_gap << "\n";
+    if (context->pot != 0)
+    {
+        std::cout << "nash_gap_fraction_of_pot: "
+                  << stats.nash_gap / static_cast<double>(context->pot) << "\n";
+    }
+    std::cout.flush();
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -369,6 +427,16 @@ int main(int argc, char** argv)
             solve_config.nash_gap_threshold = accuracy * static_cast<double>(config.pot);
             solve_config.eval_interval = 20;
         }
+        prepare_report_format();
+        const char* game_name = config.board.size() == 3 ? "flop" : "turn";
+        std::cout << "phase: start\n";
+        std::cout << "game: " << game_name << "\n";
+        std::cout << "board: " << board_text(config.board) << "\n";
+        std::cout << "algorithm: " << poker::solver::algorithm_name(algorithm) << "\n";
+        std::cout << "pot: " << config.pot << "\n";
+        std::cout << "stack: " << config.stack << "\n";
+        std::cout.flush();
+
         poker::solver::SolveStats stats;
         std::uint64_t deals = 0;
         std::uint64_t infosets = 0;
@@ -391,12 +459,42 @@ int main(int argc, char** argv)
         else
         {
             poker::solver::StreetBatchSolver solver(config);
-            stats = frozen ? solver.solve_frozen(solve_config, algorithm)
-                           : solver.solve(solve_config, algorithm);
             if (frozen)
             {
                 solver_name = "frozen";
             }
+            memory = solver.memory_report();
+            std::cout << "phase: construction\n";
+            std::cout << "solver: " << solver_name << "\n";
+            std::cout << "deals: " << solver.deal_count() << "\n";
+            std::cout << "infosets: " << solver.infoset_count() << "\n";
+            if (solver.public_decisions() > 0)
+            {
+                std::cout << "public_decisions: " << solver.public_decisions() << "\n";
+            }
+            std::cout << "decision_nodes: " << solver.decision_node_count() << "\n";
+            std::cout << "terminals: " << solver.terminal_count() << "\n";
+            print_memory(memory, false);
+            std::cout.flush();
+
+            solver.initialize_rank_cache();
+            memory = solver.memory_report();
+            std::cout << "phase: cache_init\n";
+            std::cout << "cache_init_seconds: " << memory.cache_init_seconds << "\n";
+            std::cout << "total_seconds: "
+                      << (memory.construction_seconds + memory.cache_init_seconds
+                          + memory.worker_setup_seconds + memory.train_seconds
+                          + memory.evaluation_seconds)
+                      << "\n";
+            std::cout.flush();
+
+            std::cout << "phase: training\n";
+            std::cout.flush();
+
+            CheckpointContext checkpoint{&solver, config.pot};
+            stats = frozen
+                ? solver.solve_frozen(solve_config, algorithm, print_checkpoint, &checkpoint)
+                : solver.solve(solve_config, algorithm, print_checkpoint, &checkpoint);
             deals = solver.deal_count();
             infosets = solver.infoset_count();
             decision_nodes = solver.decision_node_count();
@@ -405,9 +503,8 @@ int main(int argc, char** argv)
             memory = solver.memory_report();
         }
 
-        std::cout.setf(std::ios::fmtflags(0), std::ios::floatfield);
-        std::cout.precision(12);
-        std::cout << "game: " << (config.board.size() == 3 ? "flop" : "turn") << "\n";
+        std::cout << "phase: final\n";
+        std::cout << "game: " << game_name << "\n";
         std::cout << "solver: " << solver_name << "\n";
         std::cout << "board: " << board_text(config.board) << "\n";
         std::cout << "algorithm: " << poker::solver::algorithm_name(algorithm) << "\n";
@@ -425,25 +522,7 @@ int main(int argc, char** argv)
         std::cout << "runtime_seconds: " << stats.runtime_seconds << "\n";
         if (!reference)
         {
-            std::cout << "construction_seconds: " << memory.construction_seconds << "\n";
-            std::cout << "cache_init_seconds: " << memory.cache_init_seconds << "\n";
-            std::cout << "worker_setup_seconds: " << memory.worker_setup_seconds << "\n";
-            std::cout << "train_seconds: " << memory.train_seconds << "\n";
-            std::cout << "evaluation_seconds: " << memory.evaluation_seconds << "\n";
-            std::cout << "threads: " << memory.thread_count << "\n";
-            std::cout << "total_seconds: "
-                      << (memory.construction_seconds + memory.cache_init_seconds
-                          + memory.worker_setup_seconds + memory.train_seconds
-                          + memory.evaluation_seconds)
-                      << "\n";
-            std::cout << "memory_budget_bytes: " << memory.memory_budget_bytes << "\n";
-            std::cout << "allocated_bytes: " << memory.allocated_bytes << "\n";
-            std::cout << "peak_allocated_bytes: " << memory.peak_allocated_bytes << "\n";
-            std::cout << "reserved_bytes: " << memory.reserved_bytes << "\n";
-            std::cout << "estimated_peak_bytes: " << memory.estimated_peak_bytes << "\n";
-            std::cout << "regret_strategy_sum_bytes: " << memory.regret_strategy_sum_bytes << "\n";
-            std::cout << "process_peak_working_set_bytes: "
-                      << memory.process_peak_working_set_bytes << "\n";
+            print_memory(memory, true);
             for (const poker::solver::StreetMemoryComponent& component : memory.components)
             {
                 std::cout << "memory_component " << component.name << " " << component.bytes << "\n";
@@ -457,6 +536,7 @@ int main(int argc, char** argv)
                   << stats.nash_gap / static_cast<double>(config.pot) << "\n";
         std::cout << "deterministic: yes (runouts enumerated; no RNG)\n";
         std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
+        std::cout.flush();
     }
     catch (const std::exception& error)
     {

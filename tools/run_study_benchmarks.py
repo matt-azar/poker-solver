@@ -290,9 +290,14 @@ def parse_solver_output(text: str) -> dict:
         if not match:
             continue
         key, raw = match.group(1), match.group(2)
+        if key == "phase":
+            metrics["phase"] = raw.strip()
+            continue
         if key in metrics:
             metrics[key] = parse_scalar(raw)
     metrics["memory_components"] = components if seen_component else None
+    if "phase" not in metrics:
+        metrics["phase"] = None
     return metrics
 
 
@@ -622,6 +627,7 @@ def write_summary(path: Path, payload: dict) -> None:
                 f"(limit {format_number(case['wall_limit_seconds'])})",
                 f"- Iterations requested: {format_number(case['iterations_in_command'])}",
                 f"- Iterations completed: {format_number(metrics.get('iterations'))}",
+                f"- Last flushed phase: {format_number(metrics.get('phase'))}",
                 f"- Threads applied: {format_number(case['threads_applied'])}",
                 f"- Engine memory budget MiB: {format_number(case['memory_mib_in_command'])}",
                 f"- Player 0 EV: {format_number(case['quality']['player0_expected_utility'])}",
@@ -656,8 +662,10 @@ def write_summary(path: Path, payload: dict) -> None:
         if case["outcome"] == "timeout":
             lines.append(
                 "Timeout: the process was killed at the wall limit. "
-                "This is not a completed solve. Metrics above are whatever the process had already printed, "
-                "which is empty when the solver reports only at the end."
+                "This is not a completed solve. Metrics above are the last flushed phase. "
+                "`phase: final` is a finished report. "
+                "`start`, `construction`, `cache_init`, `training`, and `checkpoint` were interrupted. "
+                "A checkpoint records the last accuracy evaluation, not an iteration still in progress."
             )
             lines.append("")
         if case["outcome"] in ("invalid-input", "resource-rejection", "process-failure"):
@@ -716,6 +724,7 @@ def main(argv: list[str]) -> int:
             }
             metrics = {name: None for name in METRIC_FIELDS}
             metrics["memory_components"] = None
+            metrics["phase"] = None
             quality = quality_from_metrics(metrics)
             outcome = "dry-run"
         else:

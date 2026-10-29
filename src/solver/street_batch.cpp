@@ -5171,7 +5171,17 @@ void StreetBatchSolver::continue_frozen_iterations(int count, Algorithm algorith
     engine_->train_frozen(count, algorithm);
 }
 
-SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm algorithm)
+void StreetBatchSolver::initialize_rank_cache()
+{
+    engine_->check_usable();
+    engine_->ensure_ranks();
+}
+
+SolveStats StreetBatchSolver::solve_frozen(
+    const SolveConfig& config,
+    Algorithm algorithm,
+    SolveProgress progress,
+    void* progress_context)
 {
     note_profile_mutation();
     engine_->check_usable();
@@ -5195,6 +5205,10 @@ SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm 
             stats.p2_best_response_utility = p2_best_response_utility();
             stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
             fresh = true;
+            if (progress != nullptr)
+            {
+                progress(completed, stats, progress_context);
+            }
             if (stats.nash_gap <= config.nash_gap_threshold)
             {
                 break;
@@ -5215,7 +5229,11 @@ SolveStats StreetBatchSolver::solve_frozen(const SolveConfig& config, Algorithm 
     return stats;
 }
 
-SolveStats StreetBatchSolver::solve(const SolveConfig& config, Algorithm algorithm)
+SolveStats StreetBatchSolver::solve(
+    const SolveConfig& config,
+    Algorithm algorithm,
+    SolveProgress progress,
+    void* progress_context)
 {
     note_profile_mutation();
     engine_->check_usable();
@@ -5239,6 +5257,10 @@ SolveStats StreetBatchSolver::solve(const SolveConfig& config, Algorithm algorit
             stats.p2_best_response_utility = p2_best_response_utility();
             stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
             fresh = true;
+            if (progress != nullptr)
+            {
+                progress(completed, stats, progress_context);
+            }
             if (stats.nash_gap <= config.nash_gap_threshold)
             {
                 break;
