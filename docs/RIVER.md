@@ -2,6 +2,8 @@
 
 `RiverGame` is one no-limit betting street on a fixed five-card board. `CfrTrainer<RiverGame>` is the reference enumerator. `RiverBatchSolver` is the default: one public betting tree, the same per-deal regret update, and one best-response walk. Pass `--reference` to use the enumerator. Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 is out of position, player 1 is in position, and a pair of hands is legal only when the four private cards and the board are disjoint. There is no RNG.
 
+This program is the current production path for a five-card board. A turn tree already contains a river subtree for each river card. The roadmap joins the five-card production path to that shared tree under M6. `RiverGame` remains the reference enumerator after the join. See [ROADMAP.md](ROADMAP.md).
+
 This is an equilibrium of the configured bet-size tree.
 
 ## Chips

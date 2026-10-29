@@ -14,6 +14,10 @@ Phase 9 adds the `explorer` program and the static files in `ui/`. A five-card b
 
 `Algorithm::LinearCfr` is a third weighting on `CfrTrainer`: iteration `t` scales both the new regret and the average strategy, and regrets stay signed. The public river tree uses vanilla CFR and CFR+. See [HUNL.md](HUNL.md).
 
+## One postflop tree
+
+A flop, a turn, and a river are one betting tree with two, one, or zero cards still to come. Today a three-card or four-card board uses `StreetBatchSolver`. A five-card board uses `RiverBatchSolver`. `StreetGame` rejects any other board length. [ROADMAP.md](ROADMAP.md) assigns the join to M6. `RiverGame` stays the reference enumerator. `river_solver` stays a product entry point until a five-card solve on the shared tree matches that enumerator. Kuhn and Leduc stay on `CfrTrainer`.
+
 ## Modules
 
 | Module | Role |
