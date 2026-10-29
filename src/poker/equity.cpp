@@ -212,6 +212,19 @@ double scaled_weight(double weight, double scale)
     return scaled;
 }
 
+// The largest joint contribution must be a normal double. A smaller subnormal
+// contribution can sit beside it. When every contribution underflows, the
+// relative weights are no longer represented, and the input is rejected.
+void require_normal_joint(bool any_normal, bool any_subnormal)
+{
+    if (!any_normal && any_subnormal)
+    {
+        fail(
+            EquityFailure::NumericalRange,
+            "equity numerical range exceeded: joint contributions are below the normal range");
+    }
+}
+
 double participant_scale(const std::vector<HandRef>& hands)
 {
     double scale = 0.0;
@@ -271,6 +284,8 @@ void require_representable_side(
 {
     Accumulator joint;
     bool any = false;
+    bool any_normal = false;
+    bool any_subnormal = false;
     for (const HandRef& hero : heroes)
     {
         if (!hero.supported)
@@ -300,8 +315,17 @@ void require_representable_side(
         {
             joint.add(term);
             any = true;
+            if (std::isnormal(term))
+            {
+                any_normal = true;
+            }
+            else if (std::isfinite(term))
+            {
+                any_subnormal = true;
+            }
         }
     }
+    require_normal_joint(any_normal, any_subnormal);
     const double total = joint.value();
     if (!any || !std::isfinite(total) || !(total > 0.0))
     {
@@ -548,6 +572,21 @@ PlayerShowdown finish_player(
     {
         return player;
     }
+
+    bool any_normal = false;
+    bool any_subnormal = false;
+    for (const double term : joint_terms)
+    {
+        if (std::isnormal(term))
+        {
+            any_normal = true;
+        }
+        else if (std::isfinite(term) && term > 0.0)
+        {
+            any_subnormal = true;
+        }
+    }
+    require_normal_joint(any_normal, any_subnormal);
 
     const double z = joint.value();
     if (!std::isfinite(z) || !(z > 0.0))

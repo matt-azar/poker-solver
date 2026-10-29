@@ -563,6 +563,21 @@ void test_extreme_scale()
     CHECK(showdown_equity_json(blocked, board, 0.0).find("\"joint_defined\":false") != std::string::npos);
 }
 
+void test_underflowed_joint_is_rejected()
+{
+    const std::vector<int> board = parse_equity_board("Kh Kd 7c 4s 2h");
+    const Range oop = parse_equity_range("AhAd:1e123,9c9d:8e-201");
+    const Range ip = parse_equity_range("AhAc:1e123,2c3d:1e-200");
+    const EquityError forward = expect_failure(EquityFailure::NumericalRange, [&] {
+        showdown_equity(board, oop, ip);
+    });
+    CHECK(std::string(forward.what()).find("normal range") != std::string::npos);
+    const EquityError swapped = expect_failure(EquityFailure::NumericalRange, [&] {
+        showdown_equity(board, ip, oop);
+    });
+    CHECK(std::string(swapped.what()).find("normal range") != std::string::npos);
+}
+
 void test_blocked_heavy_opponent_keeps_conditional_equity()
 {
     const std::vector<int> board = parse_equity_board("Kh Kd 7c 4s");
@@ -900,6 +915,7 @@ int main()
     test_tiny_compatible_mass();
     test_rescaling_and_prior();
     test_extreme_scale();
+    test_underflowed_joint_is_rejected();
     test_blocked_heavy_opponent_keeps_conditional_equity();
     test_undefined_and_invalid();
     test_swap_suits_and_identities();
