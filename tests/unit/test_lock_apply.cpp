@@ -1,25 +1,75 @@
 #include "harness.hpp"
 
 #include "game/kuhn_game.hpp"
+#include "poker/card.hpp"
+#include "poker/range.hpp"
 #include "solver/node_lock.hpp"
 #include "solver/regret_matching.hpp"
+#include "solver/street_batch.hpp"
 #include "solver/trainer.hpp"
 
 #include <cmath>
+#include <string>
 #include <vector>
 
 namespace
 {
 
+using poker::holdem::Range;
 using poker::solver::Algorithm;
 using poker::solver::CfrTrainer;
 using poker::solver::LockKind;
 using poker::solver::LockSet;
 using poker::solver::NodeLock;
 using poker::solver::SolveConfig;
+using poker::solver::StreetBatchSolver;
+using poker::solver::StreetStrategyEntry;
 using poker::solver::apply_lock_to_strategy;
 using poker::solver::make_action_lock_row;
 using poker::solver::regret_matching;
+using poker::streets::StreetConfig;
+
+int card_id(const char* text)
+{
+    return poker::holdem::parse_card(text);
+}
+
+std::string combo_name(const char* a, const char* b)
+{
+    return Range::combo_text(Range::combo_index(card_id(a), card_id(b)));
+}
+
+StreetConfig tiny_turn_lock_config(const char* oop, const char* ip)
+{
+    StreetConfig config;
+    config.board = {card_id("Kh"), card_id("Kd"), card_id("7c"), card_id("4s")};
+    config.pot = 100;
+    config.stack = 100;
+    config.oop = Range::parse(oop);
+    config.ip = Range::parse(ip);
+    config.oop_turn_bets = {1.0};
+    config.allow_all_in = false;
+    config.max_raises = 1;
+    config.memory_mib = 64;
+    return config;
+}
+
+double open_action_prob(
+    const std::vector<StreetStrategyEntry>& entries,
+    const std::string& combo,
+    const char* action_prefix)
+{
+    const std::string needle = "OOP " + combo + " | turn | open";
+    for (const StreetStrategyEntry& entry : entries)
+    {
+        if (entry.infoset == needle && entry.action.rfind(action_prefix, 0) == 0)
+        {
+            return entry.probability;
+        }
+    }
+    CHECK(false);
+    return 0.0;
+}
 
 void test_apply_full_node_overwrites_rm()
 {
@@ -212,6 +262,135 @@ void test_kuhn_trainer_unlocked_row_matches_null_locks()
     }
 }
 
+void test_street_batch_reads_config_locks_full_node()
+{
+    // Public node 0 is OOP's open. Lock forces always bet for every hand.
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = LockKind::FullNode;
+    const double locked[] = {0.0, 1.0}; // Check, Bet
+    lock.actions = make_action_lock_row(locked, 2);
+    locks.upsert(lock);
+
+    StreetConfig config = tiny_turn_lock_config("2c3d", "AhAd");
+    StreetBatchSolver solver(config);
+    SolveConfig solve;
+    solve.max_iterations = 20;
+    solve.locks = &locks;
+    solver.solve(solve, Algorithm::VanillaCfr);
+
+    // Bet labels are "Bet N" / "Bet N all-in"; open_action_prob matches by prefix.
+    const auto entries = solver.average_strategy_entries();
+    const std::string air = combo_name("2c", "3d");
+    CHECK_NEAR(open_action_prob(entries, air, "Check"), 0.0, 1e-12);
+    CHECK_NEAR(open_action_prob(entries, air, "Bet"), 1.0, 1e-12);
+}
+
+void test_street_batch_selected_combos_only_listed_hand()
+{
+    // Two OOP hands. Lock only hand index 0 (acting-player slot.hand, not holdem id).
+    StreetConfig config = tiny_turn_lock_config("2c3d,KcKs", "AhAd");
+    const auto free_entries = [&]()
+    {
+        StreetBatchSolver free_solver(config);
+        SolveConfig free_config;
+        free_config.max_iterations = 15;
+        free_solver.solve(free_config, Algorithm::VanillaCfr);
+        return free_solver.average_strategy_entries();
+    }();
+
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = LockKind::SelectedCombos;
+    lock.combo_indices = {0};
+    const double locked[] = {0.0, 1.0};
+    lock.actions = make_action_lock_row(locked, 2);
+    locks.upsert(lock);
+
+    StreetBatchSolver locked_solver(config);
+    SolveConfig locked_config;
+    locked_config.max_iterations = 15;
+    locked_config.locks = &locks;
+    locked_solver.solve(locked_config, Algorithm::VanillaCfr);
+    const auto locked_entries = locked_solver.average_strategy_entries();
+
+    locked_solver.prepare_inspection();
+    const auto root = locked_solver.inspect_node(locked_solver.root_node_id());
+    CHECK(root.hands.size() >= 2);
+    const std::string locked_combo = root.hands[0].combo;
+    const std::string free_combo = root.hands[1].combo;
+    CHECK_NEAR(open_action_prob(locked_entries, locked_combo, "Check"), 0.0, 1e-12);
+    CHECK_NEAR(open_action_prob(locked_entries, locked_combo, "Bet"), 1.0, 1e-12);
+
+    // Unlisted hand matches the null-locks solve for the same iteration count.
+    CHECK_NEAR(
+        open_action_prob(locked_entries, free_combo, "Check"),
+        open_action_prob(free_entries, free_combo, "Check"),
+        1e-12);
+    CHECK_NEAR(
+        open_action_prob(locked_entries, free_combo, "Bet"),
+        open_action_prob(free_entries, free_combo, "Bet"),
+        1e-12);
+}
+
+void test_street_batch_null_locks_bit_identical_to_unlocked_row()
+{
+    StreetConfig config = tiny_turn_lock_config("2c3d", "AhAd");
+
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = LockKind::FullNode;
+    locks.upsert(lock); // empty probs = unlocked
+
+    StreetBatchSolver with_unlocked(config);
+    StreetBatchSolver with_null(config);
+
+    SolveConfig unlocked_config;
+    unlocked_config.max_iterations = 12;
+    unlocked_config.locks = &locks;
+    with_unlocked.solve(unlocked_config, Algorithm::VanillaCfr);
+
+    SolveConfig null_config;
+    null_config.max_iterations = 12;
+    with_null.solve(null_config, Algorithm::VanillaCfr);
+
+    const auto a = with_unlocked.average_strategy_entries();
+    const auto b = with_null.average_strategy_entries();
+    CHECK(a.size() == b.size());
+    for (std::size_t i = 0; i < a.size(); ++i)
+    {
+        CHECK(a[i].infoset == b[i].infoset);
+        CHECK(a[i].action == b[i].action);
+        CHECK(a[i].probability == b[i].probability);
+    }
+}
+
+void test_street_batch_frozen_solve_honors_locks()
+{
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = LockKind::FullNode;
+    const double locked[] = {1.0, 0.0}; // always check
+    lock.actions = make_action_lock_row(locked, 2);
+    locks.upsert(lock);
+
+    StreetConfig config = tiny_turn_lock_config("2c3d", "AhAd");
+    StreetBatchSolver solver(config);
+    SolveConfig solve;
+    solve.max_iterations = 10;
+    solve.locks = &locks;
+    solver.solve_frozen(solve, Algorithm::CfrPlus);
+
+    const auto entries = solver.average_strategy_entries();
+    const std::string air = combo_name("2c", "3d");
+    CHECK_NEAR(open_action_prob(entries, air, "Check"), 1.0, 1e-12);
+    CHECK_NEAR(open_action_prob(entries, air, "Bet"), 0.0, 1e-12);
+}
+
 } // namespace
 
 void run_lock_apply_tests()
@@ -223,4 +402,8 @@ void run_lock_apply_tests()
     test_kuhn_trainer_full_node_lock_forces_mixture();
     test_kuhn_trainer_selected_combos_combo_zero_only();
     test_kuhn_trainer_unlocked_row_matches_null_locks();
+    test_street_batch_reads_config_locks_full_node();
+    test_street_batch_selected_combos_only_listed_hand();
+    test_street_batch_null_locks_bit_identical_to_unlocked_row();
+    test_street_batch_frozen_solve_honors_locks();
 }
