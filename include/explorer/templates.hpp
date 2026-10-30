@@ -71,7 +71,7 @@ inline std::filesystem::path resolve_templates_directory(
             std::error_code error;
             if (std::filesystem::is_directory(from_env, error))
             {
-                return from_env;
+                return std::filesystem::weakly_canonical(from_env, error);
             }
         }
     }
@@ -176,7 +176,10 @@ inline std::optional<std::string> read_template(
     }
     std::ostringstream buffer;
     buffer << input.rdbuf();
-    return buffer.str();
+    std::string text = buffer.str();
+    // street-config 1 requires LF; normalize CRLF from Windows checkouts.
+    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+    return text;
 }
 
 } // namespace poker::explorer
