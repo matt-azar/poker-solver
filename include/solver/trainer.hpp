@@ -29,8 +29,13 @@ struct SolveConfig
     // Negative: do not stop early. Otherwise stop when the Nash gap is at or below this value.
     double nash_gap_threshold = -1.0;
     // How often to measure (and record) the Nash gap when a threshold is set.
-    // Must be positive to stop early. Existing default keeps prior cadence.
-    int eval_interval = 1000;
+    // Must be positive for mid-loop evaluation. Default evaluates every iteration.
+    // eval_interval is a legacy alias for the same storage.
+    union
+    {
+        int eval_every = 1;
+        int eval_interval;
+    };
     // Negative: no wall-clock cap. Otherwise stop after a completed iteration when
     // steady_clock time since solve start meets or exceeds this many seconds.
     // Checked at iteration boundaries only (safe for continue/stop semantics).
@@ -421,8 +426,8 @@ public:
             ++completed;
             fresh_evaluation = false;
             const bool check_gap = config.nash_gap_threshold >= 0.0
-                && config.eval_interval > 0
-                && completed % config.eval_interval == 0;
+                && config.eval_every > 0
+                && completed % config.eval_every == 0;
             if (check_gap)
             {
                 stats = evaluate();

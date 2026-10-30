@@ -5198,8 +5198,8 @@ SolveStats StreetBatchSolver::solve_frozen(
         ++completed;
         fresh = false;
         const bool check_gap = config.nash_gap_threshold >= 0.0
-            && config.eval_interval > 0
-            && completed % config.eval_interval == 0;
+            && config.eval_every > 0
+            && completed % config.eval_every == 0;
         if (check_gap)
         {
             stats.p1_expected_utility = expected_utility();
@@ -5269,8 +5269,8 @@ SolveStats StreetBatchSolver::solve(
         ++completed;
         fresh = false;
         const bool check_gap = config.nash_gap_threshold >= 0.0
-            && config.eval_interval > 0
-            && completed % config.eval_interval == 0;
+            && config.eval_every > 0
+            && completed % config.eval_every == 0;
         if (check_gap)
         {
             stats.p1_expected_utility = expected_utility();

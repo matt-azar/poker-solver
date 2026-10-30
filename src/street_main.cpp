@@ -33,7 +33,7 @@ void print_usage(const char* argv0)
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
-              << " [--accuracy 0.05] [--time-limit SECONDS]"
+              << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
               << " [--memory-mib N] [--threads N]"
               << " [--reference] [--frozen]\n";
 }
@@ -227,6 +227,8 @@ int main(int argc, char** argv)
         config.max_raises = 1;
         int iterations = 400;
         double accuracy = -1.0;
+        int eval_every = 20;
+        bool have_eval_every = false;
         double time_limit = -1.0;
         bool reference = false;
         bool frozen = false;
@@ -344,6 +346,15 @@ int main(int argc, char** argv)
             {
                 accuracy = std::atof(need("--accuracy"));
             }
+            else if (arg == "--eval-every")
+            {
+                eval_every = std::atoi(need("--eval-every"));
+                have_eval_every = true;
+                if (eval_every <= 0)
+                {
+                    throw std::invalid_argument("eval-every must be a positive integer");
+                }
+            }
             else if (arg == "--time-limit")
             {
                 time_limit = std::atof(need("--time-limit"));
@@ -460,7 +471,12 @@ int main(int argc, char** argv)
         if (accuracy >= 0.0)
         {
             solve_config.nash_gap_threshold = accuracy * static_cast<double>(config.pot);
-            solve_config.eval_interval = 20;
+            // CLI default cadence stays 20; --eval-every overrides. Library default is 1.
+            solve_config.eval_every = have_eval_every ? eval_every : 20;
+        }
+        else if (have_eval_every)
+        {
+            solve_config.eval_every = eval_every;
         }
         solve_config.max_wall_seconds = time_limit;
         prepare_report_format();
