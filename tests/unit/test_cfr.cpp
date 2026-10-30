@@ -508,6 +508,17 @@ void run_cfr_tests()
     CHECK(stopped.nash_gap <= stop_config.nash_gap_threshold);
     CHECK(stopped.runtime_seconds > 0.0);
     CHECK(stopped.memory_bytes_estimate > 0);
+    CHECK(!stopped.time_limit_reached);
+
+    poker::solver::CfrTrainer<poker::kuhn::KuhnGame> timed(
+        poker::kuhn::KuhnGame{}, poker::solver::Algorithm::CfrPlus);
+    poker::solver::SolveConfig time_config;
+    time_config.max_iterations = 1000000;
+    time_config.max_wall_seconds = 0.0;
+    const auto timed_out = timed.solve(time_config);
+    CHECK(timed_out.time_limit_reached);
+    CHECK(timed_out.iterations >= 1);
+    CHECK(timed_out.iterations < time_config.max_iterations);
 
     poker::solver::SolveConfig linear_config;
     linear_config.max_iterations = 2000;

@@ -30,6 +30,10 @@ struct SolveConfig
     double nash_gap_threshold = -1.0;
     // How often to measure the Nash gap when a threshold is set. Must be positive to stop early.
     int eval_interval = 1000;
+    // Negative: no wall-clock cap. Otherwise stop after a completed iteration when
+    // steady_clock time since solve start meets or exceeds this many seconds.
+    // Checked at iteration boundaries only (safe for continue/stop semantics).
+    double max_wall_seconds = -1.0;
 };
 
 struct SolveStats
@@ -41,6 +45,8 @@ struct SolveStats
     double p1_best_response_utility = 0.0;
     double p2_best_response_utility = 0.0;
     double nash_gap = 0.0;
+    // True when the loop halted because max_wall_seconds was reached.
+    bool time_limit_reached = false;
 };
 
 struct BestResponseResult
@@ -418,11 +424,23 @@ public:
                     break;
                 }
             }
+            if (config.max_wall_seconds >= 0.0)
+            {
+                const double elapsed = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - start).count();
+                if (elapsed >= config.max_wall_seconds)
+                {
+                    stats.time_limit_reached = true;
+                    break;
+                }
+            }
         }
         const auto end = std::chrono::steady_clock::now();
         if (!fresh_evaluation)
         {
+            const bool hit_time = stats.time_limit_reached;
             stats = evaluate();
+            stats.time_limit_reached = hit_time;
         }
         stats.iterations = completed;
         stats.runtime_seconds = std::chrono::duration<double>(end - start).count();

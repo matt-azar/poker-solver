@@ -43,7 +43,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Equity, action ranges, distributions, hand categories | Limited browsing foundation | M2 |
 | Weighted range editing, range libraries, board input | Basic configuration; complete visual workflow needed | M2–M3 |
 | Configurable betting trees and visual line editing | Basic parameters exist | M3 |
-| Stop-and-keep, pause/continue, accuracy stopping | Cancellation exists; distinct semantics needed | M4 |
+| Stop-and-keep, pause/continue, accuracy stopping | Cancellation and accuracy stopping exist; CLI `--time-limit` stops at an iteration boundary; pause/continue still distinct | M4 |
 | Full saves, resumable checkpoints, compact saves, lazy load | Missing | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Small benchmark set; parity unproven | M6 |
 | Full and combo node locking, editing, re-solving | Missing | M7 |
@@ -103,7 +103,7 @@ Add a visual tree preview with add/remove/force line operations, explicit canoni
 
 Introduce separate operations: cancel-and-discard, stop-and-keep, pause at a safe boundary, resume, and finish at a target. Existing cancellation must retain its tested semantics. A stop-and-keep publishes a coherent evaluated average at a complete algorithm boundary. Cancellation during construction publishes nothing.
 
-Provide iteration, elapsed-time and measured-gap targets, configurable evaluation cadence, convergence history, and honest progress information. Gap targets can only be declared achieved at an actual evaluated checkpoint. Support continuing the exact algorithm state without resetting regrets, average weights, or iteration numbering.
+Provide iteration, elapsed-time and measured-gap targets, configurable evaluation cadence, convergence history, and honest progress information. CLI `--time-limit` and `SolveConfig::max_wall_seconds` stop at an iteration boundary and set `SolveStats::time_limit_reached`. Gap targets can only be declared achieved at an actual evaluated checkpoint. Support continuing the exact algorithm state without resetting regrets, average weights, or iteration numbering.
 
 Design immutable solution revisions and an exclusive training owner. Browsing and training use a snapshot when the budget has room for one. Otherwise suspend browsing and show that state.
 

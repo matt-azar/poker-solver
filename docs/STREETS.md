@@ -42,6 +42,8 @@ An unknown field, a repeated field, extra space, or a version other than 1 is re
 
 `--accuracy 0.05` stops when the Nash gap divided by the pot is at or below 0.05. The printed Nash gap is NashConv. The fraction of the pot is printed beside it.
 
+`--time-limit SECONDS` stops at the next iteration boundary once that many wall-clock seconds have elapsed since the solve loop started. A non-negative value arms the limit. The default is off. The solvers print `time_limit_reached: 1` when the wall clock caused the stop, otherwise `0`. Accuracy and time-limit may both be set; whichever hits first ends the run.
+
 At most eight actions are legal at one decision. `StreetGame` rejects a reference enumeration above 200,000 terminals and tells the caller to use the batch solver. `StreetBatchSolver` does not use that cap, and it does not cap expanded histories. Its limit is `StreetConfig::memory_mib`, default 1024. One mebibyte is 1,048,576 bytes. Zero is rejected.
 
 The budget is the bytes the engine requests from its allocator, checked before that call. A container that grows is charged for the old block and the new block while both exist. Freeing a block releases the charge. If the upstream allocator throws, the charge is rolled back. Construction throws when a request would pass the limit, and the partial tree is freed. The solver keeps every hand and action, deals every card, and holds the configured budget.

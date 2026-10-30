@@ -926,6 +926,16 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
                 break;
             }
         }
+        if (config.max_wall_seconds >= 0.0)
+        {
+            const double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= config.max_wall_seconds)
+            {
+                stats.time_limit_reached = true;
+                break;
+            }
+        }
     }
     const auto end = std::chrono::steady_clock::now();
     if (!fresh)

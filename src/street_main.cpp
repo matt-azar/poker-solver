@@ -33,7 +33,8 @@ void print_usage(const char* argv0)
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
-              << " [--accuracy 0.05] [--memory-mib N] [--threads N]"
+              << " [--accuracy 0.05] [--time-limit SECONDS]"
+              << " [--memory-mib N] [--threads N]"
               << " [--reference] [--frozen]\n";
 }
 
@@ -226,6 +227,7 @@ int main(int argc, char** argv)
         config.max_raises = 1;
         int iterations = 400;
         double accuracy = -1.0;
+        double time_limit = -1.0;
         bool reference = false;
         bool frozen = false;
         poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
@@ -342,6 +344,14 @@ int main(int argc, char** argv)
             {
                 accuracy = std::atof(need("--accuracy"));
             }
+            else if (arg == "--time-limit")
+            {
+                time_limit = std::atof(need("--time-limit"));
+                if (!(time_limit >= 0.0))
+                {
+                    throw std::invalid_argument("time limit must be a nonnegative number of seconds");
+                }
+            }
             else if (arg == "--reference")
             {
                 reference = true;
@@ -452,6 +462,7 @@ int main(int argc, char** argv)
             solve_config.nash_gap_threshold = accuracy * static_cast<double>(config.pot);
             solve_config.eval_interval = 20;
         }
+        solve_config.max_wall_seconds = time_limit;
         prepare_report_format();
         const char* game_name = config.board.size() == 3 ? "flop" : "turn";
         std::cout << "phase: start\n";
@@ -559,6 +570,7 @@ int main(int argc, char** argv)
         std::cout << "nash_gap: " << stats.nash_gap << "\n";
         std::cout << "nash_gap_fraction_of_pot: "
                   << stats.nash_gap / static_cast<double>(config.pot) << "\n";
+        std::cout << "time_limit_reached: " << (stats.time_limit_reached ? "1" : "0") << "\n";
         std::cout << "deterministic: yes (runouts enumerated; no RNG)\n";
         std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
         std::cout.flush();

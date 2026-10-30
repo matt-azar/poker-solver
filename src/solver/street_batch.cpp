@@ -5214,6 +5214,16 @@ SolveStats StreetBatchSolver::solve_frozen(
                 break;
             }
         }
+        if (config.max_wall_seconds >= 0.0)
+        {
+            const double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= config.max_wall_seconds)
+            {
+                stats.time_limit_reached = true;
+                break;
+            }
+        }
     }
     if (!fresh)
     {
@@ -5263,6 +5273,16 @@ SolveStats StreetBatchSolver::solve(
             }
             if (stats.nash_gap <= config.nash_gap_threshold)
             {
+                break;
+            }
+        }
+        if (config.max_wall_seconds >= 0.0)
+        {
+            const double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= config.max_wall_seconds)
+            {
+                stats.time_limit_reached = true;
                 break;
             }
         }

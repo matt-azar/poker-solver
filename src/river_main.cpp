@@ -28,6 +28,7 @@ void print_usage(const char* argv0)
               << " [--first oop|ip]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--gap-threshold X] [--eval-interval N]"
+              << " [--time-limit SECONDS]"
               << " [--print-strategies] [--reference]\n";
 }
 
@@ -238,6 +239,7 @@ struct Options
     int iterations = 500;
     double gap_threshold = -1.0;
     int eval_interval = 1000;
+    double time_limit = -1.0;
     bool print_strategies = false;
     bool reference = false;
     bool have_oop_raises = false;
@@ -472,6 +474,14 @@ int main(int argc, char** argv)
             {
                 options.eval_interval = std::atoi(need("--eval-interval"));
             }
+            else if (arg == "--time-limit")
+            {
+                options.time_limit = std::atof(need("--time-limit"));
+                if (!(options.time_limit >= 0.0))
+                {
+                    throw std::invalid_argument("time limit must be a nonnegative number of seconds");
+                }
+            }
             else if (arg == "--print-strategies")
             {
                 options.print_strategies = true;
@@ -509,6 +519,7 @@ int main(int argc, char** argv)
         solve_config.max_iterations = options.iterations;
         solve_config.nash_gap_threshold = options.gap_threshold;
         solve_config.eval_interval = options.eval_interval;
+        solve_config.max_wall_seconds = options.time_limit;
 
         std::cout.setf(std::ios::fmtflags(0), std::ios::floatfield);
         std::cout.precision(12);
@@ -536,6 +547,7 @@ int main(int argc, char** argv)
             std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
             std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
             std::cout << "nash_gap: " << stats.nash_gap << "\n";
+            std::cout << "time_limit_reached: " << (stats.time_limit_reached ? "1" : "0") << "\n";
             std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
             std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
             if (options.print_strategies)
@@ -571,6 +583,7 @@ int main(int argc, char** argv)
             std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
             std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
             std::cout << "nash_gap: " << stats.nash_gap << "\n";
+            std::cout << "time_limit_reached: " << (stats.time_limit_reached ? "1" : "0") << "\n";
             std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
             std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
             if (options.print_strategies)
