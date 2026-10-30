@@ -545,9 +545,128 @@ void test_kept_stop_publishes_the_resource()
     session.finish_cancelled(running, "cancelled");
 }
 
+void test_pause_accepted_while_running()
+{
+    poker::explorer::Session session;
+    std::shared_ptr<void> retiring;
+    const std::uint64_t job = session.begin(retiring);
+    CHECK(session.request_pause(job) == poker::explorer::PauseResult::Accepted);
+    CHECK(session.pause_requested(job));
+    CHECK(!session.stop_requested(job));
+    CHECK(session.phase() == poker::explorer::Phase::Running);
+}
+
+void test_stale_pause_does_not_affect_replacement()
+{
+    poker::explorer::Session session;
+    std::shared_ptr<void> retiring;
+    const std::uint64_t first = session.begin(retiring);
+    const auto permit = session.prepare_success(first);
+    CHECK(session.commit_success(
+        first, std::make_shared<int>(1), permit.solution_id,
+        [](std::uint64_t, bool) { return std::string("done"); }));
+    const std::uint64_t second = session.begin(retiring);
+    CHECK(session.request_pause(first) == poker::explorer::PauseResult::Stale);
+    CHECK(!session.pause_requested(second));
+    CHECK(session.phase() == poker::explorer::Phase::Running);
+    CHECK(session.request_pause(second) == poker::explorer::PauseResult::Accepted);
+    CHECK(session.pause_requested(second));
+    session.finish_cancelled(second, "cancelled");
+}
+
+void test_pause_publishes_kept_resource()
+{
+    poker::explorer::Session session;
+    std::shared_ptr<void> retiring;
+    const std::uint64_t job = session.begin(retiring);
+    CHECK(session.request_pause(job) == poker::explorer::PauseResult::Accepted);
+    const poker::explorer::Session::Permit permit = session.prepare_kept(job);
+    CHECK(permit.allowed);
+    auto resource = std::make_shared<int>(11);
+    const bool published = session.commit_paused(
+        job,
+        resource,
+        permit.solution_id,
+        [](std::uint64_t) { return std::string("{\"paused\":true,\"running\":false}"); });
+    CHECK(published);
+    CHECK(session.phase() == poker::explorer::Phase::Paused);
+    CHECK(!session.running());
+    CHECK(session.current_solution() == permit.solution_id);
+    CHECK(session.status().find("\"paused\":true") != std::string::npos);
+    {
+        poker::explorer::ReaderLease lease(session, session.borrow(permit.solution_id));
+        CHECK(static_cast<bool>(lease));
+        CHECK(*std::static_pointer_cast<int>(lease.resource()) == 11);
+    }
+    CHECK(session.request_pause(job) == poker::explorer::PauseResult::AlreadyComplete);
+    CHECK(session.request_stop(job) == poker::explorer::StopResult::AlreadyComplete);
+}
+
+void test_continue_resumes_paused_solution()
+{
+    poker::explorer::Session session;
+    std::shared_ptr<void> retiring;
+    const std::uint64_t job = session.begin(retiring);
+    const poker::explorer::Session::Permit permit = session.prepare_kept(job);
+    CHECK(session.commit_paused(
+        job, std::make_shared<int>(5), permit.solution_id,
+        [](std::uint64_t) { return std::string("{\"paused\":true}"); }));
+    CHECK(session.phase() == poker::explorer::Phase::Paused);
+    std::shared_ptr<void> borrowed = session.borrow(permit.solution_id);
+    CHECK(borrowed != nullptr);
+    poker::explorer::Session::Claim claim;
+    bool committed = false;
+    std::thread trainer([&]() {
+        claim = session.claim_completed(permit.solution_id);
+        if (claim.allowed)
+        {
+            CHECK(session.phase() == poker::explorer::Phase::Running);
+            CHECK(session.training_resource(claim.job_id) != nullptr);
+            committed = session.commit_continuation(
+                claim.job_id, [](std::uint64_t) { return std::string("{\"paused\":false}"); });
+        }
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    session.release_reader();
+    trainer.join();
+    CHECK(claim.allowed);
+    CHECK(committed);
+    CHECK(session.phase() == poker::explorer::Phase::Completed);
+    CHECK(session.current_solution() == permit.solution_id);
+    std::shared_ptr<void> again = session.borrow(permit.solution_id);
+    CHECK(again != nullptr);
+    CHECK(*std::static_pointer_cast<int>(again) == 5);
+    session.release_reader();
+}
+
+void test_pause_during_continuation_stays_paused()
+{
+    poker::explorer::Session session;
+    std::shared_ptr<void> retiring;
+    const std::uint64_t job = session.begin(retiring);
+    const poker::explorer::Session::Permit permit = session.prepare_kept(job);
+    CHECK(session.commit_paused(
+        job, std::make_shared<int>(9), permit.solution_id,
+        [](std::uint64_t) { return std::string("{\"paused\":true}"); }));
+    const auto claim = session.claim_completed(permit.solution_id);
+    CHECK(claim.allowed);
+    CHECK(session.request_pause(claim.job_id) == poker::explorer::PauseResult::Accepted);
+    CHECK(session.commit_continuation(
+        claim.job_id, [](std::uint64_t) { return std::string("{\"paused\":true,\"running\":false}"); }));
+    CHECK(session.phase() == poker::explorer::Phase::Paused);
+    CHECK(session.current_solution() == permit.solution_id);
+    CHECK(session.borrow(permit.solution_id) != nullptr);
+    session.release_reader();
+}
+
 void run_session_tests()
 {
     test_kept_stop_publishes_the_resource();
+    test_pause_accepted_while_running();
+    test_stale_pause_does_not_affect_replacement();
+    test_pause_publishes_kept_resource();
+    test_continue_resumes_paused_solution();
+    test_pause_during_continuation_stays_paused();
     test_stop_before_construct();
     test_stop_during_chunk();
     test_stop_before_publication();

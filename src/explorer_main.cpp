@@ -496,6 +496,7 @@ struct HandLine
 struct StatusDraft
 {
     bool running = false;
+    bool paused = false;
     bool cancelled = false;
     std::string error;
     const Job* job = nullptr;
@@ -544,6 +545,8 @@ std::string build_status(const StatusDraft& draft)
     const poker::solver::StreetMemoryReport* memory = draft.memory;
     std::string out = "{\"running\":";
     out += draft.running ? "true" : "false";
+    out += ",\"paused\":";
+    out += draft.paused ? "true" : "false";
     out += ",\"cancelled\":";
     out += draft.cancelled ? "true" : "false";
     out += ",\"error\":";
@@ -1466,17 +1469,8 @@ void solve_job(std::uint64_t job_id, Job job)
         {
             river = std::make_shared<poker::solver::RiverBatchSolver>(river_config(job));
         }
-        const auto publish_stopped = [&]()
+        const auto hold_current = [&]()
         {
-            if (done <= 0)
-            {
-                StatusDraft draft = draft_for(
-                    job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
-                    sample_iterations, sample_values, sample_gaps, memory_ptr);
-                draft.cancelled = true;
-                g_session.finish_cancelled(job_id, build_status(draft));
-                return;
-            }
             auto kept_solution = std::make_shared<HeldSolution>();
             kept_solution->job = job;
             kept_solution->job_id = job_id;
@@ -1502,6 +1496,20 @@ void solve_job(std::uint64_t job_id, Job job)
             {
                 kept_solution->river = river;
             }
+            return kept_solution;
+        };
+        const auto publish_stopped = [&]()
+        {
+            if (done <= 0)
+            {
+                StatusDraft draft = draft_for(
+                    job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
+                    sample_iterations, sample_values, sample_gaps, memory_ptr);
+                draft.cancelled = true;
+                g_session.finish_cancelled(job_id, build_status(draft));
+                return;
+            }
+            auto kept_solution = hold_current();
             const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
             StatusDraft kept = draft_for(
                 job, job_id, done, kept_solution->runtime_seconds, true, value, p1, p2, gap,
@@ -1532,12 +1540,56 @@ void solve_job(std::uint64_t job_id, Job job)
                 g_session.finish_failed(job_id, build_status(draft));
             }
         };
+        const auto publish_paused = [&]()
+        {
+            if (done <= 0)
+            {
+                return false;
+            }
+            auto kept_solution = hold_current();
+            const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+            StatusDraft kept = draft_for(
+                job, job_id, done, kept_solution->runtime_seconds, true, value, p1, p2, gap,
+                kept_solution->sample_iterations, kept_solution->sample_values, kept_solution->sample_gaps,
+                kept_solution->has_memory ? &kept_solution->memory : nullptr);
+            kept.paused = true;
+            if (!kept_permit.allowed)
+            {
+                return false;
+            }
+            kept_solution->id = kept_permit.solution_id;
+            kept.solution_id = kept_permit.solution_id;
+            kept.root_id = kept_solution->root_id;
+            const bool published = g_session.commit_paused(
+                job_id, kept_solution, kept_permit.solution_id, [&](std::uint64_t generation)
+                {
+                    StatusDraft draft = kept;
+                    draft.generation = generation;
+                    return build_status(draft);
+                });
+            if (!published && g_session.phase() == poker::explorer::Phase::Running)
+            {
+                StatusDraft draft = kept;
+                draft.error = "failed to pause the solve";
+                draft.solution_id = 0;
+                draft.root_id.clear();
+                g_session.finish_failed(job_id, build_status(draft));
+            }
+            return published || g_session.phase() != poker::explorer::Phase::Running;
+        };
         while (done < job.iterations)
         {
             if (g_session.stop_requested(job_id))
             {
                 publish_stopped();
                 return;
+            }
+            if (g_session.pause_requested(job_id) && done > 0)
+            {
+                if (publish_paused())
+                {
+                    return;
+                }
             }
             const int step = std::min(chunk, job.iterations - done);
             if (street_tree)
@@ -1570,6 +1622,13 @@ void solve_job(std::uint64_t job_id, Job job)
                 publish_stopped();
                 return;
             }
+            if (g_session.pause_requested(job_id))
+            {
+                if (publish_paused())
+                {
+                    return;
+                }
+            }
             StatusDraft progress = draft_for(
                 job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
                 sample_iterations, sample_values, sample_gaps, memory_ptr);
@@ -1584,6 +1643,13 @@ void solve_job(std::uint64_t job_id, Job job)
         {
             publish_stopped();
             return;
+        }
+        if (g_session.pause_requested(job_id))
+        {
+            if (publish_paused())
+            {
+                return;
+            }
         }
         auto held = std::make_shared<HeldSolution>();
         held->job = job;
@@ -1634,6 +1700,28 @@ void solve_job(std::uint64_t job_id, Job job)
             });
             return;
         }
+        if (g_session.pause_requested(job_id))
+        {
+            const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+            StatusDraft kept = draft_for(
+                job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
+                held->sample_iterations, held->sample_values, held->sample_gaps,
+                held->has_memory ? &held->memory : nullptr);
+            kept.paused = true;
+            if (kept_permit.allowed)
+            {
+                held->id = kept_permit.solution_id;
+                kept.solution_id = kept_permit.solution_id;
+                kept.root_id = held->root_id;
+                g_session.commit_paused(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
+                {
+                    StatusDraft draft = kept;
+                    draft.generation = generation;
+                    return build_status(draft);
+                });
+                return;
+            }
+        }
         const poker::explorer::Session::Permit permit = g_session.prepare_success(job_id);
         if (!permit.allowed)
         {
@@ -1651,6 +1739,28 @@ void solve_job(std::uint64_t job_id, Job job)
                     kept.solution_id = kept_permit.solution_id;
                     kept.root_id = held->root_id;
                     g_session.commit_kept(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
+                    {
+                        StatusDraft draft = kept;
+                        draft.generation = generation;
+                        return build_status(draft);
+                    });
+                    return;
+                }
+            }
+            if (g_session.pause_requested(job_id))
+            {
+                const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+                StatusDraft kept = draft_for(
+                    job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
+                    held->sample_iterations, held->sample_values, held->sample_gaps,
+                    held->has_memory ? &held->memory : nullptr);
+                kept.paused = true;
+                if (kept_permit.allowed)
+                {
+                    held->id = kept_permit.solution_id;
+                    kept.solution_id = kept_permit.solution_id;
+                    kept.root_id = held->root_id;
+                    g_session.commit_paused(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
                     {
                         StatusDraft draft = kept;
                         draft.generation = generation;
@@ -1868,7 +1978,7 @@ void continue_job(std::uint64_t job_id, int extra)
         held->sample_gaps.reserve(held->sample_gaps.size() + chunks);
         while (done < target)
         {
-            if (g_session.stop_requested(job_id))
+            if (g_session.stop_requested(job_id) || g_session.pause_requested(job_id))
             {
                 break;
             }
@@ -1899,7 +2009,7 @@ void continue_job(std::uint64_t job_id, int extra)
             held->sample_iterations.push_back(done);
             held->sample_values.push_back(value);
             held->sample_gaps.push_back(gap);
-            if (g_session.stop_requested(job_id))
+            if (g_session.stop_requested(job_id) || g_session.pause_requested(job_id))
             {
                 break;
             }
@@ -1936,12 +2046,14 @@ void continue_job(std::uint64_t job_id, int extra)
             held->memory = held->street->memory_report();
             held->has_memory = true;
         }
+        const bool pause_after = g_session.pause_requested(job_id) && !g_session.stop_requested(job_id);
         StatusDraft success = draft_for(
             held->job, job_id, done, seconds, true, value, p1, p2, gap,
             held->sample_iterations, held->sample_values, held->sample_gaps,
             held->has_memory ? &held->memory : nullptr);
         success.solution_id = held->id;
         success.root_id = held->root_id;
+        success.paused = pause_after;
         const bool published = g_session.commit_continuation(job_id, [&](std::uint64_t generation)
         {
             StatusDraft draft = success;
@@ -2757,6 +2869,54 @@ void handle_client(socket_t client)
             payload += "\"accepted\"";
         }
         else if (result == poker::explorer::StopResult::AlreadyComplete)
+        {
+            payload += "\"complete\",\"solution_id\":";
+            const std::uint64_t solution = g_session.current_solution();
+            if (solution == 0)
+            {
+                payload += "null";
+            }
+            else
+            {
+                append_escaped(payload, "s" + std::to_string(solution));
+            }
+        }
+        else
+        {
+            payload += "\"stale\"";
+        }
+        payload += ",\"job_id\":";
+        if (job_id == 0)
+        {
+            payload += "null";
+        }
+        else
+        {
+            append_escaped(payload, "j" + std::to_string(job_id));
+        }
+        payload += "}";
+        send_response(client, 200, "application/json", payload);
+        return;
+    }
+    if (line.rfind("POST /api/pause", 0) == 0)
+    {
+        std::uint64_t job_id = g_session.current_job();
+        if (find_key(body, "job_id") != std::string::npos)
+        {
+            const std::string token = read_string(body, "job_id", "");
+            if (!parse_prefixed_id(token, 'j', job_id))
+            {
+                send_response(client, 400, "application/json", "{\"error\":\"bad job id\"}");
+                return;
+            }
+        }
+        const poker::explorer::PauseResult result = g_session.request_pause(job_id);
+        std::string payload = "{\"result\":";
+        if (result == poker::explorer::PauseResult::Accepted)
+        {
+            payload += "\"accepted\"";
+        }
+        else if (result == poker::explorer::PauseResult::AlreadyComplete)
         {
             payload += "\"complete\",\"solution_id\":";
             const std::uint64_t solution = g_session.current_solution();
