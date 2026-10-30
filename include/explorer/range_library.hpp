@@ -72,7 +72,7 @@ inline std::filesystem::path resolve_ranges_directory(
             std::error_code error;
             if (std::filesystem::is_directory(from_env, error))
             {
-                return from_env;
+                return std::filesystem::weakly_canonical(from_env, error);
             }
         }
     }
@@ -177,7 +177,9 @@ inline std::optional<std::string> read_range_preset(
     }
     std::ostringstream buffer;
     buffer << input.rdbuf();
-    return buffer.str();
+    std::string text = buffer.str();
+    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+    return text;
 }
 
 } // namespace poker::explorer
