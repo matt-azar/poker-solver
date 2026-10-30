@@ -50,3 +50,4 @@ void run_equity_dist_tests();
 void run_recent_files_tests();
 void run_template_tests();
 void run_range_library_tests();
+void run_node_lock_tests();
