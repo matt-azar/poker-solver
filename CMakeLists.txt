@@ -87,6 +87,7 @@ add_executable(poker_solver_tests
     tests/unit/test_equity_dist.cpp
     tests/unit/test_recent_files.cpp
     tests/unit/test_templates.cpp
+    tests/unit/test_range_library.cpp
 )
 target_include_directories(poker_solver_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"

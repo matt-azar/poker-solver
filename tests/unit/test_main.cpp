@@ -34,6 +34,7 @@ int main()
     run_equity_dist_tests();
     run_recent_files_tests();
     run_template_tests();
+    run_range_library_tests();
     }
     catch (const std::exception& error)
     {
