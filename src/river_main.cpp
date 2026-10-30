@@ -27,7 +27,8 @@ void print_usage(const char* argv0)
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--first oop|ip]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
-              << " [--gap-threshold X] [--eval-interval N]"
+              << " [--gap-threshold X] [--eval-every N] [--eval-interval N]"
+              << " [--time-limit SECONDS]"
               << " [--print-strategies] [--reference]\n";
 }
 
@@ -237,7 +238,8 @@ struct Options
     poker::river::RiverConfig config;
     int iterations = 500;
     double gap_threshold = -1.0;
-    int eval_interval = 1000;
+    int eval_every = 1000;
+    double time_limit = -1.0;
     bool print_strategies = false;
     bool reference = false;
     bool have_oop_raises = false;
@@ -336,9 +338,17 @@ void apply_config_text(const std::string& text, Options& options)
     {
         options.gap_threshold = number;
     }
-    if (read_number(text, "eval_interval", number))
+    if (read_number(text, "eval_every", number))
     {
-        options.eval_interval = static_cast<int>(number);
+        options.eval_every = static_cast<int>(number);
+    }
+    else if (read_number(text, "eval_interval", number))
+    {
+        options.eval_every = static_cast<int>(number);
+    }
+    if (options.eval_every <= 0)
+    {
+        throw std::invalid_argument("eval-every must be a positive integer");
     }
 }
 
@@ -468,9 +478,21 @@ int main(int argc, char** argv)
             {
                 options.gap_threshold = std::atof(need("--gap-threshold"));
             }
-            else if (arg == "--eval-interval")
+            else if (arg == "--eval-every" || arg == "--eval-interval")
             {
-                options.eval_interval = std::atoi(need("--eval-interval"));
+                options.eval_every = std::atoi(need(arg.c_str()));
+                if (options.eval_every <= 0)
+                {
+                    throw std::invalid_argument("eval-every must be a positive integer");
+                }
+            }
+            else if (arg == "--time-limit")
+            {
+                options.time_limit = std::atof(need("--time-limit"));
+                if (!(options.time_limit >= 0.0))
+                {
+                    throw std::invalid_argument("time limit must be a nonnegative number of seconds");
+                }
             }
             else if (arg == "--print-strategies")
             {
@@ -505,10 +527,16 @@ int main(int argc, char** argv)
             throw std::invalid_argument("iterations must be positive");
         }
 
+        if (options.eval_every <= 0)
+        {
+            throw std::invalid_argument("eval-every must be a positive integer");
+        }
+
         poker::solver::SolveConfig solve_config;
         solve_config.max_iterations = options.iterations;
         solve_config.nash_gap_threshold = options.gap_threshold;
-        solve_config.eval_interval = options.eval_interval;
+        solve_config.eval_every = options.eval_every;
+        solve_config.max_wall_seconds = options.time_limit;
 
         std::cout.setf(std::ios::fmtflags(0), std::ios::floatfield);
         std::cout.precision(12);
@@ -536,6 +564,16 @@ int main(int argc, char** argv)
             std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
             std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
             std::cout << "nash_gap: " << stats.nash_gap << "\n";
+            if (!stats.nash_gap_history.empty())
+            {
+                std::cout << "nash_gap_history:";
+                for (double gap : stats.nash_gap_history)
+                {
+                    std::cout << " " << gap;
+                }
+                std::cout << "\n";
+            }
+            std::cout << "time_limit_reached: " << (stats.time_limit_reached ? "1" : "0") << "\n";
             std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
             std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
             if (options.print_strategies)
@@ -571,6 +609,16 @@ int main(int argc, char** argv)
             std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
             std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
             std::cout << "nash_gap: " << stats.nash_gap << "\n";
+            if (!stats.nash_gap_history.empty())
+            {
+                std::cout << "nash_gap_history:";
+                for (double gap : stats.nash_gap_history)
+                {
+                    std::cout << " " << gap;
+                }
+                std::cout << "\n";
+            }
+            std::cout << "time_limit_reached: " << (stats.time_limit_reached ? "1" : "0") << "\n";
             std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
             std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
             if (options.print_strategies)

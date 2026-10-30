@@ -1711,6 +1711,8 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
     note_profile_mutation();
     int completed = 0;
     SolveStats stats;
+    stats.nash_gap_history.clear();
+    stats.nash_gap_iterations.clear();
     bool fresh = false;
     for (int step = 0; step < config.max_iterations; ++step)
     {
@@ -1719,17 +1721,29 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
         ++completed;
         fresh = false;
         const bool check_gap = config.nash_gap_threshold >= 0.0
-            && config.eval_interval > 0
-            && completed % config.eval_interval == 0;
+            && config.eval_every > 0
+            && completed % config.eval_every == 0;
         if (check_gap)
         {
             stats.p1_expected_utility = expected_utility();
             stats.p1_best_response_utility = p1_best_response_utility();
             stats.p2_best_response_utility = p2_best_response_utility();
             stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
             fresh = true;
             if (stats.nash_gap <= config.nash_gap_threshold)
             {
+                break;
+            }
+        }
+        if (config.max_wall_seconds >= 0.0)
+        {
+            const double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= config.max_wall_seconds)
+            {
+                stats.time_limit_reached = true;
                 break;
             }
         }
@@ -1741,6 +1755,11 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
         stats.p1_best_response_utility = p1_best_response_utility();
         stats.p2_best_response_utility = p2_best_response_utility();
         stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+        if (config.nash_gap_threshold >= 0.0)
+        {
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
+        }
     }
     stats.iterations = completed;
     stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
