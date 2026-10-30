@@ -50,6 +50,8 @@ Charged storage is the engine object, the public tree and its path and action st
 
 `estimated_peak_bytes` is a plan: payload sizes, one block header per planned buffer, and one map node per runout. `allocated_bytes` and `peak_allocated_bytes` are the resource's live total and high-water mark. `regret_strategy_sum_bytes` is only the regret array plus the strategy-sum array.
 
+`street_solver --plan-memory` prints that labeled plan before training. It calls `plan_street_memory` in `include/solver/memory_plan.hpp`, which builds a temporary `StreetBatchSolver`, copies `estimated_peak_bytes`, the configured `memory_budget_bytes`, and cheap deal/infoset/decision/terminal counts, then destroys the engine without solving. The printed `fits_budget` line is whether the plan is at or under the configured mebibyte budget. There is no mid-construction dry-run API yet; the helper reuses the same plan the engine records during construction. Use it to validate a config before a long solve.
+
 Outside the budget: process RSS, malloc bookkeeping, native thread stacks, the `std::thread` handles, the caller's `StreetConfig` vectors after they are moved in, the budget resource's own stage table, and a later strategy export. The stage table is a few dozen name entries. It does not hold the tree.
 
 Expanded terminals and expanded decisions are 64-bit counts of histories. The frozen walk visits the public tree with a vector of hands. A terminal value is a blocker-corrected sum over those hands. A full-range check-down on `Ah Kd 7c` has 1,271,256 deals, 2,517,086,880 expanded terminals, 5,151,129,312 expanded decision histories, and 5,197,920 stored information sets.
@@ -79,6 +81,7 @@ On the flop `Ah Kd 7c`, queens versus jacks, check-only, the value matches the a
 ```sh
 street_solver
 street_solver --config configs/street_default.txt
+street_solver --config configs/street_default.txt --plan-memory
 street_solver --config configs/street_default.txt --iterations 200
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1 --algorithm vanilla
 street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024 --threads 4
