@@ -83,7 +83,7 @@ Preserve explicit player signs and the existing root-centered net-chip utility. 
 
 Create a shared range model/editor: 13×13 grid, exact combos, arbitrary nonnegative weights, brush/select controls, text import/export, copy/paste, undo/redo, presets and named folders. Clearly distinguish input weights, strategy-conditioned weights, compatible-pair marginals, and combo counts.
 
-Add exact showdown equity per combo and range, conditional on the current board and compatible opponent distribution. State whether an equity display assumes check-down, and keep that label separate from strategic EV. Add equity distributions, made-hand/draw/backdoor categories, filtering, and range composition. Support a standalone equity-calculator workflow.
+Add exact showdown equity per combo and range, conditional on the current board and compatible opponent distribution. State whether an equity display assumes check-down, and keep that label separate from strategic EV. Check-down equity distributions are exposed as ten fixed buckets on the explorer equity JSON; a study-screen histogram, made-hand/draw/backdoor categories, filtering, and range composition remain. Support a standalone equity-calculator workflow.
 
 Build coordinated OOP/IP grids, selected-combo details, all-action strategy bars, equity/EV modes, range-after-action views, and runout switching that preserves the intended betting history where legal. Make missing/unsupported data visibly different from zero.
 
