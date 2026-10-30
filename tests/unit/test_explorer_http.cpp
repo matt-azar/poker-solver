@@ -12,16 +12,40 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+using socket_t = SOCKET;
+static constexpr socket_t kInvalidSocket = INVALID_SOCKET;
+static void close_socket(socket_t socket)
+{
+    closesocket(socket);
+}
+#else
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <netinet/in.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+using socket_t = int;
+static constexpr socket_t kInvalidSocket = -1;
+static void close_socket(socket_t socket)
+{
+    ::close(socket);
+}
 #endif
 
 namespace
 {
 
-#ifdef _WIN32
+int g_explorer_port = 0;
 
 class ExplorerProcess
 {
 public:
+#ifdef _WIN32
     explicit ExplorerProcess(const std::string& command)
     {
         STARTUPINFOA startup{};
@@ -61,6 +85,65 @@ public:
 
 private:
     PROCESS_INFORMATION process_{};
+#else
+    ExplorerProcess(const std::string& executable, int port)
+    {
+        const std::string port_text = std::to_string(port);
+        pid_ = fork();
+        if (pid_ == 0)
+        {
+            // Detach from the test harness stdio so a blocked write cannot stall the server.
+            const int null_fd = ::open("/dev/null", O_RDWR);
+            if (null_fd >= 0)
+            {
+                dup2(null_fd, STDIN_FILENO);
+                dup2(null_fd, STDOUT_FILENO);
+                dup2(null_fd, STDERR_FILENO);
+                if (null_fd > STDERR_FILENO)
+                {
+                    ::close(null_fd);
+                }
+            }
+            execl(executable.c_str(), executable.c_str(), "--port", port_text.c_str(), static_cast<char*>(nullptr));
+            _exit(127);
+        }
+    }
+
+    ~ExplorerProcess()
+    {
+        if (pid_ > 0)
+        {
+            kill(pid_, SIGTERM);
+            int status = 0;
+            for (int attempt = 0; attempt < 50; ++attempt)
+            {
+                const pid_t waited = waitpid(pid_, &status, WNOHANG);
+                if (waited == pid_)
+                {
+                    pid_ = -1;
+                    return;
+                }
+                if (waited < 0 && errno == ECHILD)
+                {
+                    pid_ = -1;
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            kill(pid_, SIGKILL);
+            waitpid(pid_, &status, 0);
+            pid_ = -1;
+        }
+    }
+
+    bool started() const
+    {
+        return pid_ > 0;
+    }
+
+private:
+    pid_t pid_ = -1;
+#endif
 };
 
 struct HttpResult
@@ -75,18 +158,18 @@ bool http_exchange(
     const std::string& payload,
     HttpResult& result)
 {
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (sock == INVALID_SOCKET)
+    const socket_t sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == kInvalidSocket)
     {
         return false;
     }
     sockaddr_in address{};
     address.sin_family = AF_INET;
-    address.sin_port = htons(18765);
+    address.sin_port = htons(static_cast<unsigned short>(g_explorer_port));
     inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
     if (connect(sock, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0)
     {
-        closesocket(sock);
+        close_socket(sock);
         return false;
     }
     std::string request = method + " " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n";
@@ -98,10 +181,14 @@ bool http_exchange(
     std::size_t sent = 0;
     while (sent < request.size())
     {
-        const int wrote = send(sock, request.data() + sent, static_cast<int>(request.size() - sent), 0);
+        const int wrote = static_cast<int>(send(
+            sock,
+            request.data() + sent,
+            static_cast<int>(request.size() - sent),
+            0));
         if (wrote <= 0)
         {
-            closesocket(sock);
+            close_socket(sock);
             return false;
         }
         sent += static_cast<std::size_t>(wrote);
@@ -110,14 +197,14 @@ bool http_exchange(
     char buffer[4096];
     while (true)
     {
-        const int got = recv(sock, buffer, static_cast<int>(sizeof(buffer)), 0);
+        const int got = static_cast<int>(recv(sock, buffer, static_cast<int>(sizeof(buffer)), 0));
         if (got <= 0)
         {
             break;
         }
         raw.append(buffer, buffer + got);
     }
-    closesocket(sock);
+    close_socket(sock);
     const std::size_t split = raw.find("\r\n\r\n");
     if (split == std::string::npos || raw.size() < 12)
     {
@@ -126,6 +213,33 @@ bool http_exchange(
     result.status = std::atoi(raw.c_str() + 9);
     result.body = raw.substr(split + 4);
     return true;
+}
+
+int find_free_port()
+{
+    const socket_t sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == kInvalidSocket)
+    {
+        return 0;
+    }
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(0);
+    inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+    if (bind(sock, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0)
+    {
+        close_socket(sock);
+        return 0;
+    }
+    socklen_t length = sizeof(address);
+    if (getsockname(sock, reinterpret_cast<sockaddr*>(&address), &length) != 0)
+    {
+        close_socket(sock);
+        return 0;
+    }
+    const int port = static_cast<int>(ntohs(address.sin_port));
+    close_socket(sock);
+    return port;
 }
 
 bool wait_until_listening()
@@ -285,7 +399,39 @@ void check_agreement(const HttpResult& status, const HttpResult& exported, doubl
     CHECK(exported.body.find("\"pot\":100") != std::string::npos);
 }
 
+std::string explorer_executable_path()
+{
+#ifdef _WIN32
+    char module[MAX_PATH];
+    const DWORD length = GetModuleFileNameA(nullptr, module, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH)
+    {
+        return {};
+    }
+    std::string executable(module, module + length);
+    const std::size_t slash = executable.find_last_of("\\/");
+    if (slash == std::string::npos)
+    {
+        return {};
+    }
+    return executable.substr(0, slash + 1) + "explorer.exe";
+#else
+    char module[PATH_MAX];
+    const ssize_t length = ::readlink("/proc/self/exe", module, sizeof(module) - 1);
+    if (length <= 0)
+    {
+        return {};
+    }
+    module[length] = '\0';
+    std::string executable(module);
+    const std::size_t slash = executable.find_last_of('/');
+    if (slash == std::string::npos)
+    {
+        return {};
+    }
+    return executable.substr(0, slash + 1) + "explorer";
 #endif
+}
 
 } // namespace
 
@@ -294,14 +440,19 @@ void run_explorer_http_tests()
 #ifdef _WIN32
     WSADATA data;
     CHECK(WSAStartup(MAKEWORD(2, 2), &data) == 0);
-    char module[MAX_PATH];
-    const DWORD length = GetModuleFileNameA(nullptr, module, MAX_PATH);
-    CHECK(length > 0 && length < MAX_PATH);
-    std::string executable(module, module + length);
-    const std::size_t slash = executable.find_last_of("\\/");
-    CHECK(slash != std::string::npos);
-    executable = executable.substr(0, slash + 1) + "explorer.exe";
-    ExplorerProcess server("\"" + executable + "\" --port 18765");
+#endif
+
+    g_explorer_port = find_free_port();
+    CHECK(g_explorer_port > 0);
+
+    const std::string executable = explorer_executable_path();
+    CHECK(!executable.empty());
+
+#ifdef _WIN32
+    ExplorerProcess server("\"" + executable + "\" --port " + std::to_string(g_explorer_port));
+#else
+    ExplorerProcess server(executable, g_explorer_port);
+#endif
     CHECK(server.started());
     CHECK(wait_until_listening());
 
@@ -495,8 +646,7 @@ void run_explorer_http_tests()
     CHECK(http_exchange("POST", "/api/solutions/s99/continue", "{\"iterations\":1}", missing_continue));
     CHECK(missing_continue.status == 404);
 
+#ifdef _WIN32
     WSACleanup();
-#else
-    std::cerr << "SKIP explorer HTTP tests: Windows-only in this suite\n";
 #endif
 }
