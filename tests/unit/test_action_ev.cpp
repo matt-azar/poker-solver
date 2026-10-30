@@ -1,8 +1,10 @@
 #include "harness.hpp"
 
+#include "game/river_game.hpp"
 #include "game/street_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
+#include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
 
 #include <atomic>
@@ -19,7 +21,9 @@ namespace
 {
 
 using poker::holdem::Range;
+using poker::river::RiverConfig;
 using poker::solver::Algorithm;
+using poker::solver::RiverBatchSolver;
 using poker::solver::SolveConfig;
 using poker::solver::StreetActionValues;
 using poker::solver::StreetBatchSolver;
@@ -1236,6 +1240,149 @@ void test_tiny_compatible_mass()
     }
 }
 
+RiverConfig river_bluff_config(const char* air_weight, const char* ip_weight)
+{
+    RiverConfig config;
+    config.board = {
+        card_id("Kh"), card_id("Kd"), card_id("7c"), card_id("4s"), card_id("2h")};
+    config.pot = 100;
+    config.stack = 100;
+    config.oop = Range::parse(std::string("KcKs:1,2c3d:") + air_weight);
+    config.ip = Range::parse(std::string("AhAd:") + ip_weight);
+    config.oop_bet_sizes = {1.0};
+    config.allow_all_in = false;
+    config.max_raises = 1;
+    return config;
+}
+
+void set_named_average(
+    RiverBatchSolver& solver,
+    const std::string& node_id,
+    const std::string& combo,
+    const std::vector<std::pair<const char*, double>>& named)
+{
+    const StreetInspection view = solver.inspect_node(node_id);
+    const int hand = find_inspected_hand(view, combo);
+    CHECK(hand >= 0);
+    std::vector<double> probability(view.actions.size(), 0.0);
+    for (const auto& item : named)
+    {
+        const int action = find_action(
+            [&]()
+            {
+                std::vector<std::string> labels;
+                labels.reserve(view.actions.size());
+                for (const auto& entry : view.actions)
+                {
+                    labels.push_back(entry.label);
+                }
+                return labels;
+            }(),
+            item.first);
+        if (action < 0)
+        {
+            throw std::runtime_error(std::string("missing action ") + item.first);
+        }
+        probability[static_cast<std::size_t>(action)] = item.second;
+    }
+    solver.set_average_for_test(node_id, hand, probability);
+}
+
+void install_river_bluff(RiverBatchSolver& solver, double air_shove, double ip_call)
+{
+    const std::string root = solver.root_node_id();
+    set_named_average(solver, root, combo_name("Kc", "Ks"), {{"Check", 0.0}, {"Bet", 1.0}});
+    set_named_average(solver, root, combo_name("2c", "3d"), {{"Check", 1.0 - air_shove}, {"Bet", air_shove}});
+    const StreetInspection opening = solver.inspect_node(root);
+    const int bet = find_action(
+        [&]()
+        {
+            std::vector<std::string> labels;
+            for (const auto& action : opening.actions)
+            {
+                labels.push_back(action.label);
+            }
+            return labels;
+        }(),
+        "Bet");
+    CHECK(bet >= 0);
+    const std::string facing = opening.actions[static_cast<std::size_t>(bet)].child_id;
+    set_named_average(
+        solver, facing, combo_name("Ah", "Ad"), {{"Fold", 1.0 - ip_call}, {"Call", ip_call}});
+}
+
+void test_river_bluff_fixture()
+{
+    RiverConfig config = river_bluff_config("1", "1");
+    RiverBatchSolver solver(config);
+    install_river_bluff(solver, 0.5, 0.5);
+    const double stored_ev = solver.expected_utility();
+    const std::string root = solver.root_node_id();
+    const StreetActionValues page = solver.action_values(root);
+    const int nuts = find_hand(page.combos, combo_name("Kc", "Ks"));
+    const int air = find_hand(page.combos, combo_name("2c", "3d"));
+    const int check = find_action(page.actions, "Check");
+    const int shove = find_action(page.actions, "Bet");
+    CHECK(nuts >= 0 && air >= 0 && check >= 0 && shove >= 0);
+    CHECK(page.ev_defined[static_cast<std::size_t>(nuts)]);
+    CHECK(page.ev_defined[static_cast<std::size_t>(air)]);
+    CHECK_NEAR(page_action(page, nuts, check), 50.0, 1e-9);
+    CHECK_NEAR(page_action(page, nuts, shove), 100.0, 1e-9);
+    CHECK_NEAR(page_action(page, air, check), -50.0, 1e-9);
+    CHECK_NEAR(page_action(page, air, shove), -50.0, 1e-9);
+    CHECK_NEAR(page.mixed_ev[static_cast<std::size_t>(nuts)], 100.0, 1e-9);
+    CHECK_NEAR(page.mixed_ev[static_cast<std::size_t>(air)], -50.0, 1e-9);
+    CHECK(page.node_ev_defined);
+    CHECK_NEAR(page.node_ev, 25.0, 1e-9);
+    CHECK_NEAR(page.node_ev, stored_ev, 1e-9);
+    CHECK(page.reach_defined);
+
+    const StreetInspection opening = solver.inspect_node(root);
+    const std::string facing = opening.actions[static_cast<std::size_t>(shove)].child_id;
+    const StreetActionValues response = solver.action_values(facing);
+    const int aces = find_hand(response.combos, combo_name("Ah", "Ad"));
+    const int fold = find_action(response.actions, "Fold");
+    const int call = find_action(response.actions, "Call");
+    CHECK(response.player == 1);
+    CHECK(aces >= 0 && fold >= 0 && call >= 0);
+    CHECK(response.ev_defined[static_cast<std::size_t>(aces)]);
+    CHECK_NEAR(page_action(response, aces, fold), -50.0, 1e-9);
+    CHECK_NEAR(page_action(response, aces, call), -50.0, 1e-9);
+    const StreetActionValues again = solver.action_values(facing);
+    CHECK(again.query_seconds == 0.0);
+    CHECK_NEAR(page_action(again, aces, call), -50.0, 1e-9);
+
+    RiverBatchSolver pure(config);
+    install_river_bluff(pure, 0.0, 0.0);
+    const StreetInspection pure_root = pure.inspect_node(pure.root_node_id());
+    const int pure_bet = find_action(
+        [&]()
+        {
+            std::vector<std::string> labels;
+            for (const auto& action : pure_root.actions)
+            {
+                labels.push_back(action.label);
+            }
+            return labels;
+        }(),
+        "Bet");
+    const StreetActionValues forced = pure.action_values(
+        pure_root.actions[static_cast<std::size_t>(pure_bet)].child_id);
+    const int pure_aces = find_hand(forced.combos, combo_name("Ah", "Ad"));
+    const int pure_fold = find_action(forced.actions, "Fold");
+    const int pure_call = find_action(forced.actions, "Call");
+    CHECK(forced.ev_defined[static_cast<std::size_t>(pure_aces)]);
+    CHECK_NEAR(page_action(forced, pure_aces, pure_fold), -50.0, 1e-9);
+    CHECK_NEAR(page_action(forced, pure_aces, pure_call), -150.0, 1e-9);
+    CHECK_NEAR(forced.mixed_ev[static_cast<std::size_t>(pure_aces)], -50.0, 1e-9);
+
+    const std::uint64_t before = solver.profile_epoch();
+    solver.continue_iterations(1, Algorithm::CfrPlus);
+    CHECK(solver.profile_epoch() != before);
+    const StreetActionValues after = solver.action_values(root);
+    CHECK(after.profile_epoch == solver.profile_epoch());
+}
+
 } // namespace
 
 void run_action_value_tests()
@@ -1246,4 +1393,5 @@ void run_action_value_tests()
     test_weighted_blockers_ties_and_flop();
     test_profile_revision_drops_stale_values();
     test_tiny_compatible_mass();
+    test_river_bluff_fixture();
 }

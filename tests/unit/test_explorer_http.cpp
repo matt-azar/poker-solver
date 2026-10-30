@@ -320,14 +320,24 @@ void run_explorer_http_tests()
     const std::string solution = json_string(status.body, "solution_id");
     CHECK(http_exchange("GET", "/api/solutions/" + solution + "/export", "", exported));
     check_agreement(status, exported, 50.0, true);
+    HttpResult river_root;
+    CHECK(http_exchange(
+        "GET",
+        "/api/solutions/" + solution + "/nodes/p0.t-1.r-1",
+        "",
+        river_root));
+    CHECK(river_root.status == 200);
+    CHECK(river_root.body.find("\"kind\":\"decision\"") != std::string::npos);
     HttpResult river_values;
     CHECK(http_exchange(
         "GET",
         "/api/solutions/" + solution + "/nodes/p0.t-1.r-1/values",
         "",
         river_values));
-    CHECK(river_values.status == 400);
-    CHECK(river_values.body.find("no street nodes") != std::string::npos);
+    CHECK(river_values.status == 200);
+    CHECK(river_values.body.find("\"units\":\"chips\"") != std::string::npos);
+    CHECK(river_values.body.find("\"utility_basis\":\"root_centered\"") != std::string::npos);
+    CHECK(river_values.body.find("\"node_ev_defined\":true") != std::string::npos);
 
     HttpResult stopped;
     CHECK(http_exchange("POST", "/api/stop", "{\"job_id\":\"" + river_job + "\"}", stopped));

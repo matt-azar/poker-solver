@@ -160,7 +160,7 @@ On `Kh Kd 7c 4s`, aces against `2c3d` win every river, so check-down is worth +5
 
 ## Conditional action values
 
-These values are read from a finished flop or turn solve. They do not train, and they do not use the current regret matching. The profile is the stored average.
+These values are read from a finished flop, turn, or river solve. They do not train, and they do not use the current regret matching. The profile is the stored average.
 
 At a decision for player \(i\), public history \(H\), and board \(B\), write \(q_{\mathrm{opp}}(g)\) for the opponent's input weight times the average-policy probabilities along the history. Hands that cannot exist on \(B\) are removed. For a hero hand \(h\),
 

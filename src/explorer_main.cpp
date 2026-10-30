@@ -1500,7 +1500,9 @@ void solve_job(std::uint64_t job_id, Job job)
             }
             else
             {
+                river->prepare_inspection();
                 kept_solution->river = river;
+                kept_solution->root_id = river->root_node_id();
             }
             const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
             StatusDraft kept = draft_for(
@@ -1608,7 +1610,9 @@ void solve_job(std::uint64_t job_id, Job job)
         }
         else
         {
+            river->prepare_inspection();
             held->river = std::move(river);
+            held->root_id = held->river->root_node_id();
         }
         if (g_session.stop_requested(job_id))
         {
@@ -1936,6 +1940,11 @@ void continue_job(std::uint64_t job_id, int extra)
             held->memory = held->street->memory_report();
             held->has_memory = true;
         }
+        else if (held->river)
+        {
+            held->river->prepare_inspection();
+            held->root_id = held->river->root_node_id();
+        }
         StatusDraft success = draft_for(
             held->job, job_id, done, seconds, true, value, p1, p2, gap,
             held->sample_iterations, held->sample_values, held->sample_gaps,
@@ -2221,6 +2230,8 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
         held->job = job_from_river(config);
         held->river = std::make_shared<poker::solver::RiverBatchSolver>(config);
         held->river->install_training_tables(document.tables);
+        held->river->prepare_inspection();
+        held->root_id = held->river->root_node_id();
     }
     else
     {
@@ -2616,9 +2627,9 @@ void handle_client(socket_t client)
         {
             if (tail.rfind("nodes/", 0) == 0)
             {
-                if (!held->street)
+                if (!held->street && !held->river)
                 {
-                    send_response(client, 400, "application/json", "{\"error\":\"this solution has no street nodes\"}");
+                    send_response(client, 400, "application/json", "{\"error\":\"this solution has no nodes\"}");
                     return;
                 }
                 std::string node_path = tail.substr(6);
@@ -2639,9 +2650,26 @@ void handle_client(socket_t client)
                     node_path.resize(node_path.size() - 7);
                 }
                 const auto query_started = std::chrono::steady_clock::now();
+                const auto inspect = [&](const std::string& id) -> poker::solver::StreetInspection
+                {
+                    if (held->street)
+                    {
+                        return held->street->inspect_node(id);
+                    }
+                    return held->river->inspect_node(id);
+                };
                 if (!query_kind.empty())
                 {
-                    const poker::solver::StreetInspection view = held->street->inspect_node(node_path);
+                    if (query_kind == "runout" && held->river)
+                    {
+                        send_response(
+                            client,
+                            400,
+                            "application/json",
+                            "{\"error\":\"runout values require a chance node\"}");
+                        return;
+                    }
+                    const poker::solver::StreetInspection view = inspect(node_path);
                     if (query_kind == "actions" && view.kind != "decision")
                     {
                         send_response(
@@ -2667,7 +2695,7 @@ void handle_client(socket_t client)
                     respond_value_query(client, solution_id, job_id, node_path, query_started, query_kind);
                     return;
                 }
-                const poker::solver::StreetInspection view = held->street->inspect_node(node_path);
+                const poker::solver::StreetInspection view = inspect(node_path);
                 const double query_seconds = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - query_started).count();
                 const auto serialize_started = std::chrono::steady_clock::now();
@@ -2983,9 +3011,27 @@ int run(int argc, char** argv)
                 }
                 return json_node_equity(page, request.solution_id, request.job_id, g_session.generation());
             }
+            if (held->river)
+            {
+                if (request.kind == "runout")
+                {
+                    throw std::invalid_argument("runout values require a chance node");
+                }
+                if (request.kind == "equity")
+                {
+                    throw std::invalid_argument("river equity is requested on /equity");
+                }
+                const poker::solver::StreetActionValues page =
+                    held->river->action_values(request.node_id, &cancel);
+                if (cancel.load() || g_session.current_solution() != request.solution_id)
+                {
+                    throw poker::solver::StreetValueCancelled();
+                }
+                return json_action_values(page, request.solution_id, request.job_id, g_session.generation());
+            }
             if (!held->street)
             {
-                throw std::invalid_argument("this solution has no street nodes");
+                throw std::invalid_argument("this solution has no nodes");
             }
             if (request.kind == "runout")
             {

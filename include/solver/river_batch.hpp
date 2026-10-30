@@ -1,10 +1,15 @@
 #pragma once
 
 #include "game/river_game.hpp"
+#include "solver/street_batch.hpp"
 #include "solver/trainer.hpp"
 #include "solver/training_state.hpp"
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
+#include <mutex>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -23,6 +28,10 @@ struct RiverStrategyEntry
 // CFR+ floors only that player. The floor is not applied between deals. The
 // betting tree is stored once. Best response is one walk over that tree.
 // RiverGame remains the reference.
+//
+// Node browse and conditional action EV reuse the street inspection and
+// StreetActionValues shapes so the explorer HTTP and UI stay shared. Node ids
+// use pN.t-1.r-1. There are no chance nodes on a five-card board.
 class RiverBatchSolver
 {
 public:
@@ -55,9 +64,33 @@ public:
 
     std::vector<RiverStrategyEntry> average_strategy_entries() const;
 
+    // Normalize the average profile once. Later node queries only read it.
+    void prepare_inspection() const;
+    std::string root_node_id() const;
+    StreetInspection inspect_node(const std::string& node_id) const;
+    // Force each legal action once, then both players follow the stored average.
+    // cancel may be null. A true flag throws StreetValueCancelled.
+    StreetActionValues action_values(
+        const std::string& node_id,
+        const std::atomic<bool>* cancel = nullptr) const;
+    std::uint64_t profile_epoch() const;
+    void set_average_for_test(
+        const std::string& node_id,
+        int hand,
+        std::span<const double> probability);
+    std::span<const double> regret_table() const;
+    std::span<const double> strategy_sum_table() const;
+
 private:
     struct Engine;
+    void note_profile_mutation();
     std::unique_ptr<Engine> engine_;
+    mutable std::mutex value_mu_;
+    mutable std::uint64_t profile_epoch_ = 0;
+    mutable bool value_cache_valid_ = false;
+    mutable std::string value_cache_node_;
+    mutable std::uint64_t value_cache_epoch_ = 0;
+    mutable StreetActionValues value_cache_{};
 };
 
 } // namespace poker::solver
