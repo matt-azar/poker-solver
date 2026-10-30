@@ -52,6 +52,11 @@ river_solver --config configs/river_default.json
 river_solver --iterations 2000 --algorithm cfr_plus
 river_solver --board Ah,Kd,7c,4s,2h --pot 100 --stack 200 --oop-range AA --ip-range KK --oop-bets 0.5,1 --ip-bets 0.5,1 --max-raises 2
 river_solver --reference --iterations 30 --algorithm vanilla --oop-range 22+ --ip-range 22+
+river_solver --iterations 200 --report report.txt
 ```
 
 The reported Nash gap is NashConv, `u0(BR0) + u1(BR1)`. Player 0 is out of position.
+
+## Strategy report
+
+`--report FILE` writes a `strategy-report 1` document after the solve (`-` for stdout). Fields match the street solver export. Root-action probabilities are an **unweighted** mean of the CFR average strategy across root infosets whose label ends in `| open` (`weighting unweighted_infoset`). There is still no batch queue.

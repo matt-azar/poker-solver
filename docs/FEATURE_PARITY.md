@@ -16,7 +16,7 @@ States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 | Broad betting-tree scale and competitive convergence | partial | M6 | Opt-in benches in [BENCHMARKS.md](BENCHMARKS.md) | No matched Pio timing or quality run |
 | Node locking and constrained re-solving | missing | M7 | — | — |
 | Rake, ICM, opponent incentives | missing | M8 | Chip utilities are zero-sum and root-centered | Payoff model is one player-0 vector |
-| Reports, scripting, batch queue | partial | M9 | CLI solvers and the local HTTP explorer | No report aggregation, queue, or stable command schema |
+| Reports, scripting, batch queue | partial | M9 | CLI solvers, the local HTTP explorer, and a versioned `strategy-report 1` file from `street_solver` / `river_solver --report` (root action mixture plus solve summary) | No runout aggregation, board-set reports, or durable batch queue |
 | Trainer, packs, session statistics | missing | M11 | — | — |
 | Preflop solver and chart editor | missing | M12 | — | — |
 | Layouts, shortcuts, themes, localization | partial | M13 | One local page in `ui/` | No saved layouts or themes |

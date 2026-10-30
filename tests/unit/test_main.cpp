@@ -28,6 +28,7 @@ int main()
     run_action_value_tests();
     run_value_worker_tests();
     run_checkpoint_tests();
+    run_strategy_report_tests();
     }
     catch (const std::exception& error)
     {

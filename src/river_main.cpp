@@ -2,6 +2,7 @@
 #include "poker/card.hpp"
 #include "poker/range.hpp"
 #include "solver/river_batch.hpp"
+#include "solver/strategy_report.hpp"
 #include "solver/trainer.hpp"
 
 #include <array>
@@ -28,7 +29,7 @@ void print_usage(const char* argv0)
               << " [--first oop|ip]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--gap-threshold X] [--eval-interval N]"
-              << " [--print-strategies] [--reference]\n";
+              << " [--print-strategies] [--reference] [--report file | -]\n";
 }
 
 std::vector<double> parse_sizes(const std::string& text)
@@ -242,6 +243,7 @@ struct Options
     bool reference = false;
     bool have_oop_raises = false;
     bool have_ip_raises = false;
+    std::string report_path;
     poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
 };
 
@@ -354,6 +356,44 @@ std::string board_text(const std::array<int, 5>& board)
         text += poker::holdem::format_card(board[static_cast<std::size_t>(i)]);
     }
     return text;
+}
+
+poker::solver::StrategyReport make_base_report(
+    const Options& options,
+    const poker::solver::SolveStats& stats)
+{
+    poker::solver::StrategyReport report;
+    report.board = board_text(options.config.board);
+    report.pot = options.config.pot;
+    report.stack = options.config.stack;
+    report.algorithm = poker::solver::algorithm_name(options.algorithm);
+    report.iterations = stats.iterations;
+    report.has_nash_gap = true;
+    report.nash_gap = stats.nash_gap;
+    report.weighting = "unweighted_infoset";
+    report.root_player = options.config.first_to_act;
+    return report;
+}
+
+void fill_root_from_entries(
+    poker::solver::StrategyReport& report,
+    const std::vector<poker::solver::RiverStrategyEntry>& entries)
+{
+    std::vector<std::string> infosets;
+    std::vector<std::string> actions;
+    std::vector<double> probabilities;
+    infosets.reserve(entries.size());
+    actions.reserve(entries.size());
+    probabilities.reserve(entries.size());
+    for (const poker::solver::RiverStrategyEntry& entry : entries)
+    {
+        infosets.push_back(entry.infoset);
+        actions.push_back(entry.action);
+        probabilities.push_back(entry.probability);
+    }
+    report.weighting = "unweighted_infoset";
+    report.root_actions = poker::solver::aggregate_open_infosets_unweighted(
+        infosets, actions, probabilities);
 }
 
 } // namespace
@@ -480,6 +520,10 @@ int main(int argc, char** argv)
             {
                 options.reference = true;
             }
+            else if (arg == "--report")
+            {
+                options.report_path = need("--report");
+            }
             else if (arg == "--help" || arg == "-h")
             {
                 print_usage(argv[0]);
@@ -555,6 +599,30 @@ int main(int argc, char** argv)
                     std::cout << "\n";
                 }
             }
+            if (!options.report_path.empty())
+            {
+                poker::solver::StrategyReport report = make_base_report(options, stats);
+                const auto offsets = poker::solver::action_offsets(game);
+                std::vector<std::string> infosets;
+                std::vector<std::string> actions;
+                std::vector<double> probabilities;
+                for (int infoset = 0; infoset < game.infoset_count(); ++infoset)
+                {
+                    const std::string label = game.infoset_label(infoset);
+                    const int count = game.action_count(infoset);
+                    const int base = offsets[static_cast<std::size_t>(infoset)];
+                    for (int action = 0; action < count; ++action)
+                    {
+                        infosets.push_back(label);
+                        actions.push_back(game.action_label(infoset, action));
+                        probabilities.push_back(strategy[static_cast<std::size_t>(base + action)]);
+                    }
+                }
+                // RiverGame labels use the same "| open" root marker as RiverBatchSolver.
+                report.root_actions = poker::solver::aggregate_open_infosets_unweighted(
+                    infosets, actions, probabilities);
+                poker::solver::write_strategy_report(options.report_path, report);
+            }
         }
         else
         {
@@ -573,9 +641,12 @@ int main(int argc, char** argv)
             std::cout << "nash_gap: " << stats.nash_gap << "\n";
             std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
             std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
+            const std::vector<poker::solver::RiverStrategyEntry> entries =
+                (!options.report_path.empty() || options.print_strategies)
+                    ? batch.average_strategy_entries()
+                    : std::vector<poker::solver::RiverStrategyEntry>{};
             if (options.print_strategies)
             {
-                const std::vector<poker::solver::RiverStrategyEntry> entries = batch.average_strategy_entries();
                 std::cout << "average_strategy:\n";
                 std::string current;
                 for (const poker::solver::RiverStrategyEntry& entry : entries)
@@ -592,6 +663,12 @@ int main(int argc, char** argv)
                     std::cout << " " << entry.action << "=" << entry.probability;
                 }
                 std::cout << "\n";
+            }
+            if (!options.report_path.empty())
+            {
+                poker::solver::StrategyReport report = make_base_report(options, stats);
+                fill_root_from_entries(report, entries);
+                poker::solver::write_strategy_report(options.report_path, report);
             }
         }
     }

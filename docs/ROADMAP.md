@@ -153,7 +153,7 @@ Pio exposes rake/ICM configuration and opponent profiling [S6, S7]. State conver
 
 ### M9 — Reports, automation and batch solving
 
-Deliver runout aggregation first: turn/river tables of action frequencies, EV/equity and hand-category breakdowns, sorting/filtering, charts and CSV. Extend to multi-flop reports over explicitly weighted board sets with board-texture filters. Pio's 3.9 release specifically adds richer flop aggregation [S8].
+A first stable export is in: `street_solver` and `river_solver` accept `--report` and write a versioned `strategy-report 1` document (solve summary plus the root decision mixture). Deliver runout aggregation next: turn/river tables of action frequencies, EV/equity and hand-category breakdowns, sorting/filtering, charts and CSV. Extend to multi-flop reports over explicitly weighted board sets with board-texture filters. Pio's 3.9 release specifically adds richer flop aggregation [S8].
 
 Every report states its weighting measure. Weight each report by compatible-pair mass. Distinguish ex-ante board frequency, frequency conditional on reaching a line, and an intentionally uniform study-board sample.
 
