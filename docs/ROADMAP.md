@@ -95,7 +95,7 @@ Version a canonical game/tree configuration. Include board, initial contribution
 
 Pio's documented builder includes sizing expressions, betting caps, forced lines and line editing [S3]. Turn these into leaf items in our ledger, including less-used spread-limit/limit-style options if required for literal reference coverage. A size restriction and a node lock are separate ledger items.
 
-Add a visual tree preview with add/remove/force line operations, explicit canonical action labels, saved templates, and a pre-build memory plan. Distinguish estimated engine allocation from measured allocation and whole-process memory. Validate before destructive replacement of a useful current solution.
+Add a visual tree preview with add/remove/force line operations, explicit canonical action labels, saved templates, and a pre-build memory plan. Distinguish estimated engine allocation from measured allocation and whole-process memory. Validate before destructive replacement of a useful current solution. The `TreeEditSet` / `LineEdit` model in `include/solver/tree_edit.hpp` stores force, remove, and add-size intents with a text round-trip; applying those edits when building `StreetGame` remains ahead.
 
 **Gate:** canonical configuration rebuilds the same tree; every displayed sizing rule has legal-edge-case tests; edits invalidate derived results; failed estimates/builds explain the offending configuration. Curated small trees match independent enumerators.
 
