@@ -6,6 +6,7 @@
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
+#include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
 #include "solver/trainer.hpp"
 
@@ -1083,6 +1084,39 @@ void run_street_tests()
         full.max_raises = 2;
         expect_street_matches_river(full, poker::solver::Algorithm::VanillaCfr, 12, true);
         expect_street_matches_river(full, poker::solver::Algorithm::CfrPlus, 12, true);
+
+        // Explorer five-card jobs use StreetBatchSolver. Pin the HTTP check-down
+        // spot against RiverBatchSolver utility and street root inspection.
+        {
+            const std::vector<int> explorer_board = {
+                card("Kh"), card("Kd"), card("7c"), card("4s"), card("2h")};
+            StreetConfig explorer = check_only(explorer_board, "AhAd", "2c3d");
+            explorer.pot = 100;
+            explorer.stack = 100;
+            explorer.memory_mib = 128;
+            poker::solver::StreetBatchSolver street(explorer);
+            street.run_iterations(3, poker::solver::Algorithm::CfrPlus);
+            street.prepare_inspection();
+            CHECK(street.root_node_id() == "p0.t-1.r-1");
+            CHECK_NEAR(street.expected_utility(), 50.0, 1e-9);
+
+            RiverConfig river_pin;
+            for (int i = 0; i < 5; ++i)
+            {
+                river_pin.board[static_cast<std::size_t>(i)] =
+                    explorer_board[static_cast<std::size_t>(i)];
+            }
+            river_pin.pot = 100;
+            river_pin.stack = 100;
+            river_pin.oop = Range::parse("AhAd");
+            river_pin.ip = Range::parse("2c3d");
+            river_pin.max_raises = 0;
+            river_pin.allow_all_in = false;
+            poker::solver::RiverBatchSolver river(river_pin);
+            river.run_iterations(3, poker::solver::Algorithm::CfrPlus);
+            CHECK_NEAR(street.expected_utility(), river.expected_utility(), 1e-9);
+            CHECK_NEAR(street.nash_gap(), river.nash_gap(), 1e-9);
+        }
     }
 
     CHECK(throws_invalid([&] {

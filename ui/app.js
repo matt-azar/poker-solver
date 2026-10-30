@@ -347,10 +347,9 @@ function updateSpot() {
   $("donk-label").hidden = count > 4;
   $("pot-cap").parentElement.hidden = count > 4;
   $("no-three-bet").parentElement.hidden = count > 4;
-  $("frozen").disabled = count === 5;
-  if (count === 5) {
-    $("frozen").checked = false;
-  } else if ((count === 3 || count === 4) && !$("frozen").dataset.touched) {
+  // Frozen is available on flop, turn, and river; threads>1 still require it.
+  $("frozen").disabled = false;
+  if ((count === 3 || count === 4 || count === 5) && !$("frozen").dataset.touched) {
     $("frozen").checked = true;
   }
   drawPick("oop");

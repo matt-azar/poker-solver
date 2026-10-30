@@ -10,13 +10,13 @@ Phase 7 adds `poker::solver::RiverBatchSolver`. It keeps one copy of the public 
 
 Phase 8 adds `poker::streets::StreetGame` for a flop, a turn, or a river. Later cards are chance nodes when any remain. The same regret update trains it. See [STREETS.md](STREETS.md).
 
-Phase 9 adds the `explorer` program and the static files in `ui/`. A five-card board still uses `RiverBatchSolver` there. A flop or a turn uses `StreetBatchSolver`, so the later streets are dealt and bet in the same tree. `StreetBatchSolver` also solves a five-card board when called directly. Nothing under `include/` includes `ui/`. See [EXPLORER.md](EXPLORER.md).
+Phase 9 adds the `explorer` program and the static files in `ui/`. A flop, a turn, or a river uses `StreetBatchSolver`, so later streets are dealt and bet in the same tree. `river_solver` remains a CLI entry over `RiverBatchSolver`. Nothing under `include/` includes `ui/`. See [EXPLORER.md](EXPLORER.md).
 
 `Algorithm::LinearCfr` is a third weighting on `CfrTrainer`: iteration `t` scales both the new regret and the average strategy, and regrets stay signed. The public river tree uses vanilla CFR and CFR+. See [HUNL.md](HUNL.md).
 
 ## One postflop tree
 
-A flop, a turn, and a river are one betting tree with two, one, or zero cards still to come. `StreetGame` and `StreetBatchSolver` accept three-, four-, and five-card boards. The explorer and `river_solver` still use `RiverBatchSolver` for five cards. [ROADMAP.md](ROADMAP.md) assigns finishing that production join to M6. `RiverGame` stays the reference enumerator. Kuhn and Leduc stay on `CfrTrainer`.
+A flop, a turn, and a river are one betting tree with two, one, or zero cards still to come. `StreetGame` and `StreetBatchSolver` accept three-, four-, and five-card boards. The explorer routes every board length through that shared tree. `river_solver` remains a CLI entry over `RiverBatchSolver` until M6 retires it. `RiverGame` stays the reference enumerator. Kuhn and Leduc stay on `CfrTrainer`.
 
 ## Modules
 
@@ -37,7 +37,7 @@ A flop, a turn, and a river are one betting tree with two, one, or zero cards st
 | `poker::streets::StreetGame` | Reference turn or flop tree: one betting structure for every runout, sizes per street |
 | `poker::solver::StreetBatchSolver` | Same streets on one public betting tree, reusing each line on every runout |
 | `street_solver` | Command-line driver; public tree by default, `--reference` for `StreetGame`, `--config` for a `street-config 1` document |
-| `explorer` | Local page. Serves `ui/`. A river calls `RiverBatchSolver`; a flop or a turn calls `StreetBatchSolver` |
+| `explorer` | Local page. Serves `ui/`. Flop, turn, and river call `StreetBatchSolver` |
 
 `expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker.
 

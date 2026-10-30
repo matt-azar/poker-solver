@@ -305,6 +305,7 @@ void run_explorer_http_tests()
     CHECK(server.started());
     CHECK(wait_until_listening());
 
+    // Five-card boards publish a street solution (shared tree), not RiverBatch.
     const std::string river =
         "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
         "\"pot\":100,\"stack\":100,\"iterations\":3,\"samples\":1,\"max_raises\":0,\"allow_all_in\":0,"
@@ -320,14 +321,26 @@ void run_explorer_http_tests()
     const std::string solution = json_string(status.body, "solution_id");
     CHECK(http_exchange("GET", "/api/solutions/" + solution + "/export", "", exported));
     check_agreement(status, exported, 50.0, true);
-    HttpResult river_values;
+    const std::string river_root = json_string(status.body, "root_node_id");
+    CHECK(river_root == "p0.t-1.r-1");
+    CHECK(exported.body.find("\"root_node_id\":\"p0.t-1.r-1\"") != std::string::npos);
+    HttpResult river_root_page;
     CHECK(http_exchange(
         "GET",
-        "/api/solutions/" + solution + "/nodes/p0.t-1.r-1/values",
+        "/api/solutions/" + solution + "/nodes/" + river_root,
         "",
-        river_values));
-    CHECK(river_values.status == 400);
-    CHECK(river_values.body.find("no street nodes") != std::string::npos);
+        river_root_page));
+    CHECK(river_root_page.status == 200);
+    CHECK(river_root_page.body.find("\"kind\":\"decision\"") != std::string::npos);
+    const std::string river_values_path =
+        "/api/solutions/" + solution + "/nodes/" + river_root + "/values";
+    HttpResult river_values;
+    CHECK(wait_for_values(river_values_path, river_values));
+    CHECK(river_values.status == 200);
+    CHECK(river_values.body.find("\"pending\":false") != std::string::npos);
+    double river_node_ev = 0.0;
+    CHECK(json_number(river_values.body, "node_ev", river_node_ev));
+    CHECK_NEAR(river_node_ev, 50.0, 1e-6);
 
     HttpResult stopped;
     CHECK(http_exchange("POST", "/api/stop", "{\"job_id\":\"" + river_job + "\"}", stopped));

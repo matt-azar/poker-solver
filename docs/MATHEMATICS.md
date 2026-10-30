@@ -154,13 +154,13 @@ One checked case: pot 100, one all-in, aces or fives against kings. The equilibr
 
 ## Turn and flop
 
-A turn tree has one more chance node after the turn betting ends: the river, uniform over the remaining cards. A flop tree has two, the turn and then the river. A five-card tree has none. Range weights enter only through the root hand distribution. `StreetBatchSolver` solves that five-card tree on the shared public tree and pins against `RiverGame`. The explorer and `river_solver` still call `RiverBatchSolver` until M6 retires that path. The acting player's information is the cards already dealt and the public betting. The chip rule is the river rule, with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
+A turn tree has one more chance node after the turn betting ends: the river, uniform over the remaining cards. A flop tree has two, the turn and then the river. A five-card tree has none. Range weights enter only through the root hand distribution. `StreetBatchSolver` solves that five-card tree on the shared public tree and pins against `RiverGame`. The explorer uses that shared tree for five cards; `river_solver` remains a CLI over `RiverBatchSolver` until M6 retires that path. The acting player's information is the cards already dealt and the public betting. The chip rule is the river rule, with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
 
 On `Kh Kd 7c 4s`, aces against `2c3d` win every river, so check-down is worth +50. With one pot-sized bet, CFR+ for 400 iterations reached 50.0016209123 and a Nash gap of 0.00187032418952. On `Ah Kd 7c`, queens against jacks, the check-down value over all 1,980 runouts is 41.6161616162, and the solver matches it with Nash gap 0.
 
 ## Conditional action values
 
-These values are read from a finished flop or turn solve. They do not train, and they do not use the current regret matching. The profile is the stored average.
+These values are read from a finished street solve, including a five-card river. They do not train, and they do not use the current regret matching. The profile is the stored average.
 
 At a decision for player \(i\), public history \(H\), and board \(B\), write \(q_{\mathrm{opp}}(g)\) for the opponent's input weight times the average-policy probabilities along the history. Hands that cannot exist on \(B\) are removed. For a hero hand \(h\),
 
