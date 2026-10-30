@@ -386,10 +386,8 @@ Job parse_job(const std::string& text)
         throw std::invalid_argument("threads must be a positive integer from 1 through 64");
     }
     job.threads = static_cast<int>(threads_raw);
-    if (job.threads > 1 && job.board.size() == 5)
-    {
-        throw std::invalid_argument("multiple threads are only available on a frozen flop or turn");
-    }
+    // Five-card boards use the same street tree as flop/turn. Frozen is
+    // allowed on any board length; threads above 1 still require frozen.
     if (job.threads > 1 && !job.frozen)
     {
         throw std::invalid_argument("multiple threads require the frozen street pass");
@@ -415,10 +413,6 @@ Job parse_job(const std::string& text)
     if (job.iterations <= 0)
     {
         throw std::invalid_argument("iterations must be positive");
-    }
-    if (job.frozen && job.board.size() == 5)
-    {
-        throw std::invalid_argument("the frozen pass is for a flop or a turn");
     }
     if (job.samples < 1)
     {
@@ -884,26 +878,6 @@ std::string build_status(const StatusDraft& draft)
     write_matrix("ip_matrix", "IP ");
     out += '}';
     return out;
-}
-
-poker::river::RiverConfig river_config(const Job& job)
-{
-    poker::river::RiverConfig config;
-    for (int i = 0; i < 5; ++i)
-    {
-        config.board[static_cast<std::size_t>(i)] = job.board[static_cast<std::size_t>(i)];
-    }
-    config.pot = job.pot;
-    config.stack = job.stack;
-    config.oop = job.oop;
-    config.ip = job.ip;
-    config.oop_bet_sizes = job.oop_bets;
-    config.ip_bet_sizes = job.ip_bets;
-    config.oop_raise_sizes = job.oop_raises;
-    config.ip_raise_sizes = job.ip_raises;
-    config.allow_all_in = job.allow_all_in;
-    config.max_raises = job.max_raises;
-    return config;
 }
 
 poker::streets::StreetConfig street_config(const Job& job)
@@ -1451,21 +1425,12 @@ void solve_job(std::uint64_t job_id, Job job)
             return;
         }
         const int chunk = std::max(1, job.iterations / job.samples);
-        std::shared_ptr<poker::solver::RiverBatchSolver> river;
-        std::shared_ptr<poker::solver::StreetBatchSolver> street;
-        poker::solver::StreetMemoryReport street_memory{};
-        const bool street_tree = job.board.size() != 5;
-        const poker::solver::StreetMemoryReport* memory_ptr = nullptr;
-        if (street_tree)
-        {
-            street = std::make_shared<poker::solver::StreetBatchSolver>(street_config(job));
-            street_memory = street->memory_report();
-            memory_ptr = &street_memory;
-        }
-        else
-        {
-            river = std::make_shared<poker::solver::RiverBatchSolver>(river_config(job));
-        }
+        // Flop, turn, and river share StreetBatchSolver. RiverBatchSolver
+        // remains only for opening older river-kind PSOL checkpoints and for
+        // the river_solver CLI.
+        auto street = std::make_shared<poker::solver::StreetBatchSolver>(street_config(job));
+        poker::solver::StreetMemoryReport street_memory = street->memory_report();
+        const poker::solver::StreetMemoryReport* memory_ptr = &street_memory;
         const auto publish_stopped = [&]()
         {
             if (done <= 0)
@@ -1489,19 +1454,12 @@ void solve_job(std::uint64_t job_id, Job job)
             kept_solution->sample_iterations = sample_iterations;
             kept_solution->sample_values = sample_values;
             kept_solution->sample_gaps = sample_gaps;
-            if (street_tree)
-            {
-                street->prepare_inspection();
-                kept_solution->street = street;
-                kept_solution->root_id = street->root_node_id();
-                kept_solution->memory = street->memory_report();
-                kept_solution->has_memory = true;
-                street_memory = kept_solution->memory;
-            }
-            else
-            {
-                kept_solution->river = river;
-            }
+            street->prepare_inspection();
+            kept_solution->street = street;
+            kept_solution->root_id = street->root_node_id();
+            kept_solution->memory = street->memory_report();
+            kept_solution->has_memory = true;
+            street_memory = kept_solution->memory;
             const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
             StatusDraft kept = draft_for(
                 job, job_id, done, kept_solution->runtime_seconds, true, value, p1, p2, gap,
@@ -1540,31 +1498,17 @@ void solve_job(std::uint64_t job_id, Job job)
                 return;
             }
             const int step = std::min(chunk, job.iterations - done);
-            if (street_tree)
+            if (job.frozen)
             {
-                if (job.frozen)
-                {
-                    street->continue_frozen_iterations(step, job.algorithm);
-                }
-                else
-                {
-                    street->continue_iterations(step, job.algorithm);
-                }
+                street->continue_frozen_iterations(step, job.algorithm);
             }
             else
             {
-                river->continue_iterations(step, job.algorithm);
+                street->continue_iterations(step, job.algorithm);
             }
             done += step;
-            if (street_tree)
-            {
-                remember(street->expected_utility(), street->p1_best_response_utility(), street->p2_best_response_utility());
-                street_memory = street->memory_report();
-            }
-            else
-            {
-                remember(river->expected_utility(), river->p1_best_response_utility(), river->p2_best_response_utility());
-            }
+            remember(street->expected_utility(), street->p1_best_response_utility(), street->p2_best_response_utility());
+            street_memory = street->memory_report();
             if (g_session.stop_requested(job_id))
             {
                 publish_stopped();
@@ -1597,19 +1541,12 @@ void solve_job(std::uint64_t job_id, Job job)
         held->sample_iterations = sample_iterations;
         held->sample_values = sample_values;
         held->sample_gaps = sample_gaps;
-        if (street_tree)
-        {
-            street->prepare_inspection();
-            held->street = std::move(street);
-            held->root_id = held->street->root_node_id();
-            held->memory = held->street->memory_report();
-            held->has_memory = true;
-            street_memory = held->memory;
-        }
-        else
-        {
-            held->river = std::move(river);
-        }
+        street->prepare_inspection();
+        held->street = std::move(street);
+        held->root_id = held->street->root_node_id();
+        held->memory = held->street->memory_report();
+        held->has_memory = true;
+        street_memory = held->memory;
         if (g_session.stop_requested(job_id))
         {
             const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
