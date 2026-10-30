@@ -14,7 +14,7 @@ States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 | Stop-and-keep, pause, continue, accuracy stopping | partial | M4 | A stop after at least one completed iteration publishes that solve. Continuation keeps finished chunks. Accuracy stopping is unchanged | Pause is absent. A stop during construction, before any completed iteration, still publishes nothing |
 | Full saves, checkpoints, compact saves, lazy load | partial | M5, M10 | One versioned `PSOL` file stores the canonical config, regrets, strategy sums, and completed iterations. Save and Open rebuild the tree and resume | No compact or multi-file library. This is not a Pio file and has not been checked against Pio |
 | Broad betting-tree scale and competitive convergence | partial | M6 | Opt-in benches in [BENCHMARKS.md](BENCHMARKS.md) | No matched Pio timing or quality run |
-| Node locking and constrained re-solving | missing | M7 | — | — |
+| Node locking and constrained re-solving | partial | M7 | `include/solver/node_lock.hpp` immutable lock model (`LockKind`, `ActionLockRow`, `NodeLock`, `LockSet`) with validation, combo lookup, and text helpers; covered by `tests/unit/test_node_lock.cpp` | Not applied during CFR updates yet. No explorer UI, strategy editing, or constrained re-solve |
 | Rake, ICM, opponent incentives | missing | M8 | Chip utilities are zero-sum and root-centered | Payoff model is one player-0 vector |
 | Reports, scripting, batch queue | partial | M9 | CLI solvers and the local HTTP explorer | No report aggregation, queue, or stable command schema |
 | Trainer, packs, session statistics | missing | M11 | — | — |

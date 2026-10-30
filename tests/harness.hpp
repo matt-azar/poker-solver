@@ -43,3 +43,4 @@ void run_street_chance_tests();
 void run_action_value_tests();
 void run_value_worker_tests();
 void run_checkpoint_tests();
+void run_node_lock_tests();
