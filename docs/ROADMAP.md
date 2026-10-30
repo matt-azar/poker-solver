@@ -24,7 +24,7 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 We already have a substantial tested foundation: Kuhn/Leduc reference games, river and street engines, pass-frozen CFR variants, active-player CFR+ flooring, correct counterfactual reach handling, compact blocker-aware showdowns, deterministic first-public-card parallelism, enforced engine allocation budgets, and node-scoped browsing. The current budget defaults to 1024 MiB and threads default to one.
 
-A flop, a turn, and a river are one betting tree with two, one, or zero cards still to come. The current code splits that tree by build order. `StreetBatchSolver` solves a three-card or four-card board and deals the later cards in the same tree. `RiverBatchSolver` solves a five-card board. `StreetGame` rejects a five-card board. The explorer selects the engine from the board length. `RiverGame` stays the reference enumerator for the five-card tree. M6 moves the production river path into the shared tree. `river_solver` remains a product entry point until a five-card solve on that tree matches `RiverGame` on strategies, values, and best response. Kuhn and Leduc stay on `CfrTrainer`.
+A flop, a turn, and a river are one betting tree with two, one, or zero cards still to come. `StreetGame` and `StreetBatchSolver` accept three-, four-, and five-card boards. Pinned five-card fixtures match `RiverGame` on strategies, values, and best response. The explorer and `river_solver` still select `RiverBatchSolver` for a five-card board. M6 finishes by routing that production path through the shared tree and retiring `river_solver` as a product entry point. `RiverGame` stays the reference enumerator. Kuhn and Leduc stay on `CfrTrainer`.
 
 The latest Windows report is 438,860 assertions / zero failures. Independent GCC review of the previous chance-page commit passed 364,907 assertions; Windows HTTP tests are skipped there. Session-focused ThreadSanitizer passed 56 assertions on the review host. That run covered the session tests. Publication now builds the completed status before it stores a terminal phase or a queryable result. If that builder throws, the job stays running and the existing failure path can record it.
 
@@ -38,7 +38,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 
 | Feature family | Current position | Delivery |
 |---|---|---|
-| Heads-up postflop CFR, chance, blocker handling, best responses | Established foundation. Flop/turn and river are separate production engines until M6 joins a five-card board to the shared tree | M0, M6 |
+| Heads-up postflop CFR, chance, blocker handling, best responses | Established foundation. Shared tree accepts five-card boards and pins against `RiverGame`; explorer/`river_solver` still use `RiverBatchSolver` until M6 retires that path | M0, M6 |
 | Conditional combo/action EV; both-player values | Flop and turn decision nodes | M1 |
 | Equity, action ranges, distributions, hand categories | Limited browsing foundation | M2 |
 | Weighted range editing, range libraries, board input | Basic configuration; complete visual workflow needed | M2–M3 |
@@ -127,7 +127,7 @@ Investigate exact suit isomorphisms, compact slot indexing, memory layout, SIMD,
 
 Address stored-index limits with checked wider/segmented representations when required. Keep the small enumerator as an oracle. Scale one batch solver, and publish a hardware profile for each supported tree size, including which trees fit in 1 GiB.
 
-Solve a five-card board in that same production tree. Cards still to come are two, one, or zero. A turn tree already solves a river after each river card; the standalone river solver is that subtree entered with the turn card known. `RiverGame` remains the oracle for the zero-card case, on the same footing as `--reference` against `StreetGame`. Remove `river_solver` as a product entry point after the pinned five-card fixtures match that oracle. Do this before scaling the flop/turn kernel and the river kernel as two products.
+Solve a five-card board in that same production tree. Cards still to come are two, one, or zero. A turn tree already solves a river after each river card; the standalone river solver is that subtree entered with the turn card known. `StreetGame` and `StreetBatchSolver` already accept a five-card board and match `RiverGame` on the pinned fixtures. Finish by routing the explorer and `river_solver` through that shared tree, then remove `river_solver` as a product entry point. `RiverGame` remains the oracle for the zero-card case, on the same footing as `--reference` against `StreetGame`. Do this before scaling the flop/turn kernel and the river kernel as two products.
 
 **Gate:** each optimization passes an appropriate oracle/parity gate and budget failure tests. A five-card public tree matches `RiverGame` on the pinned river fixtures before `river_solver` is removed as a product entry point. Algebra-preserving kernel changes should retain pins; algorithm and precision changes are compared on solution quality. Publish same-machine paired measurements, including evaluation cost and variance. Multi-size full-range betting trees must converge within a declared hardware envelope before broad practical parity is claimed.
 

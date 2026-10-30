@@ -154,7 +154,7 @@ One checked case: pot 100, one all-in, aces or fives against kings. The equilibr
 
 ## Turn and flop
 
-A turn tree has one more chance node after the turn betting ends: the river, uniform over the remaining cards. A flop tree has two, the turn and then the river. A five-card tree has none. Range weights enter only through the root hand distribution. The current production code solves that five-card tree in `RiverBatchSolver`. [ROADMAP.md](ROADMAP.md) moves it into this shared tree under M6, with `RiverGame` as the oracle. The acting player's information is the cards already dealt and the public betting. The chip rule is the river rule, with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
+A turn tree has one more chance node after the turn betting ends: the river, uniform over the remaining cards. A flop tree has two, the turn and then the river. A five-card tree has none. Range weights enter only through the root hand distribution. `StreetBatchSolver` solves that five-card tree on the shared public tree and pins against `RiverGame`. The explorer and `river_solver` still call `RiverBatchSolver` until M6 retires that path. The acting player's information is the cards already dealt and the public betting. The chip rule is the river rule, with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
 
 On `Kh Kd 7c 4s`, aces against `2c3d` win every river, so check-down is worth +50. With one pot-sized bet, CFR+ for 400 iterations reached 50.0016209123 and a Nash gap of 0.00187032418952. On `Ah Kd 7c`, queens against jacks, the check-down value over all 1,980 runouts is 41.6161616162, and the solver matches it with Nash gap 0.
 

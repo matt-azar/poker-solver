@@ -453,7 +453,9 @@ int main(int argc, char** argv)
             solve_config.eval_interval = 20;
         }
         prepare_report_format();
-        const char* game_name = config.board.size() == 3 ? "flop" : "turn";
+        const char* game_name = config.board.size() == 3
+            ? "flop"
+            : config.board.size() == 4 ? "turn" : "river";
         std::cout << "phase: start\n";
         std::cout << "game: " << game_name << "\n";
         std::cout << "board: " << board_text(config.board) << "\n";

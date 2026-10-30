@@ -392,7 +392,8 @@ private:
 
     int betting_streets() const
     {
-        return static_cast<int>(config_.board.size()) == 3 ? 3 : 2;
+        // Flop: three streets. Turn: two. River: one.
+        return 6 - static_cast<int>(config_.board.size());
     }
 
     static int round_chips(double fraction, int basis)
@@ -418,9 +419,9 @@ private:
 
     void validate_config() const
     {
-        if (config_.board.size() != 3 && config_.board.size() != 4)
+        if (config_.board.size() != 3 && config_.board.size() != 4 && config_.board.size() != 5)
         {
-            throw std::invalid_argument("street solver board must have 3 or 4 cards");
+            throw std::invalid_argument("street solver board must have 3, 4, or 5 cards");
         }
         holdem::validate_board(config_.board.data(), static_cast<int>(config_.board.size()));
         if (config_.pot <= 0)
@@ -527,7 +528,8 @@ private:
 
     int street_kind(int street) const
     {
-        return config_.board.size() == 3 ? street : street + 1;
+        // Map local street index onto flop/turn/river size lists.
+        return street + static_cast<int>(config_.board.size()) - 3;
     }
 
     const std::vector<double>& listed_bets(int player, int kind) const
@@ -848,6 +850,10 @@ private:
 
     std::string place_text(const State& state) const
     {
+        if (config_.board.size() == 5)
+        {
+            return "river";
+        }
         if (config_.board.size() == 4)
         {
             if (state.street == 0)
@@ -891,8 +897,12 @@ private:
         info.label = state.acting == 0 ? "OOP " : "IP ";
         info.label += holdem::Range::combo_text(combo);
         info.label += " | ";
-        info.label += place_text(state);
-        info.label += " | ";
+        // Five-card labels match RiverGame (no place segment).
+        if (config_.board.size() != 5)
+        {
+            info.label += place_text(state);
+            info.label += " | ";
+        }
         info.label += path.empty() ? "open" : path;
         const int id = static_cast<int>(infosets_.size());
         ids_.emplace(key, id);
