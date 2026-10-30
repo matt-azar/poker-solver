@@ -133,7 +133,7 @@ Solve a five-card board in that same production tree. Cards still to come are tw
 
 ### M7 — Strategy editing, node locking and constrained re-solving
 
-The immutable node-lock data model landed in `include/solver/node_lock.hpp` (full-node and selected-combo locks, validated probability rows, `LockSet`, text round-trip) with unit coverage in `tests/unit/test_node_lock.cpp`. CFR application, UI editing, and constrained re-solving remain ahead.
+The immutable node-lock data model landed in `include/solver/node_lock.hpp`, and locked rows are now applied during regret matching on `CfrTrainer` when `SolveConfig::locks` is set (`apply_lock_to_strategy`; covered by `tests/unit/test_lock_apply.cpp`). StreetBatch/RiverBatch/explorer UI wiring, strategy editing, and constrained re-solving remain ahead.
 
 Implement immutable scenario forks, manual strategy editing, full-node and selected-combo locks, validated probability rows, lock visualization, copy/paste, presets, undo, unlock and reset. The UI separates editing a stored strategy from locking selected hands against later updates [S5].
 
