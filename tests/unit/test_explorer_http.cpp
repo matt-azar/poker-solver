@@ -433,6 +433,139 @@ std::string explorer_executable_path()
 #endif
 }
 
+std::string workflow_checkpoint_path()
+{
+#ifdef _WIN32
+    char directory[MAX_PATH];
+    const DWORD length = GetTempPathA(MAX_PATH, directory);
+    if (length == 0 || length >= MAX_PATH)
+    {
+        return {};
+    }
+    return std::string(directory, directory + length) + "poker_solver_http_workflow.psol";
+#else
+    return "/tmp/poker_solver_http_workflow.psol";
+#endif
+}
+
+std::string json_escape_path(const std::string& path)
+{
+    std::string out;
+    out.reserve(path.size() + 8);
+    for (const char ch : path)
+    {
+        if (ch == '\\' || ch == '"')
+        {
+            out.push_back('\\');
+        }
+        out.push_back(ch);
+    }
+    return out;
+}
+
+// Weighted multi-combo river: save → open → continue with a pending /values
+// query. Continue must accept without parking the accept loop; Open must finish
+// while the value worker is drained/cancelled.
+void check_persistence_workflow_under_value_load()
+{
+    const std::string checkpoint = workflow_checkpoint_path();
+    CHECK(!checkpoint.empty());
+    const std::string path_json = json_escape_path(checkpoint);
+    const std::string solve =
+        "{\"board\":[\"Ah\",\"Kd\",\"7c\",\"4s\",\"2h\"],"
+        "\"oop_range\":\"AcAd:1,5c5d:3,QsQh:2\","
+        "\"ip_range\":\"KsKc:2,JhJd:1,9c9d:1\","
+        "\"pot\":100,\"stack\":100,\"iterations\":20,\"samples\":4,\"max_raises\":1,"
+        "\"allow_all_in\":1,\"oop_bets\":[0.5],\"ip_bets\":[0.5],\"memory_mib\":256,"
+        "\"algorithm\":\"cfr_plus\"}";
+    HttpResult accepted;
+    CHECK(http_exchange("POST", "/api/solve", solve, accepted));
+    CHECK(accepted.status == 202);
+    HttpResult solved;
+    CHECK(wait_for_completion(solved));
+    CHECK(solved.body.find("\"error\":\"\"") != std::string::npos);
+    const std::string sid1 = json_string(solved.body, "solution_id");
+    CHECK(!sid1.empty());
+    const std::string root = json_string(solved.body, "root_node_id");
+    CHECK(!root.empty());
+    double iters1 = 0.0;
+    CHECK(json_number(solved.body, "iterations", iters1));
+    CHECK(iters1 == 20.0);
+
+    const std::string values_path = "/api/solutions/" + sid1 + "/nodes/" + root + "/values";
+    HttpResult first_values;
+    CHECK(wait_for_values(values_path, first_values));
+    CHECK(first_values.status == 200);
+    CHECK(first_values.body.find("\"action_ev\"") != std::string::npos);
+
+    HttpResult saved;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solutions/" + sid1 + "/save",
+        "{\"path\":\"" + path_json + "\"}",
+        saved));
+    CHECK(saved.status == 200);
+    CHECK(saved.body.find("\"saved\":true") != std::string::npos);
+
+    // Start a values query, then Open while it may still be inflight.
+    HttpResult pending_before_open;
+    CHECK(http_exchange("GET", values_path, "", pending_before_open));
+    CHECK(pending_before_open.status == 200 || pending_before_open.status == 202);
+    const auto open_started = std::chrono::steady_clock::now();
+    HttpResult opened;
+    CHECK(http_exchange("POST", "/api/open", "{\"path\":\"" + path_json + "\"}", opened));
+    const double open_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - open_started).count();
+    CHECK(opened.status == 200);
+    CHECK(open_seconds < 5.0);
+    const std::string sid2 = json_string(opened.body, "solution_id");
+    CHECK(!sid2.empty());
+    CHECK(sid2 != sid1);
+    double opened_iters = 0.0;
+    CHECK(json_number(opened.body, "iterations", opened_iters));
+    CHECK(opened_iters == iters1);
+
+    // Status must still answer after Open drained any cancelled value walk.
+    HttpResult status_after_open;
+    CHECK(http_exchange("GET", "/api/status", "", status_after_open));
+    CHECK(status_after_open.status == 200);
+    CHECK(json_string(status_after_open.body, "solution_id") == sid2);
+
+    const std::string values2 = "/api/solutions/" + sid2 + "/nodes/" + root + "/values";
+    HttpResult pending_before_continue;
+    CHECK(http_exchange("GET", values2, "", pending_before_continue));
+    CHECK(pending_before_continue.status == 200 || pending_before_continue.status == 202);
+    const auto continue_started = std::chrono::steady_clock::now();
+    HttpResult continued;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solutions/" + sid2 + "/continue",
+        "{\"iterations\":20}",
+        continued));
+    const double continue_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - continue_started).count();
+    CHECK(continued.status == 202);
+    CHECK(continue_seconds < 2.0);
+    CHECK(json_string(continued.body, "solution_id") == sid2);
+
+    HttpResult mid_status;
+    CHECK(http_exchange("GET", "/api/status", "", mid_status));
+    CHECK(mid_status.status == 200);
+    CHECK(mid_status.body.find("\"running\":true") != std::string::npos);
+
+    HttpResult finished;
+    CHECK(wait_for_completion(finished));
+    CHECK(json_string(finished.body, "solution_id") == sid2);
+    double iters2 = 0.0;
+    CHECK(json_number(finished.body, "iterations", iters2));
+    CHECK(iters2 > iters1);
+
+    HttpResult second_values;
+    CHECK(wait_for_values(values2, second_values));
+    CHECK(second_values.status == 200);
+    CHECK(second_values.body.find("\"action_ev\"") != std::string::npos);
+}
+
 } // namespace
 
 void run_explorer_http_tests()
@@ -645,6 +778,8 @@ void run_explorer_http_tests()
     HttpResult missing_continue;
     CHECK(http_exchange("POST", "/api/solutions/s99/continue", "{\"iterations\":1}", missing_continue));
     CHECK(missing_continue.status == 404);
+
+    check_persistence_workflow_under_value_load();
 
 #ifdef _WIN32
     WSACleanup();
