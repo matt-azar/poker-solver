@@ -29,6 +29,7 @@ int main()
     run_value_worker_tests();
     run_checkpoint_tests();
     run_node_lock_tests();
+    run_lock_apply_tests();
     }
     catch (const std::exception& error)
     {

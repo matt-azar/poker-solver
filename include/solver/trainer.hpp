@@ -1,5 +1,6 @@
 #pragma once
 
+#include "solver/node_lock.hpp"
 #include "solver/regret_matching.hpp"
 
 #include <algorithm>
@@ -7,6 +8,7 @@
 #include <chrono>
 #include <concepts>
 #include <cstddef>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -30,6 +32,9 @@ struct SolveConfig
     double nash_gap_threshold = -1.0;
     // How often to measure the Nash gap when a threshold is set. Must be positive to stop early.
     int eval_interval = 1000;
+    // Non-owning. Null keeps today's unlocked regret-matching behavior bit-identical.
+    // When set, locked rows replace the current strategy after RM for matching infosets.
+    const LockSet* locks = nullptr;
 };
 
 struct SolveStats
@@ -397,6 +402,8 @@ public:
     // Early-stop checks are inside the timer because they decide when to halt.
     SolveStats solve(const SolveConfig& config)
     {
+        const LockSet* const previous_locks = locks_;
+        locks_ = config.locks;
         const auto start = std::chrono::steady_clock::now();
         int completed = 0;
         SolveStats stats;
@@ -427,6 +434,7 @@ public:
         stats.iterations = completed;
         stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
         stats.memory_bytes_estimate = memory_bytes_estimate();
+        locks_ = previous_locks;
         return stats;
     }
 
@@ -601,6 +609,8 @@ private:
 
     // One strategy for the whole pass. Later histories in the same information
     // set do not see regrets written earlier in this pass.
+    // When locks_ is set, locked action rows replace RM output for matching
+    // infosets. Kuhn and other non-combo trainers pass combo_index 0.
     void begin_pass()
     {
         std::fill(pass_delta_.begin(), pass_delta_.end(), 0.0);
@@ -613,6 +623,14 @@ private:
                 regret_.data() + base,
                 pass_sigma_.data() + base,
                 count);
+            if (locks_ != nullptr)
+            {
+                const NodeLock* lock = locks_->find(static_cast<std::size_t>(infoset));
+                apply_lock_to_strategy(
+                    std::span<double>(pass_sigma_.data() + base, static_cast<std::size_t>(count)),
+                    lock,
+                    0);
+            }
         }
     }
 
@@ -657,6 +675,8 @@ private:
     std::vector<double> pass_sigma_;
     std::vector<double> pass_delta_;
     int iterations_completed_ = 0;
+    // Non-owning; set for the duration of solve() from SolveConfig::locks.
+    const LockSet* locks_ = nullptr;
 };
 
 } // namespace poker::solver
