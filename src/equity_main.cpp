@@ -2,6 +2,7 @@
 
 #include <charconv>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -83,6 +84,15 @@ int main(int argc, char** argv)
     std::string_view oop_text;
     std::string_view ip_text;
     std::uint64_t max_pair_runouts = poker::holdem::kDefaultMaxPairRunouts;
+    if (const char* env_limit = std::getenv("POKER_EQUITY_MAX_PAIR_RUNOUTS"))
+    {
+        if (!parse_u64(env_limit, max_pair_runouts))
+        {
+            return fail(
+                poker::holdem::EquityFailure::InvalidInput,
+                "invalid equity input: POKER_EQUITY_MAX_PAIR_RUNOUTS needs an integer");
+        }
+    }
     bool json = false;
     for (int i = 1; i < argc; ++i)
     {
