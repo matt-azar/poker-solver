@@ -15,7 +15,7 @@ States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 | Full saves, checkpoints, compact saves, lazy load | partial | M5, M10 | One versioned `PSOL` file stores the canonical config, regrets, strategy sums, and completed iterations. Save and Open rebuild the tree and resume | No compact or multi-file library. This is not a Pio file and has not been checked against Pio |
 | Broad betting-tree scale and competitive convergence | partial | M6 | Opt-in benches in [BENCHMARKS.md](BENCHMARKS.md) | No matched Pio timing or quality run |
 | Node locking and constrained re-solving | missing | M7 | — | — |
-| Rake, ICM, opponent incentives | partial | M8 | `PlayerPayoff` / `ChipPayoff`; pot-rake (`docs/RAKE.md`); standalone Malmuth-Harville `icm_equities` + `IcmPayoff::from_chip_terminal` with pinned fixtures (`docs/ICM.md`) | Incentives missing; rake/ICM not wired into `StreetGame`/`RiverGame` solve path; solvers still train on the player-0 chip scalar |
+| Rake, ICM, opponent incentives | partial | M8 | `PlayerPayoff` / `ChipPayoff`; pot-rake (`docs/RAKE.md`); standalone Malmuth-Harville `icm_equities` + `IcmPayoff::from_chip_terminal` (`docs/ICM.md`); action-label/category incentive overlay (`docs/INCENTIVES.md`) with identity/stack tests | Rake/ICM/incentives not wired into `StreetGame`/`RiverGame` solve path; solvers still train on the player-0 chip scalar |
 | Reports, scripting, batch queue | partial | M9 | CLI solvers and the local HTTP explorer | No report aggregation, queue, or stable command schema |
 | Trainer, packs, session statistics | missing | M11 | — | — |
 | Preflop solver and chart editor | missing | M12 | — | — |
