@@ -1,6 +1,7 @@
 #pragma once
 
 #include "solver/payoff.hpp"
+#include "solver/rake.hpp"
 
 #include <stdexcept>
 
@@ -14,7 +15,9 @@ namespace poker::solver
 // otherwise the player who folded. showdown is >0 when player 0 wins, <0 when
 // player 0 loses, and 0 on a tie; it is ignored on a fold.
 //
-// Under this chip rule, utility[1] == -utility[0].
+// Under the zero-rake chip rule, utility[1] == -utility[0]. With positive rake,
+// the house takes collect(pot, rake) from the pot; the winner's root-centered
+// utility is reduced by that amount (split evenly on a tie). See docs/RAKE.md.
 struct ChipPayoff
 {
     static PlayerPayoff terminal(
@@ -22,7 +25,8 @@ struct ChipPayoff
         int contrib0,
         int contrib1,
         int folded,
-        int showdown)
+        int showdown,
+        const RakeConfig& rake = {})
     {
         if (initial_pot <= 0)
         {
@@ -36,16 +40,21 @@ struct ChipPayoff
         {
             throw std::invalid_argument("chip payoff folded must be -1, 0, or 1");
         }
+        rake.validate();
 
         const double half_pot = static_cast<double>(initial_pot) * 0.5;
         PlayerPayoff payoff;
+        bool player0_wins = false;
+        bool player1_wins = false;
         if (folded == 0)
         {
             payoff.utility[0] = -(half_pot + static_cast<double>(contrib0));
+            player1_wins = true;
         }
         else if (folded == 1)
         {
             payoff.utility[0] = half_pot + static_cast<double>(contrib1);
+            player0_wins = true;
         }
         else
         {
@@ -56,10 +65,12 @@ struct ChipPayoff
             if (showdown > 0)
             {
                 payoff.utility[0] = half_pot + static_cast<double>(contrib1);
+                player0_wins = true;
             }
             else if (showdown < 0)
             {
                 payoff.utility[0] = -(half_pot + static_cast<double>(contrib0));
+                player1_wins = true;
             }
             else
             {
@@ -67,6 +78,29 @@ struct ChipPayoff
             }
         }
         payoff.utility[1] = -payoff.utility[0];
+
+        const double pot_chips =
+            static_cast<double>(initial_pot) + static_cast<double>(contrib0)
+            + static_cast<double>(contrib1);
+        const double taken = collect(pot_chips, rake);
+        if (taken == 0.0)
+        {
+            return payoff;
+        }
+        if (player0_wins)
+        {
+            payoff.utility[0] -= taken;
+        }
+        else if (player1_wins)
+        {
+            payoff.utility[1] -= taken;
+        }
+        else
+        {
+            const double half_rake = taken * 0.5;
+            payoff.utility[0] -= half_rake;
+            payoff.utility[1] -= half_rake;
+        }
         return payoff;
     }
 };
