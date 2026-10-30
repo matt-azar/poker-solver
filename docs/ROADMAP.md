@@ -113,7 +113,7 @@ Design immutable solution revisions and an exclusive training owner. Browsing an
 
 Define a versioned native container with configuration, structural fingerprint, action/combo order, algorithm/version parameters, iteration/averaging state, precision, utility model, locks, and checksums. Store a study snapshot and a resumable training checkpoint as separate files.
 
-Implement atomic save/replace, load validation, bounded decompression and allocations, corruption/truncation handling, unsupported-version errors, and migration fixtures. Rebuild disposable rank caches at load time. Include recent files, folders/tags, previews, and explicit overwrite behavior in the UI.
+Implement atomic save/replace, load validation, bounded decompression and allocations, corruption/truncation handling, unsupported-version errors, and migration fixtures. Rebuild disposable rank caches at load time. A bounded recent-files MRU (sidecar + explorer dropdown/API) is in place; folders/tags, previews, and explicit overwrite behavior in the UI remain.
 
 **Gate:** fresh-process load reproduces strategies, values, node queries and configuration; continuation matches an uninterrupted run. Interrupted writes preserve the prior file. Over-budget load fails cleanly without leaking the old/new engine. Full-size saves work before compact/lazy formats.
 
@@ -229,7 +229,7 @@ Choose explicit release service-level targets after measuring a representative c
 
 The main path is M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0 and includes joining the five-card production path to the shared postflop tree before the two current kernels are scaled separately. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after all required features land.
 
-Check-down equity, made-hand category composition on five-card boards, stop-and-keep, one resumable solution file, and runout EV comparison are implemented and covered by the unit tests. They are not a completed M2 or a Pio parity claim. Draw/backdoor categories, node locking, and compact saves are still ahead.
+Check-down equity, equity-distribution buckets, made-hand category composition on five-card boards, stop-and-keep, one resumable solution file, runout EV comparison, and a bounded recent-files list for Save/Open paths are implemented and covered by the unit tests. They are not a completed M2 or a Pio parity claim. Draw/backdoor categories, node locking, and compact saves are still ahead.
 
 For each milestone: write a small specification, identify invariants and failure modes, implement reviewable commits, run relevant checks, demonstrate the user workflow, then update the ledger with exact evidence. Keep changes on the development branch unless explicitly instructed otherwise. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 

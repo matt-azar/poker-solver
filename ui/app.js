@@ -671,7 +671,9 @@ $("calculate-ev").addEventListener("click", () => {
 
 $("save-solution").addEventListener("click", saveSolution);
 $("open-solution").addEventListener("click", openSolution);
+$("open-recent").addEventListener("click", openRecentSolution);
 $("config-file").addEventListener("change", loadConfigFile);
+refreshRecentSolutions();
 $("compare-runouts").addEventListener("click", compareRunouts);
 $("node-equity").addEventListener("click", calculateEquity);
 $("node-categories").addEventListener("click", loadCategories);
@@ -1209,6 +1211,37 @@ function joinSizes(values) {
   return (values || []).map((value) => String(value)).join(", ");
 }
 
+async function refreshRecentSolutions() {
+  const select = $("recent-solutions");
+  if (!select) {
+    return;
+  }
+  const previous = select.value;
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Choose a recent file…";
+  select.appendChild(placeholder);
+  try {
+    const response = await fetch("/api/recent-solutions");
+    if (!response.ok) {
+      return;
+    }
+    const recent = await response.json();
+    recent.forEach((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.path || "";
+      option.textContent = entry.name || entry.path || "";
+      select.appendChild(option);
+    });
+    if (previous) {
+      select.value = previous;
+    }
+  } catch (error) {
+    // Recent files are optional when the sidecar is unavailable.
+  }
+}
+
 async function saveSolution() {
   if (!solutionId) {
     return;
@@ -1225,6 +1258,9 @@ async function saveSolution() {
   });
   const body = await readBody(response);
   $("message").textContent = response.ok ? "Saved " + path : (body.error || "Save failed");
+  if (response.ok) {
+    await refreshRecentSolutions();
+  }
 }
 
 async function openSolution() {
@@ -1263,6 +1299,17 @@ async function openSolution() {
   $("message").textContent = "Opened " + path;
   $("save-solution").disabled = !body.solution_id;
   $("continue").disabled = !body.solution_id;
+  await refreshRecentSolutions();
+}
+
+async function openRecentSolution() {
+  const path = $("recent-solutions").value.trim();
+  if (!path) {
+    $("message").textContent = "Choose a recent file first";
+    return;
+  }
+  $("solution-path").value = path;
+  await openSolution();
 }
 
 async function loadConfigFile(event) {

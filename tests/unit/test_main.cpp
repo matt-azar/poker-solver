@@ -32,6 +32,7 @@ int main()
     run_checkpoint_tests();
     run_strategy_report_tests();
     run_equity_dist_tests();
+    run_recent_files_tests();
     }
     catch (const std::exception& error)
     {

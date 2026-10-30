@@ -1,4 +1,5 @@
 #include "explorer/checkpoint.hpp"
+#include "explorer/recent_files.hpp"
 #include "explorer/retained_training.hpp"
 #include "explorer/session.hpp"
 #include "explorer/value_worker.hpp"
@@ -22,6 +23,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <limits>
 #include <fstream>
 #include <iostream>
@@ -2313,6 +2315,35 @@ void handle_client(socket_t client)
         send_response(client, 200, "application/json", g_session.status());
         return;
     }
+    if (line.rfind("GET /api/recent-solutions", 0) == 0)
+    {
+        const std::vector<poker::explorer::RecentFile> recent =
+            poker::explorer::list_recent_files(true);
+        std::string payload = "[";
+        for (std::size_t index = 0; index < recent.size(); ++index)
+        {
+            if (index > 0)
+            {
+                payload += ',';
+            }
+            payload += "{\"path\":";
+            append_escaped(payload, recent[index].path);
+            payload += ",\"name\":";
+            append_escaped(payload, recent[index].name);
+            payload += ",\"mtime\":";
+            payload += std::to_string(recent[index].mtime);
+            payload += '}';
+        }
+        payload += ']';
+        send_response(client, 200, "application/json", payload);
+        return;
+    }
+    if (line.rfind("POST /api/recent-solutions/clear", 0) == 0)
+    {
+        poker::explorer::clear_recent_files();
+        send_response(client, 200, "application/json", "{\"cleared\":true}");
+        return;
+    }
     if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/continue ") != std::string::npos)
     {
         if (g_session.running())
@@ -2572,6 +2603,7 @@ void handle_client(socket_t client)
             const poker::explorer::CheckpointDocument document =
                 poker::explorer::read_checkpoint(path, kMaxCheckpointBytes);
             const std::shared_ptr<HeldSolution> held = solution_from_checkpoint(document);
+            poker::explorer::record_recent_file(path);
             send_response(client, 200, "application/json", publish_loaded(held));
         }
         catch (const std::exception& error)
@@ -2610,6 +2642,7 @@ void handle_client(socket_t client)
             const std::shared_ptr<HeldSolution> held =
                 std::static_pointer_cast<HeldSolution>(lease.resource());
             poker::explorer::write_checkpoint(path, checkpoint_from_held(*held));
+            poker::explorer::record_recent_file(path);
             send_response(client, 200, "application/json", "{\"saved\":true}");
         }
         catch (const std::exception& error)
@@ -3283,6 +3316,8 @@ int run(int argc, char** argv)
     }
     std::cout << "explorer http://127.0.0.1:" << port << "\n";
     std::cout << "ui " << g_ui_root << "\n";
+    std::cout << "recent "
+              << poker::explorer::resolve_recent_file_path().string() << "\n";
     std::cout.flush();
 
     while (true)
