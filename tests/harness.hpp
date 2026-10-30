@@ -30,6 +30,7 @@ void run_cfr_tests();
 void run_leduc_tests();
 void run_holdem_tests();
 void run_river_tests();
+void run_payoff_tests();
 void run_street_tests();
 void run_street_memory_tests();
 void run_street_workspace_tests();

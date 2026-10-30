@@ -144,7 +144,7 @@ when `h0`, `h1`, and the board are pairwise disjoint, and `P = 0` otherwise. The
 
 The river tree uses that joint distribution as its only chance node. Player 0 is out of position. Both players have the same stack behind, and the pot was posted equally.
 
-Player 0's terminal utility is `pot / 2` plus the opponent's river investment when player 0 wins or the opponent folds, and the negation of `pot / 2` plus player 0's own river investment when player 0 loses or folds. A split pot is worth 0 once the river investments match. That formula is the full terminal utility.
+Player 0's terminal utility is `pot / 2` plus the opponent's river investment when player 0 wins or the opponent folds, and the negation of `pot / 2` plus player 0's own river investment when player 0 loses or folds. A split pot is worth 0 once the river investments match. That formula is the full terminal utility. `ChipPayoff` returns both players' utilities under this rule; chip EV stays zero-sum so player 1 is the negation of player 0. Rake and ICM are not modeled yet.
 
 An opening fraction `f` bets `round(f * pot)` chips. A raise fraction `f` increases the bet by `round(f * pot_after_the_call)`. The minimum later raise equals the previous full bet or raise. Details and a solved toy are in [RIVER.md](RIVER.md).
 
@@ -176,7 +176,7 @@ Q_i(h,a)=\sum_g \frac{q_{\mathrm{opp}}(g)}{D_i(h)}\, E[U_i \mid H, B, h, g, \tex
 
 Future cards are dealt from the deck that remains for that fixed pair. Forcing \(a\) does not multiply the result by the average probability of \(a\). A legal action with probability zero still has a continuation value. Later decisions, for both players, follow the average. This is not a best response and it does not maximize future choices.
 
-\(U_i\) is the existing root-centered terminal utility in chips, with \(U_1=-U_0\). The number includes chips already invested. Folding is worth \(-(initial\ pot/2 + that\ player's\ cumulative\ contribution)\). A tie is 0. The stored root EV is player 0's expected utility. At an in-position decision the reported value is the negation of the player-0 amount the terminal kernel stores.
+\(U_i\) is the existing root-centered terminal utility in chips, with \(U_1=-U_0\). The number includes chips already invested. Folding is worth \(-(initial\ pot/2 + that\ player's\ cumulative\ contribution)\). A tie is 0. The stored root EV is player 0's expected utility. At an in-position decision the reported value is the negation of the player-0 amount the terminal kernel stores. The M8 payoff abstraction (`PlayerPayoff`) is the dual-player carrier for these values; only the chip adapter exists today.
 
 If \(D_i(h)=0\), \(Q_i(h,a)\) is undefined. The query does not invent a uniform opponent range. A hand that is off the board, or otherwise structurally unsupported, is undefined and is not looked up. Hero's own strategic reach can be zero while \(D_i(h)>0\); the counterfactual continuation is still defined. A public node with zero joint reach can still have those hand values. Reach-defined and EV-defined are separate.
 

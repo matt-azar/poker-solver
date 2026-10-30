@@ -47,7 +47,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Full saves, resumable checkpoints, compact saves, lazy load | Missing | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Small benchmark set; parity unproven | M6 |
 | Full and combo node locking, editing, re-solving | Missing | M7 |
-| Rake, ICM, opponent incentives | Missing; payoff architecture changes needed | M8 |
+| Rake, ICM, opponent incentives | Dual-player payoff abstraction landed (`PlayerPayoff` / `ChipPayoff`); rake/ICM/incentives still missing | M8 |
 | Turn/river and multi-flop aggregation, filtered reports | Missing | M9 |
 | Scriptable engine, durable batch queue, exports | Basic endpoints/CLI; production coverage missing | M9 |
 | Drill trainer, packs, session statistics, hand histories | Missing | M11 |
@@ -143,7 +143,7 @@ Add baseline-versus-modified comparison: strategy changes, both-player EV change
 
 ### M8 — Rake, ICM and opponent incentives
 
-First introduce a payoff abstraction returning both players' actual utilities. The current global player-0 vectors and sign inversion match the zero-sum chip model. Rake, ICM, and incentives need both players' actual utilities. Each best response must maximize its own utility.
+The dual-player payoff abstraction is in place: `PlayerPayoff` holds both utilities, and `ChipPayoff` reproduces today's root-centered chip rule with `utility[1] == -utility[0]`. `RiverGame::terminal_payoff` uses that adapter; CFR loops still consume the player-0 scalar. Rake, ICM, and incentives still need both players' actual utilities. Each best response must maximize its own utility.
 
 Implement rake rate/cap and explicit collection/rounding rules with examples. Implement tournament utility tables and an ICM calculator/import path with stacks, payouts and interpolation validation. Then add documented action/category/runout incentive rules, previews, scenario identity and persistence. Keep chip EV and modeled utility separately labeled.
 
