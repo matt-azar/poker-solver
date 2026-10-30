@@ -1,0 +1,17 @@
+street-config 1
+board Kh Kd 7c 4s
+pot 100
+stack 100
+oop-range AhAd:1
+ip-range 3d2c:1
+first-to-act 0
+max-raises 1
+allow-all-in 0
+allow-three-bet 1
+geometric 0
+all-in-threshold 0
+pot-cap 0
+memory-mib 1024
+threads 1
+oop-bets 1
+oop-raises 1

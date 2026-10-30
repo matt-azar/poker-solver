@@ -141,7 +141,7 @@ Follow-ups for the solver CLIs:
 - Street `total_seconds` is not process wall time. `runtime_seconds` is not process wall time on either CLI.
 - Per-street raise lists exist on `StreetConfig` but have no command-line flags. A non-empty per-street bet list is reused as that street's raise list, which hides `--oop-raises` and `--ip-raises` for that street.
 - `street_solver` has no `--first` flag. Both street cases are OOP-first because that is the config default.
-- `street_solver` does not read a `street-config` document.
+- Study cases still pass flag argv. They do not yet load a `street-config` document through `street_solver --config`.
 - Empty raise lists are copied from the bet lists. A distinct raise size has to be passed explicitly. These fixtures do that.
 
 ## Quiet-machine note

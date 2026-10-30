@@ -1320,6 +1320,40 @@ void expect_canonical_street_config()
         StreetGame game(short_board);
     }));
 
+    // street_solver's no-argument default, also shipped as configs/street_default.txt.
+    const char* street_default =
+        "street-config 1\n"
+        "board Kh Kd 7c 4s\n"
+        "pot 100\n"
+        "stack 100\n"
+        "oop-range AhAd:1\n"
+        "ip-range 3d2c:1\n"
+        "first-to-act 0\n"
+        "max-raises 1\n"
+        "allow-all-in 0\n"
+        "allow-three-bet 1\n"
+        "geometric 0\n"
+        "all-in-threshold 0\n"
+        "pot-cap 0\n"
+        "memory-mib 1024\n"
+        "threads 1\n"
+        "oop-bets 1\n"
+        "oop-raises 1\n";
+    StreetConfig cli_default;
+    cli_default.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
+    cli_default.pot = 100;
+    cli_default.stack = 100;
+    cli_default.oop = Range::parse("AhAd");
+    cli_default.ip = Range::parse("2c3d");
+    cli_default.oop_bet_sizes = {1.0};
+    cli_default.oop_raise_sizes = {1.0};
+    cli_default.allow_all_in = false;
+    cli_default.max_raises = 1;
+    CHECK(poker::streets::format_street_config(cli_default) == street_default);
+    const StreetConfig loaded_default = poker::streets::parse_street_config(street_default);
+    CHECK(same_config(cli_default, loaded_default));
+    expect_same_opening(StreetGame(cli_default), StreetGame(loaded_default));
+
     StreetConfig merged;
     merged.board = config.board;
     merged.pot = 100;
