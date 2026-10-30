@@ -22,6 +22,87 @@ function blank() {
   return Array.from({length: 13}, () => Array(13).fill(0));
 }
 
+/* range-history */
+const RANGE_HISTORY_LIMIT = 50;
+
+function cloneWeightGrid(grid) {
+  return grid.map((row) => row.slice());
+}
+
+function weightGridsEqual(left, right) {
+  for (let row = 0; row < 13; row++) {
+    for (let column = 0; column < 13; column++) {
+      if (left[row][column] !== right[row][column]) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function snapshotWeights(store) {
+  return {
+    oop: cloneWeightGrid(store.oop),
+    ip: cloneWeightGrid(store.ip)
+  };
+}
+
+function snapshotsEqual(left, right) {
+  return weightGridsEqual(left.oop, right.oop) && weightGridsEqual(left.ip, right.ip);
+}
+
+function createRangeHistory(limit) {
+  const max = limit == null ? RANGE_HISTORY_LIMIT : limit;
+  const past = [];
+  const future = [];
+  return {
+    past,
+    future,
+    push(before) {
+      const snap = {
+        oop: cloneWeightGrid(before.oop),
+        ip: cloneWeightGrid(before.ip)
+      };
+      const top = past[past.length - 1];
+      if (top && snapshotsEqual(top, snap)) {
+        return false;
+      }
+      past.push(snap);
+      while (past.length > max) {
+        past.shift();
+      }
+      future.length = 0;
+      return true;
+    },
+    undo(current) {
+      if (!past.length) {
+        return null;
+      }
+      const previous = past.pop();
+      future.push(snapshotWeights(current));
+      return previous;
+    },
+    redo(current) {
+      if (!future.length) {
+        return null;
+      }
+      const next = future.pop();
+      past.push(snapshotWeights(current));
+      return next;
+    },
+    canUndo() {
+      return past.length > 0;
+    },
+    canRedo() {
+      return future.length > 0;
+    }
+  };
+}
+/* end-range-history */
+
+const rangeHistory = createRangeHistory(RANGE_HISTORY_LIMIT);
+let strokeBefore = null;
+
 function sizes(text) {
   return text.split(",").map((part) => part.trim()).filter(Boolean).map(Number).filter((value) => !Number.isNaN(value));
 }
@@ -280,6 +361,60 @@ function paintCell(button, player, row, column, weight) {
   $(player + "-count").textContent = formatCount(comboCount(player));
 }
 
+function applyWeightSnapshot(snap) {
+  weights.oop = cloneWeightGrid(snap.oop);
+  weights.ip = cloneWeightGrid(snap.ip);
+  $("oop").value = rangeText(weights.oop);
+  $("ip").value = rangeText(weights.ip);
+  drawPick("oop");
+  drawPick("ip");
+  syncRangeHistoryButtons();
+}
+
+function syncRangeHistoryButtons() {
+  const undo = $("undo-range");
+  const redo = $("redo-range");
+  if (undo) {
+    undo.disabled = !rangeHistory.canUndo();
+  }
+  if (redo) {
+    redo.disabled = !rangeHistory.canRedo();
+  }
+}
+
+function pushRangeSnapshot(before) {
+  const changed = rangeHistory.push(before);
+  syncRangeHistoryButtons();
+  return changed;
+}
+
+function finishPaintStroke() {
+  if (!strokeBefore) {
+    return;
+  }
+  const before = strokeBefore;
+  strokeBefore = null;
+  if (!snapshotsEqual(before, snapshotWeights(weights))) {
+    pushRangeSnapshot(before);
+  }
+}
+
+function undoRangeEdit() {
+  const previous = rangeHistory.undo(weights);
+  if (!previous) {
+    return;
+  }
+  applyWeightSnapshot(previous);
+}
+
+function redoRangeEdit() {
+  const next = rangeHistory.redo(weights);
+  if (!next) {
+    return;
+  }
+  applyWeightSnapshot(next);
+}
+
 function formatCount(count) {
   return count.toFixed(1).replace(/\.0$/, "") + " combos";
 }
@@ -314,11 +449,17 @@ function drawPick(player) {
         event.preventDefault();
         const slider = Number($("weight").value) / 100;
         const next = slider <= 0 || Math.abs(weights[player][row][column] - slider) < 0.001 ? 0 : slider;
+        if (!strokeBefore) {
+          strokeBefore = snapshotWeights(weights);
+        }
         drag = {player, weight: next};
         paintCell(button, player, row, column, next);
       });
       button.addEventListener("mouseenter", (event) => {
         if ((event.buttons & 1) === 0) {
+          if (drag) {
+            finishPaintStroke();
+          }
           drag = null;
           return;
         }
@@ -358,6 +499,9 @@ function updateSpot() {
 }
 
 document.addEventListener("mouseup", () => {
+  if (drag || strokeBefore) {
+    finishPaintStroke();
+  }
   drag = null;
 });
 
@@ -366,22 +510,66 @@ $("weight").addEventListener("input", () => {
 });
 
 $("clear-ranges").addEventListener("click", () => {
+  const before = snapshotWeights(weights);
   weights.oop = blank();
   weights.ip = blank();
   $("oop").value = "";
   $("ip").value = "";
   drawPick("oop");
   drawPick("ip");
+  if (!snapshotsEqual(before, snapshotWeights(weights))) {
+    pushRangeSnapshot(before);
+  } else {
+    syncRangeHistoryButtons();
+  }
+});
+
+$("undo-range").addEventListener("click", () => {
+  undoRangeEdit();
+});
+
+$("redo-range").addEventListener("click", () => {
+  redoRangeEdit();
+});
+
+document.addEventListener("keydown", (event) => {
+  const key = event.key.toLowerCase();
+  const mod = event.metaKey || event.ctrlKey;
+  if (!mod) {
+    return;
+  }
+  const target = event.target;
+  const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+  if (typing && target.id !== "oop" && target.id !== "ip") {
+    return;
+  }
+  if (key === "z" && !event.shiftKey) {
+    event.preventDefault();
+    undoRangeEdit();
+    return;
+  }
+  if ((key === "z" && event.shiftKey) || key === "y") {
+    event.preventDefault();
+    redoRangeEdit();
+  }
 });
 
 $("oop").addEventListener("input", () => {
+  const before = snapshotWeights(weights);
   readText("oop", $("oop").value);
   drawPick("oop");
+  if (!snapshotsEqual(before, snapshotWeights(weights))) {
+    pushRangeSnapshot(before);
+  }
 });
 
 $("ip").addEventListener("input", () => {
+  const before = snapshotWeights(weights);
   readText("ip", $("ip").value);
   drawPick("ip");
+  if (!snapshotsEqual(before, snapshotWeights(weights))) {
+    pushRangeSnapshot(before);
+  }
 });
 
 $("board").addEventListener("input", updateSpot);
@@ -1075,8 +1263,14 @@ async function loadConfigFile(event) {
     return;
   }
   $("board").value = (body.board || []).join(" ");
+  const beforeRanges = snapshotWeights(weights);
   $("oop").value = body.oop_range || "";
   $("ip").value = body.ip_range || "";
+  readText("oop", $("oop").value);
+  readText("ip", $("ip").value);
+  if (!snapshotsEqual(beforeRanges, snapshotWeights(weights))) {
+    pushRangeSnapshot(beforeRanges);
+  }
   $("pot").value = body.pot;
   $("stack").value = body.stack;
   $("max-raises").value = body.max_raises;
@@ -1295,4 +1489,5 @@ function renderLines(status) {
 readText("oop", $("oop").value);
 readText("ip", $("ip").value);
 updateSpot();
+syncRangeHistoryButtons();
 refresh();
