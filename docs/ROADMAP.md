@@ -50,7 +50,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Rake, ICM, opponent incentives | Pot-rake wired through street/river configs, CLI, explorer Job JSON/GUI, and solve terminals (`docs/RAKE.md`); ICM calculator + HU chip→ICM adapter (`docs/ICM.md`); standalone action/category incentive overlay with tests (`docs/INCENTIVES.md`); street/river solve-path wiring for ICM/incentives still missing | M8 |
 | Turn/river and multi-flop aggregation, filtered reports | Missing | M9 |
 | Scriptable engine, durable batch queue, exports | Basic endpoints/CLI; production coverage missing | M9 |
-| Drill trainer, packs, session statistics, hand histories | Missing | M11 |
+| Drill trainer, packs, session statistics, hand histories | `hand-history 1` export schema only; packs and session stats missing | M11 |
 | Preflop solver, weighted flop subsets, chart editor | Missing | M12 |
 | Modern study GUI: layouts, two-player grids, shortcuts, themes, localization | Basic web explorer | Land with each feature; finish in M13 |
 | Stable delivery, help, upgrade/recovery, complete validation | Development workflow | Continuous; M13 release gate |
@@ -161,7 +161,7 @@ Every report states its weighting measure. Weight each report by compatible-pair
 
 Version the engine command/API contract and expose all supported core operations independently of the UI. Add scripting examples, schema discovery, deterministic exits/errors and streaming progress. A UPI-compatible adapter is an optional interoperability layer with its own tests.
 
-Build a persistent job queue: templates × boards × scenarios, sequential default execution, resource admission, pause/retry/cancel, restart recovery, logs, checksummed output manifests, and report generation. Isolate failures by job. Include self-play hand-history export with documented semantics and supported target formats.
+Build a persistent job queue: templates × boards × scenarios, sequential default execution, resource admission, pause/retry/cancel, restart recovery, logs, checksummed output manifests, and report generation. Isolate failures by job. Include self-play hand-history export with documented semantics and supported target formats. The versioned `hand-history 1` document in [HAND_HISTORY.md](HAND_HISTORY.md) is the first export contract for one HU hand (board, stacks/pot, optional holes or range labels, action line, terminal pot/outcome).
 
 **Gate:** generated reports match a direct small-tree aggregation oracle; CLI and UI produce equivalent results; an interrupted batch resumes with each completed job kept once. Start with a small reproducible board subset, then scale.
 
@@ -175,7 +175,7 @@ Treat omitted-street reconstruction as a separate mathematical feature. Persist 
 
 ### M11 — Trainer and study sessions
 
-Build training packs from saved solutions and scenario filters: position, board texture, hand category, action history, street and selected lines. Sample legal deals from the declared joint distribution. Provide reproducible seeds and a diagnostic mode that oversamples rare situations while labeling that sampling choice.
+The `hand-history 1` export schema is in place as the played-hand record self-play will emit; packs, drills, and session statistics are still open. Build training packs from saved solutions and scenario filters: position, board texture, hand category, action history, street and selected lines. Sample legal deals from the declared joint distribution. Provide reproducible seeds and a diagnostic mode that oversamples rare situations while labeling that sampling choice.
 
 Deliver table view, action controls, instant/delayed feedback, combo strategy and EV, local decision cost, review history, bookmarks, and session statistics. Score a mixed action by its EV, including low-frequency actions in the mix. Show local EV loss and whole-strategy exploitability as separate numbers.
 
