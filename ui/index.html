@@ -67,6 +67,11 @@
       </select>
     </label>
     <label class="wide">Solution file <input id="solution-path" placeholder="Save or open a .psol file" autocomplete="off"></label>
+    <label class="wide">Recent solutions
+      <select id="recent-solutions">
+        <option value="">Choose a recent file…</option>
+      </select>
+    </label>
     <label class="wide">Configuration file <input id="config-file" type="file" accept=".txt,text/plain"></label>
     <div class="actions">
       <button type="submit" id="run">Solve</button>
@@ -74,6 +79,7 @@
       <button type="button" id="stop" disabled>Stop</button>
       <button type="button" id="save-solution" disabled>Save</button>
       <button type="button" id="open-solution">Open</button>
+      <button type="button" id="open-recent">Open recent</button>
       <button type="button" id="export" disabled>Export JSON</button>
     </div>
   </form>
