@@ -86,6 +86,8 @@ void check_matches_river(const RiverGame& game, const RiverGame::State& state)
 
 } // namespace
 
+void run_rake_tests();
+
 void run_payoff_tests()
 {
     // Fold / called-win fixtures reuse the sized river tree from RIVER.md tests.
@@ -199,4 +201,6 @@ void run_payoff_tests()
         unequal_threw = true;
     }
     CHECK(unequal_threw);
+
+    run_rake_tests();
 }
