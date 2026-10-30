@@ -1,14 +1,25 @@
 ---
-description: Parallel Cursor agents — shared tree friction and recovery
+description: Agent lessons — parallel work, architecture, solver pitfalls
 alwaysApply: true
 ---
 
-# Parallel agents
+# Agent lessons
 
-Before spawning or integrating sibling Cursor agents, read [docs/AGENT_LESSONS.md](../../docs/AGENT_LESSONS.md).
+Before spawning sibling agents, changing solvers, or claiming a milestone is done, read [docs/AGENT_LESSONS.md](../../docs/AGENT_LESSONS.md).
+
+**Parallel work**
 
 - Assume siblings may write into `/workspace` even when asked to use a worktree. Do not checkout/commit there while they run unless ownership is proven disjoint.
-- Give each agent a disjoint path list. Serialize edits to `CMakeLists.txt`, `tests/harness.hpp`, and `tests/unit/test_main.cpp`, or have only the parent touch them.
+- Give each agent a disjoint path list. Serialize `CMakeLists.txt`, `tests/harness.hpp`, and `tests/unit/test_main.cpp`, or have only the parent touch them.
 - Subagents often cannot `ManagePullRequest`; the parent opens PRs after push and subscribes CI.
-- If the tree is interleaved: commit a WIP snapshot branch, then path-checkout onto clean `cursor/<feature>-c006` branches from the correct base. Trim CMake/docs per branch before build.
+- If the tree is interleaved: WIP snapshot branch, then path-checkout onto clean `cursor/<feature>-c006` branches from the correct base. Trim CMake/docs per branch before build.
 - Re-run `git status` immediately before every commit; restore unexpected paths.
+
+**Architecture / correctness (short)**
+
+- On `main`, 3–4 card boards use `StreetBatchSolver`; 5 cards use `RiverBatchSolver`. Do not retire `river_solver` before five-card StreetBatch pins match `RiverGame`.
+- Pin production batch changes against `CfrTrainer<*Game>` / `--reference`. Kuhn/Leduc stay on `CfrTrainer` only. `include/` must not depend on `ui/`.
+- Nash gap is NashConv (sum of BR gains), not Pio’s averaged exploitability. Accuracy uses NashConv/pot.
+- Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; equity ≠ chip EV.
+- Street config is `street-config 1` text; river explorer defaults are often JSON — do not mix formats. Empty bet arrays mean check-only; absent keys mean defaults.
+- Do not change `LICENSE`. Update `FEATURE_PARITY.md` only with the commit that demonstrates the row.
