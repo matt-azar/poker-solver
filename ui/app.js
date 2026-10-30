@@ -20,6 +20,79 @@ const weights = {oop: blank(), ip: blank()};
 
 const $ = (id) => document.getElementById(id);
 
+/* theme-helpers */
+const THEME_STORAGE_KEY = "explorer-theme";
+
+function normalizeTheme(name) {
+  return name === "dark" ? "dark" : "light";
+}
+
+function readStoredTheme(storage) {
+  try {
+    return normalizeTheme(storage && storage.getItem(THEME_STORAGE_KEY));
+  } catch (error) {
+    return "light";
+  }
+}
+
+function themeClassName(name) {
+  return "theme-" + normalizeTheme(name);
+}
+
+function nextTheme(name) {
+  return normalizeTheme(name) === "dark" ? "light" : "dark";
+}
+
+function writeStoredTheme(storage, name) {
+  try {
+    if (storage) {
+      storage.setItem(THEME_STORAGE_KEY, normalizeTheme(name));
+    }
+  } catch (error) {}
+}
+/* end-theme-helpers */
+
+function cssToken(name, fallback) {
+  const value = getComputedStyle(document.body).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function rangeFill(weight) {
+  const ink = 0.28 + 0.72 * Math.min(weight, 1);
+  return "rgba(" + cssToken("--range-r", "36") + ", " + cssToken("--range-g", "92") + ", " +
+    cssToken("--range-b", "52") + ", " + ink + ")";
+}
+
+function strategyFill(bet) {
+  const t = Math.max(0, Math.min(1, Number(bet) || 0));
+  function channel(lowName, highName, lowFallback, highFallback) {
+    const low = Number(cssToken(lowName, String(lowFallback)));
+    const high = Number(cssToken(highName, String(highFallback)));
+    return Math.round(low + (high - low) * t);
+  }
+  return "rgb(" +
+    channel("--strategy-low-r", "--strategy-high-r", 236, 56) + "," +
+    channel("--strategy-low-g", "--strategy-high-g", 231, 151) + "," +
+    channel("--strategy-low-b", "--strategy-high-b", 220, 60) + ")";
+}
+
+function currentTheme() {
+  return document.body.classList.contains("theme-dark") ? "dark" : "light";
+}
+
+function applyTheme(name, storage) {
+  const theme = normalizeTheme(name);
+  document.body.classList.remove("theme-light", "theme-dark");
+  document.body.classList.add(themeClassName(theme));
+  const toggle = $("theme-toggle");
+  if (toggle) {
+    toggle.textContent = theme === "dark" ? "Light theme" : "Dark theme";
+    toggle.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
+  }
+  writeStoredTheme(storage || (typeof localStorage === "undefined" ? null : localStorage), theme);
+  return theme;
+}
+
 function blank() {
   return Array.from({length: 13}, () => Array(13).fill(0));
 }
@@ -354,8 +427,7 @@ function paintCell(button, player, row, column, weight) {
   weights[player][row][column] = weight;
   button.classList.toggle("on", weight > 0);
   if (weight > 0) {
-    const ink = 0.28 + 0.72 * Math.min(weight, 1);
-    button.style.background = "rgba(36, 92, 52, " + ink + ")";
+    button.style.background = rangeFill(weight);
   } else {
     button.style.background = "";
   }
@@ -441,8 +513,7 @@ function drawPick(player) {
         button.disabled = true;
       } else if (weight > 0) {
         button.classList.add("on");
-        const ink = 0.28 + 0.72 * Math.min(weight, 1);
-        button.style.background = "rgba(36, 92, 52, " + ink + ")";
+        button.style.background = rangeFill(weight);
       }
       button.addEventListener("mousedown", (event) => {
         if (live === 0) {
@@ -1215,7 +1286,8 @@ function drawChart(series) {
     const y = 20 + (1 - point.nash_gap / maxGap) * 140;
     return x + "," + y;
   });
-  svg.innerHTML = "<polyline fill='none' stroke='#1c1915' stroke-width='2' points='" + coords.join(" ") + "'/>";
+  const stroke = cssToken("--ink", "#1c1915");
+  svg.innerHTML = "<polyline fill='none' stroke='" + stroke + "' stroke-width='2' points='" + coords.join(" ") + "'/>";
 }
 
 function drawGrid(id, cells, player) {
@@ -1236,7 +1308,7 @@ function drawGrid(id, cells, player) {
       if (cell && (cell.range_combos > 0 || (cell.hands && cell.hands.length))) {
         button.classList.add("in-range");
         const bet = cell.bet === null || cell.bet === undefined ? 0 : cell.bet;
-        button.style.background = "rgb(" + Math.round(236 - 180 * bet) + "," + Math.round(231 - 80 * bet) + "," + Math.round(220 - 160 * bet) + ")";
+        button.style.background = strategyFill(bet);
         button.addEventListener("click", () => showCell(player, cell, button));
       }
       if (selected && selected.player === player && selected.text === name) {
@@ -1910,6 +1982,19 @@ function renderLines(status) {
     host.appendChild(block);
   });
 }
+
+applyTheme(readStoredTheme(typeof localStorage === "undefined" ? null : localStorage));
+$("theme-toggle").addEventListener("click", () => {
+  applyTheme(nextTheme(currentTheme()));
+  drawPick("oop");
+  drawPick("ip");
+  if (latest) {
+    render(latest);
+  }
+  if (currentNode) {
+    renderNode(currentNode);
+  }
+});
 
 readText("oop", $("oop").value);
 readText("ip", $("ip").value);

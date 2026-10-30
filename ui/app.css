@@ -1,13 +1,67 @@
 :root {
-  color: #1c1915;
-  background: #f4f0e6;
   font-family: "Segoe UI", sans-serif;
+}
+
+body.theme-light {
+  color-scheme: light;
+  --ink: #1c1915;
+  --muted: #5c564c;
+  --paper: #f4f0e6;
+  --surface: #ffffff;
+  --cell: #ece7dc;
+  --cell-alt: #e2dcd0;
+  --border: #d9d3c7;
+  --disabled: #b9b2a6;
+  --button-face: #1c1915;
+  --button-ink: #f4f0e6;
+  --range-r: 36;
+  --range-g: 92;
+  --range-b: 52;
+  --strategy-low-r: 236;
+  --strategy-low-g: 231;
+  --strategy-low-b: 220;
+  --strategy-high-r: 56;
+  --strategy-high-g: 151;
+  --strategy-high-b: 60;
+}
+
+body.theme-dark {
+  color-scheme: dark;
+  --ink: #e8e2d4;
+  --muted: #a39e92;
+  --paper: #1a1814;
+  --surface: #2a2620;
+  --cell: #353028;
+  --cell-alt: #3f3a32;
+  --border: #4a453c;
+  --disabled: #5c564c;
+  --button-face: #e8e2d4;
+  --button-ink: #1a1814;
+  --range-r: 86;
+  --range-g: 148;
+  --range-b: 102;
+  --strategy-low-r: 53;
+  --strategy-low-g: 48;
+  --strategy-low-b: 40;
+  --strategy-high-r: 86;
+  --strategy-high-g: 148;
+  --strategy-high-b: 102;
 }
 
 body {
   margin: 0 auto;
   max-width: 1100px;
   padding: 24px;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 h1, h2 {
@@ -16,7 +70,7 @@ h1, h2 {
 }
 
 header p, #message {
-  color: #5c564c;
+  color: var(--muted);
 }
 
 form, #summary, section {
@@ -41,14 +95,21 @@ input, select, button {
   padding: 8px;
 }
 
+input, select {
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
 button {
-  background: #1c1915;
-  color: #f4f0e6;
+  background: var(--button-face);
+  color: var(--button-ink);
   border: 0;
 }
 
 button:disabled {
-  background: #b9b2a6;
+  background: var(--disabled);
+  color: var(--button-ink);
 }
 
 .actions {
@@ -64,13 +125,13 @@ button:disabled {
 }
 
 #summary div {
-  background: white;
+  background: var(--surface);
   padding: 12px;
 }
 
 #summary span {
   display: block;
-  color: #5c564c;
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -93,7 +154,7 @@ button:disabled {
 }
 
 .count, .hint {
-  color: #5c564c;
+  color: var(--muted);
   font-weight: 400;
   font-size: 13px;
 }
@@ -119,12 +180,18 @@ label[hidden] {
 }
 
 .picker .cell.on {
-  color: #f4f0e6;
+  color: var(--button-ink);
 }
 
 .picker .cell.blocked {
-  background: repeating-linear-gradient(-45deg, #ece7dc, #ece7dc 4px, #e2dcd0 4px, #e2dcd0 8px);
-  color: #b9b2a6;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--cell),
+    var(--cell) 4px,
+    var(--cell-alt) 4px,
+    var(--cell-alt) 8px
+  );
+  color: var(--disabled);
 }
 
 .picker {
@@ -135,7 +202,7 @@ label[hidden] {
   display: grid;
   grid-template-columns: 22px repeat(13, 1fr);
   gap: 2px;
-  background: white;
+  background: var(--surface);
   padding: 8px;
 }
 
@@ -148,13 +215,13 @@ label[hidden] {
 }
 
 .axis {
-  color: #5c564c;
+  color: var(--muted);
 }
 
 .cell {
-  background: #ece7dc;
+  background: var(--cell);
   border: 0;
-  color: #1c1915;
+  color: var(--ink);
   padding: 0;
 }
 
@@ -163,17 +230,17 @@ label[hidden] {
 }
 
 .cell.selected {
-  outline: 2px solid #1c1915;
+  outline: 2px solid var(--ink);
 }
 
 #chart {
   width: 100%;
   height: 180px;
-  background: white;
+  background: var(--surface);
 }
 
 #line, #lines {
-  background: white;
+  background: var(--surface);
   padding: 12px;
 }
 
@@ -182,7 +249,7 @@ label[hidden] {
   justify-content: space-between;
   gap: 12px;
   padding: 4px 0;
-  border-bottom: 1px solid #ece7dc;
+  border-bottom: 1px solid var(--cell);
   font-variant-numeric: tabular-nums;
 }
 
@@ -191,7 +258,7 @@ label[hidden] {
 }
 
 #ev-note {
-  color: #5c564c;
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -212,7 +279,7 @@ table.runout th,
 table.runout td,
 table.categories th,
 table.categories td {
-  border-bottom: 1px solid #d9d3c7;
+  border-bottom: 1px solid var(--border);
   padding: 4px 10px;
   text-align: left;
 }
@@ -225,12 +292,12 @@ table.categories .bar {
   display: inline-block;
   height: 8px;
   min-width: 0;
-  background: #1c1915;
+  background: var(--ink);
   vertical-align: middle;
 }
 
 #categories-note {
-  color: #5c564c;
+  color: var(--muted);
   font-size: 13px;
 }
 

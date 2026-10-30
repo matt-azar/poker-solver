@@ -19,7 +19,7 @@ States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 | Reports, scripting, batch queue | partial | M9 | CLI solvers, the local HTTP explorer, and a versioned `strategy-report 1` file from `street_solver` / `river_solver --report` | No runout aggregation, board-set reports, or durable batch queue |
 | Trainer, packs, session statistics | missing | M11 | — | Deferred while the integrated study application is unfinished |
 | Preflop solver and chart editor | missing | M12 | — | Deferred; realistic flop performance should drive the next engine investment after the study baseline |
-| Layouts, shortcuts, themes, localization | partial | M13 | One local page in `ui/`; shortcut and theme PRs exist separately | No saved layouts |
+| Layouts, shortcuts, themes, localization | partial | M13 | Light/dark CSS theme tokens in `ui/app.css`; preference persisted in `localStorage` ([EXPLORER.md](EXPLORER.md)); shortcut PR exists separately | No saved layouts; localization absent |
 | Delivery, install, upgrade, recovery | partial | M13 | CMake build of the binaries; [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs Windows, Linux, and Linux sanitizer jobs including explorer HTTP on Linux | No install package |
 
 Update a row only with the commit that demonstrates it. Historical phase 1–10 notes stay in [ROADMAP.md](ROADMAP.md).
