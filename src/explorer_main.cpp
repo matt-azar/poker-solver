@@ -1,6 +1,9 @@
 #include "explorer/checkpoint.hpp"
+#include "explorer/range_library.hpp"
+#include "explorer/recent_files.hpp"
 #include "explorer/retained_training.hpp"
 #include "explorer/session.hpp"
+#include "explorer/templates.hpp"
 #include "explorer/value_worker.hpp"
 #include "game/river_config_text.hpp"
 #include "game/river_game.hpp"
@@ -8,6 +11,7 @@
 #include "game/street_game.hpp"
 #include "poker/equity.hpp"
 #include "poker/card.hpp"
+#include "poker/hand_categories.hpp"
 #include "poker/range.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
@@ -21,11 +25,14 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <limits>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -65,11 +72,36 @@ namespace explorer_detail
 std::thread g_worker;
 poker::explorer::Session g_session;
 std::string g_ui_root = "ui";
+// Process-wide equity work limit. Defaults to kDefaultMaxPairRunouts; overridden
+// by POKER_EQUITY_MAX_PAIR_RUNOUTS or --max-pair-runouts before listen.
+std::uint64_t g_equity_max_pair_runouts = poker::holdem::kDefaultMaxPairRunouts;
+std::filesystem::path g_templates_root;
+std::filesystem::path g_ranges_root;
 
 // One action-value query. The accept loop only queues it. Status and node
 // pages stay on the accept thread. A newer node or a new solve cancels the
 // walk at the next public node. The worker is joined on server teardown.
 poker::explorer::ValueWorker* g_values = nullptr;
+
+bool parse_u64(std::string_view text, std::uint64_t& value)
+{
+    const char* begin = text.data();
+    const char* end = begin + text.size();
+    const auto parsed = std::from_chars(begin, end, value);
+    return parsed.ec == std::errc{} && parsed.ptr == end;
+}
+
+poker::holdem::ShowdownEquityOptions equity_options(const std::atomic<bool>& cancel)
+{
+    poker::holdem::ShowdownEquityOptions options;
+    options.max_pair_runouts = g_equity_max_pair_runouts;
+    options.cancel_poll = [](void* context)
+    {
+        return static_cast<const std::atomic<bool>*>(context)->load(std::memory_order_relaxed);
+    };
+    options.cancel_context = const_cast<std::atomic<bool>*>(&cancel);
+    return options;
+}
 
 void append_escaped(std::string& out, const std::string& text)
 {
@@ -386,10 +418,8 @@ Job parse_job(const std::string& text)
         throw std::invalid_argument("threads must be a positive integer from 1 through 64");
     }
     job.threads = static_cast<int>(threads_raw);
-    if (job.threads > 1 && job.board.size() == 5)
-    {
-        throw std::invalid_argument("multiple threads are only available on a frozen flop or turn");
-    }
+    // Five-card boards use the same street tree as flop/turn. Frozen is
+    // allowed on any board length; threads above 1 still require frozen.
     if (job.threads > 1 && !job.frozen)
     {
         throw std::invalid_argument("multiple threads require the frozen street pass");
@@ -415,10 +445,6 @@ Job parse_job(const std::string& text)
     if (job.iterations <= 0)
     {
         throw std::invalid_argument("iterations must be positive");
-    }
-    if (job.frozen && job.board.size() == 5)
-    {
-        throw std::invalid_argument("the frozen pass is for a flop or a turn");
     }
     if (job.samples < 1)
     {
@@ -886,26 +912,6 @@ std::string build_status(const StatusDraft& draft)
     return out;
 }
 
-poker::river::RiverConfig river_config(const Job& job)
-{
-    poker::river::RiverConfig config;
-    for (int i = 0; i < 5; ++i)
-    {
-        config.board[static_cast<std::size_t>(i)] = job.board[static_cast<std::size_t>(i)];
-    }
-    config.pot = job.pot;
-    config.stack = job.stack;
-    config.oop = job.oop;
-    config.ip = job.ip;
-    config.oop_bet_sizes = job.oop_bets;
-    config.ip_bet_sizes = job.ip_bets;
-    config.oop_raise_sizes = job.oop_raises;
-    config.ip_raise_sizes = job.ip_raises;
-    config.allow_all_in = job.allow_all_in;
-    config.max_raises = job.max_raises;
-    return config;
-}
-
 poker::streets::StreetConfig street_config(const Job& job)
 {
     poker::streets::StreetConfig config;
@@ -1318,11 +1324,36 @@ std::string json_runout_values(
     return out;
 }
 
+void append_equity_distribution(
+    std::string& out,
+    const std::vector<poker::holdem::EquityDistributionBucket>& buckets)
+{
+    out += '[';
+    for (std::size_t i = 0; i < buckets.size(); ++i)
+    {
+        if (i != 0)
+        {
+            out += ',';
+        }
+        const poker::holdem::EquityDistributionBucket& bucket = buckets[i];
+        out += "{\"lo\":";
+        out += format_number(bucket.lo);
+        out += ",\"hi\":";
+        out += format_number(bucket.hi);
+        out += ",\"weight\":";
+        out += format_number(bucket.weight);
+        out += '}';
+    }
+    out += ']';
+}
+
 std::string json_node_equity(
     const poker::solver::StreetNodeEquity& page,
     std::uint64_t solution_id,
     std::uint64_t job_id,
-    std::uint64_t generation)
+    std::uint64_t generation,
+    const std::vector<poker::holdem::EquityDistributionBucket>& oop_distribution = {},
+    const std::vector<poker::holdem::EquityDistributionBucket>& ip_distribution = {})
 {
     std::string out = "{\"pending\":false,\"kind\":\"equity\",";
     out += value_identity(solution_id, job_id, page.node_id, generation);
@@ -1336,9 +1367,37 @@ std::string json_node_equity(
     append_optional(out, page.defined, page.oop_equity);
     out += ",\"ip_equity\":";
     append_optional(out, page.defined, page.ip_equity);
+    // Check-down equity histogram over combos (not chip EV). Ten fixed buckets
+    // on [0, 1]; weights are raw input masses. equity_distribution is OOP;
+    // ip_equity_distribution is IP. Always present for stable clients.
+    out += ",\"equity_distribution\":";
+    append_equity_distribution(out, oop_distribution);
+    out += ",\"ip_equity_distribution\":";
+    append_equity_distribution(out, ip_distribution);
     out += ",\"query_seconds\":";
     out += format_number(page.query_seconds);
     out += '}';
+    return out;
+}
+
+std::string json_categories(
+    const poker::holdem::CategoryComposition& report,
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    const std::string& node_id,
+    std::uint64_t generation,
+    double query_seconds)
+{
+    // Made-hand category mass on the current board only. Draws are out of scope.
+    std::string body = poker::holdem::category_composition_json(report, query_seconds);
+    if (body.size() < 2 || body.front() != '{' || body.back() != '}')
+    {
+        throw std::logic_error("category json must be an object");
+    }
+    std::string out = "{\"pending\":false,";
+    out += value_identity(solution_id, job_id, node_id, generation);
+    out += ',';
+    out.append(body.begin() + 1, body.end());
     return out;
 }
 
@@ -1410,6 +1469,9 @@ StatusDraft draft_for(
     draft.sample_values = &sample_values;
     draft.sample_gaps = &sample_gaps;
     draft.memory = memory;
+    // Only call outside Session methods that already hold mu_. install/commit
+    // callbacks must build the draft first or assign generation from the
+    // callback argument.
     draft.generation = g_session.generation() + 1;
     return draft;
 }
@@ -1451,21 +1513,12 @@ void solve_job(std::uint64_t job_id, Job job)
             return;
         }
         const int chunk = std::max(1, job.iterations / job.samples);
-        std::shared_ptr<poker::solver::RiverBatchSolver> river;
-        std::shared_ptr<poker::solver::StreetBatchSolver> street;
-        poker::solver::StreetMemoryReport street_memory{};
-        const bool street_tree = job.board.size() != 5;
-        const poker::solver::StreetMemoryReport* memory_ptr = nullptr;
-        if (street_tree)
-        {
-            street = std::make_shared<poker::solver::StreetBatchSolver>(street_config(job));
-            street_memory = street->memory_report();
-            memory_ptr = &street_memory;
-        }
-        else
-        {
-            river = std::make_shared<poker::solver::RiverBatchSolver>(river_config(job));
-        }
+        // Flop, turn, and river share StreetBatchSolver. RiverBatchSolver
+        // remains only for opening older river-kind PSOL checkpoints and for
+        // the river_solver CLI.
+        auto street = std::make_shared<poker::solver::StreetBatchSolver>(street_config(job));
+        poker::solver::StreetMemoryReport street_memory = street->memory_report();
+        const poker::solver::StreetMemoryReport* memory_ptr = &street_memory;
         const auto publish_stopped = [&]()
         {
             if (done <= 0)
@@ -1489,19 +1542,12 @@ void solve_job(std::uint64_t job_id, Job job)
             kept_solution->sample_iterations = sample_iterations;
             kept_solution->sample_values = sample_values;
             kept_solution->sample_gaps = sample_gaps;
-            if (street_tree)
-            {
-                street->prepare_inspection();
-                kept_solution->street = street;
-                kept_solution->root_id = street->root_node_id();
-                kept_solution->memory = street->memory_report();
-                kept_solution->has_memory = true;
-                street_memory = kept_solution->memory;
-            }
-            else
-            {
-                kept_solution->river = river;
-            }
+            street->prepare_inspection();
+            kept_solution->street = street;
+            kept_solution->root_id = street->root_node_id();
+            kept_solution->memory = street->memory_report();
+            kept_solution->has_memory = true;
+            street_memory = kept_solution->memory;
             const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
             StatusDraft kept = draft_for(
                 job, job_id, done, kept_solution->runtime_seconds, true, value, p1, p2, gap,
@@ -1540,31 +1586,17 @@ void solve_job(std::uint64_t job_id, Job job)
                 return;
             }
             const int step = std::min(chunk, job.iterations - done);
-            if (street_tree)
+            if (job.frozen)
             {
-                if (job.frozen)
-                {
-                    street->continue_frozen_iterations(step, job.algorithm);
-                }
-                else
-                {
-                    street->continue_iterations(step, job.algorithm);
-                }
+                street->continue_frozen_iterations(step, job.algorithm);
             }
             else
             {
-                river->continue_iterations(step, job.algorithm);
+                street->continue_iterations(step, job.algorithm);
             }
             done += step;
-            if (street_tree)
-            {
-                remember(street->expected_utility(), street->p1_best_response_utility(), street->p2_best_response_utility());
-                street_memory = street->memory_report();
-            }
-            else
-            {
-                remember(river->expected_utility(), river->p1_best_response_utility(), river->p2_best_response_utility());
-            }
+            remember(street->expected_utility(), street->p1_best_response_utility(), street->p2_best_response_utility());
+            street_memory = street->memory_report();
             if (g_session.stop_requested(job_id))
             {
                 publish_stopped();
@@ -1597,19 +1629,12 @@ void solve_job(std::uint64_t job_id, Job job)
         held->sample_iterations = sample_iterations;
         held->sample_values = sample_values;
         held->sample_gaps = sample_gaps;
-        if (street_tree)
-        {
-            street->prepare_inspection();
-            held->street = std::move(street);
-            held->root_id = held->street->root_node_id();
-            held->memory = held->street->memory_report();
-            held->has_memory = true;
-            street_memory = held->memory;
-        }
-        else
-        {
-            held->river = std::move(river);
-        }
+        street->prepare_inspection();
+        held->street = std::move(street);
+        held->root_id = held->street->root_node_id();
+        held->memory = held->street->memory_report();
+        held->has_memory = true;
+        street_memory = held->memory;
         if (g_session.stop_requested(job_id))
         {
             const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
@@ -1824,6 +1849,9 @@ void adopt_completed_training(
 
 void continue_job(std::uint64_t job_id, int extra)
 {
+    // Claim returns while cancelled value queries may still hold the engine.
+    // Match solve: wait for quiet off the accept thread before mutating.
+    g_session.wait_until_quiet();
     const std::shared_ptr<HeldSolution> held =
         std::static_pointer_cast<HeldSolution>(g_session.training_resource(job_id));
     if (!held || (!held->street && !held->river))
@@ -1935,6 +1963,11 @@ void continue_job(std::uint64_t job_id, int extra)
             held->street->prepare_inspection();
             held->memory = held->street->memory_report();
             held->has_memory = true;
+        }
+        else if (held->river)
+        {
+            held->river->prepare_inspection();
+            held->root_id = held->river->root_node_id();
         }
         StatusDraft success = draft_for(
             held->job, job_id, done, seconds, true, value, p1, p2, gap,
@@ -2221,6 +2254,8 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
         held->job = job_from_river(config);
         held->river = std::make_shared<poker::solver::RiverBatchSolver>(config);
         held->river->install_training_tables(document.tables);
+        held->river->prepare_inspection();
+        held->root_id = held->river->root_node_id();
     }
     else
     {
@@ -2240,16 +2275,20 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
 
 std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
 {
+    // Build outside install_completed: draft_for reads g_session.generation(),
+    // and the install callback already holds the session mutex.
+    StatusDraft base = draft_for(
+        held->job, 0, held->iterations, held->runtime_seconds, true,
+        held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+        held->sample_iterations, held->sample_values, held->sample_gaps,
+        held->has_memory ? &held->memory : nullptr);
+    base.root_id = held->root_id;
     std::uint64_t solution_id = 0;
     std::string status;
     const bool installed = g_session.install_completed(held, solution_id, [&](std::uint64_t generation, std::uint64_t id)
     {
         held->id = id;
-        StatusDraft draft = draft_for(
-            held->job, 0, held->iterations, held->runtime_seconds, true,
-            held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
-            held->sample_iterations, held->sample_values, held->sample_gaps,
-            held->has_memory ? &held->memory : nullptr);
+        StatusDraft draft = base;
         draft.solution_id = id;
         draft.root_id = held->root_id;
         draft.generation = generation;
@@ -2279,6 +2318,127 @@ void handle_client(socket_t client)
     if (line.rfind("GET /api/status", 0) == 0)
     {
         send_response(client, 200, "application/json", g_session.status());
+        return;
+    }
+    if (line.rfind("GET /api/recent-solutions", 0) == 0)
+    {
+        const std::vector<poker::explorer::RecentFile> recent =
+            poker::explorer::list_recent_files(true);
+        std::string payload = "[";
+        for (std::size_t index = 0; index < recent.size(); ++index)
+        {
+            if (index > 0)
+            {
+                payload += ',';
+            }
+            payload += "{\"path\":";
+            append_escaped(payload, recent[index].path);
+            payload += ",\"name\":";
+            append_escaped(payload, recent[index].name);
+            payload += ",\"mtime\":";
+            payload += std::to_string(recent[index].mtime);
+            payload += '}';
+        }
+        payload += ']';
+        send_response(client, 200, "application/json", payload);
+        return;
+    }
+    if (line.rfind("POST /api/recent-solutions/clear", 0) == 0)
+    {
+        poker::explorer::clear_recent_files();
+        send_response(client, 200, "application/json", "{\"cleared\":true}");
+        return;
+    }
+    if (line.rfind("GET /api/templates ", 0) == 0 || line.rfind("GET /api/templates?", 0) == 0)
+    {
+        const std::vector<poker::explorer::TemplateInfo> templates =
+            poker::explorer::list_templates(g_templates_root);
+        std::string payload = "[";
+        for (std::size_t index = 0; index < templates.size(); ++index)
+        {
+            if (index != 0)
+            {
+                payload.push_back(',');
+            }
+            payload += "{\"id\":";
+            append_escaped(payload, templates[index].id);
+            payload += ",\"name\":";
+            append_escaped(payload, templates[index].name);
+            payload += '}';
+        }
+        payload += ']';
+        send_response(client, 200, "application/json", payload);
+        return;
+    }
+    if (line.rfind("GET /api/templates/", 0) == 0)
+    {
+        const std::string rest = line.substr(std::string("GET /api/templates/").size());
+        const std::size_t end = rest.find(' ');
+        const std::string id = end == std::string::npos ? rest : rest.substr(0, end);
+        if (!poker::explorer::is_safe_template_id(id))
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"unknown template\"}");
+            return;
+        }
+        const std::optional<std::string> text =
+            poker::explorer::read_template(g_templates_root, id);
+        if (!text.has_value())
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"unknown template\"}");
+            return;
+        }
+        std::string payload = "{\"id\":";
+        append_escaped(payload, id);
+        payload += ",\"text\":";
+        append_escaped(payload, *text);
+        payload += '}';
+        send_response(client, 200, "application/json", payload);
+        return;
+    }
+    if (line.rfind("GET /api/ranges ", 0) == 0 || line.rfind("GET /api/ranges?", 0) == 0)
+    {
+        const std::vector<poker::explorer::RangePresetInfo> presets =
+            poker::explorer::list_range_presets(g_ranges_root);
+        std::string payload = "[";
+        for (std::size_t index = 0; index < presets.size(); ++index)
+        {
+            if (index != 0)
+            {
+                payload.push_back(',');
+            }
+            payload += "{\"id\":";
+            append_escaped(payload, presets[index].id);
+            payload += ",\"name\":";
+            append_escaped(payload, presets[index].name);
+            payload += '}';
+        }
+        payload += ']';
+        send_response(client, 200, "application/json", payload);
+        return;
+    }
+    if (line.rfind("GET /api/ranges/", 0) == 0)
+    {
+        const std::string rest = line.substr(std::string("GET /api/ranges/").size());
+        const std::size_t end = rest.find(' ');
+        const std::string id = end == std::string::npos ? rest : rest.substr(0, end);
+        if (!poker::explorer::is_safe_range_id(id))
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"unknown range\"}");
+            return;
+        }
+        const std::optional<std::string> text =
+            poker::explorer::read_range_preset(g_ranges_root, id);
+        if (!text.has_value())
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"unknown range\"}");
+            return;
+        }
+        std::string payload = "{\"id\":";
+        append_escaped(payload, id);
+        payload += ",\"text\":";
+        append_escaped(payload, *text);
+        payload += '}';
+        send_response(client, 200, "application/json", payload);
         return;
     }
     if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/continue ") != std::string::npos)
@@ -2322,6 +2482,8 @@ void handle_client(socket_t client)
         {
             g_worker.join();
         }
+        // Claim is non-blocking: cancelled value readers may still hold the
+        // engine. continue_job waits for quiet before mutating.
         const poker::explorer::Session::Claim claim = g_session.claim_completed(id);
         if (!claim.allowed)
         {
@@ -2533,11 +2695,12 @@ void handle_client(socket_t client)
             }
             if (g_values != nullptr)
             {
-                g_values->cancel();
+                g_values->cancel_and_drain();
             }
             const poker::explorer::CheckpointDocument document =
                 poker::explorer::read_checkpoint(path, kMaxCheckpointBytes);
             const std::shared_ptr<HeldSolution> held = solution_from_checkpoint(document);
+            poker::explorer::record_recent_file(path);
             send_response(client, 200, "application/json", publish_loaded(held));
         }
         catch (const std::exception& error)
@@ -2576,6 +2739,7 @@ void handle_client(socket_t client)
             const std::shared_ptr<HeldSolution> held =
                 std::static_pointer_cast<HeldSolution>(lease.resource());
             poker::explorer::write_checkpoint(path, checkpoint_from_held(*held));
+            poker::explorer::record_recent_file(path);
             send_response(client, 200, "application/json", "{\"saved\":true}");
         }
         catch (const std::exception& error)
@@ -2616,9 +2780,9 @@ void handle_client(socket_t client)
         {
             if (tail.rfind("nodes/", 0) == 0)
             {
-                if (!held->street)
+                if (!held->street && !held->river)
                 {
-                    send_response(client, 400, "application/json", "{\"error\":\"this solution has no street nodes\"}");
+                    send_response(client, 400, "application/json", "{\"error\":\"this solution has no nodes\"}");
                     return;
                 }
                 std::string node_path = tail.substr(6);
@@ -2633,15 +2797,68 @@ void handle_client(socket_t client)
                     query_kind = "equity";
                     node_path.resize(node_path.size() - 7);
                 }
+                else if (node_path.size() >= 11 && node_path.ends_with("/categories"))
+                {
+                    query_kind = "categories";
+                    node_path.resize(node_path.size() - 11);
+                }
                 else if (node_path.size() >= 7 && node_path.ends_with("/values"))
                 {
                     query_kind = "actions";
                     node_path.resize(node_path.size() - 7);
                 }
                 const auto query_started = std::chrono::steady_clock::now();
+                const auto inspect = [&](const std::string& id) -> poker::solver::StreetInspection
+                {
+                    if (held->street)
+                    {
+                        return held->street->inspect_node(id);
+                    }
+                    return held->river->inspect_node(id);
+                };
+                if (query_kind == "categories")
+                {
+                    if (!held->street)
+                    {
+                        send_response(
+                            client,
+                            400,
+                            "application/json",
+                            "{\"error\":\"hand categories require a street solution\"}");
+                        return;
+                    }
+                    held->street->inspect_node(node_path);
+                    const poker::holdem::CategoryComposition report =
+                        held->street->category_composition(node_path);
+                    const double query_seconds = std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - query_started).count();
+                    const std::string payload = json_categories(
+                        report,
+                        held->id,
+                        held->job_id,
+                        node_path,
+                        g_session.generation(),
+                        query_seconds);
+                    send_response(
+                        client,
+                        200,
+                        "application/json",
+                        payload,
+                        "X-Query-Seconds: " + format_number(query_seconds) + "\r\n");
+                    return;
+                }
                 if (!query_kind.empty())
                 {
-                    const poker::solver::StreetInspection view = held->street->inspect_node(node_path);
+                    if (query_kind == "runout" && held->river)
+                    {
+                        send_response(
+                            client,
+                            400,
+                            "application/json",
+                            "{\"error\":\"runout values require a chance node\"}");
+                        return;
+                    }
+                    const poker::solver::StreetInspection view = inspect(node_path);
                     if (query_kind == "actions" && view.kind != "decision")
                     {
                         send_response(
@@ -2667,7 +2884,7 @@ void handle_client(socket_t client)
                     respond_value_query(client, solution_id, job_id, node_path, query_started, query_kind);
                     return;
                 }
-                const poker::solver::StreetInspection view = held->street->inspect_node(node_path);
+                const poker::solver::StreetInspection view = inspect(node_path);
                 const double query_seconds = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - query_started).count();
                 const auto serialize_started = std::chrono::steady_clock::now();
@@ -2701,6 +2918,37 @@ void handle_client(socket_t client)
                     "root",
                     std::chrono::steady_clock::now(),
                     "equity");
+                return;
+            }
+            if (tail == "categories")
+            {
+                if (!held->river)
+                {
+                    send_response(
+                        client,
+                        400,
+                        "application/json",
+                        "{\"error\":\"street categories are requested on a node\"}");
+                    return;
+                }
+                const auto query_started = std::chrono::steady_clock::now();
+                const poker::holdem::CategoryComposition report = poker::holdem::category_composition(
+                    held->job.board, held->job.oop, held->job.ip);
+                const double query_seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - query_started).count();
+                const std::string payload = json_categories(
+                    report,
+                    held->id,
+                    held->job_id,
+                    "root",
+                    g_session.generation(),
+                    query_seconds);
+                send_response(
+                    client,
+                    200,
+                    "application/json",
+                    payload,
+                    "X-Query-Seconds: " + format_number(query_seconds) + "\r\n");
                 return;
             }
             if (tail == "export")
@@ -2805,6 +3053,8 @@ void handle_client(socket_t client)
                 g_worker.join();
             }
             std::shared_ptr<void> retiring;
+            // begin() retires the prior engine without waiting; the worker
+            // joins quiet before destroying it so value readers can finish.
             const std::uint64_t job_id = g_session.begin(retiring);
             StatusDraft starting;
             starting.running = true;
@@ -2961,19 +3211,24 @@ int run(int argc, char** argv)
                 page.units = poker::holdem::kEquityUnits;
                 page.model = poker::holdem::kEquityModel;
                 const auto started = std::chrono::steady_clock::now();
-                poker::holdem::ShowdownEquityOptions options;
-                options.cancel_poll = [](void* context)
-                {
-                    return static_cast<const std::atomic<bool>*>(context)->load(std::memory_order_relaxed);
-                };
-                options.cancel_context = const_cast<std::atomic<bool>*>(&cancel);
+                const poker::holdem::ShowdownEquityOptions options = equity_options(cancel);
                 const poker::holdem::ShowdownEquity equity = poker::holdem::showdown_equity(
                     held->job.board, held->job.oop, held->job.ip, options);
                 page.defined = equity.joint_defined && equity.player0.defined && equity.player1.defined;
+                std::vector<poker::holdem::EquityDistributionBucket> oop_distribution;
+                std::vector<poker::holdem::EquityDistributionBucket> ip_distribution;
                 if (page.defined)
                 {
                     page.oop_equity = equity.player0.equity;
                     page.ip_equity = equity.player1.equity;
+                    oop_distribution = poker::holdem::equity_distribution(equity.player0);
+                    ip_distribution = poker::holdem::equity_distribution(equity.player1);
+                }
+                else
+                {
+                    oop_distribution = poker::holdem::equity_distribution(
+                        std::span<const double>{}, std::span<const double>{});
+                    ip_distribution = oop_distribution;
                 }
                 page.query_seconds = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - started).count();
@@ -2981,11 +3236,35 @@ int run(int argc, char** argv)
                 {
                     throw poker::solver::StreetValueCancelled();
                 }
-                return json_node_equity(page, request.solution_id, request.job_id, g_session.generation());
+                return json_node_equity(
+                    page,
+                    request.solution_id,
+                    request.job_id,
+                    g_session.generation(),
+                    oop_distribution,
+                    ip_distribution);
+            }
+            if (held->river)
+            {
+                if (request.kind == "runout")
+                {
+                    throw std::invalid_argument("runout values require a chance node");
+                }
+                if (request.kind == "equity")
+                {
+                    throw std::invalid_argument("river equity is requested on /equity");
+                }
+                const poker::solver::StreetActionValues page =
+                    held->river->action_values(request.node_id, &cancel);
+                if (cancel.load() || g_session.current_solution() != request.solution_id)
+                {
+                    throw poker::solver::StreetValueCancelled();
+                }
+                return json_action_values(page, request.solution_id, request.job_id, g_session.generation());
             }
             if (!held->street)
             {
-                throw std::invalid_argument("this solution has no street nodes");
+                throw std::invalid_argument("this solution has no nodes");
             }
             if (request.kind == "runout")
             {
@@ -3004,14 +3283,13 @@ int run(int argc, char** argv)
                 page.node_id = request.node_id;
                 page.units = poker::holdem::kEquityUnits;
                 page.model = poker::holdem::kEquityModel;
+                std::vector<poker::holdem::EquityDistributionBucket> oop_distribution =
+                    poker::holdem::equity_distribution(
+                        std::span<const double>{}, std::span<const double>{});
+                std::vector<poker::holdem::EquityDistributionBucket> ip_distribution = oop_distribution;
                 if (!weights.oop.empty() && !weights.ip.empty())
                 {
-                    poker::holdem::ShowdownEquityOptions options;
-                    options.cancel_poll = [](void* context)
-                    {
-                        return static_cast<const std::atomic<bool>*>(context)->load(std::memory_order_relaxed);
-                    };
-                    options.cancel_context = const_cast<std::atomic<bool>*>(&cancel);
+                    const poker::holdem::ShowdownEquityOptions options = equity_options(cancel);
                     const poker::holdem::ShowdownEquity equity = poker::holdem::showdown_equity(
                         weights.board,
                         poker::holdem::Range::parse(weights.oop),
@@ -3022,6 +3300,8 @@ int run(int argc, char** argv)
                     {
                         page.oop_equity = equity.player0.equity;
                         page.ip_equity = equity.player1.equity;
+                        oop_distribution = poker::holdem::equity_distribution(equity.player0);
+                        ip_distribution = poker::holdem::equity_distribution(equity.player1);
                     }
                 }
                 page.query_seconds = std::chrono::duration<double>(
@@ -3030,7 +3310,13 @@ int run(int argc, char** argv)
                 {
                     throw poker::solver::StreetValueCancelled();
                 }
-                return json_node_equity(page, request.solution_id, request.job_id, g_session.generation());
+                return json_node_equity(
+                    page,
+                    request.solution_id,
+                    request.job_id,
+                    g_session.generation(),
+                    oop_distribution,
+                    ip_distribution);
             }
             const poker::solver::StreetActionValues page = held->street->action_values(request.node_id, &cancel);
             if (cancel.load() || g_session.current_solution() != request.solution_id)
@@ -3062,6 +3348,16 @@ int run(int argc, char** argv)
     } teardown;
 
     int port = 8765;
+    if (const char* env_limit = std::getenv("POKER_EQUITY_MAX_PAIR_RUNOUTS"))
+    {
+        std::uint64_t parsed = 0;
+        if (!parse_u64(env_limit, parsed))
+        {
+            std::cerr << "invalid POKER_EQUITY_MAX_PAIR_RUNOUTS\n";
+            return 1;
+        }
+        g_equity_max_pair_runouts = parsed;
+    }
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
@@ -3069,8 +3365,20 @@ int run(int argc, char** argv)
         {
             port = std::atoi(argv[++i]);
         }
+        else if (arg == "--max-pair-runouts" && i + 1 < argc)
+        {
+            std::uint64_t parsed = 0;
+            if (!parse_u64(argv[++i], parsed))
+            {
+                std::cerr << "invalid --max-pair-runouts\n";
+                return 1;
+            }
+            g_equity_max_pair_runouts = parsed;
+        }
     }
     choose_ui_root();
+    g_templates_root = poker::explorer::resolve_templates_directory(executable_directory());
+    g_ranges_root = poker::explorer::resolve_ranges_directory(executable_directory());
 
 #ifdef _WIN32
     WSADATA data;
@@ -3107,6 +3415,12 @@ int run(int argc, char** argv)
     }
     std::cout << "explorer http://127.0.0.1:" << port << "\n";
     std::cout << "ui " << g_ui_root << "\n";
+    std::cout << "recent "
+              << poker::explorer::resolve_recent_file_path().string() << "\n";
+    if (!g_templates_root.empty())
+    {
+        std::cout << "templates " << g_templates_root.string() << "\n";
+    }
     std::cout.flush();
 
     while (true)

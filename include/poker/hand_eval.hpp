@@ -36,6 +36,10 @@ std::string_view category_name(HandCategory category);
 // five-card hand inside that set.
 HandValue evaluate(std::span<const int> cards);
 
+// Made-hand category for two hole cards on a fully known five-card board.
+// Evaluates the best five-card hand inside the seven-card set.
+HandCategory made_hand_category(int hole0, int hole1, std::span<const int> board);
+
 // Positive if left wins, negative if right wins, zero on a tie.
 int compare_values(const HandValue& left, const HandValue& right);
 

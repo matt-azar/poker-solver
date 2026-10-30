@@ -3,6 +3,8 @@
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
+#include "solver/chip_payoff.hpp"
+#include "solver/payoff.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -168,35 +170,32 @@ public:
         return state.terminal;
     }
 
+    // Both players' root-centered chip utilities. Player 1 is the negation of
+    // player 0 under the chip zero-sum rule (see ChipPayoff).
+    poker::solver::PlayerPayoff terminal_payoff(const State& state) const
+    {
+        if (!state.terminal)
+        {
+            throw std::logic_error("terminal_payoff on a non-terminal street state");
+        }
+        const int showdown = state.folded < 0
+            ? showdown_outcome(state)
+            : 0;
+        return poker::solver::ChipPayoff::terminal(
+            config_.pot,
+            state.contrib[0],
+            state.contrib[1],
+            state.folded,
+            showdown);
+    }
+
     double p1_utility(const State& state) const
     {
         if (!state.terminal)
         {
             throw std::logic_error("p1_utility on a non-terminal street state");
         }
-        const double half_pot = static_cast<double>(config_.pot) * 0.5;
-        if (state.folded == 0)
-        {
-            return -(half_pot + static_cast<double>(state.contrib[0]));
-        }
-        if (state.folded == 1)
-        {
-            return half_pot + static_cast<double>(state.contrib[1]);
-        }
-        if (state.contrib[0] != state.contrib[1])
-        {
-            throw std::logic_error("showdown with unequal street contributions");
-        }
-        const int outcome = showdown_outcome(state);
-        if (outcome > 0)
-        {
-            return half_pot + static_cast<double>(state.contrib[1]);
-        }
-        if (outcome < 0)
-        {
-            return -(half_pot + static_cast<double>(state.contrib[0]));
-        }
-        return 0.0;
+        return terminal_payoff(state).utility[0];
     }
 
     int chance_count(const State& state) const
@@ -392,7 +391,8 @@ private:
 
     int betting_streets() const
     {
-        return static_cast<int>(config_.board.size()) == 3 ? 3 : 2;
+        // Flop: three streets. Turn: two. River: one.
+        return 6 - static_cast<int>(config_.board.size());
     }
 
     static int round_chips(double fraction, int basis)
@@ -418,9 +418,9 @@ private:
 
     void validate_config() const
     {
-        if (config_.board.size() != 3 && config_.board.size() != 4)
+        if (config_.board.size() != 3 && config_.board.size() != 4 && config_.board.size() != 5)
         {
-            throw std::invalid_argument("street solver board must have 3 or 4 cards");
+            throw std::invalid_argument("street solver board must have 3, 4, or 5 cards");
         }
         holdem::validate_board(config_.board.data(), static_cast<int>(config_.board.size()));
         if (config_.pot <= 0)
@@ -527,7 +527,8 @@ private:
 
     int street_kind(int street) const
     {
-        return config_.board.size() == 3 ? street : street + 1;
+        // Map local street index onto flop/turn/river size lists.
+        return street + static_cast<int>(config_.board.size()) - 3;
     }
 
     const std::vector<double>& listed_bets(int player, int kind) const
@@ -848,6 +849,10 @@ private:
 
     std::string place_text(const State& state) const
     {
+        if (config_.board.size() == 5)
+        {
+            return "river";
+        }
         if (config_.board.size() == 4)
         {
             if (state.street == 0)
@@ -891,8 +896,12 @@ private:
         info.label = state.acting == 0 ? "OOP " : "IP ";
         info.label += holdem::Range::combo_text(combo);
         info.label += " | ";
-        info.label += place_text(state);
-        info.label += " | ";
+        // Five-card labels match RiverGame (no place segment).
+        if (config_.board.size() != 5)
+        {
+            info.label += place_text(state);
+            info.label += " | ";
+        }
         info.label += path.empty() ? "open" : path;
         const int id = static_cast<int>(infosets_.size());
         ids_.emplace(key, id);

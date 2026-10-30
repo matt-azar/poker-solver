@@ -433,14 +433,24 @@ void test_continuation_keeps_the_same_solution()
     poker::explorer::Session::Claim claim;
     bool committed = false;
     std::thread trainer([&]() {
+        // Claim must succeed while a reader still holds the engine so the HTTP
+        // accept loop is never parked behind value queries.
         claim = session.claim_completed(permit.solution_id);
         if (claim.allowed)
         {
+            session.wait_until_quiet();
             session.request_stop(claim.job_id);
             committed = session.commit_continuation(claim.job_id, [](std::uint64_t) { return std::string("kept"); });
         }
     });
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    for (int attempt = 0;
+         attempt < 2000 && session.phase() != poker::explorer::Phase::Running;
+         ++attempt)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(session.phase() == poker::explorer::Phase::Running);
+    CHECK(!session.borrow(permit.solution_id));
     session.release_reader();
     trainer.join();
     CHECK(claim.allowed);

@@ -24,7 +24,21 @@
   <div class="range-tools">
     <label>Paint weight <input id="weight" type="range" min="0" max="100" value="100"></label>
     <strong id="weight-label">100%</strong>
+    <button type="button" id="undo-range" disabled>Undo</button>
+    <button type="button" id="redo-range" disabled>Redo</button>
     <button type="button" id="clear-ranges">Clear ranges</button>
+    <label>Preset
+      <select id="range-preset">
+        <option value="">Choose a range…</option>
+      </select>
+    </label>
+    <label>Apply to
+      <select id="range-preset-target">
+        <option value="oop">OOP</option>
+        <option value="ip">IP</option>
+      </select>
+    </label>
+    <button type="button" id="apply-range-preset">Apply</button>
     <span class="hint">Suited is above the pairs. Offsuit is below. Click toggles a cell. Drag paints the same weight. Cells blocked by the board stay grey.</span>
   </div>
   <form id="setup">
@@ -67,13 +81,25 @@
       </select>
     </label>
     <label class="wide">Solution file <input id="solution-path" placeholder="Save or open a .psol file" autocomplete="off"></label>
+    <label class="wide">Recent solutions
+      <select id="recent-solutions">
+        <option value="">Choose a recent file…</option>
+      </select>
+    </label>
     <label class="wide">Configuration file <input id="config-file" type="file" accept=".txt,text/plain"></label>
+    <label class="wide">Load template
+      <select id="template-select">
+        <option value="">Choose a template…</option>
+      </select>
+      <button type="button" id="load-template">Load</button>
+    </label>
     <div class="actions">
       <button type="submit" id="run">Solve</button>
       <button type="button" id="continue" disabled>Continue</button>
       <button type="button" id="stop" disabled>Stop</button>
       <button type="button" id="save-solution" disabled>Save</button>
       <button type="button" id="open-solution">Open</button>
+      <button type="button" id="open-recent">Open recent</button>
       <button type="button" id="export" disabled>Export JSON</button>
     </div>
   </form>
@@ -119,8 +145,11 @@
     <button type="button" id="calculate-ev" hidden>Calculate EVs</button>
     <button type="button" id="compare-runouts" hidden>Compare runouts</button>
     <button type="button" id="node-equity" hidden>Check-down equity</button>
+    <button type="button" id="node-categories" hidden>Hand categories</button>
     <p id="ev-note"></p>
     <p id="equity-note"></p>
+    <p id="categories-note"></p>
+    <div id="categories"></div>
     <div id="runout"></div>
     <label id="path-label">History
       <select id="path"></select>

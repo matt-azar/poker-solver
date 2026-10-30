@@ -498,16 +498,54 @@ void run_cfr_tests()
     poker::solver::SolveConfig stop_config;
     stop_config.max_iterations = 100000;
     stop_config.nash_gap_threshold = 1e-2;
-    stop_config.eval_interval = 200;
+    stop_config.eval_every = 200;
     const auto stopped = stopping.solve(stop_config);
     const auto stopped_strategy = stopping.average_strategy();
     report_solve("cfr_plus_early_stop", stopped, stopped_strategy);
     CHECK(stopped.iterations > 0);
     CHECK(stopped.iterations < stop_config.max_iterations);
-    CHECK(stopped.iterations % stop_config.eval_interval == 0);
+    CHECK(stopped.iterations % stop_config.eval_every == 0);
     CHECK(stopped.nash_gap <= stop_config.nash_gap_threshold);
     CHECK(stopped.runtime_seconds > 0.0);
     CHECK(stopped.memory_bytes_estimate > 0);
+    CHECK(!stopped.time_limit_reached);
+    CHECK(stopped.nash_gap_history.size() >= 1);
+    CHECK(stopped.nash_gap_history.size() == stopped.nash_gap_iterations.size());
+    CHECK(stopped.nash_gap_history.back() == stopped.nash_gap);
+    CHECK(stopped.nash_gap_iterations.back() == stopped.iterations);
+
+    // eval_every=2 records fewer history samples than every-iteration evals.
+    poker::solver::SolveConfig dense_config;
+    dense_config.max_iterations = 8;
+    dense_config.nash_gap_threshold = 0.0;
+    dense_config.eval_every = 1;
+    poker::solver::CfrTrainer<poker::kuhn::KuhnGame> dense_trainer(
+        poker::kuhn::KuhnGame{}, poker::solver::Algorithm::VanillaCfr);
+    const auto dense = dense_trainer.solve(dense_config);
+    poker::solver::SolveConfig sparse_config = dense_config;
+    sparse_config.eval_every = 2;
+    poker::solver::CfrTrainer<poker::kuhn::KuhnGame> sparse_trainer(
+        poker::kuhn::KuhnGame{}, poker::solver::Algorithm::VanillaCfr);
+    const auto sparse = sparse_trainer.solve(sparse_config);
+    CHECK(dense.iterations == 8);
+    CHECK(sparse.iterations == 8);
+    CHECK(dense.nash_gap_history.size() == 8);
+    CHECK(sparse.nash_gap_history.size() == 4);
+    CHECK(sparse.nash_gap_history.size() < dense.nash_gap_history.size());
+    CHECK(dense.nash_gap_history.size() == dense.nash_gap_iterations.size());
+    CHECK(sparse.nash_gap_history.size() == sparse.nash_gap_iterations.size());
+    CHECK(sparse.nash_gap_iterations[0] == 2);
+    CHECK(sparse.nash_gap_iterations.back() == 8);
+
+    poker::solver::CfrTrainer<poker::kuhn::KuhnGame> timed(
+        poker::kuhn::KuhnGame{}, poker::solver::Algorithm::CfrPlus);
+    poker::solver::SolveConfig time_config;
+    time_config.max_iterations = 1000000;
+    time_config.max_wall_seconds = 0.0;
+    const auto timed_out = timed.solve(time_config);
+    CHECK(timed_out.time_limit_reached);
+    CHECK(timed_out.iterations >= 1);
+    CHECK(timed_out.iterations < time_config.max_iterations);
 
     poker::solver::SolveConfig linear_config;
     linear_config.max_iterations = 2000;

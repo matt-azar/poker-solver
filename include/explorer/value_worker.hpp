@@ -55,6 +55,9 @@ public:
 
     ValueReply submit(const ValueRequest& request);
     void cancel();
+    // Soft-cancel then wait until the worker is not holding a session reader.
+    // Use on the accept thread only when the evaluator honors cancel promptly.
+    void cancel_and_drain();
     void shutdown();
     bool live() const;
 
@@ -67,6 +70,7 @@ private:
     ValueErrorBody error_body_;
     mutable std::mutex mu_;
     std::condition_variable cv_;
+    std::condition_variable idle_;
     std::thread thread_;
     std::atomic<bool> cancel_{false};
     bool started_ = false;

@@ -24,6 +24,7 @@ add_library(poker_solver_core STATIC
     src/explorer/checkpoint.cpp
     src/poker/card.cpp
     src/poker/hand_eval.cpp
+    src/poker/hand_categories.cpp
     src/poker/range.cpp
 )
 target_include_directories(poker_solver_core PUBLIC
@@ -70,7 +71,10 @@ add_executable(poker_solver_tests
     tests/unit/test_cfr.cpp
     tests/unit/test_leduc.cpp
     tests/unit/test_holdem.cpp
+    tests/unit/test_hand_categories.cpp
     tests/unit/test_river.cpp
+    tests/unit/test_payoff.cpp
+    tests/unit/test_rake.cpp
     tests/unit/test_streets.cpp
     tests/unit/test_budget.cpp
     tests/unit/test_session.cpp
@@ -79,6 +83,11 @@ add_executable(poker_solver_tests
     tests/unit/test_action_ev.cpp
     tests/unit/test_value_worker.cpp
     tests/unit/test_checkpoint.cpp
+    tests/unit/test_strategy_report.cpp
+    tests/unit/test_equity_dist.cpp
+    tests/unit/test_recent_files.cpp
+    tests/unit/test_templates.cpp
+    tests/unit/test_range_library.cpp
 )
 target_include_directories(poker_solver_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"

@@ -272,6 +272,24 @@ std::string_view category_name(HandCategory category)
     return "unknown";
 }
 
+HandCategory made_hand_category(int hole0, int hole1, std::span<const int> board)
+{
+    if (board.size() != 5)
+    {
+        bad_hand("made-hand category requires a five-card board");
+    }
+    validate_board(board.data(), static_cast<int>(board.size()));
+    validate_private(hole0, hole1, board.data(), static_cast<int>(board.size()));
+    std::array<int, 7> cards{};
+    cards[0] = hole0;
+    cards[1] = hole1;
+    for (int i = 0; i < 5; ++i)
+    {
+        cards[static_cast<std::size_t>(2 + i)] = board[static_cast<std::size_t>(i)];
+    }
+    return evaluate(std::span<const int>(cards.data(), 7)).category;
+}
+
 HandValue evaluate(std::span<const int> cards)
 {
     const int count = static_cast<int>(cards.size());

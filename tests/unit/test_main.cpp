@@ -14,7 +14,9 @@ int main()
     run_cfr_tests();
     run_leduc_tests();
     run_holdem_tests();
+    run_hand_category_tests();
     run_river_tests();
+    run_payoff_tests();
     run_budget_tests();
     run_street_tests();
     run_street_memory_tests();
@@ -28,6 +30,11 @@ int main()
     run_action_value_tests();
     run_value_worker_tests();
     run_checkpoint_tests();
+    run_strategy_report_tests();
+    run_equity_dist_tests();
+    run_recent_files_tests();
+    run_template_tests();
+    run_range_library_tests();
     }
     catch (const std::exception& error)
     {

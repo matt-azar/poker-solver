@@ -136,18 +136,15 @@ public:
         std::uint64_t job_id = 0;
     };
 
-    // Waits until no reader holds the completed solution, then takes exclusive
-    // training ownership. The solution id and the engine stay. Borrow fails
-    // until the continuation is published again.
+    // Takes exclusive training ownership immediately. The solution id and the
+    // engine stay. Borrow fails until the continuation is published again.
+    // Existing readers may still hold the engine; the continuation thread must
+    // wait_until_quiet() before mutating it. Claiming without that wait used to
+    // park the HTTP accept loop behind value queries and wedge Continue/Open.
     Claim claim_completed(std::uint64_t solution_id)
     {
-        std::unique_lock<std::mutex> lock(mu_);
+        std::lock_guard<std::mutex> lock(mu_);
         if (phase_ != Phase::Completed || solution_id == 0 || solution_id != solution_id_ || !resource_)
-        {
-            return {};
-        }
-        quiet_.wait(lock, [&]() { return readers_ == 0; });
-        if (phase_ != Phase::Completed || solution_id != solution_id_ || !resource_)
         {
             return {};
         }

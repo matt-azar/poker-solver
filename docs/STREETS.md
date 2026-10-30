@@ -1,12 +1,12 @@
-# Turn and flop
+# Flop, turn, and river
 
-`StreetGame` is a heads-up no-limit tree on a 4-card turn or a 3-card flop. `StreetBatchSolver` stores that betting structure once and reuses it on every runout. It applies the same CFR and CFR+ update as `CfrTrainer<StreetGame>`. A pass freezes regret matching, sums that player's counterfactual regret, then CFR+ floors only the player who just updated. Vanilla regrets stay signed. A child is reached with probability equal to the frozen strategy. Own-reach averaging uses the acting player's reach. A hand that meets the board, or that has no compatible opponent left, is structurally unsupported and has no information set. A supported hand with zero strategic reach still has a slot and still receives a counterfactual value. `street_solver` uses the public tree unless `--reference` is set. `--frozen` is one public-tree pass per player. Once the pass contract matches, its action probabilities match the per-deal walk. A five-card board is solved by `river_solver`. Hands stay unbucketed. Deals are deterministic.
+`StreetGame` is a heads-up no-limit tree on a 3-card flop, a 4-card turn, or a 5-card river. `StreetBatchSolver` stores that betting structure once and reuses it on every runout. It applies the same CFR and CFR+ update as `CfrTrainer<StreetGame>`. A pass freezes regret matching, sums that player's counterfactual regret, then CFR+ floors only the player who just updated. Vanilla regrets stay signed. A child is reached with probability equal to the frozen strategy. Own-reach averaging uses the acting player's reach. A hand that meets the board, or that has no compatible opponent left, is structurally unsupported and has no information set. A supported hand with zero strategic reach still has a slot and still receives a counterfactual value. `street_solver` uses the public tree unless `--reference` is set. `--frozen` is one public-tree pass per player. Once the pass contract matches, its action probabilities match the per-deal walk. Hands stay unbucketed. Deals are deterministic.
 
-A flop and a turn differ by how many cards are still to come: two, or one. A river is that same tree with zero cards left. `StreetGame` accepts only a three-card or four-card board until M6 teaches the shared production tree the zero-card case. `RiverGame` stays the reference enumerator for that case. See [ROADMAP.md](ROADMAP.md).
+A flop, a turn, and a river differ by how many cards are still to come: two, one, or zero. `StreetGame` and `StreetBatchSolver` accept all three board lengths. Five-card information-set labels match `RiverGame`. The explorer routes every board length through `StreetBatchSolver`. `river_solver` remains a CLI over `RiverBatchSolver` until that product path is retired. `RiverGame` stays the reference enumerator for the zero-card case. See [ROADMAP.md](ROADMAP.md).
 
-Chance deals an ordered hand pair from the joint distribution on the starting board, then the players bet. When the street ends without a fold, the next card is dealt uniformly from the cards that are not on the board and not in either hand. A turn tree deals the river. A flop tree deals the turn and then the river. A fold ends the hand. Chips already invested stay in the pot, and the next street starts with no bet to call.
+Chance deals an ordered hand pair from the joint distribution on the starting board, then the players bet. When the street ends without a fold, the next card is dealt uniformly from the cards that are not on the board and not in either hand. A turn tree deals the river. A flop tree deals the turn and then the river. A five-card tree has no later public cards. A fold ends the hand. Chips already invested stay in the pot, and the next street starts with no bet to call.
 
-Player 0 is out of position and acts first on every street. Utilities use the same net-chip rule as the river: `pot / 2` is the dead money each player already posted, and investments on these streets are added on top. That sum is the full net-chip result. A finished solve can also report each combo's conditional action value at one decision: force that action once, then follow the stored average. The definition is in [MATHEMATICS.md](MATHEMATICS.md).
+Player 0 is out of position and acts first on every street. Utilities use the same net-chip rule as the river: `pot / 2` is the dead money each player already posted, and investments on these streets are added on top. That sum is the full net-chip result. A finished solve can also report each combo's conditional action value at one decision: force that action once, then follow the stored average. The definition is in [MATHEMATICS.md](MATHEMATICS.md). On a node whose board has five cards, `StreetBatchSolver::category_composition` reports each player's strategy-weighted made-hand category mass (`HighCard`…`StraightFlush`). Incomplete boards are omitted with a clear reason. Draws and backdoors are out of scope.
 
 An information set is the acting player's own hand, the cards already dealt, and the public action line. It does not contain the opponent's hand. A turn decision is one node, shared by every river that can follow it.
 
@@ -38,9 +38,11 @@ The first line is `street-config 1`. Each later line is one field. Scalar fields
 
 A range is a combo list in combo-index order. A negative size is a chip amount and is written `20c`. A nonnegative size is a pot fraction. Raise multiples are plain numbers on their own fields. Flags are `0` or `1`. The document ends with a newline and uses LF endings.
 
-An unknown field, a repeated field, extra space, or a version other than 1 is rejected. The parser does not build the tree. `StreetGame` still rejects a board that is not three or four cards, a nonpositive pot, and a range pair with no legal hands. `street_solver --config file` reads this document. `--config -` reads it from stdin. Later flags override fields from the file. Iterations, algorithm, accuracy, `--reference`, and `--frozen` stay on the command line.
+An unknown field, a repeated field, extra space, or a version other than 1 is rejected. The parser does not build the tree. `StreetGame` still rejects a board that is not three, four, or five cards, a nonpositive pot, and a range pair with no legal hands. `street_solver --config file` reads this document. `--config -` reads it from stdin. Later flags override fields from the file. Iterations, algorithm, accuracy, `--reference`, and `--frozen` stay on the command line.
 
-`--accuracy 0.05` stops when the Nash gap divided by the pot is at or below 0.05. The printed Nash gap is NashConv. The fraction of the pot is printed beside it.
+`--accuracy 0.05` stops when the Nash gap divided by the pot is at or below 0.05. The printed Nash gap is NashConv. The fraction of the pot is printed beside it. With accuracy armed, each gap check appends to `nash_gap_history`; the solvers print that space-separated list when it is non-empty. `--eval-every N` sets the gap-check cadence (positive integer; rejected if `N <= 0`). On this CLI the default remains every 20 iterations when accuracy is set; `SolveConfig::eval_every` defaults to 1 for library callers.
+
+`--time-limit SECONDS` stops at the next iteration boundary once that many wall-clock seconds have elapsed since the solve loop started. A non-negative value arms the limit. The default is off. The solvers print `time_limit_reached: 1` when the wall clock caused the stop, otherwise `0`. Accuracy and time-limit may both be set; whichever hits first ends the run.
 
 At most eight actions are legal at one decision. `StreetGame` rejects a reference enumeration above 200,000 terminals and tells the caller to use the batch solver. `StreetBatchSolver` does not use that cap, and it does not cap expanded histories. Its limit is `StreetConfig::memory_mib`, default 1024. One mebibyte is 1,048,576 bytes. Zero is rejected.
 
@@ -56,7 +58,7 @@ Expanded terminals and expanded decisions are 64-bit counts of histories. The fr
 
 ## Frozen pass threads
 
-`--threads N` is the number of threads for the frozen pass, including the caller. The default is 1. One thread uses the serial chance loop. `N` must be an integer from 1 through 64. More than one thread requires `--frozen`; the per-deal walk stays serial. The explorer accepts the same `threads` field on a flop or a turn and rejects it on a river or when the frozen pass is off.
+`--threads N` is the number of threads for the frozen pass, including the caller. The default is 1. One thread uses the serial chance loop. `N` must be an integer from 1 through 64. More than one thread requires `--frozen`; the per-deal walk stays serial. The explorer accepts the same `threads` and `frozen` fields on a flop, a turn, or a river, and rejects threads above 1 when the frozen pass is off.
 
 The first future public card is the split. A turn splits river cards. A flop splits turn cards, and the worker that takes a turn card deals that card's rivers itself. Betting before that chance node stays on the caller. A later chance node, reached by a different line, is another batch after the previous one has joined. Workers do not start further batches.
 
@@ -83,7 +85,13 @@ street_solver --config configs/street_default.txt --iterations 200
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1 --algorithm vanilla
 street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024 --threads 4
 street_solver --board Ah,Kd,7c,4s --pot 100 --stack 300 --oop-range QcQd --ip-range JcJd --geometric --iterations 200
+street_solver --board Ah,Kd,7c,4s,2h --oop-range AcAd,5c5d --ip-range KsKc --oop-bets 1 --no-all-in --max-raises 1 --iterations 40
 street_solver --board Ah,Kd,7c --oop-donk 40c --oop-bets 1 --ip-bets 0.5 --no-all-in --max-raises 1 --iterations 1
+street_solver --config configs/street_default.txt --iterations 40 --report report.txt
 ```
 
 The default is the turn lock above, solved on the public tree. `configs/street_default.txt` is that same spot as a `street-config 1` document. `--reference` solves the same spot by walking `StreetGame`. The reported Nash gap is NashConv.
+
+## Strategy report
+
+`--report FILE` writes a `strategy-report 1` document after the solve. Use `-` for stdout. The file is a line-oriented schema: board, pot, stack, algorithm, iterations, nash_gap, weighting, root-player, and one `root-action LABEL P` line per legal root action. On the public or frozen tree, root probabilities are the CFR average strategy mixed with **reach** weights across the acting player's hands at the root. The reference enumerator path writes the same summary fields but omits root-action lines. This is a script-facing export, not a batch queue.

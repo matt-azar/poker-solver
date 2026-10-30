@@ -11,6 +11,7 @@ let riverExport = null;
 let nodeValues = null;
 let valueToken = 0;
 let valuePoll = null;
+let categoryToken = 0;
 let selected = null;
 let drag = null;
 
@@ -21,6 +22,87 @@ const $ = (id) => document.getElementById(id);
 function blank() {
   return Array.from({length: 13}, () => Array(13).fill(0));
 }
+
+/* range-history */
+const RANGE_HISTORY_LIMIT = 50;
+
+function cloneWeightGrid(grid) {
+  return grid.map((row) => row.slice());
+}
+
+function weightGridsEqual(left, right) {
+  for (let row = 0; row < 13; row++) {
+    for (let column = 0; column < 13; column++) {
+      if (left[row][column] !== right[row][column]) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function snapshotWeights(store) {
+  return {
+    oop: cloneWeightGrid(store.oop),
+    ip: cloneWeightGrid(store.ip)
+  };
+}
+
+function snapshotsEqual(left, right) {
+  return weightGridsEqual(left.oop, right.oop) && weightGridsEqual(left.ip, right.ip);
+}
+
+function createRangeHistory(limit) {
+  const max = limit == null ? RANGE_HISTORY_LIMIT : limit;
+  const past = [];
+  const future = [];
+  return {
+    past,
+    future,
+    push(before) {
+      const snap = {
+        oop: cloneWeightGrid(before.oop),
+        ip: cloneWeightGrid(before.ip)
+      };
+      const top = past[past.length - 1];
+      if (top && snapshotsEqual(top, snap)) {
+        return false;
+      }
+      past.push(snap);
+      while (past.length > max) {
+        past.shift();
+      }
+      future.length = 0;
+      return true;
+    },
+    undo(current) {
+      if (!past.length) {
+        return null;
+      }
+      const previous = past.pop();
+      future.push(snapshotWeights(current));
+      return previous;
+    },
+    redo(current) {
+      if (!future.length) {
+        return null;
+      }
+      const next = future.pop();
+      past.push(snapshotWeights(current));
+      return next;
+    },
+    canUndo() {
+      return past.length > 0;
+    },
+    canRedo() {
+      return future.length > 0;
+    }
+  };
+}
+/* end-range-history */
+
+const rangeHistory = createRangeHistory(RANGE_HISTORY_LIMIT);
+let strokeBefore = null;
 
 function sizes(text) {
   return text.split(",").map((part) => part.trim()).filter(Boolean).map(Number).filter((value) => !Number.isNaN(value));
@@ -280,6 +362,60 @@ function paintCell(button, player, row, column, weight) {
   $(player + "-count").textContent = formatCount(comboCount(player));
 }
 
+function applyWeightSnapshot(snap) {
+  weights.oop = cloneWeightGrid(snap.oop);
+  weights.ip = cloneWeightGrid(snap.ip);
+  $("oop").value = rangeText(weights.oop);
+  $("ip").value = rangeText(weights.ip);
+  drawPick("oop");
+  drawPick("ip");
+  syncRangeHistoryButtons();
+}
+
+function syncRangeHistoryButtons() {
+  const undo = $("undo-range");
+  const redo = $("redo-range");
+  if (undo) {
+    undo.disabled = !rangeHistory.canUndo();
+  }
+  if (redo) {
+    redo.disabled = !rangeHistory.canRedo();
+  }
+}
+
+function pushRangeSnapshot(before) {
+  const changed = rangeHistory.push(before);
+  syncRangeHistoryButtons();
+  return changed;
+}
+
+function finishPaintStroke() {
+  if (!strokeBefore) {
+    return;
+  }
+  const before = strokeBefore;
+  strokeBefore = null;
+  if (!snapshotsEqual(before, snapshotWeights(weights))) {
+    pushRangeSnapshot(before);
+  }
+}
+
+function undoRangeEdit() {
+  const previous = rangeHistory.undo(weights);
+  if (!previous) {
+    return;
+  }
+  applyWeightSnapshot(previous);
+}
+
+function redoRangeEdit() {
+  const next = rangeHistory.redo(weights);
+  if (!next) {
+    return;
+  }
+  applyWeightSnapshot(next);
+}
+
 function formatCount(count) {
   return count.toFixed(1).replace(/\.0$/, "") + " combos";
 }
@@ -314,11 +450,17 @@ function drawPick(player) {
         event.preventDefault();
         const slider = Number($("weight").value) / 100;
         const next = slider <= 0 || Math.abs(weights[player][row][column] - slider) < 0.001 ? 0 : slider;
+        if (!strokeBefore) {
+          strokeBefore = snapshotWeights(weights);
+        }
         drag = {player, weight: next};
         paintCell(button, player, row, column, next);
       });
       button.addEventListener("mouseenter", (event) => {
         if ((event.buttons & 1) === 0) {
+          if (drag) {
+            finishPaintStroke();
+          }
           drag = null;
           return;
         }
@@ -347,10 +489,9 @@ function updateSpot() {
   $("donk-label").hidden = count > 4;
   $("pot-cap").parentElement.hidden = count > 4;
   $("no-three-bet").parentElement.hidden = count > 4;
-  $("frozen").disabled = count === 5;
-  if (count === 5) {
-    $("frozen").checked = false;
-  } else if ((count === 3 || count === 4) && !$("frozen").dataset.touched) {
+  // Frozen is available on flop, turn, and river; threads>1 still require it.
+  $("frozen").disabled = false;
+  if ((count === 3 || count === 4 || count === 5) && !$("frozen").dataset.touched) {
     $("frozen").checked = true;
   }
   drawPick("oop");
@@ -358,6 +499,9 @@ function updateSpot() {
 }
 
 document.addEventListener("mouseup", () => {
+  if (drag || strokeBefore) {
+    finishPaintStroke();
+  }
   drag = null;
 });
 
@@ -366,22 +510,115 @@ $("weight").addEventListener("input", () => {
 });
 
 $("clear-ranges").addEventListener("click", () => {
+  const before = snapshotWeights(weights);
   weights.oop = blank();
   weights.ip = blank();
   $("oop").value = "";
   $("ip").value = "";
   drawPick("oop");
   drawPick("ip");
+  if (!snapshotsEqual(before, snapshotWeights(weights))) {
+    pushRangeSnapshot(before);
+  } else {
+    syncRangeHistoryButtons();
+  }
 });
 
+$("undo-range").addEventListener("click", () => {
+  undoRangeEdit();
+});
+
+$("redo-range").addEventListener("click", () => {
+  redoRangeEdit();
+});
+
+document.addEventListener("keydown", (event) => {
+  const key = event.key.toLowerCase();
+  const mod = event.metaKey || event.ctrlKey;
+  if (!mod) {
+    return;
+  }
+  const target = event.target;
+  const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+  if (typing && target.id !== "oop" && target.id !== "ip") {
+    return;
+  }
+  if (key === "z" && !event.shiftKey) {
+    event.preventDefault();
+    undoRangeEdit();
+    return;
+  }
+  if ((key === "z" && event.shiftKey) || key === "y") {
+    event.preventDefault();
+    redoRangeEdit();
+  }
+});
+
+async function populateRangePresets() {
+  const select = $("range-preset");
+  if (!select) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/ranges");
+    if (!response.ok) {
+      return;
+    }
+    const presets = await response.json();
+    presets.forEach((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.id;
+      option.textContent = entry.name || entry.id;
+      select.appendChild(option);
+    });
+  } catch (error) {
+    // Range presets are optional when the explorer has no configs/ranges tree.
+  }
+}
+
+async function applySelectedRangePreset() {
+  const id = $("range-preset").value;
+  const player = $("range-preset-target").value === "ip" ? "ip" : "oop";
+  if (!id) {
+    $("message").textContent = "Choose a range preset first";
+    return;
+  }
+  const response = await fetch("/api/ranges/" + encodeURIComponent(id));
+  const body = await readBody(response);
+  if (!response.ok) {
+    $("message").textContent = body.error || "Range preset failed";
+    return;
+  }
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  $(player).value = text;
+  readText(player, text);
+  drawPick(player);
+  $("message").textContent = "Loaded range " + id + " into " + player.toUpperCase();
+}
+
+$("apply-range-preset").addEventListener("click", () => {
+  applySelectedRangePreset().catch((error) => {
+    $("message").textContent = error.message || "Range preset failed";
+  });
+});
+populateRangePresets();
+
 $("oop").addEventListener("input", () => {
+  const before = snapshotWeights(weights);
   readText("oop", $("oop").value);
   drawPick("oop");
+  if (!snapshotsEqual(before, snapshotWeights(weights))) {
+    pushRangeSnapshot(before);
+  }
 });
 
 $("ip").addEventListener("input", () => {
+  const before = snapshotWeights(weights);
   readText("ip", $("ip").value);
   drawPick("ip");
+  if (!snapshotsEqual(before, snapshotWeights(weights))) {
+    pushRangeSnapshot(before);
+  }
 });
 
 $("board").addEventListener("input", updateSpot);
@@ -483,9 +720,14 @@ $("calculate-ev").addEventListener("click", () => {
 
 $("save-solution").addEventListener("click", saveSolution);
 $("open-solution").addEventListener("click", openSolution);
+$("open-recent").addEventListener("click", openRecentSolution);
 $("config-file").addEventListener("change", loadConfigFile);
+refreshRecentSolutions();
+$("load-template").addEventListener("click", loadSelectedTemplate);
+populateTemplates();
 $("compare-runouts").addEventListener("click", compareRunouts);
 $("node-equity").addEventListener("click", calculateEquity);
+$("node-categories").addEventListener("click", loadCategories);
 
 $("export").addEventListener("click", () => {
   let payload = currentNode || riverExport;
@@ -572,6 +814,7 @@ function dropDisplayedSolution() {
 function clearValues() {
   nodeValues = null;
   valueToken += 1;
+  categoryToken += 1;
   if (valuePoll) {
     clearInterval(valuePoll);
     valuePoll = null;
@@ -583,6 +826,14 @@ function clearValues() {
   const equity = $("equity-note");
   if (equity) {
     equity.textContent = "";
+  }
+  const categoriesNote = $("categories-note");
+  if (categoriesNote) {
+    categoriesNote.textContent = "";
+  }
+  const categories = $("categories");
+  if (categories) {
+    categories.innerHTML = "";
   }
   const runout = $("runout");
   if (runout) {
@@ -685,8 +936,12 @@ function render(status) {
   $("calculate-ev").hidden = true;
   $("compare-runouts").hidden = true;
   $("node-equity").hidden = !riverExport;
+  $("node-categories").hidden = !riverExport;
   if (!valuePoll) {
     $("ev-note").textContent = "";
+  }
+  if (riverExport) {
+    loadCategories();
   }
   renderLines(view);
 }
@@ -707,10 +962,15 @@ function renderNode(node) {
   $("calculate-ev").hidden = node.kind !== "decision";
   $("compare-runouts").hidden = node.kind !== "chance";
   $("node-equity").hidden = false;
+  const boardComplete = Array.isArray(node.board) && node.board.length === 5;
+  $("node-categories").hidden = !boardComplete;
   if (!valuePoll) {
     $("ev-note").textContent = nodeValues && nodeValues.node_id === node.node_id && !nodeValues.pending
       ? evSummary(nodeValues)
       : "";
+  }
+  if (boardComplete) {
+    loadCategories();
   }
   fillFrequency(node);
   if (node.kind === "decision") {
@@ -1002,6 +1262,37 @@ function joinSizes(values) {
   return (values || []).map((value) => String(value)).join(", ");
 }
 
+async function refreshRecentSolutions() {
+  const select = $("recent-solutions");
+  if (!select) {
+    return;
+  }
+  const previous = select.value;
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Choose a recent file…";
+  select.appendChild(placeholder);
+  try {
+    const response = await fetch("/api/recent-solutions");
+    if (!response.ok) {
+      return;
+    }
+    const recent = await response.json();
+    recent.forEach((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.path || "";
+      option.textContent = entry.name || entry.path || "";
+      select.appendChild(option);
+    });
+    if (previous) {
+      select.value = previous;
+    }
+  } catch (error) {
+    // Recent files are optional when the sidecar is unavailable.
+  }
+}
+
 async function saveSolution() {
   if (!solutionId) {
     return;
@@ -1018,6 +1309,9 @@ async function saveSolution() {
   });
   const body = await readBody(response);
   $("message").textContent = response.ok ? "Saved " + path : (body.error || "Save failed");
+  if (response.ok) {
+    await refreshRecentSolutions();
+  }
 }
 
 async function openSolution() {
@@ -1056,14 +1350,20 @@ async function openSolution() {
   $("message").textContent = "Opened " + path;
   $("save-solution").disabled = !body.solution_id;
   $("continue").disabled = !body.solution_id;
+  await refreshRecentSolutions();
 }
 
-async function loadConfigFile(event) {
-  const file = event.target.files && event.target.files[0];
-  if (!file) {
+async function openRecentSolution() {
+  const path = $("recent-solutions").value.trim();
+  if (!path) {
+    $("message").textContent = "Choose a recent file first";
     return;
   }
-  const text = await file.text();
+  $("solution-path").value = path;
+  await openSolution();
+}
+
+async function applyConfigText(text, label) {
   const response = await fetch("/api/config", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -1075,8 +1375,14 @@ async function loadConfigFile(event) {
     return;
   }
   $("board").value = (body.board || []).join(" ");
+  const beforeRanges = snapshotWeights(weights);
   $("oop").value = body.oop_range || "";
   $("ip").value = body.ip_range || "";
+  readText("oop", $("oop").value);
+  readText("ip", $("ip").value);
+  if (!snapshotsEqual(beforeRanges, snapshotWeights(weights))) {
+    pushRangeSnapshot(beforeRanges);
+  }
   $("pot").value = body.pot;
   $("stack").value = body.stack;
   $("max-raises").value = body.max_raises;
@@ -1102,7 +1408,52 @@ async function loadConfigFile(event) {
     $("ip-bets").value = joinSizes(body.ip_bets);
   }
   updateSpot();
-  $("message").textContent = "Loaded " + body.kind + " configuration";
+  $("message").textContent = "Loaded " + (label || (body.kind + " configuration"));
+}
+
+async function loadConfigFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) {
+    return;
+  }
+  await applyConfigText(await file.text());
+}
+
+async function populateTemplates() {
+  const select = $("template-select");
+  if (!select) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/templates");
+    if (!response.ok) {
+      return;
+    }
+    const templates = await response.json();
+    templates.forEach((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.id;
+      option.textContent = entry.name || entry.id;
+      select.appendChild(option);
+    });
+  } catch (error) {
+    // Templates are optional when the explorer has no configs/templates tree.
+  }
+}
+
+async function loadSelectedTemplate() {
+  const id = $("template-select").value;
+  if (!id) {
+    $("message").textContent = "Choose a template first";
+    return;
+  }
+  const response = await fetch("/api/templates/" + encodeURIComponent(id));
+  const body = await readBody(response);
+  if (!response.ok) {
+    $("message").textContent = body.error || "Template failed";
+    return;
+  }
+  await applyConfigText(body.text, "template " + id);
 }
 
 function renderRunout(page) {
@@ -1249,6 +1600,84 @@ function calculateEquity() {
   });
 }
 
+function renderCategories(body) {
+  const host = $("categories");
+  const note = $("categories-note");
+  if (!host || !note) {
+    return;
+  }
+  host.innerHTML = "";
+  if (!body.available) {
+    note.textContent = body.reason || "Made-hand categories require a five-card board.";
+    return;
+  }
+  note.textContent = "Made-hand categories on the current board (not draws). Fractions of each player's positive reach mass.";
+  const names = body.categories || [];
+  const table = document.createElement("table");
+  table.className = "categories";
+  const head = document.createElement("tr");
+  ["Category", "OOP", "IP"].forEach((label) => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    head.appendChild(th);
+  });
+  table.appendChild(head);
+  names.forEach((name, index) => {
+    const oop = body.oop && body.oop.defined ? Number(body.oop.fractions[index] || 0) : null;
+    const ip = body.ip && body.ip.defined ? Number(body.ip.fractions[index] || 0) : null;
+    if ((oop === null || oop === 0) && (ip === null || ip === 0)) {
+      return;
+    }
+    const row = document.createElement("tr");
+    const label = document.createElement("td");
+    label.textContent = name;
+    row.appendChild(label);
+    [oop, ip].forEach((value) => {
+      const cell = document.createElement("td");
+      if (value === null) {
+        cell.textContent = "—";
+      } else {
+        const bar = document.createElement("span");
+        bar.className = "bar";
+        bar.style.width = Math.max(0, Math.min(1, value)) * 72 + "px";
+        cell.appendChild(bar);
+        cell.appendChild(document.createTextNode(" " + (value * 100).toFixed(1) + "%"));
+      }
+      row.appendChild(cell);
+    });
+    table.appendChild(row);
+  });
+  host.appendChild(table);
+}
+
+async function loadCategories() {
+  if (!solutionId) {
+    return;
+  }
+  const token = ++categoryToken;
+  const solution = solutionId;
+  const nodeId = currentNode ? currentNode.node_id : "root";
+  const path = currentNode
+    ? "/api/solutions/" + solution + "/nodes/" + nodeId + "/categories"
+    : "/api/solutions/" + solution + "/categories";
+  const note = $("categories-note");
+  if (note) {
+    note.textContent = "Loading made-hand categories…";
+  }
+  const response = await fetch(path);
+  const body = await readBody(response);
+  if (!shouldApply(token, categoryToken, solution, solutionId)) {
+    return;
+  }
+  if (!response.ok) {
+    if (note) {
+      note.textContent = body.error || "Category request failed";
+    }
+    return;
+  }
+  renderCategories(body);
+}
+
 function lineOf(infoset) {
   const parts = infoset.split(" | ");
   return parts.slice(1).join(" | ");
@@ -1295,4 +1724,5 @@ function renderLines(status) {
 readText("oop", $("oop").value);
 readText("ip", $("ip").value);
 updateSpot();
+syncRangeHistoryButtons();
 refresh();

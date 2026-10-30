@@ -2,6 +2,7 @@
 
 #include "game/street_config_text.hpp"
 #include "poker/card.hpp"
+#include "poker/hand_categories.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
 #include "solver/regret_matching.hpp"
@@ -70,12 +71,14 @@ struct Legal
 
 int betting_streets(const streets::StreetConfig& config)
 {
-    return static_cast<int>(config.board.size()) == 3 ? 3 : 2;
+    // Flop: three streets. Turn: two. River: one.
+    return 6 - static_cast<int>(config.board.size());
 }
 
 int street_kind(const streets::StreetConfig& config, int street)
 {
-    return config.board.size() == 3 ? street : street + 1;
+    // Map local street index onto flop/turn/river size lists.
+    return street + static_cast<int>(config.board.size()) - 3;
 }
 
 const std::vector<double>& listed_bets(const streets::StreetConfig& config, int player, int kind)
@@ -920,9 +923,9 @@ struct StreetBatchSolver::Engine
 
     void validate() const
     {
-        if (config.board.size() != 3 && config.board.size() != 4)
+        if (config.board.size() != 3 && config.board.size() != 4 && config.board.size() != 5)
         {
-            throw std::invalid_argument("street solver board must have 3 or 4 cards");
+            throw std::invalid_argument("street solver board must have 3, 4, or 5 cards");
         }
         holdem::validate_board(config.board.data(), static_cast<int>(config.board.size()));
         if (config.pot <= 0)
@@ -1017,6 +1020,11 @@ struct StreetBatchSolver::Engine
             {
                 node.card_mode = 2;
             }
+        }
+        else if (config.board.size() == 5)
+        {
+            // River: no public cards left to deal.
+            node.card_mode = 0;
         }
         else
         {
@@ -1245,7 +1253,9 @@ struct StreetBatchSolver::Engine
         add(checked_mul(planned_slots_, sizeof(int), "plan"));
         add(checked_mul(hands0 + hands1, sizeof(double), "plan"));
         const int free_cards = 52 - static_cast<int>(config.board.size());
-        const std::uint64_t keys = config.board.size() == 3
+        const std::uint64_t keys = config.board.size() == 5
+            ? 1ull
+            : config.board.size() == 3
             ? checked_mul(
                 static_cast<std::uint64_t>(free_cards),
                 static_cast<std::uint64_t>(free_cards - 1),
@@ -1382,6 +1392,10 @@ struct StreetBatchSolver::Engine
 
     std::string place_text(int street, int turn, int river) const
     {
+        if (config.board.size() == 5)
+        {
+            return "river";
+        }
         if (config.board.size() == 4)
         {
             if (street == 0)
@@ -1620,8 +1634,12 @@ struct StreetBatchSolver::Engine
         std::string text = node.player == 0 ? "OOP " : "IP ";
         text += holdem::Range::combo_text(combo);
         text += " | ";
-        text += place_text(node.street, slot.turn, slot.river);
-        text += " | ";
+        // Five-card labels match RiverGame / RiverBatchSolver (no place segment).
+        if (config.board.size() != 5)
+        {
+            text += place_text(node.street, slot.turn, slot.river);
+            text += " | ";
+        }
         if (node.path.empty())
         {
             text += "open";
@@ -2190,9 +2208,19 @@ struct StreetBatchSolver::Engine
             on_board[card] = true;
         }
         const int free_cards = 52 - static_cast<int>(config.board.size());
-        max_rank_keys_ = config.board.size() == 3
-            ? static_cast<std::uint64_t>(free_cards) * static_cast<std::uint64_t>(free_cards - 1)
-            : static_cast<std::uint64_t>(free_cards);
+        if (config.board.size() == 5)
+        {
+            max_rank_keys_ = 1;
+        }
+        else if (config.board.size() == 3)
+        {
+            max_rank_keys_ =
+                static_cast<std::uint64_t>(free_cards) * static_cast<std::uint64_t>(free_cards - 1);
+        }
+        else
+        {
+            max_rank_keys_ = static_cast<std::uint64_t>(free_cards);
+        }
         runout_ranks.reserve(static_cast<std::size_t>(max_rank_keys_));
         const auto reserve_key = [&](int turn, int river)
         {
@@ -2222,7 +2250,11 @@ struct StreetBatchSolver::Engine
             reserve_side(0, n0);
             reserve_side(1, n1);
         };
-        if (config.board.size() == 4)
+        if (config.board.size() == 5)
+        {
+            reserve_key(-1, -1);
+        }
+        else if (config.board.size() == 4)
         {
             for (int river = 0; river < 52; ++river)
             {
@@ -3741,7 +3773,11 @@ struct StreetBatchSolver::Engine
         const Node& found = nodes[static_cast<std::size_t>(node)];
         bool want_turn = false;
         bool want_river = false;
-        if (found.chance)
+        if (config.board.size() == 5)
+        {
+            // Fixed board: node ids never carry a turn or river card.
+        }
+        else if (found.chance)
         {
             if (found.deal_which == 1)
             {
@@ -5189,6 +5225,8 @@ SolveStats StreetBatchSolver::solve_frozen(
     engine_->reset();
     int completed = 0;
     SolveStats stats;
+    stats.nash_gap_history.clear();
+    stats.nash_gap_iterations.clear();
     bool fresh = false;
     for (int step = 0; step < config.max_iterations; ++step)
     {
@@ -5196,14 +5234,16 @@ SolveStats StreetBatchSolver::solve_frozen(
         ++completed;
         fresh = false;
         const bool check_gap = config.nash_gap_threshold >= 0.0
-            && config.eval_interval > 0
-            && completed % config.eval_interval == 0;
+            && config.eval_every > 0
+            && completed % config.eval_every == 0;
         if (check_gap)
         {
             stats.p1_expected_utility = expected_utility();
             stats.p1_best_response_utility = p1_best_response_utility();
             stats.p2_best_response_utility = p2_best_response_utility();
             stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
             fresh = true;
             if (progress != nullptr)
             {
@@ -5214,6 +5254,16 @@ SolveStats StreetBatchSolver::solve_frozen(
                 break;
             }
         }
+        if (config.max_wall_seconds >= 0.0)
+        {
+            const double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= config.max_wall_seconds)
+            {
+                stats.time_limit_reached = true;
+                break;
+            }
+        }
     }
     if (!fresh)
     {
@@ -5221,6 +5271,11 @@ SolveStats StreetBatchSolver::solve_frozen(
         stats.p1_best_response_utility = p1_best_response_utility();
         stats.p2_best_response_utility = p2_best_response_utility();
         stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+        if (config.nash_gap_threshold >= 0.0)
+        {
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
+        }
     }
     const auto end = std::chrono::steady_clock::now();
     stats.iterations = completed;
@@ -5241,6 +5296,8 @@ SolveStats StreetBatchSolver::solve(
     engine_->reset();
     int completed = 0;
     SolveStats stats;
+    stats.nash_gap_history.clear();
+    stats.nash_gap_iterations.clear();
     bool fresh = false;
     for (int step = 0; step < config.max_iterations; ++step)
     {
@@ -5248,14 +5305,16 @@ SolveStats StreetBatchSolver::solve(
         ++completed;
         fresh = false;
         const bool check_gap = config.nash_gap_threshold >= 0.0
-            && config.eval_interval > 0
-            && completed % config.eval_interval == 0;
+            && config.eval_every > 0
+            && completed % config.eval_every == 0;
         if (check_gap)
         {
             stats.p1_expected_utility = expected_utility();
             stats.p1_best_response_utility = p1_best_response_utility();
             stats.p2_best_response_utility = p2_best_response_utility();
             stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
             fresh = true;
             if (progress != nullptr)
             {
@@ -5266,6 +5325,16 @@ SolveStats StreetBatchSolver::solve(
                 break;
             }
         }
+        if (config.max_wall_seconds >= 0.0)
+        {
+            const double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= config.max_wall_seconds)
+            {
+                stats.time_limit_reached = true;
+                break;
+            }
+        }
     }
     if (!fresh)
     {
@@ -5273,6 +5342,11 @@ SolveStats StreetBatchSolver::solve(
         stats.p1_best_response_utility = p1_best_response_utility();
         stats.p2_best_response_utility = p2_best_response_utility();
         stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+        if (config.nash_gap_threshold >= 0.0)
+        {
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
+        }
     }
     const auto end = std::chrono::steady_clock::now();
     stats.iterations = completed;
@@ -5573,6 +5647,34 @@ StreetReachWeights StreetBatchSolver::reaching_weights(const std::string& node_i
 {
     std::lock_guard<std::mutex> lock(value_mu_);
     return engine_->compute_reaching_weights(node_id);
+}
+
+holdem::CategoryComposition StreetBatchSolver::category_composition(
+    const std::string& node_id) const
+{
+    const StreetReachWeights weights = reaching_weights(node_id);
+    if (weights.board.size() != 5)
+    {
+        holdem::CategoryComposition report;
+        report.board = weights.board;
+        report.available = false;
+        report.reason = "made-hand categories require a five-card board";
+        return report;
+    }
+    if (weights.oop.empty() && weights.ip.empty())
+    {
+        holdem::CategoryComposition report;
+        report.board = weights.board;
+        report.available = true;
+        return report;
+    }
+    const holdem::Range oop = weights.oop.empty()
+        ? holdem::Range{}
+        : holdem::Range::parse(weights.oop);
+    const holdem::Range ip = weights.ip.empty()
+        ? holdem::Range{}
+        : holdem::Range::parse(weights.ip);
+    return holdem::category_composition(weights.board, oop, ip);
 }
 
 const streets::StreetConfig& StreetBatchSolver::config() const

@@ -24,11 +24,11 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 We already have a substantial tested foundation: Kuhn/Leduc reference games, river and street engines, pass-frozen CFR variants, active-player CFR+ flooring, correct counterfactual reach handling, compact blocker-aware showdowns, deterministic first-public-card parallelism, enforced engine allocation budgets, and node-scoped browsing. The current budget defaults to 1024 MiB and threads default to one.
 
-A flop, a turn, and a river are one betting tree with two, one, or zero cards still to come. The current code splits that tree by build order. `StreetBatchSolver` solves a three-card or four-card board and deals the later cards in the same tree. `RiverBatchSolver` solves a five-card board. `StreetGame` rejects a five-card board. The explorer selects the engine from the board length. `RiverGame` stays the reference enumerator for the five-card tree. M6 moves the production river path into the shared tree. `river_solver` remains a product entry point until a five-card solve on that tree matches `RiverGame` on strategies, values, and best response. Kuhn and Leduc stay on `CfrTrainer`.
+A flop, a turn, and a river are one betting tree with two, one, or zero cards still to come. `StreetGame` and `StreetBatchSolver` accept three-, four-, and five-card boards. Pinned five-card fixtures match `RiverGame` on strategies, values, and best response. The explorer routes five-card jobs through that shared tree. M6 finishes by moving `river_solver` onto the same path and retiring it as a separate product entry point. `RiverGame` stays the reference enumerator. Kuhn and Leduc stay on `CfrTrainer`.
 
 The latest Windows report is 438,860 assertions / zero failures. Independent GCC review of the previous chance-page commit passed 364,907 assertions; Windows HTTP tests are skipped there. Session-focused ThreadSanitizer passed 56 assertions on the review host. That run covered the session tests. Publication now builds the completed status before it stores a terminal phase or a queryable result. If that builder throws, the job stays running and the existing failure path can record it.
 
-Completed-average conditional action EV is implemented for flop and turn decision nodes. The profile cache follows training, reset, continuation, and explicit average edits. A stop after at least one completed iteration keeps that solve. A versioned solution file can be saved, closed, reopened, and continued. A chance node can list every legal next card with its conditional probability and both players' continuation EVs. Check-down equity is available from the strategy-conditioned reaches at a node and is labeled separately from chip EV. Hand categories, node locks, compact saves, tournament/rake utilities, production packaging, and preflop remain substantial work. No head-to-head Pio performance or solution-quality equivalence has been established.
+Completed-average conditional action EV is implemented for flop and turn decision nodes. The profile cache follows training, reset, continuation, and explicit average edits. A stop after at least one completed iteration keeps that solve. A versioned solution file can be saved, closed, reopened, and continued. A chance node can list every legal next card with its conditional probability and both players' continuation EVs. Check-down equity is available from the strategy-conditioned reaches at a node and is labeled separately from chip EV. Made-hand category composition on five-card boards is available from strategy-weighted reaches; draws and backdoors are not. Node locks, compact saves, tournament/rake utilities, production packaging, and preflop remain substantial work. No head-to-head Pio performance or solution-quality equivalence has been established.
 
 Full-range check-down measures whether a large tree fits and runs. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them.
 
@@ -38,16 +38,16 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 
 | Feature family | Current position | Delivery |
 |---|---|---|
-| Heads-up postflop CFR, chance, blocker handling, best responses | Established foundation. Flop/turn and river are separate production engines until M6 joins a five-card board to the shared tree | M0, M6 |
-| Conditional combo/action EV; both-player values | Flop and turn decision nodes | M1 |
+| Heads-up postflop CFR, chance, blocker handling, best responses | Established foundation. Shared tree accepts five-card boards and pins against `RiverGame`; explorer uses that tree for five cards; `river_solver` remains a CLI until M6 retires it | M0, M6 |
+| Conditional combo/action EV; both-player values | Flop, turn, and river decision nodes on the shared street tree (RiverBatch still carries oracle fixtures) | M1 |
 | Equity, action ranges, distributions, hand categories | Limited browsing foundation | M2 |
 | Weighted range editing, range libraries, board input | Basic configuration; complete visual workflow needed | M2–M3 |
 | Configurable betting trees and visual line editing | Basic parameters exist | M3 |
-| Stop-and-keep, pause/continue, accuracy stopping | Cancellation exists; distinct semantics needed | M4 |
-| Full saves, resumable checkpoints, compact saves, lazy load | Missing | M5, M10 |
+| Stop-and-keep, pause/continue, accuracy stopping | Cancellation and accuracy stopping exist; CLI `--time-limit` stops at an iteration boundary; `eval_every` / `--eval-every` sets Nash-gap eval cadence; accuracy evals record `nash_gap_history`; pause/continue still distinct | M4 |
+| Full saves, resumable checkpoints, compact saves, lazy load | One versioned `PSOL` save/open/continue works (HTTP + GUI); compact/lazy formats still missing | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Small benchmark set; parity unproven | M6 |
 | Full and combo node locking, editing, re-solving | Missing | M7 |
-| Rake, ICM, opponent incentives | Missing; payoff architecture changes needed | M8 |
+| Rake, ICM, opponent incentives | Pot-rake model + tests on `ChipPayoff` (`docs/RAKE.md`); ICM/incentives and street/river wiring still missing | M8 |
 | Turn/river and multi-flop aggregation, filtered reports | Missing | M9 |
 | Scriptable engine, durable batch queue, exports | Basic endpoints/CLI; production coverage missing | M9 |
 | Drill trainer, packs, session statistics, hand histories | Missing | M11 |
@@ -71,7 +71,7 @@ Pin compiler/build, configuration hashes, test fixtures, metric conventions, and
 
 ### M1 — Conditional action EV
 
-Flop and turn decision nodes return these values. The river page does not, and a generic export stays strategy-only.
+Flop, turn, and river decision nodes return these values. A generic export stays strategy-only.
 
 Implement the separate detailed EV specification already delivered. Force the selected legal action once, then follow the completed average strategy for both players. Support zero-probability actions and supported hands with zero own strategic reach. Normalize by compatible opponent reach; zero opponent support leaves the value undefined.
 
@@ -81,9 +81,9 @@ Preserve explicit player signs and the existing root-centered net-chip utility. 
 
 ### M2 — Range and equity analysis with a useful study screen
 
-Create a shared range model/editor: 13×13 grid, exact combos, arbitrary nonnegative weights, brush/select controls, text import/export, copy/paste, undo/redo, presets and named folders. Clearly distinguish input weights, strategy-conditioned weights, compatible-pair marginals, and combo counts.
+Create a shared range model/editor: 13×13 grid, exact combos, arbitrary nonnegative weights, brush/select controls, text import/export, copy/paste, undo/redo, and presets. A flat named preset library under `configs/ranges` with explorer list/fetch is in place; nested folders remain open. Clearly distinguish input weights, strategy-conditioned weights, compatible-pair marginals, and combo counts.
 
-Add exact showdown equity per combo and range, conditional on the current board and compatible opponent distribution. State whether an equity display assumes check-down, and keep that label separate from strategic EV. Add equity distributions, made-hand/draw/backdoor categories, filtering, and range composition. Support a standalone equity-calculator workflow.
+Add exact showdown equity per combo and range, conditional on the current board and compatible opponent distribution. State whether an equity display assumes check-down, and keep that label separate from strategic EV. Check-down equity distributions are exposed as ten fixed buckets on the explorer equity JSON; a study-screen histogram, made-hand/draw/backdoor categories, filtering, and range composition remain. Support a standalone equity-calculator workflow.
 
 Build coordinated OOP/IP grids, selected-combo details, all-action strategy bars, equity/EV modes, range-after-action views, and runout switching that preserves the intended betting history where legal. Make missing/unsupported data visibly different from zero.
 
@@ -103,7 +103,7 @@ Add a visual tree preview with add/remove/force line operations, explicit canoni
 
 Introduce separate operations: cancel-and-discard, stop-and-keep, pause at a safe boundary, resume, and finish at a target. Existing cancellation must retain its tested semantics. A stop-and-keep publishes a coherent evaluated average at a complete algorithm boundary. Cancellation during construction publishes nothing.
 
-Provide iteration, elapsed-time and measured-gap targets, configurable evaluation cadence, convergence history, and honest progress information. Gap targets can only be declared achieved at an actual evaluated checkpoint. Support continuing the exact algorithm state without resetting regrets, average weights, or iteration numbering.
+Provide iteration, elapsed-time and measured-gap targets, configurable evaluation cadence, convergence history, and honest progress information. CLI `--time-limit` and `SolveConfig::max_wall_seconds` stop at an iteration boundary and set `SolveStats::time_limit_reached`. `SolveConfig::eval_every` (default 1; CLI `--eval-every`, rejecting non-positive values) controls how often a thresholded solve measures the Nash gap. When a Nash-gap threshold is set, each accuracy evaluation appends to `SolveStats::nash_gap_history` (and `nash_gap_iterations`) at that cadence. Gap targets can only be declared achieved at an actual evaluated checkpoint. Support continuing the exact algorithm state without resetting regrets, average weights, or iteration numbering.
 
 Design immutable solution revisions and an exclusive training owner. Browsing and training use a snapshot when the budget has room for one. Otherwise suspend browsing and show that state.
 
@@ -113,7 +113,7 @@ Design immutable solution revisions and an exclusive training owner. Browsing an
 
 Define a versioned native container with configuration, structural fingerprint, action/combo order, algorithm/version parameters, iteration/averaging state, precision, utility model, locks, and checksums. Store a study snapshot and a resumable training checkpoint as separate files.
 
-Implement atomic save/replace, load validation, bounded decompression and allocations, corruption/truncation handling, unsupported-version errors, and migration fixtures. Rebuild disposable rank caches at load time. Include recent files, folders/tags, previews, and explicit overwrite behavior in the UI.
+Implement atomic save/replace, load validation, bounded decompression and allocations, corruption/truncation handling, unsupported-version errors, and migration fixtures. Rebuild disposable rank caches at load time. A bounded recent-files MRU (sidecar + explorer dropdown/API) is in place; folders/tags, previews, and explicit overwrite behavior in the UI remain.
 
 **Gate:** fresh-process load reproduces strategies, values, node queries and configuration; continuation matches an uninterrupted run. Interrupted writes preserve the prior file. Over-budget load fails cleanly without leaking the old/new engine. Full-size saves work before compact/lazy formats.
 
@@ -127,7 +127,7 @@ Investigate exact suit isomorphisms, compact slot indexing, memory layout, SIMD,
 
 Address stored-index limits with checked wider/segmented representations when required. Keep the small enumerator as an oracle. Scale one batch solver, and publish a hardware profile for each supported tree size, including which trees fit in 1 GiB.
 
-Solve a five-card board in that same production tree. Cards still to come are two, one, or zero. A turn tree already solves a river after each river card; the standalone river solver is that subtree entered with the turn card known. `RiverGame` remains the oracle for the zero-card case, on the same footing as `--reference` against `StreetGame`. Remove `river_solver` as a product entry point after the pinned five-card fixtures match that oracle. Do this before scaling the flop/turn kernel and the river kernel as two products.
+Solve a five-card board in that same production tree. Cards still to come are two, one, or zero. A turn tree already solves a river after each river card; the standalone river solver is that subtree entered with the turn card known. `StreetGame` and `StreetBatchSolver` already accept a five-card board and match `RiverGame` on the pinned fixtures. The explorer now routes five-card jobs through that shared tree. Finish by moving `river_solver` onto the same path, then remove it as a separate product entry point. `RiverGame` remains the oracle for the zero-card case, on the same footing as `--reference` against `StreetGame`. Do this before scaling the flop/turn kernel and the river kernel as two products.
 
 **Gate:** each optimization passes an appropriate oracle/parity gate and budget failure tests. A five-card public tree matches `RiverGame` on the pinned river fixtures before `river_solver` is removed as a product entry point. Algebra-preserving kernel changes should retain pins; algorithm and precision changes are compared on solution quality. Publish same-machine paired measurements, including evaluation cost and variance. Multi-size full-range betting trees must converge within a declared hardware envelope before broad practical parity is claimed.
 
@@ -143,9 +143,9 @@ Add baseline-versus-modified comparison: strategy changes, both-player EV change
 
 ### M8 — Rake, ICM and opponent incentives
 
-First introduce a payoff abstraction returning both players' actual utilities. The current global player-0 vectors and sign inversion match the zero-sum chip model. Rake, ICM, and incentives need both players' actual utilities. Each best response must maximize its own utility.
+The dual-player payoff abstraction is in place: `PlayerPayoff` holds both utilities, and `ChipPayoff` reproduces today's root-centered chip rule with `utility[1] == -utility[0]`. `RiverGame::terminal_payoff` and `StreetGame::terminal_payoff` use that adapter; CFR loops still consume the player-0 scalar. Pot-rake rate/cap collection (whole-chip floor, optional cap) is implemented on `ChipPayoff` with pinned zero-rake and positive-rake fixtures in `docs/RAKE.md`; it is not yet passed through the street/river solve path. ICM and incentives still need both players' actual utilities. Each best response must maximize its own utility.
 
-Implement rake rate/cap and explicit collection/rounding rules with examples. Implement tournament utility tables and an ICM calculator/import path with stacks, payouts and interpolation validation. Then add documented action/category/runout incentive rules, previews, scenario identity and persistence. Keep chip EV and modeled utility separately labeled.
+Wire rake into the solve path next. Implement tournament utility tables and an ICM calculator/import path with stacks, payouts and interpolation validation. Then add documented action/category/runout incentive rules, previews, scenario identity and persistence. Keep chip EV and modeled utility separately labeled.
 
 Pio exposes rake/ICM configuration and opponent profiling [S6, S7]. State convergence claims for the game that was solved. Zero-sum CFR guarantees cover the zero-sum chip model. Use both unilateral deviation gains as diagnostics, and check a general-sum model on its own fixtures before calling it supported. Check a constant-sum surrogate against the incentives it is meant to represent.
 
@@ -153,7 +153,7 @@ Pio exposes rake/ICM configuration and opponent profiling [S6, S7]. State conver
 
 ### M9 — Reports, automation and batch solving
 
-Deliver runout aggregation first: turn/river tables of action frequencies, EV/equity and hand-category breakdowns, sorting/filtering, charts and CSV. Extend to multi-flop reports over explicitly weighted board sets with board-texture filters. Pio's 3.9 release specifically adds richer flop aggregation [S8].
+A first stable export is in: `street_solver` and `river_solver` accept `--report` and write a versioned `strategy-report 1` document (solve summary plus the root decision mixture). Deliver runout aggregation next: turn/river tables of action frequencies, EV/equity and hand-category breakdowns, sorting/filtering, charts and CSV. Extend to multi-flop reports over explicitly weighted board sets with board-texture filters. Pio's 3.9 release specifically adds richer flop aggregation [S8].
 
 Every report states its weighting measure. Weight each report by compatible-pair mass. Distinguish ex-ante board frequency, frequency conditional on reaching a line, and an intentionally uniform study-board sample.
 
@@ -229,7 +229,7 @@ Choose explicit release service-level targets after measuring a representative c
 
 The main path is M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0 and includes joining the five-card production path to the shared postflop tree before the two current kernels are scaled separately. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after all required features land.
 
-Check-down equity, stop-and-keep, one resumable solution file, and runout EV comparison are implemented and covered by the unit tests. They are not a completed M2 or a Pio parity claim. Hand categories, node locking, and compact saves are still ahead.
+Check-down equity, equity-distribution buckets, made-hand category composition on five-card boards, stop-and-keep, one resumable solution file, runout EV comparison, and a bounded recent-files list for Save/Open paths, and saved street-config templates, and named range presets are implemented and covered by the unit tests. They are not a completed M2 or a Pio parity claim. Draw/backdoor categories, node locking, and compact saves are still ahead.
 
 For each milestone: write a small specification, identify invariants and failure modes, implement reviewable commits, run relevant checks, demonstrate the user workflow, then update the ledger with exact evidence. Keep changes on the development branch unless explicitly instructed otherwise. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 

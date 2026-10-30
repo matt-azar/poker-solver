@@ -2,7 +2,7 @@
 
 `RiverGame` is one no-limit betting street on a fixed five-card board. `CfrTrainer<RiverGame>` is the reference enumerator. `RiverBatchSolver` is the default: one public betting tree, the same per-deal regret update, and one best-response walk. Pass `--reference` to use the enumerator. Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 is out of position, player 1 is in position, and a pair of hands is legal only when the four private cards and the board are disjoint. There is no RNG.
 
-This program is the current production path for a five-card board. A turn tree already contains a river subtree for each river card. The roadmap joins the five-card production path to that shared tree under M6. `RiverGame` remains the reference enumerator after the join. See [ROADMAP.md](ROADMAP.md).
+This program remains a CLI entry point for a five-card board. `StreetGame` and `StreetBatchSolver` also accept a five-card board and match `RiverGame` on the pinned fixtures. The explorer uses that shared street tree for five cards and saves street-config based PSOL files. M6 retires `river_solver` after the CLI path moves fully onto the shared tree. See [ROADMAP.md](ROADMAP.md) and [STREETS.md](STREETS.md).
 
 This is an equilibrium of the configured bet-size tree.
 
@@ -52,6 +52,14 @@ river_solver --config configs/river_default.json
 river_solver --iterations 2000 --algorithm cfr_plus
 river_solver --board Ah,Kd,7c,4s,2h --pot 100 --stack 200 --oop-range AA --ip-range KK --oop-bets 0.5,1 --ip-bets 0.5,1 --max-raises 2
 river_solver --reference --iterations 30 --algorithm vanilla --oop-range 22+ --ip-range 22+
+river_solver --iterations 100000 --time-limit 5
+river_solver --iterations 200 --report report.txt
 ```
 
+`--time-limit SECONDS` stops at the next iteration boundary once that many wall-clock seconds have elapsed. The solver prints `time_limit_reached: 1` when the wall clock caused the stop. The same flag exists on `street_solver`. `--report FILE` writes a versioned `strategy-report 1` summary after the solve.
+
 The reported Nash gap is NashConv, `u0(BR0) + u1(BR1)`. Player 0 is out of position.
+
+## Strategy report
+
+`--report FILE` writes a `strategy-report 1` document after the solve (`-` for stdout). Fields match the street solver export. Root-action probabilities are an **unweighted** mean of the CFR average strategy across root infosets whose label ends in `| open` (`weighting unweighted_infoset`). There is still no batch queue.

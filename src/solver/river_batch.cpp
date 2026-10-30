@@ -7,9 +7,11 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -250,6 +252,8 @@ struct RiverBatchSolver::Engine
         int contrib[2] = {};
         int n_actions = 0;
         int child[8] = {};
+        int parent = -1;
+        int parent_action = -1;
         int hand_base = 0;
         std::string path;
         std::string action_labels[8];
@@ -265,6 +269,9 @@ struct RiverBatchSolver::Engine
 
     river::RiverConfig config;
     std::vector<int> combos[2];
+    std::vector<int> hole_a[2];
+    std::vector<int> hole_b[2];
+    std::vector<double> range_w[2];
     std::vector<Deal> deals;
     std::vector<double> weight;
     std::vector<std::int8_t> showdown;
@@ -275,6 +282,7 @@ struct RiverBatchSolver::Engine
     std::vector<double> strategy_sum;
     mutable std::vector<double> average;
     mutable bool average_ready = false;
+    double joint_scale = 1.0;
     int n0 = 0;
     int n1 = 0;
     int public_decisions = 0;
@@ -345,6 +353,8 @@ struct RiverBatchSolver::Engine
             const std::string next_path = path.empty() ? label : path + "/" + label;
             const int child = build_node(apply_action(config, state, legal, action), next_path);
             nodes[static_cast<std::size_t>(id)].child[action] = child;
+            nodes[static_cast<std::size_t>(child)].parent = id;
+            nodes[static_cast<std::size_t>(child)].parent_action = action;
         }
         return id;
     }
@@ -364,6 +374,13 @@ struct RiverBatchSolver::Engine
 
     void build_deals()
     {
+        const double joint_mass = holdem::joint_mass(
+            config.oop, config.ip, config.board.data(), 5);
+        if (!(joint_mass > 0.0))
+        {
+            throw std::invalid_argument("ranges leave no legal river hand pair");
+        }
+        joint_scale = 1.0 / joint_mass;
         const std::vector<holdem::HandPairProbability> rows = holdem::joint_distribution(
             config.oop, config.ip, config.board.data(), 5);
         if (rows.empty())
@@ -378,6 +395,24 @@ struct RiverBatchSolver::Engine
         }
         n0 = static_cast<int>(combos[0].size());
         n1 = static_cast<int>(combos[1].size());
+        const holdem::Range* ranges[2] = {&config.oop, &config.ip};
+        for (int player = 0; player < 2; ++player)
+        {
+            const int hands = player == 0 ? n0 : n1;
+            hole_a[player].assign(static_cast<std::size_t>(hands), 0);
+            hole_b[player].assign(static_cast<std::size_t>(hands), 0);
+            range_w[player].assign(static_cast<std::size_t>(hands), 0.0);
+            for (int hand = 0; hand < hands; ++hand)
+            {
+                const int combo = combos[player][static_cast<std::size_t>(hand)];
+                int c0 = 0;
+                int c1 = 0;
+                holdem::Range::combo_cards(combo, c0, c1);
+                hole_a[player][static_cast<std::size_t>(hand)] = c0;
+                hole_b[player][static_cast<std::size_t>(hand)] = c1;
+                range_w[player][static_cast<std::size_t>(hand)] = ranges[player]->weight(combo);
+            }
+        }
         weight.assign(static_cast<std::size_t>(n0 * n1), 0.0);
         showdown.assign(static_cast<std::size_t>(n0 * n1), 0);
         const std::span<const int> board(config.board.data(), config.board.size());
@@ -859,6 +894,697 @@ struct RiverBatchSolver::Engine
         trained = tables.iterations;
         average_ready = false;
     }
+
+    void throw_if_cancelled(const std::atomic<bool>* cancel) const
+    {
+        if (cancel != nullptr && cancel->load(std::memory_order_relaxed))
+        {
+            throw StreetValueCancelled();
+        }
+    }
+
+    std::string root_node_id() const
+    {
+        return "p0.t-1.r-1";
+    }
+
+    std::string node_id(int node) const
+    {
+        return "p" + std::to_string(node) + ".t-1.r-1";
+    }
+
+    std::string canonical_node_id(const std::string& text) const
+    {
+        return node_id(locate_node(text));
+    }
+
+    bool parse_node_id(const std::string& text, int& node) const
+    {
+        auto read_number = [&](std::size_t& cursor, int& value) -> bool
+        {
+            if (cursor >= text.size() || text[cursor] == '+')
+            {
+                return false;
+            }
+            long long parsed = 0;
+            const char* first = text.data() + cursor;
+            const char* last = text.data() + text.size();
+            const std::from_chars_result result = std::from_chars(first, last, parsed);
+            if (result.ec != std::errc() || result.ptr == first)
+            {
+                return false;
+            }
+            if (parsed < std::numeric_limits<int>::min() || parsed > std::numeric_limits<int>::max())
+            {
+                return false;
+            }
+            cursor = static_cast<std::size_t>(result.ptr - text.data());
+            value = static_cast<int>(parsed);
+            return true;
+        };
+        std::size_t cursor = 0;
+        if (text.empty() || text[cursor] != 'p')
+        {
+            return false;
+        }
+        ++cursor;
+        int turn = 0;
+        int river = 0;
+        if (!read_number(cursor, node) || cursor >= text.size() || text[cursor] != '.')
+        {
+            return false;
+        }
+        ++cursor;
+        if (cursor >= text.size() || text[cursor] != 't')
+        {
+            return false;
+        }
+        ++cursor;
+        if (!read_number(cursor, turn) || cursor >= text.size() || text[cursor] != '.')
+        {
+            return false;
+        }
+        ++cursor;
+        if (cursor >= text.size() || text[cursor] != 'r')
+        {
+            return false;
+        }
+        ++cursor;
+        return read_number(cursor, river) && cursor == text.size() && turn == -1 && river == -1;
+    }
+
+    int locate_node(const std::string& text) const
+    {
+        int node = 0;
+        if (!parse_node_id(text, node)
+            || node < 0
+            || static_cast<std::size_t>(node) >= nodes.size())
+        {
+            throw std::invalid_argument("unknown node");
+        }
+        return node;
+    }
+
+    bool shares_hole(int hero, int hero_hand, int opponent, int opponent_hand) const
+    {
+        const int c0 = hole_a[hero][static_cast<std::size_t>(hero_hand)];
+        const int c1 = hole_b[hero][static_cast<std::size_t>(hero_hand)];
+        const int o0 = hole_a[opponent][static_cast<std::size_t>(opponent_hand)];
+        const int o1 = hole_b[opponent][static_cast<std::size_t>(opponent_hand)];
+        return o0 == c0 || o0 == c1 || o1 == c0 || o1 == c1;
+    }
+
+    bool difference_is_stable(double total, double removed, double difference) const
+    {
+        if (!std::isfinite(total) || !std::isfinite(removed) || !std::isfinite(difference))
+        {
+            return false;
+        }
+        if (difference < 0.0)
+        {
+            return false;
+        }
+        if (difference == 0.0)
+        {
+            return total == 0.0 && removed == 0.0;
+        }
+        const double scale = std::max(total, std::abs(removed));
+        return difference > scale * 1e-3;
+    }
+
+    double direct_compatible_mass(int hero, int hand, int opponent, std::span<const double> opp_amount) const
+    {
+        double sum = 0.0;
+        for (int other = 0; other < static_cast<int>(opp_amount.size()); ++other)
+        {
+            const double piece = opp_amount[static_cast<std::size_t>(other)];
+            if (!(piece > 0.0) || shares_hole(hero, hand, opponent, other))
+            {
+                continue;
+            }
+            sum += piece;
+        }
+        return sum;
+    }
+
+    double blocked_reach(int hero, int hand, const double* by_card, std::span<const double> opp_amount) const
+    {
+        const int c0 = hole_a[hero][static_cast<std::size_t>(hand)];
+        const int c1 = hole_b[hero][static_cast<std::size_t>(hand)];
+        double blocked = by_card[c0] + by_card[c1];
+        const int opp = 1 - hero;
+        for (int other = 0; other < static_cast<int>(opp_amount.size()); ++other)
+        {
+            if (hole_a[opp][static_cast<std::size_t>(other)] == c0
+                && hole_b[opp][static_cast<std::size_t>(other)] == c1)
+            {
+                blocked -= opp_amount[static_cast<std::size_t>(other)];
+                break;
+            }
+            if (hole_a[opp][static_cast<std::size_t>(other)] == c1
+                && hole_b[opp][static_cast<std::size_t>(other)] == c0)
+            {
+                blocked -= opp_amount[static_cast<std::size_t>(other)];
+                break;
+            }
+        }
+        return blocked;
+    }
+
+    double stable_compatible_mass(
+        int hero,
+        int hand,
+        int opponent,
+        double total,
+        const double* by_card,
+        std::span<const double> opp_amount) const
+    {
+        const double blocked = blocked_reach(hero, hand, by_card, opp_amount);
+        const double open = total - blocked;
+        if (difference_is_stable(total, blocked, open))
+        {
+            return open;
+        }
+        return direct_compatible_mass(hero, hand, opponent, opp_amount);
+    }
+
+    double joint_mass_of(const std::vector<double>& left, const std::vector<double>& right) const
+    {
+        double total = 0.0;
+        double by_card[52] = {};
+        for (int hand = 0; hand < static_cast<int>(right.size()); ++hand)
+        {
+            const double piece = right[static_cast<std::size_t>(hand)];
+            if (piece == 0.0)
+            {
+                continue;
+            }
+            total += piece;
+            by_card[hole_a[1][static_cast<std::size_t>(hand)]] += piece;
+            by_card[hole_b[1][static_cast<std::size_t>(hand)]] += piece;
+        }
+        double joint = 0.0;
+        for (int hand = 0; hand < static_cast<int>(left.size()); ++hand)
+        {
+            const double piece = left[static_cast<std::size_t>(hand)];
+            if (piece == 0.0)
+            {
+                continue;
+            }
+            const double open = stable_compatible_mass(0, hand, 1, total, by_card, right);
+            joint += piece * open;
+        }
+        return joint;
+    }
+
+    void marginals_of(
+        const std::vector<double>& reach,
+        int player,
+        const std::vector<double>& opponent,
+        int opponent_player,
+        double& joint,
+        std::vector<double>& marginal) const
+    {
+        double total = 0.0;
+        double by_card[52] = {};
+        for (int hand = 0; hand < static_cast<int>(opponent.size()); ++hand)
+        {
+            const double piece = opponent[static_cast<std::size_t>(hand)];
+            if (piece == 0.0)
+            {
+                continue;
+            }
+            total += piece;
+            by_card[hole_a[opponent_player][static_cast<std::size_t>(hand)]] += piece;
+            by_card[hole_b[opponent_player][static_cast<std::size_t>(hand)]] += piece;
+        }
+        joint = 0.0;
+        marginal.assign(reach.size(), 0.0);
+        for (int hand = 0; hand < static_cast<int>(reach.size()); ++hand)
+        {
+            const double piece = reach[static_cast<std::size_t>(hand)];
+            if (piece == 0.0)
+            {
+                continue;
+            }
+            const double open = stable_compatible_mass(
+                player, hand, opponent_player, total, by_card, opponent);
+            const double mass = piece * open;
+            marginal[static_cast<std::size_t>(hand)] = mass;
+            joint += mass;
+        }
+        if (joint > 0.0)
+        {
+            for (double& value : marginal)
+            {
+                value /= joint;
+            }
+        }
+    }
+
+    void replay_weights(int node_index, std::vector<double>& q0, std::vector<double>& q1) const
+    {
+        q0 = range_w[0];
+        q1 = range_w[1];
+        std::vector<int> chain;
+        for (int at = node_index; at >= 0; at = nodes[static_cast<std::size_t>(at)].parent)
+        {
+            chain.push_back(at);
+            if (chain.size() > nodes.size())
+            {
+                throw std::logic_error("node parent cycle");
+            }
+        }
+        std::reverse(chain.begin(), chain.end());
+        if (chain.empty() || chain.front() != 0)
+        {
+            throw std::invalid_argument("unknown node");
+        }
+        for (std::size_t step = 0; step + 1 < chain.size(); ++step)
+        {
+            const int current = chain[step];
+            const int next = chain[step + 1];
+            const Node& node = nodes[static_cast<std::size_t>(current)];
+            if (nodes[static_cast<std::size_t>(next)].parent != current)
+            {
+                throw std::logic_error("node parent chain broke");
+            }
+            const int action = nodes[static_cast<std::size_t>(next)].parent_action;
+            std::vector<double>& acting = node.player == 0 ? q0 : q1;
+            const int hands = node.player == 0 ? n0 : n1;
+            for (int hand = 0; hand < hands; ++hand)
+            {
+                if (!(acting[static_cast<std::size_t>(hand)] > 0.0))
+                {
+                    continue;
+                }
+                acting[static_cast<std::size_t>(hand)] *= sigma_of(node, hand)[action];
+            }
+        }
+    }
+
+    void average_value_walk(
+        int node_index,
+        std::vector<double>& pi0,
+        std::vector<double>& pi1,
+        std::vector<double>& ev0,
+        std::vector<double>& ev1,
+        std::vector<double>& aev0,
+        std::vector<double>& aev1,
+        bool force,
+        const std::atomic<bool>* cancel) const
+    {
+        throw_if_cancelled(cancel);
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (node.terminal)
+        {
+            terminal_v0(node, pi1.data(), ev0.data());
+            terminal_v1(node, pi0.data(), ev1.data());
+            return;
+        }
+
+        std::vector<double> child_pi0(static_cast<std::size_t>(n0), 0.0);
+        std::vector<double> child_pi1(static_cast<std::size_t>(n1), 0.0);
+        std::vector<double> child_ev0(static_cast<std::size_t>(n0), 0.0);
+        std::vector<double> child_ev1(static_cast<std::size_t>(n1), 0.0);
+        aev0.assign(static_cast<std::size_t>(node.n_actions * n0), 0.0);
+        aev1.assign(static_cast<std::size_t>(node.n_actions * n1), 0.0);
+        for (int action = 0; action < node.n_actions; ++action)
+        {
+            if (node.player == 0)
+            {
+                for (int h0 = 0; h0 < n0; ++h0)
+                {
+                    if (force)
+                    {
+                        child_pi0[static_cast<std::size_t>(h0)] = pi0[static_cast<std::size_t>(h0)];
+                    }
+                    else
+                    {
+                        child_pi0[static_cast<std::size_t>(h0)] =
+                            pi0[static_cast<std::size_t>(h0)] * sigma_of(node, h0)[action];
+                    }
+                }
+                child_pi1 = pi1;
+            }
+            else
+            {
+                child_pi0 = pi0;
+                for (int h1 = 0; h1 < n1; ++h1)
+                {
+                    if (force)
+                    {
+                        child_pi1[static_cast<std::size_t>(h1)] = pi1[static_cast<std::size_t>(h1)];
+                    }
+                    else
+                    {
+                        child_pi1[static_cast<std::size_t>(h1)] =
+                            pi1[static_cast<std::size_t>(h1)] * sigma_of(node, h1)[action];
+                    }
+                }
+            }
+            std::vector<double> unused_aev0;
+            std::vector<double> unused_aev1;
+            average_value_walk(
+                node.child[action],
+                child_pi0,
+                child_pi1,
+                child_ev0,
+                child_ev1,
+                unused_aev0,
+                unused_aev1,
+                false,
+                cancel);
+            for (int h0 = 0; h0 < n0; ++h0)
+            {
+                aev0[static_cast<std::size_t>(action * n0 + h0)] = child_ev0[static_cast<std::size_t>(h0)];
+            }
+            for (int h1 = 0; h1 < n1; ++h1)
+            {
+                aev1[static_cast<std::size_t>(action * n1 + h1)] = child_ev1[static_cast<std::size_t>(h1)];
+            }
+        }
+        if (force)
+        {
+            return;
+        }
+        for (int h0 = 0; h0 < n0; ++h0)
+        {
+            if (node.player == 0)
+            {
+                double mix = 0.0;
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    mix += sigma_of(node, h0)[action]
+                        * aev0[static_cast<std::size_t>(action * n0 + h0)];
+                }
+                ev0[static_cast<std::size_t>(h0)] = mix;
+            }
+            else
+            {
+                double mix = 0.0;
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    mix += aev0[static_cast<std::size_t>(action * n0 + h0)];
+                }
+                ev0[static_cast<std::size_t>(h0)] = mix;
+            }
+        }
+        for (int h1 = 0; h1 < n1; ++h1)
+        {
+            if (node.player == 1)
+            {
+                double mix = 0.0;
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    mix += sigma_of(node, h1)[action]
+                        * aev1[static_cast<std::size_t>(action * n1 + h1)];
+                }
+                ev1[static_cast<std::size_t>(h1)] = mix;
+            }
+            else
+            {
+                double mix = 0.0;
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    mix += aev1[static_cast<std::size_t>(action * n1 + h1)];
+                }
+                ev1[static_cast<std::size_t>(h1)] = mix;
+            }
+        }
+    }
+
+    StreetInspection inspect_node(const std::string& text) const
+    {
+        ensure_average();
+        const int node_index = locate_node(text);
+        std::vector<double> q0;
+        std::vector<double> q1;
+        replay_weights(node_index, q0, q1);
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        StreetInspection view;
+        view.node_id = text;
+        view.line = node.path.empty() ? "open" : node.path;
+        for (int card : config.board)
+        {
+            view.board.push_back(holdem::format_card(card));
+        }
+        view.place = "river";
+        double hand_joint = 0.0;
+        std::vector<double> marginal0;
+        std::vector<double> marginal1;
+        marginals_of(q0, 0, q1, 1, hand_joint, marginal0);
+        marginals_of(q1, 1, q0, 0, hand_joint, marginal1);
+        view.joint = hand_joint;
+        view.reach_defined = hand_joint > 0.0;
+        if (node.terminal)
+        {
+            view.kind = "terminal";
+            view.folded = node.folded;
+            return view;
+        }
+        view.kind = "decision";
+        view.player = node.player;
+        view.actions.resize(static_cast<std::size_t>(node.n_actions));
+        for (int action = 0; action < node.n_actions; ++action)
+        {
+            view.actions[static_cast<std::size_t>(action)].label = node.action_labels[action];
+            view.actions[static_cast<std::size_t>(action)].child_id = node_id(node.child[action]);
+        }
+        const int actor = node.player;
+        const int hands = actor == 0 ? n0 : n1;
+        const std::vector<double>& hero_q = actor == 0 ? q0 : q1;
+        const std::vector<double>& hero_marginal = actor == 0 ? marginal0 : marginal1;
+        view.hands.reserve(static_cast<std::size_t>(hands));
+        for (int hand = 0; hand < hands; ++hand)
+        {
+            StreetInspectHand row;
+            row.combo = holdem::Range::combo_text(combos[actor][static_cast<std::size_t>(hand)]);
+            row.structural = range_w[actor][static_cast<std::size_t>(hand)] > 0.0;
+            row.marginal = hero_marginal[static_cast<std::size_t>(hand)];
+            row.reach = hero_q[static_cast<std::size_t>(hand)];
+            row.strategy.resize(static_cast<std::size_t>(node.n_actions), 0.0);
+            if (row.structural)
+            {
+                const double* sigma = sigma_of(node, hand);
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    row.strategy[static_cast<std::size_t>(action)] = sigma[action];
+                }
+            }
+            view.hands.push_back(std::move(row));
+        }
+        return view;
+    }
+
+    StreetActionValues compute_action_values(
+        const std::string& text,
+        const std::atomic<bool>* cancel) const
+    {
+        const auto started = std::chrono::steady_clock::now();
+        ensure_average();
+        const int node_index = locate_node(text);
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (node.terminal)
+        {
+            throw std::invalid_argument("action values require a decision node");
+        }
+        std::vector<double> q0;
+        std::vector<double> q1;
+        replay_weights(node_index, q0, q1);
+        const int actor = node.player;
+        const int opponent = 1 - actor;
+        const int hero_hands = actor == 0 ? n0 : n1;
+        const int opp_hands = opponent == 0 ? n0 : n1;
+        std::vector<double> strategic[2] = {
+            std::vector<double>(static_cast<std::size_t>(n0), 0.0),
+            std::vector<double>(static_cast<std::size_t>(n1), 0.0)};
+        const std::vector<double>* weight_q[2] = {&q0, &q1};
+        for (int player = 0; player < 2; ++player)
+        {
+            for (int hand = 0; hand < static_cast<int>(strategic[player].size()); ++hand)
+            {
+                const double prior = range_w[player][static_cast<std::size_t>(hand)];
+                if (prior > 0.0)
+                {
+                    strategic[player][static_cast<std::size_t>(hand)] =
+                        (*weight_q[player])[static_cast<std::size_t>(hand)] / prior;
+                }
+            }
+        }
+        StreetActionValues page;
+        page.node_id = text;
+        page.player = actor;
+        page.reach_defined = joint_mass_of(q0, q1) > 0.0;
+        page.actions.resize(static_cast<std::size_t>(node.n_actions));
+        for (int action = 0; action < node.n_actions; ++action)
+        {
+            page.actions[static_cast<std::size_t>(action)] = node.action_labels[action];
+        }
+        page.combos.resize(static_cast<std::size_t>(hero_hands));
+        for (int hand = 0; hand < hero_hands; ++hand)
+        {
+            page.combos[static_cast<std::size_t>(hand)] =
+                holdem::Range::combo_text(combos[actor][static_cast<std::size_t>(hand)]);
+        }
+        page.ev_defined.assign(static_cast<std::size_t>(hero_hands), 0);
+        page.action_ev.assign(static_cast<std::size_t>(hero_hands * node.n_actions), 0.0);
+        page.mixed_ev.assign(static_cast<std::size_t>(hero_hands), 0.0);
+
+        double peak = 0.0;
+        for (int hand = 0; hand < opp_hands; ++hand)
+        {
+            peak = std::max(
+                peak,
+                range_w[opponent][static_cast<std::size_t>(hand)]
+                    * strategic[opponent][static_cast<std::size_t>(hand)]);
+        }
+        if (!(peak > 0.0))
+        {
+            page.query_seconds = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+            return page;
+        }
+        const double reach_scale = 1.0 / peak;
+        for (double& value : strategic[opponent])
+        {
+            value *= reach_scale;
+        }
+
+        std::vector<double> pi0(static_cast<std::size_t>(n0), 0.0);
+        std::vector<double> pi1(static_cast<std::size_t>(n1), 0.0);
+        if (actor == 0)
+        {
+            for (int hand = 0; hand < n0; ++hand)
+            {
+                pi0[static_cast<std::size_t>(hand)] =
+                    range_w[0][static_cast<std::size_t>(hand)] > 0.0 ? 1.0 : 0.0;
+            }
+            pi1 = strategic[1];
+        }
+        else
+        {
+            pi0 = strategic[0];
+            for (int hand = 0; hand < n1; ++hand)
+            {
+                pi1[static_cast<std::size_t>(hand)] =
+                    range_w[1][static_cast<std::size_t>(hand)] > 0.0 ? 1.0 : 0.0;
+            }
+        }
+        std::vector<double> ev0(static_cast<std::size_t>(n0), 0.0);
+        std::vector<double> ev1(static_cast<std::size_t>(n1), 0.0);
+        std::vector<double> aev0;
+        std::vector<double> aev1;
+        average_value_walk(node_index, pi0, pi1, ev0, ev1, aev0, aev1, true, cancel);
+
+        std::vector<double> amount(static_cast<std::size_t>(opp_hands), 0.0);
+        double total = 0.0;
+        double by_card[52] = {};
+        for (int hand = 0; hand < opp_hands; ++hand)
+        {
+            const double piece = range_w[opponent][static_cast<std::size_t>(hand)]
+                * strategic[opponent][static_cast<std::size_t>(hand)];
+            if (piece == 0.0)
+            {
+                continue;
+            }
+            amount[static_cast<std::size_t>(hand)] = piece;
+            total += piece;
+            by_card[hole_a[opponent][static_cast<std::size_t>(hand)]] += piece;
+            by_card[hole_b[opponent][static_cast<std::size_t>(hand)]] += piece;
+        }
+        const std::vector<double>& raw = actor == 0 ? aev0 : aev1;
+        const int raw_stride = actor == 0 ? n0 : n1;
+        std::vector<double> marginal;
+        double hand_joint = 0.0;
+        const std::vector<double>& hero_weight = actor == 0 ? q0 : q1;
+        const std::vector<double>& opp_weight = actor == 0 ? q1 : q0;
+        marginals_of(hero_weight, actor, opp_weight, opponent, hand_joint, marginal);
+        double node_ev = 0.0;
+        bool node_ok = page.reach_defined;
+        for (int hand = 0; hand < hero_hands; ++hand)
+        {
+            const double open = stable_compatible_mass(
+                actor, hand, opponent, total, by_card, amount);
+            const double prior = range_w[actor][static_cast<std::size_t>(hand)];
+            if (!(open > 0.0) || !(prior > 0.0))
+            {
+                if (page.reach_defined && marginal[static_cast<std::size_t>(hand)] > 0.0)
+                {
+                    node_ok = false;
+                }
+                continue;
+            }
+            double mixed = 0.0;
+            for (int action = 0; action < node.n_actions; ++action)
+            {
+                const double stored_raw = raw[static_cast<std::size_t>(action * raw_stride + hand)];
+                const double signed_raw = actor == 0 ? stored_raw : -stored_raw;
+                const double denom = prior * joint_scale * open;
+                const double conditional = signed_raw / denom;
+                page.action_ev[static_cast<std::size_t>(hand * node.n_actions + action)] = conditional;
+                const double played = average[static_cast<std::size_t>(
+                    node.hand_base + hand * node.n_actions + action)];
+                mixed += played * conditional;
+            }
+            page.ev_defined[static_cast<std::size_t>(hand)] = 1;
+            page.mixed_ev[static_cast<std::size_t>(hand)] = mixed;
+            if (page.reach_defined)
+            {
+                node_ev += marginal[static_cast<std::size_t>(hand)] * mixed;
+            }
+        }
+        page.node_ev_defined = node_ok;
+        if (node_ok)
+        {
+            page.node_ev = node_ev;
+        }
+        page.query_seconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
+        return page;
+    }
+
+    void set_average_for_test(const std::string& text, int hand, std::span<const double> probability)
+    {
+        ensure_average();
+        const int node_index = locate_node(text);
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (node.terminal)
+        {
+            throw std::invalid_argument("average edits require a decision node");
+        }
+        const int hands = node.player == 0 ? n0 : n1;
+        if (hand < 0 || hand >= hands)
+        {
+            throw std::invalid_argument("hand is out of range");
+        }
+        if (static_cast<int>(probability.size()) != node.n_actions)
+        {
+            throw std::invalid_argument("average edit needs one probability per action");
+        }
+        double sum = 0.0;
+        for (double value : probability)
+        {
+            if (!(value >= 0.0) || !std::isfinite(value))
+            {
+                throw std::invalid_argument("average probabilities must be nonnegative");
+            }
+            sum += value;
+        }
+        if (!(sum > 0.0))
+        {
+            throw std::invalid_argument("average probabilities must sum to a positive mass");
+        }
+        const int base = node.hand_base + hand * node.n_actions;
+        for (int action = 0; action < node.n_actions; ++action)
+        {
+            average[static_cast<std::size_t>(base + action)] =
+                probability[static_cast<std::size_t>(action)] / sum;
+            strategy_sum[static_cast<std::size_t>(base + action)] =
+                average[static_cast<std::size_t>(base + action)];
+        }
+        average_ready = true;
+    }
 };
 
 RiverBatchSolver::RiverBatchSolver(river::RiverConfig config)
@@ -868,15 +1594,25 @@ RiverBatchSolver::RiverBatchSolver(river::RiverConfig config)
 
 RiverBatchSolver::~RiverBatchSolver() = default;
 
+void RiverBatchSolver::note_profile_mutation()
+{
+    ++profile_epoch_;
+    value_cache_valid_ = false;
+    value_cache_node_.clear();
+    value_cache_ = StreetActionValues{};
+}
+
 void RiverBatchSolver::run_iterations(int count, Algorithm algorithm)
 {
     engine_->reset();
     engine_->train_more(count, algorithm);
+    note_profile_mutation();
 }
 
 void RiverBatchSolver::continue_iterations(int count, Algorithm algorithm)
 {
     engine_->train_more(count, algorithm);
+    note_profile_mutation();
 }
 
 int RiverBatchSolver::completed_iterations() const
@@ -897,32 +1633,117 @@ TrainingTables RiverBatchSolver::training_tables() const
 void RiverBatchSolver::install_training_tables(const TrainingTables& tables)
 {
     engine_->install_tables(tables);
+    note_profile_mutation();
+}
+
+void RiverBatchSolver::prepare_inspection() const
+{
+    engine_->ensure_average();
+}
+
+std::string RiverBatchSolver::root_node_id() const
+{
+    return engine_->root_node_id();
+}
+
+StreetInspection RiverBatchSolver::inspect_node(const std::string& node_id) const
+{
+    return engine_->inspect_node(node_id);
+}
+
+StreetActionValues RiverBatchSolver::action_values(
+    const std::string& node_id,
+    const std::atomic<bool>* cancel) const
+{
+    const std::string canonical = engine_->canonical_node_id(node_id);
+    {
+        std::lock_guard<std::mutex> lock(value_mu_);
+        if (value_cache_valid_
+            && value_cache_epoch_ == profile_epoch_
+            && value_cache_node_ == canonical)
+        {
+            StreetActionValues hit = value_cache_;
+            hit.query_seconds = 0.0;
+            return hit;
+        }
+    }
+    StreetActionValues page = engine_->compute_action_values(canonical, cancel);
+    page.profile_epoch = profile_epoch_;
+    page.node_id = canonical;
+    {
+        std::lock_guard<std::mutex> lock(value_mu_);
+        value_cache_ = page;
+        value_cache_node_ = canonical;
+        value_cache_epoch_ = profile_epoch_;
+        value_cache_valid_ = true;
+    }
+    return page;
+}
+
+std::uint64_t RiverBatchSolver::profile_epoch() const
+{
+    return profile_epoch_;
+}
+
+void RiverBatchSolver::set_average_for_test(
+    const std::string& node_id,
+    int hand,
+    std::span<const double> probability)
+{
+    engine_->set_average_for_test(node_id, hand, probability);
+    note_profile_mutation();
+}
+
+std::span<const double> RiverBatchSolver::regret_table() const
+{
+    return engine_->regret;
+}
+
+std::span<const double> RiverBatchSolver::strategy_sum_table() const
+{
+    return engine_->strategy_sum;
 }
 
 SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorithm)
 {
     const auto start = std::chrono::steady_clock::now();
     engine_->reset();
+    note_profile_mutation();
     int completed = 0;
     SolveStats stats;
+    stats.nash_gap_history.clear();
+    stats.nash_gap_iterations.clear();
     bool fresh = false;
     for (int step = 0; step < config.max_iterations; ++step)
     {
         engine_->train_more(1, algorithm);
+        note_profile_mutation();
         ++completed;
         fresh = false;
         const bool check_gap = config.nash_gap_threshold >= 0.0
-            && config.eval_interval > 0
-            && completed % config.eval_interval == 0;
+            && config.eval_every > 0
+            && completed % config.eval_every == 0;
         if (check_gap)
         {
             stats.p1_expected_utility = expected_utility();
             stats.p1_best_response_utility = p1_best_response_utility();
             stats.p2_best_response_utility = p2_best_response_utility();
             stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
             fresh = true;
             if (stats.nash_gap <= config.nash_gap_threshold)
             {
+                break;
+            }
+        }
+        if (config.max_wall_seconds >= 0.0)
+        {
+            const double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= config.max_wall_seconds)
+            {
+                stats.time_limit_reached = true;
                 break;
             }
         }
@@ -934,6 +1755,11 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
         stats.p1_best_response_utility = p1_best_response_utility();
         stats.p2_best_response_utility = p2_best_response_utility();
         stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+        if (config.nash_gap_threshold >= 0.0)
+        {
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
+        }
     }
     stats.iterations = completed;
     stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
