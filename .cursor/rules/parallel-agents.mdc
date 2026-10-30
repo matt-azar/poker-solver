@@ -1,0 +1,14 @@
+---
+description: Parallel Cursor agents — shared tree friction and recovery
+alwaysApply: true
+---
+
+# Parallel agents
+
+Before spawning or integrating sibling Cursor agents, read [docs/AGENT_LESSONS.md](../../docs/AGENT_LESSONS.md).
+
+- Assume siblings may write into `/workspace` even when asked to use a worktree. Do not checkout/commit there while they run unless ownership is proven disjoint.
+- Give each agent a disjoint path list. Serialize edits to `CMakeLists.txt`, `tests/harness.hpp`, and `tests/unit/test_main.cpp`, or have only the parent touch them.
+- Subagents often cannot `ManagePullRequest`; the parent opens PRs after push and subscribes CI.
+- If the tree is interleaved: commit a WIP snapshot branch, then path-checkout onto clean `cursor/<feature>-c006` branches from the correct base. Trim CMake/docs per branch before build.
+- Re-run `git status` immediately before every commit; restore unexpected paths.
