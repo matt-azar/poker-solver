@@ -8,6 +8,7 @@
 #include "game/street_game.hpp"
 #include "poker/equity.hpp"
 #include "poker/card.hpp"
+#include "poker/hand_categories.hpp"
 #include "poker/range.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
@@ -1342,6 +1343,27 @@ std::string json_node_equity(
     return out;
 }
 
+std::string json_categories(
+    const poker::holdem::CategoryComposition& report,
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    const std::string& node_id,
+    std::uint64_t generation,
+    double query_seconds)
+{
+    // Made-hand category mass on the current board only. Draws are out of scope.
+    std::string body = poker::holdem::category_composition_json(report, query_seconds);
+    if (body.size() < 2 || body.front() != '{' || body.back() != '}')
+    {
+        throw std::logic_error("category json must be an object");
+    }
+    std::string out = "{\"pending\":false,";
+    out += value_identity(solution_id, job_id, node_id, generation);
+    out += ',';
+    out.append(body.begin() + 1, body.end());
+    return out;
+}
+
 void send_response(
     socket_t client,
     int status,
@@ -2633,12 +2655,39 @@ void handle_client(socket_t client)
                     query_kind = "equity";
                     node_path.resize(node_path.size() - 7);
                 }
+                else if (node_path.size() >= 11 && node_path.ends_with("/categories"))
+                {
+                    query_kind = "categories";
+                    node_path.resize(node_path.size() - 11);
+                }
                 else if (node_path.size() >= 7 && node_path.ends_with("/values"))
                 {
                     query_kind = "actions";
                     node_path.resize(node_path.size() - 7);
                 }
                 const auto query_started = std::chrono::steady_clock::now();
+                if (query_kind == "categories")
+                {
+                    held->street->inspect_node(node_path);
+                    const poker::holdem::CategoryComposition report =
+                        held->street->category_composition(node_path);
+                    const double query_seconds = std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - query_started).count();
+                    const std::string payload = json_categories(
+                        report,
+                        held->id,
+                        held->job_id,
+                        node_path,
+                        g_session.generation(),
+                        query_seconds);
+                    send_response(
+                        client,
+                        200,
+                        "application/json",
+                        payload,
+                        "X-Query-Seconds: " + format_number(query_seconds) + "\r\n");
+                    return;
+                }
                 if (!query_kind.empty())
                 {
                     const poker::solver::StreetInspection view = held->street->inspect_node(node_path);
@@ -2701,6 +2750,37 @@ void handle_client(socket_t client)
                     "root",
                     std::chrono::steady_clock::now(),
                     "equity");
+                return;
+            }
+            if (tail == "categories")
+            {
+                if (!held->river)
+                {
+                    send_response(
+                        client,
+                        400,
+                        "application/json",
+                        "{\"error\":\"street categories are requested on a node\"}");
+                    return;
+                }
+                const auto query_started = std::chrono::steady_clock::now();
+                const poker::holdem::CategoryComposition report = poker::holdem::category_composition(
+                    held->job.board, held->job.oop, held->job.ip);
+                const double query_seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - query_started).count();
+                const std::string payload = json_categories(
+                    report,
+                    held->id,
+                    held->job_id,
+                    "root",
+                    g_session.generation(),
+                    query_seconds);
+                send_response(
+                    client,
+                    200,
+                    "application/json",
+                    payload,
+                    "X-Query-Seconds: " + format_number(query_seconds) + "\r\n");
                 return;
             }
             if (tail == "export")
