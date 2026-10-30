@@ -1,4 +1,5 @@
 #include "explorer/checkpoint.hpp"
+#include "explorer/range_library.hpp"
 #include "explorer/retained_training.hpp"
 #include "explorer/session.hpp"
 #include "explorer/value_worker.hpp"
@@ -21,11 +22,13 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <limits>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -65,6 +68,7 @@ namespace explorer_detail
 std::thread g_worker;
 poker::explorer::Session g_session;
 std::string g_ui_root = "ui";
+std::filesystem::path g_ranges_root;
 
 // One action-value query. The accept loop only queues it. Status and node
 // pages stay on the accept thread. A newer node or a new solve cancels the
@@ -2281,6 +2285,52 @@ void handle_client(socket_t client)
         send_response(client, 200, "application/json", g_session.status());
         return;
     }
+    if (line.rfind("GET /api/ranges ", 0) == 0 || line.rfind("GET /api/ranges?", 0) == 0)
+    {
+        const std::vector<poker::explorer::RangePresetInfo> presets =
+            poker::explorer::list_range_presets(g_ranges_root);
+        std::string payload = "[";
+        for (std::size_t index = 0; index < presets.size(); ++index)
+        {
+            if (index != 0)
+            {
+                payload.push_back(',');
+            }
+            payload += "{\"id\":";
+            append_escaped(payload, presets[index].id);
+            payload += ",\"name\":";
+            append_escaped(payload, presets[index].name);
+            payload += '}';
+        }
+        payload += ']';
+        send_response(client, 200, "application/json", payload);
+        return;
+    }
+    if (line.rfind("GET /api/ranges/", 0) == 0)
+    {
+        const std::string rest = line.substr(std::string("GET /api/ranges/").size());
+        const std::size_t end = rest.find(' ');
+        const std::string id = end == std::string::npos ? rest : rest.substr(0, end);
+        if (!poker::explorer::is_safe_range_id(id))
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"unknown range\"}");
+            return;
+        }
+        const std::optional<std::string> text =
+            poker::explorer::read_range_preset(g_ranges_root, id);
+        if (!text.has_value())
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"unknown range\"}");
+            return;
+        }
+        std::string payload = "{\"id\":";
+        append_escaped(payload, id);
+        payload += ",\"text\":";
+        append_escaped(payload, *text);
+        payload += '}';
+        send_response(client, 200, "application/json", payload);
+        return;
+    }
     if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/continue ") != std::string::npos)
     {
         if (g_session.running())
@@ -3071,6 +3121,7 @@ int run(int argc, char** argv)
         }
     }
     choose_ui_root();
+    g_ranges_root = poker::explorer::resolve_ranges_directory(executable_directory());
 
 #ifdef _WIN32
     WSADATA data;
@@ -3107,6 +3158,10 @@ int run(int argc, char** argv)
     }
     std::cout << "explorer http://127.0.0.1:" << port << "\n";
     std::cout << "ui " << g_ui_root << "\n";
+    if (!g_ranges_root.empty())
+    {
+        std::cout << "ranges " << g_ranges_root.string() << "\n";
+    }
     std::cout.flush();
 
     while (true)

@@ -25,6 +25,18 @@
     <label>Paint weight <input id="weight" type="range" min="0" max="100" value="100"></label>
     <strong id="weight-label">100%</strong>
     <button type="button" id="clear-ranges">Clear ranges</button>
+    <label>Preset
+      <select id="range-preset">
+        <option value="">Choose a range…</option>
+      </select>
+    </label>
+    <label>Apply to
+      <select id="range-preset-target">
+        <option value="oop">OOP</option>
+        <option value="ip">IP</option>
+      </select>
+    </label>
+    <button type="button" id="apply-range-preset">Apply</button>
     <span class="hint">Suited is above the pairs. Offsuit is below. Click toggles a cell. Drag paints the same weight. Cells blocked by the board stay grey.</span>
   </div>
   <form id="setup">

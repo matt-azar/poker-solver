@@ -374,6 +374,55 @@ $("clear-ranges").addEventListener("click", () => {
   drawPick("ip");
 });
 
+async function populateRangePresets() {
+  const select = $("range-preset");
+  if (!select) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/ranges");
+    if (!response.ok) {
+      return;
+    }
+    const presets = await response.json();
+    presets.forEach((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.id;
+      option.textContent = entry.name || entry.id;
+      select.appendChild(option);
+    });
+  } catch (error) {
+    // Range presets are optional when the explorer has no configs/ranges tree.
+  }
+}
+
+async function applySelectedRangePreset() {
+  const id = $("range-preset").value;
+  const player = $("range-preset-target").value === "ip" ? "ip" : "oop";
+  if (!id) {
+    $("message").textContent = "Choose a range preset first";
+    return;
+  }
+  const response = await fetch("/api/ranges/" + encodeURIComponent(id));
+  const body = await readBody(response);
+  if (!response.ok) {
+    $("message").textContent = body.error || "Range preset failed";
+    return;
+  }
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  $(player).value = text;
+  readText(player, text);
+  drawPick(player);
+  $("message").textContent = "Loaded range " + id + " into " + player.toUpperCase();
+}
+
+$("apply-range-preset").addEventListener("click", () => {
+  applySelectedRangePreset().catch((error) => {
+    $("message").textContent = error.message || "Range preset failed";
+  });
+});
+populateRangePresets();
+
 $("oop").addEventListener("input", () => {
   readText("oop", $("oop").value);
   drawPick("oop");
