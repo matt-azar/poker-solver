@@ -570,6 +570,15 @@ int main(int argc, char** argv)
         std::cout << "nash_gap: " << stats.nash_gap << "\n";
         std::cout << "nash_gap_fraction_of_pot: "
                   << stats.nash_gap / static_cast<double>(config.pot) << "\n";
+        if (!stats.nash_gap_history.empty())
+        {
+            std::cout << "nash_gap_history:";
+            for (double gap : stats.nash_gap_history)
+            {
+                std::cout << " " << gap;
+            }
+            std::cout << "\n";
+        }
         std::cout << "time_limit_reached: " << (stats.time_limit_reached ? "1" : "0") << "\n";
         std::cout << "deterministic: yes (runouts enumerated; no RNG)\n";
         std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";

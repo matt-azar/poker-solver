@@ -28,7 +28,8 @@ struct SolveConfig
     int max_iterations = 1;
     // Negative: do not stop early. Otherwise stop when the Nash gap is at or below this value.
     double nash_gap_threshold = -1.0;
-    // How often to measure the Nash gap when a threshold is set. Must be positive to stop early.
+    // How often to measure (and record) the Nash gap when a threshold is set.
+    // Must be positive to stop early. Existing default keeps prior cadence.
     int eval_interval = 1000;
     // Negative: no wall-clock cap. Otherwise stop after a completed iteration when
     // steady_clock time since solve start meets or exceeds this many seconds.
@@ -47,6 +48,11 @@ struct SolveStats
     double nash_gap = 0.0;
     // True when the loop halted because max_wall_seconds was reached.
     bool time_limit_reached = false;
+    // Nash gaps recorded at each accuracy evaluation when nash_gap_threshold >= 0
+    // (including a final evaluate that was not already a mid-loop checkpoint).
+    // Cleared at solve start. Empty when no threshold was armed.
+    std::vector<double> nash_gap_history;
+    std::vector<int> nash_gap_iterations;
 };
 
 struct BestResponseResult
@@ -406,6 +412,8 @@ public:
         const auto start = std::chrono::steady_clock::now();
         int completed = 0;
         SolveStats stats;
+        std::vector<double> gap_history;
+        std::vector<int> gap_iterations;
         bool fresh_evaluation = false;
         for (int step = 0; step < config.max_iterations; ++step)
         {
@@ -418,6 +426,8 @@ public:
             if (check_gap)
             {
                 stats = evaluate();
+                gap_history.push_back(stats.nash_gap);
+                gap_iterations.push_back(completed);
                 fresh_evaluation = true;
                 if (stats.nash_gap <= config.nash_gap_threshold)
                 {
@@ -441,10 +451,17 @@ public:
             const bool hit_time = stats.time_limit_reached;
             stats = evaluate();
             stats.time_limit_reached = hit_time;
+            if (config.nash_gap_threshold >= 0.0)
+            {
+                gap_history.push_back(stats.nash_gap);
+                gap_iterations.push_back(completed);
+            }
         }
         stats.iterations = completed;
         stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
         stats.memory_bytes_estimate = memory_bytes_estimate();
+        stats.nash_gap_history = std::move(gap_history);
+        stats.nash_gap_iterations = std::move(gap_iterations);
         return stats;
     }
 

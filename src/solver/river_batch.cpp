@@ -905,6 +905,8 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
     engine_->reset();
     int completed = 0;
     SolveStats stats;
+    stats.nash_gap_history.clear();
+    stats.nash_gap_iterations.clear();
     bool fresh = false;
     for (int step = 0; step < config.max_iterations; ++step)
     {
@@ -920,6 +922,8 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
             stats.p1_best_response_utility = p1_best_response_utility();
             stats.p2_best_response_utility = p2_best_response_utility();
             stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
             fresh = true;
             if (stats.nash_gap <= config.nash_gap_threshold)
             {
@@ -944,6 +948,11 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
         stats.p1_best_response_utility = p1_best_response_utility();
         stats.p2_best_response_utility = p2_best_response_utility();
         stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+        if (config.nash_gap_threshold >= 0.0)
+        {
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
+        }
     }
     stats.iterations = completed;
     stats.runtime_seconds = std::chrono::duration<double>(end - start).count();

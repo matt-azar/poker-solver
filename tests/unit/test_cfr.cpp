@@ -509,6 +509,10 @@ void run_cfr_tests()
     CHECK(stopped.runtime_seconds > 0.0);
     CHECK(stopped.memory_bytes_estimate > 0);
     CHECK(!stopped.time_limit_reached);
+    CHECK(stopped.nash_gap_history.size() >= 1);
+    CHECK(stopped.nash_gap_history.size() == stopped.nash_gap_iterations.size());
+    CHECK(stopped.nash_gap_history.back() == stopped.nash_gap);
+    CHECK(stopped.nash_gap_iterations.back() == stopped.iterations);
 
     poker::solver::CfrTrainer<poker::kuhn::KuhnGame> timed(
         poker::kuhn::KuhnGame{}, poker::solver::Algorithm::CfrPlus);

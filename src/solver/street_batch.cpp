@@ -5189,6 +5189,8 @@ SolveStats StreetBatchSolver::solve_frozen(
     engine_->reset();
     int completed = 0;
     SolveStats stats;
+    stats.nash_gap_history.clear();
+    stats.nash_gap_iterations.clear();
     bool fresh = false;
     for (int step = 0; step < config.max_iterations; ++step)
     {
@@ -5204,6 +5206,8 @@ SolveStats StreetBatchSolver::solve_frozen(
             stats.p1_best_response_utility = p1_best_response_utility();
             stats.p2_best_response_utility = p2_best_response_utility();
             stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
             fresh = true;
             if (progress != nullptr)
             {
@@ -5231,6 +5235,11 @@ SolveStats StreetBatchSolver::solve_frozen(
         stats.p1_best_response_utility = p1_best_response_utility();
         stats.p2_best_response_utility = p2_best_response_utility();
         stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+        if (config.nash_gap_threshold >= 0.0)
+        {
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
+        }
     }
     const auto end = std::chrono::steady_clock::now();
     stats.iterations = completed;
@@ -5251,6 +5260,8 @@ SolveStats StreetBatchSolver::solve(
     engine_->reset();
     int completed = 0;
     SolveStats stats;
+    stats.nash_gap_history.clear();
+    stats.nash_gap_iterations.clear();
     bool fresh = false;
     for (int step = 0; step < config.max_iterations; ++step)
     {
@@ -5266,6 +5277,8 @@ SolveStats StreetBatchSolver::solve(
             stats.p1_best_response_utility = p1_best_response_utility();
             stats.p2_best_response_utility = p2_best_response_utility();
             stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
             fresh = true;
             if (progress != nullptr)
             {
@@ -5293,6 +5306,11 @@ SolveStats StreetBatchSolver::solve(
         stats.p1_best_response_utility = p1_best_response_utility();
         stats.p2_best_response_utility = p2_best_response_utility();
         stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+        if (config.nash_gap_threshold >= 0.0)
+        {
+            stats.nash_gap_history.push_back(stats.nash_gap);
+            stats.nash_gap_iterations.push_back(completed);
+        }
     }
     const auto end = std::chrono::steady_clock::now();
     stats.iterations = completed;

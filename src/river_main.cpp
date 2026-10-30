@@ -547,6 +547,15 @@ int main(int argc, char** argv)
             std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
             std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
             std::cout << "nash_gap: " << stats.nash_gap << "\n";
+            if (!stats.nash_gap_history.empty())
+            {
+                std::cout << "nash_gap_history:";
+                for (double gap : stats.nash_gap_history)
+                {
+                    std::cout << " " << gap;
+                }
+                std::cout << "\n";
+            }
             std::cout << "time_limit_reached: " << (stats.time_limit_reached ? "1" : "0") << "\n";
             std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
             std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
@@ -583,6 +592,15 @@ int main(int argc, char** argv)
             std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
             std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
             std::cout << "nash_gap: " << stats.nash_gap << "\n";
+            if (!stats.nash_gap_history.empty())
+            {
+                std::cout << "nash_gap_history:";
+                for (double gap : stats.nash_gap_history)
+                {
+                    std::cout << " " << gap;
+                }
+                std::cout << "\n";
+            }
             std::cout << "time_limit_reached: " << (stats.time_limit_reached ? "1" : "0") << "\n";
             std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
             std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
