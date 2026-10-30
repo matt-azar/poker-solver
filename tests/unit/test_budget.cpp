@@ -1,6 +1,10 @@
 #include "harness.hpp"
 
+#include "poker/card.hpp"
+#include "poker/range.hpp"
 #include "solver/budget_resource.hpp"
+#include "solver/memory_plan.hpp"
+#include "solver/street_batch.hpp"
 
 #include <cstdint>
 #include <memory_resource>
@@ -130,6 +134,44 @@ void test_upstream_failure_rolls_back()
     CHECK(upstream.peak() == BudgetResource::request_bytes(32, 8));
 }
 
+void test_street_memory_plan_matches_solver_report()
+{
+    poker::streets::StreetConfig config;
+    config.board = {
+        poker::holdem::parse_card("Kh"),
+        poker::holdem::parse_card("Kd"),
+        poker::holdem::parse_card("7c"),
+        poker::holdem::parse_card("4s"),
+    };
+    config.pot = 100;
+    config.stack = 100;
+    config.oop = poker::holdem::Range::parse("AhAd");
+    config.ip = poker::holdem::Range::parse("2c3d");
+    config.oop_bet_sizes = {1.0};
+    config.oop_raise_sizes = {1.0};
+    config.ip_bet_sizes = {1.0};
+    config.ip_raise_sizes = {1.0};
+    config.allow_all_in = false;
+    config.max_raises = 1;
+    config.memory_mib = 64;
+
+    const poker::solver::StreetMemoryPlan plan = poker::solver::plan_street_memory(config);
+    poker::solver::StreetBatchSolver solver(config);
+    const poker::solver::StreetMemoryReport report = solver.memory_report();
+
+    CHECK(plan.estimated_peak_bytes == report.estimated_peak_bytes);
+    CHECK(plan.memory_budget_bytes == report.memory_budget_bytes);
+    CHECK(plan.deals == solver.deal_count());
+    CHECK(plan.infosets == solver.infoset_count());
+    CHECK(plan.decision_nodes == solver.decision_node_count());
+    CHECK(plan.terminals == solver.terminal_count());
+    CHECK(plan.public_decisions == solver.public_decisions());
+    CHECK(plan.thread_count == solver.thread_count());
+    CHECK(plan.estimated_peak_bytes > 0);
+    CHECK(plan.deals == 1);
+    CHECK(poker::solver::plan_fits_budget(plan));
+}
+
 } // namespace
 
 void run_budget_tests()
@@ -137,4 +179,5 @@ void run_budget_tests()
     test_exact_limit_and_one_byte_over();
     test_overlap_and_release();
     test_upstream_failure_rolls_back();
+    test_street_memory_plan_matches_solver_report();
 }
