@@ -294,7 +294,6 @@ void run_payoff_tests()
     }
     CHECK(unequal_threw);
 
-<<<<<<< HEAD
     // StreetGame mirrors RiverGame through ChipPayoff. This base accepts only
     // 3/4-card boards, so fold / showdown / tie use a turn check-down fixture
     // with river 2h (the five-card board Ah Kd 7c 4s 2h).
@@ -366,7 +365,6 @@ void run_payoff_tests()
             CHECK_NEAR(chips.utility[1], 0.0, 1e-12);
         }
     }
-=======
+
     run_rake_tests();
->>>>>>> origin/cursor/rake-payoff-c006
 }
