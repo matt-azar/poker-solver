@@ -36,7 +36,7 @@ A flop, a turn, and a river are one betting tree with two, one, or zero cards st
 | `river_solver` | Command-line driver; public tree by default, `--reference` for the enumerator |
 | `poker::streets::StreetGame` | Reference turn or flop tree: one betting structure for every runout, sizes per street |
 | `poker::solver::StreetBatchSolver` | Same streets on one public betting tree, reusing each line on every runout |
-| `street_solver` | Command-line driver; public tree by default, `--reference` for `StreetGame` |
+| `street_solver` | Command-line driver; public tree by default, `--reference` for `StreetGame`, `--config` for a `street-config 1` document |
 | `explorer` | Local page. Serves `ui/`. A river calls `RiverBatchSolver`; a flop or a turn calls `StreetBatchSolver` |
 
 `expected_p1_utility` in `cfr.cpp` is a second Kuhn utility walk, used to check the generalized walker.

@@ -50,6 +50,7 @@ leduc_solver --iterations 1000 --algorithm cfr_plus
 river_solver --config configs/river_default.json
 river_solver --iterations 2000 --algorithm cfr_plus
 street_solver
+street_solver --config configs/street_default.txt
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1
 street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024
 explorer
@@ -61,7 +62,7 @@ Kuhn chance is the six equally likely deals. Leduc chance deals two private card
 
 For Kuhn, the expected value of the first player approaches `-1/18`. The reported **Nash gap** is NashConv `u1(BR1, σ2) + u2(σ1, BR2)`. Leduc has no closed form in this repository; the tests check that its Nash gap falls.
 
-Example flags: [`configs/kuhn_default.json`](configs/kuhn_default.json), [`configs/leduc_default.json`](configs/leduc_default.json), [`configs/river_default.json`](configs/river_default.json).
+Example flags: [`configs/kuhn_default.json`](configs/kuhn_default.json), [`configs/leduc_default.json`](configs/leduc_default.json), [`configs/river_default.json`](configs/river_default.json), [`configs/street_default.txt`](configs/street_default.txt).
 
 ## Layout
 

@@ -38,7 +38,7 @@ The first line is `street-config 1`. Each later line is one field. Scalar fields
 
 A range is a combo list in combo-index order. A negative size is a chip amount and is written `20c`. A nonnegative size is a pot fraction. Raise multiples are plain numbers on their own fields. Flags are `0` or `1`. The document ends with a newline and uses LF endings.
 
-An unknown field, a repeated field, extra space, or a version other than 1 is rejected. The parser does not build the tree. `StreetGame` still rejects a board that is not three or four cards, a nonpositive pot, and a range pair with no legal hands. `street_solver` does not read this document yet.
+An unknown field, a repeated field, extra space, or a version other than 1 is rejected. The parser does not build the tree. `StreetGame` still rejects a board that is not three or four cards, a nonpositive pot, and a range pair with no legal hands. `street_solver --config file` reads this document. `--config -` reads it from stdin. Later flags override fields from the file. Iterations, algorithm, accuracy, `--reference`, and `--frozen` stay on the command line.
 
 `--accuracy 0.05` stops when the Nash gap divided by the pot is at or below 0.05. The printed Nash gap is NashConv. The fraction of the pot is printed beside it.
 
@@ -78,10 +78,12 @@ On the flop `Ah Kd 7c`, queens versus jacks, check-only, the value matches the a
 
 ```sh
 street_solver
+street_solver --config configs/street_default.txt
+street_solver --config configs/street_default.txt --iterations 200
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1 --algorithm vanilla
 street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024 --threads 4
 street_solver --board Ah,Kd,7c,4s --pot 100 --stack 300 --oop-range QcQd --ip-range JcJd --geometric --iterations 200
 street_solver --board Ah,Kd,7c --oop-donk 40c --oop-bets 1 --ip-bets 0.5 --no-all-in --max-raises 1 --iterations 1
 ```
 
-The default is the turn lock above, solved on the public tree. `--reference` solves the same spot by walking `StreetGame`. The reported Nash gap is NashConv.
+The default is the turn lock above, solved on the public tree. `configs/street_default.txt` is that same spot as a `street-config 1` document. `--reference` solves the same spot by walking `StreetGame`. The reported Nash gap is NashConv.

@@ -1,3 +1,4 @@
+#include "game/street_config_text.hpp"
 #include "game/street_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
@@ -8,6 +9,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -21,6 +23,7 @@ namespace
 void print_usage(const char* argv0)
 {
     std::cerr << "Usage: " << argv0
+              << " [--config file | -]"
               << " [--board Ah,Kd,7c,4s] [--pot N] [--stack N]"
               << " [--oop-range TEXT] [--ip-range TEXT]"
               << " [--oop-bets 0.5,1] [--ip-bets 0.5,1]"
@@ -32,6 +35,24 @@ void print_usage(const char* argv0)
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--accuracy 0.05] [--memory-mib N] [--threads N]"
               << " [--reference] [--frozen]\n";
+}
+
+std::string read_config_text(const std::string& path)
+{
+    if (path == "-")
+    {
+        std::ostringstream buffer;
+        buffer << std::cin.rdbuf();
+        return buffer.str();
+    }
+    std::ifstream input(path);
+    if (!input)
+    {
+        throw std::runtime_error("cannot read config " + path);
+    }
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    return buffer.str();
 }
 
 std::string trim_copy(const std::string& text)
@@ -220,7 +241,11 @@ int main(int argc, char** argv)
                 }
                 return argv[++i];
             };
-            if (arg == "--board")
+            if (arg == "--config")
+            {
+                config = poker::streets::parse_street_config(read_config_text(need("--config")));
+            }
+            else if (arg == "--board")
             {
                 config.board = parse_board(need("--board"));
             }
