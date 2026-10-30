@@ -39,7 +39,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Feature family | Current position | Delivery |
 |---|---|---|
 | Heads-up postflop CFR, chance, blocker handling, best responses | Established foundation. Shared tree accepts five-card boards and pins against `RiverGame`; explorer uses that tree for five cards; `river_solver` remains a CLI until M6 retires it | M0, M6 |
-| Conditional combo/action EV; both-player values | Flop, turn, and river decision nodes on the shared street tree | M1 |
+| Conditional combo/action EV; both-player values | Flop, turn, and river decision nodes on the shared street tree (RiverBatch still carries oracle fixtures) | M1 |
 | Equity, action ranges, distributions, hand categories | Limited browsing foundation | M2 |
 | Weighted range editing, range libraries, board input | Basic configuration; complete visual workflow needed | M2–M3 |
 | Configurable betting trees and visual line editing | Basic parameters exist | M3 |
@@ -71,7 +71,7 @@ Pin compiler/build, configuration hashes, test fixtures, metric conventions, and
 
 ### M1 — Conditional action EV
 
-Flop and turn decision nodes return these values. The river page does not, and a generic export stays strategy-only.
+Flop, turn, and river decision nodes return these values. A generic export stays strategy-only.
 
 Implement the separate detailed EV specification already delivered. Force the selected legal action once, then follow the completed average strategy for both players. Support zero-probability actions and supported hands with zero own strategic reach. Normalize by compatible opponent reach; zero opponent support leaves the value undefined.
 

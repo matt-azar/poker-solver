@@ -338,6 +338,9 @@ void run_explorer_http_tests()
     CHECK(wait_for_values(river_values_path, river_values));
     CHECK(river_values.status == 200);
     CHECK(river_values.body.find("\"pending\":false") != std::string::npos);
+    CHECK(river_values.body.find("\"units\":\"chips\"") != std::string::npos);
+    CHECK(river_values.body.find("\"utility_basis\":\"root_centered\"") != std::string::npos);
+    CHECK(river_values.body.find("\"node_ev_defined\":true") != std::string::npos);
     double river_node_ev = 0.0;
     CHECK(json_number(river_values.body, "node_ev", river_node_ev));
     CHECK_NEAR(river_node_ev, 50.0, 1e-6);
