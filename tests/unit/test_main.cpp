@@ -35,6 +35,8 @@ int main()
     run_recent_files_tests();
     run_template_tests();
     run_range_library_tests();
+    run_node_lock_tests();
+    run_lock_apply_tests();
     }
     catch (const std::exception& error)
     {

@@ -57,6 +57,8 @@ Kuhn’s only chance node is the root deal: six equally likely ordered hands. Af
 
 Regrets and strategy sums are two `std::vector<double>` blocks. An offset table maps each information set to its first action. Kuhn has 12 information sets and 2 actions each, so 24 doubles per table. The inner CFR recursion uses stack arrays. The action-count scratch limit is 8 per information set.
 
+Node locks (`poker::solver::NodeLock` / `LockSet` in `node_lock.hpp`) are an immutable constraint layer keyed by infoset or stable public-node id. A `FullNode` lock applies one validated action-probability row to every combo; `SelectedCombos` applies that row only to listed combo indices. An empty probability row means unlocked (free for later CFR updates) and is distinct from locking an action at probability zero. When `SolveConfig::locks` is set, `CfrTrainer` calls `apply_lock_to_strategy` after regret matching so locked rows replace the current strategy for matching infosets/combos; StreetBatch and RiverBatch do not consult locks yet.
+
 CFR+ stores the same tables. Negative cumulative regrets are replaced by zero once, after the updating player's pass has summed its counterfactual regret. The opponent's table is left unchanged. The average strategy is weighted by the iteration index. Linear CFR weights both the new regret and the average strategy by the iteration index and leaves regrets signed. See [MATHEMATICS.md](MATHEMATICS.md).
 
 ## Best response

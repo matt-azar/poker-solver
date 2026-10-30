@@ -826,6 +826,8 @@ struct StreetBatchSolver::Engine
     int trained = 0;
     double joint_scale = 0.0;
     std::uint64_t board_mask = 0;
+    // Non-owning; set for the duration of solve()/solve_frozen() from SolveConfig::locks.
+    const LockSet* locks_ = nullptr;
 
     explicit Engine(streets::StreetConfig incoming, BudgetResource& budget)
         : config(std::move(incoming))
@@ -3525,6 +3527,9 @@ struct StreetBatchSolver::Engine
         }
     }
 
+    // When locks_ is set, locked rows replace RM for matching public nodes.
+    // Lock infoset_id is the public-node index (slot.node). SelectedCombos
+    // uses the acting player's hand index (slot.hand).
     void freeze_sigma()
     {
         for (const Slot& slot : slots)
@@ -3533,6 +3538,16 @@ struct StreetBatchSolver::Engine
                 regret.data() + slot.base,
                 frozen_sigma.data() + slot.base,
                 slot.n_actions);
+            if (locks_ != nullptr)
+            {
+                const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
+                apply_lock_to_strategy(
+                    std::span<double>(
+                        frozen_sigma.data() + slot.base,
+                        static_cast<std::size_t>(slot.n_actions)),
+                    lock,
+                    static_cast<std::size_t>(slot.hand));
+            }
         }
     }
 
@@ -5221,6 +5236,8 @@ SolveStats StreetBatchSolver::solve_frozen(
 {
     note_profile_mutation();
     engine_->check_usable();
+    const LockSet* const previous_locks = engine_->locks_;
+    engine_->locks_ = config.locks;
     const auto start = std::chrono::steady_clock::now();
     engine_->reset();
     int completed = 0;
@@ -5281,6 +5298,7 @@ SolveStats StreetBatchSolver::solve_frozen(
     stats.iterations = completed;
     stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
     stats.memory_bytes_estimate = memory_bytes_estimate();
+    engine_->locks_ = previous_locks;
     return stats;
 }
 
@@ -5292,6 +5310,8 @@ SolveStats StreetBatchSolver::solve(
 {
     note_profile_mutation();
     engine_->check_usable();
+    const LockSet* const previous_locks = engine_->locks_;
+    engine_->locks_ = config.locks;
     const auto start = std::chrono::steady_clock::now();
     engine_->reset();
     int completed = 0;
@@ -5352,6 +5372,7 @@ SolveStats StreetBatchSolver::solve(
     stats.iterations = completed;
     stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
     stats.memory_bytes_estimate = memory_bytes_estimate();
+    engine_->locks_ = previous_locks;
     return stats;
 }
 
