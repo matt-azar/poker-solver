@@ -15,13 +15,8 @@ States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 | Full saves, checkpoints, compact saves, lazy load | partial | M5, M10 | One versioned `PSOL` file stores the canonical config, regrets, strategy sums, and completed iterations. Save and Open rebuild the tree and resume | No compact or multi-file library. This is not a Pio file and has not been checked against Pio |
 | Broad betting-tree scale and competitive convergence | partial | M6 | Opt-in benches in [BENCHMARKS.md](BENCHMARKS.md) | No matched Pio timing or quality run |
 | Node locking and constrained re-solving | missing | M7 | — | — |
-<<<<<<< HEAD
 | Rake, ICM, opponent incentives | partial | M8 | `PlayerPayoff` / `ChipPayoff` match `RiverGame` and `StreetGame` `p1_utility`; pot-rake `RakeConfig` + `collect` with whole-chip floor/cap and tests (`docs/RAKE.md`); zero-rake matches prior chip terminals | ICM and incentives missing; rake not wired into `StreetGame`/`RiverGame` solve path; solvers still train on the player-0 chip scalar |
-| Reports, scripting, batch queue | partial | M9 | CLI solvers and the local HTTP explorer | No report aggregation, queue, or stable command schema |
-=======
-| Rake, ICM, opponent incentives | missing | M8 | Chip utilities are zero-sum and root-centered | Payoff model is one player-0 vector |
 | Reports, scripting, batch queue | partial | M9 | CLI solvers, the local HTTP explorer, and a versioned `strategy-report 1` file from `street_solver` / `river_solver --report` (root action mixture plus solve summary) | No runout aggregation, board-set reports, or durable batch queue |
->>>>>>> origin/cursor/strategy-report-c006
 | Trainer, packs, session statistics | missing | M11 | — | — |
 | Preflop solver and chart editor | missing | M12 | — | — |
 | Layouts, shortcuts, themes, localization | partial | M13 | One local page in `ui/` | No saved layouts or themes |

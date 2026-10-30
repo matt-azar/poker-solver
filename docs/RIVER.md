@@ -52,14 +52,11 @@ river_solver --config configs/river_default.json
 river_solver --iterations 2000 --algorithm cfr_plus
 river_solver --board Ah,Kd,7c,4s,2h --pot 100 --stack 200 --oop-range AA --ip-range KK --oop-bets 0.5,1 --ip-bets 0.5,1 --max-raises 2
 river_solver --reference --iterations 30 --algorithm vanilla --oop-range 22+ --ip-range 22+
-<<<<<<< HEAD
 river_solver --iterations 100000 --time-limit 5
-=======
 river_solver --iterations 200 --report report.txt
->>>>>>> origin/cursor/strategy-report-c006
 ```
 
-`--time-limit SECONDS` stops at the next iteration boundary once that many wall-clock seconds have elapsed. The solver prints `time_limit_reached: 1` when the wall clock caused the stop. The same flag exists on `street_solver`.
+`--time-limit SECONDS` stops at the next iteration boundary once that many wall-clock seconds have elapsed. The solver prints `time_limit_reached: 1` when the wall clock caused the stop. The same flag exists on `street_solver`. `--report FILE` writes a versioned `strategy-report 1` summary after the solve.
 
 The reported Nash gap is NashConv, `u0(BR0) + u1(BR1)`. Player 0 is out of position.
 

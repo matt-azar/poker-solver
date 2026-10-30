@@ -34,14 +34,9 @@ void print_usage(const char* argv0)
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
-<<<<<<< HEAD
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
               << " [--memory-mib N] [--threads N]"
-              << " [--reference] [--frozen]\n";
-=======
-              << " [--accuracy 0.05] [--memory-mib N] [--threads N]"
               << " [--reference] [--frozen] [--report file | -]\n";
->>>>>>> origin/cursor/strategy-report-c006
 }
 
 std::string read_config_text(const std::string& path)

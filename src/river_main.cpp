@@ -28,14 +28,9 @@ void print_usage(const char* argv0)
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--first oop|ip]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
-<<<<<<< HEAD
               << " [--gap-threshold X] [--eval-every N] [--eval-interval N]"
               << " [--time-limit SECONDS]"
-              << " [--print-strategies] [--reference]\n";
-=======
-              << " [--gap-threshold X] [--eval-interval N]"
               << " [--print-strategies] [--reference] [--report file | -]\n";
->>>>>>> origin/cursor/strategy-report-c006
 }
 
 std::vector<double> parse_sizes(const std::string& text)
