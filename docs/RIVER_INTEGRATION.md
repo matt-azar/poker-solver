@@ -29,4 +29,17 @@ cmake --build build -j
 # expected: failed=0 (explorer HTTP still SKIP on Linux in this suite)
 ```
 
+### GUI workflow (persistence + solution identity + cache)
+
+Integrated check against a running explorer:
+
+1. Solve a five-card river spot (`StreetBatch` path).
+2. Calculate action EVs at the root.
+3. Save to a `.psol`, open it again (new solution id, same engine progress).
+4. Continue training; Calculate EVs again (profile epoch invalidates the value cache).
+
+Continue must not park the HTTP accept loop behind in-flight value readers. `Session::claim_completed` takes ownership immediately; `continue_job` calls `wait_until_quiet()` before mutating. Open drains the value worker before `install_completed`. `publish_loaded` builds its status draft before `install_completed` so `draft_for` does not re-enter the session mutex (that deadlock wedged Open on Linux).
+
+Validated over HTTP against `./explorer --port 8765`: solve 30 → action EVs → save → open (new `solution_id`) → continue +30 (same id, iters 60) → EVs again; continue also returns 202 while a values query is outstanding.
+
 Not yet folded in (separate stacks, less river-overlap): node locks (`#14`/`#23`/`#33`), ICM/incentives (`#20`/`#28`), UI-only tracks, templates/range libs.

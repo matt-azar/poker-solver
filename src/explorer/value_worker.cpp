@@ -78,6 +78,20 @@ void ValueWorker::cancel()
     has_result_ = false;
 }
 
+void ValueWorker::cancel_and_drain()
+{
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        cancel_.store(true);
+        pending_ = false;
+        ++serial_;
+        has_result_ = false;
+    }
+    cv_.notify_all();
+    std::unique_lock<std::mutex> lock(mu_);
+    idle_.wait(lock, [&] { return !inflight_; });
+}
+
 void ValueWorker::shutdown()
 {
     {
@@ -109,7 +123,11 @@ void ValueWorker::thread_main()
         std::uint64_t serial = 0;
         {
             std::unique_lock<std::mutex> lock(mu_);
-            inflight_ = false;
+            if (inflight_)
+            {
+                inflight_ = false;
+                idle_.notify_all();
+            }
             cv_.wait(lock, [&] { return stop_ || pending_; });
             if (stop_ && !pending_)
             {
@@ -170,18 +188,21 @@ void ValueWorker::thread_main()
                 }
             }
         }
-        std::lock_guard<std::mutex> lock(mu_);
-        inflight_ = false;
-        if (discard || serial_ != serial || pending_ || stop_)
         {
-            continue;
+            std::lock_guard<std::mutex> lock(mu_);
+            inflight_ = false;
+            idle_.notify_all();
+            if (discard || serial_ != serial || pending_ || stop_)
+            {
+                continue;
+            }
+            has_result_ = true;
+            result_ok_ = ok;
+            result_solution_ = request.solution_id;
+            result_node_ = request.node_id;
+            result_kind_ = request.kind;
+            result_body_ = std::move(body);
         }
-        has_result_ = true;
-        result_ok_ = ok;
-        result_solution_ = request.solution_id;
-        result_node_ = request.node_id;
-        result_kind_ = request.kind;
-        result_body_ = std::move(body);
     }
 }
 

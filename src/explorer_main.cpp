@@ -1384,6 +1384,9 @@ StatusDraft draft_for(
     draft.sample_values = &sample_values;
     draft.sample_gaps = &sample_gaps;
     draft.memory = memory;
+    // Only call outside Session methods that already hold mu_. install/commit
+    // callbacks must build the draft first or assign generation from the
+    // callback argument.
     draft.generation = g_session.generation() + 1;
     return draft;
 }
@@ -1761,6 +1764,9 @@ void adopt_completed_training(
 
 void continue_job(std::uint64_t job_id, int extra)
 {
+    // Claim returns while cancelled value queries may still hold the engine.
+    // Match solve: wait for quiet off the accept thread before mutating.
+    g_session.wait_until_quiet();
     const std::shared_ptr<HeldSolution> held =
         std::static_pointer_cast<HeldSolution>(g_session.training_resource(job_id));
     if (!held || (!held->street && !held->river))
@@ -2184,16 +2190,20 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
 
 std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
 {
+    // Build outside install_completed: draft_for reads g_session.generation(),
+    // and the install callback already holds the session mutex.
+    StatusDraft base = draft_for(
+        held->job, 0, held->iterations, held->runtime_seconds, true,
+        held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+        held->sample_iterations, held->sample_values, held->sample_gaps,
+        held->has_memory ? &held->memory : nullptr);
+    base.root_id = held->root_id;
     std::uint64_t solution_id = 0;
     std::string status;
     const bool installed = g_session.install_completed(held, solution_id, [&](std::uint64_t generation, std::uint64_t id)
     {
         held->id = id;
-        StatusDraft draft = draft_for(
-            held->job, 0, held->iterations, held->runtime_seconds, true,
-            held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
-            held->sample_iterations, held->sample_values, held->sample_gaps,
-            held->has_memory ? &held->memory : nullptr);
+        StatusDraft draft = base;
         draft.solution_id = id;
         draft.root_id = held->root_id;
         draft.generation = generation;
@@ -2266,6 +2276,8 @@ void handle_client(socket_t client)
         {
             g_worker.join();
         }
+        // Claim is non-blocking: cancelled value readers may still hold the
+        // engine. continue_job waits for quiet before mutating.
         const poker::explorer::Session::Claim claim = g_session.claim_completed(id);
         if (!claim.allowed)
         {
@@ -2477,7 +2489,7 @@ void handle_client(socket_t client)
             }
             if (g_values != nullptr)
             {
-                g_values->cancel();
+                g_values->cancel_and_drain();
             }
             const poker::explorer::CheckpointDocument document =
                 poker::explorer::read_checkpoint(path, kMaxCheckpointBytes);
@@ -2766,6 +2778,8 @@ void handle_client(socket_t client)
                 g_worker.join();
             }
             std::shared_ptr<void> retiring;
+            // begin() retires the prior engine without waiting; the worker
+            // joins quiet before destroying it so value readers can finish.
             const std::uint64_t job_id = g_session.begin(retiring);
             StatusDraft starting;
             starting.running = true;

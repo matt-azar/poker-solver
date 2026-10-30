@@ -302,6 +302,40 @@ void test_destructor_releases_readers_without_shutdown()
     CHECK(session.reader_count() == 0);
 }
 
+void test_cancel_and_drain_releases_reader()
+{
+    Session session;
+    const std::uint64_t solution = publish(session, std::make_shared<int>(1));
+    std::atomic<bool> entered{false};
+    ValueWorker worker(
+        session,
+        [&](const std::shared_ptr<void>&, const ValueRequest&, const std::atomic<bool>& cancel) {
+            entered.store(true);
+            while (!cancel.load())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            throw std::runtime_error("cancelled");
+            return std::string();
+        },
+        [](const std::string& what, const ValueRequest&) { return what; });
+    ValueRequest request;
+    request.solution_id = solution;
+    request.job_id = 1;
+    request.node_id = "root";
+    CHECK(!worker.submit(request).ready);
+    for (int attempt = 0; attempt < 2000 && !entered.load(); ++attempt)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(entered.load());
+    CHECK(session.reader_count() == 1);
+    worker.cancel_and_drain();
+    CHECK(session.reader_count() == 0);
+    worker.shutdown();
+    CHECK(!worker.live());
+}
+
 } // namespace
 
 void run_value_worker_tests()
@@ -312,4 +346,5 @@ void run_value_worker_tests()
     test_replacement_destroys_engine_before_the_next_one();
     test_shutdown_during_query_and_pending_work();
     test_destructor_releases_readers_without_shutdown();
+    test_cancel_and_drain_releases_reader();
 }
