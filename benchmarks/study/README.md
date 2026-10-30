@@ -51,7 +51,7 @@ Each execution is exactly one of:
 
 ## Cases
 
-Reference cases live in `benchmarks/study/cases/`. The executable content is the `argv` array. Metadata next to it describes the same spot. The runner executes `argv` and does not rebuild a second configuration model.
+Reference cases live in `benchmarks/study/cases/`. The executable content is the `argv` array. Metadata next to it describes the same spot. The runner executes `argv` and does not rebuild a second configuration model. Street cases load the tree from a `street-config 1` file under `benchmarks/study/configs/` via `street_solver --config`. Relative `--config` paths are resolved against the repository root. Solve controls (`--iterations`, `--algorithm`, `--accuracy`, `--frozen`) and optional `--memory-mib` / `--threads` overrides stay on the command line.
 
 ### `river_competing_weights`
 
@@ -141,8 +141,8 @@ Follow-ups for the solver CLIs:
 - Street `total_seconds` is not process wall time. `runtime_seconds` is not process wall time on either CLI.
 - Per-street raise lists exist on `StreetConfig` but have no command-line flags. A non-empty per-street bet list is reused as that street's raise list, which hides `--oop-raises` and `--ip-raises` for that street.
 - `street_solver` has no `--first` flag. Both street cases are OOP-first because that is the config default.
-- Study cases still pass flag argv. They do not yet load a `street-config` document through `street_solver --config`.
-- Empty raise lists are copied from the bet lists. A distinct raise size has to be passed explicitly. These fixtures do that.
+- River cases still use flag argv. They do not load a `river-config` document.
+- Empty raise lists are copied from the bet lists when flags omit them. The street-config fixtures list raises explicitly.
 
 ## Quiet-machine note
 

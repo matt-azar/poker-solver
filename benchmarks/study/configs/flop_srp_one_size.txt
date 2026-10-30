@@ -1,0 +1,19 @@
+street-config 1
+board Js 8h 3h
+pot 100
+stack 500
+oop-range 7c6c:1,7d6d:1,7h6h:1,7s6s:1,8c7c:1,8d7d:1,8h7h:1,8s7s:1,9c8c:1,9d8d:1,9h8h:1,9s8s:1,Tc9c:1,Td9d:1,Th9h:1,Ts9s:1,JcTc:1,KcTc:1,AcTc:1,JdTd:1,KdTd:1,AdTd:1,JhTh:1,KhTh:1,AhTh:1,JsTs:1,KsTs:1,AsTs:1,JdJc:1,JhJc:1,JsJc:1,QcJc:1,KcJc:1,AcJc:1,AdJc:0.5,AhJc:0.5,AsJc:0.5,JhJd:1,JsJd:1,QdJd:1,KdJd:1,AcJd:0.5,AdJd:1,AhJd:0.5,AsJd:0.5,JsJh:1,QhJh:1,KhJh:1,AcJh:0.5,AdJh:0.5,AhJh:1,AsJh:0.5,QsJs:1,KsJs:1,AcJs:0.5,AdJs:0.5,AhJs:0.5,AsJs:1,QdQc:1,QhQc:1,QsQc:1,KcQc:1,KdQc:1,KhQc:1,KsQc:1,AcQc:1,AdQc:1,AhQc:1,AsQc:1,QhQd:1,QsQd:1,KcQd:1,KdQd:1,KhQd:1,KsQd:1,AcQd:1,AdQd:1,AhQd:1,AsQd:1,QsQh:1,KcQh:1,KdQh:1,KhQh:1,KsQh:1,AcQh:1,AdQh:1,AhQh:1,AsQh:1,KcQs:1,KdQs:1,KhQs:1,KsQs:1,AcQs:1,AdQs:1,AhQs:1,AsQs:1,KdKc:1,KhKc:1,KsKc:1,AcKc:1,AdKc:1,AhKc:1,AsKc:1,KhKd:1,KsKd:1,AcKd:1,AdKd:1,AhKd:1,AsKd:1,KsKh:1,AcKh:1,AdKh:1,AhKh:1,AsKh:1,AcKs:1,AdKs:1,AhKs:1,AsKs:1,AdAc:1,AhAc:1,AsAc:1,AhAd:1,AsAd:1,AsAh:1
+ip-range TdTc:1,ThTc:1,TsTc:1,AcTc:0.34999999999999998,ThTd:1,TsTd:1,AdTd:0.34999999999999998,TsTh:1,AhTh:0.34999999999999998,AsTs:0.34999999999999998,JdJc:1,JhJc:1,JsJc:1,QcJc:0.40000000000000002,KdJc:0.5,KhJc:0.5,KsJc:0.5,AcJc:1,AdJc:1,AhJc:1,AsJc:1,JhJd:1,JsJd:1,QdJd:0.40000000000000002,KcJd:0.5,KhJd:0.5,KsJd:0.5,AcJd:1,AdJd:1,AhJd:1,AsJd:1,JsJh:1,QhJh:0.40000000000000002,KcJh:0.5,KdJh:0.5,KsJh:0.5,AcJh:1,AdJh:1,AhJh:1,AsJh:1,QsJs:0.40000000000000002,KcJs:0.5,KdJs:0.5,KhJs:0.5,AcJs:1,AdJs:1,AhJs:1,AsJs:1,QdQc:1,QhQc:1,QsQc:1,KcQc:1,AcQc:1,AdQc:1,AhQc:1,AsQc:1,QhQd:1,QsQd:1,KdQd:1,AcQd:1,AdQd:1,AhQd:1,AsQd:1,QsQh:1,KhQh:1,AcQh:1,AdQh:1,AhQh:1,AsQh:1,KsQs:1,AcQs:1,AdQs:1,AhQs:1,AsQs:1,KdKc:1,KhKc:1,KsKc:1,AcKc:1,AdKc:1,AhKc:1,AsKc:1,KhKd:1,KsKd:1,AcKd:1,AdKd:1,AhKd:1,AsKd:1,KsKh:1,AcKh:1,AdKh:1,AhKh:1,AsKh:1,AcKs:1,AdKs:1,AhKs:1,AsKs:1,AdAc:1,AhAc:1,AsAc:1,AhAd:1,AsAd:1,AsAh:1
+first-to-act 0
+max-raises 2
+allow-all-in 1
+allow-three-bet 1
+geometric 0
+all-in-threshold 0
+pot-cap 0
+memory-mib 4096
+threads 1
+oop-bets 0.5
+ip-bets 0.5
+oop-raises 0.75
+ip-raises 0.75

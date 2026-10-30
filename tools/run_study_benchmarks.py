@@ -211,6 +211,33 @@ def flag_value(argv: list[str], flag: str) -> str | None:
     return None
 
 
+def resolve_config_paths(argv: list[str], root: Path) -> list[str]:
+    """Resolve relative --config paths against the repository root.
+
+    Cases store paths such as benchmarks/study/configs/....txt so the argv
+    stays portable. The solver still receives an absolute path, and stdin (-)
+    is left alone.
+    """
+    output: list[str] = []
+    index = 0
+    while index < len(argv):
+        if argv[index] == "--config" and index + 1 < len(argv):
+            raw = argv[index + 1]
+            output.append("--config")
+            if raw == "-":
+                output.append(raw)
+            else:
+                path = Path(raw)
+                if not path.is_absolute():
+                    path = (root / path).resolve()
+                output.append(str(path))
+            index += 2
+            continue
+        output.append(argv[index])
+        index += 1
+    return output
+
+
 def binary_path(bin_dir: Path, name: str) -> Path:
     base = bin_dir / name
     if os.name == "nt":
@@ -220,7 +247,7 @@ def binary_path(bin_dir: Path, name: str) -> Path:
 
 
 def apply_overrides(case: dict, args: argparse.Namespace, bin_dir: Path) -> dict:
-    argv = [str(item) for item in case["argv"]]
+    argv = resolve_config_paths([str(item) for item in case["argv"]], ROOT)
     binary_name = case["binary"]
     notes: list[str] = []
     if args.iterations is not None:
