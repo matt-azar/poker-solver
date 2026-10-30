@@ -3,6 +3,8 @@
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
+#include "solver/chip_payoff.hpp"
+#include "solver/payoff.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -168,35 +170,32 @@ public:
         return state.terminal;
     }
 
+    // Both players' root-centered chip utilities. Player 1 is the negation of
+    // player 0 under the chip zero-sum rule (see ChipPayoff).
+    poker::solver::PlayerPayoff terminal_payoff(const State& state) const
+    {
+        if (!state.terminal)
+        {
+            throw std::logic_error("terminal_payoff on a non-terminal street state");
+        }
+        const int showdown = state.folded < 0
+            ? showdown_outcome(state)
+            : 0;
+        return poker::solver::ChipPayoff::terminal(
+            config_.pot,
+            state.contrib[0],
+            state.contrib[1],
+            state.folded,
+            showdown);
+    }
+
     double p1_utility(const State& state) const
     {
         if (!state.terminal)
         {
             throw std::logic_error("p1_utility on a non-terminal street state");
         }
-        const double half_pot = static_cast<double>(config_.pot) * 0.5;
-        if (state.folded == 0)
-        {
-            return -(half_pot + static_cast<double>(state.contrib[0]));
-        }
-        if (state.folded == 1)
-        {
-            return half_pot + static_cast<double>(state.contrib[1]);
-        }
-        if (state.contrib[0] != state.contrib[1])
-        {
-            throw std::logic_error("showdown with unequal street contributions");
-        }
-        const int outcome = showdown_outcome(state);
-        if (outcome > 0)
-        {
-            return half_pot + static_cast<double>(state.contrib[1]);
-        }
-        if (outcome < 0)
-        {
-            return -(half_pot + static_cast<double>(state.contrib[0]));
-        }
-        return 0.0;
+        return terminal_payoff(state).utility[0];
     }
 
     int chance_count(const State& state) const

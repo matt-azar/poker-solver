@@ -143,7 +143,7 @@ Add baseline-versus-modified comparison: strategy changes, both-player EV change
 
 ### M8 — Rake, ICM and opponent incentives
 
-The dual-player payoff abstraction is in place: `PlayerPayoff` holds both utilities, and `ChipPayoff` reproduces today's root-centered chip rule with `utility[1] == -utility[0]`. `RiverGame::terminal_payoff` uses that adapter; CFR loops still consume the player-0 scalar. Rake, ICM, and incentives still need both players' actual utilities. Each best response must maximize its own utility.
+The dual-player payoff abstraction is in place: `PlayerPayoff` holds both utilities, and `ChipPayoff` reproduces today's root-centered chip rule with `utility[1] == -utility[0]`. `RiverGame::terminal_payoff` and `StreetGame::terminal_payoff` use that adapter; CFR loops still consume the player-0 scalar. Rake, ICM, and incentives still need both players' actual utilities. Each best response must maximize its own utility.
 
 Implement rake rate/cap and explicit collection/rounding rules with examples. Implement tournament utility tables and an ICM calculator/import path with stacks, payouts and interpolation validation. Then add documented action/category/runout incentive rules, previews, scenario identity and persistence. Keep chip EV and modeled utility separately labeled.
 
