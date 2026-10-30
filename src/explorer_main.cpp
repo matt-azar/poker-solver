@@ -65,11 +65,34 @@ namespace explorer_detail
 std::thread g_worker;
 poker::explorer::Session g_session;
 std::string g_ui_root = "ui";
+// Process-wide equity work limit. Defaults to kDefaultMaxPairRunouts; overridden
+// by POKER_EQUITY_MAX_PAIR_RUNOUTS or --max-pair-runouts before listen.
+std::uint64_t g_equity_max_pair_runouts = poker::holdem::kDefaultMaxPairRunouts;
 
 // One action-value query. The accept loop only queues it. Status and node
 // pages stay on the accept thread. A newer node or a new solve cancels the
 // walk at the next public node. The worker is joined on server teardown.
 poker::explorer::ValueWorker* g_values = nullptr;
+
+bool parse_u64(std::string_view text, std::uint64_t& value)
+{
+    const char* begin = text.data();
+    const char* end = begin + text.size();
+    const auto parsed = std::from_chars(begin, end, value);
+    return parsed.ec == std::errc{} && parsed.ptr == end;
+}
+
+poker::holdem::ShowdownEquityOptions equity_options(const std::atomic<bool>& cancel)
+{
+    poker::holdem::ShowdownEquityOptions options;
+    options.max_pair_runouts = g_equity_max_pair_runouts;
+    options.cancel_poll = [](void* context)
+    {
+        return static_cast<const std::atomic<bool>*>(context)->load(std::memory_order_relaxed);
+    };
+    options.cancel_context = const_cast<std::atomic<bool>*>(&cancel);
+    return options;
+}
 
 void append_escaped(std::string& out, const std::string& text)
 {
@@ -2936,12 +2959,7 @@ int run(int argc, char** argv)
                 page.units = poker::holdem::kEquityUnits;
                 page.model = poker::holdem::kEquityModel;
                 const auto started = std::chrono::steady_clock::now();
-                poker::holdem::ShowdownEquityOptions options;
-                options.cancel_poll = [](void* context)
-                {
-                    return static_cast<const std::atomic<bool>*>(context)->load(std::memory_order_relaxed);
-                };
-                options.cancel_context = const_cast<std::atomic<bool>*>(&cancel);
+                const poker::holdem::ShowdownEquityOptions options = equity_options(cancel);
                 const poker::holdem::ShowdownEquity equity = poker::holdem::showdown_equity(
                     held->job.board, held->job.oop, held->job.ip, options);
                 page.defined = equity.joint_defined && equity.player0.defined && equity.player1.defined;
@@ -2999,12 +3017,7 @@ int run(int argc, char** argv)
                 page.model = poker::holdem::kEquityModel;
                 if (!weights.oop.empty() && !weights.ip.empty())
                 {
-                    poker::holdem::ShowdownEquityOptions options;
-                    options.cancel_poll = [](void* context)
-                    {
-                        return static_cast<const std::atomic<bool>*>(context)->load(std::memory_order_relaxed);
-                    };
-                    options.cancel_context = const_cast<std::atomic<bool>*>(&cancel);
+                    const poker::holdem::ShowdownEquityOptions options = equity_options(cancel);
                     const poker::holdem::ShowdownEquity equity = poker::holdem::showdown_equity(
                         weights.board,
                         poker::holdem::Range::parse(weights.oop),
@@ -3055,12 +3068,32 @@ int run(int argc, char** argv)
     } teardown;
 
     int port = 8765;
+    if (const char* env_limit = std::getenv("POKER_EQUITY_MAX_PAIR_RUNOUTS"))
+    {
+        std::uint64_t parsed = 0;
+        if (!parse_u64(env_limit, parsed))
+        {
+            std::cerr << "invalid POKER_EQUITY_MAX_PAIR_RUNOUTS\n";
+            return 1;
+        }
+        g_equity_max_pair_runouts = parsed;
+    }
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
         if (arg == "--port" && i + 1 < argc)
         {
             port = std::atoi(argv[++i]);
+        }
+        else if (arg == "--max-pair-runouts" && i + 1 < argc)
+        {
+            std::uint64_t parsed = 0;
+            if (!parse_u64(argv[++i], parsed))
+            {
+                std::cerr << "invalid --max-pair-runouts\n";
+                return 1;
+            }
+            g_equity_max_pair_runouts = parsed;
         }
     }
     choose_ui_root();

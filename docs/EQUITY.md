@@ -1,6 +1,6 @@
 # Check-down showdown equity
 
-Standalone exact equity for a flop, turn, or river. The library, `equity_calculator`, and `equity_tests` are on the development line with the street-configuration and continuation work. The explorer calls it with strategy-conditioned reaching weights. It does not edit ranges, build a betting tree, or read solver state. The default work limit can reject a full-range river. This is not a claim of Pio equity parity.
+Standalone exact equity for a flop, turn, or river. The library, `equity_calculator`, and `equity_tests` are on the development line with the street-configuration and continuation work. The explorer calls it with strategy-conditioned reaching weights. It does not edit ranges, build a betting tree, or read solver state. The default work limit admits a full-range river and still rejects a full-range turn. This is not a claim of Pio equity parity.
 
 ## Model
 
@@ -28,7 +28,7 @@ Invalid boards, invalid range syntax, nonfinite or negative weights, cancellatio
 
 ```cpp
 poker::holdem::ShowdownEquityOptions options;
-options.max_pair_runouts = 1000000;
+options.max_pair_runouts = poker::holdem::kDefaultMaxPairRunouts;
 const std::vector<int> board = poker::holdem::parse_equity_board("Kh Kd 7c 4s");
 const poker::holdem::Range oop = poker::holdem::parse_equity_range("AhAd,9c9d");
 const poker::holdem::Range ip = poker::holdem::parse_equity_range("AhAc:1,2c3d:1e-18");
@@ -38,17 +38,17 @@ const poker::holdem::ShowdownEquity equity =
 
 `measure_showdown_work` counts legal pairs and pair-runouts and does not evaluate showdowns. `showdown_equity_json` writes undefined numbers as null.
 
-The default work limit is `kDefaultMaxPairRunouts` (1,000,000 pair-runouts). A request above the limit throws before showdown evaluation and reports required and allowed counts. The caller can raise the limit. The calculator does not sample or drop runouts. Cancellation uses `ShowdownEquityOptions::cancel_poll`. One deterministic thread performs the enumeration.
+The default work limit is `kDefaultMaxPairRunouts` (1,100,000 pair-runouts). A full off-board random-vs-random river is `kFullRangeRiverPairRunouts` (1,070,190) and succeeds at the default. A request above the limit throws before showdown evaluation and reports required and allowed counts. A full-range turn is about 51M pair-runouts (`As Kd Qc Jh` measures 51,369,120) and still rejects. The caller can raise or lower the limit through `ShowdownEquityOptions::max_pair_runouts`, `--max-pair-runouts`, or `POKER_EQUITY_MAX_PAIR_RUNOUTS`. The calculator does not sample or drop runouts. Cancellation uses `ShowdownEquityOptions::cancel_poll`. One deterministic thread performs the enumeration.
 
 ## CLI
 
 ```sh
 equity_calculator --board "Kh Kd 7c 4s" \
   --oop "AhAd,9c9d" --ip "AhAc:1,2c3d:1e-18" \
-  --max-pair-runouts 1000000 --json
+  --max-pair-runouts 1100000 --json
 ```
 
-Range text is the existing `Range::parse` syntax. Exit 0 prints the result. Exit 1 is invalid input, 2 is an invalid weight, 3 is the work limit, 4 is cancellation, and 5 is a numerical-range failure. Exit 5 writes the diagnostic to stderr and does not print a result.
+`POKER_EQUITY_MAX_PAIR_RUNOUTS` sets the same ceiling when the flag is omitted. `--max-pair-runouts` wins over the environment variable. Range text is the existing `Range::parse` syntax. Exit 0 prints the result. Exit 1 is invalid input, 2 is an invalid weight, 3 is the work limit, 4 is cancellation, and 5 is a numerical-range failure. Exit 5 writes the diagnostic to stderr and does not print a result.
 
 On this Windows machine the command above printed:
 
@@ -70,7 +70,7 @@ These are single runs on this machine. They are not a comparison with Pio or wit
 
 ## Memory and work
 
-The preflight stores at most 1,326 hand descriptors per player. Showdown evaluation then allocates two 1,326-bin accumulators, about 220 KiB, plus a 49-card stack buffer. There is no all-deals table and no global cache. A rejected limit does not allocate the bins and does not call the evaluator. The unit test rejects the full off-board river `As Kd Qc Jh 9c` at 1,070,190 pair-runouts against the default limit of 1,000,000.
+The preflight stores at most 1,326 hand descriptors per player. Showdown evaluation then allocates two 1,326-bin accumulators, about 220 KiB, plus a 49-card stack buffer. There is no all-deals table and no global cache. A rejected limit does not allocate the bins and does not call the evaluator. The unit test measures the full off-board river `As Kd Qc Jh 9c` at 1,070,190 pair-runouts under the default 1,100,000 ceiling, rejects it when the caller sets 1,070,189 or the legacy 1,000,000 ceiling, and rejects a full-range turn at the default before evaluation.
 
 This module does not use `BudgetResource` or the street solver's 1024 MiB engine budget. Its bound is the explicit pair-runout limit plus the fixed buffers above.
 

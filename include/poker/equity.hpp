@@ -14,7 +14,13 @@ namespace poker::holdem
 
 // Check-down showdown equity. A tie contributes one half of the pot.
 // Values are fractions in [0, 1]. This is a separate quantity from chip EV.
-inline constexpr std::uint64_t kDefaultMaxPairRunouts = 1000000;
+//
+// A full off-board random-vs-random river is 1,070,190 pair-runouts
+// (`As Kd Qc Jh 9c`). The default admits that common study case with a little
+// headroom. A full-range turn is about 51M pair-runouts and still rejects.
+inline constexpr std::uint64_t kFullRangeRiverPairRunouts = 1070190;
+inline constexpr std::uint64_t kDefaultMaxPairRunouts = 1100000;
+static_assert(kDefaultMaxPairRunouts >= kFullRangeRiverPairRunouts);
 inline constexpr char kEquityModel[] = "check-down";
 inline constexpr char kEquityUnits[] = "fraction of the pot";
 

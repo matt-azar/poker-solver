@@ -8,7 +8,7 @@ From the repository root:
 explorer
 ```
 
-Open `http://127.0.0.1:8765`. The server listens on `127.0.0.1` only. `--port` changes the port. Static files come from `ui/` in the working directory, or from `ui/` next to the executable and one or two directories above it. On Linux that directory is the parent of `/proc/self/exe`.
+Open `http://127.0.0.1:8765`. The server listens on `127.0.0.1` only. `--port` changes the port. `--max-pair-runouts N` and `POKER_EQUITY_MAX_PAIR_RUNOUTS` set the check-down equity work limit for node and river equity queries; the flag wins over the environment variable, and both default to `kDefaultMaxPairRunouts` (1,100,000). A request above that limit fails before showdown evaluation with the required and allowed pair-runout counts. The default admits a full-range river and still rejects a full-range turn. Static files come from `ui/` in the working directory, or from `ui/` next to the executable and one or two directories above it. On Linux that directory is the parent of `/proc/self/exe`.
 
 The board length chooses where the hand starts. Three cards solve the flop, the turn, and the river in one tree: the turn and the river are dealt inside that tree, and each street is bet. Four cards solve the turn and the river the same way. Five cards are the river only, because the flop and the turn have already been dealt. Five cards use the river public tree. Three or four cards use the turn and flop public tree. Painting a range writes the same text the solver already parses: `AA`, `AKs`, `AKo:0.5`, `QQ+`, `22-77`, `ATs+`. A weight slider sets the next paint. Clicking a cell that already has that weight clears it. Dragging paints the chosen weight across cells. Cards on the board are grey and cannot be selected.
 

@@ -44,6 +44,7 @@ using poker::holdem::EquityFailure;
 using poker::holdem::Range;
 using poker::holdem::ShowdownEquity;
 using poker::holdem::ShowdownEquityOptions;
+using poker::holdem::ShowdownWork;
 using poker::holdem::kComboCount;
 using poker::holdem::kDeckSize;
 using poker::holdem::measure_showdown_work;
@@ -786,10 +787,34 @@ void test_work_limit_and_cancellation()
 
     const std::vector<int> river = parse_equity_board("As Kd Qc Jh 9c");
     const Range wide = parse_equity_range("random");
-    const EquityError wide_limit = expect_failure(
-        EquityFailure::WorkLimit, [&] { showdown_equity(river, wide, wide); });
-    CHECK(wide_limit.required_pair_runouts() == 1070190);
-    CHECK(wide_limit.allowed_pair_runouts() == poker::holdem::kDefaultMaxPairRunouts);
+    const ShowdownWork river_work = measure_showdown_work(river, wide, wide);
+    CHECK(river_work.pair_runouts == poker::holdem::kFullRangeRiverPairRunouts);
+    CHECK(poker::holdem::kDefaultMaxPairRunouts >= poker::holdem::kFullRangeRiverPairRunouts);
+    CHECK(poker::holdem::kDefaultMaxPairRunouts >= river_work.pair_runouts);
+
+    ShowdownEquityOptions just_under;
+    just_under.max_pair_runouts = poker::holdem::kFullRangeRiverPairRunouts - 1;
+    const EquityError under = expect_failure(
+        EquityFailure::WorkLimit, [&] { showdown_equity(river, wide, wide, just_under); });
+    CHECK(under.required_pair_runouts() == poker::holdem::kFullRangeRiverPairRunouts);
+    CHECK(under.allowed_pair_runouts() == poker::holdem::kFullRangeRiverPairRunouts - 1);
+
+    // The previous 1,000,000 ceiling still rejects when the caller sets it.
+    ShowdownEquityOptions legacy;
+    legacy.max_pair_runouts = 1000000;
+    const EquityError legacy_limit = expect_failure(
+        EquityFailure::WorkLimit, [&] { showdown_equity(river, wide, wide, legacy); });
+    CHECK(legacy_limit.required_pair_runouts() == poker::holdem::kFullRangeRiverPairRunouts);
+    CHECK(legacy_limit.allowed_pair_runouts() == 1000000);
+
+    // A full-range turn is pathological at the default and rejects before evaluation.
+    const std::vector<int> turn = parse_equity_board("As Kd Qc Jh");
+    const ShowdownWork turn_work = measure_showdown_work(turn, wide, wide);
+    CHECK(turn_work.pair_runouts > poker::holdem::kDefaultMaxPairRunouts);
+    const EquityError turn_limit = expect_failure(
+        EquityFailure::WorkLimit, [&] { showdown_equity(turn, wide, wide); });
+    CHECK(turn_limit.required_pair_runouts() == turn_work.pair_runouts);
+    CHECK(turn_limit.allowed_pair_runouts() == poker::holdem::kDefaultMaxPairRunouts);
 
     const std::vector<int> sample = parse_equity_board("Kh Kd 7c 4s 2h");
     const Range left = parse_equity_range("2c2d,3c3d");
