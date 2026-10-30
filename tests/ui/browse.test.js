@@ -6,7 +6,24 @@ const context = {console};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("ui/browse.js", "utf8"), context);
 
-const {groupHands, frequencyOf, groupEv, shouldApply, nextGeneration, solutionNeedsReload} = context;
+const appSource = fs.readFileSync("ui/app.js", "utf8");
+const historyBlock = appSource.match(/\/\* range-history \*\/([\s\S]*?)\/\* end-range-history \*\//);
+assert.ok(historyBlock, "range-history helpers must exist in ui/app.js");
+vm.runInContext(historyBlock[1], context);
+
+const {
+  groupHands,
+  frequencyOf,
+  groupEv,
+  shouldApply,
+  nextGeneration,
+  solutionNeedsReload,
+  createRangeHistory,
+  snapshotWeights,
+  cloneWeightGrid,
+  snapshotsEqual,
+  RANGE_HISTORY_LIMIT
+} = context;
 
 function cellOf(node, text) {
   const cell = groupHands(node).find((item) => item.text === text);
@@ -120,6 +137,69 @@ const zeroMass = {
 assert.strictEqual(groupEv(zeroMass, splitValues, cellOf(zeroMass, "AKs")), null);
 assert.strictEqual(groupEv(split, Object.assign({}, splitValues, {pending: true}), cellOf(split, "AKs")), null);
 assert.strictEqual(groupEv(Object.assign({}, split, {reach_defined: false}), splitValues, cellOf(split, "AKs")), null);
+
+function blankGrid() {
+  return Array.from({length: 13}, () => Array(13).fill(0));
+}
+
+function setCell(store, player, row, column, weight) {
+  store[player][row][column] = weight;
+}
+
+function paintWithHistory(history, store, player, row, column, weight) {
+  const before = snapshotWeights(store);
+  setCell(store, player, row, column, weight);
+  if (!snapshotsEqual(before, snapshotWeights(store))) {
+    history.push(before);
+  }
+}
+
+{
+  const store = {oop: blankGrid(), ip: blankGrid()};
+  const history = createRangeHistory(RANGE_HISTORY_LIMIT);
+  setCell(store, "oop", 0, 0, 1);
+  paintWithHistory(history, store, "oop", 0, 0, 0.5);
+  assert.strictEqual(store.oop[0][0], 0.5);
+  assert.ok(history.canUndo());
+  const restored = history.undo(store);
+  assert.ok(restored);
+  store.oop = cloneWeightGrid(restored.oop);
+  store.ip = cloneWeightGrid(restored.ip);
+  assert.strictEqual(store.oop[0][0], 1);
+  assert.ok(history.canRedo());
+  const redone = history.redo(store);
+  store.oop = cloneWeightGrid(redone.oop);
+  store.ip = cloneWeightGrid(redone.ip);
+  assert.strictEqual(store.oop[0][0], 0.5);
+}
+
+{
+  const store = {oop: blankGrid(), ip: blankGrid()};
+  const history = createRangeHistory(3);
+  for (let i = 1; i <= 5; i++) {
+    const before = snapshotWeights(store);
+    setCell(store, "ip", 1, 1, i / 10);
+    history.push(before);
+  }
+  assert.strictEqual(history.past.length, 3);
+  assert.ok(!snapshotsEqual(history.past[0], history.past[1]));
+}
+
+{
+  const store = {oop: blankGrid(), ip: blankGrid()};
+  const history = createRangeHistory(RANGE_HISTORY_LIMIT);
+  setCell(store, "oop", 2, 2, 1);
+  const before = snapshotWeights(store);
+  assert.ok(history.push(before));
+  assert.strictEqual(history.push(before), false);
+  assert.strictEqual(history.past.length, 1);
+}
+
+{
+  const markup = fs.readFileSync("ui/index.html", "utf8");
+  assert.ok(markup.includes('id="undo-range"'));
+  assert.ok(markup.includes('id="redo-range"'));
+}
 
 async function main() {
 const renders = [];

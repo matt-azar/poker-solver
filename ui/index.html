@@ -24,8 +24,10 @@
   <div class="range-tools">
     <label>Paint weight <input id="weight" type="range" min="0" max="100" value="100"></label>
     <strong id="weight-label">100%</strong>
+    <button type="button" id="undo-range" disabled>Undo</button>
+    <button type="button" id="redo-range" disabled>Redo</button>
     <button type="button" id="clear-ranges">Clear ranges</button>
-    <span class="hint">Suited is above the pairs. Offsuit is below. Click toggles a cell. Drag paints the same weight. Cells blocked by the board stay grey.</span>
+    <span class="hint">Suited is above the pairs. Offsuit is below. Click toggles a cell. Drag paints the same weight. Cells blocked by the board stay grey. Ctrl/Cmd+Z undoes. Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes.</span>
   </div>
   <form id="setup">
     <label class="wide">Board <input id="board" value="Ah Kd 7c 4s 2h" autocomplete="off"></label>
