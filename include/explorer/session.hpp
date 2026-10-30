@@ -17,11 +17,19 @@ enum class Phase
     Idle,
     Running,
     Completed,
+    Paused,
     Cancelled,
     Failed
 };
 
 enum class StopResult
+{
+    Accepted,
+    AlreadyComplete,
+    Stale
+};
+
+enum class PauseResult
 {
     Accepted,
     AlreadyComplete,
@@ -54,6 +62,7 @@ public:
         job_id_ = next_job_++;
         phase_ = Phase::Running;
         stop_ = false;
+        pause_ = false;
         ++generation_;
         return job_id_;
     }
@@ -65,7 +74,7 @@ public:
         {
             return StopResult::Stale;
         }
-        if (phase_ == Phase::Completed)
+        if (phase_ == Phase::Completed || phase_ == Phase::Paused)
         {
             return StopResult::AlreadyComplete;
         }
@@ -81,6 +90,31 @@ public:
     {
         std::lock_guard<std::mutex> lock(mu_);
         return job_id == job_id_ && stop_;
+    }
+
+    PauseResult request_pause(std::uint64_t job_id)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_)
+        {
+            return PauseResult::Stale;
+        }
+        if (phase_ == Phase::Completed || phase_ == Phase::Paused)
+        {
+            return PauseResult::AlreadyComplete;
+        }
+        if (phase_ != Phase::Running)
+        {
+            return PauseResult::Stale;
+        }
+        pause_ = true;
+        return PauseResult::Accepted;
+    }
+
+    bool pause_requested(std::uint64_t job_id) const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        return job_id == job_id_ && pause_;
     }
 
     bool running() const
@@ -122,7 +156,7 @@ public:
     void set_progress(std::uint64_t job_id, std::string status)
     {
         std::lock_guard<std::mutex> lock(mu_);
-        if (job_id != job_id_ || phase_ != Phase::Running || stop_)
+        if (job_id != job_id_ || phase_ != Phase::Running || stop_ || pause_)
         {
             return;
         }
@@ -136,21 +170,23 @@ public:
         std::uint64_t job_id = 0;
     };
 
-    // Takes exclusive training ownership immediately. The solution id and the
-    // engine stay. Borrow fails until the continuation is published again.
-    // Existing readers may still hold the engine; the continuation thread must
-    // wait_until_quiet() before mutating it. Claiming without that wait used to
-    // park the HTTP accept loop behind value queries and wedge Continue/Open.
+    // Takes exclusive training ownership immediately for a completed or paused
+    // solution. The solution id and the engine stay. Borrow fails until the
+    // continuation is published again. Existing readers may still hold the
+    // engine; the continuation thread must wait_until_quiet() before mutating
+    // it. Claiming without that wait used to park the HTTP accept loop behind
+    // value queries and wedge Continue/Open.
     Claim claim_completed(std::uint64_t solution_id)
     {
         std::lock_guard<std::mutex> lock(mu_);
-        if (phase_ != Phase::Completed || solution_id == 0 || solution_id != solution_id_ || !resource_)
+        if (!queryable_locked() || solution_id == 0 || solution_id != solution_id_ || !resource_)
         {
             return {};
         }
         job_id_ = next_job_++;
         phase_ = Phase::Running;
         stop_ = false;
+        pause_ = false;
         ++generation_;
         Claim claim;
         claim.allowed = true;
@@ -174,7 +210,7 @@ public:
     {
         std::lock_guard<std::mutex> lock(mu_);
         Permit permit;
-        if (job_id != job_id_ || phase_ != Phase::Running || stop_)
+        if (job_id != job_id_ || phase_ != Phase::Running || stop_ || pause_)
         {
             return permit;
         }
@@ -214,7 +250,8 @@ public:
         }
         resource_ = std::move(resource);
         solution_id_ = solution_id;
-        phase_ = Phase::Completed;
+        phase_ = pause_ ? Phase::Paused : Phase::Completed;
+        pause_ = false;
         status_ = std::move(next_status);
         generation_ = next_generation;
         return true;
@@ -254,12 +291,39 @@ public:
         solution_id_ = solution_id;
         phase_ = Phase::Completed;
         stop_ = false;
+        pause_ = false;
         status_ = std::move(next_status);
         generation_ = next_generation;
         return true;
     }
 
-    // Replaces a quiet completed or idle solution. Refuses while training is running.
+    // Like commit_kept, but the published solution is Phase::Paused so Continue
+    // can resume the same training state.
+    template <typename Make>
+    bool commit_paused(
+        std::uint64_t job_id,
+        std::shared_ptr<void> resource,
+        std::uint64_t solution_id,
+        Make&& make)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running || solution_id != pending_solution_)
+        {
+            return false;
+        }
+        const std::uint64_t next_generation = generation_ + 1;
+        std::string next_status = make(next_generation);
+        resource_ = std::move(resource);
+        solution_id_ = solution_id;
+        phase_ = Phase::Paused;
+        stop_ = false;
+        pause_ = false;
+        status_ = std::move(next_status);
+        generation_ = next_generation;
+        return true;
+    }
+
+    // Replaces a quiet completed, paused, or idle solution. Refuses while training is running.
     // make(generation, solution_id) runs under the lock and must not call back in.
     template <typename Make>
     bool install_completed(std::shared_ptr<void> resource, std::uint64_t& solution_id, Make&& make)
@@ -279,6 +343,7 @@ public:
         resource_ = std::move(resource);
         phase_ = Phase::Completed;
         stop_ = false;
+        pause_ = false;
         job_id_ = 0;
         const std::uint64_t next_generation = generation_ + 1;
         status_ = make(next_generation, solution_id_);
@@ -288,7 +353,8 @@ public:
     }
 
     // Publishes more training on the same solution. A stop keeps the chunks
-    // that finished. make(generation) runs under the lock and must not call back in.
+    // that finished as Completed. A pause keeps them as Paused so Continue can
+    // resume. make(generation) runs under the lock and must not call back in.
     template <typename Make>
     bool commit_continuation(std::uint64_t job_id, Make&& make)
     {
@@ -299,8 +365,9 @@ public:
         }
         const std::uint64_t next_generation = generation_ + 1;
         std::string next_status = make(next_generation);
-        phase_ = Phase::Completed;
+        phase_ = (!stop_ && pause_) ? Phase::Paused : Phase::Completed;
         stop_ = false;
+        pause_ = false;
         status_ = std::move(next_status);
         generation_ = next_generation;
         return true;
@@ -316,6 +383,7 @@ public:
         }
         phase_ = Phase::Completed;
         stop_ = false;
+        pause_ = false;
         status_ = std::move(status);
         ++generation_;
     }
@@ -329,6 +397,7 @@ public:
         }
         phase_ = Phase::Cancelled;
         stop_ = true;
+        pause_ = false;
         resource_.reset();
         solution_id_ = 0;
         status_ = std::move(status);
@@ -352,7 +421,7 @@ public:
     std::shared_ptr<void> borrow(std::uint64_t solution_id)
     {
         std::lock_guard<std::mutex> lock(mu_);
-        if (phase_ != Phase::Completed || solution_id == 0 || solution_id != solution_id_ || !resource_)
+        if (!queryable_locked() || solution_id == 0 || solution_id != solution_id_ || !resource_)
         {
             return {};
         }
@@ -405,10 +474,16 @@ public:
     }
 
 private:
+    bool queryable_locked() const
+    {
+        return phase_ == Phase::Completed || phase_ == Phase::Paused;
+    }
+
     mutable std::mutex mu_;
     std::condition_variable quiet_;
     Phase phase_ = Phase::Idle;
     bool stop_ = false;
+    bool pause_ = false;
     std::uint64_t job_id_ = 0;
     std::uint64_t next_job_ = 1;
     std::uint64_t solution_id_ = 0;
@@ -418,7 +493,7 @@ private:
     int readers_ = 0;
     std::shared_ptr<void> resource_;
     std::string status_ =
-        "{\"running\":false,\"cancelled\":false,\"error\":\"\",\"solution_id\":null,"
+        "{\"running\":false,\"paused\":false,\"cancelled\":false,\"error\":\"\",\"solution_id\":null,"
         "\"root_node_id\":null,\"job_id\":null,\"status_generation\":0}";
     std::function<void()> release_hook_;
 };
