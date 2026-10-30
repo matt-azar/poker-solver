@@ -2,6 +2,7 @@
 
 #include "game/street_config_text.hpp"
 #include "poker/card.hpp"
+#include "poker/hand_categories.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
 #include "solver/regret_matching.hpp"
@@ -5646,6 +5647,34 @@ StreetReachWeights StreetBatchSolver::reaching_weights(const std::string& node_i
 {
     std::lock_guard<std::mutex> lock(value_mu_);
     return engine_->compute_reaching_weights(node_id);
+}
+
+holdem::CategoryComposition StreetBatchSolver::category_composition(
+    const std::string& node_id) const
+{
+    const StreetReachWeights weights = reaching_weights(node_id);
+    if (weights.board.size() != 5)
+    {
+        holdem::CategoryComposition report;
+        report.board = weights.board;
+        report.available = false;
+        report.reason = "made-hand categories require a five-card board";
+        return report;
+    }
+    if (weights.oop.empty() && weights.ip.empty())
+    {
+        holdem::CategoryComposition report;
+        report.board = weights.board;
+        report.available = true;
+        return report;
+    }
+    const holdem::Range oop = weights.oop.empty()
+        ? holdem::Range{}
+        : holdem::Range::parse(weights.oop);
+    const holdem::Range ip = weights.ip.empty()
+        ? holdem::Range{}
+        : holdem::Range::parse(weights.ip);
+    return holdem::category_composition(weights.board, oop, ip);
 }
 
 const streets::StreetConfig& StreetBatchSolver::config() const

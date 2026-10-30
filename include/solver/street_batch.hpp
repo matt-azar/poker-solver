@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/street_game.hpp"
+#include "poker/hand_categories.hpp"
 #include "solver/budget_resource.hpp"
 #include "solver/trainer.hpp"
 #include "solver/training_state.hpp"
@@ -306,6 +307,9 @@ public:
         const std::string& node_id,
         const std::atomic<bool>* cancel = nullptr) const;
     StreetReachWeights reaching_weights(const std::string& node_id) const;
+    // Made-hand category fractions from strategy-weighted reaches. Available
+    // only when the node's board has five cards. Incomplete boards are omitted.
+    holdem::CategoryComposition category_composition(const std::string& node_id) const;
     const streets::StreetConfig& config() const;
     TrainingTables training_tables() const;
     // Rebuilds nothing. The tree must already match the combo order and action counts.

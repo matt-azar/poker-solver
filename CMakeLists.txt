@@ -24,6 +24,7 @@ add_library(poker_solver_core STATIC
     src/explorer/checkpoint.cpp
     src/poker/card.cpp
     src/poker/hand_eval.cpp
+    src/poker/hand_categories.cpp
     src/poker/range.cpp
 )
 target_include_directories(poker_solver_core PUBLIC
@@ -70,6 +71,7 @@ add_executable(poker_solver_tests
     tests/unit/test_cfr.cpp
     tests/unit/test_leduc.cpp
     tests/unit/test_holdem.cpp
+    tests/unit/test_hand_categories.cpp
     tests/unit/test_river.cpp
     tests/unit/test_payoff.cpp
     tests/unit/test_rake.cpp

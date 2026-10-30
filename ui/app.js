@@ -11,6 +11,7 @@ let riverExport = null;
 let nodeValues = null;
 let valueToken = 0;
 let valuePoll = null;
+let categoryToken = 0;
 let selected = null;
 let drag = null;
 
@@ -673,6 +674,7 @@ $("open-solution").addEventListener("click", openSolution);
 $("config-file").addEventListener("change", loadConfigFile);
 $("compare-runouts").addEventListener("click", compareRunouts);
 $("node-equity").addEventListener("click", calculateEquity);
+$("node-categories").addEventListener("click", loadCategories);
 
 $("export").addEventListener("click", () => {
   let payload = currentNode || riverExport;
@@ -759,6 +761,7 @@ function dropDisplayedSolution() {
 function clearValues() {
   nodeValues = null;
   valueToken += 1;
+  categoryToken += 1;
   if (valuePoll) {
     clearInterval(valuePoll);
     valuePoll = null;
@@ -770,6 +773,14 @@ function clearValues() {
   const equity = $("equity-note");
   if (equity) {
     equity.textContent = "";
+  }
+  const categoriesNote = $("categories-note");
+  if (categoriesNote) {
+    categoriesNote.textContent = "";
+  }
+  const categories = $("categories");
+  if (categories) {
+    categories.innerHTML = "";
   }
   const runout = $("runout");
   if (runout) {
@@ -872,8 +883,12 @@ function render(status) {
   $("calculate-ev").hidden = true;
   $("compare-runouts").hidden = true;
   $("node-equity").hidden = !riverExport;
+  $("node-categories").hidden = !riverExport;
   if (!valuePoll) {
     $("ev-note").textContent = "";
+  }
+  if (riverExport) {
+    loadCategories();
   }
   renderLines(view);
 }
@@ -894,10 +909,15 @@ function renderNode(node) {
   $("calculate-ev").hidden = node.kind !== "decision";
   $("compare-runouts").hidden = node.kind !== "chance";
   $("node-equity").hidden = false;
+  const boardComplete = Array.isArray(node.board) && node.board.length === 5;
+  $("node-categories").hidden = !boardComplete;
   if (!valuePoll) {
     $("ev-note").textContent = nodeValues && nodeValues.node_id === node.node_id && !nodeValues.pending
       ? evSummary(nodeValues)
       : "";
+  }
+  if (boardComplete) {
+    loadCategories();
   }
   fillFrequency(node);
   if (node.kind === "decision") {
@@ -1440,6 +1460,84 @@ function calculateEquity() {
       + Number(body.oop_equity).toFixed(4) + " · IP " + Number(body.ip_equity).toFixed(4)
       + ". This is not chip EV.";
   });
+}
+
+function renderCategories(body) {
+  const host = $("categories");
+  const note = $("categories-note");
+  if (!host || !note) {
+    return;
+  }
+  host.innerHTML = "";
+  if (!body.available) {
+    note.textContent = body.reason || "Made-hand categories require a five-card board.";
+    return;
+  }
+  note.textContent = "Made-hand categories on the current board (not draws). Fractions of each player's positive reach mass.";
+  const names = body.categories || [];
+  const table = document.createElement("table");
+  table.className = "categories";
+  const head = document.createElement("tr");
+  ["Category", "OOP", "IP"].forEach((label) => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    head.appendChild(th);
+  });
+  table.appendChild(head);
+  names.forEach((name, index) => {
+    const oop = body.oop && body.oop.defined ? Number(body.oop.fractions[index] || 0) : null;
+    const ip = body.ip && body.ip.defined ? Number(body.ip.fractions[index] || 0) : null;
+    if ((oop === null || oop === 0) && (ip === null || ip === 0)) {
+      return;
+    }
+    const row = document.createElement("tr");
+    const label = document.createElement("td");
+    label.textContent = name;
+    row.appendChild(label);
+    [oop, ip].forEach((value) => {
+      const cell = document.createElement("td");
+      if (value === null) {
+        cell.textContent = "—";
+      } else {
+        const bar = document.createElement("span");
+        bar.className = "bar";
+        bar.style.width = Math.max(0, Math.min(1, value)) * 72 + "px";
+        cell.appendChild(bar);
+        cell.appendChild(document.createTextNode(" " + (value * 100).toFixed(1) + "%"));
+      }
+      row.appendChild(cell);
+    });
+    table.appendChild(row);
+  });
+  host.appendChild(table);
+}
+
+async function loadCategories() {
+  if (!solutionId) {
+    return;
+  }
+  const token = ++categoryToken;
+  const solution = solutionId;
+  const nodeId = currentNode ? currentNode.node_id : "root";
+  const path = currentNode
+    ? "/api/solutions/" + solution + "/nodes/" + nodeId + "/categories"
+    : "/api/solutions/" + solution + "/categories";
+  const note = $("categories-note");
+  if (note) {
+    note.textContent = "Loading made-hand categories…";
+  }
+  const response = await fetch(path);
+  const body = await readBody(response);
+  if (!shouldApply(token, categoryToken, solution, solutionId)) {
+    return;
+  }
+  if (!response.ok) {
+    if (note) {
+      note.textContent = body.error || "Category request failed";
+    }
+    return;
+  }
+  renderCategories(body);
 }
 
 function lineOf(infoset) {

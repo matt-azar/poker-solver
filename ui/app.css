@@ -202,13 +202,16 @@ label[hidden] {
   margin: 8px 0;
 }
 
-table.runout {
+table.runout,
+table.categories {
   border-collapse: collapse;
   margin: 8px 0 12px;
 }
 
 table.runout th,
-table.runout td {
+table.runout td,
+table.categories th,
+table.categories td {
   border-bottom: 1px solid #d9d3c7;
   padding: 4px 10px;
   text-align: left;
@@ -216,6 +219,19 @@ table.runout td {
 
 table.runout th {
   cursor: pointer;
+}
+
+table.categories .bar {
+  display: inline-block;
+  height: 8px;
+  min-width: 0;
+  background: #1c1915;
+  vertical-align: middle;
+}
+
+#categories-note {
+  color: #5c564c;
+  font-size: 13px;
 }
 
 @media (max-width: 800px) {

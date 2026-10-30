@@ -14,6 +14,7 @@ int main()
     run_cfr_tests();
     run_leduc_tests();
     run_holdem_tests();
+    run_hand_category_tests();
     run_river_tests();
     run_payoff_tests();
     run_budget_tests();
