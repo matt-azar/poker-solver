@@ -44,7 +44,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Weighted range editing, range libraries, board input | Basic configuration; complete visual workflow needed | M2–M3 |
 | Configurable betting trees and visual line editing | Basic parameters exist | M3 |
 | Stop-and-keep, pause/continue, accuracy stopping | Cancellation and accuracy stopping exist; CLI `--time-limit` stops at an iteration boundary; `eval_every` / `--eval-every` sets Nash-gap eval cadence; accuracy evals record `nash_gap_history`; pause/continue still distinct | M4 |
-| Full saves, resumable checkpoints, compact saves, lazy load | Missing | M5, M10 |
+| Full saves, resumable checkpoints, compact saves, lazy load | One versioned `PSOL` save/open/continue works (HTTP + GUI); compact/lazy formats still missing | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Small benchmark set; parity unproven | M6 |
 | Full and combo node locking, editing, re-solving | Missing | M7 |
 | Rake, ICM, opponent incentives | Pot-rake model + tests on `ChipPayoff` (`docs/RAKE.md`); ICM/incentives and street/river wiring still missing | M8 |
@@ -229,7 +229,7 @@ Choose explicit release service-level targets after measuring a representative c
 
 The main path is M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0 and includes joining the five-card production path to the shared postflop tree before the two current kernels are scaled separately. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after all required features land.
 
-Check-down equity, equity-distribution buckets, made-hand category composition on five-card boards, stop-and-keep, one resumable solution file, runout EV comparison, and a bounded recent-files list for Save/Open paths are implemented and covered by the unit tests. They are not a completed M2 or a Pio parity claim. Draw/backdoor categories, node locking, and compact saves are still ahead.
+Check-down equity, equity-distribution buckets, made-hand category composition on five-card boards, stop-and-keep, one resumable solution file, runout EV comparison, and a bounded recent-files list for Save/Open paths, and saved street-config templates are implemented and covered by the unit tests. They are not a completed M2 or a Pio parity claim. Draw/backdoor categories, node locking, and compact saves are still ahead.
 
 For each milestone: write a small specification, identify invariants and failure modes, implement reviewable commits, run relevant checks, demonstrate the user workflow, then update the ledger with exact evidence. Keep changes on the development branch unless explicitly instructed otherwise. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 

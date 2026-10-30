@@ -48,3 +48,4 @@ void run_checkpoint_tests();
 void run_strategy_report_tests();
 void run_equity_dist_tests();
 void run_recent_files_tests();
+void run_template_tests();
