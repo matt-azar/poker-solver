@@ -484,6 +484,8 @@ $("calculate-ev").addEventListener("click", () => {
 $("save-solution").addEventListener("click", saveSolution);
 $("open-solution").addEventListener("click", openSolution);
 $("config-file").addEventListener("change", loadConfigFile);
+$("load-template").addEventListener("click", loadSelectedTemplate);
+populateTemplates();
 $("compare-runouts").addEventListener("click", compareRunouts);
 $("node-equity").addEventListener("click", calculateEquity);
 
@@ -1058,12 +1060,7 @@ async function openSolution() {
   $("continue").disabled = !body.solution_id;
 }
 
-async function loadConfigFile(event) {
-  const file = event.target.files && event.target.files[0];
-  if (!file) {
-    return;
-  }
-  const text = await file.text();
+async function applyConfigText(text, label) {
   const response = await fetch("/api/config", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -1102,7 +1099,52 @@ async function loadConfigFile(event) {
     $("ip-bets").value = joinSizes(body.ip_bets);
   }
   updateSpot();
-  $("message").textContent = "Loaded " + body.kind + " configuration";
+  $("message").textContent = "Loaded " + (label || (body.kind + " configuration"));
+}
+
+async function loadConfigFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) {
+    return;
+  }
+  await applyConfigText(await file.text());
+}
+
+async function populateTemplates() {
+  const select = $("template-select");
+  if (!select) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/templates");
+    if (!response.ok) {
+      return;
+    }
+    const templates = await response.json();
+    templates.forEach((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.id;
+      option.textContent = entry.name || entry.id;
+      select.appendChild(option);
+    });
+  } catch (error) {
+    // Templates are optional when the explorer has no configs/templates tree.
+  }
+}
+
+async function loadSelectedTemplate() {
+  const id = $("template-select").value;
+  if (!id) {
+    $("message").textContent = "Choose a template first";
+    return;
+  }
+  const response = await fetch("/api/templates/" + encodeURIComponent(id));
+  const body = await readBody(response);
+  if (!response.ok) {
+    $("message").textContent = body.error || "Template failed";
+    return;
+  }
+  await applyConfigText(body.text, "template " + id);
 }
 
 function renderRunout(page) {

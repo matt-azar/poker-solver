@@ -229,7 +229,7 @@ Choose explicit release service-level targets after measuring a representative c
 
 The main path is M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0 and includes joining the five-card production path to the shared postflop tree before the two current kernels are scaled separately. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after all required features land.
 
-Check-down equity, stop-and-keep, one resumable solution file, and runout EV comparison are implemented and covered by the unit tests. They are not a completed M2 or a Pio parity claim. Hand categories, node locking, and compact saves are still ahead.
+Check-down equity, stop-and-keep, one resumable solution file, and runout EV comparison are implemented and covered by the unit tests. They are not a completed M2 or a Pio parity claim. M3 evidence now includes curated `street-config 1` templates under `configs/templates` with explorer list/fetch endpoints and unit coverage for list, get, missing ids, and path-traversal rejection. Hand categories, node locking, and compact saves are still ahead.
 
 For each milestone: write a small specification, identify invariants and failure modes, implement reviewable commits, run relevant checks, demonstrate the user workflow, then update the ledger with exact evidence. Keep changes on the development branch unless explicitly instructed otherwise. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 

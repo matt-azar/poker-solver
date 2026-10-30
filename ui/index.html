@@ -68,6 +68,12 @@
     </label>
     <label class="wide">Solution file <input id="solution-path" placeholder="Save or open a .psol file" autocomplete="off"></label>
     <label class="wide">Configuration file <input id="config-file" type="file" accept=".txt,text/plain"></label>
+    <label class="wide">Load template
+      <select id="template-select">
+        <option value="">Choose a template…</option>
+      </select>
+      <button type="button" id="load-template">Load</button>
+    </label>
     <div class="actions">
       <button type="submit" id="run">Solve</button>
       <button type="button" id="continue" disabled>Continue</button>
