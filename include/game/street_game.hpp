@@ -3,12 +3,14 @@
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
+#include "solver/tree_edit.hpp"
 
 #include <cmath>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -73,6 +75,10 @@ struct StreetConfig
     int memory_mib = 1024;
     // Frozen-pass threads, including the caller. One keeps the serial walk.
     int threads = 1;
+    // Force/Remove filter legal actions at matching public histories during
+    // build and play. AddSize is stored here but not applied yet (sizes stay on
+    // the bet/raise vectors above).
+    poker::solver::TreeEditSet tree_edits{};
 };
 
 // Pot fraction that invests stack_left over streets_left equal called bets.
@@ -597,7 +603,213 @@ private:
         return text;
     }
 
-    Legal legal_actions(const State& state) const
+    // Compact tokens accepted by TreeEditSet (no spaces): c, f, call, b50, r100.
+    static std::string compact_action_token(
+        int code, int add, int street_total, bool all_in, bool facing)
+    {
+        if (code == 0)
+        {
+            return "f";
+        }
+        if (code == 1)
+        {
+            return facing ? "call" : "c";
+        }
+        std::string text = facing ? "r" + std::to_string(street_total) : "b" + std::to_string(add);
+        if (all_in)
+        {
+            text += "ai";
+        }
+        return text;
+    }
+
+    static bool token_matches_action(
+        std::string_view token, int code, int add, int street_total, bool all_in, bool facing)
+    {
+        if (token == chip_label(code, add, street_total, all_in, facing))
+        {
+            return true;
+        }
+        return token == compact_action_token(code, add, street_total, all_in, facing);
+    }
+
+    struct HistStep
+    {
+        int code = 0;
+        int add = 0;
+        int street_total = 0;
+        bool all_in = false;
+        bool facing = false;
+    };
+
+    bool path_matches_history(
+        const poker::solver::LinePath& path, const std::vector<HistStep>& history) const
+    {
+        if (path.size() != history.size())
+        {
+            return false;
+        }
+        for (std::size_t i = 0; i < path.steps.size(); ++i)
+        {
+            const HistStep& step = history[i];
+            if (!token_matches_action(
+                    path.steps[i].label, step.code, step.add, step.street_total, step.all_in,
+                    step.facing))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    int find_outcome_for_card(const State& chance, int card) const
+    {
+        int cards[52];
+        const int count = remaining_cards(chance, cards);
+        for (int outcome = 0; outcome < count; ++outcome)
+        {
+            if (cards[outcome] == card)
+            {
+                return outcome;
+            }
+        }
+        return -1;
+    }
+
+    // Replay prior betting actions (with edits applied) to recover the public
+    // label sequence that TreeEdit paths match against.
+    std::vector<HistStep> public_history_steps(const State& target) const
+    {
+        std::vector<HistStep> history;
+        if (target.n_hist == 0)
+        {
+            return history;
+        }
+        State cursor;
+        cursor.pair_index = target.pair_index;
+        cursor.pot = config_.pot;
+        cursor.acting = config_.first_to_act;
+        cursor.street = 0;
+        int used = 0;
+        while (used < target.n_hist)
+        {
+            if (cursor.terminal)
+            {
+                throw std::logic_error("street history replay hit a terminal early");
+            }
+            if (is_chance(cursor))
+            {
+                if (cursor.chance_kind == 2)
+                {
+                    const int outcome = find_outcome_for_card(cursor, target.turn_card);
+                    if (outcome < 0)
+                    {
+                        throw std::logic_error("street history replay missing turn card");
+                    }
+                    cursor = child_chance(cursor, outcome);
+                    continue;
+                }
+                if (cursor.chance_kind == 3)
+                {
+                    const int outcome = find_outcome_for_card(cursor, target.river_card);
+                    if (outcome < 0)
+                    {
+                        throw std::logic_error("street history replay missing river card");
+                    }
+                    cursor = child_chance(cursor, outcome);
+                    continue;
+                }
+                throw std::logic_error("street history replay at unexpected chance");
+            }
+            Legal legal = enumerate_legal_actions(cursor);
+            apply_tree_edits(legal, cursor, history);
+            const int action = target.hist[used++];
+            if (action < 0 || action >= legal.count)
+            {
+                throw std::logic_error("street history replay action out of range");
+            }
+            const bool facing = cursor.committed > cursor.contrib[cursor.acting];
+            const int street_total = cursor.contrib[cursor.acting] + legal.add[action];
+            const bool all_in =
+                legal.code[action] != 0 && street_total == config_.stack && legal.add[action] > 0;
+            HistStep step;
+            step.code = legal.code[action];
+            step.add = legal.add[action];
+            step.street_total = street_total;
+            step.all_in = all_in;
+            step.facing = facing;
+            history.push_back(step);
+            cursor = apply(cursor, legal, action);
+        }
+        return history;
+    }
+
+    void apply_tree_edits(
+        Legal& legal, const State& state, const std::vector<HistStep>& history) const
+    {
+        if (config_.tree_edits.empty())
+        {
+            return;
+        }
+        for (const poker::solver::LineEdit& edit : config_.tree_edits.edits)
+        {
+            if (edit.kind == poker::solver::LineEditKind::AddSize)
+            {
+                continue;
+            }
+            if (!path_matches_history(edit.path, history))
+            {
+                continue;
+            }
+            if (edit.kind == poker::solver::LineEditKind::Force)
+            {
+                int keep = -1;
+                for (int i = 0; i < legal.count; ++i)
+                {
+                    const bool facing = state.committed > state.contrib[state.acting];
+                    const int street_total = state.contrib[state.acting] + legal.add[i];
+                    const bool all_in =
+                        legal.code[i] != 0 && street_total == config_.stack && legal.add[i] > 0;
+                    if (token_matches_action(
+                            edit.action, legal.code[i], legal.add[i], street_total, all_in, facing))
+                    {
+                        keep = i;
+                        break;
+                    }
+                }
+                if (keep < 0)
+                {
+                    continue;
+                }
+                legal.code[0] = legal.code[keep];
+                legal.add[0] = legal.add[keep];
+                legal.count = 1;
+                continue;
+            }
+            if (edit.kind == poker::solver::LineEditKind::Remove)
+            {
+                Legal filtered;
+                for (int i = 0; i < legal.count; ++i)
+                {
+                    const bool facing = state.committed > state.contrib[state.acting];
+                    const int street_total = state.contrib[state.acting] + legal.add[i];
+                    const bool all_in =
+                        legal.code[i] != 0 && street_total == config_.stack && legal.add[i] > 0;
+                    if (token_matches_action(
+                            edit.action, legal.code[i], legal.add[i], street_total, all_in, facing))
+                    {
+                        continue;
+                    }
+                    filtered.code[filtered.count] = legal.code[i];
+                    filtered.add[filtered.count] = legal.add[i];
+                    ++filtered.count;
+                }
+                legal = filtered;
+            }
+        }
+    }
+
+    Legal enumerate_legal_actions(const State& state) const
     {
         if (is_chance(state) || state.terminal)
         {
@@ -769,6 +981,17 @@ private:
             legal.code[legal.count] = 2;
             legal.add[legal.count] = amounts[i];
             ++legal.count;
+        }
+        return legal;
+    }
+
+    Legal legal_actions(const State& state) const
+    {
+        Legal legal = enumerate_legal_actions(state);
+        if (!config_.tree_edits.empty())
+        {
+            const std::vector<HistStep> history = public_history_steps(state);
+            apply_tree_edits(legal, state, history);
         }
         return legal;
     }

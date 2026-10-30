@@ -30,6 +30,8 @@ An all-in threshold is a fraction of the starting stack. A size that would commi
 
 Two listed sizes that round to the same chip amount are one action. A raise increment smaller than the previous raise is omitted. The first bet of a street only has to add at least one chip. An all-in shorter than the minimum raise is kept when all-ins are allowed, and omitted when they are not.
 
+`StreetConfig::tree_edits` holds a `TreeEditSet`. At each decision, Force keeps only the named action when the public history labels match the edit path, and Remove drops that action label. Paths match `action_label` strings (for example `Check`, `Bet 50`) and the compact tokens TreeEditSet already uses (`c`, `b50`, `r100`). AddSize entries are kept on the config but are not applied during build yet.
+
 ## Canonical configuration
 
 `format_street_config` writes one `street-config 1` document for a `StreetConfig`. `parse_street_config` reads that document. Formatting the parsed value again produces the same text. A `StreetGame` built from the parsed config has the same deals, information sets, decisions, terminals, and opening action labels as a game built from the original.
