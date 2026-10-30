@@ -251,6 +251,9 @@ public:
     // The stats iteration count and runtime are not filled in yet.
     using SolveProgress = void (*)(int iterations, const SolveStats& stats, void* context);
 
+    // Honors SolveConfig::locks: after regret matching, locked rows replace the
+    // current strategy for matching public nodes (infoset_id == node index) and
+    // SelectedCombos hand indices. Null locks keep today's unlocked path.
     SolveStats solve(
         const SolveConfig& config,
         Algorithm algorithm,
@@ -258,6 +261,7 @@ public:
         void* progress_context = nullptr);
     // One public-tree pass per player. The strategy is frozen for the pass and
     // CFR+ floors only the player who just accumulated regret.
+    // Same SolveConfig::locks contract as solve().
     SolveStats solve_frozen(
         const SolveConfig& config,
         Algorithm algorithm,
