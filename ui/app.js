@@ -630,6 +630,7 @@ $("setup").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("message").textContent = "Solving…";
   $("run").disabled = true;
+  $("pause").disabled = false;
   $("stop").disabled = false;
   const body = {
     board: boardCards($("board").value),
@@ -669,6 +670,7 @@ $("setup").addEventListener("submit", async (event) => {
     const failed = await response.json().catch(() => ({error: response.statusText}));
     $("message").textContent = failed.error || "Solve failed";
     $("run").disabled = false;
+    $("pause").disabled = true;
     $("stop").disabled = true;
     return;
   }
@@ -686,6 +688,7 @@ $("continue").addEventListener("click", async () => {
   $("message").textContent = "Continuing…";
   $("run").disabled = true;
   $("continue").disabled = true;
+  $("pause").disabled = false;
   $("stop").disabled = false;
   const response = await fetch("/api/solutions/" + solutionId + "/continue", {
     method: "POST",
@@ -697,6 +700,7 @@ $("continue").addEventListener("click", async () => {
     $("message").textContent = failed.error || "Continue failed";
     $("run").disabled = false;
     $("continue").disabled = false;
+    $("pause").disabled = true;
     $("stop").disabled = true;
     return;
   }
@@ -707,6 +711,11 @@ $("continue").addEventListener("click", async () => {
   }
   poll = setInterval(refresh, 250);
   refresh();
+});
+
+$("pause").addEventListener("click", async () => {
+  await fetch("/api/pause", {method: "POST"});
+  $("message").textContent = "Pausing after the current sample…";
 });
 
 $("stop").addEventListener("click", async () => {
@@ -782,8 +791,11 @@ async function refresh() {
     clearInterval(poll);
     poll = null;
     $("run").disabled = false;
+    $("pause").disabled = true;
     $("stop").disabled = true;
   }
+  $("pause").disabled = !status.running;
+  $("stop").disabled = !status.running;
   $("continue").disabled = Boolean(status.running) || !status.solution_id;
   $("save-solution").disabled = Boolean(status.running) || !status.solution_id;
   $("export").disabled = !(currentNode || riverExport);
@@ -883,6 +895,8 @@ function render(status) {
     $("message").textContent = status.error;
   } else if (status.running) {
     $("message").textContent = "Iteration " + status.iterations + (status.spot ? " · " + status.spot : "");
+  } else if (status.paused) {
+    $("message").textContent = "Paused at iteration " + status.iterations;
   } else if (status.cancelled) {
     $("message").textContent = "Stopped at iteration " + status.iterations;
   } else if (status.iterations > 0) {
