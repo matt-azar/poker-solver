@@ -73,6 +73,7 @@ add_executable(poker_solver_tests
     tests/unit/test_river.cpp
     tests/unit/test_payoff.cpp
     tests/unit/test_rake.cpp
+    tests/unit/test_icm.cpp
     tests/unit/test_streets.cpp
     tests/unit/test_budget.cpp
     tests/unit/test_session.cpp

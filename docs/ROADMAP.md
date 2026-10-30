@@ -47,7 +47,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Full saves, resumable checkpoints, compact saves, lazy load | Missing | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Small benchmark set; parity unproven | M6 |
 | Full and combo node locking, editing, re-solving | Missing | M7 |
-| Rake, ICM, opponent incentives | Pot-rake model + tests on `ChipPayoff` (`docs/RAKE.md`); ICM/incentives and street/river wiring still missing | M8 |
+| Rake, ICM, opponent incentives | Pot-rake on `ChipPayoff` (`docs/RAKE.md`); ICM calculator + HU chip→ICM adapter with tests (`docs/ICM.md`); incentives and street/river wiring still missing | M8 |
 | Turn/river and multi-flop aggregation, filtered reports | Missing | M9 |
 | Scriptable engine, durable batch queue, exports | Basic endpoints/CLI; production coverage missing | M9 |
 | Drill trainer, packs, session statistics, hand histories | Missing | M11 |
@@ -143,9 +143,9 @@ Add baseline-versus-modified comparison: strategy changes, both-player EV change
 
 ### M8 — Rake, ICM and opponent incentives
 
-The dual-player payoff abstraction is in place: `PlayerPayoff` holds both utilities, and `ChipPayoff` reproduces today's root-centered chip rule with `utility[1] == -utility[0]`. `RiverGame::terminal_payoff` uses that adapter; CFR loops still consume the player-0 scalar. Pot-rake rate/cap collection (whole-chip floor, optional cap) is implemented on `ChipPayoff` with pinned zero-rake and positive-rake fixtures in `docs/RAKE.md`; it is not yet passed through the street/river solve path. ICM and incentives still need both players' actual utilities. Each best response must maximize its own utility.
+The dual-player payoff abstraction is in place: `PlayerPayoff` holds both utilities, and `ChipPayoff` reproduces today's root-centered chip rule with `utility[1] == -utility[0]`. `RiverGame::terminal_payoff` uses that adapter; CFR loops still consume the player-0 scalar. Pot-rake rate/cap collection (whole-chip floor, optional cap) is implemented on `ChipPayoff` with pinned zero-rake and positive-rake fixtures in `docs/RAKE.md`; it is not yet passed through the street/river solve path. A standalone Malmuth-Harville ICM calculator (`icm_equities`) and HU `IcmPayoff::from_chip_terminal` adapter map chip outcomes to ICM equity deltas with pinned fixtures in `docs/ICM.md`; they are not in the live solve path. Incentives still need both players' actual utilities. Each best response must maximize its own utility.
 
-Wire rake into the solve path next. Implement tournament utility tables and an ICM calculator/import path with stacks, payouts and interpolation validation. Then add documented action/category/runout incentive rules, previews, scenario identity and persistence. Keep chip EV and modeled utility separately labeled.
+Wire rake into the solve path next. Attach tournament utility tables to street/river terminals (stacks, payouts, interpolation validation). Then add documented action/category/runout incentive rules, previews, scenario identity and persistence. Keep chip EV and modeled utility separately labeled.
 
 Pio exposes rake/ICM configuration and opponent profiling [S6, S7]. State convergence claims for the game that was solved. Zero-sum CFR guarantees cover the zero-sum chip model. Use both unilateral deviation gains as diagnostics, and check a general-sum model on its own fixtures before calling it supported. Check a constant-sum surrogate against the incentives it is meant to represent.
 
