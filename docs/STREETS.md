@@ -87,6 +87,11 @@ street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in 
 street_solver --board Ah,Kd,7c,4s --pot 100 --stack 300 --oop-range QcQd --ip-range JcJd --geometric --iterations 200
 street_solver --board Ah,Kd,7c,4s,2h --oop-range AcAd,5c5d --ip-range KsKc --oop-bets 1 --no-all-in --max-raises 1 --iterations 40
 street_solver --board Ah,Kd,7c --oop-donk 40c --oop-bets 1 --ip-bets 0.5 --no-all-in --max-raises 1 --iterations 1
+street_solver --config configs/street_default.txt --iterations 40 --report report.txt
 ```
 
 The default is the turn lock above, solved on the public tree. `configs/street_default.txt` is that same spot as a `street-config 1` document. `--reference` solves the same spot by walking `StreetGame`. The reported Nash gap is NashConv.
+
+## Strategy report
+
+`--report FILE` writes a `strategy-report 1` document after the solve. Use `-` for stdout. The file is a line-oriented schema: board, pot, stack, algorithm, iterations, nash_gap, weighting, root-player, and one `root-action LABEL P` line per legal root action. On the public or frozen tree, root probabilities are the CFR average strategy mixed with **reach** weights across the acting player's hands at the root. The reference enumerator path writes the same summary fields but omits root-action lines. This is a script-facing export, not a batch queue.

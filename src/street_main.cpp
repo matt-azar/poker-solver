@@ -3,6 +3,7 @@
 #include "poker/card.hpp"
 #include "poker/range.hpp"
 #include "solver/street_batch.hpp"
+#include "solver/strategy_report.hpp"
 #include "solver/trainer.hpp"
 
 #include <cctype>
@@ -33,9 +34,14 @@ void print_usage(const char* argv0)
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
+<<<<<<< HEAD
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
               << " [--memory-mib N] [--threads N]"
               << " [--reference] [--frozen]\n";
+=======
+              << " [--accuracy 0.05] [--memory-mib N] [--threads N]"
+              << " [--reference] [--frozen] [--report file | -]\n";
+>>>>>>> origin/cursor/strategy-report-c006
 }
 
 std::string read_config_text(const std::string& path)
@@ -152,6 +158,56 @@ std::string board_text(const std::vector<int>& board)
     return text;
 }
 
+poker::solver::StrategyReport make_base_report(
+    const poker::streets::StreetConfig& config,
+    poker::solver::Algorithm algorithm,
+    const poker::solver::SolveStats& stats)
+{
+    poker::solver::StrategyReport report;
+    report.board = board_text(config.board);
+    report.pot = config.pot;
+    report.stack = config.stack;
+    report.algorithm = poker::solver::algorithm_name(algorithm);
+    report.iterations = stats.iterations;
+    report.has_nash_gap = true;
+    report.nash_gap = stats.nash_gap;
+    report.weighting = "reach";
+    report.root_player = config.first_to_act;
+    return report;
+}
+
+void fill_root_from_inspection(
+    poker::solver::StrategyReport& report,
+    const poker::solver::StreetInspection& view)
+{
+    if (view.kind != "decision")
+    {
+        return;
+    }
+    report.root_player = view.player;
+    report.weighting = "reach";
+    std::vector<std::string> labels;
+    labels.reserve(view.actions.size());
+    for (const poker::solver::StreetInspectAction& action : view.actions)
+    {
+        labels.push_back(action.label);
+    }
+    std::vector<double> reaches;
+    std::vector<std::vector<double>> strategies;
+    reaches.reserve(view.hands.size());
+    strategies.reserve(view.hands.size());
+    for (const poker::solver::StreetInspectHand& hand : view.hands)
+    {
+        if (!hand.structural || hand.strategy.size() != labels.size())
+        {
+            continue;
+        }
+        reaches.push_back(hand.reach);
+        strategies.push_back(hand.strategy);
+    }
+    report.root_actions = poker::solver::aggregate_reach_weighted(labels, reaches, strategies);
+}
+
 void prepare_report_format()
 {
     std::cout.setf(std::ios::fmtflags(0), std::ios::floatfield);
@@ -232,6 +288,7 @@ int main(int argc, char** argv)
         double time_limit = -1.0;
         bool reference = false;
         bool frozen = false;
+        std::string report_path;
         poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
 
         for (int i = 1; i < argc; ++i)
@@ -248,6 +305,10 @@ int main(int argc, char** argv)
             if (arg == "--config")
             {
                 config = poker::streets::parse_street_config(read_config_text(need("--config")));
+            }
+            else if (arg == "--report")
+            {
+                report_path = need("--report");
             }
             else if (arg == "--board")
             {
@@ -498,6 +559,8 @@ int main(int argc, char** argv)
         std::uint64_t terminals = 0;
         int public_decisions = 0;
         poker::solver::StreetMemoryReport memory;
+        poker::solver::StrategyReport strategy_report;
+        bool have_strategy_report = false;
         const char* solver_name = "public";
         if (reference)
         {
@@ -509,6 +572,11 @@ int main(int argc, char** argv)
             decision_nodes = game.decision_node_count();
             terminals = game.terminal_count();
             solver_name = "reference";
+            if (!report_path.empty())
+            {
+                strategy_report = make_base_report(config, algorithm, stats);
+                have_strategy_report = true;
+            }
         }
         else
         {
@@ -555,6 +623,13 @@ int main(int argc, char** argv)
             terminals = solver.terminal_count();
             public_decisions = solver.public_decisions();
             memory = solver.memory_report();
+            if (!report_path.empty())
+            {
+                strategy_report = make_base_report(config, algorithm, stats);
+                fill_root_from_inspection(
+                    strategy_report, solver.inspect_node(solver.root_node_id()));
+                have_strategy_report = true;
+            }
         }
 
         std::cout << "phase: final\n";
@@ -601,6 +676,11 @@ int main(int argc, char** argv)
         std::cout << "deterministic: yes (runouts enumerated; no RNG)\n";
         std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
         std::cout.flush();
+
+        if (have_strategy_report)
+        {
+            poker::solver::write_strategy_report(report_path, strategy_report);
+        }
     }
     catch (const std::exception& error)
     {
