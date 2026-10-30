@@ -872,6 +872,82 @@ void append_player(std::string& out, const PlayerShowdown& player)
     out += "]}";
 }
 
+std::vector<EquityDistributionBucket> empty_equity_distribution()
+{
+    std::vector<EquityDistributionBucket> buckets(
+        static_cast<std::size_t>(kEquityDistributionBuckets));
+    for (int i = 0; i < kEquityDistributionBuckets; ++i)
+    {
+        buckets[static_cast<std::size_t>(i)].lo =
+            static_cast<double>(i) / static_cast<double>(kEquityDistributionBuckets);
+        buckets[static_cast<std::size_t>(i)].hi =
+            static_cast<double>(i + 1) / static_cast<double>(kEquityDistributionBuckets);
+        buckets[static_cast<std::size_t>(i)].weight = 0.0;
+    }
+    return buckets;
+}
+
+std::vector<EquityDistributionBucket> equity_distribution(
+    std::span<const double> equities,
+    std::span<const double> weights)
+{
+    if (equities.size() != weights.size())
+    {
+        throw std::invalid_argument("equity_distribution: equities and weights size mismatch");
+    }
+    std::vector<EquityDistributionBucket> buckets = empty_equity_distribution();
+    for (std::size_t i = 0; i < equities.size(); ++i)
+    {
+        const double weight = weights[i];
+        if (!std::isfinite(weight) || weight < 0.0)
+        {
+            throw EquityError(EquityFailure::InvalidWeight, "equity_distribution: weight must be finite and nonnegative");
+        }
+        if (weight == 0.0)
+        {
+            continue;
+        }
+        double equity = equities[i];
+        if (!std::isfinite(equity))
+        {
+            throw EquityError(EquityFailure::InvalidInput, "equity_distribution: equity must be finite");
+        }
+        if (equity < 0.0)
+        {
+            equity = 0.0;
+        }
+        else if (equity > 1.0)
+        {
+            equity = 1.0;
+        }
+        int index = static_cast<int>(equity * static_cast<double>(kEquityDistributionBuckets));
+        if (index >= kEquityDistributionBuckets)
+        {
+            index = kEquityDistributionBuckets - 1;
+        }
+        buckets[static_cast<std::size_t>(index)].weight += weight;
+    }
+    return buckets;
+}
+
+std::vector<EquityDistributionBucket> equity_distribution(const PlayerShowdown& player)
+{
+    std::vector<double> equities;
+    std::vector<double> weights;
+    equities.reserve(player.combos.size());
+    weights.reserve(player.combos.size());
+    for (const ComboShowdown& row : player.combos)
+    {
+        if (!row.defined || row.input_weight <= 0.0)
+        {
+            continue;
+        }
+        equities.push_back(row.equity);
+        weights.push_back(row.input_weight);
+    }
+    return equity_distribution(equities, weights);
+}
+
 std::string showdown_equity_json(
     const ShowdownEquity& equity,
     std::span<const int> board,

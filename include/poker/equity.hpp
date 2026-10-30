@@ -98,6 +98,31 @@ struct ShowdownEquity
     PlayerShowdown player1;
 };
 
+// Fixed check-down equity histogram over [0, 1]. Ten equal-width buckets:
+// [0, 0.1), [0.1, 0.2), ..., [0.8, 0.9), [0.9, 1.0]. The last bucket includes 1.
+// Bucket weights are the raw (unnormalized) nonnegative input masses that land
+// in that interval. Their sum equals the total finite nonnegative weight that
+// was counted. Equities outside [0, 1] are clamped. This is check-down equity,
+// not chip EV.
+inline constexpr int kEquityDistributionBuckets = 10;
+
+struct EquityDistributionBucket
+{
+    double lo = 0.0;
+    double hi = 0.0;
+    double weight = 0.0;
+};
+
+// equities and weights must have the same length. Weights must be finite and
+// nonnegative. Empty input yields ten zero-weight buckets.
+std::vector<EquityDistributionBucket> equity_distribution(
+    std::span<const double> equities,
+    std::span<const double> weights);
+
+// Defined combos only, weighted by each combo's input_weight. Undefined or
+// zero-weight rows do not contribute.
+std::vector<EquityDistributionBucket> equity_distribution(const PlayerShowdown& player);
+
 // Board length is 3, 4, or 5. Weights must be finite and nonnegative.
 // An empty legal joint is a successful undefined result.
 ShowdownWork measure_showdown_work(

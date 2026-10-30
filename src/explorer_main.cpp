@@ -26,6 +26,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -1318,11 +1319,36 @@ std::string json_runout_values(
     return out;
 }
 
+void append_equity_distribution(
+    std::string& out,
+    const std::vector<poker::holdem::EquityDistributionBucket>& buckets)
+{
+    out += '[';
+    for (std::size_t i = 0; i < buckets.size(); ++i)
+    {
+        if (i != 0)
+        {
+            out += ',';
+        }
+        const poker::holdem::EquityDistributionBucket& bucket = buckets[i];
+        out += "{\"lo\":";
+        out += format_number(bucket.lo);
+        out += ",\"hi\":";
+        out += format_number(bucket.hi);
+        out += ",\"weight\":";
+        out += format_number(bucket.weight);
+        out += '}';
+    }
+    out += ']';
+}
+
 std::string json_node_equity(
     const poker::solver::StreetNodeEquity& page,
     std::uint64_t solution_id,
     std::uint64_t job_id,
-    std::uint64_t generation)
+    std::uint64_t generation,
+    const std::vector<poker::holdem::EquityDistributionBucket>& oop_distribution = {},
+    const std::vector<poker::holdem::EquityDistributionBucket>& ip_distribution = {})
 {
     std::string out = "{\"pending\":false,\"kind\":\"equity\",";
     out += value_identity(solution_id, job_id, page.node_id, generation);
@@ -1336,6 +1362,13 @@ std::string json_node_equity(
     append_optional(out, page.defined, page.oop_equity);
     out += ",\"ip_equity\":";
     append_optional(out, page.defined, page.ip_equity);
+    // Check-down equity histogram over combos (not chip EV). Ten fixed buckets
+    // on [0, 1]; weights are raw input masses. equity_distribution is OOP;
+    // ip_equity_distribution is IP. Always present for stable clients.
+    out += ",\"equity_distribution\":";
+    append_equity_distribution(out, oop_distribution);
+    out += ",\"ip_equity_distribution\":";
+    append_equity_distribution(out, ip_distribution);
     out += ",\"query_seconds\":";
     out += format_number(page.query_seconds);
     out += '}';
@@ -2970,10 +3003,20 @@ int run(int argc, char** argv)
                 const poker::holdem::ShowdownEquity equity = poker::holdem::showdown_equity(
                     held->job.board, held->job.oop, held->job.ip, options);
                 page.defined = equity.joint_defined && equity.player0.defined && equity.player1.defined;
+                std::vector<poker::holdem::EquityDistributionBucket> oop_distribution;
+                std::vector<poker::holdem::EquityDistributionBucket> ip_distribution;
                 if (page.defined)
                 {
                     page.oop_equity = equity.player0.equity;
                     page.ip_equity = equity.player1.equity;
+                    oop_distribution = poker::holdem::equity_distribution(equity.player0);
+                    ip_distribution = poker::holdem::equity_distribution(equity.player1);
+                }
+                else
+                {
+                    oop_distribution = poker::holdem::equity_distribution(
+                        std::span<const double>{}, std::span<const double>{});
+                    ip_distribution = oop_distribution;
                 }
                 page.query_seconds = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - started).count();
@@ -2981,7 +3024,13 @@ int run(int argc, char** argv)
                 {
                     throw poker::solver::StreetValueCancelled();
                 }
-                return json_node_equity(page, request.solution_id, request.job_id, g_session.generation());
+                return json_node_equity(
+                    page,
+                    request.solution_id,
+                    request.job_id,
+                    g_session.generation(),
+                    oop_distribution,
+                    ip_distribution);
             }
             if (!held->street)
             {
@@ -3004,6 +3053,10 @@ int run(int argc, char** argv)
                 page.node_id = request.node_id;
                 page.units = poker::holdem::kEquityUnits;
                 page.model = poker::holdem::kEquityModel;
+                std::vector<poker::holdem::EquityDistributionBucket> oop_distribution =
+                    poker::holdem::equity_distribution(
+                        std::span<const double>{}, std::span<const double>{});
+                std::vector<poker::holdem::EquityDistributionBucket> ip_distribution = oop_distribution;
                 if (!weights.oop.empty() && !weights.ip.empty())
                 {
                     poker::holdem::ShowdownEquityOptions options;
@@ -3022,6 +3075,8 @@ int run(int argc, char** argv)
                     {
                         page.oop_equity = equity.player0.equity;
                         page.ip_equity = equity.player1.equity;
+                        oop_distribution = poker::holdem::equity_distribution(equity.player0);
+                        ip_distribution = poker::holdem::equity_distribution(equity.player1);
                     }
                 }
                 page.query_seconds = std::chrono::duration<double>(
@@ -3030,7 +3085,13 @@ int run(int argc, char** argv)
                 {
                     throw poker::solver::StreetValueCancelled();
                 }
-                return json_node_equity(page, request.solution_id, request.job_id, g_session.generation());
+                return json_node_equity(
+                    page,
+                    request.solution_id,
+                    request.job_id,
+                    g_session.generation(),
+                    oop_distribution,
+                    ip_distribution);
             }
             const poker::solver::StreetActionValues page = held->street->action_values(request.node_id, &cancel);
             if (cancel.load() || g_session.current_solution() != request.solution_id)
