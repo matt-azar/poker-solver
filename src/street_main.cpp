@@ -2,6 +2,7 @@
 #include "game/street_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
+#include "solver/memory_plan.hpp"
 #include "solver/street_batch.hpp"
 #include "solver/strategy_report.hpp"
 #include "solver/trainer.hpp"
@@ -36,7 +37,25 @@ void print_usage(const char* argv0)
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
               << " [--memory-mib N] [--threads N]"
-              << " [--reference] [--frozen] [--report file | -]\n";
+              << " [--plan-memory] [--reference] [--frozen] [--report file | -]\n";
+}
+
+void print_memory_plan(const poker::solver::StreetMemoryPlan& plan)
+{
+    std::cout << "phase: memory_plan\n";
+    std::cout << "estimated_peak_bytes: " << plan.estimated_peak_bytes << "\n";
+    std::cout << "memory_budget_bytes: " << plan.memory_budget_bytes << "\n";
+    std::cout << "deals: " << plan.deals << "\n";
+    std::cout << "infosets: " << plan.infosets << "\n";
+    if (plan.public_decisions > 0)
+    {
+        std::cout << "public_decisions: " << plan.public_decisions << "\n";
+    }
+    std::cout << "decision_nodes: " << plan.decision_nodes << "\n";
+    std::cout << "terminals: " << plan.terminals << "\n";
+    std::cout << "threads: " << plan.thread_count << "\n";
+    std::cout << "fits_budget: "
+              << (poker::solver::plan_fits_budget(plan) ? "yes" : "no") << "\n";
 }
 
 std::string read_config_text(const std::string& path)
@@ -284,6 +303,7 @@ int main(int argc, char** argv)
         bool reference = false;
         bool frozen = false;
         std::string report_path;
+        bool plan_memory = false;
         poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
 
         for (int i = 1; i < argc; ++i)
@@ -427,6 +447,10 @@ int main(int argc, char** argv)
             {
                 frozen = true;
             }
+            else if (arg == "--plan-memory")
+            {
+                plan_memory = true;
+            }
             else if (arg == "--all-in")
             {
                 config.allow_all_in = true;
@@ -516,6 +540,22 @@ int main(int argc, char** argv)
         if (config.ip_raise_sizes.empty() && config.ip_raise_multiples.empty())
         {
             config.ip_raise_sizes = config.ip_bet_sizes;
+        }
+        if (plan_memory)
+        {
+            if (reference)
+            {
+                throw std::invalid_argument("--plan-memory does not apply to --reference");
+            }
+            prepare_report_format();
+            const char* game_name = config.board.size() == 3 ? "flop" : "turn";
+            std::cout << "game: " << game_name << "\n";
+            std::cout << "board: " << board_text(config.board) << "\n";
+            std::cout << "pot: " << config.pot << "\n";
+            std::cout << "stack: " << config.stack << "\n";
+            print_memory_plan(poker::solver::plan_street_memory(config));
+            std::cout.flush();
+            return 0;
         }
         if (config.threads > 1 && !frozen)
         {
