@@ -55,12 +55,16 @@ betting effective stack for the hand — not tournament ICM stacks.
 `StreetConfig::icm` and `RiverConfig::icm` are optional. `street-config 1` /
 `river-config 1` emit `icm-stacks` / `icm-payouts` only when stacks are
 non-empty. CLI flags `--icm-stacks` and `--icm-payouts` set them on
-`street_solver` and `river_solver`.
+`street_solver` and `river_solver`. Explorer Job JSON uses flat keys
+`icm_stacks` and `icm_payouts` (same validation against job pot/stack); the
+GUI solve form sends them and status echoes them. Empty or omitted stacks
+leave the chip/rake path unchanged.
 
 When ICM is enabled, validate requires at least two seats, valid ICM inputs,
 and both hero stacks covering the worst chip swing `pot/2 + effective_stack`
 so `from_chip_terminal` cannot see a negative post-stack. Building a
 `StreetGame` / `RiverGame` or batch solver with a bad ICM config rejects it.
+Invalid explorer Job values are HTTP 400.
 
 ## Solve path
 
@@ -80,6 +84,6 @@ stacks with prize 100).
 
 Nash-gap and best-response helpers that assume chip zero-sum remain
 approximate under ICM (same caveat as positive rake). Multiway spectators are
-accepted by the adapter but the p0-scalar CFR path is HU-oriented; explorer
-Job/GUI ICM fields, incentives CFR hooks, dual-utility Nash-gap, action-EV
-unit labels, and PSOL ICM fields are out of scope here.
+accepted by the adapter but the p0-scalar CFR path is HU-oriented; incentives
+CFR hooks, dual-utility Nash-gap, action-EV unit labels, and dedicated PSOL
+ICM UI fields beyond config round-trip are out of scope here.
