@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Hold'em Study",
+  "productName": "Holdem Study",
   "version": "0.1.0",
   "identifier": "com.mattazar.holdem-study",
   "build": {

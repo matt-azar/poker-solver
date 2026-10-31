@@ -77,5 +77,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: holdem-study-windows-installer
-          path: desktop/src-tauri/target/release/bundle/nsis/*.exe
+          # productName is "Holdem Study" (no apostrophe) — NSIS rejects Hold'em in shortcuts.
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/nsis/**/*.exe
           if-no-files-found: error
+
+      - name: List bundle outputs (diagnostics)
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse desktop/src-tauri/target/release/bundle -ErrorAction SilentlyContinue |
+            Select-Object FullName, Length
