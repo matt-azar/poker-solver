@@ -339,13 +339,13 @@ After board-support masks (`#51` / `eaeffaf`), a short instrumented profile on t
 
 `cursor/engine-speed-3-e394` stores supported-hand index lists beside the `#51` masks, walks those lists in collect / fold / showdown, fuses worse/better/tie mass extraction after one `order_reach`, and caches same-combo twin indexes. Rank-order opponent weights are materialized once per prefix build. Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Short microbench only.
 
-### Reset-30 warm-cache vs engine-speed-2 tip (`9ce187e` / `#51`)
+### Reset-30 warm-cache vs latest `origin/main` (includes `#51`)
 
-`street_parallel_bench sample`, alternating before/after binaries, no walk profile:
+`street_parallel_bench sample`, alternating before/after binaries, no walk profile. Re-measured after rebase onto `main` with `#50,#51,#47,#49,#31`:
 
 | Case | Threads | Before median train (s) | After median train (s) | Speedup |
 | --- | ---: | ---: | ---: | ---: |
-| flop_paired | 4 | 2.283 | 1.605 | **1.42x** |
-| turn_half_pot | 4 | 1.163 | 0.803 | **1.45x** |
+| flop_paired | 4 | 2.289 | 1.678 | **1.36x** |
+| turn_half_pot | 4 | 1.162 | 0.839 | **1.39x** |
 
-Instrumented 3-iter profile at 1 thread: flop `showdown_seconds` 0.458 → 0.229, train 1.119 → 0.891; turn showdown 0.202 → 0.075, train 0.400 → 0.254. Allocated bytes rise with twin indexes, ordered-amount scratch, and per-board index lists (flop 4 threads 177,166,040 → 177,667,784). Parity pins at iteration 30: 1-vs-4 and after-vs-`#51` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,590 assertions, 0 failures.
+Instrumented 3-iter profile at 1 thread: flop `showdown_seconds` 0.437 → 0.230, train 1.141 → 0.916; turn showdown 0.185 → 0.074, train 0.405 → 0.263. Allocated bytes rise with twin indexes, ordered-amount scratch, and per-board index lists (flop 4 threads 177,166,040 → 177,667,784). Parity pins at iteration 30: 1-vs-4 and after-vs-`main` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,644 assertions, 0 failures.
