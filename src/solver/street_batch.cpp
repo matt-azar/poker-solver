@@ -7,6 +7,7 @@
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
 #include "solver/chip_payoff.hpp"
+#include "solver/dcfr.hpp"
 #include "solver/icm.hpp"
 #include "solver/incentives.hpp"
 #include "solver/regret_matching.hpp"
@@ -1182,10 +1183,14 @@ struct StreetBatchSolver::Engine
         Freeze = 0,
         Floor = 1,
         FloorAndFreeze = 2,
+        Discount = 3,
+        DiscountAndFreeze = 4,
     };
     PoolJob pool_job_ = PoolJob::Chance;
     SlotPass slot_pass_ = SlotPass::Freeze;
     int slot_floor_player_ = -1;
+    double slot_positive_discount_ = 1.0;
+    double slot_negative_discount_ = 0.5;
     double freeze_seconds_ = 0.0;
     int n0 = 0;
     int n1 = 0;
@@ -1203,6 +1208,8 @@ struct StreetBatchSolver::Engine
     mutable double evaluation_seconds_ = 0.0;
     double joint_mass_ = 0.0;
     int trained = 0;
+    bool algorithm_bound_ = false;
+    Algorithm bound_algorithm_ = Algorithm::CfrPlus;
     double joint_scale = 0.0;
     std::uint64_t board_mask = 0;
     // Non-owning; set for the duration of solve()/solve_frozen() from SolveConfig::locks.
@@ -2208,6 +2215,32 @@ struct StreetBatchSolver::Engine
         std::fill(strategy_sum.begin(), strategy_sum.end(), 0.0);
         average_ready = false;
         trained = 0;
+        algorithm_bound_ = false;
+        bound_algorithm_ = Algorithm::CfrPlus;
+    }
+
+    // Reject algorithm switches on trained state before any table mutation.
+    // A fresh solve (reset / run_*) clears the binding first.
+    void bind_training_algorithm(Algorithm algorithm)
+    {
+        if (trained > 0 && !algorithm_bound_)
+        {
+            throw std::invalid_argument(
+                "training algorithm is not bound on restored state; bind the solution algorithm first");
+        }
+        if (algorithm_bound_ && bound_algorithm_ != algorithm)
+        {
+            throw std::invalid_argument(
+                "cannot switch training algorithm on an existing trained state; start a new solve");
+        }
+        algorithm_bound_ = true;
+        bound_algorithm_ = algorithm;
+    }
+
+    void bind_algorithm_for_tables(Algorithm algorithm)
+    {
+        algorithm_bound_ = true;
+        bound_algorithm_ = algorithm;
     }
 
     void train_more(int count, Algorithm algorithm)
@@ -2217,10 +2250,15 @@ struct StreetBatchSolver::Engine
         {
             throw std::invalid_argument("multiple threads require the frozen street pass");
         }
+        if (algorithm == Algorithm::Dcfr)
+        {
+            throw std::invalid_argument("DCFR requires the frozen street pass");
+        }
         if (algorithm != Algorithm::VanillaCfr && algorithm != Algorithm::CfrPlus)
         {
             throw std::invalid_argument("the public street tree implements vanilla CFR and CFR+");
         }
+        bind_training_algorithm(algorithm);
         average_ready = false;
         const auto started = std::chrono::steady_clock::now();
         for (int step = 0; step < count; ++step)
@@ -4074,6 +4112,58 @@ struct StreetBatchSolver::Engine
         }
     }
 
+    // DCFR: discount every action entry of the updating player after the pass,
+    // including entries whose increment this pass was zero. Regret already holds
+    // the post-pass value; do not add the increment again.
+    void apply_discount_range(std::size_t begin, std::size_t end, int player)
+    {
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[index];
+            if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player != player)
+            {
+                continue;
+            }
+            for (int action = 0; action < slot.n_actions; ++action)
+            {
+                double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                cumulative = dcfr_discount_post_pass(
+                    cumulative, slot_positive_discount_, slot_negative_discount_);
+            }
+        }
+    }
+
+    void apply_discount_and_freeze_range(std::size_t begin, std::size_t end, int player)
+    {
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[index];
+            if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player == player)
+            {
+                for (int action = 0; action < slot.n_actions; ++action)
+                {
+                    double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                    cumulative = dcfr_discount_post_pass(
+                        cumulative, slot_positive_discount_, slot_negative_discount_);
+                }
+            }
+            regret_matching(
+                regret.data() + slot.base,
+                frozen_sigma.data() + slot.base,
+                slot.n_actions);
+            if (locks_ != nullptr)
+            {
+                const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
+                apply_lock_to_strategy(
+                    std::span<double>(
+                        frozen_sigma.data() + slot.base,
+                        static_cast<std::size_t>(slot.n_actions)),
+                    lock,
+                    static_cast<std::size_t>(slot.hand));
+            }
+        }
+    }
+
     void run_slot_range(int begin, int end)
     {
         const std::size_t first = static_cast<std::size_t>(begin);
@@ -4088,6 +4178,12 @@ struct StreetBatchSolver::Engine
             break;
         case SlotPass::FloorAndFreeze:
             apply_floor_and_freeze_range(first, last, slot_floor_player_);
+            break;
+        case SlotPass::Discount:
+            apply_discount_range(first, last, slot_floor_player_);
+            break;
+        case SlotPass::DiscountAndFreeze:
+            apply_discount_and_freeze_range(first, last, slot_floor_player_);
             break;
         }
     }
@@ -4529,6 +4625,36 @@ struct StreetBatchSolver::Engine
         }
     }
 
+    void discount_player(int player, double positive, double negative)
+    {
+        slot_positive_discount_ = positive;
+        slot_negative_discount_ = negative;
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        run_slot_pass(SlotPass::Discount, player);
+        if (profile_)
+        {
+            freeze_seconds_ += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+        }
+    }
+
+    void discount_and_freeze(int player, double positive, double negative)
+    {
+        slot_positive_discount_ = positive;
+        slot_negative_discount_ = negative;
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        run_slot_pass(SlotPass::DiscountAndFreeze, player);
+        if (profile_)
+        {
+            freeze_seconds_ += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+        }
+    }
+
     void frozen_pass(int updating, double weight_iter, Algorithm algorithm)
     {
         freeze_sigma();
@@ -4539,15 +4665,23 @@ struct StreetBatchSolver::Engine
         {
             floor_player(updating);
         }
+        else if (algorithm == Algorithm::Dcfr)
+        {
+            discount_player(updating, slot_positive_discount_, slot_negative_discount_);
+        }
     }
 
     void train_frozen(int count, Algorithm algorithm)
     {
         check_usable();
-        if (algorithm != Algorithm::VanillaCfr && algorithm != Algorithm::CfrPlus)
+        if (algorithm != Algorithm::VanillaCfr
+            && algorithm != Algorithm::CfrPlus
+            && algorithm != Algorithm::Dcfr)
         {
-            throw std::invalid_argument("the frozen street pass implements vanilla CFR and CFR+");
+            throw std::invalid_argument(
+                "the frozen street pass implements vanilla CFR, CFR+, and DCFR");
         }
+        bind_training_algorithm(algorithm);
         average_ready = false;
         ensure_ranks();
         ensure_support_masks();
@@ -4558,6 +4692,23 @@ struct StreetBatchSolver::Engine
             if (algorithm == Algorithm::VanillaCfr)
             {
                 frozen_pass(-1, 1.0, algorithm);
+            }
+            else if (algorithm == Algorithm::Dcfr)
+            {
+                // DCFR(1.5,0,2): freeze, update OOP, discount(OOP)+freeze, update IP,
+                // discount(IP). Both passes share t; average weight is t².
+                const DcfrFactors factors = dcfr_factors(trained);
+                slot_positive_discount_ = factors.positive_discount;
+                slot_negative_discount_ = factors.negative_discount;
+                freeze_sigma();
+                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
+                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
+                frozen_walk(workspace, 0, -1, -1, 0, 0, factors.average_weight, false);
+                discount_and_freeze(0, factors.positive_discount, factors.negative_discount);
+                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
+                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
+                frozen_walk(workspace, 0, -1, -1, 0, 1, factors.average_weight, false);
+                discount_player(1, factors.positive_discount, factors.negative_discount);
             }
             else
             {
@@ -6784,6 +6935,28 @@ void StreetBatchSolver::install_training_tables(const TrainingTables& tables)
 {
     note_profile_mutation();
     engine_->install_tables(tables);
+    // Tables alone do not carry the algorithm. Callers that reopen a solution
+    // must bind_training_algorithm from the checkpoint/job tag before continue.
+    engine_->algorithm_bound_ = false;
+}
+
+void StreetBatchSolver::bind_training_algorithm(Algorithm algorithm)
+{
+    engine_->bind_algorithm_for_tables(algorithm);
+}
+
+Algorithm StreetBatchSolver::training_algorithm() const
+{
+    if (!engine_->algorithm_bound_)
+    {
+        throw std::logic_error("training algorithm is not bound");
+    }
+    return engine_->bound_algorithm_;
+}
+
+bool StreetBatchSolver::has_training_algorithm() const
+{
+    return engine_->algorithm_bound_;
 }
 
 std::uint64_t StreetBatchSolver::profile_epoch() const

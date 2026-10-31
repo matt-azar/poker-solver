@@ -641,6 +641,11 @@ struct RiverBatchSolver::Engine
 
     void train_more(int count, Algorithm algorithm)
     {
+        if (algorithm == Algorithm::Dcfr)
+        {
+            throw std::invalid_argument(
+                "DCFR is not supported on the legacy river public tree; use street_solver --frozen");
+        }
         if (algorithm != Algorithm::VanillaCfr && algorithm != Algorithm::CfrPlus)
         {
             throw std::invalid_argument("the public river tree implements vanilla CFR and CFR+");

@@ -16,7 +16,7 @@ struct CheckpointDocument
 {
     // 1 is a street tree. 2 is a river tree.
     std::uint8_t kind = 1;
-    // 0 vanilla, 1 CFR+, 2 linear.
+    // 0 vanilla, 1 CFR+, 2 linear, 3 DCFR(1.5,0,2). Do not renumber.
     std::uint8_t algorithm = 1;
     bool frozen = false;
     int samples = 5;
