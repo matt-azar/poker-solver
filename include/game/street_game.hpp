@@ -4,6 +4,7 @@
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
 #include "solver/chip_payoff.hpp"
+#include "solver/icm.hpp"
 #include "solver/payoff.hpp"
 #include "solver/tree_edit.hpp"
 
@@ -80,6 +81,9 @@ struct StreetConfig
     // Pot rake applied at terminals. Zero rate keeps the prior chip rule.
     // See docs/RAKE.md.
     poker::solver::RakeConfig rake{};
+    // Optional tournament ICM. Empty stacks leaves chip/rake terminals.
+    // stacks[] are tournament chip counts (not betting `stack`). See docs/ICM.md.
+    poker::solver::IcmConfig icm{};
     // Force/Remove filter legal actions at matching public histories during
     // build and play. AddSize injects one extra bet/raise size at the matching
     // decision (same min-raise / stack / pot-cap rules as listed sizes).
@@ -179,8 +183,8 @@ public:
         return state.terminal;
     }
 
-    // Both players' root-centered chip utilities. With zero rake, player 1 is
-    // the negation of player 0 (see ChipPayoff). Positive rake uses config_.rake.
+    // Both players' root-centered utilities. Chip/rake first; when config_.icm
+    // is enabled, wrap through IcmPayoff (ICM equity deltas, not chip EV).
     poker::solver::PlayerPayoff terminal_payoff(const State& state) const
     {
         if (!state.terminal)
@@ -190,13 +194,14 @@ public:
         const int showdown = state.folded < 0
             ? showdown_outcome(state)
             : 0;
-        return poker::solver::ChipPayoff::terminal(
+        const poker::solver::PlayerPayoff chips = poker::solver::ChipPayoff::terminal(
             config_.pot,
             state.contrib[0],
             state.contrib[1],
             state.folded,
             showdown,
             config_.rake);
+        return poker::solver::apply_icm_terminal(config_.icm, chips);
     }
 
     double p1_utility(const State& state) const
@@ -458,6 +463,7 @@ private:
             throw std::invalid_argument("pot cap must be nonnegative");
         }
         config_.rake.validate();
+        config_.icm.validate(config_.pot, config_.stack);
     }
 
     void build_deals()

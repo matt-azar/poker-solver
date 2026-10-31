@@ -41,6 +41,8 @@ inline std::string format_river_config(const RiverConfig& config)
     streets::append_flag(out, "allow-all-in", config.allow_all_in);
     streets::append_line(out, "rake-rate", streets::format_number(config.rake.rate));
     streets::append_line(out, "rake-cap", streets::format_number(config.rake.cap));
+    streets::append_numbers(out, "icm-stacks", config.icm.stacks);
+    streets::append_numbers(out, "icm-payouts", config.icm.payouts);
     streets::append_specs(out, "oop-bets", config.oop_bet_sizes);
     streets::append_specs(out, "ip-bets", config.ip_bet_sizes);
     streets::append_specs(out, "oop-raises", config.oop_raise_sizes);
@@ -134,6 +136,14 @@ inline RiverConfig parse_river_config(std::string_view text)
         else if (key == "rake-cap")
         {
             config.rake.cap = streets::parse_finite(value);
+        }
+        else if (key == "icm-stacks")
+        {
+            config.icm.stacks = streets::parse_numbers(value);
+        }
+        else if (key == "icm-payouts")
+        {
+            config.icm.payouts = streets::parse_numbers(value);
         }
         else if (key == "oop-bets")
         {

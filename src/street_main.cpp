@@ -34,6 +34,7 @@ void print_usage(const char* argv0)
               << " [--oop-donk 0.5,20c] [--pot-cap 1] [--no-three-bet]"
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--rake-rate RATE] [--rake-cap CHIPS]"
+              << " [--icm-stacks S0,S1,...] [--icm-payouts P1,P2,...]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
@@ -426,6 +427,16 @@ int main(int argc, char** argv)
             else if (arg == "--rake-cap")
             {
                 config.rake.cap = std::atof(need("--rake-cap"));
+            }
+            else if (arg == "--icm-stacks")
+            {
+                config.icm.stacks.clear();
+                parse_sizes(need("--icm-stacks"), config.icm.stacks, nullptr);
+            }
+            else if (arg == "--icm-payouts")
+            {
+                config.icm.payouts.clear();
+                parse_sizes(need("--icm-payouts"), config.icm.payouts, nullptr);
             }
             else if (arg == "--accuracy")
             {

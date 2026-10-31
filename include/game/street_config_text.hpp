@@ -141,6 +141,8 @@ inline std::string format_street_config(const StreetConfig& config)
     append_line(out, "pot-cap", format_number(config.pot_cap));
     append_line(out, "rake-rate", format_number(config.rake.rate));
     append_line(out, "rake-cap", format_number(config.rake.cap));
+    append_numbers(out, "icm-stacks", config.icm.stacks);
+    append_numbers(out, "icm-payouts", config.icm.payouts);
     append_ints(out, "memory-mib", config.memory_mib);
     append_ints(out, "threads", config.threads);
     append_specs(out, "oop-bets", config.oop_bet_sizes);
@@ -441,6 +443,14 @@ inline StreetConfig parse_street_config(std::string_view text)
         else if (key == "rake-cap")
         {
             config.rake.cap = parse_finite(value);
+        }
+        else if (key == "icm-stacks")
+        {
+            config.icm.stacks = parse_numbers(value);
+        }
+        else if (key == "icm-payouts")
+        {
+            config.icm.payouts = parse_numbers(value);
         }
         else if (key == "memory-mib")
         {

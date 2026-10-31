@@ -196,4 +196,58 @@ struct IcmPayoff
     }
 };
 
+// Optional tournament ICM attached to a street/river solve. Empty stacks means
+// off (plain chip/rake terminals). When enabled, stacks[0]/stacks[1] are the two
+// hero seats; further seats are untouched spectators. StreetConfig::stack /
+// RiverConfig::stack remain betting effective stack — not these tournament
+// stacks. See docs/ICM.md.
+struct IcmConfig
+{
+    std::vector<double> stacks{};
+    std::vector<double> payouts{};
+
+    bool enabled() const noexcept
+    {
+        return !stacks.empty();
+    }
+
+    // Rejects malformed inputs. When pot/effective_stack are provided (solve
+    // build), also require both hero stacks cover the worst chip loss
+    // pot/2 + effective_stack so from_chip_terminal cannot see a negative post.
+    void validate(int pot = 0, int effective_stack = 0) const
+    {
+        if (!enabled())
+        {
+            return;
+        }
+        if (stacks.size() < 2)
+        {
+            throw std::invalid_argument("icm stacks need at least two seats");
+        }
+        validate_icm_inputs(stacks, payouts);
+        if (pot < 0 || effective_stack < 0)
+        {
+            throw std::invalid_argument("icm hand pot and stack must be nonnegative");
+        }
+        const double need =
+            0.5 * static_cast<double>(pot) + static_cast<double>(effective_stack);
+        if (stacks[0] < need || stacks[1] < need)
+        {
+            throw std::invalid_argument(
+                "icm stacks must cover pot/2 + effective stack for both heroes");
+        }
+    }
+};
+
+inline PlayerPayoff apply_icm_terminal(
+    const IcmConfig& icm,
+    const PlayerPayoff& chip_terminal)
+{
+    if (!icm.enabled())
+    {
+        return chip_terminal;
+    }
+    return IcmPayoff::from_chip_terminal(icm.stacks, icm.payouts, chip_terminal);
+}
+
 } // namespace poker::solver
