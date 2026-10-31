@@ -25,7 +25,7 @@ This is the consolidated everyday-study baseline after the river / study / pause
 - Memory planning still constructs a temporary engine; it is not a cheap pre-allocation feasibility check
 - Full-range river equity is admitted by default; full-range turn equity still exceeds the default work limit
 - Rake is not connected to solving; ICM and incentives remain separate open PRs
-- Tree editing (#19/#27), hand-history export (#26), shortcuts (#22), themes (#31), and agent lessons (#9) remain open
+- Tree editing Force/Remove on StreetGame + StreetBatch (+ street-config round-trip) lands on `cursor/tree-edit-batch-e394`; AddSize injection and the GUI visual editor remain deferred. Hand-history export (#26), shortcuts (#22), themes (#31), and agent lessons (#9) remain open
 
 ## Validation
 

@@ -37,6 +37,7 @@ int main()
     run_range_library_tests();
     run_node_lock_tests();
     run_lock_apply_tests();
+    run_tree_edit_tests();
     }
     catch (const std::exception& error)
     {
