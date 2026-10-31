@@ -1,4 +1,4 @@
-# Sidecar binaries are CI artifacts (explorer-$TARGET_TRIPLE[.exe]).
+# Sidecar binaries are CI artifacts (holdem-explorer-$TARGET_TRIPLE[.exe]).
 *
 !.gitignore
 !.gitkeep
