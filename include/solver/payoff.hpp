@@ -9,6 +9,8 @@ namespace poker::solver
 // numbers are net chips from the start of the street (dead pot/2 plus street
 // investments). Rake, ICM, and incentives (M8) need this dual return because
 // those models are not generally zero-sum under a single player-0 vector.
+// ICM equity deltas live in IcmPayoff (solver/icm.hpp) and stay off the chip
+// path until a later wiring step.
 struct PlayerPayoff
 {
     double utility[2]{};
