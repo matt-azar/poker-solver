@@ -78,7 +78,7 @@ On top of `#46`, precomputing structural `hand_supported` masks for every walkab
 
 ## Fused showdown + supported-hand indexes (`cursor/engine-speed-3-e394`)
 
-On top of `#51`, walking precomputed supported-hand indexes through terminal collect/fold/showdown and fusing showdown mass extraction cut paired-flop reset-30 train at four threads from median 2.283 s to 1.605 s (~1.42x); turn_half_pot 1.163 s to 0.803 s (~1.45x). Profiled `showdown_seconds` roughly halved on the paired flop. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
+On top of `#51` / latest `main`, walking precomputed supported-hand indexes through terminal collect/fold/showdown and fusing showdown mass extraction cut paired-flop reset-30 train at four threads from median 2.289 s to 1.678 s (~1.36x); turn_half_pot 1.162 s to 0.839 s (~1.39x). Profiled `showdown_seconds` roughly halved on the paired flop. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
 
 ## Next measurement
 
