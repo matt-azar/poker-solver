@@ -24,7 +24,7 @@ Turn quality at 400 and 720 iterations matches the earlier Windows record (`0.26
 
 Turn allocated ~48.5 MiB (peak equal to allocated); construction and cache init stay under 0.03 s. The river CLI still does not print construction / train / eval / process working set.
 
-The completed flop used ~9.5 GiB free at start, a 4096 MiB engine budget (~4.27 GiB allocated, 42,830,564 infosets, 8104 deals), and 4 frozen threads. Wall was overridden to 7200 s for this finish run (case default remains 2400 s). Training ~4.8 s/iter at 4 threads versus ~15 s/iter at 1 thread on the early probe. At the 400-iteration cap NashConv/pot is 0.004182 — above the 0.001 target. An extended to-target flop (8000-iter cap, accuracy 0.001, 4 threads) is in progress on this host.
+The completed flop used ~9.5 GiB free at start, a 4096 MiB engine budget (~4.27 GiB allocated, 42,830,564 infosets, 8104 deals), and 4 frozen threads. Wall was overridden to 7200 s for this finish run (case default remains 2400 s). Training ~4.8 s/iter at 4 threads versus ~15 s/iter at 1 thread on the early probe. At the 400-iteration cap NashConv/pot is 0.004182 — above the 0.001 target. An extended to-target chase was started and then stopped: at ~4.8 s/iter, reaching 0.001 would be multi-hour wall on this host and is not a routine measurement.
 
 ## Baseline at `95242db`
 
@@ -66,4 +66,4 @@ A 2-second kill of `turn_srp_river_betting` on the `381c9a5` binary flushed `pha
 
 ## Next measurement
 
-Finish the extended flop to NashConv/pot ≤ 0.001 (or record the 8000-iter / wall stop). Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target.
+Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target.
