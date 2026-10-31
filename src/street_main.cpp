@@ -36,7 +36,7 @@ void print_usage(const char* argv0)
               << " [--rake-rate RATE] [--rake-cap CHIPS]"
               << " [--icm-stacks S0,S1,...] [--icm-payouts P1,P2,...]"
               << " [--all-in | --no-all-in] [--max-raises N]"
-              << " [--iterations N] [--algorithm vanilla|cfr_plus]"
+              << " [--iterations N] [--algorithm vanilla|cfr_plus|dcfr]"
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
               << " [--memory-mib N] [--threads N]"
               << " [--plan-memory] [--reference] [--frozen] [--report file | -]\n";
@@ -536,6 +536,10 @@ int main(int argc, char** argv)
                 {
                     algorithm = poker::solver::Algorithm::CfrPlus;
                 }
+                else if (name == "dcfr")
+                {
+                    algorithm = poker::solver::Algorithm::Dcfr;
+                }
                 else
                 {
                     throw std::invalid_argument("unknown algorithm");
@@ -580,6 +584,10 @@ int main(int argc, char** argv)
         if (config.threads > 1 && !frozen)
         {
             throw std::invalid_argument("multiple threads require the frozen street pass (--frozen)");
+        }
+        if (algorithm == poker::solver::Algorithm::Dcfr && !frozen && !reference)
+        {
+            throw std::invalid_argument("dcfr requires the frozen street pass (--frozen)");
         }
 
         poker::solver::SolveConfig solve_config;

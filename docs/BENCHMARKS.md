@@ -379,3 +379,22 @@ An earlier noisier three-pair set was ~1.02x flop / ~1.06x turn. Instrumented 3-
 | turn_half_pot | 4 | 0.791 | 0.792 | **1.00x** |
 
 Instrumented 3-iter profile at 1 thread now reports non-zero `chance_seconds` for the outermost serial chance wall (flop ≈0.790 of ≈0.860 train; turn ≈0.214 of ≈0.256), confirming that bucket was previously unaccounted. Sparse idx* filters did not clear ~1.05x wall train at four threads: on the paired flop only ~11% of hole combos are board-blocked, so fill-zero then sparse assign for child reaches offsets the shorter EV reduce, and multi-thread chance wall remains dominated by nested child walks rather than the dense hand loops. Parity pins at iteration 30: 1-vs-4 and after-vs-`#52` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,717 assertions, 0 failures. Not shipped.
+
+## Optional DCFR(1.5, 0, 2) versus CFR+ (frozen StreetBatch)
+
+Linux cloud agent, g++ 13.3.0 Release, `street_solver --frozen --threads 1`, accuracy stop NashConv/pot ≤ 0.001 with `--eval-every 20`. Two repetitions with rotated algorithm order. Peak memory is `peak_allocated_bytes` from the engine report. Quadratic-averaged CFR+ is not a production street option here (would expand product scope); linear CFR remains `CfrTrainer`-only.
+
+First checked iteration at which NashConv/pot ≤ 0.001 (eval cadence 20, so the reported iteration is a multiple of 20):
+
+| Fixture | CFR+ iters | DCFR iters | CFR+ train (s) | DCFR train (s) | CFR+ peak bytes | DCFR peak bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Competing-weight river | 340 | 160 | 0.046 | 0.023 | ~same tree | ~same tree |
+| Paired river | 120 | 100 | 0.003 | 0.003 | | |
+| Original turn (AhAd vs 2c3d) | 100 | 40 | 0.011 | 0.005 | | |
+| Mixed river | 60 | 60 | 0.001 | 0.001 | | |
+| Four-flush river | 80 | 100 | 0.001 | 0.001 | | |
+| Second turn | 60 | 20 | 0.007 | 0.002 | | |
+
+Fixed-horizon controls (no accuracy stop): broader turn `turn_srp_river_betting` 30 iters — CFR+ NashConv 13.31 vs DCFR 8.62 (train ≈1.5 s each). Memory-safe flop `flop_srp_one_size` 5 iters — CFR+ NashConv 168.9 vs DCFR 201.8 (train ≈48–51 s); DCFR does not win this short flop horizon. Setup/cache times matched within noise for each pair.
+
+Limitations: Linux-only measurement on this agent; Windows Explorer coverage is not established by these runs. Runtime on tiny trees is noisy. CFR+ remains the default until broader evidence supports a separate product decision. `poker_solver_tests` on this change: 466973 assertions, 0 failures.

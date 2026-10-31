@@ -469,9 +469,17 @@ Job parse_job(const std::string& text)
     {
         job.algorithm = poker::solver::Algorithm::CfrPlus;
     }
+    else if (algorithm == "dcfr")
+    {
+        job.algorithm = poker::solver::Algorithm::Dcfr;
+    }
     else
     {
         throw std::invalid_argument("unknown algorithm");
+    }
+    if (job.algorithm == poker::solver::Algorithm::Dcfr && !job.frozen)
+    {
+        throw std::invalid_argument("dcfr requires the frozen combo pass");
     }
     if (job.iterations <= 0)
     {
@@ -1145,6 +1153,7 @@ std::shared_ptr<HeldSolution> clone_held_baseline(const HeldSolution& source)
     {
         copy->street = std::make_shared<poker::solver::StreetBatchSolver>(source.street->config());
         copy->street->install_training_tables(source.street->training_tables());
+        copy->street->bind_training_algorithm(source.job.algorithm);
         copy->street->prepare_inspection();
         copy->root_id = copy->street->root_node_id();
         copy->memory = copy->street->memory_report();
@@ -2402,6 +2411,7 @@ void resolve_locked_job(
         if (warm_start)
         {
             held->street->install_training_tables(prior_tables);
+            held->street->bind_training_algorithm(held->job.algorithm);
             held->iterations = prior_iterations;
             held->runtime_seconds = prior_runtime;
         }
@@ -2694,32 +2704,12 @@ constexpr std::uint64_t kMaxCheckpointBytes = 2ull * 1024ull * 1024ull * 1024ull
 
 std::uint8_t algorithm_code(poker::solver::Algorithm algorithm)
 {
-    if (algorithm == poker::solver::Algorithm::VanillaCfr)
-    {
-        return 0;
-    }
-    if (algorithm == poker::solver::Algorithm::CfrPlus)
-    {
-        return 1;
-    }
-    return 2;
+    return poker::solver::algorithm_tag(algorithm);
 }
 
 poker::solver::Algorithm algorithm_from_code(std::uint8_t code)
 {
-    if (code == 0)
-    {
-        return poker::solver::Algorithm::VanillaCfr;
-    }
-    if (code == 1)
-    {
-        return poker::solver::Algorithm::CfrPlus;
-    }
-    if (code == 2)
-    {
-        return poker::solver::Algorithm::LinearCfr;
-    }
-    throw std::invalid_argument("checkpoint algorithm is unknown");
+    return poker::solver::algorithm_from_tag(code);
 }
 
 Job job_from_street(const poker::streets::StreetConfig& config)
@@ -2826,12 +2816,18 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
     {
         held->locks = poker::solver::parse_lock_set(document.locks_text);
     }
+    const poker::solver::Algorithm loaded_algorithm = algorithm_from_code(document.algorithm);
+    if (loaded_algorithm == poker::solver::Algorithm::Dcfr && !document.frozen)
+    {
+        throw std::invalid_argument("dcfr checkpoint requires the frozen combo pass");
+    }
     if (document.kind == 1)
     {
         const poker::streets::StreetConfig config = poker::streets::parse_street_config(document.config_text);
         held->job = job_from_street(config);
         held->street = std::make_shared<poker::solver::StreetBatchSolver>(config);
         held->street->install_training_tables(document.tables);
+        held->street->bind_training_algorithm(loaded_algorithm);
         held->street->prepare_inspection();
         held->root_id = held->street->root_node_id();
         held->memory = held->street->memory_report();
@@ -2839,6 +2835,11 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
     }
     else if (document.kind == 2)
     {
+        if (loaded_algorithm == poker::solver::Algorithm::Dcfr)
+        {
+            throw std::invalid_argument(
+                "DCFR is not supported on legacy river-kind checkpoints; use a street-kind solve");
+        }
         const poker::river::RiverConfig config = poker::river::parse_river_config(document.config_text);
         held->job = job_from_river(config);
         held->river = std::make_shared<poker::solver::RiverBatchSolver>(config);
@@ -2850,7 +2851,7 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
     {
         throw std::invalid_argument("checkpoint kind is not a street or river solve");
     }
-    held->job.algorithm = algorithm_from_code(document.algorithm);
+    held->job.algorithm = loaded_algorithm;
     held->job.frozen = document.frozen;
     held->job.samples = document.samples;
     held->job.accuracy = document.accuracy;

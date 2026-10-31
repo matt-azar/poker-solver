@@ -42,6 +42,15 @@ The explorer HTTP cases spawn a local `explorer` process on an ephemeral port an
 - Mixed positive regrets → normalized positive regrets
 - Reach-weighted average accumulation on a hand-constructed two-action path
 
+**DCFR(1.5, 0, 2)** (`tests/unit/test_dcfr.cpp`)
+
+- Independent scalar oracle for positive/negative/zero increments, sign crossings, and `t=1`
+- Non-updating player's regrets unchanged; negatives stay signed
+- Frozen batch vs `CfrTrainer` parity on tiny river (exact regrets), turn (strategy/NashConv + CFR+-matched chance scale), and flop
+- Continuation and save/load/continue match uninterrupted training
+- Algorithm tag `3` round-trip; unknown tags and algorithm switches reject without mutation
+- Single/multi-thread frozen parity; DCFR rejected on non-frozen walk and legacy river batch
+
 **Mathematical validation**
 
 - After 200,000 vanilla CFR iterations and 200,000 CFR+ iterations, both through `CfrTrainer<KuhnGame>`: \(|u_1 + 1/18| \le 10^{-3}\) and Nash gap \(< 10^{-3}\)

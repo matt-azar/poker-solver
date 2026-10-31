@@ -231,8 +231,10 @@ struct StreetWalkProfile
 
 // Same pass contract as CfrTrainer<StreetGame>. Each pass freezes regret
 // matching, sums that player's counterfactual regret, then CFR+ floors only
-// that player. The sequential walk and the frozen combo walk both use this
-// contract. StreetGame remains the reference. Construction and the workspace
+// that player. DCFR(1.5,0,2) discounts the updating player after the pass
+// instead of flooring and uses t² average weights; it requires this frozen
+// path. The sequential walk supports vanilla CFR and CFR+. StreetGame remains
+// the reference. Construction and the workspace
 // used by a pass stay inside StreetConfig::memory_mib. That budget is the
 // bytes the engine requests from its allocator, not an operating-system limit.
 // Scratch, action values, and showdown prefix buffers live in a WorkerContext.
@@ -327,6 +329,12 @@ public:
     TrainingTables training_tables() const;
     // Rebuilds nothing. The tree must already match the combo order and action counts.
     void install_training_tables(const TrainingTables& tables);
+    // Bind the algorithm that produced installed tables. Required after a
+    // non-zero install so continue rejects silent algorithm switches.
+    // Does not mutate regrets or strategy sums.
+    void bind_training_algorithm(Algorithm algorithm);
+    Algorithm training_algorithm() const;
+    bool has_training_algorithm() const;
     std::uint64_t profile_epoch() const;
     // The next successful evaluation throws before its page can replace the cache.
     void arm_value_cache_failure_for_test();
