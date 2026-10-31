@@ -2647,11 +2647,43 @@ std::string content_type(const std::string& path)
     {
         return "text/css; charset=utf-8";
     }
-    if (path.size() >= 3 && path.substr(path.size() - 3) == ".js")
+    if (path.size() >= 4 && path.substr(path.size() - 4) == ".svg")
+    {
+        return "image/svg+xml";
+    }
+    if (path.size() >= 5 && path.substr(path.size() - 5) == ".json")
+    {
+        return "application/json";
+    }
+    if (path.size() >= 4 && path.substr(path.size() - 4) == ".map")
+    {
+        return "application/json";
+    }
+    if ((path.size() >= 3 && path.substr(path.size() - 3) == ".js")
+        || (path.size() >= 4 && path.substr(path.size() - 4) == ".mjs"))
     {
         return "text/javascript; charset=utf-8";
     }
     return "application/octet-stream";
+}
+
+bool safe_static_asset_path(const std::string& path)
+{
+    if (path.rfind("/assets/", 0) != 0 || path.size() <= 8)
+    {
+        return false;
+    }
+    for (std::size_t index = 8; index < path.size(); ++index)
+    {
+        const unsigned char ch = static_cast<unsigned char>(path[index]);
+        const bool ok = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+            || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-' || ch == '/';
+        if (!ok)
+        {
+            return false;
+        }
+    }
+    return path.find("..") == std::string::npos;
 }
 
 void send_response(
@@ -4327,6 +4359,21 @@ void handle_client(socket_t client)
     {
         path = "/browse.js";
     }
+    else if (line.rfind("GET /favicon.svg", 0) == 0)
+    {
+        path = "/favicon.svg";
+    }
+    else if (line.rfind("GET /assets/", 0) == 0)
+    {
+        const std::size_t end = line.find(' ', 4);
+        const std::string request = end == std::string::npos ? line.substr(4) : line.substr(4, end - 4);
+        if (!safe_static_asset_path(request))
+        {
+            send_response(client, 400, "text/plain", "not found");
+            return;
+        }
+        path = request;
+    }
     else if (line.rfind("GET / ", 0) == 0 || line.rfind("GET /index.html", 0) == 0)
     {
         path = "/index.html";
@@ -4386,7 +4433,15 @@ std::string executable_directory()
 void choose_ui_root()
 {
     const std::string exe = executable_directory();
+    // Prefer the built Study client when present; fall back to legacy ui/.
     const std::string candidates[] = {
+        "desktop/dist",
+        exe + "\\desktop\\dist",
+        exe + "\\..\\desktop\\dist",
+        exe + "\\..\\..\\desktop\\dist",
+        exe + "/desktop/dist",
+        exe + "/../desktop/dist",
+        exe + "/../../desktop/dist",
         "ui",
         exe + "\\ui",
         exe + "\\..\\ui",

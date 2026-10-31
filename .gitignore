@@ -1,6 +1,9 @@
-build/
+/build/
 worktrees/
 out/
+desktop/node_modules/
+desktop/dist/
+desktop/node_modules/.tmp/
 cmake-build-*/
 .vs/
 .vscode/

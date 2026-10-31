@@ -1,0 +1,121 @@
+/* Hold'em Study — visual tokens (dark / light) */
+
+:root,
+[data-theme="light"] {
+  --app-bg: #eceff2;
+  --panel: #ffffff;
+  --secondary: #f4f6f8;
+  --border: #ccd3db;
+  --text: #1c2530;
+  --muted: #536170;
+  --accent: #285f99;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --danger: #a33b32;
+  --ok: #2f7a52;
+  --hover-outline: #8a97a8;
+  --selection-outline: #285f99;
+  --empty-cell: #e4e8ed;
+  --matrix-label: #6a7684;
+  --shadow-soft: 0 1px 0 color-mix(in srgb, var(--border) 70%, transparent);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --app-bg: #15181d;
+  --panel: #1c2026;
+  --secondary: #242a32;
+  --border: #343d48;
+  --text: #e7ecf2;
+  --muted: #a8b3c1;
+  --accent: #7fa8d1;
+  --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --danger: #d07168;
+  --ok: #6fb08a;
+  --hover-outline: #6a7788;
+  --selection-outline: #7fa8d1;
+  --empty-cell: #1a1e24;
+  --matrix-label: #8a96a6;
+  --shadow-soft: 0 1px 0 color-mix(in srgb, #000 35%, transparent);
+  color-scheme: dark;
+}
+
+:root {
+  --font-sans: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue",
+    sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --radius-sm: 2px;
+  --radius: 4px;
+  --menubar-h: 32px;
+  --tabs-h: 28px;
+  --context-h: 44px;
+  --statusbar-h: 26px;
+  --history-h: 120px;
+  --dock-h: 220px;
+  --inspector-w: 300px;
+  --nav-w: 180px;
+  --body-size: 13px;
+  --label-size: 11px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--body-size);
+  line-height: 1.35;
+  color: var(--text);
+  background: var(--app-bg);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+a {
+  color: var(--accent);
+}
+
+kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+}

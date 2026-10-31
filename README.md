@@ -75,7 +75,7 @@ tests/            In-repo harness + CTest
 docs/             Architecture, mathematics, testing, roadmap
 ```
 
-The `python/` directory is reserved for a later binding. `ui/` is the local explorer: a flop or a turn is one tree through the river, and ranges are painted on a 13×13 grid.
+The `python/` directory is reserved for a later binding. `ui/` is the legacy local explorer page. `desktop/` is the React Study workstation client (Vite); see [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md). Run `explorer` for the engine, then `cd desktop && npm run dev` during UI development.
 
 ## Documentation
 
