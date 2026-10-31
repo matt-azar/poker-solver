@@ -33,6 +33,7 @@ void print_usage(const char* argv0)
               << " [--ip-turn-bets 0.5] [--ip-river-bets 1]"
               << " [--oop-donk 0.5,20c] [--pot-cap 1] [--no-three-bet]"
               << " [--geometric] [--all-in-threshold 0.4]"
+              << " [--rake-rate RATE] [--rake-cap CHIPS]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
@@ -417,6 +418,14 @@ int main(int argc, char** argv)
             else if (arg == "--all-in-threshold")
             {
                 config.all_in_threshold = std::atof(need("--all-in-threshold"));
+            }
+            else if (arg == "--rake-rate")
+            {
+                config.rake.rate = std::atof(need("--rake-rate"));
+            }
+            else if (arg == "--rake-cap")
+            {
+                config.rake.cap = std::atof(need("--rake-cap"));
             }
             else if (arg == "--accuracy")
             {

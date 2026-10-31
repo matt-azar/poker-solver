@@ -1,13 +1,18 @@
 # Pot rake
 
 Planning date: October 30, 2026. This page documents the M8 pot-rake model on
-`ChipPayoff`. Solvers are not yet wired to pass a rake config through
-`StreetGame` / `RiverGame`.
+`ChipPayoff`, and how street/river solvers pass it through training terminals.
 
 ## Config
 
 `RakeConfig` has a `rate` in `[0, 1]` and a chip `cap` with `cap >= 0`. A zero
 cap means uncapped. Invalid values fail `validate()` / `valid()`.
+
+`StreetConfig::rake` and `RiverConfig::rake` carry the same fields. Defaults are
+zero (no rake). `street-config 1` / `river-config 1` always write `rake-rate` and
+`rake-cap`. CLI flags `--rake-rate` and `--rake-cap` set them on `street_solver`
+and `river_solver`. Building a `StreetGame` or `RiverGame` with an invalid rake
+rejects the config.
 
 ## Collection
 
@@ -34,3 +39,14 @@ With rake `R > 0`:
 Fold win, pot 100, contrib 100/0, IP folds, 5%: no-rake `(50, -50)` becomes
 `(40, -50)`. Showdown lose, pot 100, check-down, 5%: `(-50, 50)` becomes
 `(-50, 45)`. Tie, pot 100, 5%: `(0, 0)` becomes `(-2.5, -2.5)`.
+
+## Solve path
+
+`StreetGame::terminal_payoff` and `RiverGame::terminal_payoff` pass `config.rake`
+into `ChipPayoff::terminal`. `StreetBatchSolver` and `RiverBatchSolver` use the
+same rake at public-tree / per-deal terminals, including the frozen showdown
+kernel (winner pays full rake; ties split it). CFR still trains on the player-0
+scalar. Nash-gap and best-response helpers that assume chip zero-sum remain
+approximate under positive rake; ICM and opponent incentives are out of scope
+here (see open M8 work). Zero rake reproduces prior chip terminals and pinned
+fixtures bit-identically.

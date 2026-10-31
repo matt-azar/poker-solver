@@ -75,6 +75,9 @@ struct StreetConfig
     int memory_mib = 1024;
     // Frozen-pass threads, including the caller. One keeps the serial walk.
     int threads = 1;
+    // Pot rake applied at terminals. Zero rate keeps the prior chip rule.
+    // See docs/RAKE.md.
+    poker::solver::RakeConfig rake{};
 };
 
 // Pot fraction that invests stack_left over streets_left equal called bets.
@@ -170,8 +173,8 @@ public:
         return state.terminal;
     }
 
-    // Both players' root-centered chip utilities. Player 1 is the negation of
-    // player 0 under the chip zero-sum rule (see ChipPayoff).
+    // Both players' root-centered chip utilities. With zero rake, player 1 is
+    // the negation of player 0 (see ChipPayoff). Positive rake uses config_.rake.
     poker::solver::PlayerPayoff terminal_payoff(const State& state) const
     {
         if (!state.terminal)
@@ -186,7 +189,8 @@ public:
             state.contrib[0],
             state.contrib[1],
             state.folded,
-            showdown);
+            showdown,
+            config_.rake);
     }
 
     double p1_utility(const State& state) const
@@ -447,6 +451,7 @@ private:
         {
             throw std::invalid_argument("pot cap must be nonnegative");
         }
+        config_.rake.validate();
     }
 
     void build_deals()

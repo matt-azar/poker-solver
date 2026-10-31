@@ -6,7 +6,7 @@ A flop, a turn, and a river differ by how many cards are still to come: two, one
 
 Chance deals an ordered hand pair from the joint distribution on the starting board, then the players bet. When the street ends without a fold, the next card is dealt uniformly from the cards that are not on the board and not in either hand. A turn tree deals the river. A flop tree deals the turn and then the river. A five-card tree has no later public cards. A fold ends the hand. Chips already invested stay in the pot, and the next street starts with no bet to call.
 
-Player 0 is out of position and acts first on every street. Utilities use the same net-chip rule as the river: `pot / 2` is the dead money each player already posted, and investments on these streets are added on top. That sum is the full net-chip result. A finished solve can also report each combo's conditional action value at one decision: force that action once, then follow the stored average. The definition is in [MATHEMATICS.md](MATHEMATICS.md). On a node whose board has five cards, `StreetBatchSolver::category_composition` reports each player's strategy-weighted made-hand category mass (`HighCard`…`StraightFlush`). Incomplete boards are omitted with a clear reason. Draws and backdoors are out of scope.
+Player 0 is out of position and acts first on every street. Utilities use the same net-chip rule as the river: `pot / 2` is the dead money each player already posted, and investments on these streets are added on top. That sum is the full net-chip result. Optional pot rake (`StreetConfig::rake`, CLI `--rake-rate` / `--rake-cap`) is applied at terminals the same way as on the river; see [RAKE.md](RAKE.md). A finished solve can also report each combo's conditional action value at one decision: force that action once, then follow the stored average. The definition is in [MATHEMATICS.md](MATHEMATICS.md). On a node whose board has five cards, `StreetBatchSolver::category_composition` reports each player's strategy-weighted made-hand category mass (`HighCard`…`StraightFlush`). Incomplete boards are omitted with a clear reason. Draws and backdoors are out of scope.
 
 An information set is the acting player's own hand, the cards already dealt, and the public action line. It does not contain the opponent's hand. A turn decision is one node, shared by every river that can follow it.
 
@@ -34,7 +34,7 @@ Two listed sizes that round to the same chip amount are one action. A raise incr
 
 `format_street_config` writes one `street-config 1` document for a `StreetConfig`. `parse_street_config` reads that document. Formatting the parsed value again produces the same text. A `StreetGame` built from the parsed config has the same deals, information sets, decisions, terminals, and opening action labels as a game built from the original.
 
-The first line is `street-config 1`. Each later line is one field. Scalar fields are always written, in this order: `board`, `pot`, `stack`, `oop-range`, `ip-range`, `first-to-act`, `max-raises`, `allow-all-in`, `allow-three-bet`, `geometric`, `all-in-threshold`, `pot-cap`, `memory-mib`, `threads`. An empty size list is omitted. A missing size field means an empty list. Size fields that are present follow the member order in `StreetConfig`, then `oop-donk`, `oop-raise-multiples`, and `ip-raise-multiples`.
+The first line is `street-config 1`. Each later line is one field. Scalar fields are always written, in this order: `board`, `pot`, `stack`, `oop-range`, `ip-range`, `first-to-act`, `max-raises`, `allow-all-in`, `allow-three-bet`, `geometric`, `all-in-threshold`, `pot-cap`, `rake-rate`, `rake-cap`, `memory-mib`, `threads`. An empty size list is omitted. A missing size field means an empty list. Size fields that are present follow the member order in `StreetConfig`, then `oop-donk`, `oop-raise-multiples`, and `ip-raise-multiples`.
 
 A range is a combo list in combo-index order. A negative size is a chip amount and is written `20c`. A nonnegative size is a pot fraction. Raise multiples are plain numbers on their own fields. Flags are `0` or `1`. The document ends with a newline and uses LF endings.
 
@@ -90,6 +90,7 @@ street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in 
 street_solver --board Ah,Kd,7c,4s --pot 100 --stack 300 --oop-range QcQd --ip-range JcJd --geometric --iterations 200
 street_solver --board Ah,Kd,7c,4s,2h --oop-range AcAd,5c5d --ip-range KsKc --oop-bets 1 --no-all-in --max-raises 1 --iterations 40
 street_solver --board Ah,Kd,7c --oop-donk 40c --oop-bets 1 --ip-bets 0.5 --no-all-in --max-raises 1 --iterations 1
+street_solver --board Ah,Kd,7c,4s,2h --oop-range AcAd --ip-range KsKc --no-all-in --max-raises 0 --rake-rate 0.05 --iterations 1
 street_solver --config configs/street_default.txt --iterations 40 --report report.txt
 ```
 

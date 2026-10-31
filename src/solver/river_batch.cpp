@@ -3,6 +3,7 @@
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
+#include "solver/chip_payoff.hpp"
 #include "solver/regret_matching.hpp"
 
 #include <algorithm>
@@ -308,6 +309,7 @@ struct RiverBatchSolver::Engine
         {
             throw std::invalid_argument("max raises must be from 0 through 6");
         }
+        config.rake.validate();
 
         BetState root;
         root.pot = config.pot;
@@ -470,25 +472,16 @@ struct RiverBatchSolver::Engine
 
     double payoff(const Node& node, int h0, int h1) const
     {
-        const double half = static_cast<double>(config.pot) * 0.5;
-        if (node.folded == 0)
-        {
-            return -(half + static_cast<double>(node.contrib[0]));
-        }
-        if (node.folded == 1)
-        {
-            return half + static_cast<double>(node.contrib[1]);
-        }
-        const int outcome = showdown[static_cast<std::size_t>(h0 * n1 + h1)];
-        if (outcome > 0)
-        {
-            return half + static_cast<double>(node.contrib[1]);
-        }
-        if (outcome < 0)
-        {
-            return -(half + static_cast<double>(node.contrib[0]));
-        }
-        return 0.0;
+        const int outcome = node.folded < 0
+            ? showdown[static_cast<std::size_t>(h0 * n1 + h1)]
+            : 0;
+        return ChipPayoff::terminal(
+            config.pot,
+            node.contrib[0],
+            node.contrib[1],
+            node.folded,
+            outcome,
+            config.rake).utility[0];
     }
 
     double cfr_deal(int node_index, double pi0, double pi1, double chance, int h0, int h1,

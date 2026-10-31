@@ -11,5 +11,7 @@ allow-three-bet 1
 geometric 0
 all-in-threshold 0
 pot-cap 0
+rake-rate 0
+rake-cap 0
 memory-mib 64
 threads 1
