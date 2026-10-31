@@ -264,6 +264,7 @@ struct RiverBatchSolver::Engine
     {
         std::string label;
         int node = 0;
+        int hand = 0;
         int base = 0;
         int n_actions = 0;
     };
@@ -288,6 +289,8 @@ struct RiverBatchSolver::Engine
     int n1 = 0;
     int public_decisions = 0;
     int public_terminals = 0;
+    // Non-owning; set for the duration of solve()/run_*/continue_* from SolveConfig::locks.
+    const LockSet* locks_ = nullptr;
 
     explicit Engine(river::RiverConfig incoming)
         : config(std::move(incoming))
@@ -459,6 +462,7 @@ struct RiverBatchSolver::Engine
                 slot.label += " | ";
                 slot.label += node.path.empty() ? "open" : node.path;
                 slot.node = static_cast<int>(&node - nodes.data());
+                slot.hand = hand;
                 slot.base = node.hand_base + hand * node.n_actions;
                 slot.n_actions = node.n_actions;
                 slots.push_back(std::move(slot));
@@ -531,6 +535,7 @@ struct RiverBatchSolver::Engine
         return node_utility;
     }
 
+    // When locks_ is set, locked rows replace RM for matching public nodes.
     void freeze_sigma()
     {
         for (const Slot& slot : slots)
@@ -539,6 +544,16 @@ struct RiverBatchSolver::Engine
                 regret.data() + slot.base,
                 pass_sigma.data() + slot.base,
                 slot.n_actions);
+            if (locks_ != nullptr)
+            {
+                const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
+                apply_lock_to_strategy(
+                    std::span<double>(
+                        pass_sigma.data() + slot.base,
+                        static_cast<std::size_t>(slot.n_actions)),
+                    lock,
+                    static_cast<std::size_t>(slot.hand));
+            }
         }
     }
 
@@ -1595,16 +1610,38 @@ void RiverBatchSolver::note_profile_mutation()
     value_cache_ = StreetActionValues{};
 }
 
-void RiverBatchSolver::run_iterations(int count, Algorithm algorithm)
+void RiverBatchSolver::run_iterations(int count, Algorithm algorithm, const LockSet* locks)
 {
-    engine_->reset();
-    engine_->train_more(count, algorithm);
+    const LockSet* const previous_locks = engine_->locks_;
+    engine_->locks_ = locks;
+    try
+    {
+        engine_->reset();
+        engine_->train_more(count, algorithm);
+    }
+    catch (...)
+    {
+        engine_->locks_ = previous_locks;
+        throw;
+    }
+    engine_->locks_ = previous_locks;
     note_profile_mutation();
 }
 
-void RiverBatchSolver::continue_iterations(int count, Algorithm algorithm)
+void RiverBatchSolver::continue_iterations(int count, Algorithm algorithm, const LockSet* locks)
 {
-    engine_->train_more(count, algorithm);
+    const LockSet* const previous_locks = engine_->locks_;
+    engine_->locks_ = locks;
+    try
+    {
+        engine_->train_more(count, algorithm);
+    }
+    catch (...)
+    {
+        engine_->locks_ = previous_locks;
+        throw;
+    }
+    engine_->locks_ = previous_locks;
     note_profile_mutation();
 }
 
@@ -1699,6 +1736,8 @@ std::span<const double> RiverBatchSolver::strategy_sum_table() const
 
 SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorithm)
 {
+    const LockSet* const previous_locks = engine_->locks_;
+    engine_->locks_ = config.locks;
     const auto start = std::chrono::steady_clock::now();
     engine_->reset();
     note_profile_mutation();
@@ -1707,56 +1746,65 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
     stats.nash_gap_history.clear();
     stats.nash_gap_iterations.clear();
     bool fresh = false;
-    for (int step = 0; step < config.max_iterations; ++step)
+    try
     {
-        engine_->train_more(1, algorithm);
-        note_profile_mutation();
-        ++completed;
-        fresh = false;
-        const bool check_gap = config.nash_gap_threshold >= 0.0
-            && config.eval_every > 0
-            && completed % config.eval_every == 0;
-        if (check_gap)
+        for (int step = 0; step < config.max_iterations; ++step)
+        {
+            engine_->train_more(1, algorithm);
+            note_profile_mutation();
+            ++completed;
+            fresh = false;
+            const bool check_gap = config.nash_gap_threshold >= 0.0
+                && config.eval_every > 0
+                && completed % config.eval_every == 0;
+            if (check_gap)
+            {
+                stats.p1_expected_utility = expected_utility();
+                stats.p1_best_response_utility = p1_best_response_utility();
+                stats.p2_best_response_utility = p2_best_response_utility();
+                stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+                stats.nash_gap_history.push_back(stats.nash_gap);
+                stats.nash_gap_iterations.push_back(completed);
+                fresh = true;
+                if (stats.nash_gap <= config.nash_gap_threshold)
+                {
+                    break;
+                }
+            }
+            if (config.max_wall_seconds >= 0.0)
+            {
+                const double elapsed = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - start).count();
+                if (elapsed >= config.max_wall_seconds)
+                {
+                    stats.time_limit_reached = true;
+                    break;
+                }
+            }
+        }
+        const auto end = std::chrono::steady_clock::now();
+        if (!fresh)
         {
             stats.p1_expected_utility = expected_utility();
             stats.p1_best_response_utility = p1_best_response_utility();
             stats.p2_best_response_utility = p2_best_response_utility();
             stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
-            stats.nash_gap_history.push_back(stats.nash_gap);
-            stats.nash_gap_iterations.push_back(completed);
-            fresh = true;
-            if (stats.nash_gap <= config.nash_gap_threshold)
+            if (config.nash_gap_threshold >= 0.0)
             {
-                break;
+                stats.nash_gap_history.push_back(stats.nash_gap);
+                stats.nash_gap_iterations.push_back(completed);
             }
         }
-        if (config.max_wall_seconds >= 0.0)
-        {
-            const double elapsed = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= config.max_wall_seconds)
-            {
-                stats.time_limit_reached = true;
-                break;
-            }
-        }
+        stats.iterations = completed;
+        stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
+        stats.memory_bytes_estimate = memory_bytes_estimate();
     }
-    const auto end = std::chrono::steady_clock::now();
-    if (!fresh)
+    catch (...)
     {
-        stats.p1_expected_utility = expected_utility();
-        stats.p1_best_response_utility = p1_best_response_utility();
-        stats.p2_best_response_utility = p2_best_response_utility();
-        stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
-        if (config.nash_gap_threshold >= 0.0)
-        {
-            stats.nash_gap_history.push_back(stats.nash_gap);
-            stats.nash_gap_iterations.push_back(completed);
-        }
+        engine_->locks_ = previous_locks;
+        throw;
     }
-    stats.iterations = completed;
-    stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
-    stats.memory_bytes_estimate = memory_bytes_estimate();
+    engine_->locks_ = previous_locks;
     return stats;
 }
 

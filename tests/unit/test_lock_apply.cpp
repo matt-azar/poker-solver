@@ -1,10 +1,12 @@
 #include "harness.hpp"
 
 #include "game/kuhn_game.hpp"
+#include "game/river_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
 #include "solver/node_lock.hpp"
 #include "solver/regret_matching.hpp"
+#include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
 #include "solver/trainer.hpp"
 
@@ -16,11 +18,14 @@ namespace
 {
 
 using poker::holdem::Range;
+using poker::river::RiverConfig;
 using poker::solver::Algorithm;
 using poker::solver::CfrTrainer;
 using poker::solver::LockKind;
 using poker::solver::LockSet;
 using poker::solver::NodeLock;
+using poker::solver::RiverBatchSolver;
+using poker::solver::RiverStrategyEntry;
 using poker::solver::SolveConfig;
 using poker::solver::StreetBatchSolver;
 using poker::solver::StreetStrategyEntry;
@@ -61,6 +66,46 @@ double open_action_prob(
 {
     const std::string needle = "OOP " + combo + " | turn | open";
     for (const StreetStrategyEntry& entry : entries)
+    {
+        if (entry.infoset == needle && entry.action.rfind(action_prefix, 0) == 0)
+        {
+            return entry.probability;
+        }
+    }
+    CHECK(false);
+    return 0.0;
+}
+
+void set_river_board(RiverConfig& config)
+{
+    const char* names[] = {"Ah", "Kd", "7c", "4s", "2h"};
+    for (int i = 0; i < 5; ++i)
+    {
+        config.board[static_cast<std::size_t>(i)] = card_id(names[i]);
+    }
+}
+
+RiverConfig tiny_river_lock_config(const char* oop, const char* ip)
+{
+    RiverConfig config;
+    set_river_board(config);
+    config.pot = 100;
+    config.stack = 100;
+    config.oop = Range::parse(oop);
+    config.ip = Range::parse(ip);
+    config.oop_bet_sizes = {1.0};
+    config.allow_all_in = false;
+    config.max_raises = 1;
+    return config;
+}
+
+double river_open_action_prob(
+    const std::vector<RiverStrategyEntry>& entries,
+    const std::string& combo,
+    const char* action_prefix)
+{
+    const std::string needle = "OOP " + combo + " | open";
+    for (const RiverStrategyEntry& entry : entries)
     {
         if (entry.infoset == needle && entry.action.rfind(action_prefix, 0) == 0)
         {
@@ -430,6 +475,174 @@ void test_street_batch_continue_null_locks_bit_identical()
     }
 }
 
+void test_river_batch_reads_config_locks_full_node()
+{
+    // Public node 0 is OOP's open. Lock forces always bet for every hand.
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = LockKind::FullNode;
+    const double locked[] = {0.0, 1.0}; // Check, Bet
+    lock.actions = make_action_lock_row(locked, 2);
+    locks.upsert(lock);
+
+    // Board is Ah Kd 7c 4s 2h; avoid hole cards that collide with it.
+    RiverConfig config = tiny_river_lock_config("5c5d", "KsKc");
+    RiverBatchSolver solver(config);
+    SolveConfig solve;
+    solve.max_iterations = 20;
+    solve.locks = &locks;
+    solver.solve(solve, Algorithm::VanillaCfr);
+
+    const auto entries = solver.average_strategy_entries();
+    const std::string air = combo_name("5c", "5d");
+    CHECK_NEAR(river_open_action_prob(entries, air, "Check"), 0.0, 1e-12);
+    CHECK_NEAR(river_open_action_prob(entries, air, "Bet"), 1.0, 1e-12);
+}
+
+void test_river_batch_selected_combos_only_listed_hand()
+{
+    // Two OOP hands. Lock only hand index 0 (acting-player slot.hand, not holdem id).
+    RiverConfig config = tiny_river_lock_config("5c5d,QcQd", "KsKc");
+    const auto free_entries = [&]()
+    {
+        RiverBatchSolver free_solver(config);
+        SolveConfig free_config;
+        free_config.max_iterations = 15;
+        free_solver.solve(free_config, Algorithm::VanillaCfr);
+        return free_solver.average_strategy_entries();
+    }();
+
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = LockKind::SelectedCombos;
+    lock.combo_indices = {0};
+    const double locked[] = {0.0, 1.0};
+    lock.actions = make_action_lock_row(locked, 2);
+    locks.upsert(lock);
+
+    RiverBatchSolver locked_solver(config);
+    SolveConfig locked_config;
+    locked_config.max_iterations = 15;
+    locked_config.locks = &locks;
+    locked_solver.solve(locked_config, Algorithm::VanillaCfr);
+    const auto locked_entries = locked_solver.average_strategy_entries();
+
+    locked_solver.prepare_inspection();
+    const auto root = locked_solver.inspect_node(locked_solver.root_node_id());
+    CHECK(root.hands.size() >= 2);
+    const std::string locked_combo = root.hands[0].combo;
+    const std::string free_combo = root.hands[1].combo;
+    CHECK_NEAR(river_open_action_prob(locked_entries, locked_combo, "Check"), 0.0, 1e-12);
+    CHECK_NEAR(river_open_action_prob(locked_entries, locked_combo, "Bet"), 1.0, 1e-12);
+
+    // Unlisted hand matches the null-locks solve for the same iteration count.
+    CHECK_NEAR(
+        river_open_action_prob(locked_entries, free_combo, "Check"),
+        river_open_action_prob(free_entries, free_combo, "Check"),
+        1e-12);
+    CHECK_NEAR(
+        river_open_action_prob(locked_entries, free_combo, "Bet"),
+        river_open_action_prob(free_entries, free_combo, "Bet"),
+        1e-12);
+}
+
+void test_river_batch_null_locks_bit_identical_to_unlocked_row()
+{
+    RiverConfig config = tiny_river_lock_config("5c5d", "KsKc");
+
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = LockKind::FullNode;
+    locks.upsert(lock); // empty probs = unlocked
+
+    RiverBatchSolver with_unlocked(config);
+    RiverBatchSolver with_null(config);
+
+    SolveConfig unlocked_config;
+    unlocked_config.max_iterations = 12;
+    unlocked_config.locks = &locks;
+    with_unlocked.solve(unlocked_config, Algorithm::VanillaCfr);
+
+    SolveConfig null_config;
+    null_config.max_iterations = 12;
+    with_null.solve(null_config, Algorithm::VanillaCfr);
+
+    const auto a = with_unlocked.average_strategy_entries();
+    const auto b = with_null.average_strategy_entries();
+    CHECK(a.size() == b.size());
+    for (std::size_t i = 0; i < a.size(); ++i)
+    {
+        CHECK(a[i].infoset == b[i].infoset);
+        CHECK(a[i].action == b[i].action);
+        CHECK(a[i].probability == b[i].probability);
+    }
+}
+
+void test_river_batch_continue_iterations_honors_locks()
+{
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = LockKind::FullNode;
+    const double locked[] = {0.0, 1.0}; // always bet
+    lock.actions = make_action_lock_row(locked, 2);
+    locks.upsert(lock);
+
+    RiverConfig config = tiny_river_lock_config("5c5d", "KsKc");
+    RiverBatchSolver solver(config);
+    solver.continue_iterations(15, Algorithm::VanillaCfr, &locks);
+
+    const auto entries = solver.average_strategy_entries();
+    const std::string air = combo_name("5c", "5d");
+    CHECK_NEAR(river_open_action_prob(entries, air, "Check"), 0.0, 1e-12);
+    CHECK_NEAR(river_open_action_prob(entries, air, "Bet"), 1.0, 1e-12);
+}
+
+void test_river_batch_continue_null_locks_bit_identical()
+{
+    RiverConfig config = tiny_river_lock_config("5c5d", "KsKc");
+    RiverBatchSolver with_null(config);
+    RiverBatchSolver with_default(config);
+    with_null.continue_iterations(10, Algorithm::VanillaCfr, nullptr);
+    with_default.continue_iterations(10, Algorithm::VanillaCfr);
+
+    const auto a = with_null.average_strategy_entries();
+    const auto b = with_default.average_strategy_entries();
+    CHECK(a.size() == b.size());
+    for (std::size_t i = 0; i < a.size(); ++i)
+    {
+        CHECK(a[i].infoset == b[i].infoset);
+        CHECK(a[i].action == b[i].action);
+        CHECK(a[i].probability == b[i].probability);
+    }
+}
+
+void test_river_batch_cfr_plus_solve_honors_locks()
+{
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = LockKind::FullNode;
+    const double locked[] = {1.0, 0.0}; // always check
+    lock.actions = make_action_lock_row(locked, 2);
+    locks.upsert(lock);
+
+    RiverConfig config = tiny_river_lock_config("5c5d", "KsKc");
+    RiverBatchSolver solver(config);
+    SolveConfig solve;
+    solve.max_iterations = 10;
+    solve.locks = &locks;
+    solver.solve(solve, Algorithm::CfrPlus);
+
+    const auto entries = solver.average_strategy_entries();
+    const std::string air = combo_name("5c", "5d");
+    CHECK_NEAR(river_open_action_prob(entries, air, "Check"), 1.0, 1e-12);
+    CHECK_NEAR(river_open_action_prob(entries, air, "Bet"), 0.0, 1e-12);
+}
+
 } // namespace
 
 void run_lock_apply_tests()
@@ -447,4 +660,10 @@ void run_lock_apply_tests()
     test_street_batch_frozen_solve_honors_locks();
     test_street_batch_continue_iterations_honors_locks();
     test_street_batch_continue_null_locks_bit_identical();
+    test_river_batch_reads_config_locks_full_node();
+    test_river_batch_selected_combos_only_listed_hand();
+    test_river_batch_null_locks_bit_identical_to_unlocked_row();
+    test_river_batch_continue_iterations_honors_locks();
+    test_river_batch_continue_null_locks_bit_identical();
+    test_river_batch_cfr_plus_solve_honors_locks();
 }
