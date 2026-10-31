@@ -11,8 +11,9 @@ cap means uncapped. Invalid values fail `validate()` / `valid()`.
 `StreetConfig::rake` and `RiverConfig::rake` carry the same fields. Defaults are
 zero (no rake). `street-config 1` / `river-config 1` always write `rake-rate` and
 `rake-cap`. CLI flags `--rake-rate` and `--rake-cap` set them on `street_solver`
-and `river_solver`. Building a `StreetGame` or `RiverGame` with an invalid rake
-rejects the config.
+and `river_solver`. Explorer Job JSON uses flat keys `rake_rate` and `rake_cap`
+(same validation); the GUI solve form sends them and status echoes them.
+Building a `StreetGame` or `RiverGame` with an invalid rake rejects the config.
 
 ## Collection
 
