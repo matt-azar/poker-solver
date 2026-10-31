@@ -60,6 +60,13 @@ export interface SolveJobRequest {
   time_limit?: number;
 }
 
+export interface GapSeriesPoint {
+  iterations?: number;
+  iteration?: number;
+  value?: number;
+  nash_gap: number;
+}
+
 export interface StatusPayload {
   running?: boolean;
   paused?: boolean;
@@ -69,23 +76,32 @@ export interface StatusPayload {
   job_id?: string | null;
   solution_id?: string | null;
   baseline_solution_id?: string | null;
+  root_node_id?: string | null;
   status_generation?: number;
   iterations?: number | null;
+  iterations_requested?: number | null;
+  runtime_seconds?: number | null;
   runtime?: number | null;
+  player0_expected_utility?: number | null;
   value?: number | null;
   nash_gap?: number | null;
-  br0?: number | null;
-  br1?: number | null;
+  p1_best_response?: number | null;
+  p2_best_response?: number | null;
   pot?: number | null;
   stack?: number | null;
   board?: string[] | string | null;
   algorithm?: string | null;
   frozen?: boolean | number | null;
-  samples?: Array<{ iteration: number; nash_gap: number; value?: number }> | null;
+  /** Job sample-chunk count (integer), not the chart series. */
+  samples?: number | Array<{ iteration: number; nash_gap: number; value?: number }> | null;
+  gap_series?: GapSeriesPoint[] | null;
   time_limit_reached?: boolean;
+  engine_allocated?: number | null;
+  engine_peak?: number | null;
   engine_heap_bytes?: number | null;
   message?: string | null;
   spot?: string | null;
+  plays?: string | null;
   [key: string]: unknown;
 }
 

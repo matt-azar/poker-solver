@@ -168,8 +168,8 @@ function phaseFromStatus(status: StatusPayload | null, fallback: SolvePhase): So
   return fallback === "solving" || fallback === "pause_requested" ? "idle" : fallback;
 }
 
-function rootNodeId(): string {
-  return "p00.t-1.r-1";
+function rootNodeId(statusRoot?: string | null): string {
+  return statusRoot || "p0.t-1.r-1";
 }
 
 function buildJob(draft: SpotDraft): SolveJobRequest {
@@ -752,7 +752,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               ? "Stopped — keeping completed iterations."
               : "Solve complete.",
         });
-        await get().navigateTo(get().currentNode?.node_id || rootNodeId());
+        await get().navigateTo(
+          get().currentNode?.node_id || rootNodeId(status.root_node_id),
+        );
       } else if (status.running) {
         set({
           message: status.paused

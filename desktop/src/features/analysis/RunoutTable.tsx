@@ -10,6 +10,8 @@ interface RunoutRow {
   [key: string]: unknown;
 }
 
+type SuitFilter = "all" | "s" | "h" | "d" | "c";
+
 export function RunoutTable() {
   const runouts = useStudyStore((s) => s.runouts) as {
     runouts?: RunoutRow[];
@@ -18,9 +20,16 @@ export function RunoutTable() {
   const loadRunouts = useStudyStore((s) => s.loadRunouts);
   const followAction = useStudyStore((s) => s.followAction);
   const [sortKey, setSortKey] = useState<"card" | "weight" | "oop_ev" | "ip_ev">("card");
+  const [suitFilter, setSuitFilter] = useState<SuitFilter>("all");
 
   const rows = useMemo(() => {
-    const list = runouts?.runouts ?? [];
+    const list = (runouts?.runouts ?? []).filter((row) => {
+      if (suitFilter === "all") {
+        return true;
+      }
+      const card = String(row.card || "");
+      return card.length >= 2 && card[1]?.toLowerCase() === suitFilter;
+    });
     return [...list].sort((left, right) => {
       const a = left[sortKey];
       const b = right[sortKey];
@@ -29,15 +38,30 @@ export function RunoutTable() {
       }
       return Number(a ?? 0) - Number(b ?? 0);
     });
-  }, [runouts, sortKey]);
+  }, [runouts, sortKey, suitFilter]);
 
   return (
     <div className="runout-table">
       <div className="panel-title-row">
         <h2 className="panel-title">Runouts</h2>
-        <button type="button" className="toolbar-btn" onClick={() => void loadRunouts()}>
-          Refresh
-        </button>
+        <div className="panel-title-actions">
+          <div className="seat-toggle" role="group" aria-label="Suit filter">
+            {(["all", "s", "h", "d", "c"] as const).map((suit) => (
+              <button
+                key={suit}
+                type="button"
+                className="toolbar-btn"
+                aria-pressed={suitFilter === suit}
+                onClick={() => setSuitFilter(suit)}
+              >
+                {suit === "all" ? "All" : suit}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="toolbar-btn" onClick={() => void loadRunouts()}>
+            Refresh
+          </button>
+        </div>
       </div>
       {runouts?.pending ? <p className="empty-hint">Pending…</p> : null}
       {!rows.length ? (

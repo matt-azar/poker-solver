@@ -26,6 +26,7 @@ function nodeIdOf(child: NodeActionChild | NodeCardChild | string): string | nul
 
 export function NodeNavigator() {
   const currentNode = useStudyStore((s) => s.currentNode);
+  const rootId = useStudyStore((s) => s.status?.root_node_id || "p0.t-1.r-1");
   const layout = useStudyStore((s) => s.layout);
   const navigateTo = useStudyStore((s) => s.navigateTo);
   const followAction = useStudyStore((s) => s.followAction);
@@ -60,7 +61,7 @@ export function NodeNavigator() {
         <button
           type="button"
           className="nav-node"
-          onClick={() => void navigateTo("p00.t-1.r-1")}
+          onClick={() => void navigateTo(rootId)}
         >
           <span>Root</span>
         </button>

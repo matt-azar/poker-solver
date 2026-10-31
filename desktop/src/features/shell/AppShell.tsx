@@ -55,9 +55,7 @@ export function AppShell() {
         message={message}
         connection={connection}
         phase={phase}
-        iterations={status?.iterations}
-        nashGap={status?.nash_gap}
-        pot={status?.pot}
+        status={status}
         onReconnect={() => {
           startPolling();
           void useStudyStore.getState().refresh();
