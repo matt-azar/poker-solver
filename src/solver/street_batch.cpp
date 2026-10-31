@@ -674,6 +674,8 @@ struct StreetBatchSolver::Engine
         std::pmr::vector<double> pi1;
         std::pmr::vector<double> aev0;
         std::pmr::vector<double> aev1;
+        // Acting-player infoset bases for this decision depth only.
+        std::pmr::vector<int> slot_base;
 
         template <typename Alloc>
         Scratch(std::allocator_arg_t, const Alloc& alloc)
@@ -683,6 +685,7 @@ struct StreetBatchSolver::Engine
             , pi1(alloc)
             , aev0(alloc)
             , aev1(alloc)
+            , slot_base(alloc)
         {
         }
 
@@ -694,6 +697,7 @@ struct StreetBatchSolver::Engine
             , pi1(other.pi1, alloc)
             , aev0(other.aev0, alloc)
             , aev1(other.aev1, alloc)
+            , slot_base(other.slot_base, alloc)
         {
         }
 
@@ -705,6 +709,7 @@ struct StreetBatchSolver::Engine
             , pi1(std::move(other.pi1), alloc)
             , aev0(std::move(other.aev0), alloc)
             , aev1(std::move(other.aev1), alloc)
+            , slot_base(std::move(other.slot_base), alloc)
         {
         }
     };
@@ -721,10 +726,19 @@ struct StreetBatchSolver::Engine
         std::pmr::vector<double> prefix_buf;
         // Compact card prefixes: one initial zero per card, then one weight per hole card.
         std::pmr::vector<double> block_buf;
+        // Structural support for the current (turn, river); filled by ensure_board_support.
+        std::pmr::vector<char> live0;
+        std::pmr::vector<char> live1;
+        int support_turn = -2;
+        int support_river = -2;
         double order_seconds = 0.0;
         double showdown_seconds = 0.0;
         double decision_seconds = 0.0;
         double chance_seconds = 0.0;
+        double fold_seconds = 0.0;
+        double collect_seconds = 0.0;
+        double expand_seconds = 0.0;
+        double support_seconds = 0.0;
 
         explicit WorkerContext(std::pmr::memory_resource* heap)
             : WorkerContext(std::allocator_arg, allocator_type(heap))
@@ -736,6 +750,8 @@ struct StreetBatchSolver::Engine
             , amount_buf{std::pmr::vector<double>(alloc), std::pmr::vector<double>(alloc)}
             , prefix_buf(alloc)
             , block_buf(alloc)
+            , live0(alloc)
+            , live1(alloc)
         {
         }
     };
@@ -1252,9 +1268,13 @@ struct StreetBatchSolver::Engine
         add(table);
         add(table);
         add(table);
+        // ev/pi/aev doubles plus per-depth acting slot bases (wide ints).
         const std::uint64_t scratch_level = checked_add(
-            checked_mul(hands0, sizeof(double) * 10, "plan"),
-            checked_mul(hands1, sizeof(double) * 10, "plan"),
+            checked_add(
+                checked_mul(hands0, sizeof(double) * 10, "plan"),
+                checked_mul(hands1, sizeof(double) * 10, "plan"),
+                "plan"),
+            checked_mul(wide, sizeof(int), "plan"),
             "plan");
         add(checked_mul(32, sizeof(Scratch), "plan"));
         add(checked_mul(32, scratch_level, "plan"));
@@ -1269,6 +1289,8 @@ struct StreetBatchSolver::Engine
             "plan"));
         add(checked_mul(planned_slots_, sizeof(int), "plan"));
         add(checked_mul(hands0 + hands1, sizeof(double), "plan"));
+        // Board support masks reused across decision actions on the same runout.
+        add(checked_mul(hands0 + hands1, sizeof(char), "plan"));
         const int free_cards = 52 - static_cast<int>(config.board.size());
         const std::uint64_t keys = config.board.size() == 5
             ? 1ull
@@ -1294,10 +1316,7 @@ struct StreetBatchSolver::Engine
         if (config.threads > 1)
         {
             const std::uint64_t extra = static_cast<std::uint64_t>(config.threads - 1);
-            const std::uint64_t extra_scratch = checked_add(
-                checked_mul(hands0, sizeof(double) * 10, "plan"),
-                checked_mul(hands1, sizeof(double) * 10, "plan"),
-                "plan");
+            const std::uint64_t extra_scratch = scratch_level;
             add(checked_mul(extra, sizeof(WorkerContext), "plan"));
             add(checked_mul(extra, checked_mul(32, sizeof(Scratch), "plan"), "plan"));
             add(checked_mul(extra, checked_mul(32, extra_scratch, "plan"), "plan"));
@@ -1310,6 +1329,7 @@ struct StreetBatchSolver::Engine
                     "plan"),
                 "plan"));
             add(checked_mul(extra, checked_mul(hands0 + hands1, sizeof(double), "plan"), "plan"));
+            add(checked_mul(extra, checked_mul(hands0 + hands1, sizeof(char), "plan"), "plan"));
             add(checked_mul(52, hands0 * sizeof(double), "plan"));
             add(checked_mul(52, hands1 * sizeof(double), "plan"));
         }
@@ -1940,7 +1960,7 @@ struct StreetBatchSolver::Engine
                 {
                     next_river = card;
                 }
-                if (!card_reaches_pair(next_turn, next_river, pi0, pi1))
+                if (!card_reaches_pair(&ctx, next_turn, next_river, pi0, pi1))
                 {
                     continue;
                 }
@@ -2203,6 +2223,7 @@ struct StreetBatchSolver::Engine
             level.pi1.assign(static_cast<std::size_t>(n1), 0.0);
             level.aev0.assign(static_cast<std::size_t>(8 * n0), 0.0);
             level.aev1.assign(static_cast<std::size_t>(8 * n1), 0.0);
+            level.slot_base.assign(static_cast<std::size_t>(wide), -1);
         }
         budget_->set_stage("prefix");
         const std::uint64_t block_entries = checked_add(
@@ -2214,6 +2235,61 @@ struct StreetBatchSolver::Engine
         budget_->set_stage("terminal_buffers");
         ctx.amount_buf[0].assign(static_cast<std::size_t>(n0), 0.0);
         ctx.amount_buf[1].assign(static_cast<std::size_t>(n1), 0.0);
+        ctx.live0.assign(static_cast<std::size_t>(n0), 0);
+        ctx.live1.assign(static_cast<std::size_t>(n1), 0);
+        ctx.support_turn = -2;
+        ctx.support_river = -2;
+    }
+
+    void ensure_board_support(WorkerContext& ctx, int turn, int river) const
+    {
+        if (ctx.support_turn == turn && ctx.support_river == river)
+        {
+            return;
+        }
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        for (int hand = 0; hand < n0; ++hand)
+        {
+            ctx.live0[static_cast<std::size_t>(hand)] =
+                hand_supported(0, hand, turn, river) ? 1 : 0;
+        }
+        for (int hand = 0; hand < n1; ++hand)
+        {
+            ctx.live1[static_cast<std::size_t>(hand)] =
+                hand_supported(1, hand, turn, river) ? 1 : 0;
+        }
+        ctx.support_turn = turn;
+        ctx.support_river = river;
+        if (profile_)
+        {
+            ctx.support_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+        }
+    }
+
+    void fill_actor_slot_bases(
+        WorkerContext& ctx,
+        Scratch& here,
+        const Node& node,
+        int turn,
+        int river,
+        const double* pi) const
+    {
+        const int hands = node.player == 0 ? n0 : n1;
+        const std::pmr::vector<char>& live = node.player == 0 ? ctx.live0 : ctx.live1;
+        for (int hand = 0; hand < hands; ++hand)
+        {
+            if (!live[static_cast<std::size_t>(hand)])
+            {
+                here.slot_base[static_cast<std::size_t>(hand)] = -1;
+                continue;
+            }
+            const int index = slot_index(node, hand, turn, river, pi[hand]);
+            here.slot_base[static_cast<std::size_t>(hand)] =
+                slots[static_cast<std::size_t>(index)].base;
+        }
     }
 
     void prepare_rank_cache()
@@ -2571,6 +2647,7 @@ struct StreetBatchSolver::Engine
     }
 
     void collect_reach(
+        WorkerContext& ctx,
         int player,
         int turn,
         int river,
@@ -2580,6 +2657,9 @@ struct StreetBatchSolver::Engine
         double& total,
         double* by_card) const
     {
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
         const int hands = player == 0 ? n0 : n1;
         amount.assign(static_cast<std::size_t>(hands), 0.0);
         total = 0.0;
@@ -2603,6 +2683,11 @@ struct StreetBatchSolver::Engine
             total += piece;
             by_card[hole_a[player][static_cast<std::size_t>(hand)]] += piece;
             by_card[hole_b[player][static_cast<std::size_t>(hand)]] += piece;
+        }
+        if (profile_)
+        {
+            ctx.collect_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
         }
     }
 
@@ -2726,23 +2811,42 @@ struct StreetBatchSolver::Engine
     // at least one side. A positive-reach hand with no compatible partner does
     // not qualify. Chance probabilities are not renormalized over the cards
     // this keeps.
-    bool card_reaches_pair(int turn, int river, const double* pi0, const double* pi1) const
+    bool card_reaches_pair(
+        WorkerContext* profile_ctx,
+        int turn,
+        int river,
+        const double* pi0,
+        const double* pi1) const
     {
+        const auto started = profile_ && profile_ctx != nullptr
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        bool found = false;
         for (int hand = 0; hand < n0; ++hand)
         {
             if (pi0[hand] > 0.0 && hand_supported(0, hand, turn, river))
             {
-                return true;
+                found = true;
+                break;
             }
         }
-        for (int hand = 0; hand < n1; ++hand)
+        if (!found)
         {
-            if (pi1[hand] > 0.0 && hand_supported(1, hand, turn, river))
+            for (int hand = 0; hand < n1; ++hand)
             {
-                return true;
+                if (pi1[hand] > 0.0 && hand_supported(1, hand, turn, river))
+                {
+                    found = true;
+                    break;
+                }
             }
         }
-        return false;
+        if (profile_ && profile_ctx != nullptr)
+        {
+            profile_ctx->support_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+        }
+        return found;
     }
 
     void order_reach(
@@ -2971,11 +3075,14 @@ struct StreetBatchSolver::Engine
         double total1 = 0.0;
         double by0[52];
         double by1[52];
-        collect_reach(0, turn, river, pi0, true, ctx.amount_buf[0], total0, by0);
-        collect_reach(1, turn, river, pi1, true, ctx.amount_buf[1], total1, by1);
+        collect_reach(ctx, 0, turn, river, pi0, true, ctx.amount_buf[0], total0, by0);
+        collect_reach(ctx, 1, turn, river, pi1, true, ctx.amount_buf[1], total1, by1);
         const double half = static_cast<double>(config.pot) * 0.5;
         if (node.folded >= 0)
         {
+            const auto fold_started = profile_
+                ? std::chrono::steady_clock::now()
+                : std::chrono::steady_clock::time_point{};
             const double pay = node.folded == 0
                 ? -(half + static_cast<double>(node.contrib[0]))
                 : half + static_cast<double>(node.contrib[1]);
@@ -3004,6 +3111,11 @@ struct StreetBatchSolver::Engine
                     : total0 - blocked_reach(1, hand, by0, ctx.amount_buf[0]);
                 ev1[static_cast<std::size_t>(hand)] =
                     pay * range_w[1][static_cast<std::size_t>(hand)] * joint_scale * open;
+            }
+            if (profile_)
+            {
+                ctx.fold_seconds += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - fold_started).count();
             }
             return;
         }
@@ -3129,15 +3241,16 @@ struct StreetBatchSolver::Engine
             {
                 next_river = card;
             }
+            ensure_board_support(ctx, next_turn, next_river);
             for (int hand = 0; hand < n0; ++hand)
             {
-                child.pi0[static_cast<std::size_t>(hand)] = hand_supported(0, hand, next_turn, next_river)
-                    ? task_pi0_[hand] : 0.0;
+                child.pi0[static_cast<std::size_t>(hand)] =
+                    ctx.live0[static_cast<std::size_t>(hand)] ? task_pi0_[hand] : 0.0;
             }
             for (int hand = 0; hand < n1; ++hand)
             {
-                child.pi1[static_cast<std::size_t>(hand)] = hand_supported(1, hand, next_turn, next_river)
-                    ? task_pi1_[hand] : 0.0;
+                child.pi1[static_cast<std::size_t>(hand)] =
+                    ctx.live1[static_cast<std::size_t>(hand)] ? task_pi1_[hand] : 0.0;
             }
             frozen_walk(
                 ctx, task_node_, next_turn, next_river, task_depth_, task_updating_, task_weight_, true);
@@ -3414,7 +3527,7 @@ struct StreetBatchSolver::Engine
             {
                 next_river = card;
             }
-            if (!card_reaches_pair(next_turn, next_river, pi0, pi1))
+            if (!card_reaches_pair(&ctx, next_turn, next_river, pi0, pi1))
             {
                 continue;
             }
@@ -3535,19 +3648,20 @@ struct StreetBatchSolver::Engine
                 {
                     next_river = card;
                 }
-                if (!card_reaches_pair(next_turn, next_river, pi0, pi1))
+                if (!card_reaches_pair(&ctx, next_turn, next_river, pi0, pi1))
                 {
                     continue;
                 }
+                ensure_board_support(ctx, next_turn, next_river);
                 for (int h0 = 0; h0 < n0; ++h0)
                 {
-                    child.pi0[static_cast<std::size_t>(h0)] = hand_supported(0, h0, next_turn, next_river)
-                        ? pi0[h0] : 0.0;
+                    child.pi0[static_cast<std::size_t>(h0)] =
+                        ctx.live0[static_cast<std::size_t>(h0)] ? pi0[h0] : 0.0;
                 }
                 for (int h1 = 0; h1 < n1; ++h1)
                 {
-                    child.pi1[static_cast<std::size_t>(h1)] = hand_supported(1, h1, next_turn, next_river)
-                        ? pi1[h1] : 0.0;
+                    child.pi1[static_cast<std::size_t>(h1)] =
+                        ctx.live1[static_cast<std::size_t>(h1)] ? pi1[h1] : 0.0;
                 }
                 frozen_walk(
                     ctx, node.child[0], next_turn, next_river, depth + 1, updating, weight_iter, true);
@@ -3563,21 +3677,27 @@ struct StreetBatchSolver::Engine
             return;
         }
 
+        ensure_board_support(ctx, turn, river);
+        const double* actor_pi = node.player == 0 ? pi0 : pi1;
+        fill_actor_slot_bases(ctx, here, node, turn, river, actor_pi);
         Scratch& child = ctx.scratch[static_cast<std::size_t>(depth + 1)];
         for (int action = 0; action < node.n_actions; ++action)
         {
+            const auto expand_started = profile_
+                ? std::chrono::steady_clock::now()
+                : std::chrono::steady_clock::time_point{};
             if (node.player == 0)
             {
                 for (int h0 = 0; h0 < n0; ++h0)
                 {
-                    if (!hand_supported(0, h0, turn, river))
+                    const int base = here.slot_base[static_cast<std::size_t>(h0)];
+                    if (base < 0)
                     {
                         child.pi0[static_cast<std::size_t>(h0)] = 0.0;
                         continue;
                     }
-                    const int index = slot_index(node, h0, turn, river, pi0[h0]);
-                    const double* sigma = frozen_sigma.data() + slots[static_cast<std::size_t>(index)].base;
-                    child.pi0[static_cast<std::size_t>(h0)] = pi0[h0] * sigma[action];
+                    child.pi0[static_cast<std::size_t>(h0)] =
+                        pi0[h0] * frozen_sigma[static_cast<std::size_t>(base + action)];
                 }
                 std::copy(pi1, pi1 + n1, child.pi1.begin());
             }
@@ -3586,28 +3706,43 @@ struct StreetBatchSolver::Engine
                 std::copy(pi0, pi0 + n0, child.pi0.begin());
                 for (int h1 = 0; h1 < n1; ++h1)
                 {
-                    if (!hand_supported(1, h1, turn, river))
+                    const int base = here.slot_base[static_cast<std::size_t>(h1)];
+                    if (base < 0)
                     {
                         child.pi1[static_cast<std::size_t>(h1)] = 0.0;
                         continue;
                     }
-                    const int index = slot_index(node, h1, turn, river, pi1[h1]);
-                    const double* sigma = frozen_sigma.data() + slots[static_cast<std::size_t>(index)].base;
-                    child.pi1[static_cast<std::size_t>(h1)] = pi1[h1] * sigma[action];
+                    child.pi1[static_cast<std::size_t>(h1)] =
+                        pi1[h1] * frozen_sigma[static_cast<std::size_t>(base + action)];
                 }
+            }
+            if (profile_)
+            {
+                ctx.expand_seconds += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - expand_started).count();
             }
             frozen_walk(
                 ctx, node.child[action], turn, river, depth + 1, updating, weight_iter, serial_chance);
+            const auto copy_started = profile_
+                ? std::chrono::steady_clock::now()
+                : std::chrono::steady_clock::time_point{};
             std::copy(child.ev0.begin(), child.ev0.end(), here.aev0.begin() + static_cast<std::size_t>(action * n0));
             std::copy(child.ev1.begin(), child.ev1.end(), here.aev1.begin() + static_cast<std::size_t>(action * n1));
+            if (profile_)
+            {
+                ctx.expand_seconds += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - copy_started).count();
+            }
         }
 
+        // Child chance nodes overwrite the support masks; restore this board.
+        ensure_board_support(ctx, turn, river);
         const auto decision_started = profile_
             ? std::chrono::steady_clock::now()
             : std::chrono::steady_clock::time_point{};
         for (int h0 = 0; h0 < n0; ++h0)
         {
-            if (!hand_supported(0, h0, turn, river))
+            if (!ctx.live0[static_cast<std::size_t>(h0)])
             {
                 here.ev0[static_cast<std::size_t>(h0)] = 0.0;
                 continue;
@@ -3615,8 +3750,7 @@ struct StreetBatchSolver::Engine
             double mix = 0.0;
             if (node.player == 0)
             {
-                const int index = slot_index(node, h0, turn, river, pi0[h0]);
-                const int base = slots[static_cast<std::size_t>(index)].base;
+                const int base = here.slot_base[static_cast<std::size_t>(h0)];
                 const double* sigma = frozen_sigma.data() + base;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
@@ -3645,7 +3779,7 @@ struct StreetBatchSolver::Engine
         }
         for (int h1 = 0; h1 < n1; ++h1)
         {
-            if (!hand_supported(1, h1, turn, river))
+            if (!ctx.live1[static_cast<std::size_t>(h1)])
             {
                 here.ev1[static_cast<std::size_t>(h1)] = 0.0;
                 continue;
@@ -3653,8 +3787,7 @@ struct StreetBatchSolver::Engine
             double mix = 0.0;
             if (node.player == 1)
             {
-                const int index = slot_index(node, h1, turn, river, pi1[h1]);
-                const int base = slots[static_cast<std::size_t>(index)].base;
+                const int base = here.slot_base[static_cast<std::size_t>(h1)];
                 const double* sigma = frozen_sigma.data() + base;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
@@ -4527,7 +4660,7 @@ struct StreetBatchSolver::Engine
                 {
                     next_river = card;
                 }
-                if (!card_reaches_pair(next_turn, next_river, pi0, pi1))
+                if (!card_reaches_pair(&ctx, next_turn, next_river, pi0, pi1))
                 {
                     continue;
                 }
@@ -5693,6 +5826,10 @@ void StreetBatchSolver::enable_walk_profile(bool enabled)
         ctx.showdown_seconds = 0.0;
         ctx.decision_seconds = 0.0;
         ctx.chance_seconds = 0.0;
+        ctx.fold_seconds = 0.0;
+        ctx.collect_seconds = 0.0;
+        ctx.expand_seconds = 0.0;
+        ctx.support_seconds = 0.0;
     };
     clear(engine_->workspace);
     for (int index = 0; index < engine_->extra_count_; ++index)
@@ -5710,6 +5847,10 @@ StreetWalkProfile StreetBatchSolver::walk_profile() const
         profile.showdown_seconds += ctx.showdown_seconds;
         profile.decision_seconds += ctx.decision_seconds;
         profile.chance_seconds += ctx.chance_seconds;
+        profile.fold_seconds += ctx.fold_seconds;
+        profile.collect_seconds += ctx.collect_seconds;
+        profile.expand_seconds += ctx.expand_seconds;
+        profile.support_seconds += ctx.support_seconds;
     };
     add(engine_->workspace);
     for (int index = 0; index < engine_->extra_count_; ++index)
