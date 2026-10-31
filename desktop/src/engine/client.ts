@@ -4,6 +4,19 @@ import type {
   SolveJobRequest,
   StatusPayload,
 } from "../domain/types";
+import { isTauriRuntime } from "../platform";
+
+function defaultEngineBaseUrl(): string {
+  const fromEnv = import.meta.env.VITE_ENGINE_URL;
+  if (typeof fromEnv === "string" && fromEnv.length > 0) {
+    return fromEnv;
+  }
+  // Tauri webview origin is not the explorer; hit the managed local explorer.
+  if (isTauriRuntime()) {
+    return "http://127.0.0.1:8765";
+  }
+  return "";
+}
 
 export class EngineError extends Error {
   status: number;
@@ -303,4 +316,4 @@ export class EngineClient {
   }
 }
 
-export const engineClient = new EngineClient();
+export const engineClient = new EngineClient({ baseUrl: defaultEngineBaseUrl() });

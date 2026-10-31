@@ -1,7 +1,7 @@
 /** Browser platform adapter — no native privileges; path fields instead of OS dialogs. */
 
 export interface PlatformFileApi {
-  kind: "browser";
+  kind: "browser" | "tauri";
   pickOpenPath(): Promise<string | null>;
   pickSavePath(defaultPath?: string): Promise<string | null>;
   revealInFolder(_path: string): Promise<void>;
@@ -30,7 +30,7 @@ export function getPlatform(): PlatformApi {
   return active;
 }
 
-/** Future Tauri adapter can replace this without rewriting Study components. */
+/** Tauri (or other native) adapters replace this without rewriting Study components. */
 export function setPlatform(platform: PlatformApi) {
   active = platform;
 }
