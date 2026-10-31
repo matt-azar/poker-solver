@@ -14,7 +14,7 @@ Unrestricted HUNL deals two hole cards from a 52-card deck and then three street
 
 **Monte Carlo CFR.** MCCFR samples outcomes or information sets. The traversals here walk every outcome. A sampled run would trade variance for a larger tree. This repository has no sampled run.
 
-**Discounted CFR.** Discounted CFR scales the current regrets and the average strategy by a function of the iteration. Linear CFR is the case that weights iteration `t` by `t`. The shared trainer implements it on Kuhn, below.
+**Discounted CFR.** Discounted CFR scales the current regrets and the average strategy by a function of the iteration. Linear CFR is the case that weights iteration `t` by `t` on both the regret increment and the average. Fixed DCFR(α=1.5, β=0, γ=2) (Brown and Sandholm, AAAI 2019) is an optional production algorithm: alternating OOP/IP frozen passes, signed regrets discounted once per completed pass with `t^1.5/(t^1.5+1)` on positives and `0.5` on non-positives, and average weight `t^2`. CFR+ remains the default. See [STREETS.md](STREETS.md).
 
 **Subgame solving.** Libratus-style resolving, continual resolving, and safe subgames re-solve the public state in front of the players, with a gadget that accounts for the opponent's range. The river solver takes a pot and two ranges and solves that river. The caller supplies the ranges.
 

@@ -409,3 +409,22 @@ Instrumented 3-iter profile at 1 thread (flop): `order_seconds` 0.091 → 0.075,
 | turn_half_pot | 4 | 0.727 | 0.722 | **1.01x** |
 
 Instrumented 3-iter profile at 1 thread (flop): `decision_seconds` 0.148 → 0.115, `expand_seconds` 0.115 → 0.119, train 0.957 → 0.903. The decision bucket shrank, but the mix work moved into expand and four-thread wall train did not clear ~1.05x. Parity pins at iteration 30: 1-vs-4 and after-vs-`main` relative regret / strategy-sum delta 0 on both trees (after fixing an early live-mask read that raced child chance overwrites — mix accumulate must use `slot_base`, not `ctx.live*`, inside the action loop). Not shipped.
+
+## Optional DCFR(1.5, 0, 2) versus CFR+ (frozen StreetBatch)
+
+Linux cloud agent, g++ 13.3.0 Release, `street_solver --frozen --threads 1`, accuracy stop NashConv/pot ≤ 0.001 with `--eval-every 20`. Two repetitions with rotated algorithm order. Peak memory is `peak_allocated_bytes` from the engine report. Quadratic-averaged CFR+ is not a production street option here (would expand product scope); linear CFR remains `CfrTrainer`-only.
+
+First checked iteration at which NashConv/pot ≤ 0.001 (eval cadence 20, so the reported iteration is a multiple of 20):
+
+| Fixture | CFR+ iters | DCFR iters | CFR+ train (s) | DCFR train (s) | CFR+ peak bytes | DCFR peak bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Competing-weight river | 340 | 160 | 0.046 | 0.023 | ~same tree | ~same tree |
+| Paired river | 120 | 100 | 0.003 | 0.003 | | |
+| Original turn (AhAd vs 2c3d) | 100 | 40 | 0.011 | 0.005 | | |
+| Mixed river | 60 | 60 | 0.001 | 0.001 | | |
+| Four-flush river | 80 | 100 | 0.001 | 0.001 | | |
+| Second turn | 60 | 20 | 0.007 | 0.002 | | |
+
+Fixed-horizon controls (no accuracy stop): broader turn `turn_srp_river_betting` 30 iters — CFR+ NashConv 13.31 vs DCFR 8.62 (train ≈1.5 s each). Memory-safe flop `flop_srp_one_size` 5 iters — CFR+ NashConv 168.9 vs DCFR 201.8 (train ≈48–51 s); DCFR does not win this short flop horizon. Setup/cache times matched within noise for each pair.
+
+Limitations: Linux-only measurement on this agent; Windows Explorer coverage is not established by these runs. Runtime on tiny trees is noisy. CFR+ remains the default until broader evidence supports a separate product decision. `poker_solver_tests` on this change: 466973 assertions, 0 failures.

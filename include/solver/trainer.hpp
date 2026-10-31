@@ -1,5 +1,6 @@
 #pragma once
 
+#include "solver/dcfr.hpp"
 #include "solver/node_lock.hpp"
 #include "solver/regret_matching.hpp"
 
@@ -7,6 +8,7 @@
 #include <array>
 #include <chrono>
 #include <concepts>
+#include <cstdint>
 #include <cstddef>
 #include <span>
 #include <stdexcept>
@@ -22,7 +24,10 @@ enum class Algorithm
     CfrPlus,
     // Regret and the average strategy are both weighted by the iteration index.
     // Regrets are not floored. Both players update in one traversal.
-    LinearCfr
+    LinearCfr,
+    // Fixed DCFR(1.5, 0, 2): alternating passes, signed regrets with
+    // pass-level discounting, quadratic own-reach average weights.
+    Dcfr
 };
 
 struct SolveConfig
@@ -82,7 +87,60 @@ inline const char* algorithm_name(Algorithm algorithm)
     {
         return "linear_cfr";
     }
+    if (algorithm == Algorithm::Dcfr)
+    {
+        return "dcfr";
+    }
     return "vanilla_cfr";
+}
+
+// Checkpoint / PSOL algorithm tags. Do not renumber existing values.
+inline constexpr std::uint8_t kAlgorithmTagVanilla = 0;
+inline constexpr std::uint8_t kAlgorithmTagCfrPlus = 1;
+inline constexpr std::uint8_t kAlgorithmTagLinear = 2;
+inline constexpr std::uint8_t kAlgorithmTagDcfr = 3;
+inline constexpr std::uint8_t kAlgorithmTagMax = kAlgorithmTagDcfr;
+
+inline std::uint8_t algorithm_tag(Algorithm algorithm)
+{
+    if (algorithm == Algorithm::VanillaCfr)
+    {
+        return kAlgorithmTagVanilla;
+    }
+    if (algorithm == Algorithm::CfrPlus)
+    {
+        return kAlgorithmTagCfrPlus;
+    }
+    if (algorithm == Algorithm::LinearCfr)
+    {
+        return kAlgorithmTagLinear;
+    }
+    if (algorithm == Algorithm::Dcfr)
+    {
+        return kAlgorithmTagDcfr;
+    }
+    throw std::invalid_argument("algorithm has no checkpoint tag");
+}
+
+inline Algorithm algorithm_from_tag(std::uint8_t tag)
+{
+    if (tag == kAlgorithmTagVanilla)
+    {
+        return Algorithm::VanillaCfr;
+    }
+    if (tag == kAlgorithmTagCfrPlus)
+    {
+        return Algorithm::CfrPlus;
+    }
+    if (tag == kAlgorithmTagLinear)
+    {
+        return Algorithm::LinearCfr;
+    }
+    if (tag == kAlgorithmTagDcfr)
+    {
+        return Algorithm::Dcfr;
+    }
+    throw std::invalid_argument("checkpoint algorithm is unknown");
 }
 
 // Two-player zero-sum extensive game with perfect recall.
@@ -405,8 +463,17 @@ public:
                 const double weight = static_cast<double>(iterations_completed_);
                 run_pass(-1, weight);
             }
+            else if (algorithm_ == Algorithm::Dcfr)
+            {
+                const DcfrFactors factors = dcfr_factors(iterations_completed_);
+                dcfr_positive_ = factors.positive_discount;
+                dcfr_negative_ = factors.negative_discount;
+                run_pass(0, factors.average_weight);
+                run_pass(1, factors.average_weight);
+            }
             else
             {
+                // CFR+: floor after each alternating pass; average weight is t.
                 const double weight = static_cast<double>(iterations_completed_);
                 run_pass(0, weight);
                 run_pass(1, weight);
@@ -674,9 +741,11 @@ private:
         }
     }
 
-    // Add this player's summed regret, then floor that player once.
+    // Add this player's summed regret, then finalize that player once.
     // Vanilla and linear pass updating_player < 0 and keep signed regrets.
-    // The other player's table is left unchanged.
+    // CFR+ floors the updating player. DCFR discounts the updating player
+    // with the iteration's fixed (positive, negative) factors. The other
+    // player's table is left unchanged.
     void end_pass(int updating_player)
     {
         const int infosets = game_.infoset_count();
@@ -685,6 +754,7 @@ private:
             const int actor = game_.acting_player(infoset);
             const bool active = updating_player < 0 || actor == updating_player;
             const bool floor_this = algorithm_ == Algorithm::CfrPlus && active && updating_player >= 0;
+            const bool discount_this = algorithm_ == Algorithm::Dcfr && active && updating_player >= 0;
             const int count = game_.action_count(infoset);
             const int base = offset_[static_cast<std::size_t>(infoset)];
             for (int action = 0; action < count; ++action)
@@ -696,6 +766,15 @@ private:
                     {
                         throw std::logic_error("inactive player accumulated regret during this pass");
                     }
+                    continue;
+                }
+                if (discount_this)
+                {
+                    regret_[index] = dcfr_discounted_regret(
+                        regret_[index],
+                        pass_delta_[index],
+                        dcfr_positive_,
+                        dcfr_negative_);
                     continue;
                 }
                 regret_[index] += pass_delta_[index];
@@ -715,6 +794,8 @@ private:
     std::vector<double> pass_sigma_;
     std::vector<double> pass_delta_;
     int iterations_completed_ = 0;
+    double dcfr_positive_ = 1.0;
+    double dcfr_negative_ = 0.5;
     // Non-owning; set for the duration of solve() from SolveConfig::locks.
     const LockSet* locks_ = nullptr;
 };

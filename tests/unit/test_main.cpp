@@ -12,6 +12,7 @@ int main()
     run_smoke_tests();
     run_kuhn_tests();
     run_cfr_tests();
+    run_dcfr_tests();
     run_leduc_tests();
     run_holdem_tests();
     run_hand_category_tests();

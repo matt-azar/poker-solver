@@ -1,5 +1,7 @@
 #include "explorer/checkpoint.hpp"
 
+#include "solver/trainer.hpp"
+
 #include <bit>
 #include <cstring>
 #include <filesystem>
@@ -249,7 +251,7 @@ std::string payload_of(const CheckpointDocument& document)
     {
         throw std::invalid_argument("checkpoint kind is not a street or river solve");
     }
-    if (document.algorithm > 2)
+    if (document.algorithm > poker::solver::kAlgorithmTagMax)
     {
         throw std::invalid_argument("checkpoint algorithm is unknown");
     }
@@ -463,7 +465,9 @@ CheckpointDocument read_checkpoint(const std::string& path, std::uint64_t max_pa
     {
         throw std::invalid_argument("checkpoint has trailing bytes");
     }
-    if ((document.kind != 1 && document.kind != 2) || document.algorithm > 2 || (frozen != 0 && frozen != 1))
+    if ((document.kind != 1 && document.kind != 2)
+        || document.algorithm > poker::solver::kAlgorithmTagMax
+        || (frozen != 0 && frozen != 1))
     {
         throw std::invalid_argument("checkpoint shape is invalid");
     }

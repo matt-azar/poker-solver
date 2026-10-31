@@ -88,6 +88,7 @@ void test_resume_matches_uninterrupted_street()
     CHECK(same_tables(loaded.tables, document.tables));
     StreetBatchSolver restored(poker::streets::parse_street_config(loaded.config_text));
     restored.install_training_tables(loaded.tables);
+    restored.bind_training_algorithm(Algorithm::CfrPlus);
     restored.continue_iterations(2, Algorithm::CfrPlus);
     CHECK(same_tables(restored.training_tables(), full.training_tables()));
     CHECK(restored.completed_iterations() == 6);

@@ -69,6 +69,7 @@ add_executable(poker_solver_tests
     tests/unit/test_smoke.cpp
     tests/unit/test_kuhn.cpp
     tests/unit/test_cfr.cpp
+    tests/unit/test_dcfr.cpp
     tests/unit/test_leduc.cpp
     tests/unit/test_holdem.cpp
     tests/unit/test_hand_categories.cpp

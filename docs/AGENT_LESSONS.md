@@ -105,8 +105,9 @@ Engine and session types live under `include/game`, `include/solver`, `include/e
 
 - `--threads N>1` requires `--frozen`; per-deal walk stays serial.
 - Parallelism splits the **first future public card** only (turn→rivers, flop→turns).
-- Public frozen path: vanilla CFR and CFR+ (not Linear CFR).
+- Public frozen path: vanilla CFR, CFR+, and fixed DCFR(1.5,0,2) (not Linear CFR).
 - CFR+: sum counterfactual regret across the frozen pass, then **floor only the updating player**; leave the opponent table alone.
+- DCFR: same alternating frozen passes; after each pass **discount** the updating player's full regret row (signed; no CFR+ floor) with `t^1.5/(t^1.5+1)` on positives and `0.5` on non-positives; average with `t^2` own-reach. Reject DCFR on the non-frozen walk and on legacy `RiverBatchSolver`.
 
 **Pointers:** `docs/STREETS.md` (frozen threads), `src/solver/street_batch.cpp` `train_frozen`, commits `9e0d87d`, `6a597df`, `e2ad8df`.
 

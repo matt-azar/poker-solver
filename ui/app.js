@@ -730,6 +730,11 @@ $("board").addEventListener("input", updateSpot);
 $("frozen").addEventListener("change", () => {
   $("frozen").dataset.touched = "1";
 });
+$("algorithm").addEventListener("change", () => {
+  if ($("algorithm").value === "dcfr") {
+    $("frozen").checked = true;
+  }
+});
 
 $("setup").addEventListener("submit", async (event) => {
   event.preventDefault();
