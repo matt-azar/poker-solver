@@ -87,7 +87,7 @@ These do not replace the three reference cases.
 | --- | --- |
 | `smoke_success` | `success`. AA versus KK, small river, target reachable |
 | `smoke_invalid` | `invalid-input`. Unknown flag |
-| `smoke_timeout` | `timeout`. Full-range flop, engine budget 2048 MiB, killed at 2 seconds before a final report. A 1024 MiB budget rejects this tree and is not the timeout diagnostic |
+| `smoke_timeout` | `timeout`. Full-range flop, engine budget 4096 MiB, killed at 2 seconds before a final report. A 2048 MiB budget rejects this tree (~2.12 GiB estimated) and is not the timeout diagnostic |
 | `smoke_resource` | `resource-rejection`. Full-range flop with a 1 MiB engine budget |
 
 ## How to run

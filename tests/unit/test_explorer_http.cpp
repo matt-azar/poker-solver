@@ -779,6 +779,51 @@ void run_explorer_http_tests()
     CHECK(http_exchange("POST", "/api/solutions/s99/continue", "{\"iterations\":1}", missing_continue));
     CHECK(missing_continue.status == 404);
 
+    HttpResult bad_time_limit;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solve",
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":4,\"samples\":2,\"time_limit\":-1,"
+        "\"max_raises\":0,\"allow_all_in\":0,\"oop_bets\":[],\"ip_bets\":[],\"memory_mib\":128}",
+        bad_time_limit));
+    CHECK(bad_time_limit.status == 400);
+    CHECK(bad_time_limit.body.find("time_limit") != std::string::npos);
+
+    // time_limit 0 stops after the first completed sample chunk and keeps the solve.
+    const std::string timed =
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":40,\"samples\":4,\"time_limit\":0,"
+        "\"max_raises\":0,\"allow_all_in\":0,\"oop_bets\":[],\"ip_bets\":[],\"memory_mib\":128}";
+    HttpResult timed_accepted;
+    CHECK(http_exchange("POST", "/api/solve", timed, timed_accepted));
+    CHECK(timed_accepted.status == 202);
+    HttpResult timed_status;
+    CHECK(wait_for_completion(timed_status));
+    CHECK(timed_status.body.find("\"time_limit_reached\":true") != std::string::npos);
+    CHECK(timed_status.body.find("\"cancelled\":false") != std::string::npos);
+    double timed_iters = 0.0;
+    CHECK(json_number(timed_status.body, "iterations", timed_iters));
+    CHECK(timed_iters == 10.0);
+    CHECK(timed_iters < 40.0);
+    const std::string timed_solution = json_string(timed_status.body, "solution_id");
+    CHECK(!timed_solution.empty());
+
+    HttpResult timed_continue;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solutions/" + timed_solution + "/continue",
+        "{\"iterations\":40,\"time_limit\":0}",
+        timed_continue));
+    CHECK(timed_continue.status == 202);
+    HttpResult timed_continue_status;
+    CHECK(wait_for_completion(timed_continue_status));
+    CHECK(timed_continue_status.body.find("\"time_limit_reached\":true") != std::string::npos);
+    double timed_continue_iters = 0.0;
+    CHECK(json_number(timed_continue_status.body, "iterations", timed_continue_iters));
+    CHECK(timed_continue_iters == 20.0);
+    CHECK(json_string(timed_continue_status.body, "solution_id") == timed_solution);
+
     check_persistence_workflow_under_value_load();
 
 #ifdef _WIN32

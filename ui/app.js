@@ -659,8 +659,12 @@ $("setup").addEventListener("submit", async (event) => {
     memory_mib: Number($("memory-mib").value),
     threads: Number($("threads").value),
     algorithm: $("algorithm").value,
-    samples: 5
+    samples: Math.max(1, Math.min(20, Number($("samples").value) || 5))
   };
+  const timeLimitText = $("time-limit").value.trim();
+  if (timeLimitText !== "") {
+    body.time_limit = Number(timeLimitText);
+  }
   const response = await fetch("/api/solve", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -690,10 +694,15 @@ $("continue").addEventListener("click", async () => {
   $("continue").disabled = true;
   $("pause").disabled = false;
   $("stop").disabled = false;
+  const continueBody = {iterations: Number($("iterations").value)};
+  const continueTimeLimit = $("time-limit").value.trim();
+  if (continueTimeLimit !== "") {
+    continueBody.time_limit = Number(continueTimeLimit);
+  }
   const response = await fetch("/api/solutions/" + solutionId + "/continue", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({iterations: Number($("iterations").value)})
+    body: JSON.stringify(continueBody)
   });
   if (!response.ok && response.status !== 202) {
     const failed = await response.json().catch(() => ({error: response.statusText}));
@@ -899,6 +908,8 @@ function render(status) {
     $("message").textContent = "Paused at iteration " + status.iterations;
   } else if (status.cancelled) {
     $("message").textContent = "Stopped at iteration " + status.iterations;
+  } else if (status.time_limit_reached) {
+    $("message").textContent = "Time limit at iteration " + status.iterations;
   } else if (status.iterations > 0) {
     $("message").textContent = "Finished";
   }
