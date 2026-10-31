@@ -55,10 +55,12 @@ function EquityHistogram({
             <span className="tabular muted">
               {bucket.lo.toFixed(1)}–{bucket.hi.toFixed(1)}
             </span>
-            <span
-              className="equity-bar"
-              style={{ width: `${Math.min(100, bucket.fraction * 100)}%` }}
-            />
+            <span className="equity-bar-track">
+              <span
+                className="equity-bar"
+                style={{ width: `${Math.min(100, bucket.fraction * 100)}%` }}
+              />
+            </span>
             <span className="tabular" title={`raw weight ${bucket.weight}`}>
               {(bucket.fraction * 100).toFixed(1)}%
             </span>

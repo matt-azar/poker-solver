@@ -328,6 +328,48 @@ let seenGeneration = -1;
 let continuationPending = false;
 let valuePollTimer: ReturnType<typeof setInterval> | null = null;
 
+function clearValuePoll() {
+  if (valuePollTimer) {
+    clearInterval(valuePollTimer);
+    valuePollTimer = null;
+  }
+}
+
+/** Poll async analysis endpoints that may return `{ pending: true }` / HTTP 202. */
+async function pollAnalysis<T extends { pending?: boolean }>(
+  token: number,
+  fetchOnce: () => Promise<T>,
+  onReady: (body: T) => void,
+  onError: (message: string) => void,
+): Promise<void> {
+  clearValuePoll();
+  const tick = async () => {
+    try {
+      const body = await fetchOnce();
+      if (token !== valueToken) {
+        return;
+      }
+      if (body && body.pending) {
+        if (!valuePollTimer) {
+          valuePollTimer = setInterval(() => {
+            void tick();
+          }, 250);
+        }
+        return;
+      }
+      clearValuePoll();
+      onReady(body);
+    } catch (error) {
+      if (token !== valueToken) {
+        return;
+      }
+      clearValuePoll();
+      onError(error instanceof EngineError ? error.message : "Analysis request failed");
+    }
+  };
+  await tick();
+}
+
 function syncThemeProxy(set: (partial: Partial<StudyState>) => void) {
   const theme = useThemeStore.getState();
   set({
@@ -722,10 +764,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       clearInterval(pollTimer);
       pollTimer = null;
     }
-    if (valuePollTimer) {
-      clearInterval(valuePollTimer);
-      valuePollTimer = null;
-    }
+    clearValuePoll();
   },
 
   async refresh() {
@@ -931,45 +970,24 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const token = ++valueToken;
     set({ phase: "analysis_pending", message: "Calculating action EVs…" });
-    const poll = async () => {
-      try {
-        const values = await engineClient.getValues(solutionId, node.node_id);
-        if (token !== valueToken) {
-          return;
-        }
-        if (values.pending) {
-          if (!valuePollTimer) {
-            valuePollTimer = setInterval(() => {
-              void poll();
-            }, 250);
-          }
-          return;
-        }
-        if (valuePollTimer) {
-          clearInterval(valuePollTimer);
-          valuePollTimer = null;
-        }
+    await pollAnalysis(
+      token,
+      () => engineClient.getValues(solutionId, node.node_id),
+      (values) => {
         set({
           nodeValues: values,
           phase: phaseFromStatus(get().status, "complete"),
           message: `Action EVs ready (${values.units || "chips"}, ${values.utility_basis || "root_centered"}).`,
           matrixMode: get().matrixMode === "strategy" ? "strategy-ev" : get().matrixMode,
         });
-      } catch (error) {
-        if (token !== valueToken) {
-          return;
-        }
-        if (valuePollTimer) {
-          clearInterval(valuePollTimer);
-          valuePollTimer = null;
-        }
+      },
+      (message) => {
         set({
           phase: phaseFromStatus(get().status, "complete"),
-          message: error instanceof EngineError ? error.message : "EV calculation failed",
+          message,
         });
-      }
-    };
-    await poll();
+      },
+    );
   },
 
   async loadRunouts() {
@@ -978,15 +996,21 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
-    set({ message: "Loading runouts…", analysisTab: "runouts" });
-    try {
-      const runouts = await engineClient.getRunouts(solutionId, node.node_id);
-      set({ runouts, message: "Runout comparison ready." });
-    } catch (error) {
-      set({
-        message: error instanceof EngineError ? error.message : "Runouts failed",
-      });
-    }
+    const token = ++valueToken;
+    set({
+      message: "Loading runouts…",
+      analysisTab: "runouts",
+      runouts: { pending: true },
+    });
+    await pollAnalysis(
+      token,
+      () =>
+        engineClient.getRunouts(solutionId, node.node_id) as Promise<{ pending?: boolean }>,
+      (runouts) => {
+        set({ runouts, message: "Runout comparison ready." });
+      },
+      (message) => set({ message, runouts: null }),
+    );
   },
 
   async loadEquity() {
@@ -995,15 +1019,21 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
-    set({ message: "Loading check-down equity…", analysisTab: "equity" });
-    try {
-      const equity = await engineClient.getEquity(solutionId, node.node_id);
-      set({ equity, message: "Check-down equity ready (fraction of pot)." });
-    } catch (error) {
-      set({
-        message: error instanceof EngineError ? error.message : "Equity failed",
-      });
-    }
+    const token = ++valueToken;
+    set({
+      message: "Loading check-down equity…",
+      analysisTab: "equity",
+      equity: { pending: true },
+    });
+    await pollAnalysis(
+      token,
+      () =>
+        engineClient.getEquity(solutionId, node.node_id) as Promise<{ pending?: boolean }>,
+      (equity) => {
+        set({ equity, message: "Check-down equity ready (fraction of pot)." });
+      },
+      (message) => set({ message }),
+    );
   },
 
   async loadCategories() {
@@ -1012,15 +1042,21 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
-    set({ message: "Loading made-hand categories…", analysisTab: "categories" });
-    try {
-      const categories = await engineClient.getCategories(solutionId, node.node_id);
-      set({ categories, message: "Made-hand categories ready." });
-    } catch (error) {
-      set({
-        message: error instanceof EngineError ? error.message : "Categories failed",
-      });
-    }
+    const token = ++valueToken;
+    set({
+      message: "Loading made-hand categories…",
+      analysisTab: "categories",
+      categories: { pending: true },
+    });
+    await pollAnalysis(
+      token,
+      () =>
+        engineClient.getCategories(solutionId, node.node_id) as Promise<{ pending?: boolean }>,
+      (categories) => {
+        set({ categories, message: "Made-hand categories ready." });
+      },
+      (message) => set({ message }),
+    );
   },
 
   async saveSolution() {

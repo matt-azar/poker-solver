@@ -1049,11 +1049,21 @@
   font-size: 12px;
 }
 
-.equity-bar {
+.equity-bar-track {
   display: block;
   height: 8px;
-  background: var(--accent);
+  width: 100%;
+  background: var(--secondary);
+  border: 1px solid var(--border);
   border-radius: 2px;
+  overflow: hidden;
+}
+
+.equity-bar {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  background: var(--accent);
 }
 
 .category-bar {
