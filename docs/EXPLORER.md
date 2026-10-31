@@ -74,4 +74,18 @@ The page then shows:
 - **Hand categories** on a five-card board: made-hand category fractions for each player from strategy-weighted reaches (not draws or backdoors)
 - Export writes the node on screen. A node export carries values only after they were calculated for that same node
 
+## Keyboard shortcuts
+
+When focus is not in an `input`, `textarea`, or `select`, these keys run the matching page control if that control is enabled:
+
+| Key | Action |
+| --- | --- |
+| `s` | Solve |
+| `x` | Stop |
+| `c` | Continue |
+| `b` | Focus the board field |
+| `?` | Toggle the on-page shortcuts help |
+
+Modifier chords (`Ctrl`, `Alt`, `Meta`) are ignored. There is no Undo control on this page, so no undo shortcut.
+
 The default spot is aces versus kings on `Ah Kd 7c 4s 2h`. That is the same tree as `configs/river_default.json`, with 200 iterations instead of 500. A three-, four-, or five-card board calls `StreetBatchSolver`. `river_solver` remains the CLI entry over `RiverBatchSolver`. Every board length sends `memory_mib` (default 1024) and `threads` (default 1). The memory field is the street solver's heap budget. Threads above 1 require the frozen pass; a non-frozen request with more than one thread is rejected before the solve starts. If the tree does not fit, the page keeps running and shows the budget error. The 200,000-terminal limit belongs to the `StreetGame` reference enumerator.

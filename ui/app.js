@@ -93,6 +93,39 @@ function applyTheme(name, storage) {
   return theme;
 }
 
+/* shortcut-helpers */
+function isTypingTarget(target) {
+  if (!target || typeof target !== "object") {
+    return false;
+  }
+  const tag = String(target.tagName || "").toUpperCase();
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+    return true;
+  }
+  return Boolean(target.isContentEditable);
+}
+
+function shortcutAction(key) {
+  if (key === "?") {
+    return "help";
+  }
+  const lower = String(key || "").toLowerCase();
+  if (lower === "s") {
+    return "solve";
+  }
+  if (lower === "x") {
+    return "stop";
+  }
+  if (lower === "c") {
+    return "continue";
+  }
+  if (lower === "b") {
+    return "board";
+  }
+  return null;
+}
+/* end-shortcut-helpers */
+
 function blank() {
   return Array.from({length: 13}, () => Array(13).fill(0));
 }
@@ -857,6 +890,42 @@ $("pause").addEventListener("click", async () => {
 $("stop").addEventListener("click", async () => {
   await fetch("/api/stop", {method: "POST"});
   $("message").textContent = "Stopping after the current sample…";
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
+    return;
+  }
+  if (isTypingTarget(event.target)) {
+    return;
+  }
+  const action = shortcutAction(event.key);
+  if (!action) {
+    return;
+  }
+  if (action === "help") {
+    event.preventDefault();
+    const help = $("shortcuts-help");
+    if (help) {
+      help.open = !help.open;
+    }
+    return;
+  }
+  if (action === "board") {
+    event.preventDefault();
+    const board = $("board");
+    if (board) {
+      board.focus();
+      board.select();
+    }
+    return;
+  }
+  const buttonId = action === "solve" ? "run" : action;
+  const button = $(buttonId);
+  if (button && !button.disabled) {
+    event.preventDefault();
+    button.click();
+  }
 });
 
 $("calculate-ev").addEventListener("click", () => {

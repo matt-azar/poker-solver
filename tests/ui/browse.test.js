@@ -267,11 +267,11 @@ assert.strictEqual(solutionNeedsReload({running: true, solution_id: "s1"}, null,
 assert.strictEqual(solutionNeedsReload({running: false, solution_id: null}, null, true), false);
 
 const appSource = fs.readFileSync("ui/app.js", "utf8");
-const helperBlock = appSource.match(/\/\* theme-helpers \*\/([\s\S]*?)\/\* end-theme-helpers \*\//);
-assert.ok(helperBlock, "theme helpers marked in app.js");
-vm.runInContext(helperBlock[1], context);
+const themeHelperBlock = appSource.match(/\/\* theme-helpers \*\/([\s\S]*?)\/\* end-theme-helpers \*\//);
+assert.ok(themeHelperBlock, "theme helpers marked in app.js");
+vm.runInContext(themeHelperBlock[1], context);
 const {normalizeTheme, readStoredTheme, themeClassName, nextTheme, writeStoredTheme} = context;
-assert.ok(helperBlock[1].includes('"explorer-theme"'), "storage key named explorer-theme");
+assert.ok(themeHelperBlock[1].includes('"explorer-theme"'), "storage key named explorer-theme");
 assert.strictEqual(normalizeTheme("dark"), "dark");
 assert.strictEqual(normalizeTheme("light"), "light");
 assert.strictEqual(normalizeTheme("other"), "light");
@@ -297,6 +297,26 @@ assert.ok(appSource.includes('$("theme-toggle")'), "theme toggle wired in app.js
 assert.ok(fs.readFileSync("ui/app.css", "utf8").includes("body.theme-light"), "light theme tokens in app.css");
 assert.ok(fs.readFileSync("ui/app.css", "utf8").includes("body.theme-dark"), "dark theme tokens in app.css");
 assert.ok(fs.readFileSync("ui/index.html", "utf8").includes('class="theme-light"'), "light default on body");
+
+const shortcutHelperBlock = appSource.match(/\/\* shortcut-helpers \*\/([\s\S]*?)\/\* end-shortcut-helpers \*\//);
+assert.ok(shortcutHelperBlock, "shortcut helpers marked in app.js");
+vm.runInContext(shortcutHelperBlock[1], context);
+const {isTypingTarget, shortcutAction} = context;
+assert.strictEqual(isTypingTarget({tagName: "INPUT"}), true);
+assert.strictEqual(isTypingTarget({tagName: "TEXTAREA"}), true);
+assert.strictEqual(isTypingTarget({tagName: "SELECT"}), true);
+assert.strictEqual(isTypingTarget({tagName: "BUTTON"}), false);
+assert.strictEqual(isTypingTarget({tagName: "DIV", isContentEditable: true}), true);
+assert.strictEqual(isTypingTarget(null), false);
+assert.strictEqual(shortcutAction("s"), "solve");
+assert.strictEqual(shortcutAction("S"), "solve");
+assert.strictEqual(shortcutAction("x"), "stop");
+assert.strictEqual(shortcutAction("c"), "continue");
+assert.strictEqual(shortcutAction("b"), "board");
+assert.strictEqual(shortcutAction("?"), "help");
+assert.strictEqual(shortcutAction("z"), null);
+assert.ok(appSource.includes('document.addEventListener("keydown"'), "keydown wired in app.js");
+assert.ok(fs.readFileSync("ui/index.html", "utf8").includes('id="shortcuts-help"'), "shortcuts help in index.html");
 
 console.log("browse tests passed");
 }
