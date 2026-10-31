@@ -5,6 +5,7 @@
 #include "poker/range.hpp"
 #include "solver/chip_payoff.hpp"
 #include "solver/icm.hpp"
+#include "solver/incentives.hpp"
 #include "solver/regret_matching.hpp"
 
 #include <algorithm>
@@ -257,6 +258,8 @@ struct RiverBatchSolver::Engine
         int parent = -1;
         int parent_action = -1;
         int hand_base = 0;
+        // Path-attributed player-0 incentive delta (0 when incentives empty).
+        double incentive_u0 = 0.0;
         std::string path;
         std::string action_labels[8];
     };
@@ -315,13 +318,60 @@ struct RiverBatchSolver::Engine
         }
         config.rake.validate();
         config.icm.validate(config.pot, config.stack);
+        config.incentives.validate();
 
         BetState root;
         root.pot = config.pot;
         root.acting = config.first_to_act;
         build_node(root, "");
+        fill_terminal_incentives();
         build_deals();
         assign_bases();
+    }
+
+    void fill_terminal_incentives()
+    {
+        if (!config.incentives.enabled())
+        {
+            return;
+        }
+        std::vector<IncentiveEdge> rev;
+        std::vector<IncentiveEdge> path;
+        for (int index = 0; index < static_cast<int>(nodes.size()); ++index)
+        {
+            Node& node = nodes[static_cast<std::size_t>(index)];
+            if (!node.terminal)
+            {
+                continue;
+            }
+            rev.clear();
+            for (int at = index; nodes[static_cast<std::size_t>(at)].parent >= 0;)
+            {
+                const Node& child = nodes[static_cast<std::size_t>(at)];
+                const Node& parent = nodes[static_cast<std::size_t>(child.parent)];
+                const int action = child.parent_action;
+                if (action < 0 || action >= parent.n_actions)
+                {
+                    throw std::logic_error("river incentive parent action out of range");
+                }
+                IncentiveEdge edge;
+                edge.player = parent.player;
+                edge.display_label = parent.action_labels[static_cast<std::size_t>(action)];
+                edge.compact_label = incentive_compact_from_display(edge.display_label);
+                if (edge.compact_label.empty())
+                {
+                    edge.compact_label = edge.display_label;
+                }
+                rev.push_back(std::move(edge));
+                at = child.parent;
+            }
+            path.assign(rev.rbegin(), rev.rend());
+            PlayerPayoff zero;
+            zero.utility[0] = 0.0;
+            zero.utility[1] = 0.0;
+            node.incentive_u0 =
+                apply_path_incentives(config.incentives, zero, path).utility[0];
+        }
     }
 
     int build_node(const BetState& state, const std::string& path)
@@ -488,7 +538,7 @@ struct RiverBatchSolver::Engine
             node.folded,
             outcome,
             config.rake);
-        return apply_icm_terminal(config.icm, chips).utility[0];
+        return apply_icm_terminal(config.icm, chips).utility[0] + node.incentive_u0;
     }
 
     double cfr_deal(int node_index, double pi0, double pi1, double chance, int h0, int h1,

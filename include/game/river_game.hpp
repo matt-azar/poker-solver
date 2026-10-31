@@ -5,6 +5,7 @@
 #include "poker/range.hpp"
 #include "solver/chip_payoff.hpp"
 #include "solver/icm.hpp"
+#include "solver/incentives.hpp"
 #include "solver/payoff.hpp"
 
 #include <array>
@@ -62,6 +63,9 @@ struct RiverConfig
     // Optional tournament ICM. Empty stacks leaves chip/rake terminals.
     // stacks[] are tournament chip counts (not betting `stack`). See docs/ICM.md.
     poker::solver::IcmConfig icm{};
+    // Optional action-label incentive overlay. Empty rules leave terminals
+    // unchanged. Path-attributed at terminals; see docs/INCENTIVES.md.
+    poker::solver::IncentiveConfig incentives{};
 };
 
 class RiverGame
@@ -150,6 +154,7 @@ public:
 
     // Both players' root-centered utilities. Chip/rake first; when config_.icm
     // is enabled, wrap through IcmPayoff (ICM equity deltas, not chip EV).
+    // Optional path-attributed incentives apply last (docs/INCENTIVES.md).
     poker::solver::PlayerPayoff terminal_payoff(const State& state) const
     {
         if (!state.terminal)
@@ -166,7 +171,10 @@ public:
             state.folded,
             showdown,
             config_.rake);
-        return poker::solver::apply_icm_terminal(config_.icm, chips);
+        const poker::solver::PlayerPayoff icm =
+            poker::solver::apply_icm_terminal(config_.icm, chips);
+        return poker::solver::apply_path_incentives(
+            config_.incentives, icm, incentive_path(state));
     }
 
     double p1_utility(const State& state) const
@@ -332,6 +340,50 @@ private:
         }
         config_.rake.validate();
         config_.icm.validate(config_.pot, config_.stack);
+        config_.incentives.validate();
+    }
+
+    std::vector<poker::solver::IncentiveEdge> incentive_path(const State& target) const
+    {
+        std::vector<poker::solver::IncentiveEdge> path;
+        if (!config_.incentives.enabled() || target.n_hist == 0)
+        {
+            return path;
+        }
+        if (target.pair_index < 0)
+        {
+            throw std::logic_error("river incentive path needs a dealt hand pair");
+        }
+        State cursor;
+        cursor.pair_index = target.pair_index;
+        cursor.pot = config_.pot;
+        cursor.acting = config_.first_to_act;
+        for (int i = 0; i < target.n_hist; ++i)
+        {
+            if (cursor.terminal || is_chance(cursor))
+            {
+                throw std::logic_error("river incentive path hit chance or terminal early");
+            }
+            const Legal legal = legal_actions(cursor);
+            const int action = target.hist[i];
+            if (action < 0 || action >= legal.count)
+            {
+                throw std::logic_error("river incentive path action out of range");
+            }
+            const bool facing = cursor.committed > cursor.contrib[cursor.acting];
+            const int street_total = cursor.contrib[cursor.acting] + legal.add[action];
+            const bool all_in =
+                legal.code[action] != 0 && street_total == config_.stack && legal.add[action] > 0;
+            poker::solver::IncentiveEdge edge;
+            edge.player = cursor.acting;
+            edge.display_label = poker::solver::incentive_chip_label(
+                legal.code[action], legal.add[action], street_total, all_in, facing);
+            edge.compact_label = poker::solver::incentive_compact_token(
+                legal.code[action], legal.add[action], street_total, all_in, facing);
+            path.push_back(std::move(edge));
+            cursor = apply(cursor, legal, action);
+        }
+        return path;
     }
 
     void build_deals()

@@ -35,6 +35,7 @@ void print_usage(const char* argv0)
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--rake-rate RATE] [--rake-cap CHIPS]"
               << " [--icm-stacks S0,S1,...] [--icm-payouts P1,P2,...]"
+              << " [--incentive label|tag,PLAYER,KEY,DELTA] (repeatable)"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
@@ -437,6 +438,46 @@ int main(int argc, char** argv)
             {
                 config.icm.payouts.clear();
                 parse_sizes(need("--icm-payouts"), config.icm.payouts, nullptr);
+            }
+            else if (arg == "--incentive")
+            {
+                const std::string text = need("--incentive");
+                std::vector<std::string> parts;
+                std::size_t start = 0;
+                while (start <= text.size())
+                {
+                    const std::size_t comma = text.find(',', start);
+                    parts.push_back(text.substr(
+                        start,
+                        comma == std::string::npos ? std::string::npos : comma - start));
+                    if (comma == std::string::npos)
+                    {
+                        break;
+                    }
+                    start = comma + 1;
+                }
+                if (parts.size() != 4)
+                {
+                    throw std::invalid_argument(
+                        "--incentive needs kind,player,key,delta (e.g. label,0,b100,3.5)");
+                }
+                poker::solver::IncentiveRule rule;
+                if (parts[0] == "label")
+                {
+                    rule.kind = poker::solver::IncentiveKind::ActionLabelMatch;
+                }
+                else if (parts[0] == "tag")
+                {
+                    rule.kind = poker::solver::IncentiveKind::CategoryTag;
+                }
+                else
+                {
+                    throw std::invalid_argument("--incentive kind must be label or tag");
+                }
+                rule.player = std::atoi(parts[1].c_str());
+                rule.key = parts[2];
+                rule.delta = std::atof(parts[3].c_str());
+                config.incentives.add(std::move(rule));
             }
             else if (arg == "--accuracy")
             {

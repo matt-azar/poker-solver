@@ -20,6 +20,7 @@ int main()
     run_icm_tests();
     run_icm_solve_tests();
     run_incentives_tests();
+    run_incentives_solve_tests();
     run_budget_tests();
     run_street_tests();
     run_street_memory_tests();
