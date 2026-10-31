@@ -88,6 +88,10 @@ On top of `#52`, walking the same supported-hand indexes through frozen decision
 
 On top of `#52`, walking supported-hand indexes through frozen serial/parallel chance `pi` filters and EV reduces (and `card_reaches_pair`) did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈0.97x / 1.00x). One-thread `chance_seconds` became visible, but wall train did not move. Change reverted; details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md).
 
+## Lean order_reach + showdown collect + non-actor aev (`cursor/engine-speed-6-e394`)
+
+On top of `#52`, skipping full `order_reach` zero-fills, dropping by-card work on showdown collect, and accumulating non-actor action EVs without `aev*` copies cut paired-flop reset-30 train at four threads from median 1.621 s to 1.485 s (~1.09x); turn_half_pot 0.815 s to 0.724 s (~1.13x). Profiled order/showdown/decision/collect buckets all shrank. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
+
 ## Next measurement
 
-Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target. Dense idx* walks over flop boards (few blocked combos) are exhausted for decision and chance bookkeeping after `#52`–speed-5 probes; remaining train is still nested showdown/chance-child work.
+Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target. Dense idx* walks over flop boards (few blocked combos) are exhausted for decision and chance bookkeeping after `#52`–speed-5 probes; remaining train is still nested showdown/chance-child work after the engine-speed-6 lean terminal/decision path.

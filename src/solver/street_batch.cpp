@@ -3144,7 +3144,10 @@ struct StreetBatchSolver::Engine
         const int hands = player == 0 ? n0 : n1;
         amount.assign(static_cast<std::size_t>(hands), 0.0);
         total = 0.0;
-        std::fill(by_card, by_card + 52, 0.0);
+        if (by_card != nullptr)
+        {
+            std::fill(by_card, by_card + 52, 0.0);
+        }
         if (use_board)
         {
             const BoardSupport& masks = board_support_for(turn, river);
@@ -3152,22 +3155,43 @@ struct StreetBatchSolver::Engine
             const double* weights = range_w[player].data();
             const int* hole0 = hole_a[player].data();
             const int* hole1 = hole_b[player].data();
-            for (std::uint16_t hand_u : live_idx)
+            if (by_card != nullptr)
             {
-                const int hand = static_cast<int>(hand_u);
-                if (pi[hand] == 0.0)
+                for (std::uint16_t hand_u : live_idx)
                 {
-                    continue;
+                    const int hand = static_cast<int>(hand_u);
+                    if (pi[hand] == 0.0)
+                    {
+                        continue;
+                    }
+                    const double piece = weights[static_cast<std::size_t>(hand)] * pi[hand];
+                    if (piece == 0.0)
+                    {
+                        continue;
+                    }
+                    amount[static_cast<std::size_t>(hand)] = piece;
+                    total += piece;
+                    by_card[hole0[static_cast<std::size_t>(hand)]] += piece;
+                    by_card[hole1[static_cast<std::size_t>(hand)]] += piece;
                 }
-                const double piece = weights[static_cast<std::size_t>(hand)] * pi[hand];
-                if (piece == 0.0)
+            }
+            else
+            {
+                for (std::uint16_t hand_u : live_idx)
                 {
-                    continue;
+                    const int hand = static_cast<int>(hand_u);
+                    if (pi[hand] == 0.0)
+                    {
+                        continue;
+                    }
+                    const double piece = weights[static_cast<std::size_t>(hand)] * pi[hand];
+                    if (piece == 0.0)
+                    {
+                        continue;
+                    }
+                    amount[static_cast<std::size_t>(hand)] = piece;
+                    total += piece;
                 }
-                amount[static_cast<std::size_t>(hand)] = piece;
-                total += piece;
-                by_card[hole0[static_cast<std::size_t>(hand)]] += piece;
-                by_card[hole1[static_cast<std::size_t>(hand)]] += piece;
             }
         }
         else
@@ -3185,8 +3209,11 @@ struct StreetBatchSolver::Engine
                 }
                 amount[static_cast<std::size_t>(hand)] = piece;
                 total += piece;
-                by_card[hole_a[player][static_cast<std::size_t>(hand)]] += piece;
-                by_card[hole_b[player][static_cast<std::size_t>(hand)]] += piece;
+                if (by_card != nullptr)
+                {
+                    by_card[hole_a[player][static_cast<std::size_t>(hand)]] += piece;
+                    by_card[hole_b[player][static_cast<std::size_t>(hand)]] += piece;
+                }
             }
         }
         if (profile_)
@@ -3374,18 +3401,22 @@ struct StreetBatchSolver::Engine
         {
             throw std::logic_error("street showdown prefix exceeded its reserved bound");
         }
-        ctx.prefix_buf.assign(static_cast<std::size_t>(hands + 1), 0.0);
-        ctx.block_buf.assign(static_cast<std::size_t>(blocks), 0.0);
+        // Avoid full zero-fills: every prefix[1..] and every non-base block slot is
+        // written below; only prefix[0] and each card's base slot must start at 0.
+        ctx.prefix_buf.resize(static_cast<std::size_t>(hands + 1));
+        ctx.block_buf.resize(static_cast<std::size_t>(blocks));
         ctx.ordered_buf.resize(static_cast<std::size_t>(hands));
         double* ordered = ctx.ordered_buf.data();
         double* prefix = ctx.prefix_buf.data();
         const std::uint16_t* order = table.order[player].data();
+        prefix[0] = 0.0;
+        double running = 0.0;
         for (int index = 0; index < hands; ++index)
         {
             const double piece = amount[static_cast<std::size_t>(order[static_cast<std::size_t>(index)])];
             ordered[static_cast<std::size_t>(index)] = piece;
-            prefix[static_cast<std::size_t>(index + 1)] =
-                prefix[static_cast<std::size_t>(index)] + piece;
+            running += piece;
+            prefix[static_cast<std::size_t>(index + 1)] = running;
         }
         double* block = ctx.block_buf.data();
         const std::uint32_t* card_off = table.card_off[player].data();
@@ -3396,6 +3427,7 @@ struct StreetBatchSolver::Engine
             const std::uint32_t end = card_off[static_cast<std::size_t>(card + 1)];
             const std::uint32_t base = begin + static_cast<std::uint32_t>(card);
             ctx.block_base[static_cast<std::size_t>(card)] = base;
+            block[static_cast<std::size_t>(base)] = 0.0;
             double total = 0.0;
             for (std::uint32_t at = begin; at < end; ++at)
             {
@@ -3581,7 +3613,8 @@ struct StreetBatchSolver::Engine
                 ? twin : -1;
             const int add_at = add_hand >= 0 ? static_cast<int>(pos[static_cast<std::size_t>(add_hand)]) : -1;
             const double add_piece = add_hand >= 0 ? opp_amount[static_cast<std::size_t>(add_hand)] : 0.0;
-            double worse_mass = prefix[static_cast<std::size_t>(worse)] - prefix[0]
+            // prefix[0] is always 0 after order_reach.
+            double worse_mass = prefix[static_cast<std::size_t>(worse)]
                 - (b0_w - b0_0) - (b1_w - b1_0);
             if (add_at >= 0 && add_at < worse)
             {
@@ -3644,12 +3677,12 @@ struct StreetBatchSolver::Engine
     {
         double total0 = 0.0;
         double total1 = 0.0;
-        double by0[52];
-        double by1[52];
-        collect_reach(ctx, 0, turn, river, pi0, true, ctx.amount_buf[0], total0, by0);
-        collect_reach(ctx, 1, turn, river, pi1, true, ctx.amount_buf[1], total1, by1);
         if (node.folded >= 0)
         {
+            double by0[52];
+            double by1[52];
+            collect_reach(ctx, 0, turn, river, pi0, true, ctx.amount_buf[0], total0, by0);
+            collect_reach(ctx, 1, turn, river, pi1, true, ctx.amount_buf[1], total1, by1);
             const auto fold_started = profile_
                 ? std::chrono::steady_clock::now()
                 : std::chrono::steady_clock::time_point{};
@@ -3690,6 +3723,9 @@ struct StreetBatchSolver::Engine
             }
             return;
         }
+        // Showdown only needs hand-indexed amounts; skip by-card aggregates.
+        collect_reach(ctx, 0, turn, river, pi0, true, ctx.amount_buf[0], total0, nullptr);
+        collect_reach(ctx, 1, turn, river, pi1, true, ctx.amount_buf[1], total1, nullptr);
         const double win_pay = apply_icm_terminal(
             config.icm,
             ChipPayoff::terminal(
@@ -4307,8 +4343,47 @@ struct StreetBatchSolver::Engine
             const auto copy_started = profile_
                 ? std::chrono::steady_clock::now()
                 : std::chrono::steady_clock::time_point{};
-            std::copy(child.ev0.begin(), child.ev0.end(), here.aev0.begin() + static_cast<std::size_t>(action * n0));
-            std::copy(child.ev1.begin(), child.ev1.end(), here.aev1.begin() + static_cast<std::size_t>(action * n1));
+            // Keep per-action EVs only for the actor (regret / sigma mix). The
+            // non-acting side is an unweighted sum over actions — accumulate it
+            // into here.ev during the action loop and skip the aev traffic.
+            if (node.player == 0)
+            {
+                std::copy(
+                    child.ev0.begin(),
+                    child.ev0.end(),
+                    here.aev0.begin() + static_cast<std::size_t>(action * n0));
+                if (action == 0)
+                {
+                    std::copy(child.ev1.begin(), child.ev1.end(), here.ev1.begin());
+                }
+                else
+                {
+                    for (int h1 = 0; h1 < n1; ++h1)
+                    {
+                        here.ev1[static_cast<std::size_t>(h1)] +=
+                            child.ev1[static_cast<std::size_t>(h1)];
+                    }
+                }
+            }
+            else
+            {
+                std::copy(
+                    child.ev1.begin(),
+                    child.ev1.end(),
+                    here.aev1.begin() + static_cast<std::size_t>(action * n1));
+                if (action == 0)
+                {
+                    std::copy(child.ev0.begin(), child.ev0.end(), here.ev0.begin());
+                }
+                else
+                {
+                    for (int h0 = 0; h0 < n0; ++h0)
+                    {
+                        here.ev0[static_cast<std::size_t>(h0)] +=
+                            child.ev0[static_cast<std::size_t>(h0)];
+                    }
+                }
+            }
             if (profile_)
             {
                 ctx.expand_seconds += std::chrono::duration<double>(
@@ -4321,18 +4396,18 @@ struct StreetBatchSolver::Engine
         const auto decision_started = profile_
             ? std::chrono::steady_clock::now()
             : std::chrono::steady_clock::time_point{};
-        for (int h0 = 0; h0 < n0; ++h0)
+        if (node.player == 0)
         {
-            if (!ctx.live0[static_cast<std::size_t>(h0)])
+            for (int h0 = 0; h0 < n0; ++h0)
             {
-                here.ev0[static_cast<std::size_t>(h0)] = 0.0;
-                continue;
-            }
-            double mix = 0.0;
-            if (node.player == 0)
-            {
+                if (!ctx.live0[static_cast<std::size_t>(h0)])
+                {
+                    here.ev0[static_cast<std::size_t>(h0)] = 0.0;
+                    continue;
+                }
                 const int base = here.slot_base[static_cast<std::size_t>(h0)];
                 const double* sigma = frozen_sigma.data() + base;
+                double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
                     mix += sigma[action] * here.aev0[static_cast<std::size_t>(action * n0 + h0)];
@@ -4349,27 +4424,33 @@ struct StreetBatchSolver::Engine
                     }
                 }
             }
-            else
+            for (int h1 = 0; h1 < n1; ++h1)
             {
-                for (int action = 0; action < node.n_actions; ++action)
+                if (!ctx.live1[static_cast<std::size_t>(h1)])
                 {
-                    mix += here.aev0[static_cast<std::size_t>(action * n0 + h0)];
+                    here.ev1[static_cast<std::size_t>(h1)] = 0.0;
                 }
-                here.ev0[static_cast<std::size_t>(h0)] = mix;
             }
         }
-        for (int h1 = 0; h1 < n1; ++h1)
+        else
         {
-            if (!ctx.live1[static_cast<std::size_t>(h1)])
+            for (int h0 = 0; h0 < n0; ++h0)
             {
-                here.ev1[static_cast<std::size_t>(h1)] = 0.0;
-                continue;
+                if (!ctx.live0[static_cast<std::size_t>(h0)])
+                {
+                    here.ev0[static_cast<std::size_t>(h0)] = 0.0;
+                }
             }
-            double mix = 0.0;
-            if (node.player == 1)
+            for (int h1 = 0; h1 < n1; ++h1)
             {
+                if (!ctx.live1[static_cast<std::size_t>(h1)])
+                {
+                    here.ev1[static_cast<std::size_t>(h1)] = 0.0;
+                    continue;
+                }
                 const int base = here.slot_base[static_cast<std::size_t>(h1)];
                 const double* sigma = frozen_sigma.data() + base;
+                double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
                     mix += sigma[action] * here.aev1[static_cast<std::size_t>(action * n1 + h1)];
@@ -4385,14 +4466,6 @@ struct StreetBatchSolver::Engine
                             mix - here.aev1[static_cast<std::size_t>(action * n1 + h1)];
                     }
                 }
-            }
-            else
-            {
-                for (int action = 0; action < node.n_actions; ++action)
-                {
-                    mix += here.aev1[static_cast<std::size_t>(action * n1 + h1)];
-                }
-                here.ev1[static_cast<std::size_t>(h1)] = mix;
             }
         }
         if (profile_)
