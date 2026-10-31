@@ -124,6 +124,7 @@ void profile_case(const char* name, poker::streets::StreetConfig config, int thr
               << " showdown_seconds " << profile.showdown_seconds
               << " decision_seconds " << profile.decision_seconds
               << " chance_seconds " << profile.chance_seconds
+              << " freeze_seconds " << profile.freeze_seconds
               << " train_seconds " << report.train_seconds
               << " cache_init_seconds " << report.cache_init_seconds
               << "\n";
@@ -131,6 +132,8 @@ void profile_case(const char* name, poker::streets::StreetConfig config, int thr
     require(profile.showdown_seconds > 0.0, "profile missed showdown");
     require(profile.order_seconds > 0.0, "profile missed ordering");
     require(profile.order_seconds <= profile.showdown_seconds * 1.000000001, "order outside showdown");
+    require(profile.freeze_seconds > 0.0, "profile missed freeze");
+    require(profile.freeze_seconds <= report.train_seconds * 1.000000001, "freeze outside train");
 }
 
 struct SpeedResult
