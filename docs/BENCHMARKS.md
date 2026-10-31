@@ -200,7 +200,7 @@ street_solver --board Ah,Kd,7c --pot 100 --stack 100 --oop-range QQ,JJ,TT,99 --i
 
 `build\Release\street_parallel_bench.exe`, same compiler and machine as the betting table: Release, MSVC 19.40, Windows 10.0.26200, x64, Intel Core i7-10510U (4 cores, 8 threads). The bench is not part of CTest. `converge` skips the timing repetitions. `converge 100` stops at iteration 100. The default run includes the repetitions and the full checkpoint list, with the same 600-second wall stop as `street_betting_bench`.
 
-The thread count includes the caller. One thread keeps the serial chance loop and allocates no extra worker context and no card-result buffer. More threads split only the first future public card. A turn splits rivers. A flop splits turns, and each worker deals that turn's rivers itself. Descendant regrets of different cards are disjoint, so a worker writes them directly. The caller reduces card values in ascending card order after every task has joined. Evaluation stays serial.
+The thread count includes the caller. One thread keeps the serial chance loop and allocates no extra worker context and no card-result buffer. More threads split the first future public card and, on the same worker pool, the independent `freeze_sigma` / floor / fused floor+freeze slot scans. A turn splits rivers. A flop splits turns, and each worker deals that turn's rivers itself. Descendant regrets of different cards are disjoint, so a worker writes them directly. Each slot writes only its own regret / `frozen_sigma` span. The caller reduces card values in ascending card order after every task has joined. Evaluation stays serial.
 
 Rank fill is `cache_init_seconds`. It is outside construction and outside training. Worker creation is `worker_setup_seconds`. Native thread stacks are outside the engine budget.
 
@@ -277,3 +277,23 @@ Train seconds, four threads, flop: baseline 18.6798585, 22.4444654, 22.4279414 (
 Allocated bytes equalled peak on every sample. Turn, one thread: baseline 141,624,990, compact 143,384,278. Flop, one thread: 171,120,018 and 176,209,546. Turn, four threads: 161,454,222 and 161,818,798. Flop, four threads: 171,576,258 and 176,635,618.
 
 The full-range check-down cache fill is a different cost. On the plugged-in Windows run of `29cf58f`, `street_memory_bench` reported cache init 0.297 s on the turn and 12.039 s on the flop at one thread, and 0.317 s and 12.426 s at four threads. The training block after that fill was 0.034 s and 2.004 s at one thread. A warm 30-iteration betting-tree gain is not that cold fill. Engine heap on that run, allocated equal to peak: turn 62,645,166 and 81,079,686 bytes; flop 531,424,158 and 550,641,654 bytes. The independent Linux review of the same commit reported 62,647,533 and 81,082,053 on the turn, and 531,364,379 and 550,581,875 on the flop. Values were unchanged: turn `1.9567680809e-15`, NashConv `8.64586180427e-15`; flop `1.28230759344e-14`, NashConv `1.43912659567e-14`.
+
+## Frozen freeze / floor slot scans (M6)
+
+Commit `a04eb8c` on `cursor/flop-freeze-parallel-e394` partitions the slot vector across the existing frozen worker pool for `freeze_sigma`, `floor_player`, and a fused CFR+ `floor_and_freeze` pass (one fewer full slot scan per iteration). `StreetWalkProfile::freeze_seconds` times those caller-side scans. Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Not a multi-hour flop-to-0.001 chase.
+
+### Paired flop betting tree (`QQ,JJ,TT,99`, warm 30 CFR+ iters, no walk profile)
+
+Alternating rebuild of `origin/main` versus the freeze branch, two pairs:
+
+| Threads | Before median train (s) | After median train (s) | Speedup |
+| ---: | ---: | ---: | ---: |
+| 1 | 12.22 | 11.66 | 1.05x |
+| 2 | 6.73 | 6.28 | 1.07x |
+| 4 | 4.14 | 3.42 | 1.21x |
+
+One-thread gain is mostly the fused floor+freeze scan. Four-thread gain adds parallel slot work on top of the existing chance split.
+
+### Study flop `flop_srp_one_size` (~42.8 M infosets, ~4.27 GiB)
+
+Warm one frozen iteration, then time two more (no walk profile) at four threads: before `4.595` s/iter, after `3.833` s/iter (**1.20x**, about 16% less train time per iteration). After branch with walk profile on for two timed iterations: `freeze_seconds` 1.044 s/iter at one thread and 0.235 s/iter at four threads (**4.45x** on the freeze/floor scans alone); train 14.60 s/iter at one thread and 3.82 s/iter at four threads. Allocated bytes stay ~4.27 GiB. Parallel unit tables still match; `poker_solver_tests` reported 440,795 assertions and 0 failures on this branch.
