@@ -766,7 +766,9 @@ $("setup").addEventListener("submit", async (event) => {
     algorithm: $("algorithm").value,
     samples: Math.max(1, Math.min(20, Number($("samples").value) || 5)),
     rake_rate: Number($("rake-rate").value) || 0,
-    rake_cap: Number($("rake-cap").value) || 0
+    rake_cap: Number($("rake-cap").value) || 0,
+    icm_stacks: sizes($("icm-stacks").value),
+    icm_payouts: sizes($("icm-payouts").value)
   };
   const timeLimitText = $("time-limit").value.trim();
   if (timeLimitText !== "") {

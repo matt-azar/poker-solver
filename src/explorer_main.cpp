@@ -314,6 +314,8 @@ struct Job
     double time_limit = -1.0;
     double rake_rate = 0.0;
     double rake_cap = 0.0;
+    std::vector<double> icm_stacks{};
+    std::vector<double> icm_payouts{};
     int max_raises = 2;
     int iterations = 200;
     int samples = 5;
@@ -456,6 +458,14 @@ Job parse_job(const std::string& text)
     if (!std::isfinite(job.rake_cap) || job.rake_cap < 0.0)
     {
         throw std::invalid_argument("rake_cap must be a non-negative number of chips");
+    }
+    job.icm_stacks = optional_sizes(text, "icm_stacks");
+    job.icm_payouts = optional_sizes(text, "icm_payouts");
+    {
+        poker::solver::IcmConfig icm;
+        icm.stacks = job.icm_stacks;
+        icm.payouts = job.icm_payouts;
+        icm.validate(job.pot, job.stack);
     }
     job.max_raises = static_cast<int>(read_number(text, "max_raises", 2));
     job.iterations = static_cast<int>(read_number(text, "iterations", 200));
@@ -652,7 +662,25 @@ std::string build_status(const StatusDraft& draft)
     out += format_number(job.rake_rate);
     out += ",\"rake_cap\":";
     out += format_number(job.rake_cap);
-    out += ",\"frozen\":";
+    out += ",\"icm_stacks\":[";
+    for (std::size_t i = 0; i < job.icm_stacks.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        out += format_number(job.icm_stacks[i]);
+    }
+    out += "],\"icm_payouts\":[";
+    for (std::size_t i = 0; i < job.icm_payouts.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        out += format_number(job.icm_payouts[i]);
+    }
+    out += "],\"frozen\":";
     out += job.frozen ? "true" : "false";
     out += ",\"memory_mib\":";
     out += std::to_string(job.memory_mib);
@@ -1005,6 +1033,8 @@ poker::streets::StreetConfig street_config(const Job& job)
     config.max_raises = job.max_raises;
     config.rake.rate = job.rake_rate;
     config.rake.cap = job.rake_cap;
+    config.icm.stacks = job.icm_stacks;
+    config.icm.payouts = job.icm_payouts;
     config.memory_mib = job.memory_mib;
     config.threads = job.threads;
     return config;
@@ -2751,6 +2781,8 @@ Job job_from_street(const poker::streets::StreetConfig& config)
     job.max_raises = config.max_raises;
     job.rake_rate = config.rake.rate;
     job.rake_cap = config.rake.cap;
+    job.icm_stacks = config.icm.stacks;
+    job.icm_payouts = config.icm.payouts;
     job.memory_mib = config.memory_mib;
     job.threads = config.threads;
     return job;
@@ -2772,6 +2804,8 @@ Job job_from_river(const poker::river::RiverConfig& config)
     job.max_raises = config.max_raises;
     job.rake_rate = config.rake.rate;
     job.rake_cap = config.rake.cap;
+    job.icm_stacks = config.icm.stacks;
+    job.icm_payouts = config.icm.payouts;
     return job;
 }
 

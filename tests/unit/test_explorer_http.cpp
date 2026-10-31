@@ -947,6 +947,47 @@ void run_explorer_http_tests()
     CHECK(json_number(raked_status.body, "player0_expected_utility", raked_ev));
     CHECK_NEAR(raked_ev, 45.0, 1e-6);
 
+    HttpResult bad_icm_stacks;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solve",
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":1,\"samples\":1,\"icm_stacks\":[1000],"
+        "\"icm_payouts\":[100],\"max_raises\":0,\"allow_all_in\":0,\"oop_bets\":[],\"ip_bets\":[],"
+        "\"memory_mib\":128}",
+        bad_icm_stacks));
+    CHECK(bad_icm_stacks.status == 400);
+    CHECK(bad_icm_stacks.body.find("icm") != std::string::npos);
+
+    HttpResult bad_icm_cover;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solve",
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":1,\"samples\":1,\"icm_stacks\":[40,40],"
+        "\"icm_payouts\":[100],\"max_raises\":0,\"allow_all_in\":0,\"oop_bets\":[],\"ip_bets\":[],"
+        "\"memory_mib\":128}",
+        bad_icm_cover));
+    CHECK(bad_icm_cover.status == 400);
+    CHECK(bad_icm_cover.body.find("icm") != std::string::npos);
+
+    // HU WTA on a tiny check-only river: chip EV 50 → ICM 2.5 (stacks 1000/1000, prize 100).
+    const std::string icm_job =
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":3,\"samples\":1,\"icm_stacks\":[1000,1000],"
+        "\"icm_payouts\":[100],\"max_raises\":0,\"allow_all_in\":0,\"oop_bets\":[],\"ip_bets\":[],"
+        "\"memory_mib\":128}";
+    HttpResult icm_accepted;
+    CHECK(http_exchange("POST", "/api/solve", icm_job, icm_accepted));
+    CHECK(icm_accepted.status == 202);
+    HttpResult icm_status;
+    CHECK(wait_for_completion(icm_status));
+    CHECK(icm_status.body.find("\"icm_stacks\":[1000,1000]") != std::string::npos);
+    CHECK(icm_status.body.find("\"icm_payouts\":[100]") != std::string::npos);
+    double icm_ev = 0.0;
+    CHECK(json_number(icm_status.body, "player0_expected_utility", icm_ev));
+    CHECK_NEAR(icm_ev, 2.5, 1e-6);
+
     // time_limit 0 stops after the first completed sample chunk and keeps the solve.
     const std::string timed =
         "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
