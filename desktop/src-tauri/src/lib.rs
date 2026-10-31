@@ -11,7 +11,9 @@ use tauri_plugin_shell::ShellExt;
 const ENGINE_PORT: u16 = 8765;
 
 /// Sidecar path as declared in `tauri.conf.json` `bundle.externalBin`.
-const EXPLORER_SIDECAR: &str = "binaries/explorer";
+/// Named holdem-explorer (not explorer) so the installed binary is never
+/// confused with Windows File Explorer (`explorer.exe`).
+const EXPLORER_SIDECAR: &str = "binaries/holdem-explorer";
 
 struct EngineState {
     child: Mutex<Option<CommandChild>>,

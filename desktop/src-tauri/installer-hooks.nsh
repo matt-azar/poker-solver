@@ -2,20 +2,15 @@
 ;
 ; Sidecar naming
 ; --------------
-; tauri.conf.json externalBin is "binaries/explorer".
+; tauri.conf.json externalBin is "binaries/holdem-explorer".
 ; Tauri ships that sidecar next to the app executable as:
-;   $INSTDIR\explorer.exe
-; (basename of the externalBin entry — NOT "binaries/explorer.exe").
+;   $INSTDIR\holdem-explorer.exe
+; (basename of the externalBin entry — NOT "binaries/holdem-explorer.exe").
 ;
-; CRITICAL: Do NOT run `taskkill /IM explorer.exe`.
-; Windows File Explorer is also named explorer.exe; an image-name kill
-; would tear down the user's desktop shell. Always scope by full path
-; under $INSTDIR (our bundled sidecar only).
-;
-; If the externalBin basename is ever renamed (e.g. holdem-explorer),
-; update SIDECAR_EXE below to match the new installed filename.
+; CRITICAL: Never taskkill Windows File Explorer (`explorer.exe`).
+; The solver sidecar is deliberately named holdem-explorer.exe.
 
-!define SIDECAR_EXE "explorer.exe"
+!define SIDECAR_EXE "holdem-explorer.exe"
 
 !macro KillHoldemStudySidecar
   ; Path-scoped stop: only the installed sidecar, never C:\Windows\explorer.exe.

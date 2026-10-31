@@ -9,7 +9,7 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "name": "binaries/explorer",
+          "name": "binaries/holdem-explorer",
           "sidecar": true,
           "args": true
         }
@@ -19,7 +19,7 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "binaries/explorer",
+          "name": "binaries/holdem-explorer",
           "sidecar": true,
           "args": true
         }

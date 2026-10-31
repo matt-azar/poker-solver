@@ -31,6 +31,7 @@ __pycache__/
 *.dylib
 
 # Tauri sidecar binaries (CI-produced)
+desktop/src-tauri/binaries/holdem-explorer-*
 desktop/src-tauri/binaries/explorer-*
 !desktop/src-tauri/binaries/.gitkeep
 !desktop/src-tauri/binaries/README.md

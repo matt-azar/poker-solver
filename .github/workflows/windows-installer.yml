@@ -62,9 +62,10 @@ jobs:
           $hostTriple = (rustc -vV | Select-String "host:").ToString().Split()[1]
           Write-Host "rustc host triple: $hostTriple"
           # Expected on windows-latest: x86_64-pc-windows-msvc
+          # Sidecar basename is holdem-explorer (not explorer) to avoid Windows Shell collisions.
           Copy-Item -Force build/Release/explorer.exe `
-            "desktop/src-tauri/binaries/explorer-x86_64-pc-windows-msvc.exe"
-          Get-Item "desktop/src-tauri/binaries/explorer-x86_64-pc-windows-msvc.exe" |
+            "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe"
+          Get-Item "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe" |
             Format-List FullName, Length, LastWriteTime
 
       - name: Build Tauri NSIS installer
