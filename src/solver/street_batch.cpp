@@ -5365,32 +5365,76 @@ void StreetBatchSolver::note_profile_mutation()
     value_cache_valid_ = false;
 }
 
-void StreetBatchSolver::run_iterations(int count, Algorithm algorithm)
+void StreetBatchSolver::run_iterations(int count, Algorithm algorithm, const LockSet* locks)
 {
     note_profile_mutation();
     engine_->check_usable();
-    engine_->reset();
-    engine_->train_more(count, algorithm);
+    const LockSet* const previous_locks = engine_->locks_;
+    engine_->locks_ = locks;
+    try
+    {
+        engine_->reset();
+        engine_->train_more(count, algorithm);
+    }
+    catch (...)
+    {
+        engine_->locks_ = previous_locks;
+        throw;
+    }
+    engine_->locks_ = previous_locks;
 }
 
-void StreetBatchSolver::continue_iterations(int count, Algorithm algorithm)
+void StreetBatchSolver::continue_iterations(int count, Algorithm algorithm, const LockSet* locks)
 {
     note_profile_mutation();
-    engine_->train_more(count, algorithm);
+    const LockSet* const previous_locks = engine_->locks_;
+    engine_->locks_ = locks;
+    try
+    {
+        engine_->train_more(count, algorithm);
+    }
+    catch (...)
+    {
+        engine_->locks_ = previous_locks;
+        throw;
+    }
+    engine_->locks_ = previous_locks;
 }
 
-void StreetBatchSolver::run_frozen_iterations(int count, Algorithm algorithm)
+void StreetBatchSolver::run_frozen_iterations(int count, Algorithm algorithm, const LockSet* locks)
 {
     note_profile_mutation();
     engine_->check_usable();
-    engine_->reset();
-    engine_->train_frozen(count, algorithm);
+    const LockSet* const previous_locks = engine_->locks_;
+    engine_->locks_ = locks;
+    try
+    {
+        engine_->reset();
+        engine_->train_frozen(count, algorithm);
+    }
+    catch (...)
+    {
+        engine_->locks_ = previous_locks;
+        throw;
+    }
+    engine_->locks_ = previous_locks;
 }
 
-void StreetBatchSolver::continue_frozen_iterations(int count, Algorithm algorithm)
+void StreetBatchSolver::continue_frozen_iterations(int count, Algorithm algorithm, const LockSet* locks)
 {
     note_profile_mutation();
-    engine_->train_frozen(count, algorithm);
+    const LockSet* const previous_locks = engine_->locks_;
+    engine_->locks_ = locks;
+    try
+    {
+        engine_->train_frozen(count, algorithm);
+    }
+    catch (...)
+    {
+        engine_->locks_ = previous_locks;
+        throw;
+    }
+    engine_->locks_ = previous_locks;
 }
 
 void StreetBatchSolver::initialize_rank_cache()

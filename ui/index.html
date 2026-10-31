@@ -98,6 +98,8 @@
     <div class="actions">
       <button type="submit" id="run">Solve</button>
       <button type="button" id="continue" disabled>Continue</button>
+      <button type="button" id="resolve-locked" disabled>Resolve locked</button>
+      <label class="check"><input id="warm-start" type="checkbox"> Warm-start locks</label>
       <button type="button" id="pause" disabled>Pause</button>
       <button type="button" id="stop" disabled>Stop</button>
       <button type="button" id="save-solution" disabled>Save</button>
@@ -107,6 +109,7 @@
     </div>
   </form>
   <p id="message"></p>
+  <p id="compare-note" hidden></p>
   <section id="summary" hidden>
     <div><span>Starts on</span><strong id="show-spot"></strong></div>
     <div><span>Tree</span><strong id="show-plays"></strong></div>
@@ -117,6 +120,7 @@
     <div><span>OOP value</span><strong id="show-value"></strong></div>
     <div><span>Nash gap</span><strong id="show-gap"></strong></div>
     <div><span>Gap / pot</span><strong id="show-fraction"></strong></div>
+    <div><span>Baseline</span><strong id="show-baseline"></strong></div>
   </section>
   <section id="chart-wrap" hidden>
     <h2>Nash gap</h2>

@@ -31,6 +31,9 @@ struct CheckpointDocument
     std::vector<int> sample_iterations;
     std::vector<double> sample_values;
     std::vector<double> sample_gaps;
+    // Empty means no locks. Writers emit PSOL payload version 2 with this
+    // field (format_lock_set text). Version 1 readers still open with empty locks.
+    std::string locks_text;
 };
 
 enum class CheckpointFault

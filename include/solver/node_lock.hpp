@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <optional>
@@ -140,6 +141,34 @@ public:
         return by_id_.erase(infoset_id) > 0;
     }
 
+    // Remove one combo from a SelectedCombos lock. Returns true when the set changed.
+    // FullNode locks cannot be partially unlocked this way (returns false).
+    // If the last selected combo is removed, the node lock is erased.
+    bool erase_combo(std::size_t infoset_id, std::size_t combo_index)
+    {
+        const auto it = by_id_.find(infoset_id);
+        if (it == by_id_.end())
+        {
+            return false;
+        }
+        if (it->second.kind != LockKind::SelectedCombos)
+        {
+            return false;
+        }
+        auto& indices = it->second.combo_indices;
+        const auto found = std::find(indices.begin(), indices.end(), combo_index);
+        if (found == indices.end())
+        {
+            return false;
+        }
+        indices.erase(found);
+        if (indices.empty())
+        {
+            by_id_.erase(it);
+        }
+        return true;
+    }
+
     const NodeLock* find(std::size_t infoset_id) const
     {
         const auto it = by_id_.find(infoset_id);
@@ -163,6 +192,19 @@ public:
     std::size_t size() const
     {
         return by_id_.size();
+    }
+
+    // Sorted infoset ids for stable text round-trips.
+    std::vector<std::size_t> infoset_ids() const
+    {
+        std::vector<std::size_t> ids;
+        ids.reserve(by_id_.size());
+        for (const auto& entry : by_id_)
+        {
+            ids.push_back(entry.first);
+        }
+        std::sort(ids.begin(), ids.end());
+        return ids;
     }
 
 private:
@@ -219,6 +261,11 @@ inline std::string format_lock_set(const LockSet& locks, const std::vector<std::
         out.push_back('\n');
     }
     return out;
+}
+
+inline std::string format_lock_set(const LockSet& locks)
+{
+    return format_lock_set(locks, locks.infoset_ids());
 }
 
 namespace detail
