@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <optional>
@@ -165,6 +166,19 @@ public:
         return by_id_.size();
     }
 
+    // Sorted infoset ids for stable text round-trips.
+    std::vector<std::size_t> infoset_ids() const
+    {
+        std::vector<std::size_t> ids;
+        ids.reserve(by_id_.size());
+        for (const auto& entry : by_id_)
+        {
+            ids.push_back(entry.first);
+        }
+        std::sort(ids.begin(), ids.end());
+        return ids;
+    }
+
 private:
     std::unordered_map<std::size_t, NodeLock> by_id_;
 };
@@ -219,6 +233,11 @@ inline std::string format_lock_set(const LockSet& locks, const std::vector<std::
         out.push_back('\n');
     }
     return out;
+}
+
+inline std::string format_lock_set(const LockSet& locks)
+{
+    return format_lock_set(locks, locks.infoset_ids());
 }
 
 namespace detail

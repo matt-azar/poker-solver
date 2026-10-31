@@ -21,7 +21,7 @@ This is the consolidated everyday-study baseline after the river / study / pause
 
 ## Explicitly deferred / partial
 
-- Node locking is engine-level only: no GUI editing, saved-lock workflow, or constrained re-solve comparison
+- Node locking end-to-end is on the locking branch (GUI lock inputs, PSOL v2, resolve-locked + baseline compare); RiverBatch still ignores locks; warm-start remains reset-from-zero
 - Memory planning still constructs a temporary engine; it is not a cheap pre-allocation feasibility check
 - Full-range river equity is admitted by default; full-range turn equity still exceeds the default work limit
 - Rake is not connected to solving; ICM and incentives remain separate open PRs
@@ -43,4 +43,4 @@ Explorer HTTP tests spawn on Linux and Windows. Prefer the weighted multi-combo 
 
 1. Study-corpus measurements at `abe999f` are recorded in `benchmarks/study/RESULTS.md` (Linux quiet host). Finish the flop case to the iteration cap or 0.001 target on a machine with more free RAM / wall.
 2. Explorer GUI/API now exposes `time_limit` and `samples` (eval chunks) with `time_limit_reached` on status.
-3. Complete node locking end-to-end (GUI, persistence, constrained re-solve comparison)
+3. Node locking end-to-end landed on the locking branch (GUI, PSOL v2, resolve-locked + baseline compare). Remaining: RiverBatch locks, richer strategy editing, warm-start from prior regrets

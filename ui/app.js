@@ -3,6 +3,7 @@ const order = "AKQJT98765432";
 let latest = null;
 let poll = null;
 let solutionId = null;
+let baselineSolutionId = null;
 let continuationPending = false;
 let nodeToken = 0;
 let seenGeneration = -1;
@@ -692,6 +693,9 @@ $("continue").addEventListener("click", async () => {
   $("message").textContent = "Continuing…";
   $("run").disabled = true;
   $("continue").disabled = true;
+  if ($("resolve-locked")) {
+    $("resolve-locked").disabled = true;
+  }
   $("pause").disabled = false;
   $("stop").disabled = false;
   const continueBody = {iterations: Number($("iterations").value)};
@@ -709,6 +713,9 @@ $("continue").addEventListener("click", async () => {
     $("message").textContent = failed.error || "Continue failed";
     $("run").disabled = false;
     $("continue").disabled = false;
+    if ($("resolve-locked")) {
+      $("resolve-locked").disabled = !solutionId;
+    }
     $("pause").disabled = true;
     $("stop").disabled = true;
     return;
@@ -721,6 +728,47 @@ $("continue").addEventListener("click", async () => {
   poll = setInterval(refresh, 250);
   refresh();
 });
+
+if ($("resolve-locked")) {
+  $("resolve-locked").addEventListener("click", async () => {
+    if (!solutionId) {
+      return;
+    }
+    $("message").textContent = "Resolving with locks (reset + re-solve)…";
+    $("run").disabled = true;
+    $("continue").disabled = true;
+    $("resolve-locked").disabled = true;
+    $("pause").disabled = false;
+    $("stop").disabled = false;
+    const body = {iterations: Number($("iterations").value)};
+    const timeLimitText = $("time-limit").value.trim();
+    if (timeLimitText !== "") {
+      body.time_limit = Number(timeLimitText);
+    }
+    const response = await fetch("/api/solutions/" + solutionId + "/resolve-locked", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)
+    });
+    if (!response.ok && response.status !== 202) {
+      const failed = await response.json().catch(() => ({error: response.statusText}));
+      $("message").textContent = failed.error || "Resolve locked failed";
+      $("run").disabled = false;
+      $("continue").disabled = false;
+      $("resolve-locked").disabled = false;
+      $("pause").disabled = true;
+      $("stop").disabled = true;
+      return;
+    }
+    dropDisplayedSolution();
+    continuationPending = true;
+    if (poll) {
+      clearInterval(poll);
+    }
+    poll = setInterval(refresh, 250);
+    refresh();
+  });
+}
 
 $("pause").addEventListener("click", async () => {
   await fetch("/api/pause", {method: "POST"});
@@ -806,8 +854,20 @@ async function refresh() {
   $("pause").disabled = !status.running;
   $("stop").disabled = !status.running;
   $("continue").disabled = Boolean(status.running) || !status.solution_id;
+  if ($("resolve-locked")) {
+    $("resolve-locked").disabled = Boolean(status.running) || !status.solution_id;
+  }
   $("save-solution").disabled = Boolean(status.running) || !status.solution_id;
   $("export").disabled = !(currentNode || riverExport);
+  baselineSolutionId = status.baseline_solution_id || null;
+  if ($("show-baseline")) {
+    $("show-baseline").textContent = baselineSolutionId || "—";
+  }
+  if (!status.running && baselineSolutionId && status.solution_id && currentNode) {
+    refreshCompare(baselineSolutionId, status.solution_id, currentNode.node_id);
+  } else if ($("compare-note")) {
+    $("compare-note").hidden = true;
+  }
 }
 
 async function readBody(response) {
@@ -830,6 +890,73 @@ function dropDisplayedSolution() {
   $("node-meta").textContent = "";
   drawGrid("oop-grid", [], "OOP");
   drawGrid("ip-grid", [], "IP");
+  if ($("compare-note")) {
+    $("compare-note").hidden = true;
+  }
+}
+
+async function refreshCompare(baselineId, scenarioId, nodeId) {
+  const note = $("compare-note");
+  if (!note || !baselineId || !scenarioId || !nodeId) {
+    return;
+  }
+  try {
+    const response = await fetch(
+      "/api/compare?baseline=" + encodeURIComponent(baselineId)
+        + "&scenario=" + encodeURIComponent(scenarioId)
+        + "&node_id=" + encodeURIComponent(nodeId)
+    );
+    const body = await readBody(response);
+    if (!response.ok) {
+      note.hidden = true;
+      return;
+    }
+    note.hidden = false;
+    note.textContent = "Compare " + baselineId + " → " + scenarioId
+      + ": EV delta " + Number(body.value_delta).toFixed(4)
+      + " (baseline " + Number(body.baseline_value).toFixed(4)
+      + ", scenario " + Number(body.scenario_value).toFixed(4) + ")";
+  } catch (error) {
+    note.hidden = true;
+  }
+}
+
+async function lockHand(handIndex, probs) {
+  if (!solutionId || !currentNode || currentNode.kind !== "decision") {
+    return;
+  }
+  const response = await fetch("/api/solutions/" + solutionId + "/locks", {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      node_id: currentNode.node_id,
+      kind: "selected",
+      hand_indices: [handIndex],
+      probs
+    })
+  });
+  const body = await readBody(response);
+  if (!response.ok) {
+    $("message").textContent = body.error || "Lock failed";
+    return;
+  }
+  $("message").textContent = "Locked hand index " + handIndex + " at " + currentNode.node_id;
+}
+
+async function unlockHand() {
+  if (!solutionId || !currentNode) {
+    return;
+  }
+  const response = await fetch(
+    "/api/solutions/" + solutionId + "/locks?node_id=" + encodeURIComponent(currentNode.node_id),
+    {method: "DELETE"}
+  );
+  const body = await readBody(response);
+  if (!response.ok) {
+    $("message").textContent = body.error || "Unlock failed";
+    return;
+  }
+  $("message").textContent = "Unlocked " + currentNode.node_id;
 }
 
 function clearValues() {
@@ -1170,23 +1297,50 @@ function paintDetail(player, cell) {
   $("detail-meta").textContent = text;
   const host = $("detail-hands");
   host.innerHTML = "";
+  const nodeCombos = (currentNode && currentNode.combos) || [];
   (cell.hands || []).forEach((hand) => {
     const block = document.createElement("div");
     block.className = "mix";
     const title = document.createElement("strong");
     title.textContent = hand.combo;
     block.appendChild(title);
-    (hand.actions || []).forEach((action) => {
+    const inputs = [];
+    (hand.actions || []).forEach((action, actionIndex) => {
       const row = document.createElement("div");
       row.className = "line";
       const label = document.createElement("span");
       label.textContent = action.action;
-      const probability = document.createElement("span");
-      probability.textContent = Number(action.probability).toFixed(3);
+      const probability = document.createElement("input");
+      probability.type = "number";
+      probability.min = "0";
+      probability.max = "1";
+      probability.step = "0.01";
+      probability.value = Number(action.probability).toFixed(3);
+      probability.style.width = "4.5rem";
+      inputs[actionIndex] = probability;
       row.appendChild(label);
       row.appendChild(probability);
       block.appendChild(row);
     });
+    const handIndex = nodeCombos.indexOf(hand.combo);
+    if (solutionId && currentNode && currentNode.kind === "decision" && handIndex >= 0) {
+      const controls = document.createElement("div");
+      controls.className = "line";
+      const lockButton = document.createElement("button");
+      lockButton.type = "button";
+      lockButton.textContent = "Lock";
+      lockButton.addEventListener("click", () => {
+        const probs = inputs.map((input) => Number(input.value));
+        lockHand(handIndex, probs);
+      });
+      const unlockButton = document.createElement("button");
+      unlockButton.type = "button";
+      unlockButton.textContent = "Unlock";
+      unlockButton.addEventListener("click", () => unlockHand(handIndex));
+      controls.appendChild(lockButton);
+      controls.appendChild(unlockButton);
+      block.appendChild(controls);
+    }
     const values = handEv(hand.combo);
     if (values && !values.defined) {
       const row = document.createElement("div");

@@ -1,6 +1,7 @@
 #include "harness.hpp"
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -566,6 +567,89 @@ void check_persistence_workflow_under_value_load()
     CHECK(second_values.body.find("\"action_ev\"") != std::string::npos);
 }
 
+// Tiny turn: lock root → resolve-locked → compare vs retained baseline → save/open locks.
+void check_lock_resolve_compare_workflow()
+{
+    const std::string checkpoint = workflow_checkpoint_path() + ".locks";
+    const std::string path_json = json_escape_path(checkpoint);
+    const std::string solve =
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\"],\"oop_range\":\"2c3d\",\"ip_range\":\"AhAd\","
+        "\"pot\":100,\"stack\":100,\"iterations\":8,\"samples\":2,\"max_raises\":1,"
+        "\"allow_all_in\":0,\"oop_bets\":[1.0],\"ip_bets\":[],\"oop_turn_bets\":[1.0],"
+        "\"memory_mib\":128,\"algorithm\":\"vanilla\"}";
+    HttpResult accepted;
+    CHECK(http_exchange("POST", "/api/solve", solve, accepted));
+    CHECK(accepted.status == 202);
+    HttpResult solved;
+    CHECK(wait_for_completion(solved));
+    const std::string baseline = json_string(solved.body, "solution_id");
+    CHECK(!baseline.empty());
+    const std::string root = json_string(solved.body, "root_node_id");
+    CHECK(root == "p0.t-1.r-1");
+
+    HttpResult locked;
+    CHECK(http_exchange(
+        "PUT",
+        "/api/solutions/" + baseline + "/locks",
+        "{\"node_id\":\"" + root + "\",\"kind\":\"selected\",\"hand_indices\":[0],\"probs\":[0,1]}",
+        locked));
+    CHECK(locked.status == 200);
+    CHECK(locked.body.find("\"probs\"") != std::string::npos);
+    CHECK(locked.body.find(root) != std::string::npos);
+
+    HttpResult resolve_accepted;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solutions/" + baseline + "/resolve-locked",
+        "{\"iterations\":6,\"samples\":2}",
+        resolve_accepted));
+    CHECK(resolve_accepted.status == 202);
+    HttpResult resolved;
+    CHECK(wait_for_completion(resolved));
+    const std::string scenario = json_string(resolved.body, "solution_id");
+    CHECK(!scenario.empty());
+    CHECK(scenario != baseline);
+    CHECK(json_string(resolved.body, "baseline_solution_id") == baseline);
+
+    HttpResult locks;
+    CHECK(http_exchange("GET", "/api/solutions/" + scenario + "/locks", "", locks));
+    CHECK(locks.status == 200);
+    CHECK(locks.body.find("\"locks\":[") != std::string::npos);
+    CHECK(locks.body.find(root) != std::string::npos);
+
+    HttpResult compared;
+    CHECK(http_exchange(
+        "GET",
+        "/api/compare?baseline=" + baseline + "&scenario=" + scenario + "&node_id=" + root,
+        "",
+        compared));
+    CHECK(compared.status == 200);
+    CHECK(compared.body.find("\"value_delta\"") != std::string::npos);
+    CHECK(compared.body.find("\"locked\":true") != std::string::npos);
+
+    HttpResult baseline_export;
+    CHECK(http_exchange("GET", "/api/solutions/" + baseline + "/export", "", baseline_export));
+    CHECK(baseline_export.status == 200);
+
+    HttpResult saved;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solutions/" + scenario + "/save",
+        "{\"path\":\"" + path_json + "\"}",
+        saved));
+    CHECK(saved.status == 200);
+    HttpResult opened;
+    CHECK(http_exchange("POST", "/api/open", "{\"path\":\"" + path_json + "\"}", opened));
+    CHECK(opened.status == 200);
+    const std::string reopened = json_string(opened.body, "solution_id");
+    CHECK(!reopened.empty());
+    HttpResult reopened_locks;
+    CHECK(http_exchange("GET", "/api/solutions/" + reopened + "/locks", "", reopened_locks));
+    CHECK(reopened_locks.status == 200);
+    CHECK(reopened_locks.body.find(root) != std::string::npos);
+    std::remove(checkpoint.c_str());
+}
+
 } // namespace
 
 void run_explorer_http_tests()
@@ -825,6 +909,7 @@ void run_explorer_http_tests()
     CHECK(json_string(timed_continue_status.body, "solution_id") == timed_solution);
 
     check_persistence_workflow_under_value_load();
+    check_lock_resolve_compare_workflow();
 
 #ifdef _WIN32
     WSACleanup();

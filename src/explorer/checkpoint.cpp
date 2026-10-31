@@ -20,7 +20,9 @@ namespace
 {
 
 constexpr char kMagic[4] = {'P', 'S', 'O', 'L'};
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersionWrite = 2;
+constexpr std::uint32_t kVersionMin = 1;
+constexpr std::uint32_t kVersionMax = 2;
 constexpr std::string_view kUtility = "root_centered_zero_sum";
 
 void append_bytes(std::string& out, const void* data, std::size_t size)
@@ -296,6 +298,9 @@ std::string payload_of(const CheckpointDocument& document)
     append_ints(out, document.sample_iterations);
     append_doubles(out, document.sample_values);
     append_doubles(out, document.sample_gaps);
+    // Version 2 trailing section: lock-set text (may be empty).
+    append_u32(out, static_cast<std::uint32_t>(document.locks_text.size()));
+    out.append(document.locks_text);
     return out;
 }
 
@@ -330,7 +335,7 @@ void write_checkpoint(
     const std::string payload = payload_of(document);
     std::string file;
     file.append(kMagic, 4);
-    append_u32(file, kVersion);
+    append_u32(file, kVersionWrite);
     append_u64(file, payload.size());
     append_u64(file, fnv1a64(payload));
     append_u32(file, crc32(payload));
@@ -403,7 +408,8 @@ CheckpointDocument read_checkpoint(const std::string& path, std::uint64_t max_pa
         throw std::invalid_argument("checkpoint could not be read");
     }
     Reader header(std::string_view(file).substr(4));
-    if (header.u32() != kVersion)
+    const std::uint32_t version = header.u32();
+    if (version < kVersionMin || version > kVersionMax)
     {
         throw std::invalid_argument("unsupported checkpoint version");
     }
@@ -449,6 +455,10 @@ CheckpointDocument read_checkpoint(const std::string& path, std::uint64_t max_pa
     document.sample_iterations = read_ints(reader);
     document.sample_values = read_doubles(reader);
     document.sample_gaps = read_doubles(reader);
+    if (version >= 2)
+    {
+        document.locks_text = reader.text();
+    }
     if (!reader.done())
     {
         throw std::invalid_argument("checkpoint has trailing bytes");

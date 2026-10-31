@@ -391,6 +391,45 @@ void test_street_batch_frozen_solve_honors_locks()
     CHECK_NEAR(open_action_prob(entries, air, "Bet"), 0.0, 1e-12);
 }
 
+void test_street_batch_continue_iterations_honors_locks()
+{
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = LockKind::FullNode;
+    const double locked[] = {0.0, 1.0}; // always bet
+    lock.actions = make_action_lock_row(locked, 2);
+    locks.upsert(lock);
+
+    StreetConfig config = tiny_turn_lock_config("2c3d", "AhAd");
+    StreetBatchSolver solver(config);
+    solver.continue_iterations(15, Algorithm::VanillaCfr, &locks);
+
+    const auto entries = solver.average_strategy_entries();
+    const std::string air = combo_name("2c", "3d");
+    CHECK_NEAR(open_action_prob(entries, air, "Check"), 0.0, 1e-12);
+    CHECK_NEAR(open_action_prob(entries, air, "Bet"), 1.0, 1e-12);
+}
+
+void test_street_batch_continue_null_locks_bit_identical()
+{
+    StreetConfig config = tiny_turn_lock_config("2c3d", "AhAd");
+    StreetBatchSolver with_null(config);
+    StreetBatchSolver with_default(config);
+    with_null.continue_iterations(10, Algorithm::VanillaCfr, nullptr);
+    with_default.continue_iterations(10, Algorithm::VanillaCfr);
+
+    const auto a = with_null.average_strategy_entries();
+    const auto b = with_default.average_strategy_entries();
+    CHECK(a.size() == b.size());
+    for (std::size_t i = 0; i < a.size(); ++i)
+    {
+        CHECK(a[i].infoset == b[i].infoset);
+        CHECK(a[i].action == b[i].action);
+        CHECK(a[i].probability == b[i].probability);
+    }
+}
+
 } // namespace
 
 void run_lock_apply_tests()
@@ -406,4 +445,6 @@ void run_lock_apply_tests()
     test_street_batch_selected_combos_only_listed_hand();
     test_street_batch_null_locks_bit_identical_to_unlocked_row();
     test_street_batch_frozen_solve_honors_locks();
+    test_street_batch_continue_iterations_honors_locks();
+    test_street_batch_continue_null_locks_bit_identical();
 }
