@@ -331,4 +331,4 @@ After the expand cache (`#46` / `5762d5c`), a short instrumented profile on the 
 | flop_paired | 4 | 2.301 | 2.116 | **1.09x** |
 | turn_half_pot | 4 | 1.176 | 1.093 | 1.08x |
 
-Instrumented 3-iter profile: flop `support_seconds` 0.050 → 0.018 at 1 thread; turn 0.010 → 0.0006. Allocated bytes rise with the mask table (flop 4 threads 176,644,816 → 177,166,000). Parity pins at iteration 30: 1-vs-4 and after-vs-main relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,411 assertions, 0 failures.
+Instrumented 3-iter profile: flop `support_seconds` 0.050 → 0.018 at 1 thread; turn 0.010 → 0.0006. Allocated bytes rise with the mask table (flop 4 threads 176,644,816 → 177,166,000). Parity pins at iteration 30: 1-vs-4 and after-vs-main relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,547 assertions, 0 failures.
