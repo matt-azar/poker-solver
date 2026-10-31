@@ -85,5 +85,7 @@ stacks with prize 100).
 Nash-gap and best-response helpers that assume chip zero-sum remain
 approximate under ICM (same caveat as positive rake). Multiway spectators are
 accepted by the adapter but the p0-scalar CFR path is HU-oriented; incentives
-CFR hooks, dual-utility Nash-gap, action-EV unit labels, and dedicated PSOL
-ICM UI fields beyond config round-trip are out of scope here.
+CFR hooks beyond the p0 scalar, dual-utility Nash-gap, action-EV unit labels,
+and dedicated PSOL ICM UI fields beyond config round-trip are out of scope
+here. Action-label incentives are a separate overlay after this wrap
+([INCENTIVES.md](INCENTIVES.md)).

@@ -143,6 +143,18 @@ inline std::string format_street_config(const StreetConfig& config)
     append_line(out, "rake-cap", format_number(config.rake.cap));
     append_numbers(out, "icm-stacks", config.icm.stacks);
     append_numbers(out, "icm-payouts", config.icm.payouts);
+    for (const poker::solver::IncentiveRule& rule : config.incentives.rules)
+    {
+        std::string value;
+        value += rule.kind == poker::solver::IncentiveKind::CategoryTag ? "tag" : "label";
+        value.push_back(' ');
+        value += std::to_string(rule.player);
+        value.push_back(' ');
+        value += rule.key;
+        value.push_back(' ');
+        value += format_number(rule.delta);
+        append_line(out, "incentive", value);
+    }
     append_ints(out, "memory-mib", config.memory_mib);
     append_ints(out, "threads", config.threads);
     append_specs(out, "oop-bets", config.oop_bet_sizes);
@@ -380,6 +392,34 @@ inline StreetConfig parse_street_config(std::string_view text)
                 throw std::invalid_argument("tree-edit must describe one edit");
             }
             config.tree_edits.append(parsed.edits[0]);
+            continue;
+        }
+        if (key == "incentive")
+        {
+            // Repeatable: one rule per line. Spelling: incentive label|tag PLAYER KEY DELTA
+            const std::vector<std::string_view> tokens = split_tokens(value);
+            if (tokens.size() != 4)
+            {
+                throw std::invalid_argument(
+                    "incentive needs kind player key delta (e.g. label 0 b100 3.5)");
+            }
+            poker::solver::IncentiveRule rule;
+            if (tokens[0] == "label")
+            {
+                rule.kind = poker::solver::IncentiveKind::ActionLabelMatch;
+            }
+            else if (tokens[0] == "tag")
+            {
+                rule.kind = poker::solver::IncentiveKind::CategoryTag;
+            }
+            else
+            {
+                throw std::invalid_argument("incentive kind must be label or tag");
+            }
+            rule.player = parse_int(tokens[1]);
+            rule.key = std::string(tokens[2]);
+            rule.delta = parse_finite(tokens[3]);
+            config.incentives.add(std::move(rule));
             continue;
         }
         take_field(seen, key);

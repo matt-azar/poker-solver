@@ -5,6 +5,7 @@
 #include "poker/range.hpp"
 #include "solver/chip_payoff.hpp"
 #include "solver/icm.hpp"
+#include "solver/incentives.hpp"
 #include "solver/payoff.hpp"
 #include "solver/tree_edit.hpp"
 
@@ -84,6 +85,9 @@ struct StreetConfig
     // Optional tournament ICM. Empty stacks leaves chip/rake terminals.
     // stacks[] are tournament chip counts (not betting `stack`). See docs/ICM.md.
     poker::solver::IcmConfig icm{};
+    // Optional action-label incentive overlay. Empty rules leave terminals
+    // unchanged. Path-attributed at terminals; see docs/INCENTIVES.md.
+    poker::solver::IncentiveConfig incentives{};
     // Force/Remove filter legal actions at matching public histories during
     // build and play. AddSize injects one extra bet/raise size at the matching
     // decision (same min-raise / stack / pot-cap rules as listed sizes).
@@ -185,6 +189,7 @@ public:
 
     // Both players' root-centered utilities. Chip/rake first; when config_.icm
     // is enabled, wrap through IcmPayoff (ICM equity deltas, not chip EV).
+    // Optional path-attributed incentives apply last (docs/INCENTIVES.md).
     poker::solver::PlayerPayoff terminal_payoff(const State& state) const
     {
         if (!state.terminal)
@@ -201,7 +206,10 @@ public:
             state.folded,
             showdown,
             config_.rake);
-        return poker::solver::apply_icm_terminal(config_.icm, chips);
+        const poker::solver::PlayerPayoff icm =
+            poker::solver::apply_icm_terminal(config_.icm, chips);
+        return poker::solver::apply_path_incentives(
+            config_.incentives, icm, incentive_path(state));
     }
 
     double p1_utility(const State& state) const
@@ -464,6 +472,7 @@ private:
         }
         config_.rake.validate();
         config_.icm.validate(config_.pot, config_.stack);
+        config_.incentives.validate();
     }
 
     void build_deals()
@@ -754,6 +763,84 @@ private:
             cursor = apply(cursor, legal, action);
         }
         return history;
+    }
+
+    // Acting seat + display/compact labels for each betting action on the path
+    // to `target`. Used to path-attribute IncentiveConfig at terminals.
+    std::vector<poker::solver::IncentiveEdge> incentive_path(const State& target) const
+    {
+        std::vector<poker::solver::IncentiveEdge> path;
+        if (!config_.incentives.enabled() || target.n_hist == 0)
+        {
+            return path;
+        }
+        State cursor;
+        cursor.pair_index = target.pair_index;
+        cursor.pot = config_.pot;
+        cursor.acting = config_.first_to_act;
+        cursor.street = 0;
+        cursor.turn_card = -1;
+        cursor.river_card = -1;
+        std::vector<HistStep> history;
+        int used = 0;
+        while (used < target.n_hist)
+        {
+            if (cursor.terminal)
+            {
+                throw std::logic_error("street incentive path hit a terminal early");
+            }
+            if (is_chance(cursor))
+            {
+                if (cursor.chance_kind == 2)
+                {
+                    const int outcome = find_outcome_for_card(cursor, target.turn_card);
+                    if (outcome < 0)
+                    {
+                        throw std::logic_error("street incentive path missing turn card");
+                    }
+                    cursor = child_chance(cursor, outcome);
+                    continue;
+                }
+                if (cursor.chance_kind == 3)
+                {
+                    const int outcome = find_outcome_for_card(cursor, target.river_card);
+                    if (outcome < 0)
+                    {
+                        throw std::logic_error("street incentive path missing river card");
+                    }
+                    cursor = child_chance(cursor, outcome);
+                    continue;
+                }
+                throw std::logic_error("street incentive path at unexpected chance");
+            }
+            Legal legal = enumerate_legal_actions(cursor);
+            apply_tree_edits(legal, cursor, history);
+            const int action = target.hist[used++];
+            if (action < 0 || action >= legal.count)
+            {
+                throw std::logic_error("street incentive path action out of range");
+            }
+            const bool facing = cursor.committed > cursor.contrib[cursor.acting];
+            const int street_total = cursor.contrib[cursor.acting] + legal.add[action];
+            const bool all_in =
+                legal.code[action] != 0 && street_total == config_.stack && legal.add[action] > 0;
+            poker::solver::IncentiveEdge edge;
+            edge.player = cursor.acting;
+            edge.display_label = poker::solver::incentive_chip_label(
+                legal.code[action], legal.add[action], street_total, all_in, facing);
+            edge.compact_label = poker::solver::incentive_compact_token(
+                legal.code[action], legal.add[action], street_total, all_in, facing);
+            path.push_back(std::move(edge));
+            HistStep step;
+            step.code = legal.code[action];
+            step.add = legal.add[action];
+            step.street_total = street_total;
+            step.all_in = all_in;
+            step.facing = facing;
+            history.push_back(step);
+            cursor = apply(cursor, legal, action);
+        }
+        return path;
     }
 
     // Resolve AddSize to a chip add using the same clamps as enumerate's consider.
