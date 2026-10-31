@@ -59,6 +59,10 @@ Node locks (street solutions; public-node id `pN.t-1.r-1` maps to infoset `N`):
 
 Save/Open uses PSOL payload version 2 with a trailing `locks_text` field (`format_lock_set`). Version 1 files still open with empty locks.
 
+## Themes
+
+The page defaults to the **light** theme (`theme-light` on `body`). A header button switches to **dark** (`theme-dark`). Colors and surfaces are CSS variables in `ui/app.css`. The choice is stored under the `explorer-theme` key in `localStorage` and restored on reload. Saved layouts and localization are still ahead.
+
 The page then shows:
 
 - The street, pot, stack, board, out-of-position value, the Nash gap, and the gap as a fraction of the pot

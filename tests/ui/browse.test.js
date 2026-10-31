@@ -266,6 +266,38 @@ assert.strictEqual(solutionNeedsReload(finished, "s2", false), true);
 assert.strictEqual(solutionNeedsReload({running: true, solution_id: "s1"}, null, true), false);
 assert.strictEqual(solutionNeedsReload({running: false, solution_id: null}, null, true), false);
 
+const appSource = fs.readFileSync("ui/app.js", "utf8");
+const helperBlock = appSource.match(/\/\* theme-helpers \*\/([\s\S]*?)\/\* end-theme-helpers \*\//);
+assert.ok(helperBlock, "theme helpers marked in app.js");
+vm.runInContext(helperBlock[1], context);
+const {normalizeTheme, readStoredTheme, themeClassName, nextTheme, writeStoredTheme} = context;
+assert.ok(helperBlock[1].includes('"explorer-theme"'), "storage key named explorer-theme");
+assert.strictEqual(normalizeTheme("dark"), "dark");
+assert.strictEqual(normalizeTheme("light"), "light");
+assert.strictEqual(normalizeTheme("other"), "light");
+assert.strictEqual(themeClassName("dark"), "theme-dark");
+assert.strictEqual(themeClassName("light"), "theme-light");
+assert.strictEqual(nextTheme("light"), "dark");
+assert.strictEqual(nextTheme("dark"), "light");
+const memory = {
+  store: Object.create(null),
+  getItem(key) {
+    return Object.prototype.hasOwnProperty.call(this.store, key) ? this.store[key] : null;
+  },
+  setItem(key, value) {
+    this.store[key] = String(value);
+  }
+};
+assert.strictEqual(readStoredTheme(memory), "light");
+memory.setItem("explorer-theme", "dark");
+assert.strictEqual(readStoredTheme(memory), "dark");
+writeStoredTheme(memory, "light");
+assert.strictEqual(memory.getItem("explorer-theme"), "light");
+assert.ok(appSource.includes('$("theme-toggle")'), "theme toggle wired in app.js");
+assert.ok(fs.readFileSync("ui/app.css", "utf8").includes("body.theme-light"), "light theme tokens in app.css");
+assert.ok(fs.readFileSync("ui/app.css", "utf8").includes("body.theme-dark"), "dark theme tokens in app.css");
+assert.ok(fs.readFileSync("ui/index.html", "utf8").includes('class="theme-light"'), "light default on body");
+
 console.log("browse tests passed");
 }
 

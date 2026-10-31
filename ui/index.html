@@ -6,10 +6,20 @@
   <title>Hold'em explorer</title>
   <link rel="stylesheet" href="/app.css">
 </head>
-<body>
+<body class="theme-light">
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem("explorer-theme") === "dark") {
+          document.body.className = "theme-dark";
+        }
+      } catch (error) {}
+    })();
+  </script>
   <header>
     <h1>Hold'em explorer</h1>
     <!-- <p>HUNLH solver.</p> -->
+    <button type="button" id="theme-toggle" aria-pressed="false">Dark theme</button>
   </header>
   <section class="pickers">
     <div>
