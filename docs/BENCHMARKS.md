@@ -394,3 +394,18 @@ After fused showdown (`#52`), a fresh 1-thread instrumented profile still spent 
 | turn_half_pot | 4 | 0.815 | 0.724 | **1.13x** |
 
 Instrumented 3-iter profile at 1 thread (flop): `order_seconds` 0.091 → 0.075, `showdown_seconds` 0.234 → 0.211, `decision_seconds` 0.141 → 0.106, `collect_seconds` 0.094 → 0.082, train 0.930 → 0.861. Allocated bytes unchanged at four threads (177,667,832). Parity pins at iteration 30: 1-vs-4 and after-vs-`#52` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,746 assertions, 0 failures.
+
+## Fused actor σ-mix + skip non-updating aev probe (not shipped)
+
+`cursor/engine-speed-7-e394` after `#56` / latest `main`. Fresh 1-thread instrumented profile (3 warm CFR+ iters) still showed material `decision_seconds` / `expand_seconds` beside showdown. This probe folded the actor's σ-weighted mix into the frozen action loop (so the post-loop pass only writes regrets/averages) and skipped actor `aev*` copies on nodes whose player is not the CFR+ updating player for that pass. Not an idx* walk and not `#56`'s zero-fill / non-actor aev skips. Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Short microbench only; code change reverted.
+
+### Reset-30 warm-cache vs `#56` / `main` tip (`2c6c132`)
+
+`street_parallel_bench sample`, five alternating before/after pairs at four threads, quiet host, no walk profile:
+
+| Case | Threads | Before median train (s) | After median train (s) | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| flop_paired | 4 | 1.468 | 1.453 | **1.01x** |
+| turn_half_pot | 4 | 0.727 | 0.722 | **1.01x** |
+
+Instrumented 3-iter profile at 1 thread (flop): `decision_seconds` 0.148 → 0.115, `expand_seconds` 0.115 → 0.119, train 0.957 → 0.903. The decision bucket shrank, but the mix work moved into expand and four-thread wall train did not clear ~1.05x. Parity pins at iteration 30: 1-vs-4 and after-vs-`main` relative regret / strategy-sum delta 0 on both trees (after fixing an early live-mask read that raced child chance overwrites — mix accumulate must use `slot_base`, not `ctx.live*`, inside the action loop). Not shipped.
