@@ -2,7 +2,7 @@
   "id": "smoke_timeout",
   "role": "diagnostic",
   "binary": "street_solver",
-  "why": "Full-range flop with a two-second wall. The process is killed before the solver prints a final result. Used only to show a timeout record. It does not replace the flop reference case. The engine budget is 2048 MiB because a 1024 MiB budget rejects this tree during regret allocation (about 1.22 GiB estimated) and would record resource-rejection instead of a timeout.",
+  "why": "Full-range flop with a two-second wall. The process is killed before the solver prints a final result. Used only to show a timeout record. It does not replace the flop reference case. The engine budget is 4096 MiB because a 2048 MiB budget rejects this tree during frozen allocation (about 2.12 GiB estimated on the consolidated main baseline) and would record resource-rejection instead of a timeout.",
   "study_inputs_note": "Diagnostic only.",
   "pot": 100,
   "effective_stack": 100,
@@ -12,7 +12,7 @@
   "algorithm": "cfr_plus",
   "iteration_cap": 30,
   "threads": 1,
-  "memory_mib": 2048,
+  "memory_mib": 4096,
   "eval_interval": 20,
   "quality_target_nashconv_over_pot": 0.001,
   "wall_seconds": 2,
@@ -22,7 +22,7 @@
     "--iterations", "30",
     "--algorithm", "cfr_plus",
     "--accuracy", "0.001",
-    "--memory-mib", "2048",
+    "--memory-mib", "4096",
     "--threads", "1",
     "--frozen"
   ]

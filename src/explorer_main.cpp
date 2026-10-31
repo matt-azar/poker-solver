@@ -310,6 +310,7 @@ struct Job
     bool frozen = false;
     double all_in_threshold = 0.0;
     double accuracy = -1.0;
+    double time_limit = -1.0;
     int max_raises = 2;
     int iterations = 200;
     int samples = 5;
@@ -334,6 +335,7 @@ struct HeldSolution
     double p1_best_response = 0.0;
     double p2_best_response = 0.0;
     double nash_gap = 0.0;
+    bool time_limit_reached = false;
     std::vector<int> sample_iterations;
     std::vector<double> sample_values;
     std::vector<double> sample_gaps;
@@ -426,6 +428,19 @@ Job parse_job(const std::string& text)
     }
     job.all_in_threshold = read_number(text, "all_in_threshold", 0);
     job.accuracy = read_number(text, "accuracy", -1);
+    if (find_key(text, "time_limit") != std::string::npos)
+    {
+        const double time_limit_raw = read_number(text, "time_limit", -1);
+        if (!std::isfinite(time_limit_raw) || time_limit_raw < 0.0)
+        {
+            throw std::invalid_argument("time_limit must be a non-negative number of seconds");
+        }
+        job.time_limit = time_limit_raw;
+    }
+    else
+    {
+        job.time_limit = -1.0;
+    }
     job.max_raises = static_cast<int>(read_number(text, "max_raises", 2));
     job.iterations = static_cast<int>(read_number(text, "iterations", 200));
     job.samples = static_cast<int>(read_number(text, "samples", 5));
@@ -524,6 +539,7 @@ struct StatusDraft
     bool running = false;
     bool paused = false;
     bool cancelled = false;
+    bool time_limit_reached = false;
     std::string error;
     const Job* job = nullptr;
     int iterations = 0;
@@ -575,6 +591,8 @@ std::string build_status(const StatusDraft& draft)
     out += draft.paused ? "true" : "false";
     out += ",\"cancelled\":";
     out += draft.cancelled ? "true" : "false";
+    out += ",\"time_limit_reached\":";
+    out += draft.time_limit_reached ? "true" : "false";
     out += ",\"error\":";
     append_escaped(out, draft.error);
     out += ",\"job_id\":";
@@ -600,6 +618,19 @@ std::string build_status(const StatusDraft& draft)
     out += std::to_string(draft.iterations);
     out += ",\"iterations_requested\":";
     out += std::to_string(job.iterations);
+    out += ",\"samples\":";
+    out += std::to_string(job.samples);
+    out += ",\"accuracy\":";
+    out += format_number(job.accuracy);
+    out += ",\"time_limit\":";
+    if (job.time_limit < 0.0)
+    {
+        out += "null";
+    }
+    else
+    {
+        out += format_number(job.time_limit);
+    }
     out += ",\"frozen\":";
     out += job.frozen ? "true" : "false";
     out += ",\"memory_mib\":";
@@ -1490,10 +1521,15 @@ void solve_job(std::uint64_t job_id, Job job)
     double gap = 0.0;
     int done = 0;
     bool evaluated = false;
+    bool time_limit_reached = false;
     const auto started = std::chrono::steady_clock::now();
     const auto seconds_now = [&]()
     {
         return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    };
+    const auto wall_exhausted = [&]()
+    {
+        return job.time_limit >= 0.0 && seconds_now() >= job.time_limit;
     };
     const auto remember = [&](double utility, double response0, double response1)
     {
@@ -1533,6 +1569,7 @@ void solve_job(std::uint64_t job_id, Job job)
             kept_solution->p1_best_response = p1;
             kept_solution->p2_best_response = p2;
             kept_solution->nash_gap = gap;
+            kept_solution->time_limit_reached = time_limit_reached;
             kept_solution->sample_iterations = sample_iterations;
             kept_solution->sample_values = sample_values;
             kept_solution->sample_gaps = sample_gaps;
@@ -1665,9 +1702,15 @@ void solve_job(std::uint64_t job_id, Job job)
                 job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
                 sample_iterations, sample_values, sample_gaps, memory_ptr);
             progress.running = true;
+            progress.time_limit_reached = time_limit_reached;
             g_session.set_progress(job_id, build_status(progress));
             if (job.accuracy >= 0.0 && gap <= job.accuracy * static_cast<double>(job.pot))
             {
+                break;
+            }
+            if (wall_exhausted())
+            {
+                time_limit_reached = true;
                 break;
             }
         }
@@ -1692,6 +1735,7 @@ void solve_job(std::uint64_t job_id, Job job)
         held->p1_best_response = p1;
         held->p2_best_response = p2;
         held->nash_gap = gap;
+        held->time_limit_reached = time_limit_reached;
         held->sample_iterations = sample_iterations;
         held->sample_values = sample_values;
         held->sample_gaps = sample_gaps;
@@ -1808,6 +1852,7 @@ void solve_job(std::uint64_t job_id, Job job)
             held->has_memory ? &held->memory : nullptr);
         success.solution_id = permit.solution_id;
         success.root_id = held->root_id;
+        success.time_limit_reached = time_limit_reached;
         const bool published = g_session.commit_success(job_id, held, permit.solution_id, [&](std::uint64_t generation, bool accepted)
         {
             StatusDraft draft = success;
@@ -1957,7 +2002,7 @@ void adopt_completed_training(
     }
 }
 
-void continue_job(std::uint64_t job_id, int extra)
+void continue_job(std::uint64_t job_id, int extra, double time_limit)
 {
     // Claim returns while cancelled value queries may still hold the engine.
     // Match solve: wait for quiet off the accept thread before mutating.
@@ -1971,6 +2016,11 @@ void continue_job(std::uint64_t job_id, int extra)
             "{\"running\":false,\"cancelled\":false,\"error\":\"missing solution\",\"solution_id\":null}");
         return;
     }
+    if (time_limit >= 0.0)
+    {
+        held->job.time_limit = time_limit;
+    }
+    held->time_limit_reached = false;
     const auto started = std::chrono::steady_clock::now();
     int done = held->iterations;
     if (extra > std::numeric_limits<int>::max() - done)
@@ -1991,12 +2041,21 @@ void continue_job(std::uint64_t job_id, int extra)
     double p1 = held->p1_best_response;
     double p2 = held->p2_best_response;
     double gap = held->nash_gap;
+    bool time_limit_reached = false;
     const int samples = std::max(1, held->job.samples);
     const int chunk = std::max(1, extra / samples);
     const auto seconds_now = [&]()
     {
         return held->runtime_seconds
             + std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    };
+    const auto continuation_seconds = [&]()
+    {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    };
+    const auto wall_exhausted = [&]()
+    {
+        return time_limit >= 0.0 && continuation_seconds() >= time_limit;
     };
     try
     {
@@ -2054,9 +2113,15 @@ void continue_job(std::uint64_t job_id, int extra)
             progress.running = true;
             progress.solution_id = held->id;
             progress.root_id = held->root_id;
+            progress.time_limit_reached = time_limit_reached;
             g_session.set_progress(job_id, build_status(progress));
             if (held->job.accuracy >= 0.0 && gap <= held->job.accuracy * static_cast<double>(held->job.pot))
             {
+                break;
+            }
+            if (wall_exhausted())
+            {
+                time_limit_reached = true;
                 break;
             }
         }
@@ -2067,6 +2132,7 @@ void continue_job(std::uint64_t job_id, int extra)
         held->p1_best_response = p1;
         held->p2_best_response = p2;
         held->nash_gap = gap;
+        held->time_limit_reached = time_limit_reached;
         held->job_id = job_id;
         if (held->street)
         {
@@ -2087,6 +2153,7 @@ void continue_job(std::uint64_t job_id, int extra)
         success.solution_id = held->id;
         success.root_id = held->root_id;
         success.paused = pause_after;
+        success.time_limit_reached = time_limit_reached;
         const bool published = g_session.commit_continuation(job_id, [&](std::uint64_t generation)
         {
             StatusDraft draft = success;
@@ -2113,6 +2180,7 @@ void continue_job(std::uint64_t job_id, int extra)
         draft.error = error.what();
         draft.solution_id = held->id;
         draft.root_id = held->root_id;
+        draft.time_limit_reached = held->time_limit_reached;
         g_session.abort_continuation(job_id, build_status(draft));
     }
 }
@@ -2570,9 +2638,14 @@ void handle_client(socket_t client)
             return;
         }
         double requested = 0.0;
+        double continue_time_limit = -1.0;
         try
         {
             requested = read_number(body, "iterations", 0.0);
+            if (find_key(body, "time_limit") != std::string::npos)
+            {
+                continue_time_limit = read_number(body, "time_limit", -1.0);
+            }
         }
         catch (const std::exception&)
         {
@@ -2583,6 +2656,16 @@ void handle_client(socket_t client)
             || std::floor(requested) != requested)
         {
             send_response(client, 400, "application/json", "{\"error\":\"iterations must be a positive integer\"}");
+            return;
+        }
+        if (find_key(body, "time_limit") != std::string::npos
+            && (!std::isfinite(continue_time_limit) || continue_time_limit < 0.0))
+        {
+            send_response(
+                client,
+                400,
+                "application/json",
+                "{\"error\":\"time_limit must be a non-negative number of seconds\"}");
             return;
         }
         const int extra = static_cast<int>(requested);
@@ -2623,7 +2706,9 @@ void handle_client(socket_t client)
             starting.solution_id = held->id;
             starting.root_id = held->root_id;
             g_session.set_progress(claim.job_id, build_status(starting));
-            g_worker = std::thread([job_id = claim.job_id, extra]() { continue_job(job_id, extra); });
+            g_worker = std::thread(
+                [job_id = claim.job_id, extra, continue_time_limit]()
+                { continue_job(job_id, extra, continue_time_limit); });
         }
         catch (const std::exception& error)
         {

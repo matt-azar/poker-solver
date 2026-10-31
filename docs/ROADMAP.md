@@ -43,7 +43,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Equity, action ranges, distributions, hand categories | Limited browsing foundation | M2 |
 | Weighted range editing, range libraries, board input | Basic configuration; complete visual workflow needed | M2–M3 |
 | Configurable betting trees and visual line editing | Basic parameters exist | M3 |
-| Stop-and-keep, pause/continue, accuracy stopping | Cancellation and accuracy stopping exist; CLI `--time-limit` stops at an iteration boundary; `eval_every` / `--eval-every` sets Nash-gap eval cadence; accuracy evals record `nash_gap_history`; pause/continue still distinct | M4 |
+| Stop-and-keep, pause/continue, accuracy stopping | Cancellation, accuracy stopping, pause/continue, CLI `--time-limit` / `--eval-every`, and explorer GUI/API `time_limit` + `samples` exist; construction-time stop/pause still publishes nothing | M4 |
 | Full saves, resumable checkpoints, compact saves, lazy load | One versioned `PSOL` save/open/continue works (HTTP + GUI); compact/lazy formats still missing | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Small benchmark set; parity unproven | M6 |
 | Full and combo node locking, editing, re-solving | Missing | M7 |
