@@ -58,13 +58,20 @@ explorer   # serves desktop/dist when present
 - Chip EV: root-centered, units `chips`
 - Accuracy / Nash gap: NashConv (sum of BR gains); accuracy is NashConv/pot
 - Equity: check-down, fraction of pot — not chip EV
-- Zero probability on a lock is a constraint; unlock is separate
+- A 0% action inside a lock row that sums to 1 is a constraint; unlock is DELETE. All-zero PUT rows are rejected by the engine.
 
 ## Slice status
 
 1. **Audit + contracts** — this document + `EngineClient`
-2. **Study workspace** — tokens, adaptive layout, context/history, segmented strategy matrix, combo inspector, node navigation, solve controls against live API
-3. Analysis dock + organized Build — in progress / follow-on
-4. Locks + Compare polish — follow-on
-5. Tauri shell + Windows installer — follow-on
-6. Visual/a11y/perf acceptance — follow-on
+2. **Study workspace** — tokens, adaptive layout, context/history, segmented strategy matrix, combo inspector, node navigation, solve controls against live API; optional dual-range layout
+3. Analysis dock + organized Build + Library — present against live APIs (ongoing polish)
+4. **Locks + Compare** — Lock drawer + Compare workspace wired to PUT/DELETE/resolve-locked/compare
+5. Tauri shell + Windows installer — not started; supported path remains browser client + `explorer`
+6. Visual/a11y/perf acceptance — ongoing
+
+| Lock / compare op | UI | Backend |
+| --- | --- | --- |
+| Apply selected/full lock | Lock drawer / inspector | `PUT …/locks` |
+| Unlock | Lock drawer / inspector | `DELETE …/locks` |
+| Resolve locked | Solve/Tree menus + drawer | `POST …/resolve-locked` |
+| Compare revisions | Compare workspace | `GET /api/compare` |

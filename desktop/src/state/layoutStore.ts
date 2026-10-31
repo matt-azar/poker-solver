@@ -5,6 +5,7 @@ const LAYOUT_KEY = "study-layout-v1";
 export interface StudyLayout {
   leftNav: boolean;
   lowerDock: boolean;
+  dualRange: boolean;
   inspectorWidth: number;
   historyHeight: number;
   lowerDockHeight: number;
@@ -14,6 +15,7 @@ export interface StudyLayout {
 export const DEFAULT_LAYOUT: StudyLayout = {
   leftNav: true,
   lowerDock: true,
+  dualRange: false,
   inspectorWidth: 320,
   historyHeight: 120,
   lowerDockHeight: 220,

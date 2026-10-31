@@ -15,6 +15,18 @@ import {
   solutionNeedsReload,
 } from "../domain/browse";
 import {
+  handIndexForCombo,
+  isHandLocked,
+  lockForNode,
+  normalizeProbs,
+  seedProbsFromStrategy,
+  toggleHandIndex,
+  type ComparePayload,
+  type LockDraft,
+  type LockRecord,
+  type LocksPayload,
+} from "../domain/locks";
+import {
   DEFAULT_SPOT,
   type ActionValuesPayload,
   type FrequencyMode,
@@ -31,10 +43,107 @@ import { useLayoutStore } from "./layoutStore";
 
 export type WorkspaceId = "study" | "build" | "compare" | "library";
 
+export interface LibraryRecentEntry {
+  path: string;
+  name: string;
+  mtime: number;
+}
+
+export interface LibraryNamedEntry {
+  id: string;
+  name: string;
+}
+
+export interface LibraryLists {
+  recent: LibraryRecentEntry[];
+  templates: LibraryNamedEntry[];
+  ranges: LibraryNamedEntry[];
+  loading: boolean;
+}
+
 interface SelectedCell {
   row: number;
   col: number;
   text: string;
+}
+
+function joinSizes(values: unknown): string {
+  if (!Array.isArray(values)) {
+    return "";
+  }
+  return values.map((value) => String(value)).join(", ");
+}
+
+function asNamedList(data: unknown): LibraryNamedEntry[] {
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  const out: LibraryNamedEntry[] = [];
+  for (const entry of data) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const id = String((entry as { id?: unknown }).id ?? "").trim();
+    if (!id) {
+      continue;
+    }
+    const name = String((entry as { name?: unknown }).name ?? id).trim() || id;
+    out.push({ id, name });
+  }
+  return out;
+}
+
+function asRecentList(data: unknown): LibraryRecentEntry[] {
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  const out: LibraryRecentEntry[] = [];
+  for (const entry of data) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const path = String((entry as { path?: unknown }).path ?? "").trim();
+    if (!path) {
+      continue;
+    }
+    const name = String((entry as { name?: unknown }).name ?? path).trim() || path;
+    const mtimeRaw = (entry as { mtime?: unknown }).mtime;
+    const mtime = typeof mtimeRaw === "number" ? mtimeRaw : Number(mtimeRaw) || 0;
+    out.push({ path, name, mtime });
+  }
+  return out;
+}
+
+/** Map POST /api/config JSON onto SpotDraft fields (mirrors legacy ui applyConfigText). */
+function draftFromParsedConfig(body: Record<string, unknown>): Partial<SpotDraft> {
+  const board = Array.isArray(body.board)
+    ? body.board.map((card) => String(card)).join(" ")
+    : "";
+  const partial: Partial<SpotDraft> = {
+    boardText: board,
+    pot: Number(body.pot) || 0,
+    stack: Number(body.stack) || 0,
+    maxRaises: Number(body.max_raises) || 0,
+    allowAllIn: Boolean(body.allow_all_in),
+    oopBets: joinSizes(body.oop_bets),
+    ipBets: joinSizes(body.ip_bets),
+  };
+  if (body.kind === "street") {
+    partial.oopFlop = joinSizes(body.oop_flop_bets);
+    partial.ipFlop = joinSizes(body.ip_flop_bets);
+    partial.oopTurn = joinSizes(body.oop_turn_bets);
+    partial.ipTurn = joinSizes(body.ip_turn_bets);
+    partial.oopRiver = joinSizes(body.oop_river_bets);
+    partial.ipRiver = joinSizes(body.ip_river_bets);
+    partial.oopDonk = joinSizes(body.oop_donk);
+    partial.potCap = Number(body.pot_cap) || 0;
+    partial.noThreeBet = body.allow_three_bet === false;
+    partial.geometric = Boolean(body.geometric);
+    partial.allInThreshold = Number(body.all_in_threshold) || 0;
+    partial.memoryMib = Number(body.memory_mib) || 0;
+    partial.threads = Number(body.threads) || 1;
+  }
+  return partial;
 }
 
 function phaseFromStatus(status: StatusPayload | null, fallback: SolvePhase): SolvePhase {
@@ -130,7 +239,7 @@ interface StudyState {
   runouts: unknown | null;
   equity: unknown | null;
   categories: unknown | null;
-  compareNote: unknown | null;
+  compareNote: ComparePayload | null;
 
   selectedCell: SelectedCell | null;
   hoverCell: SelectedCell | null;
@@ -146,6 +255,25 @@ interface StudyState {
   setAnalysisTab: (tab: StudyState["analysisTab"]) => void;
   warmStart: boolean;
   setWarmStart: (value: boolean) => void;
+
+  lockDrawerOpen: boolean;
+  setLockDrawerOpen: (open: boolean) => void;
+  locks: LockRecord[];
+  lockDraft: LockDraft;
+  lockDraftBaseline: LockDraft | null;
+  setLockKind: (kind: LockDraft["kind"]) => void;
+  setLockProbs: (probs: number[]) => void;
+  setLockProbAt: (index: number, value: number) => void;
+  toggleLockHand: (handIndex: number) => void;
+  selectCombosForLock: (combos: string[]) => void;
+  seedLockFromStrategy: () => void;
+  revertLockDraft: () => void;
+  refreshLocks: () => Promise<void>;
+  applyLock: () => Promise<void>;
+  unlockHands: (handIndices?: number[]) => Promise<void>;
+  unlockNode: () => Promise<void>;
+  clearAllLocks: () => Promise<void>;
+  isHandLockedAtCurrentNode: (handIndex: number) => boolean;
 
   // theme/layout proxies for UI convenience
   theme: "light" | "dark";
@@ -172,7 +300,24 @@ interface StudyState {
   loadCategories: () => Promise<void>;
   saveSolution: () => Promise<void>;
   openSolution: (path?: string) => Promise<void>;
-  loadCompare: () => Promise<void>;
+  loadCompare: (nodeId?: string) => Promise<void>;
+
+  libraryLists: LibraryLists;
+  loadRecent: () => Promise<void>;
+  loadTemplates: () => Promise<void>;
+  loadRanges: () => Promise<void>;
+  applyTemplate: (id: string) => Promise<void>;
+  applyRangePreset: (id: string, player: "oop" | "ip") => Promise<void>;
+}
+
+function defaultLockDraft(actionCount: number): LockDraft {
+  return {
+    kind: "selected",
+    handIndices: [],
+    probs: Array.from({ length: actionCount }, (_, index) =>
+      actionCount === 0 ? 0 : index === 0 ? 1 : 0,
+    ),
+  };
 }
 
 const rangeHistory = createRangeHistory();
@@ -342,6 +487,205 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   warmStart: false,
   setWarmStart(value) {
     set({ warmStart: value });
+  },
+
+  lockDrawerOpen: false,
+  setLockDrawerOpen(open) {
+    if (!open) {
+      set({ lockDrawerOpen: false });
+      return;
+    }
+    const actions = get().currentNode?.actions?.length ?? 0;
+    const existing = get().lockDraft;
+    const draft =
+      existing.probs.length === actions
+        ? existing
+        : defaultLockDraft(actions);
+    set({
+      lockDrawerOpen: true,
+      lockDraft: draft,
+      lockDraftBaseline: structuredClone(draft),
+    });
+    void get().refreshLocks();
+  },
+  locks: [],
+  lockDraft: defaultLockDraft(0),
+  lockDraftBaseline: null,
+  setLockKind(kind) {
+    set({ lockDraft: { ...get().lockDraft, kind } });
+  },
+  setLockProbs(probs) {
+    set({ lockDraft: { ...get().lockDraft, probs: probs.slice() } });
+  },
+  setLockProbAt(index, value) {
+    const probs = get().lockDraft.probs.slice();
+    probs[index] = value;
+    set({ lockDraft: { ...get().lockDraft, probs } });
+  },
+  toggleLockHand(handIndex) {
+    const handIndices = toggleHandIndex(get().lockDraft.handIndices, handIndex);
+    set({ lockDraft: { ...get().lockDraft, handIndices, kind: "selected" } });
+  },
+  selectCombosForLock(combos) {
+    const node = get().currentNode;
+    if (!node?.combos) {
+      return;
+    }
+    const handIndices = combos
+      .map((combo) => handIndexForCombo(node.combos, combo))
+      .filter((index) => index >= 0);
+    const unique = [...new Set(handIndices)].sort((a, b) => a - b);
+    const actions = node.actions?.length ?? 0;
+    const probs = seedProbsFromStrategy(node.strategy ?? null, unique, actions);
+    const draft: LockDraft = { kind: "selected", handIndices: unique, probs };
+    set({
+      lockDraft: draft,
+      lockDraftBaseline: structuredClone(draft),
+      lockDrawerOpen: true,
+    });
+    void get().refreshLocks();
+  },
+  seedLockFromStrategy() {
+    const node = get().currentNode;
+    const actions = node?.actions?.length ?? 0;
+    const probs = seedProbsFromStrategy(
+      node?.strategy ?? null,
+      get().lockDraft.handIndices,
+      actions,
+    );
+    set({ lockDraft: { ...get().lockDraft, probs } });
+  },
+  revertLockDraft() {
+    const baseline = get().lockDraftBaseline;
+    if (!baseline) {
+      return;
+    }
+    set({ lockDraft: structuredClone(baseline) });
+  },
+  async refreshLocks() {
+    const solutionId = get().solutionId;
+    if (!solutionId) {
+      set({ locks: [] });
+      return;
+    }
+    try {
+      const payload = (await engineClient.listLocks(solutionId)) as LocksPayload;
+      set({ locks: payload.locks || [] });
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Failed to list locks",
+      });
+    }
+  },
+  isHandLockedAtCurrentNode(handIndex) {
+    const node = get().currentNode;
+    if (!node) {
+      return false;
+    }
+    return isHandLocked(lockForNode(get().locks, node.node_id), handIndex);
+  },
+  async applyLock() {
+    const solutionId = get().solutionId;
+    const node = get().currentNode;
+    if (!solutionId || !node || node.kind !== "decision") {
+      set({ message: "Locks require a published decision node." });
+      return;
+    }
+    const draft = get().lockDraft;
+    if (draft.kind === "selected" && draft.handIndices.length === 0) {
+      set({ message: "Select at least one combo, or switch to full-node lock." });
+      return;
+    }
+    const normalized = normalizeProbs(draft.probs);
+    if (!normalized.valid) {
+      set({
+        message: normalized.reason || "Lock probabilities are invalid.",
+      });
+      return;
+    }
+    try {
+      const body =
+        draft.kind === "full"
+          ? {
+              node_id: node.node_id,
+              kind: "full" as const,
+              probs: normalized.probs,
+            }
+          : {
+              node_id: node.node_id,
+              kind: "selected" as const,
+              hand_indices: draft.handIndices,
+              probs: normalized.probs,
+            };
+      const payload = (await engineClient.putLock(solutionId, body)) as LocksPayload;
+      set({
+        locks: payload.locks || [],
+        lockDraft: { ...draft, probs: normalized.probs },
+        lockDraftBaseline: structuredClone({ ...draft, probs: normalized.probs }),
+        message:
+          draft.kind === "full"
+            ? `Full-node lock applied at ${node.node_id}`
+            : `Locked ${draft.handIndices.length} combo(s) at ${node.node_id}`,
+      });
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Lock failed",
+      });
+    }
+  },
+  async unlockHands(handIndices) {
+    const solutionId = get().solutionId;
+    const node = get().currentNode;
+    if (!solutionId || !node) {
+      return;
+    }
+    const targets = handIndices ?? get().lockDraft.handIndices;
+    if (!targets.length) {
+      set({ message: "No combo selected to unlock." });
+      return;
+    }
+    try {
+      for (const handIndex of targets) {
+        await engineClient.deleteLock(solutionId, node.node_id, handIndex);
+      }
+      await get().refreshLocks();
+      set({ message: `Unlocked ${targets.length} combo(s) at ${node.node_id}` });
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Unlock failed",
+      });
+    }
+  },
+  async unlockNode() {
+    const solutionId = get().solutionId;
+    const node = get().currentNode;
+    if (!solutionId || !node) {
+      return;
+    }
+    try {
+      await engineClient.deleteLock(solutionId, node.node_id);
+      await get().refreshLocks();
+      set({ message: `Cleared locks at ${node.node_id}` });
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Unlock node failed",
+      });
+    }
+  },
+  async clearAllLocks() {
+    const solutionId = get().solutionId;
+    if (!solutionId) {
+      return;
+    }
+    try {
+      await engineClient.deleteLock(solutionId);
+      await get().refreshLocks();
+      set({ message: "Cleared all locks on this solution." });
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Clear locks failed",
+      });
+    }
   },
 
   theme: useThemeStore.getState().theme,
@@ -559,7 +903,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         solutionId: node.solution_id ?? solutionId,
         frequencyMode: "aggression",
         actionFilter: null,
+        lockDraft: defaultLockDraft(node.actions?.length ?? 0),
+        lockDraftBaseline: defaultLockDraft(node.actions?.length ?? 0),
       });
+      void get().refreshLocks();
     } catch (error) {
       if (token !== nodeToken) {
         return;
@@ -717,20 +1064,171 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
   },
 
-  async loadCompare() {
+  async loadCompare(nodeId) {
     const baseline = get().baselineSolutionId;
     const scenario = get().solutionId;
-    const nodeId = get().currentNode?.node_id;
-    if (!baseline || !scenario || !nodeId) {
-      set({ message: "Compare needs a baseline, scenario, and node." });
+    const targetNode = nodeId || get().currentNode?.node_id;
+    if (!baseline || !scenario || !targetNode) {
+      set({
+        message:
+          "Compare needs a baseline (after resolve-locked), the scenario solution, and a decision node.",
+      });
       return;
     }
     try {
-      const compareNote = await engineClient.compare(baseline, scenario, nodeId);
-      set({ compareNote, workspace: "compare", message: "Comparison loaded." });
+      const compareNote = (await engineClient.compare(
+        baseline,
+        scenario,
+        targetNode,
+      )) as ComparePayload;
+      set({
+        compareNote,
+        workspace: "compare",
+        message: `Compare ${baseline} → ${scenario}: EV Δ ${Number(compareNote.value_delta).toFixed(4)}`,
+      });
     } catch (error) {
       set({
         message: error instanceof EngineError ? error.message : "Compare failed",
+      });
+    }
+  },
+
+  libraryLists: {
+    recent: [],
+    templates: [],
+    ranges: [],
+    loading: false,
+  },
+
+  async loadRecent() {
+    set({
+      libraryLists: { ...get().libraryLists, loading: true },
+    });
+    try {
+      const data = await engineClient.recentSolutions();
+      set({
+        libraryLists: {
+          ...get().libraryLists,
+          recent: asRecentList(data),
+          loading: false,
+        },
+        connection: "connected",
+      });
+    } catch (error) {
+      set({
+        libraryLists: { ...get().libraryLists, recent: [], loading: false },
+        connection: "disconnected",
+        message:
+          error instanceof EngineError
+            ? error.message
+            : error instanceof Error
+              ? `Engine unreachable: ${error.message}`
+              : "Failed to load recent solutions",
+      });
+    }
+  },
+
+  async loadTemplates() {
+    set({
+      libraryLists: { ...get().libraryLists, loading: true },
+    });
+    try {
+      const data = await engineClient.templates();
+      set({
+        libraryLists: {
+          ...get().libraryLists,
+          templates: asNamedList(data),
+          loading: false,
+        },
+        connection: "connected",
+      });
+    } catch (error) {
+      set({
+        libraryLists: { ...get().libraryLists, templates: [], loading: false },
+        connection: "disconnected",
+        message:
+          error instanceof EngineError
+            ? error.message
+            : error instanceof Error
+              ? `Engine unreachable: ${error.message}`
+              : "Failed to load templates",
+      });
+    }
+  },
+
+  async loadRanges() {
+    set({
+      libraryLists: { ...get().libraryLists, loading: true },
+    });
+    try {
+      const data = await engineClient.ranges();
+      set({
+        libraryLists: {
+          ...get().libraryLists,
+          ranges: asNamedList(data),
+          loading: false,
+        },
+        connection: "connected",
+      });
+    } catch (error) {
+      set({
+        libraryLists: { ...get().libraryLists, ranges: [], loading: false },
+        connection: "disconnected",
+        message:
+          error instanceof EngineError
+            ? error.message
+            : error instanceof Error
+              ? `Engine unreachable: ${error.message}`
+              : "Failed to load range presets",
+      });
+    }
+  },
+
+  async applyTemplate(id) {
+    const trimmed = id.trim();
+    if (!trimmed) {
+      set({ message: "Choose a template first." });
+      return;
+    }
+    set({ message: `Loading template ${trimmed}…` });
+    try {
+      const template = await engineClient.template(trimmed);
+      const parsed = await engineClient.parseConfig(template.text);
+      const partial = draftFromParsedConfig(parsed);
+      get().updateDraft(partial);
+      const oop = typeof parsed.oop_range === "string" ? parsed.oop_range : "";
+      const ip = typeof parsed.ip_range === "string" ? parsed.ip_range : "";
+      get().setRangeText("oop", oop);
+      get().setRangeText("ip", ip);
+      const kind = typeof parsed.kind === "string" ? parsed.kind : "configuration";
+      set({
+        message: `Loaded template ${trimmed} (${kind}) into Build draft.`,
+        workspace: "build",
+      });
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Template failed",
+      });
+    }
+  },
+
+  async applyRangePreset(id, player) {
+    const trimmed = id.trim();
+    if (!trimmed) {
+      set({ message: "Choose a range preset first." });
+      return;
+    }
+    set({ message: `Loading range ${trimmed}…` });
+    try {
+      const preset = await engineClient.rangePreset(trimmed);
+      const text = typeof preset.text === "string" ? preset.text.trim() : "";
+      get().setRangeText(player, text);
+      set({
+        message: `Loaded range ${trimmed} into ${player.toUpperCase()}.`,
+      });
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Range preset failed",
       });
     }
   },

@@ -1,6 +1,8 @@
 import { LowerDock } from "../analysis/LowerDock";
+import { LockDrawer } from "../locks/LockDrawer";
 import { ActionSummary } from "../matrix/ActionSummary";
 import { ComboInspector } from "../matrix/ComboInspector";
+import { OpponentRangePanel } from "../matrix/OpponentRangePanel";
 import { RangeMatrix } from "../matrix/RangeMatrix";
 import { NodeNavigator } from "../tree/NodeNavigator";
 import { useStudyStore } from "../../state/studyStore";
@@ -11,7 +13,9 @@ import { SolveControls } from "./SolveControls";
 export function StudyWorkspace() {
   const leftNav = useStudyStore((s) => s.layout.leftNav);
   const lowerDock = useStudyStore((s) => s.layout.lowerDock);
+  const dualRange = useStudyStore((s) => s.layout.dualRange);
   const inspectorWidth = useStudyStore((s) => s.layout.inspectorWidth);
+  const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
 
   return (
     <div className="study-workspace">
@@ -31,13 +35,21 @@ export function StudyWorkspace() {
         style={{ ["--inspector-w" as string]: `${inspectorWidth}px` }}
       >
         {leftNav ? <NodeNavigator /> : null}
-        <section className="matrix-pane" aria-label="Strategy matrix">
+        <section
+          className="matrix-pane"
+          data-dual={dualRange ? "true" : "false"}
+          aria-label="Strategy matrix"
+        >
           <ActionSummary />
-          <RangeMatrix />
+          <div className={dualRange ? "matrix-dual" : undefined}>
+            <RangeMatrix />
+            {dualRange ? <OpponentRangePanel /> : null}
+          </div>
         </section>
         <ComboInspector />
       </div>
       {lowerDock ? <LowerDock /> : null}
+      {lockDrawerOpen ? <LockDrawer /> : null}
     </div>
   );
 }

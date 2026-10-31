@@ -1,17 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { BuildWorkspace } from "../build/BuildWorkspace";
+import { CompareWorkspace } from "../compare/CompareWorkspace";
+import { LibraryWorkspace } from "../library/LibraryWorkspace";
 import { StudyWorkspace } from "../study/StudyWorkspace";
 import { HelpOverlay, MenuBar } from "./MenuBar";
 import { StatusBar } from "./StatusBar";
-
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div className="placeholder-workspace">
-      {title} workspace — coming soon
-    </div>
-  );
-}
 
 export function AppShell() {
   const workspace = useStudyStore((s) => s.workspace);
@@ -43,9 +37,9 @@ export function AppShell() {
   } else if (workspace === "build") {
     body = <BuildWorkspace />;
   } else if (workspace === "compare") {
-    body = <Placeholder title="Compare" />;
+    body = <CompareWorkspace />;
   } else {
-    body = <Placeholder title="Library" />;
+    body = <LibraryWorkspace />;
   }
 
   return (

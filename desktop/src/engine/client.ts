@@ -254,6 +254,15 @@ export class EngineClient {
     return data;
   }
 
+  async listLocks(solutionId: string): Promise<unknown> {
+    const { response, data } = await this.request(
+      "GET",
+      `/api/solutions/${solutionId}/locks`,
+    );
+    this.ensureOk(response, data);
+    return data;
+  }
+
   async putLock(
     solutionId: string,
     body: {

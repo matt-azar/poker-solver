@@ -11,7 +11,7 @@ interface Props {
   onHelpOpen: (open: boolean) => void;
 }
 
-type MenuId = "file" | "solve" | "view" | "help" | null;
+type MenuId = "file" | "solve" | "tree" | "view" | "help" | null;
 
 export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props) {
   const [openMenu, setOpenMenu] = useState<MenuId>(null);
@@ -33,6 +33,10 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
   const undoRange = useStudyStore((s) => s.undoRange);
   const redoRange = useStudyStore((s) => s.redoRange);
   const phase = useStudyStore((s) => s.phase);
+  const setLockDrawerOpen = useStudyStore((s) => s.setLockDrawerOpen);
+  const resolveLocked = useStudyStore((s) => s.resolveLocked);
+  const loadCompare = useStudyStore((s) => s.loadCompare);
+  const baselineSolutionId = useStudyStore((s) => s.baselineSolutionId);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -96,6 +100,37 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
             { label: "Stop", shortcut: "X", onClick: () => void stop(), disabled: !busy },
             { sep: true },
             { label: "Calculate EV", onClick: () => void calculateEv() },
+            { sep: true },
+            {
+              label: "Resolve locked",
+              onClick: () => void resolveLocked(),
+            },
+            {
+              label: "Compare to baseline",
+              onClick: () => void loadCompare(),
+              disabled: !baselineSolutionId,
+            },
+          ]}
+        />
+        <Menu
+          id="tree"
+          label="Tree"
+          open={openMenu}
+          setOpen={setOpenMenu}
+          items={[
+            {
+              label: "Open lock editor",
+              onClick: () => setLockDrawerOpen(true),
+            },
+            {
+              label: "Resolve locked",
+              onClick: () => void resolveLocked(),
+            },
+            {
+              label: "Compare to baseline",
+              onClick: () => void loadCompare(),
+              disabled: !baselineSolutionId,
+            },
           ]}
         />
         <Menu
@@ -126,6 +161,10 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
             {
               label: layout.lowerDock ? "Hide lower dock" : "Show lower dock",
               onClick: () => setLayout({ lowerDock: !layout.lowerDock }),
+            },
+            {
+              label: layout.dualRange ? "Single matrix" : "Dual range layout",
+              onClick: () => setLayout({ dualRange: !layout.dualRange }),
             },
             { label: "Reset layout", onClick: () => resetLayout() },
           ]}

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { mapActionColors } from "../../domain/actionColors";
 import { groupEv, groupHands } from "../../domain/browse";
+import { handIndexForCombo, isHandLocked, lockForNode } from "../../domain/locks";
 import { useStudyStore } from "../../state/studyStore";
 
 export function ComboInspector() {
@@ -10,6 +11,12 @@ export function ComboInspector() {
   const hoverCell = useStudyStore((s) => s.hoverCell);
   const calculateEv = useStudyStore((s) => s.calculateEv);
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
+  const selectCombosForLock = useStudyStore((s) => s.selectCombosForLock);
+  const setLockDrawerOpen = useStudyStore((s) => s.setLockDrawerOpen);
+  const toggleLockHand = useStudyStore((s) => s.toggleLockHand);
+  const unlockHands = useStudyStore((s) => s.unlockHands);
+  const lockDraft = useStudyStore((s) => s.lockDraft);
+  const locks = useStudyStore((s) => s.locks);
 
   const focus = selectedCell ?? hoverCell;
   const cell = useMemo(() => {
@@ -22,6 +29,11 @@ export function ComboInspector() {
   const colors = useMemo(
     () => mapActionColors(currentNode?.actions ?? []),
     [currentNode?.actions],
+  );
+
+  const nodeLock = useMemo(
+    () => (currentNode ? lockForNode(locks, currentNode.node_id) : null),
+    [locks, currentNode],
   );
 
   const ev = cell && currentNode ? groupEv(currentNode, nodeValues, cell) : null;
@@ -91,38 +103,99 @@ export function ComboInspector() {
             })}
           </div>
           <div className="inspector-combos">
-            {cell.hands.map((hand) => (
-              <div key={hand.combo} className="inspector-combo">
-                <code>{hand.combo}</code>
-                <div className="inspector-combo__mix">
-                  {hand.actions.map((action) => (
-                    <span key={action.action} title={action.action}>
-                      <i
-                        style={{
-                          background: colors.byLabel[action.action] || "#666",
-                          width: `${Math.max(2, action.probability * 100)}%`,
-                        }}
-                      />
-                    </span>
-                  ))}
+            {cell.hands.map((hand) => {
+              const handIndex = handIndexForCombo(currentNode.combos, hand.combo);
+              const locked = handIndex >= 0 ? isHandLocked(nodeLock, handIndex) : false;
+              const inDraft =
+                handIndex >= 0 && lockDraft.handIndices.includes(handIndex);
+              return (
+                <div
+                  key={hand.combo}
+                  className="inspector-combo"
+                  data-locked={locked ? "true" : "false"}
+                  data-lock-draft={inDraft ? "true" : "false"}
+                >
+                  <input
+                    type="checkbox"
+                    checked={inDraft}
+                    disabled={handIndex < 0}
+                    onChange={() => {
+                      if (handIndex >= 0) {
+                        toggleLockHand(handIndex);
+                      }
+                    }}
+                    aria-label={`Select ${hand.combo} for lock`}
+                    title="Include in lock draft"
+                  />
+                  <code>{hand.combo}</code>
+                  <div className="inspector-combo__mix">
+                    {hand.actions.map((action) => (
+                      <span key={action.action} title={action.action}>
+                        <i
+                          style={{
+                            background: colors.byLabel[action.action] || "#666",
+                            width: `${Math.max(2, action.probability * 100)}%`,
+                          }}
+                        />
+                      </span>
+                    ))}
+                  </div>
+                  <span className="tabular muted">
+                    {locked ? "L · " : ""}
+                    {hand.actions
+                      .map((action) => `${(action.probability * 100).toFixed(0)}`)
+                      .join("/")}
+                  </span>
+                  {handIndex >= 0 ? (
+                    locked ? (
+                      <button
+                        type="button"
+                        className="toolbar-btn inspector-lock-btn"
+                        onClick={() => void unlockHands([handIndex])}
+                      >
+                        Unlock
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="toolbar-btn inspector-lock-btn"
+                        onClick={() => selectCombosForLock([hand.combo])}
+                      >
+                        Lock
+                      </button>
+                    )
+                  ) : null}
                 </div>
-                <span className="tabular muted">
-                  {hand.actions
-                    .map((action) => `${(action.probability * 100).toFixed(0)}`)
-                    .join("/")}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
-          {pinned ? (
+          <div className="inspector-lock-actions">
+            <button
+              type="button"
+              className="toolbar-btn primary"
+              onClick={() =>
+                selectCombosForLock(cell.hands.map((hand) => hand.combo))
+              }
+            >
+              Lock selection
+            </button>
             <button
               type="button"
               className="toolbar-btn"
-              onClick={() => setSelectedCell(null)}
+              onClick={() => setLockDrawerOpen(true)}
             >
-              Clear selection
+              Lock editor
             </button>
-          ) : null}
+            {pinned ? (
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={() => setSelectedCell(null)}
+              >
+                Clear selection
+              </button>
+            ) : null}
+          </div>
         </>
       )}
     </aside>

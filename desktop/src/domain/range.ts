@@ -80,13 +80,25 @@ export function createRangeHistory(limit = RANGE_HISTORY_LIMIT) {
   };
 }
 
+/** Accept `0.5`, `50%`, or `50` when clearly percent-styled with `%`. */
+export function parseSizeToken(token: string): number | null {
+  const raw = token.trim();
+  if (!raw) {
+    return null;
+  }
+  if (raw.endsWith("%")) {
+    const pct = Number(raw.slice(0, -1).trim());
+    return Number.isFinite(pct) ? pct / 100 : null;
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
 export function parseSizeList(text: string): number[] {
   return text
     .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map(Number)
-    .filter((value) => !Number.isNaN(value));
+    .map((part) => parseSizeToken(part))
+    .filter((value): value is number => value !== null);
 }
 
 export function boardCards(text: string): string[] {
