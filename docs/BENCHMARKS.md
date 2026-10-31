@@ -315,3 +315,20 @@ After `a04eb8c`, a short instrumented `street_parallel_bench` profile on the pai
 | flop_paired | 1 | ~15.5–16.7 (n=2) | ~10.2–10.5 (n=2) | ~1.55x |
 
 Instrumented 3-iter flop profile at 1 thread: `expand_seconds` 0.579 → 0.125; train 1.838 → 1.335. Allocated bytes rise slightly from the support/slot scratch (flop 4 threads 176,624,560 → 176,644,816). Parity pins at iteration 30: 1-vs-4 thread regret and strategy-sum relative delta 0 on both trees. `poker_solver_tests` 440,795 assertions, 0 failures.
+
+## Precomputed board-support masks (M6)
+
+After the expand cache (`#46` / `5762d5c`), a short instrumented profile on the paired flop (3 warm CFR+ iters) showed showdown still large, with `support_seconds` and serial chance still recomputing `hand_supported` on every board visit and again inside `card_reaches_pair`. Structural support depends only on ranges and the public board, so it can be filled once per walkable `(turn, river)` (including turn-only partial boards).
+
+`cursor/engine-speed-2-e394` reserves those boards at construction, fills the masks on first train (charged to `cache_init_seconds`), and makes `ensure_board_support` a copy from the cache. `card_reaches_pair` reads the same masks. Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Short microbench only.
+
+### Reset-30 warm-cache vs main tip (`4ea6224` / `#46`)
+
+`street_parallel_bench sample`, alternating before/after binaries, no walk profile:
+
+| Case | Threads | Before median train (s) | After median train (s) | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| flop_paired | 4 | 2.301 | 2.116 | **1.09x** |
+| turn_half_pot | 4 | 1.176 | 1.093 | 1.08x |
+
+Instrumented 3-iter profile: flop `support_seconds` 0.050 → 0.018 at 1 thread; turn 0.010 → 0.0006. Allocated bytes rise with the mask table (flop 4 threads 176,644,816 → 177,166,000). Parity pins at iteration 30: 1-vs-4 and after-vs-main relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,547 assertions, 0 failures.

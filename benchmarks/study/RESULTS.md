@@ -72,6 +72,10 @@ Short Linux Release timings only (not a completed study to 0.001). Warm one froz
 
 On top of the freeze tip, caching structural support and acting-player slot bases cut paired-flop reset-30 train at four threads from median 3.452 s to 2.374 s (~1.45x). Profiled expand was the post-freeze hotspot. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
 
+## Board-support mask precompute microbench (`cursor/engine-speed-2-e394`)
+
+On top of `#46`, precomputing structural `hand_supported` masks for every walkable `(turn, river)` cut paired-flop reset-30 train at four threads from median 2.301 s to 2.116 s (~1.09x); turn_half_pot 1.176 s to 1.093 s (~1.08x). Profiled `support_seconds` collapsed; showdown remains the largest remaining bucket. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
+
 ## Next measurement
 
-Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target.
+Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target. Showdown remains the next profile hotspot after support.
