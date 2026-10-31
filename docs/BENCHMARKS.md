@@ -348,4 +348,4 @@ After board-support masks (`#51` / `eaeffaf`), a short instrumented profile on t
 | flop_paired | 4 | 2.283 | 1.605 | **1.42x** |
 | turn_half_pot | 4 | 1.163 | 0.803 | **1.45x** |
 
-Instrumented 3-iter profile at 1 thread: flop `showdown_seconds` 0.458 → 0.229, train 1.119 → 0.891; turn showdown 0.202 → 0.075, train 0.400 → 0.254. Allocated bytes rise with twin indexes, ordered-amount scratch, and per-board index lists (flop 4 threads 177,166,040 → 177,667,784). Parity pins at iteration 30: 1-vs-4 and after-vs-`#51` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,547 assertions, 0 failures.
+Instrumented 3-iter profile at 1 thread: flop `showdown_seconds` 0.458 → 0.229, train 1.119 → 0.891; turn showdown 0.202 → 0.075, train 0.400 → 0.254. Allocated bytes rise with twin indexes, ordered-amount scratch, and per-board index lists (flop 4 threads 177,166,040 → 177,667,784). Parity pins at iteration 30: 1-vs-4 and after-vs-`#51` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,590 assertions, 0 failures.
