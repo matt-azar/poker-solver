@@ -6,16 +6,21 @@
 #include "poker/card.hpp"
 #include "poker/equity.hpp"
 #include "poker/range.hpp"
+#include "solver/node_lock.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
 #include "solver/trainer.hpp"
 
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace
 {
@@ -228,6 +233,133 @@ std::string chance_after_checks(StreetBatchSolver& solver)
     return node;
 }
 
+std::uint64_t fnv1a64_bytes(std::string_view bytes)
+{
+    std::uint64_t hash = 14695981039346656037ull;
+    for (unsigned char byte : bytes)
+    {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+std::uint32_t crc32_bytes(std::string_view bytes)
+{
+    std::uint32_t crc = 0xffffffffu;
+    for (unsigned char byte : bytes)
+    {
+        crc ^= byte;
+        for (int shift = 0; shift < 8; ++shift)
+        {
+            const bool low_bit = (crc & 1u) != 0;
+            crc >>= 1;
+            if (low_bit)
+            {
+                crc ^= 0xedb88320u;
+            }
+        }
+    }
+    return ~crc;
+}
+
+void write_u32_le(std::string& bytes, std::size_t at, std::uint32_t value)
+{
+    bytes[at] = static_cast<char>(value & 0xffu);
+    bytes[at + 1] = static_cast<char>((value >> 8) & 0xffu);
+    bytes[at + 2] = static_cast<char>((value >> 16) & 0xffu);
+    bytes[at + 3] = static_cast<char>((value >> 24) & 0xffu);
+}
+
+void write_u64_le(std::string& bytes, std::size_t at, std::uint64_t value)
+{
+    for (int index = 0; index < 8; ++index)
+    {
+        bytes[at + static_cast<std::size_t>(index)] =
+            static_cast<char>((value >> (8 * index)) & 0xffu);
+    }
+}
+
+void test_checkpoint_locks_round_trip()
+{
+    const poker::streets::StreetConfig config = turn_config();
+    StreetBatchSolver solver(config);
+    solver.continue_iterations(2, Algorithm::CfrPlus);
+
+    poker::solver::LockSet locks;
+    poker::solver::NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = poker::solver::LockKind::SelectedCombos;
+    lock.combo_indices = {0};
+    const double probs[] = {0.0, 1.0};
+    lock.actions = poker::solver::make_action_lock_row(probs, 2);
+    locks.upsert(lock);
+
+    CheckpointDocument document;
+    document.kind = 1;
+    document.algorithm = 1;
+    document.samples = 1;
+    document.config_text = poker::streets::format_street_config(config);
+    document.tables = solver.training_tables();
+    document.locks_text = poker::solver::format_lock_set(locks);
+    CHECK(!document.locks_text.empty());
+
+    const std::filesystem::path path = test_file("poker-solver-locks.psol");
+    poker::explorer::write_checkpoint(path.string(), document);
+    const CheckpointDocument loaded =
+        poker::explorer::read_checkpoint(path.string(), 64ull * 1024ull * 1024ull);
+    CHECK(loaded.locks_text == document.locks_text);
+    const poker::solver::LockSet back = poker::solver::parse_lock_set(loaded.locks_text);
+    CHECK(back.size() == 1);
+    const poker::solver::NodeLock* found = back.find(0);
+    CHECK(found != nullptr);
+    CHECK(found->kind == poker::solver::LockKind::SelectedCombos);
+    CHECK(found->combo_indices.size() == 1);
+    CHECK(found->combo_indices[0] == 0);
+    CHECK(found->actions.probs.size() == 2);
+    CHECK_NEAR(found->actions.probs[0], 0.0, 1e-15);
+    CHECK_NEAR(found->actions.probs[1], 1.0, 1e-15);
+    std::filesystem::remove(path);
+}
+
+void test_checkpoint_v1_loads_empty_locks()
+{
+    const poker::streets::StreetConfig config = turn_config();
+    StreetBatchSolver solver(config);
+    solver.continue_iterations(1, Algorithm::CfrPlus);
+    CheckpointDocument document;
+    document.kind = 1;
+    document.algorithm = 1;
+    document.samples = 1;
+    document.config_text = poker::streets::format_street_config(config);
+    document.tables = solver.training_tables();
+    // Empty locks_text still writes a trailing u32(0) in v2; strip it for a v1 file.
+    const std::filesystem::path path = test_file("poker-solver-v1.psol");
+    poker::explorer::write_checkpoint(path.string(), document);
+    {
+        std::ifstream input(path, std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+        CHECK(bytes.size() > 32);
+        CHECK(bytes.compare(0, 4, "PSOL") == 0);
+        // Drop the final empty locks string (4 zero length bytes) from the payload.
+        CHECK(bytes.size() >= 36);
+        bytes.resize(bytes.size() - 4);
+        const std::uint64_t payload_size = bytes.size() - 32;
+        write_u32_le(bytes, 4, 1); // version 1
+        write_u64_le(bytes, 8, payload_size);
+        const std::string_view payload(bytes.data() + 32, static_cast<std::size_t>(payload_size));
+        write_u64_le(bytes, 16, fnv1a64_bytes(payload));
+        write_u32_le(bytes, 24, crc32_bytes(payload));
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    const CheckpointDocument loaded =
+        poker::explorer::read_checkpoint(path.string(), 64ull * 1024ull * 1024ull);
+    CHECK(loaded.locks_text.empty());
+    CHECK(same_tables(loaded.tables, document.tables));
+    std::filesystem::remove(path);
+}
+
 void test_runout_and_equity()
 {
     StreetBatchSolver solver(turn_config());
@@ -282,5 +414,7 @@ void run_checkpoint_tests()
     test_resume_matches_uninterrupted_street();
     test_resume_matches_uninterrupted_river();
     test_checkpoint_rejects_bad_files();
+    test_checkpoint_locks_round_trip();
+    test_checkpoint_v1_loads_empty_locks();
     test_runout_and_equity();
 }

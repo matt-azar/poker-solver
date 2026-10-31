@@ -6,24 +6,25 @@ Raw logs stay in `benchmarks/study/out/` and are gitignored. This file is the co
 
 ## Machine (Linux cloud agent, 2026-10-30 America/New_York)
 
-x86_64, 4 logical processors, 16,780,574,720 bytes of RAM (~5 GiB available before the quiet reference run). Linux 6.12.94+, glibc 2.39. g++ 13.3.0, CMake Unix Makefiles, Release. Source commit `abe999f` on `main` (solver binaries unchanged by the GUI time-limit follow-up). Timing label: quiet for reference cases; contended for smoke.
+x86_64, 4 logical processors, 16,780,574,720 bytes of RAM. Linux 6.12.94+, glibc 2.39. g++ 13.3.0, CMake Unix Makefiles, Release. Timing label: quiet for reference cases; contended for smoke.
 
 Smoke taxonomy on this host: `success`, `invalid-input`, `timeout`, `resource-rejection`. The timeout diagnostic needed a 4096 MiB engine budget; 2048 MiB now rejects the full-range flop during frozen allocation (~2.12 GiB estimated).
 
 ## Main at `abe999f` (Linux)
 
-| Case | Outcome | Iterations | Player 0 EV | NashConv | NashConv/pot | Wall | Train | Eval |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `river_competing_weights` | success | 340 of 2000 | −21.1586 | 0.095607 | 0.000956 | 1.11 s | unavailable | unavailable |
-| `turn_srp_river_betting` | target not reached | 400 of 400 | −8.09892 | 0.260636 | 0.002606 | 35.09 s | 33.04 s | 1.99 s |
-| `turn_srp_river_betting_to_target` | success | 720 of 8000 | −8.08496 | 0.099581 | 0.000996 | 62.65 s | 59.03 s | 3.56 s |
-| `flop_srp_one_size` | timeout (600 s wall) | 20 of 400 | −11.1099 | 35.2859 | 0.352859 | 600.2 s killed | 297.7 s | 15.85 s |
+| Case | Outcome | Iterations | Player 0 EV | NashConv | NashConv/pot | Wall | Train | Eval | Threads |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `river_competing_weights` | success | 340 of 2000 | −21.1586 | 0.095607 | 0.000956 | 1.11 s | unavailable | unavailable | n/a |
+| `turn_srp_river_betting` | target not reached | 400 of 400 | −8.09892 | 0.260636 | 0.002606 | 35.09 s | 33.04 s | 1.99 s | 1 |
+| `turn_srp_river_betting_to_target` | success | 720 of 8000 | −8.08496 | 0.099581 | 0.000996 | 62.65 s | 59.03 s | 3.56 s | 1 |
+| `flop_srp_one_size` (early probe) | timeout (600 s wall) | 20 of 400 | −11.1099 | 35.2859 | 0.352859 | 600.2 s killed | 297.7 s | 15.85 s | 1 |
+| `flop_srp_one_size` | target not reached | 400 of 400 | −7.96769 | 0.418203 | 0.004182 | 2254.7 s | 1935.6 s | 314.8 s | 4 |
 
 Turn quality at 400 and 720 iterations matches the earlier Windows record (`0.260636` / `0.000996`). Training is still almost the entire clock. On this quieter Linux host the 400-iteration turn is ~35 s wall versus 62–244 s across the older Windows sessions, so those earlier spreads were machine noise, not an engine regression.
 
 Turn allocated ~48.5 MiB (peak equal to allocated); construction and cache init stay under 0.03 s. The river CLI still does not print construction / train / eval / process working set.
 
-The flop admitted under a 4096 MiB engine budget (~4.27 GiB allocated, ~42.8 M infosets, 8104 deals). At the first accuracy checkpoint (iteration 20) NashConv/pot was still 0.35. Roughly 15 s of training per iteration on one thread. Completing 400 iterations on this host would need on the order of 100 minutes of training alone; the case wall stays 2400 s. Leave `flop_srp_one_size` unchanged. A killed flop now keeps the last flushed checkpoint.
+The completed flop used ~9.5 GiB free at start, a 4096 MiB engine budget (~4.27 GiB allocated, 42,830,564 infosets, 8104 deals), and 4 frozen threads. Wall was overridden to 7200 s for this finish run (case default remains 2400 s). Training ~4.8 s/iter at 4 threads versus ~15 s/iter at 1 thread on the early probe. At the 400-iteration cap NashConv/pot is 0.004182 — above the 0.001 target. An extended to-target chase was started and then stopped: at ~4.8 s/iter, reaching 0.001 would be multi-hour wall on this host and is not a routine measurement.
 
 ## Baseline at `95242db`
 
@@ -65,4 +66,4 @@ A 2-second kill of `turn_srp_river_betting` on the `381c9a5` binary flushed `pha
 
 ## Next measurement
 
-On a quiet machine with more than ~6 GiB free, finish `flop_srp_one_size` to the 400-iteration cap or the 0.001 target under the case's 2400 s wall. Multi-thread the same flop once a one-thread completed report exists. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target.
+Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target.

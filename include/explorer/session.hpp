@@ -57,6 +57,8 @@ public:
         }
         retiring = std::move(resource_);
         resource_.reset();
+        baseline_resource_.reset();
+        baseline_solution_id_ = 0;
         solution_id_ = 0;
         pending_solution_ = 0;
         job_id_ = next_job_++;
@@ -65,6 +67,34 @@ public:
         pause_ = false;
         ++generation_;
         return job_id_;
+    }
+
+    // Keeps a prior revision queryable after a locked re-solve publishes a new id.
+    // Cleared when a new unbound solve begins or a quiet install replaces the session.
+    void set_baseline(std::shared_ptr<void> resource, std::uint64_t solution_id)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (!resource || solution_id == 0)
+        {
+            baseline_resource_.reset();
+            baseline_solution_id_ = 0;
+            return;
+        }
+        baseline_resource_ = std::move(resource);
+        baseline_solution_id_ = solution_id;
+    }
+
+    std::uint64_t baseline_solution() const
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        return baseline_solution_id_;
+    }
+
+    void clear_baseline()
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        baseline_resource_.reset();
+        baseline_solution_id_ = 0;
     }
 
     StopResult request_stop(std::uint64_t job_id)
@@ -325,6 +355,7 @@ public:
 
     // Replaces a quiet completed, paused, or idle solution. Refuses while training is running.
     // make(generation, solution_id) runs under the lock and must not call back in.
+    // Clears any retained baseline — Open / install starts a fresh single revision.
     template <typename Make>
     bool install_completed(std::shared_ptr<void> resource, std::uint64_t& solution_id, Make&& make)
     {
@@ -338,6 +369,8 @@ public:
         {
             return false;
         }
+        baseline_resource_.reset();
+        baseline_solution_id_ = 0;
         solution_id_ = next_solution_++;
         pending_solution_ = 0;
         resource_ = std::move(resource);
@@ -421,12 +454,22 @@ public:
     std::shared_ptr<void> borrow(std::uint64_t solution_id)
     {
         std::lock_guard<std::mutex> lock(mu_);
-        if (!queryable_locked() || solution_id == 0 || solution_id != solution_id_ || !resource_)
+        if (solution_id == 0)
         {
             return {};
         }
-        ++readers_;
-        return resource_;
+        if (queryable_locked() && solution_id == solution_id_ && resource_)
+        {
+            ++readers_;
+            return resource_;
+        }
+        // Baseline stays readable while the scenario solution is queryable.
+        if (queryable_locked() && solution_id == baseline_solution_id_ && baseline_resource_)
+        {
+            ++readers_;
+            return baseline_resource_;
+        }
+        return {};
     }
 
     void release_reader()
@@ -492,6 +535,8 @@ private:
     std::uint64_t generation_ = 0;
     int readers_ = 0;
     std::shared_ptr<void> resource_;
+    std::shared_ptr<void> baseline_resource_;
+    std::uint64_t baseline_solution_id_ = 0;
     std::string status_ =
         "{\"running\":false,\"paused\":false,\"cancelled\":false,\"error\":\"\",\"solution_id\":null,"
         "\"root_node_id\":null,\"job_id\":null,\"status_generation\":0}";

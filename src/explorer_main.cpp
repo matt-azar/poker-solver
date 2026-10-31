@@ -13,6 +13,7 @@
 #include "poker/card.hpp"
 #include "poker/hand_categories.hpp"
 #include "poker/range.hpp"
+#include "solver/node_lock.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
 
@@ -323,6 +324,8 @@ struct HeldSolution
 {
     std::uint64_t id = 0;
     std::uint64_t job_id = 0;
+    // Prior unlocked (or earlier locked) revision kept queryable after resolve-locked.
+    std::uint64_t baseline_solution_id = 0;
     std::shared_ptr<poker::solver::StreetBatchSolver> street;
     std::shared_ptr<poker::solver::RiverBatchSolver> river;
     std::string root_id;
@@ -339,6 +342,7 @@ struct HeldSolution
     std::vector<int> sample_iterations;
     std::vector<double> sample_values;
     std::vector<double> sample_gaps;
+    poker::solver::LockSet locks;
 };
 
 std::vector<double> optional_sizes(const std::string& text, const char* key)
@@ -557,6 +561,7 @@ struct StatusDraft
     const std::vector<double>* sample_gaps = nullptr;
     std::uint64_t job_id = 0;
     std::uint64_t solution_id = 0;
+    std::uint64_t baseline_solution_id = 0;
     std::uint64_t generation = 0;
     std::string root_id;
     const poker::solver::StreetMemoryReport* memory = nullptr;
@@ -690,6 +695,15 @@ std::string build_status(const StatusDraft& draft)
     else
     {
         append_escaped(out, draft.root_id);
+    }
+    out += ",\"baseline_solution_id\":";
+    if (draft.baseline_solution_id == 0)
+    {
+        out += "null";
+    }
+    else
+    {
+        append_escaped(out, "s" + std::to_string(draft.baseline_solution_id));
     }
     out += ",\"engine_allocated\":";
     out += memory == nullptr ? "null" : std::to_string(memory->allocated_bytes);
@@ -1008,6 +1022,128 @@ bool parse_prefixed_id(std::string_view text, char prefix, std::uint64_t& id)
     }
     const std::from_chars_result parsed = std::from_chars(first, last, id);
     return parsed.ec == std::errc() && parsed.ptr == last;
+}
+
+const poker::solver::LockSet* locks_arg(const HeldSolution& held)
+{
+    return held.locks.empty() ? nullptr : &held.locks;
+}
+
+// Public node index from explorer ids like p0.t-1.r-1 (infoset_id for street locks).
+bool parse_public_node_index(std::string_view text, std::size_t& infoset_id)
+{
+    if (text.empty() || text[0] != 'p')
+    {
+        return false;
+    }
+    const char* first = text.data() + 1;
+    const char* last = text.data() + text.size();
+    if (first >= last || *first == '+' || *first == '-')
+    {
+        return false;
+    }
+    unsigned long long value = 0;
+    const std::from_chars_result parsed = std::from_chars(first, last, value);
+    if (parsed.ec != std::errc() || parsed.ptr == first || parsed.ptr >= last || *parsed.ptr != '.')
+    {
+        return false;
+    }
+    infoset_id = static_cast<std::size_t>(value);
+    return true;
+}
+
+std::string node_id_for_infoset(std::size_t infoset_id)
+{
+    return "p" + std::to_string(infoset_id) + ".t-1.r-1";
+}
+
+std::string json_locks(const poker::solver::LockSet& locks)
+{
+    std::string out = "{\"locks\":[";
+    const std::vector<std::size_t> ids = locks.infoset_ids();
+    for (std::size_t i = 0; i < ids.size(); ++i)
+    {
+        const poker::solver::NodeLock* lock = locks.find(ids[i]);
+        if (lock == nullptr)
+        {
+            continue;
+        }
+        if (i > 0)
+        {
+            out += ',';
+        }
+        out += "{\"node_id\":";
+        append_escaped(out, node_id_for_infoset(lock->infoset_id));
+        out += ",\"infoset_id\":";
+        out += std::to_string(lock->infoset_id);
+        out += ",\"kind\":";
+        append_escaped(out, lock->kind == poker::solver::LockKind::FullNode ? "full" : "selected");
+        out += ",\"hand_indices\":[";
+        for (std::size_t h = 0; h < lock->combo_indices.size(); ++h)
+        {
+            if (h > 0)
+            {
+                out += ',';
+            }
+            out += std::to_string(lock->combo_indices[h]);
+        }
+        out += "],\"probs\":[";
+        for (std::size_t a = 0; a < lock->actions.probs.size(); ++a)
+        {
+            if (a > 0)
+            {
+                out += ',';
+            }
+            out += format_number(lock->actions.probs[a]);
+        }
+        out += "]}";
+    }
+    out += "]}";
+    return out;
+}
+
+std::shared_ptr<HeldSolution> clone_held_baseline(const HeldSolution& source)
+{
+    auto copy = std::make_shared<HeldSolution>();
+    copy->id = source.id;
+    copy->job_id = source.job_id;
+    copy->baseline_solution_id = 0;
+    copy->root_id = source.root_id;
+    copy->has_memory = source.has_memory;
+    copy->memory = source.memory;
+    copy->job = source.job;
+    copy->iterations = source.iterations;
+    copy->runtime_seconds = source.runtime_seconds;
+    copy->value = source.value;
+    copy->p1_best_response = source.p1_best_response;
+    copy->p2_best_response = source.p2_best_response;
+    copy->nash_gap = source.nash_gap;
+    copy->time_limit_reached = source.time_limit_reached;
+    copy->sample_iterations = source.sample_iterations;
+    copy->sample_values = source.sample_values;
+    copy->sample_gaps = source.sample_gaps;
+    copy->locks = source.locks;
+    if (source.street)
+    {
+        copy->street = std::make_shared<poker::solver::StreetBatchSolver>(source.street->config());
+        copy->street->install_training_tables(source.street->training_tables());
+        copy->street->prepare_inspection();
+        copy->root_id = copy->street->root_node_id();
+        copy->memory = copy->street->memory_report();
+        copy->has_memory = true;
+    }
+    else if (source.river)
+    {
+        copy->river = std::make_shared<poker::solver::RiverBatchSolver>(source.river->config());
+        copy->river->install_training_tables(source.river->training_tables());
+        copy->river->prepare_inspection();
+        copy->root_id = copy->river->root_node_id();
+    }
+    else
+    {
+        throw std::invalid_argument("solution has no solver");
+    }
+    return copy;
 }
 
 std::string json_inspection(
@@ -1675,13 +1811,14 @@ void solve_job(std::uint64_t job_id, Job job)
                 }
             }
             const int step = std::min(chunk, job.iterations - done);
+            // Fresh solves start with empty locks; continue_job / resolve-locked pass HeldSolution locks.
             if (job.frozen)
             {
-                street->continue_frozen_iterations(step, job.algorithm);
+                street->continue_frozen_iterations(step, job.algorithm, nullptr);
             }
             else
             {
-                street->continue_iterations(step, job.algorithm);
+                street->continue_iterations(step, job.algorithm, nullptr);
             }
             done += step;
             remember(street->expected_utility(), street->p1_best_response_utility(), street->p2_best_response_utility());
@@ -2070,15 +2207,16 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
                 break;
             }
             const int step = std::min(chunk, target - done);
+            const poker::solver::LockSet* const locks = locks_arg(*held);
             if (held->street)
             {
                 if (held->job.frozen)
                 {
-                    held->street->continue_frozen_iterations(step, held->job.algorithm);
+                    held->street->continue_frozen_iterations(step, held->job.algorithm, locks);
                 }
                 else
                 {
-                    held->street->continue_iterations(step, held->job.algorithm);
+                    held->street->continue_iterations(step, held->job.algorithm, locks);
                 }
                 value = held->street->expected_utility();
                 p1 = held->street->p1_best_response_utility();
@@ -2152,6 +2290,7 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
             held->has_memory ? &held->memory : nullptr);
         success.solution_id = held->id;
         success.root_id = held->root_id;
+        success.baseline_solution_id = held->baseline_solution_id;
         success.paused = pause_after;
         success.time_limit_reached = time_limit_reached;
         const bool published = g_session.commit_continuation(job_id, [&](std::uint64_t generation)
@@ -2180,7 +2319,211 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
         draft.error = error.what();
         draft.solution_id = held->id;
         draft.root_id = held->root_id;
+        draft.baseline_solution_id = held->baseline_solution_id;
         draft.time_limit_reached = held->time_limit_reached;
+        g_session.abort_continuation(job_id, build_status(draft));
+    }
+}
+
+// Warm-start policy for v1: reset training tables and re-solve from zero with locks.
+// Retains the prior revision as Session baseline so compare/export still work.
+void resolve_locked_job(
+    std::uint64_t job_id,
+    int iterations,
+    double accuracy,
+    int samples,
+    double time_limit)
+{
+    g_session.wait_until_quiet();
+    const std::shared_ptr<HeldSolution> held =
+        std::static_pointer_cast<HeldSolution>(g_session.training_resource(job_id));
+    if (!held || !held->street)
+    {
+        g_session.abort_continuation(
+            job_id,
+            "{\"running\":false,\"cancelled\":false,\"error\":\"resolve-locked requires a street solution\","
+            "\"solution_id\":null}");
+        return;
+    }
+    if (accuracy >= 0.0)
+    {
+        held->job.accuracy = accuracy;
+    }
+    if (samples >= 1)
+    {
+        held->job.samples = samples;
+    }
+    if (time_limit >= 0.0)
+    {
+        held->job.time_limit = time_limit;
+    }
+    held->time_limit_reached = false;
+    const std::uint64_t prior_id = held->id;
+    try
+    {
+        if (g_session.baseline_solution() == 0)
+        {
+            const std::shared_ptr<HeldSolution> baseline = clone_held_baseline(*held);
+            baseline->id = prior_id;
+            g_session.set_baseline(baseline, prior_id);
+        }
+        held->baseline_solution_id = g_session.baseline_solution();
+
+        const poker::streets::StreetConfig config = held->street->config();
+        held->street = std::make_shared<poker::solver::StreetBatchSolver>(config);
+        held->sample_iterations.clear();
+        held->sample_values.clear();
+        held->sample_gaps.clear();
+        held->iterations = 0;
+        held->runtime_seconds = 0.0;
+        held->value = 0.0;
+        held->p1_best_response = 0.0;
+        held->p2_best_response = 0.0;
+        held->nash_gap = 0.0;
+
+        const auto started = std::chrono::steady_clock::now();
+        int done = 0;
+        double value = 0.0;
+        double p1 = 0.0;
+        double p2 = 0.0;
+        double gap = 0.0;
+        bool time_limit_reached = false;
+        const int eval_samples = std::max(1, held->job.samples);
+        const int chunk = std::max(1, iterations / eval_samples);
+        const auto seconds_now = [&]()
+        {
+            return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        };
+        const auto wall_exhausted = [&]()
+        {
+            return held->job.time_limit >= 0.0 && seconds_now() >= held->job.time_limit;
+        };
+        const poker::solver::LockSet* const locks = locks_arg(*held);
+        while (done < iterations)
+        {
+            if (g_session.stop_requested(job_id) || g_session.pause_requested(job_id))
+            {
+                break;
+            }
+            const int step = std::min(chunk, iterations - done);
+            if (held->job.frozen)
+            {
+                held->street->continue_frozen_iterations(step, held->job.algorithm, locks);
+            }
+            else
+            {
+                held->street->continue_iterations(step, held->job.algorithm, locks);
+            }
+            done += step;
+            value = held->street->expected_utility();
+            p1 = held->street->p1_best_response_utility();
+            p2 = held->street->p2_best_response_utility();
+            gap = p1 + p2;
+            held->sample_iterations.push_back(done);
+            held->sample_values.push_back(value);
+            held->sample_gaps.push_back(gap);
+            StatusDraft progress = draft_for(
+                held->job, job_id, done, seconds_now(), true, value, p1, p2, gap,
+                held->sample_iterations, held->sample_values, held->sample_gaps,
+                nullptr);
+            progress.running = true;
+            progress.solution_id = held->id;
+            progress.root_id = held->root_id;
+            progress.baseline_solution_id = held->baseline_solution_id;
+            progress.time_limit_reached = time_limit_reached;
+            g_session.set_progress(job_id, build_status(progress));
+            if (held->job.accuracy >= 0.0 && gap <= held->job.accuracy * static_cast<double>(held->job.pot))
+            {
+                break;
+            }
+            if (wall_exhausted())
+            {
+                time_limit_reached = true;
+                break;
+            }
+        }
+        if (done == 0)
+        {
+            StatusDraft draft = draft_for(
+                held->job, job_id, 0, seconds_now(), false, 0.0, 0.0, 0.0, 0.0,
+                held->sample_iterations, held->sample_values, held->sample_gaps, nullptr);
+            draft.error = "resolve-locked produced no iterations";
+            draft.solution_id = prior_id;
+            draft.root_id = held->root_id;
+            draft.baseline_solution_id = held->baseline_solution_id;
+            g_session.abort_continuation(job_id, build_status(draft));
+            return;
+        }
+        held->street->prepare_inspection();
+        held->root_id = held->street->root_node_id();
+        held->memory = held->street->memory_report();
+        held->has_memory = true;
+        held->iterations = done;
+        held->runtime_seconds = seconds_now();
+        held->value = value;
+        held->p1_best_response = p1;
+        held->p2_best_response = p2;
+        held->nash_gap = gap;
+        held->time_limit_reached = time_limit_reached;
+        held->job_id = job_id;
+
+        const poker::explorer::Session::Permit permit = g_session.prepare_success(job_id);
+        if (!permit.allowed)
+        {
+            StatusDraft draft = draft_for(
+                held->job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
+                held->sample_iterations, held->sample_values, held->sample_gaps,
+                &held->memory);
+            draft.error = "resolve-locked was stopped before publish";
+            draft.solution_id = prior_id;
+            draft.root_id = held->root_id;
+            draft.baseline_solution_id = held->baseline_solution_id;
+            g_session.abort_continuation(job_id, build_status(draft));
+            return;
+        }
+        held->id = permit.solution_id;
+        StatusDraft success = draft_for(
+            held->job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
+            held->sample_iterations, held->sample_values, held->sample_gaps,
+            &held->memory);
+        success.solution_id = held->id;
+        success.root_id = held->root_id;
+        success.baseline_solution_id = held->baseline_solution_id;
+        success.time_limit_reached = time_limit_reached;
+        const bool published = g_session.commit_success(
+            job_id,
+            held,
+            permit.solution_id,
+            [&](std::uint64_t generation, bool accepted)
+            {
+                StatusDraft draft = success;
+                draft.generation = generation;
+                if (!accepted)
+                {
+                    draft.cancelled = true;
+                    draft.solution_id = 0;
+                    draft.root_id.clear();
+                }
+                return build_status(draft);
+            });
+        if (!published && g_session.phase() == poker::explorer::Phase::Running)
+        {
+            StatusDraft draft = success;
+            draft.error = "failed to publish the locked resolve";
+            g_session.abort_continuation(job_id, build_status(draft));
+        }
+    }
+    catch (const std::exception& error)
+    {
+        StatusDraft draft = draft_for(
+            held->job, job_id, held->iterations, held->runtime_seconds, true,
+            held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+            held->sample_iterations, held->sample_values, held->sample_gaps,
+            held->has_memory ? &held->memory : nullptr);
+        draft.error = error.what();
+        draft.solution_id = held->id;
+        draft.root_id = held->root_id;
+        draft.baseline_solution_id = held->baseline_solution_id;
         g_session.abort_continuation(job_id, build_status(draft));
     }
 }
@@ -2386,6 +2729,7 @@ poker::explorer::CheckpointDocument checkpoint_from_held(const HeldSolution& hel
     document.sample_iterations = held.sample_iterations;
     document.sample_values = held.sample_values;
     document.sample_gaps = held.sample_gaps;
+    document.locks_text = poker::solver::format_lock_set(held.locks);
     if (held.street)
     {
         document.kind = 1;
@@ -2417,6 +2761,10 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
     held->sample_iterations = document.sample_iterations;
     held->sample_values = document.sample_values;
     held->sample_gaps = document.sample_gaps;
+    if (!document.locks_text.empty())
+    {
+        held->locks = poker::solver::parse_lock_set(document.locks_text);
+    }
     if (document.kind == 1)
     {
         const poker::streets::StreetConfig config = poker::streets::parse_street_config(document.config_text);
@@ -2619,6 +2967,477 @@ void handle_client(socket_t client)
         append_escaped(payload, *text);
         payload += '}';
         send_response(client, 200, "application/json", payload);
+        return;
+    }
+    if (line.rfind("GET /api/compare", 0) == 0)
+    {
+        const auto query_value = [&](const char* key) -> std::string
+        {
+            const std::size_t q = line.find('?');
+            if (q == std::string::npos)
+            {
+                return {};
+            }
+            const std::size_t space = line.find(' ', q);
+            const std::string query = space == std::string::npos
+                ? line.substr(q + 1)
+                : line.substr(q + 1, space - q - 1);
+            const std::string needle = std::string(key) + "=";
+            std::size_t at = 0;
+            while (at < query.size())
+            {
+                const std::size_t amp = query.find('&', at);
+                const std::string part = amp == std::string::npos
+                    ? query.substr(at)
+                    : query.substr(at, amp - at);
+                if (part.rfind(needle, 0) == 0)
+                {
+                    return part.substr(needle.size());
+                }
+                if (amp == std::string::npos)
+                {
+                    break;
+                }
+                at = amp + 1;
+            }
+            return {};
+        };
+        std::uint64_t baseline_id = 0;
+        std::uint64_t scenario_id = 0;
+        const std::string baseline_token = query_value("baseline");
+        const std::string scenario_token = query_value("scenario");
+        const std::string node_token = query_value("node_id");
+        if (!parse_prefixed_id(baseline_token, 's', baseline_id)
+            || !parse_prefixed_id(scenario_token, 's', scenario_id)
+            || node_token.empty())
+        {
+            send_response(
+                client,
+                400,
+                "application/json",
+                "{\"error\":\"baseline, scenario, and node_id are required\"}");
+            return;
+        }
+        poker::explorer::ReaderLease baseline_lease(g_session, g_session.borrow(baseline_id));
+        poker::explorer::ReaderLease scenario_lease(g_session, g_session.borrow(scenario_id));
+        if (!baseline_lease || !scenario_lease)
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+            return;
+        }
+        try
+        {
+            const auto baseline =
+                std::static_pointer_cast<HeldSolution>(baseline_lease.resource());
+            const auto scenario =
+                std::static_pointer_cast<HeldSolution>(scenario_lease.resource());
+            const auto inspect = [&](const HeldSolution& held, const std::string& node_id)
+                -> poker::solver::StreetInspection
+            {
+                if (held.street)
+                {
+                    return held.street->inspect_node(node_id);
+                }
+                if (held.river)
+                {
+                    return held.river->inspect_node(node_id);
+                }
+                throw std::invalid_argument("solution has no solver");
+            };
+            const poker::solver::StreetInspection base_view = inspect(*baseline, node_token);
+            const poker::solver::StreetInspection scen_view = inspect(*scenario, node_token);
+            if (base_view.kind != "decision" || scen_view.kind != "decision")
+            {
+                throw std::invalid_argument("compare requires a decision node");
+            }
+            if (base_view.actions.size() != scen_view.actions.size())
+            {
+                throw std::invalid_argument("solutions disagree on action arity at node");
+            }
+            std::size_t infoset_id = 0;
+            parse_public_node_index(node_token, infoset_id);
+            const poker::solver::NodeLock* lock = scenario->locks.find(infoset_id);
+            std::string out = "{\"baseline_id\":";
+            append_escaped(out, "s" + std::to_string(baseline_id));
+            out += ",\"scenario_id\":";
+            append_escaped(out, "s" + std::to_string(scenario_id));
+            out += ",\"node_id\":";
+            append_escaped(out, node_token);
+            out += ",\"baseline_value\":";
+            out += format_number(baseline->value);
+            out += ",\"scenario_value\":";
+            out += format_number(scenario->value);
+            out += ",\"value_delta\":";
+            out += format_number(scenario->value - baseline->value);
+            out += ",\"baseline_nash_gap\":";
+            out += format_number(baseline->nash_gap);
+            out += ",\"scenario_nash_gap\":";
+            out += format_number(scenario->nash_gap);
+            out += ",\"actions\":[";
+            for (std::size_t i = 0; i < base_view.actions.size(); ++i)
+            {
+                if (i > 0)
+                {
+                    out += ',';
+                }
+                append_escaped(out, base_view.actions[i].label);
+            }
+            out += "],\"hands\":[";
+            const std::size_t hand_count = std::min(base_view.hands.size(), scen_view.hands.size());
+            for (std::size_t h = 0; h < hand_count; ++h)
+            {
+                if (h > 0)
+                {
+                    out += ',';
+                }
+                const bool locked_hand = lock != nullptr
+                    && !lock->actions.unlocked()
+                    && (lock->kind == poker::solver::LockKind::FullNode
+                        || poker::solver::combo_is_selected(*lock, h));
+                out += "{\"combo\":";
+                append_escaped(out, scen_view.hands[h].combo);
+                out += ",\"locked\":";
+                out += locked_hand ? "true" : "false";
+                out += ",\"baseline\":[";
+                for (std::size_t a = 0; a < base_view.hands[h].strategy.size(); ++a)
+                {
+                    if (a > 0)
+                    {
+                        out += ',';
+                    }
+                    out += format_number(base_view.hands[h].strategy[a]);
+                }
+                out += "],\"scenario\":[";
+                for (std::size_t a = 0; a < scen_view.hands[h].strategy.size(); ++a)
+                {
+                    if (a > 0)
+                    {
+                        out += ',';
+                    }
+                    out += format_number(scen_view.hands[h].strategy[a]);
+                }
+                out += "],\"delta\":[";
+                const std::size_t action_count =
+                    std::min(base_view.hands[h].strategy.size(), scen_view.hands[h].strategy.size());
+                for (std::size_t a = 0; a < action_count; ++a)
+                {
+                    if (a > 0)
+                    {
+                        out += ',';
+                    }
+                    out += format_number(
+                        scen_view.hands[h].strategy[a] - base_view.hands[h].strategy[a]);
+                }
+                out += "]}";
+            }
+            out += "]}";
+            send_response(client, 200, "application/json", out);
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += '}';
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
+    if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/resolve-locked ") != std::string::npos)
+    {
+        if (g_session.running())
+        {
+            send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
+            return;
+        }
+        const std::string prefix = "POST /api/solutions/";
+        const std::string rest = line.substr(prefix.size());
+        const std::size_t slash = rest.find('/');
+        std::uint64_t id = 0;
+        if (slash == std::string::npos || !parse_prefixed_id(rest.substr(0, slash), 's', id))
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
+            return;
+        }
+        double requested = 0.0;
+        double resolve_accuracy = -1.0;
+        double resolve_time_limit = -1.0;
+        int resolve_samples = -1;
+        try
+        {
+            requested = read_number(body, "iterations", 0.0);
+            if (find_key(body, "accuracy") != std::string::npos)
+            {
+                resolve_accuracy = read_number(body, "accuracy", -1.0);
+            }
+            if (find_key(body, "samples") != std::string::npos)
+            {
+                resolve_samples = static_cast<int>(read_number(body, "samples", 5.0));
+            }
+            if (find_key(body, "time_limit") != std::string::npos)
+            {
+                resolve_time_limit = read_number(body, "time_limit", -1.0);
+            }
+        }
+        catch (const std::exception&)
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"iterations must be a positive integer\"}");
+            return;
+        }
+        if (!std::isfinite(requested) || requested < 1.0 || requested > 1000000000.0
+            || std::floor(requested) != requested)
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"iterations must be a positive integer\"}");
+            return;
+        }
+        if (find_key(body, "time_limit") != std::string::npos
+            && (!std::isfinite(resolve_time_limit) || resolve_time_limit < 0.0))
+        {
+            send_response(
+                client,
+                400,
+                "application/json",
+                "{\"error\":\"time_limit must be a non-negative number of seconds\"}");
+            return;
+        }
+        const int extra = static_cast<int>(requested);
+        if (g_values != nullptr)
+        {
+            g_values->cancel();
+        }
+        if (g_worker.joinable())
+        {
+            g_worker.join();
+        }
+        const poker::explorer::Session::Claim claim = g_session.claim_completed(id);
+        if (!claim.allowed)
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+            return;
+        }
+        try
+        {
+            const std::shared_ptr<HeldSolution> held =
+                std::static_pointer_cast<HeldSolution>(g_session.training_resource(claim.job_id));
+            if (!held || !held->street)
+            {
+                g_session.abort_continuation(
+                    claim.job_id,
+                    "{\"running\":false,\"cancelled\":false,\"error\":\"resolve-locked requires a street solution\","
+                    "\"solution_id\":null}");
+                send_response(
+                    client,
+                    400,
+                    "application/json",
+                    "{\"error\":\"resolve-locked requires a street solution\"}");
+                return;
+            }
+            StatusDraft starting = draft_for(
+                held->job, claim.job_id, held->iterations, held->runtime_seconds, true,
+                held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+                held->sample_iterations, held->sample_values, held->sample_gaps,
+                held->has_memory ? &held->memory : nullptr);
+            starting.running = true;
+            starting.solution_id = held->id;
+            starting.root_id = held->root_id;
+            starting.baseline_solution_id = held->baseline_solution_id;
+            g_session.set_progress(claim.job_id, build_status(starting));
+            g_worker = std::thread(
+                [job_id = claim.job_id, extra, resolve_accuracy, resolve_samples, resolve_time_limit]()
+                {
+                    resolve_locked_job(
+                        job_id, extra, resolve_accuracy, resolve_samples, resolve_time_limit);
+                });
+        }
+        catch (const std::exception& error)
+        {
+            g_session.abort_continuation(
+                claim.job_id,
+                "{\"running\":false,\"cancelled\":false,\"error\":\"resolve-locked failed\",\"solution_id\":null}");
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += '}';
+            send_response(client, 400, "application/json", payload);
+            return;
+        }
+        std::string accepted = "{\"running\":true,\"job_id\":";
+        append_escaped(accepted, "j" + std::to_string(claim.job_id));
+        accepted += ",\"solution_id\":";
+        append_escaped(accepted, "s" + std::to_string(id));
+        accepted += ",\"warm_start\":\"reset\"}";
+        send_response(client, 202, "application/json", accepted);
+        return;
+    }
+    if (line.rfind("PUT /api/solutions/", 0) == 0 && line.find("/locks ") != std::string::npos)
+    {
+        const std::string prefix = "PUT /api/solutions/";
+        const std::string rest = line.substr(prefix.size());
+        const std::size_t slash = rest.find('/');
+        std::uint64_t id = 0;
+        if (slash == std::string::npos || !parse_prefixed_id(rest.substr(0, slash), 's', id))
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
+            return;
+        }
+        if (g_session.running())
+        {
+            send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
+            return;
+        }
+        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        if (!lease)
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+            return;
+        }
+        try
+        {
+            auto held = std::static_pointer_cast<HeldSolution>(lease.resource());
+            const std::string node_id = read_string(body, "node_id", "");
+            const std::string kind = read_string(body, "kind", "full");
+            std::size_t infoset_id = 0;
+            if (!parse_public_node_index(node_id, infoset_id))
+            {
+                throw std::invalid_argument("bad node_id");
+            }
+            poker::solver::StreetInspection view;
+            if (held->street)
+            {
+                view = held->street->inspect_node(node_id);
+            }
+            else if (held->river)
+            {
+                view = held->river->inspect_node(node_id);
+            }
+            else
+            {
+                throw std::invalid_argument("solution has no solver");
+            }
+            if (view.kind != "decision")
+            {
+                throw std::invalid_argument("locks apply only to decision nodes");
+            }
+            const int action_count = static_cast<int>(view.actions.size());
+            const std::vector<double> probs = read_number_array(body, "probs");
+            if (static_cast<int>(probs.size()) != action_count)
+            {
+                throw std::invalid_argument("probs length must match action arity");
+            }
+            poker::solver::NodeLock lock;
+            lock.infoset_id = infoset_id;
+            if (kind == "full")
+            {
+                lock.kind = poker::solver::LockKind::FullNode;
+            }
+            else if (kind == "selected")
+            {
+                lock.kind = poker::solver::LockKind::SelectedCombos;
+                const std::vector<double> hands = read_number_array(body, "hand_indices");
+                for (double hand : hands)
+                {
+                    if (!std::isfinite(hand) || hand < 0.0 || std::floor(hand) != hand)
+                    {
+                        throw std::invalid_argument("hand_indices must be non-negative integers");
+                    }
+                    const std::size_t index = static_cast<std::size_t>(hand);
+                    if (index >= view.hands.size())
+                    {
+                        throw std::invalid_argument("hand index out of range");
+                    }
+                    lock.combo_indices.push_back(index);
+                }
+            }
+            else
+            {
+                throw std::invalid_argument("kind must be full or selected");
+            }
+            lock.actions = poker::solver::make_action_lock_row(probs, action_count);
+            held->locks.upsert(std::move(lock));
+            send_response(client, 200, "application/json", json_locks(held->locks));
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += '}';
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
+    if (line.rfind("DELETE /api/solutions/", 0) == 0
+        && (line.find("/locks?") != std::string::npos || line.find("/locks/") != std::string::npos
+            || line.find("/locks ") != std::string::npos))
+    {
+        const std::string prefix = "DELETE /api/solutions/";
+        const std::string rest = line.substr(prefix.size());
+        const std::size_t slash = rest.find('/');
+        std::uint64_t id = 0;
+        if (slash == std::string::npos || !parse_prefixed_id(rest.substr(0, slash), 's', id))
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
+            return;
+        }
+        if (g_session.running())
+        {
+            send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
+            return;
+        }
+        std::string node_id;
+        const std::size_t locks_at = rest.find("/locks");
+        if (locks_at != std::string::npos)
+        {
+            const std::string after = rest.substr(locks_at + 6);
+            if (!after.empty() && after[0] == '/')
+            {
+                const std::size_t end = after.find(' ');
+                node_id = end == std::string::npos ? after.substr(1) : after.substr(1, end - 1);
+            }
+            else if (!after.empty() && after[0] == '?')
+            {
+                const std::string needle = "node_id=";
+                const std::size_t at = after.find(needle);
+                if (at != std::string::npos)
+                {
+                    const std::size_t start = at + needle.size();
+                    const std::size_t amp = after.find('&', start);
+                    const std::size_t space = after.find(' ', start);
+                    const std::size_t end = std::min(
+                        amp == std::string::npos ? after.size() : amp,
+                        space == std::string::npos ? after.size() : space);
+                    node_id = after.substr(start, end - start);
+                }
+            }
+        }
+        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        if (!lease)
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+            return;
+        }
+        try
+        {
+            auto held = std::static_pointer_cast<HeldSolution>(lease.resource());
+            if (node_id.empty())
+            {
+                held->locks.clear();
+            }
+            else
+            {
+                std::size_t infoset_id = 0;
+                if (!parse_public_node_index(node_id, infoset_id))
+                {
+                    throw std::invalid_argument("bad node_id");
+                }
+                held->locks.erase(infoset_id);
+            }
+            send_response(client, 200, "application/json", json_locks(held->locks));
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += '}';
+            send_response(client, 400, "application/json", payload);
+        }
         return;
     }
     if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/continue ") != std::string::npos)
@@ -2975,6 +3794,11 @@ void handle_client(socket_t client)
         std::shared_ptr<HeldSolution> held = std::static_pointer_cast<HeldSolution>(lease.resource());
         try
         {
+            if (tail == "locks")
+            {
+                send_response(client, 200, "application/json", json_locks(held->locks));
+                return;
+            }
             if (tail.rfind("nodes/", 0) == 0)
             {
                 if (!held->street && !held->river)

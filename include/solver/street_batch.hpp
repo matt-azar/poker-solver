@@ -269,10 +269,12 @@ public:
         void* progress_context = nullptr);
     // Write the rank cache before training. Later passes do not fill it again.
     void initialize_rank_cache();
-    void run_iterations(int count, Algorithm algorithm);
-    void continue_iterations(int count, Algorithm algorithm);
-    void run_frozen_iterations(int count, Algorithm algorithm);
-    void continue_frozen_iterations(int count, Algorithm algorithm);
+    // Optional locks apply for this call only (saved/restored like solve()).
+    // Null keeps the unlocked path bit-identical to the prior no-locks API.
+    void run_iterations(int count, Algorithm algorithm, const LockSet* locks = nullptr);
+    void continue_iterations(int count, Algorithm algorithm, const LockSet* locks = nullptr);
+    void run_frozen_iterations(int count, Algorithm algorithm, const LockSet* locks = nullptr);
+    void continue_frozen_iterations(int count, Algorithm algorithm, const LockSet* locks = nullptr);
 
     double expected_utility() const;
     double p1_best_response_utility() const;
