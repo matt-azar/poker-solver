@@ -808,6 +808,21 @@ struct StreetBatchSolver::Engine
     std::exception_ptr worker_error_;
     std::atomic<int> fail_tickets_{0};
     std::atomic<int> delay_us_{0};
+    enum class PoolJob : unsigned char
+    {
+        Chance = 0,
+        Slots = 1,
+    };
+    enum class SlotPass : unsigned char
+    {
+        Freeze = 0,
+        Floor = 1,
+        FloorAndFreeze = 2,
+    };
+    PoolJob pool_job_ = PoolJob::Chance;
+    SlotPass slot_pass_ = SlotPass::Freeze;
+    int slot_floor_player_ = -1;
+    double freeze_seconds_ = 0.0;
     int n0 = 0;
     int n1 = 0;
     int public_decisions = 0;
@@ -3140,6 +3155,7 @@ struct StreetBatchSolver::Engine
         {
             int begin = 0;
             int end = 0;
+            PoolJob job = PoolJob::Chance;
             {
                 std::unique_lock<std::mutex> lock(pool_mutex_);
                 work_cv_.wait(lock, [&] { return stop_ || epoch_ != seen; });
@@ -3150,11 +3166,19 @@ struct StreetBatchSolver::Engine
                 seen = epoch_;
                 begin = chunk_begin_[worker_index];
                 end = chunk_end_[worker_index];
+                job = pool_job_;
             }
             std::exception_ptr error;
             try
             {
-                run_chunk(worker_index, begin, end);
+                if (job == PoolJob::Slots)
+                {
+                    run_slot_range(begin, end);
+                }
+                else
+                {
+                    run_chunk(worker_index, begin, end);
+                }
             }
             catch (...)
             {
@@ -3172,19 +3196,27 @@ struct StreetBatchSolver::Engine
         }
     }
 
-    void dispatch_chance()
+    void dispatch_workers(PoolJob job)
     {
         {
             std::lock_guard<std::mutex> lock(pool_mutex_);
             worker_error_ = nullptr;
             finished_ = 0;
+            pool_job_ = job;
             ++epoch_;
         }
         work_cv_.notify_all();
         std::exception_ptr caller_error;
         try
         {
-            run_chunk(0, chunk_begin_[0], chunk_end_[0]);
+            if (job == PoolJob::Slots)
+            {
+                run_slot_range(chunk_begin_[0], chunk_end_[0]);
+            }
+            else
+            {
+                run_chunk(0, chunk_begin_[0], chunk_end_[0]);
+            }
         }
         catch (...)
         {
@@ -3202,6 +3234,135 @@ struct StreetBatchSolver::Engine
             failed_ = true;
             std::rethrow_exception(worker_error != nullptr ? worker_error : caller_error);
         }
+    }
+
+    void dispatch_chance()
+    {
+        dispatch_workers(PoolJob::Chance);
+    }
+
+    void partition_slots()
+    {
+        const int workers = config.threads;
+        const int total = static_cast<int>(slots.size());
+        const int base = total / workers;
+        const int remainder = total % workers;
+        int cursor = 0;
+        for (int worker = 0; worker < workers; ++worker)
+        {
+            const int count = base + (worker < remainder ? 1 : 0);
+            chunk_begin_[worker] = cursor;
+            chunk_end_[worker] = cursor + count;
+            cursor += count;
+        }
+    }
+
+    void apply_freeze_range(std::size_t begin, std::size_t end)
+    {
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[index];
+            regret_matching(
+                regret.data() + slot.base,
+                frozen_sigma.data() + slot.base,
+                slot.n_actions);
+            if (locks_ != nullptr)
+            {
+                const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
+                apply_lock_to_strategy(
+                    std::span<double>(
+                        frozen_sigma.data() + slot.base,
+                        static_cast<std::size_t>(slot.n_actions)),
+                    lock,
+                    static_cast<std::size_t>(slot.hand));
+            }
+        }
+    }
+
+    void apply_floor_range(std::size_t begin, std::size_t end, int player)
+    {
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[index];
+            if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player != player)
+            {
+                continue;
+            }
+            for (int action = 0; action < slot.n_actions; ++action)
+            {
+                double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                if (cumulative < 0.0)
+                {
+                    cumulative = 0.0;
+                }
+            }
+        }
+    }
+
+    // Floor one player's regrets, then rebuild frozen_sigma for every slot.
+    // Same values as floor_player then freeze_sigma; one slot scan instead of two.
+    void apply_floor_and_freeze_range(std::size_t begin, std::size_t end, int player)
+    {
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[index];
+            if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player == player)
+            {
+                for (int action = 0; action < slot.n_actions; ++action)
+                {
+                    double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                    if (cumulative < 0.0)
+                    {
+                        cumulative = 0.0;
+                    }
+                }
+            }
+            regret_matching(
+                regret.data() + slot.base,
+                frozen_sigma.data() + slot.base,
+                slot.n_actions);
+            if (locks_ != nullptr)
+            {
+                const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
+                apply_lock_to_strategy(
+                    std::span<double>(
+                        frozen_sigma.data() + slot.base,
+                        static_cast<std::size_t>(slot.n_actions)),
+                    lock,
+                    static_cast<std::size_t>(slot.hand));
+            }
+        }
+    }
+
+    void run_slot_range(int begin, int end)
+    {
+        const std::size_t first = static_cast<std::size_t>(begin);
+        const std::size_t last = static_cast<std::size_t>(end);
+        switch (slot_pass_)
+        {
+        case SlotPass::Freeze:
+            apply_freeze_range(first, last);
+            break;
+        case SlotPass::Floor:
+            apply_floor_range(first, last, slot_floor_player_);
+            break;
+        case SlotPass::FloorAndFreeze:
+            apply_floor_and_freeze_range(first, last, slot_floor_player_);
+            break;
+        }
+    }
+
+    void run_slot_pass(SlotPass pass, int player)
+    {
+        slot_pass_ = pass;
+        slot_floor_player_ = player;
+        if (config.threads <= 1 || worker_count_ == 0 || slots.empty())
+        {
+            run_slot_range(0, static_cast<int>(slots.size()));
+            return;
+        }
+        partition_slots();
+        dispatch_workers(PoolJob::Slots);
     }
 
     // Descendant information sets of different cards are disjoint: each slot
@@ -3529,44 +3690,45 @@ struct StreetBatchSolver::Engine
 
     // When locks_ is set, locked rows replace RM for matching public nodes.
     // Lock infoset_id is the public-node index (slot.node). SelectedCombos
-    // uses the acting player's hand index (slot.hand).
+    // uses the acting player's hand index (slot.hand). Slots are independent:
+    // each writes only its own frozen_sigma / regret span, so threads > 1
+    // partition the slot vector with the same worker pool as chance splits.
     void freeze_sigma()
     {
-        for (const Slot& slot : slots)
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        run_slot_pass(SlotPass::Freeze, -1);
+        if (profile_)
         {
-            regret_matching(
-                regret.data() + slot.base,
-                frozen_sigma.data() + slot.base,
-                slot.n_actions);
-            if (locks_ != nullptr)
-            {
-                const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
-                apply_lock_to_strategy(
-                    std::span<double>(
-                        frozen_sigma.data() + slot.base,
-                        static_cast<std::size_t>(slot.n_actions)),
-                    lock,
-                    static_cast<std::size_t>(slot.hand));
-            }
+            freeze_seconds_ += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
         }
     }
 
     void floor_player(int player)
     {
-        for (const Slot& slot : slots)
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        run_slot_pass(SlotPass::Floor, player);
+        if (profile_)
         {
-            if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player != player)
-            {
-                continue;
-            }
-            for (int action = 0; action < slot.n_actions; ++action)
-            {
-                double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
-                if (cumulative < 0.0)
-                {
-                    cumulative = 0.0;
-                }
-            }
+            freeze_seconds_ += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+        }
+    }
+
+    void floor_and_freeze(int player)
+    {
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        run_slot_pass(SlotPass::FloorAndFreeze, player);
+        if (profile_)
+        {
+            freeze_seconds_ += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
         }
     }
 
@@ -3601,9 +3763,18 @@ struct StreetBatchSolver::Engine
             }
             else
             {
+                // CFR+: freeze, update OOP, fuse floor(OOP)+freeze, update IP, floor(IP).
+                // Same tables as two frozen_pass calls; one fewer full slot scan.
                 const double weight_iter = static_cast<double>(trained);
-                frozen_pass(0, weight_iter, algorithm);
-                frozen_pass(1, weight_iter, algorithm);
+                freeze_sigma();
+                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
+                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
+                frozen_walk(workspace, 0, -1, -1, 0, 0, weight_iter, false);
+                floor_and_freeze(0);
+                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
+                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
+                frozen_walk(workspace, 0, -1, -1, 0, 1, weight_iter, false);
+                floor_player(1);
             }
         }
         train_seconds_ += std::chrono::duration<double>(
@@ -5515,6 +5686,7 @@ void StreetBatchSolver::enable_walk_profile(bool enabled)
 {
     engine_->check_usable();
     engine_->profile_ = enabled;
+    engine_->freeze_seconds_ = 0.0;
     const auto clear = [](Engine::WorkerContext& ctx)
     {
         ctx.order_seconds = 0.0;
@@ -5544,6 +5716,7 @@ StreetWalkProfile StreetBatchSolver::walk_profile() const
     {
         add(*engine_->extra_contexts_[index]);
     }
+    profile.freeze_seconds = engine_->freeze_seconds_;
     return profile;
 }
 

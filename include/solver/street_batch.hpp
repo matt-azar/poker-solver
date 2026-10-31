@@ -220,6 +220,8 @@ struct StreetWalkProfile
     double showdown_seconds = 0.0;
     double decision_seconds = 0.0;
     double chance_seconds = 0.0;
+    // Caller-side freeze_sigma / floor_player / fused floor+freeze scans.
+    double freeze_seconds = 0.0;
 };
 
 // Same pass contract as CfrTrainer<StreetGame>. Each pass freezes regret

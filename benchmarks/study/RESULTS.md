@@ -64,6 +64,10 @@ Selected checkpoints from the extended process (`nash_gap / 100`):
 
 A 2-second kill of `turn_srp_river_betting` on the `381c9a5` binary flushed `phase: training` and kept construction 0.072 s, cache init 0.085 s, 43,316 deals, and 442,776 information sets. Iterations and NashConv stayed unavailable because the first accuracy check had not finished. That kill was contended and is not a speed result.
 
+## Freeze / floor parallelization microbench (`a04eb8c`)
+
+Short Linux Release timings only (not a completed study to 0.001). Warm one frozen CFR+ iteration, then two timed iterations of `flop_srp_one_size` at four threads: `origin/main` 4.595 s/iter versus freeze-parallel branch 3.833 s/iter (~1.20x). With walk profile enabled on the branch, `freeze_seconds` alone was 1.044 s/iter at one thread and 0.235 s/iter at four threads (~4.45x). See [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md) for the paired-flop alternating table. Do not treat these as a substitute for finishing the flop study wall.
+
 ## Next measurement
 
 Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target.
