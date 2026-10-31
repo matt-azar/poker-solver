@@ -2332,7 +2332,8 @@ void resolve_locked_job(
     int iterations,
     double accuracy,
     int samples,
-    double time_limit)
+    double time_limit,
+    bool warm_start)
 {
     g_session.wait_until_quiet();
     const std::shared_ptr<HeldSolution> held =
@@ -2370,42 +2371,80 @@ void resolve_locked_job(
         held->baseline_solution_id = g_session.baseline_solution();
 
         const poker::streets::StreetConfig config = held->street->config();
+        // warm_start keeps regrets/strategy-sums and continues from the prior
+        // iteration count under the current locks. Default remains reset-from-zero.
+        poker::solver::TrainingTables prior_tables{};
+        const int prior_iterations = held->iterations;
+        const double prior_runtime = held->runtime_seconds;
+        if (warm_start)
+        {
+            prior_tables = held->street->training_tables();
+        }
         held->street = std::make_shared<poker::solver::StreetBatchSolver>(config);
-        held->sample_iterations.clear();
-        held->sample_values.clear();
-        held->sample_gaps.clear();
-        held->iterations = 0;
-        held->runtime_seconds = 0.0;
-        held->value = 0.0;
-        held->p1_best_response = 0.0;
-        held->p2_best_response = 0.0;
-        held->nash_gap = 0.0;
+        if (warm_start)
+        {
+            held->street->install_training_tables(prior_tables);
+            held->iterations = prior_iterations;
+            held->runtime_seconds = prior_runtime;
+        }
+        else
+        {
+            held->sample_iterations.clear();
+            held->sample_values.clear();
+            held->sample_gaps.clear();
+            held->iterations = 0;
+            held->runtime_seconds = 0.0;
+            held->value = 0.0;
+            held->p1_best_response = 0.0;
+            held->p2_best_response = 0.0;
+            held->nash_gap = 0.0;
+        }
 
         const auto started = std::chrono::steady_clock::now();
-        int done = 0;
-        double value = 0.0;
-        double p1 = 0.0;
-        double p2 = 0.0;
-        double gap = 0.0;
+        int done = held->iterations;
+        if (iterations > std::numeric_limits<int>::max() - done)
+        {
+            StatusDraft draft = draft_for(
+                held->job, job_id, done, held->runtime_seconds, true,
+                held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+                held->sample_iterations, held->sample_values, held->sample_gaps,
+                held->has_memory ? &held->memory : nullptr);
+            draft.error = "iteration count overflow";
+            draft.solution_id = prior_id;
+            draft.root_id = held->root_id;
+            draft.baseline_solution_id = held->baseline_solution_id;
+            g_session.abort_continuation(job_id, build_status(draft));
+            return;
+        }
+        const int target = done + iterations;
+        double value = held->value;
+        double p1 = held->p1_best_response;
+        double p2 = held->p2_best_response;
+        double gap = held->nash_gap;
         bool time_limit_reached = false;
         const int eval_samples = std::max(1, held->job.samples);
         const int chunk = std::max(1, iterations / eval_samples);
         const auto seconds_now = [&]()
         {
+            return held->runtime_seconds
+                + std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        };
+        const auto continuation_seconds = [&]()
+        {
             return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         };
         const auto wall_exhausted = [&]()
         {
-            return held->job.time_limit >= 0.0 && seconds_now() >= held->job.time_limit;
+            return held->job.time_limit >= 0.0 && continuation_seconds() >= held->job.time_limit;
         };
         const poker::solver::LockSet* const locks = locks_arg(*held);
-        while (done < iterations)
+        while (done < target)
         {
             if (g_session.stop_requested(job_id) || g_session.pause_requested(job_id))
             {
                 break;
             }
-            const int step = std::min(chunk, iterations - done);
+            const int step = std::min(chunk, target - done);
             if (held->job.frozen)
             {
                 held->street->continue_frozen_iterations(step, held->job.algorithm, locks);
@@ -3162,6 +3201,7 @@ void handle_client(socket_t client)
         double resolve_accuracy = -1.0;
         double resolve_time_limit = -1.0;
         int resolve_samples = -1;
+        bool warm_start = false;
         try
         {
             requested = read_number(body, "iterations", 0.0);
@@ -3176,6 +3216,10 @@ void handle_client(socket_t client)
             if (find_key(body, "time_limit") != std::string::npos)
             {
                 resolve_time_limit = read_number(body, "time_limit", -1.0);
+            }
+            if (find_key(body, "warm_start") != std::string::npos)
+            {
+                warm_start = read_number(body, "warm_start", 0.0) != 0.0;
             }
         }
         catch (const std::exception&)
@@ -3242,10 +3286,20 @@ void handle_client(socket_t client)
             starting.baseline_solution_id = held->baseline_solution_id;
             g_session.set_progress(claim.job_id, build_status(starting));
             g_worker = std::thread(
-                [job_id = claim.job_id, extra, resolve_accuracy, resolve_samples, resolve_time_limit]()
+                [job_id = claim.job_id,
+                    extra,
+                    resolve_accuracy,
+                    resolve_samples,
+                    resolve_time_limit,
+                    warm_start]()
                 {
                     resolve_locked_job(
-                        job_id, extra, resolve_accuracy, resolve_samples, resolve_time_limit);
+                        job_id,
+                        extra,
+                        resolve_accuracy,
+                        resolve_samples,
+                        resolve_time_limit,
+                        warm_start);
                 });
         }
         catch (const std::exception& error)
@@ -3263,7 +3317,7 @@ void handle_client(socket_t client)
         append_escaped(accepted, "j" + std::to_string(claim.job_id));
         accepted += ",\"solution_id\":";
         append_escaped(accepted, "s" + std::to_string(id));
-        accepted += ",\"warm_start\":\"reset\"}";
+        accepted += warm_start ? ",\"warm_start\":1}" : ",\"warm_start\":0}";
         send_response(client, 202, "application/json", accepted);
         return;
     }
@@ -3382,6 +3436,8 @@ void handle_client(socket_t client)
             return;
         }
         std::string node_id;
+        bool have_hand_index = false;
+        std::size_t hand_index = 0;
         const std::size_t locks_at = rest.find("/locks");
         if (locks_at != std::string::npos)
         {
@@ -3393,17 +3449,36 @@ void handle_client(socket_t client)
             }
             else if (!after.empty() && after[0] == '?')
             {
-                const std::string needle = "node_id=";
-                const std::size_t at = after.find(needle);
-                if (at != std::string::npos)
+                const auto query_value = [&](const char* key) -> std::string
                 {
+                    const std::string needle = std::string(key) + "=";
+                    const std::size_t at = after.find(needle);
+                    if (at == std::string::npos)
+                    {
+                        return {};
+                    }
                     const std::size_t start = at + needle.size();
                     const std::size_t amp = after.find('&', start);
                     const std::size_t space = after.find(' ', start);
                     const std::size_t end = std::min(
                         amp == std::string::npos ? after.size() : amp,
                         space == std::string::npos ? after.size() : space);
-                    node_id = after.substr(start, end - start);
+                    return after.substr(start, end - start);
+                };
+                node_id = query_value("node_id");
+                const std::string hand_text = query_value("hand_index");
+                if (!hand_text.empty())
+                {
+                    char* end = nullptr;
+                    const unsigned long parsed = std::strtoul(hand_text.c_str(), &end, 10);
+                    if (end == hand_text.c_str() || *end != '\0')
+                    {
+                        send_response(
+                            client, 400, "application/json", "{\"error\":\"bad hand_index\"}");
+                        return;
+                    }
+                    hand_index = static_cast<std::size_t>(parsed);
+                    have_hand_index = true;
                 }
             }
         }
@@ -3427,7 +3502,20 @@ void handle_client(socket_t client)
                 {
                     throw std::invalid_argument("bad node_id");
                 }
-                held->locks.erase(infoset_id);
+                if (have_hand_index)
+                {
+                    const poker::solver::NodeLock* existing = held->locks.find(infoset_id);
+                    if (existing != nullptr && existing->kind == poker::solver::LockKind::FullNode)
+                    {
+                        throw std::invalid_argument(
+                            "full-node locks unlock with node_id only; omit hand_index");
+                    }
+                    held->locks.erase_combo(infoset_id, hand_index);
+                }
+                else
+                {
+                    held->locks.erase(infoset_id);
+                }
             }
             send_response(client, 200, "application/json", json_locks(held->locks));
         }

@@ -734,13 +734,19 @@ if ($("resolve-locked")) {
     if (!solutionId) {
       return;
     }
-    $("message").textContent = "Resolving with locks (reset + re-solve)…";
+    const warmStart = Boolean($("warm-start") && $("warm-start").checked);
+    $("message").textContent = warmStart
+      ? "Resolving with locks (warm-start)…"
+      : "Resolving with locks (reset + re-solve)…";
     $("run").disabled = true;
     $("continue").disabled = true;
     $("resolve-locked").disabled = true;
     $("pause").disabled = false;
     $("stop").disabled = false;
-    const body = {iterations: Number($("iterations").value)};
+    const body = {
+      iterations: Number($("iterations").value),
+      warm_start: warmStart ? 1 : 0
+    };
     const timeLimitText = $("time-limit").value.trim();
     if (timeLimitText !== "") {
       body.time_limit = Number(timeLimitText);
@@ -943,20 +949,23 @@ async function lockHand(handIndex, probs) {
   $("message").textContent = "Locked hand index " + handIndex + " at " + currentNode.node_id;
 }
 
-async function unlockHand() {
+async function unlockHand(handIndex) {
   if (!solutionId || !currentNode) {
     return;
   }
-  const response = await fetch(
-    "/api/solutions/" + solutionId + "/locks?node_id=" + encodeURIComponent(currentNode.node_id),
-    {method: "DELETE"}
-  );
+  let url = "/api/solutions/" + solutionId + "/locks?node_id=" + encodeURIComponent(currentNode.node_id);
+  if (handIndex !== undefined && handIndex !== null) {
+    url += "&hand_index=" + encodeURIComponent(String(handIndex));
+  }
+  const response = await fetch(url, {method: "DELETE"});
   const body = await readBody(response);
   if (!response.ok) {
     $("message").textContent = body.error || "Unlock failed";
     return;
   }
-  $("message").textContent = "Unlocked " + currentNode.node_id;
+  $("message").textContent = handIndex === undefined || handIndex === null
+    ? ("Unlocked " + currentNode.node_id)
+    : ("Unlocked hand index " + handIndex + " at " + currentNode.node_id);
 }
 
 function clearValues() {
