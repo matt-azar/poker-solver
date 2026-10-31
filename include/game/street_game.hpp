@@ -81,8 +81,8 @@ struct StreetConfig
     // See docs/RAKE.md.
     poker::solver::RakeConfig rake{};
     // Force/Remove filter legal actions at matching public histories during
-    // build and play. AddSize is stored here but not applied yet (sizes stay on
-    // the bet/raise vectors above).
+    // build and play. AddSize injects one extra bet/raise size at the matching
+    // decision (same min-raise / stack / pot-cap rules as listed sizes).
     poker::solver::TreeEditSet tree_edits{};
 };
 
@@ -750,6 +750,108 @@ private:
         return history;
     }
 
+    // Resolve AddSize to a chip add using the same clamps as enumerate's consider.
+    // Returns false when the size is illegal at this state (silently skipped).
+    bool resolve_add_size_amount(const State& state, const poker::solver::LineEdit& edit, int& out_add)
+        const
+    {
+        const int player = state.acting;
+        const int to_call = state.committed - state.contrib[player];
+        const bool facing = to_call > 0;
+        const int max_add = config_.stack - state.contrib[player];
+        if (to_call < 0 || max_add < 0)
+        {
+            throw std::logic_error("street stack accounting failed");
+        }
+        if (config_.max_raises <= state.num_raises)
+        {
+            return false;
+        }
+        if (!config_.allow_three_bet && state.num_raises >= 2)
+        {
+            return false;
+        }
+        const int basis = facing ? state.pot + to_call : state.pot;
+        const int sized = edit.uses_chip_size()
+            ? edit.size_chips
+            : round_chips(edit.size_pot_fraction, basis);
+        int add = facing ? to_call + sized : sized;
+        if (add < 1)
+        {
+            return false;
+        }
+        if (add > max_add)
+        {
+            if (!config_.allow_all_in)
+            {
+                return false;
+            }
+            add = max_add;
+        }
+        if (config_.all_in_threshold > 0.0 && config_.allow_all_in)
+        {
+            const double committed_after = static_cast<double>(state.contrib[player] + add);
+            const double limit = config_.all_in_threshold * static_cast<double>(config_.stack);
+            if (committed_after > limit && add < max_add)
+            {
+                add = max_add;
+            }
+        }
+        if (config_.pot_cap > 0.0)
+        {
+            const int reference = facing ? state.pot + to_call : state.pot;
+            int max_by = round_chips(config_.pot_cap, reference);
+            if (max_by < 1)
+            {
+                max_by = 1;
+            }
+            if (add - to_call > max_by)
+            {
+                add = to_call + max_by;
+            }
+        }
+        const int raise_by = add - to_call;
+        if (raise_by <= 0)
+        {
+            return false;
+        }
+        const int min_increment = state.last_raise == 0 ? 1 : state.last_raise;
+        const bool full = raise_by >= min_increment;
+        const bool shove = state.contrib[player] + add == config_.stack;
+        if (!full && !(config_.allow_all_in && shove))
+        {
+            return false;
+        }
+        out_add = add;
+        return true;
+    }
+
+    void insert_aggressive_amount(Legal& legal, int add) const
+    {
+        for (int i = 0; i < legal.count; ++i)
+        {
+            if (legal.code[i] == 2 && legal.add[i] == add)
+            {
+                return;
+            }
+        }
+        if (legal.count >= kMaxStreetActions)
+        {
+            throw std::invalid_argument(
+                "a street decision has more than 8 actions; use fewer bet sizes");
+        }
+        int slot = legal.count;
+        while (slot > 0 && legal.code[slot - 1] == 2 && legal.add[slot - 1] > add)
+        {
+            legal.code[slot] = legal.code[slot - 1];
+            legal.add[slot] = legal.add[slot - 1];
+            --slot;
+        }
+        legal.code[slot] = 2;
+        legal.add[slot] = add;
+        ++legal.count;
+    }
+
     void apply_tree_edits(
         Legal& legal, const State& state, const std::vector<HistStep>& history) const
     {
@@ -759,12 +861,17 @@ private:
         }
         for (const poker::solver::LineEdit& edit : config_.tree_edits.edits)
         {
-            if (edit.kind == poker::solver::LineEditKind::AddSize)
+            if (!path_matches_history(edit.path, history))
             {
                 continue;
             }
-            if (!path_matches_history(edit.path, history))
+            if (edit.kind == poker::solver::LineEditKind::AddSize)
             {
+                int add = 0;
+                if (resolve_add_size_amount(state, edit, add))
+                {
+                    insert_aggressive_amount(legal, add);
+                }
                 continue;
             }
             if (edit.kind == poker::solver::LineEditKind::Force)
