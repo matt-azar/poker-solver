@@ -1088,6 +1088,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       });
     } catch (error) {
       set({
+        compareNote: null,
         message: error instanceof EngineError ? error.message : "Compare failed",
       });
     }

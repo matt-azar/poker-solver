@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStudyStore } from "../../state/studyStore";
 import { CompareHeader } from "./CompareHeader";
 import {
@@ -24,6 +24,24 @@ export function CompareWorkspace() {
   const nodeId = currentNode?.node_id ?? compareNote?.node_id ?? null;
   const canCompare = Boolean(baselineSolutionId && solutionId && nodeId);
   const missingBaseline = !baselineSolutionId;
+  const noteMatchesNode =
+    Boolean(compareNote) && (!nodeId || compareNote?.node_id === nodeId);
+
+  useEffect(() => {
+    if (!canCompare || noteMatchesNode) {
+      return;
+    }
+    let cancelled = false;
+    setBusy(true);
+    void loadCompare(nodeId ?? undefined).finally(() => {
+      if (!cancelled) {
+        setBusy(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canCompare, loadCompare, nodeId, noteMatchesNode]);
 
   async function onRefresh() {
     setBusy(true);

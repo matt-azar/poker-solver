@@ -241,7 +241,7 @@ export function LockDrawer() {
             <span className="muted">Sum</span>
             <strong className="tabular">{rawSum.toFixed(4)}</strong>
             {rawSum === 0 && actions.length > 0 ? (
-              <span className="lock-prob-sum__note">all-zero constraint</span>
+              <span className="lock-prob-sum__note">invalid — use Unlock, not all-zero</span>
             ) : null}
           </div>
           <div className="lock-prob-preview" aria-label="Normalized preview">
@@ -249,9 +249,7 @@ export function LockDrawer() {
             {actions.length === 0 ? (
               <span>—</span>
             ) : rawSum === 0 ? (
-              <span className="tabular">
-                {actions.map((label) => `${label}: 0%`).join(" · ")}
-              </span>
+              <span className="muted">Cannot apply — probabilities must sum to 1</span>
             ) : (
               <span className="tabular">
                 {actions
