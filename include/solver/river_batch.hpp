@@ -41,10 +41,16 @@ public:
     RiverBatchSolver(const RiverBatchSolver&) = delete;
     RiverBatchSolver& operator=(const RiverBatchSolver&) = delete;
 
+    // Honors SolveConfig::locks: after regret matching, locked rows replace the
+    // current strategy for matching public nodes (infoset_id == node index) and
+    // SelectedCombos hand indices. Null locks keep today's unlocked path.
     SolveStats solve(const SolveConfig& config, Algorithm algorithm);
-    void run_iterations(int count, Algorithm algorithm);
+    // Optional locks apply for this call only (saved/restored like solve()).
+    // Null keeps the unlocked path bit-identical to the prior no-locks API.
+    void run_iterations(int count, Algorithm algorithm, const LockSet* locks = nullptr);
     // Adds iterations on top of the tables already stored. A new solver starts at zero.
-    void continue_iterations(int count, Algorithm algorithm);
+    // Optional locks apply for this call only (same contract as run_iterations).
+    void continue_iterations(int count, Algorithm algorithm, const LockSet* locks = nullptr);
     int completed_iterations() const;
     const river::RiverConfig& config() const;
     TrainingTables training_tables() const;
