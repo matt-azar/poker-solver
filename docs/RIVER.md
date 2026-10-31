@@ -18,7 +18,7 @@ Player 0's utility is net chips from the start of the river:
 
 An uncalled raise is not profit. Betting 100 into a pot of 100 and getting a fold wins 50, the same as winning a check-down. A called bet that wins is worth `pot / 2` plus the call.
 
-Optional pot rake (`RiverConfig::rake`, CLI `--rake-rate` / `--rake-cap`, and `rake-rate` / `rake-cap` on `river-config 1`) subtracts the house take from the winner, or half each on a tie. Zero rake keeps the chip rule above bit-for-bit. See [RAKE.md](RAKE.md).
+Optional pot rake (`RiverConfig::rake`, CLI `--rake-rate` / `--rake-cap`, and `rake-rate` / `rake-cap` on `river-config 1`) subtracts the house take from the winner, or half each on a tie. Zero rake keeps the chip rule above bit-for-bit. See [RAKE.md](RAKE.md). Optional tournament ICM (`RiverConfig::icm`, CLI `--icm-stacks` / `--icm-payouts`) wraps chip/rake terminals into equity deltas; empty ICM stays bit-identical. See [ICM.md](ICM.md).
 
 ## Sizes
 

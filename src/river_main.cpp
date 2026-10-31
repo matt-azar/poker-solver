@@ -27,6 +27,7 @@ void print_usage(const char* argv0)
               << " [--oop-raises 1] [--ip-raises 1]"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--rake-rate RATE] [--rake-cap CHIPS]"
+              << " [--icm-stacks S0,S1,...] [--icm-payouts P1,P2,...]"
               << " [--first oop|ip]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--gap-threshold X] [--eval-every N] [--eval-interval N]"
@@ -494,6 +495,14 @@ int main(int argc, char** argv)
             else if (arg == "--rake-cap")
             {
                 options.config.rake.cap = std::atof(need("--rake-cap"));
+            }
+            else if (arg == "--icm-stacks")
+            {
+                options.config.icm.stacks = parse_sizes(need("--icm-stacks"));
+            }
+            else if (arg == "--icm-payouts")
+            {
+                options.config.icm.payouts = parse_sizes(need("--icm-payouts"));
             }
             else if (arg == "--first")
             {

@@ -7,6 +7,7 @@
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
 #include "solver/chip_payoff.hpp"
+#include "solver/icm.hpp"
 #include "solver/regret_matching.hpp"
 
 #include <algorithm>
@@ -1314,6 +1315,7 @@ struct StreetBatchSolver::Engine
             throw std::invalid_argument("pot cap must be nonnegative");
         }
         config.rake.validate();
+        config.icm.validate(config.pot, config.stack);
         if (config.threads < 1 || config.threads > kMaxThreads)
         {
             throw std::invalid_argument(
@@ -2083,13 +2085,14 @@ struct StreetBatchSolver::Engine
             outcome = holdem::compare_showdown(
                 deal.c0, deal.c1, deal.d0, deal.d1, std::span<const int>(board, 5));
         }
-        return ChipPayoff::terminal(
+        const PlayerPayoff chips = ChipPayoff::terminal(
             config.pot,
             node.contrib[0],
             node.contrib[1],
             node.folded,
             outcome,
-            config.rake).utility[0];
+            config.rake);
+        return apply_icm_terminal(config.icm, chips).utility[0];
     }
 
     double cfr_deal(int node_index, double pi0, double pi1, double chance, const Deal& deal,
@@ -3540,13 +3543,15 @@ struct StreetBatchSolver::Engine
             const auto fold_started = profile_
                 ? std::chrono::steady_clock::now()
                 : std::chrono::steady_clock::time_point{};
-            const double pay = ChipPayoff::terminal(
-                config.pot,
-                node.contrib[0],
-                node.contrib[1],
-                node.folded,
-                0,
-                config.rake).utility[0];
+            const double pay = apply_icm_terminal(
+                config.icm,
+                ChipPayoff::terminal(
+                    config.pot,
+                    node.contrib[0],
+                    node.contrib[1],
+                    node.folded,
+                    0,
+                    config.rake)).utility[0];
             for (int hand = 0; hand < n0; ++hand)
             {
                 if (!hand_live(0, hand, turn, river))
@@ -3580,12 +3585,18 @@ struct StreetBatchSolver::Engine
             }
             return;
         }
-        const double win_pay = ChipPayoff::terminal(
-            config.pot, node.contrib[0], node.contrib[1], -1, 1, config.rake).utility[0];
-        const double lose_pay = ChipPayoff::terminal(
-            config.pot, node.contrib[0], node.contrib[1], -1, -1, config.rake).utility[0];
-        const double tie_pay = ChipPayoff::terminal(
-            config.pot, node.contrib[0], node.contrib[1], -1, 0, config.rake).utility[0];
+        const double win_pay = apply_icm_terminal(
+            config.icm,
+            ChipPayoff::terminal(
+                config.pot, node.contrib[0], node.contrib[1], -1, 1, config.rake)).utility[0];
+        const double lose_pay = apply_icm_terminal(
+            config.icm,
+            ChipPayoff::terminal(
+                config.pot, node.contrib[0], node.contrib[1], -1, -1, config.rake)).utility[0];
+        const double tie_pay = apply_icm_terminal(
+            config.icm,
+            ChipPayoff::terminal(
+                config.pot, node.contrib[0], node.contrib[1], -1, 0, config.rake)).utility[0];
         showdown_side(ctx, 0, turn, river, win_pay, lose_pay, tie_pay, ctx.amount_buf[1], ev0, stable);
         showdown_side(ctx, 1, turn, river, win_pay, lose_pay, tie_pay, ctx.amount_buf[0], ev1, stable);
     }

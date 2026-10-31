@@ -48,6 +48,7 @@ into `ChipPayoff::terminal`. `StreetBatchSolver` and `RiverBatchSolver` use the
 same rake at public-tree / per-deal terminals, including the frozen showdown
 kernel (winner pays full rake; ties split it). CFR still trains on the player-0
 scalar. Nash-gap and best-response helpers that assume chip zero-sum remain
-approximate under positive rake; ICM and opponent incentives are out of scope
-here (see open M8 work). Zero rake reproduces prior chip terminals and pinned
+approximate under positive rake (same caveat as ICM). Opponent incentives are
+out of scope here. Optional ICM wraps these chip terminals afterward; see
+[ICM.md](ICM.md). Zero rake reproduces prior chip terminals and pinned
 fixtures bit-identically.

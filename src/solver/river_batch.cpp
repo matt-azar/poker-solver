@@ -4,6 +4,7 @@
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
 #include "solver/chip_payoff.hpp"
+#include "solver/icm.hpp"
 #include "solver/regret_matching.hpp"
 
 #include <algorithm>
@@ -313,6 +314,7 @@ struct RiverBatchSolver::Engine
             throw std::invalid_argument("max raises must be from 0 through 6");
         }
         config.rake.validate();
+        config.icm.validate(config.pot, config.stack);
 
         BetState root;
         root.pot = config.pot;
@@ -479,13 +481,14 @@ struct RiverBatchSolver::Engine
         const int outcome = node.folded < 0
             ? showdown[static_cast<std::size_t>(h0 * n1 + h1)]
             : 0;
-        return ChipPayoff::terminal(
+        const PlayerPayoff chips = ChipPayoff::terminal(
             config.pot,
             node.contrib[0],
             node.contrib[1],
             node.folded,
             outcome,
-            config.rake).utility[0];
+            config.rake);
+        return apply_icm_terminal(config.icm, chips).utility[0];
     }
 
     double cfr_deal(int node_index, double pi0, double pi1, double chance, int h0, int h1,
