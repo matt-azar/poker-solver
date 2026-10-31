@@ -29,3 +29,8 @@ __pycache__/
 *.dll
 *.so
 *.dylib
+
+# Tauri sidecar binaries (CI-produced)
+desktop/src-tauri/binaries/explorer-*
+!desktop/src-tauri/binaries/.gitkeep
+!desktop/src-tauri/binaries/README.md
