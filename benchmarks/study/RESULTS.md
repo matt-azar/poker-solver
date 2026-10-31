@@ -84,6 +84,10 @@ On top of `#51` / latest `main`, walking precomputed supported-hand indexes thro
 
 On top of `#52`, walking the same supported-hand indexes through frozen decision expand / regret mix did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈0.99x). Profiled decision/expand buckets shrank, but wall train did not. Change reverted; details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md).
 
+## Sparse serial-chance reach / EV reduce probe (`cursor/engine-speed-5-e394`, not shipped)
+
+On top of `#52`, walking supported-hand indexes through frozen serial/parallel chance `pi` filters and EV reduces (and `card_reaches_pair`) did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈0.97x / 1.00x). One-thread `chance_seconds` became visible, but wall train did not move. Change reverted; details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md).
+
 ## Next measurement
 
-Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target. Look past dense hand scans on flop boards (few blocked combos); remaining train is still showdown/chance-heavy after `#52`.
+Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target. Dense idx* walks over flop boards (few blocked combos) are exhausted for decision and chance bookkeeping after `#52`–speed-5 probes; remaining train is still nested showdown/chance-child work.
