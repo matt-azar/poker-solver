@@ -8,6 +8,7 @@
 #include "poker/range.hpp"
 #include "solver/chip_payoff.hpp"
 #include "solver/icm.hpp"
+#include "solver/incentives.hpp"
 #include "solver/regret_matching.hpp"
 
 #include <algorithm>
@@ -817,6 +818,8 @@ struct StreetBatchSolver::Engine
         int contrib[2] = {};
         int n_actions = 0;
         int child[8] = {};
+        // Path-attributed player-0 incentive delta (0 when incentives empty).
+        double incentive_u0 = 0.0;
         std::pmr::vector<int> slot_of;
         std::pmr::string path;
         std::pmr::string action_labels[8];
@@ -862,6 +865,7 @@ struct StreetBatchSolver::Engine
             contrib[0] = other.contrib[0];
             contrib[1] = other.contrib[1];
             n_actions = other.n_actions;
+            incentive_u0 = other.incentive_u0;
             for (int index = 0; index < 8; ++index)
             {
                 child[index] = other.child[index];
@@ -1245,6 +1249,7 @@ struct StreetBatchSolver::Engine
         root.street = 0;
         build_node(root, "", 0);
         index_parents();
+        fill_terminal_incentives();
         count_and_index_hands();
         set_hand_counts();
         visit_slots(false);
@@ -1333,6 +1338,7 @@ struct StreetBatchSolver::Engine
         }
         config.rake.validate();
         config.icm.validate(config.pot, config.stack);
+        config.incentives.validate();
         if (config.threads < 1 || config.threads > kMaxThreads)
         {
             throw std::invalid_argument(
@@ -2118,7 +2124,7 @@ struct StreetBatchSolver::Engine
             node.folded,
             outcome,
             config.rake);
-        return apply_icm_terminal(config.icm, chips).utility[0];
+        return apply_icm_terminal(config.icm, chips).utility[0] + node.incentive_u0;
     }
 
     double cfr_deal(int node_index, double pi0, double pi1, double chance, const Deal& deal,
@@ -3694,7 +3700,8 @@ struct StreetBatchSolver::Engine
                     node.contrib[1],
                     node.folded,
                     0,
-                    config.rake)).utility[0];
+                    config.rake)).utility[0]
+                + node.incentive_u0;
             const BoardSupport& fold_masks = board_support_for(turn, river);
             std::fill(ev0.begin(), ev0.end(), 0.0);
             std::fill(ev1.begin(), ev1.end(), 0.0);
@@ -3729,15 +3736,18 @@ struct StreetBatchSolver::Engine
         const double win_pay = apply_icm_terminal(
             config.icm,
             ChipPayoff::terminal(
-                config.pot, node.contrib[0], node.contrib[1], -1, 1, config.rake)).utility[0];
+                config.pot, node.contrib[0], node.contrib[1], -1, 1, config.rake)).utility[0]
+            + node.incentive_u0;
         const double lose_pay = apply_icm_terminal(
             config.icm,
             ChipPayoff::terminal(
-                config.pot, node.contrib[0], node.contrib[1], -1, -1, config.rake)).utility[0];
+                config.pot, node.contrib[0], node.contrib[1], -1, -1, config.rake)).utility[0]
+            + node.incentive_u0;
         const double tie_pay = apply_icm_terminal(
             config.icm,
             ChipPayoff::terminal(
-                config.pot, node.contrib[0], node.contrib[1], -1, 0, config.rake)).utility[0];
+                config.pot, node.contrib[0], node.contrib[1], -1, 0, config.rake)).utility[0]
+            + node.incentive_u0;
         showdown_side(ctx, 0, turn, river, win_pay, lose_pay, tie_pay, ctx.amount_buf[1], ev0, stable);
         showdown_side(ctx, 1, turn, river, win_pay, lose_pay, tie_pay, ctx.amount_buf[0], ev1, stable);
     }
@@ -4959,6 +4969,55 @@ struct StreetBatchSolver::Engine
                     claim(node.child[action], action, false);
                 }
             }
+        }
+    }
+
+    void fill_terminal_incentives()
+    {
+        if (!config.incentives.enabled())
+        {
+            return;
+        }
+        config.incentives.validate();
+        std::vector<IncentiveEdge> rev;
+        std::vector<IncentiveEdge> path;
+        for (int index = 0; index < static_cast<int>(nodes.size()); ++index)
+        {
+            Node& node = nodes[static_cast<std::size_t>(index)];
+            if (!node.terminal)
+            {
+                continue;
+            }
+            rev.clear();
+            for (int at = index; at >= 0;)
+            {
+                const ParentLink& link = parent_link[static_cast<std::size_t>(at)];
+                if (link.parent < 0)
+                {
+                    break;
+                }
+                if (!link.from_chance && link.action >= 0)
+                {
+                    const Node& parent = nodes[static_cast<std::size_t>(link.parent)];
+                    const std::string_view display(parent.action_labels[link.action]);
+                    IncentiveEdge edge;
+                    edge.player = parent.player;
+                    edge.display_label.assign(display.data(), display.size());
+                    edge.compact_label = incentive_compact_from_display(display);
+                    if (edge.compact_label.empty())
+                    {
+                        edge.compact_label = edge.display_label;
+                    }
+                    rev.push_back(std::move(edge));
+                }
+                at = link.parent;
+            }
+            path.assign(rev.rbegin(), rev.rend());
+            PlayerPayoff zero;
+            zero.utility[0] = 0.0;
+            zero.utility[1] = 0.0;
+            node.incentive_u0 =
+                apply_path_incentives(config.incentives, zero, path).utility[0];
         }
     }
 
