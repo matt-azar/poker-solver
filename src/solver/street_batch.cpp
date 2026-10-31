@@ -978,12 +978,43 @@ struct StreetBatchSolver::Engine
     std::pmr::vector<int> hole_b[2];
     std::pmr::vector<int> hand_of[2];
     mutable std::pmr::unordered_map<int, RunoutRanks> runout_ranks;
+    // Structural hand_supported masks per walkable (turn, river), including
+    // partial boards. Filled once; ensure_board_support only copies them.
+    struct BoardSupport
+    {
+        using allocator_type = std::pmr::polymorphic_allocator<std::byte>;
+        std::pmr::vector<char> live0;
+        std::pmr::vector<char> live1;
+
+        template <typename Alloc>
+        BoardSupport(std::allocator_arg_t, const Alloc& alloc)
+            : live0(alloc)
+            , live1(alloc)
+        {
+        }
+
+        template <typename Alloc>
+        BoardSupport(std::allocator_arg_t, const Alloc& alloc, const BoardSupport& other)
+            : live0(other.live0, alloc)
+            , live1(other.live1, alloc)
+        {
+        }
+
+        template <typename Alloc>
+        BoardSupport(std::allocator_arg_t, const Alloc& alloc, BoardSupport&& other)
+            : live0(std::move(other.live0), alloc)
+            , live1(std::move(other.live1), alloc)
+        {
+        }
+    };
+    mutable std::pmr::unordered_map<int, BoardSupport> board_support_;
     mutable WorkerContext workspace;
     std::pmr::vector<std::uint64_t> mask[2];
     std::pmr::vector<Support> support[2];
     std::pmr::vector<double> frozen_sigma;
     mutable bool average_ready = false;
     mutable bool ranks_ready_ = false;
+    mutable bool support_ready_ = false;
     mutable double cache_init_seconds_ = 0.0;
     double worker_setup_seconds_ = 0.0;
     bool failed_ = false;
@@ -1076,6 +1107,7 @@ struct StreetBatchSolver::Engine
         , hole_b{std::pmr::vector<int>(heap_), std::pmr::vector<int>(heap_)}
         , hand_of{std::pmr::vector<int>(heap_), std::pmr::vector<int>(heap_)}
         , runout_ranks(heap_)
+        , board_support_(heap_)
         , workspace(heap_)
         , mask{std::pmr::vector<std::uint64_t>(heap_), std::pmr::vector<std::uint64_t>(heap_)}
         , support{std::pmr::vector<Support>(heap_), std::pmr::vector<Support>(heap_)}
@@ -1484,7 +1516,7 @@ struct StreetBatchSolver::Engine
             "plan"));
         add(checked_mul(planned_slots_, sizeof(int), "plan"));
         add(checked_mul(hands0 + hands1, sizeof(double), "plan"));
-        // Board support masks reused across decision actions on the same runout.
+        // Worker-local board support masks reused across decision actions.
         add(checked_mul(hands0 + hands1, sizeof(char), "plan"));
         const int free_cards = 52 - static_cast<int>(config.board.size());
         const std::uint64_t keys = config.board.size() == 5
@@ -1495,6 +1527,18 @@ struct StreetBatchSolver::Engine
                 static_cast<std::uint64_t>(free_cards - 1),
                 "plan")
             : static_cast<std::uint64_t>(free_cards);
+        // Walkable boards include the root and, on a flop, each turn-only board.
+        const std::uint64_t support_keys = config.board.size() == 5
+            ? 1ull
+            : config.board.size() == 3
+            ? checked_add(
+                1ull,
+                checked_add(
+                    static_cast<std::uint64_t>(free_cards),
+                    keys,
+                    "plan"),
+                "plan")
+            : checked_add(1ull, static_cast<std::uint64_t>(free_cards), "plan");
         const auto side_meta = [&](std::uint64_t hands)
         {
             std::uint64_t bytes = checked_mul(hands, sizeof(std::uint32_t), "plan");
@@ -1508,6 +1552,9 @@ struct StreetBatchSolver::Engine
         // This is a plan, not the measured allocation.
         const std::uint64_t map_node = 3ull * sizeof(void*) + sizeof(RunoutRanks);
         add(checked_mul(keys, checked_add(payload, map_node, "plan"), "plan"));
+        const std::uint64_t support_payload = checked_mul(hands0 + hands1, sizeof(char), "plan");
+        const std::uint64_t support_node = 3ull * sizeof(void*) + sizeof(BoardSupport);
+        add(checked_mul(support_keys, checked_add(support_payload, support_node, "plan"), "plan"));
         if (config.threads > 1)
         {
             const std::uint64_t extra = static_cast<std::uint64_t>(config.threads - 1);
@@ -2429,6 +2476,18 @@ struct StreetBatchSolver::Engine
         ctx.support_river = -2;
     }
 
+    const BoardSupport& board_support_for(int turn, int river) const
+    {
+        ensure_support_masks();
+        const int key = (turn + 1) * 64 + (river + 1);
+        const auto found = board_support_.find(key);
+        if (found == board_support_.end() || found->second.live0.empty())
+        {
+            throw std::logic_error("street board support cache missed a reserved board");
+        }
+        return found->second;
+    }
+
     void ensure_board_support(WorkerContext& ctx, int turn, int river) const
     {
         if (ctx.support_turn == turn && ctx.support_river == river)
@@ -2438,16 +2497,9 @@ struct StreetBatchSolver::Engine
         const auto started = profile_
             ? std::chrono::steady_clock::now()
             : std::chrono::steady_clock::time_point{};
-        for (int hand = 0; hand < n0; ++hand)
-        {
-            ctx.live0[static_cast<std::size_t>(hand)] =
-                hand_supported(0, hand, turn, river) ? 1 : 0;
-        }
-        for (int hand = 0; hand < n1; ++hand)
-        {
-            ctx.live1[static_cast<std::size_t>(hand)] =
-                hand_supported(1, hand, turn, river) ? 1 : 0;
-        }
+        const BoardSupport& masks = board_support_for(turn, river);
+        std::copy(masks.live0.begin(), masks.live0.end(), ctx.live0.begin());
+        std::copy(masks.live1.begin(), masks.live1.end(), ctx.live1.begin());
         ctx.support_turn = turn;
         ctx.support_river = river;
         if (profile_)
@@ -2567,6 +2619,92 @@ struct StreetBatchSolver::Engine
         {
             throw std::logic_error("street rank cache did not reserve every runout");
         }
+        prepare_support_cache();
+    }
+
+    // Every (turn, river) the frozen walk can request, including partial boards
+    // such as (turn, -1) on a flop before the river is dealt.
+    void prepare_support_cache()
+    {
+        budget_->set_stage("board_support");
+        bool on_board[52] = {};
+        for (int card : config.board)
+        {
+            on_board[card] = true;
+        }
+        const auto reserve = [&](int turn, int river)
+        {
+            const int key = (turn + 1) * 64 + (river + 1);
+            const auto inserted = board_support_.try_emplace(key);
+            BoardSupport& masks = inserted.first->second;
+            masks.live0.reserve(static_cast<std::size_t>(n0));
+            masks.live1.reserve(static_cast<std::size_t>(n1));
+        };
+        reserve(-1, -1);
+        if (config.board.size() == 3)
+        {
+            for (int turn = 0; turn < 52; ++turn)
+            {
+                if (on_board[turn])
+                {
+                    continue;
+                }
+                reserve(turn, -1);
+                for (int river = 0; river < 52; ++river)
+                {
+                    if (on_board[river] || river == turn)
+                    {
+                        continue;
+                    }
+                    reserve(turn, river);
+                }
+            }
+        }
+        else if (config.board.size() == 4)
+        {
+            for (int river = 0; river < 52; ++river)
+            {
+                if (!on_board[river])
+                {
+                    reserve(-1, river);
+                }
+            }
+        }
+    }
+
+    void ensure_support_masks() const
+    {
+        if (support_ready_)
+        {
+            return;
+        }
+        const auto started = std::chrono::steady_clock::now();
+        for (auto& entry : board_support_)
+        {
+            const int key = entry.first;
+            const int turn = key / 64 - 1;
+            const int river = key % 64 - 1;
+            BoardSupport& masks = entry.second;
+            if (!masks.live0.empty())
+            {
+                continue;
+            }
+            masks.live0.resize(static_cast<std::size_t>(n0));
+            masks.live1.resize(static_cast<std::size_t>(n1));
+            for (int hand = 0; hand < n0; ++hand)
+            {
+                masks.live0[static_cast<std::size_t>(hand)] =
+                    hand_supported(0, hand, turn, river) ? 1 : 0;
+            }
+            for (int hand = 0; hand < n1; ++hand)
+            {
+                masks.live1[static_cast<std::size_t>(hand)] =
+                    hand_supported(1, hand, turn, river) ? 1 : 0;
+            }
+        }
+        support_ready_ = true;
+        cache_init_seconds_ += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
     }
 
     bool hand_live(int player, int hand, int turn, int river) const
@@ -3009,10 +3147,11 @@ struct StreetBatchSolver::Engine
         const auto started = profile_ && profile_ctx != nullptr
             ? std::chrono::steady_clock::now()
             : std::chrono::steady_clock::time_point{};
+        const BoardSupport& masks = board_support_for(turn, river);
         bool found = false;
         for (int hand = 0; hand < n0; ++hand)
         {
-            if (pi0[hand] > 0.0 && hand_supported(0, hand, turn, river))
+            if (pi0[hand] > 0.0 && masks.live0[static_cast<std::size_t>(hand)])
             {
                 found = true;
                 break;
@@ -3022,7 +3161,7 @@ struct StreetBatchSolver::Engine
         {
             for (int hand = 0; hand < n1; ++hand)
             {
-                if (pi1[hand] > 0.0 && hand_supported(1, hand, turn, river))
+                if (pi1[hand] > 0.0 && masks.live1[static_cast<std::size_t>(hand)])
                 {
                     found = true;
                     break;
@@ -4109,6 +4248,7 @@ struct StreetBatchSolver::Engine
         }
         average_ready = false;
         ensure_ranks();
+        ensure_support_masks();
         const auto started = std::chrono::steady_clock::now();
         for (int step = 0; step < count; ++step)
         {
