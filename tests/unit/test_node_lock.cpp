@@ -220,6 +220,35 @@ void test_text_round_trip()
 
 } // namespace
 
+void test_erase_combo()
+{
+    LockSet set;
+    NodeLock selected;
+    selected.infoset_id = 3;
+    selected.kind = LockKind::SelectedCombos;
+    selected.combo_indices = {1, 4, 7};
+    const double probs[2] = {0.25, 0.75};
+    selected.actions = make_action_lock_row(probs, 2);
+    set.upsert(selected);
+    CHECK(set.erase_combo(3, 4));
+    CHECK(set.find(3) != nullptr);
+    CHECK(set.find(3)->combo_indices.size() == 2);
+    CHECK(set.find(3)->combo_indices[0] == 1);
+    CHECK(set.find(3)->combo_indices[1] == 7);
+    CHECK(!set.erase_combo(3, 4));
+    CHECK(set.erase_combo(3, 1));
+    CHECK(set.erase_combo(3, 7));
+    CHECK(set.find(3) == nullptr);
+
+    NodeLock full;
+    full.infoset_id = 8;
+    full.kind = LockKind::FullNode;
+    full.actions = make_action_lock_row(probs, 2);
+    set.upsert(full);
+    CHECK(!set.erase_combo(8, 0));
+    CHECK(set.find(8) != nullptr);
+}
+
 void run_node_lock_tests()
 {
     test_validate_action_row_accepts();
@@ -228,4 +257,5 @@ void run_node_lock_tests()
     test_unlocked_distinct_from_zero_lock();
     test_lock_set_upsert_erase();
     test_text_round_trip();
+    test_erase_combo();
 }

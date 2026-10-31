@@ -53,7 +53,8 @@ Node locks (street solutions; public-node id `pN.t-1.r-1` maps to infoset `N`):
 - `GET /api/solutions/{id}/locks` lists held locks
 - `PUT /api/solutions/{id}/locks` with `{"node_id","kind":"full"|"selected","hand_indices","probs"}` upserts a lock after validating action arity via `inspect_node`
 - `DELETE /api/solutions/{id}/locks?node_id=...` (or `/locks/{node}`) removes one lock; omit the node to clear all
-- `POST /api/solutions/{id}/resolve-locked` with `{"iterations":N}` and optional `accuracy` / `samples` / `time_limit` retains the current revision as a Session baseline, rebuilds the street solver, and re-solves from zero with locks (v1 warm-start policy). Publishes a new solution id; status exposes `baseline_solution_id`. Baseline export/nodes stay queryable
+- `POST /api/solutions/{id}/resolve-locked` with `{"iterations":N}` and optional `accuracy` / `samples` / `time_limit` / `warm_start` retains the current revision as a Session baseline. Default rebuilds and re-solves from zero with locks. `warm_start:1` keeps regrets/strategy-sums and continues N more iterations under locks. Publishes a new solution id; status exposes `baseline_solution_id`. Baseline export/nodes stay queryable
+- `DELETE /api/solutions/{id}/locks?node_id=…&hand_index=K` removes one combo from a SelectedCombos lock (erases the node lock when none remain). Full-node locks unlock with `node_id` only
 - `GET /api/compare?baseline=sA&scenario=sB&node_id=...` returns root EV/gap for both revisions plus per-hand strategy vectors, deltas, and locked-hand marks
 
 Save/Open uses PSOL payload version 2 with a trailing `locks_text` field (`format_lock_set`). Version 1 files still open with empty locks.

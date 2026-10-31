@@ -573,7 +573,7 @@ void check_lock_resolve_compare_workflow()
     const std::string checkpoint = workflow_checkpoint_path() + ".locks";
     const std::string path_json = json_escape_path(checkpoint);
     const std::string solve =
-        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\"],\"oop_range\":\"2c3d\",\"ip_range\":\"AhAd\","
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\"],\"oop_range\":\"2c3d,2h3h\",\"ip_range\":\"AhAd\","
         "\"pot\":100,\"stack\":100,\"iterations\":8,\"samples\":2,\"max_raises\":1,"
         "\"allow_all_in\":0,\"oop_bets\":[1.0],\"ip_bets\":[],\"oop_turn_bets\":[1.0],"
         "\"memory_mib\":128,\"algorithm\":\"vanilla\"}";
@@ -647,6 +647,37 @@ void check_lock_resolve_compare_workflow()
     CHECK(http_exchange("GET", "/api/solutions/" + reopened + "/locks", "", reopened_locks));
     CHECK(reopened_locks.status == 200);
     CHECK(reopened_locks.body.find(root) != std::string::npos);
+
+    // Combo unlock removes one selected hand; warm_start continues from stored tables.
+    HttpResult locked_two;
+    CHECK(http_exchange(
+        "PUT",
+        "/api/solutions/" + reopened + "/locks",
+        "{\"node_id\":\"" + root + "\",\"kind\":\"selected\",\"hand_indices\":[0,1],\"probs\":[0,1]}",
+        locked_two));
+    CHECK(locked_two.status == 200);
+    HttpResult unlocked_one;
+    CHECK(http_exchange(
+        "DELETE",
+        "/api/solutions/" + reopened + "/locks?node_id=" + root + "&hand_index=1",
+        "",
+        unlocked_one));
+    CHECK(unlocked_one.status == 200);
+    CHECK(unlocked_one.body.find(root) != std::string::npos);
+    double before_warm = 0.0;
+    CHECK(json_number(opened.body, "iterations", before_warm));
+    HttpResult warm_accepted;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solutions/" + reopened + "/resolve-locked",
+        "{\"iterations\":2,\"samples\":1,\"warm_start\":1}",
+        warm_accepted));
+    CHECK(warm_accepted.status == 202);
+    HttpResult warmed;
+    CHECK(wait_for_completion(warmed));
+    double after_warm = 0.0;
+    CHECK(json_number(warmed.body, "iterations", after_warm));
+    CHECK(after_warm >= before_warm + 2.0 - 1e-9);
     std::remove(checkpoint.c_str());
 }
 
