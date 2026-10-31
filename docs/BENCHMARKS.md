@@ -349,3 +349,18 @@ After board-support masks (`#51` / `eaeffaf`), a short instrumented profile on t
 | turn_half_pot | 4 | 1.162 | 0.839 | **1.39x** |
 
 Instrumented 3-iter profile at 1 thread: flop `showdown_seconds` 0.437 → 0.230, train 1.141 → 0.916; turn showdown 0.185 → 0.074, train 0.405 → 0.263. Allocated bytes rise with twin indexes, ordered-amount scratch, and per-board index lists (flop 4 threads 177,166,040 → 177,667,784). Parity pins at iteration 30: 1-vs-4 and after-vs-`main` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,644 assertions, 0 failures.
+
+## Decision/expand idx* walk probe (not shipped)
+
+`cursor/engine-speed-4-e394` tried walking `BoardSupport::{idx0,idx1}` through frozen `fill_actor_slot_bases`, action expand, and decision regret / average mix (same pattern as the `#52` terminal paths). Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Short microbench only; code change reverted.
+
+### Reset-30 warm-cache vs engine-speed-3 tip (`b3f3923` / `#52` pre-rebase tip)
+
+`street_parallel_bench sample`, five alternating before/after pairs at four threads, quiet host, no walk profile:
+
+| Case | Threads | Before median train (s) | After median train (s) | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| flop_paired | 4 | 1.589 | 1.600 | **0.99x** |
+| turn_half_pot | 4 | 0.795 | 0.805 | **0.99x** |
+
+An earlier noisier three-pair set was ~1.02x flop / ~1.06x turn. Instrumented 3-iter profile at 1 thread did shrink `decision_seconds` (flop ≈0.174 → 0.109) and `expand_seconds` (≈0.111 → 0.087), but wall train for reset-30 at four threads did not clear ~1.05x. On the paired flop only ~11% of hole combos are board-blocked, so the dense `live[]` scan was already cheap relative to showdown/chance, and zero-fills for unsupported reaches offset the sparse walk. Parity pins at iteration 30: 1-vs-4 and after-vs-`#52` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,666 assertions, 0 failures. Not shipped.
