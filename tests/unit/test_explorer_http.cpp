@@ -905,6 +905,48 @@ void run_explorer_http_tests()
     CHECK(bad_time_limit.status == 400);
     CHECK(bad_time_limit.body.find("time_limit") != std::string::npos);
 
+    HttpResult bad_rake_rate;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solve",
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":1,\"samples\":1,\"rake_rate\":1.5,"
+        "\"max_raises\":0,\"allow_all_in\":0,\"oop_bets\":[],\"ip_bets\":[],\"memory_mib\":128}",
+        bad_rake_rate));
+    CHECK(bad_rake_rate.status == 400);
+    CHECK(bad_rake_rate.body.find("rake_rate") != std::string::npos);
+
+    HttpResult bad_rake_cap;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solve",
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":1,\"samples\":1,\"rake_rate\":0.05,\"rake_cap\":-1,"
+        "\"max_raises\":0,\"allow_all_in\":0,\"oop_bets\":[],\"ip_bets\":[],\"memory_mib\":128}",
+        bad_rake_cap));
+    CHECK(bad_rake_cap.status == 400);
+    CHECK(bad_rake_cap.body.find("rake_cap") != std::string::npos);
+
+    // Positive rake on a tiny check-only river: winner EV is 50 - floor(0.05*100) = 45.
+    const std::string raked =
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":3,\"samples\":1,\"rake_rate\":0.05,\"rake_cap\":0,"
+        "\"max_raises\":0,\"allow_all_in\":0,\"oop_bets\":[],\"ip_bets\":[],\"memory_mib\":128}";
+    HttpResult raked_accepted;
+    CHECK(http_exchange("POST", "/api/solve", raked, raked_accepted));
+    CHECK(raked_accepted.status == 202);
+    HttpResult raked_status;
+    CHECK(wait_for_completion(raked_status));
+    double status_rake_rate = -1.0;
+    double status_rake_cap = -1.0;
+    CHECK(json_number(raked_status.body, "rake_rate", status_rake_rate));
+    CHECK(json_number(raked_status.body, "rake_cap", status_rake_cap));
+    CHECK_NEAR(status_rake_rate, 0.05, 1e-12);
+    CHECK_NEAR(status_rake_cap, 0.0, 1e-12);
+    double raked_ev = 0.0;
+    CHECK(json_number(raked_status.body, "player0_expected_utility", raked_ev));
+    CHECK_NEAR(raked_ev, 45.0, 1e-6);
+
     // time_limit 0 stops after the first completed sample chunk and keeps the solve.
     const std::string timed =
         "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","

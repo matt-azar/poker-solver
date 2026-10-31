@@ -312,6 +312,8 @@ struct Job
     double all_in_threshold = 0.0;
     double accuracy = -1.0;
     double time_limit = -1.0;
+    double rake_rate = 0.0;
+    double rake_cap = 0.0;
     int max_raises = 2;
     int iterations = 200;
     int samples = 5;
@@ -444,6 +446,16 @@ Job parse_job(const std::string& text)
     else
     {
         job.time_limit = -1.0;
+    }
+    job.rake_rate = read_number(text, "rake_rate", 0);
+    job.rake_cap = read_number(text, "rake_cap", 0);
+    if (!std::isfinite(job.rake_rate) || job.rake_rate < 0.0 || job.rake_rate > 1.0)
+    {
+        throw std::invalid_argument("rake_rate must be a number in [0, 1]");
+    }
+    if (!std::isfinite(job.rake_cap) || job.rake_cap < 0.0)
+    {
+        throw std::invalid_argument("rake_cap must be a non-negative number of chips");
     }
     job.max_raises = static_cast<int>(read_number(text, "max_raises", 2));
     job.iterations = static_cast<int>(read_number(text, "iterations", 200));
@@ -636,6 +648,10 @@ std::string build_status(const StatusDraft& draft)
     {
         out += format_number(job.time_limit);
     }
+    out += ",\"rake_rate\":";
+    out += format_number(job.rake_rate);
+    out += ",\"rake_cap\":";
+    out += format_number(job.rake_cap);
     out += ",\"frozen\":";
     out += job.frozen ? "true" : "false";
     out += ",\"memory_mib\":";
@@ -987,6 +1003,8 @@ poker::streets::StreetConfig street_config(const Job& job)
     config.geometric = job.geometric;
     config.all_in_threshold = job.all_in_threshold;
     config.max_raises = job.max_raises;
+    config.rake.rate = job.rake_rate;
+    config.rake.cap = job.rake_cap;
     config.memory_mib = job.memory_mib;
     config.threads = job.threads;
     return config;
@@ -2731,6 +2749,8 @@ Job job_from_street(const poker::streets::StreetConfig& config)
     job.geometric = config.geometric;
     job.all_in_threshold = config.all_in_threshold;
     job.max_raises = config.max_raises;
+    job.rake_rate = config.rake.rate;
+    job.rake_cap = config.rake.cap;
     job.memory_mib = config.memory_mib;
     job.threads = config.threads;
     return job;
@@ -2750,6 +2770,8 @@ Job job_from_river(const poker::river::RiverConfig& config)
     job.ip_raises = config.ip_raise_sizes;
     job.allow_all_in = config.allow_all_in;
     job.max_raises = config.max_raises;
+    job.rake_rate = config.rake.rate;
+    job.rake_cap = config.rake.cap;
     return job;
 }
 
