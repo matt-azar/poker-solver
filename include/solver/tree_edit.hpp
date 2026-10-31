@@ -15,8 +15,10 @@ namespace poker::solver
 // How a LineEdit constrains the betting tree before build.
 // Force keeps only the named action at that decision along the path.
 // Remove drops the named action (check/fold may remain subject to game rules).
-// AddSize inserts an extra bet/raise size at the path's decision (fraction or
-// chips); the engine applies it later — this model only stores the intent.
+// AddSize injects one extra bet/raise size at the matching public decision:
+// pot fraction uses the same basis as listed sizes (pot, or pot+to_call when
+// facing); Nc is an absolute chip size. Illegal or duplicate sizes are skipped;
+// edits apply in list order so later Force/Remove can see an earlier AddSize.
 enum class LineEditKind
 {
     Force,

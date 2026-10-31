@@ -46,6 +46,24 @@ LineEdit remove_along(LinePath path, const char* action)
     return edit;
 }
 
+LineEdit add_size_along(LinePath path, double pot_fraction)
+{
+    LineEdit edit;
+    edit.kind = LineEditKind::AddSize;
+    edit.path = std::move(path);
+    edit.size_pot_fraction = pot_fraction;
+    return edit;
+}
+
+LineEdit add_chips_along(LinePath path, int chips)
+{
+    LineEdit edit;
+    edit.kind = LineEditKind::AddSize;
+    edit.path = std::move(path);
+    edit.size_chips = chips;
+    return edit;
+}
+
 int card(const char* text)
 {
     return poker::holdem::parse_card(text);
@@ -219,7 +237,7 @@ void run_tree_edit_tests()
         CHECK(validate_line_edit(edit)); // label "0" is a legal action name token
     }
 
-    // StreetGame applies Force/Remove to legal actions; AddSize stays stored only.
+    // StreetGame applies Force/Remove/AddSize to legal actions at matching paths.
     {
         StreetConfig plain = tiny_turn_one_bet();
         const StreetGame baseline(plain);
@@ -297,20 +315,78 @@ void run_tree_edit_tests()
 
     {
         StreetConfig with_add = tiny_turn_one_bet();
-        LineEdit add;
-        add.kind = LineEditKind::AddSize;
-        add.size_pot_fraction = 0.33;
-        with_add.tree_edits.append(std::move(add));
+        with_add.tree_edits.append(add_size_along(LinePath{}, 0.33));
         CHECK(with_add.tree_edits.size() == 1);
         const StreetGame game(with_add);
         const StreetGame::State open = game.child_chance(game.root(), 0);
-        CHECK(game.action_count(game.infoset(open)) == 2);
+        CHECK(game.action_count(game.infoset(open)) == 3);
         CHECK(has_action_label(game, open, "Check"));
+        CHECK(has_action_label(game, open, "Bet 33"));
         CHECK(has_action_label(game, open, "Bet 50"));
-        CHECK(!has_action_label(game, open, "Bet 33"));
     }
 
-    // StreetBatch public tree applies the same Force/Remove filter.
+    {
+        StreetConfig with_chips = tiny_turn_one_bet();
+        with_chips.tree_edits.append(add_chips_along(LinePath{}, 20));
+        const StreetGame game(with_chips);
+        const StreetGame::State open = game.child_chance(game.root(), 0);
+        CHECK(has_action_label(game, open, "Bet 20"));
+        CHECK(has_action_label(game, open, "Bet 50"));
+        CHECK(game.action_count(game.infoset(open)) == 3);
+    }
+
+    {
+        // Duplicate of an existing listed size is a no-op.
+        StreetConfig dup = tiny_turn_one_bet();
+        dup.tree_edits.append(add_size_along(LinePath{}, 0.5));
+        const StreetGame game(dup);
+        const StreetGame::State open = game.child_chance(game.root(), 0);
+        CHECK(game.action_count(game.infoset(open)) == 2);
+        CHECK(has_action_label(game, open, "Bet 50"));
+    }
+
+    {
+        // Path-scoped AddSize only hits the matching decision.
+        StreetConfig along = tiny_turn_one_bet();
+        LinePath path;
+        path.steps.push_back(LineStep{"Check"});
+        along.tree_edits.append(add_size_along(path, 0.25));
+        const StreetGame game(along);
+        StreetGame::State state = game.child_chance(game.root(), 0);
+        CHECK(game.action_count(game.infoset(state)) == 2);
+        CHECK(!has_action_label(game, state, "Bet 25"));
+        int check_action = -1;
+        const int infoset = game.infoset(state);
+        for (int action = 0; action < game.action_count(infoset); ++action)
+        {
+            if (game.action_label(infoset, action) == "Check")
+            {
+                check_action = action;
+                break;
+            }
+        }
+        CHECK(check_action >= 0);
+        state = game.child_action(state, check_action);
+        CHECK(has_action_label(game, state, "Check"));
+        CHECK(has_action_label(game, state, "Bet 25"));
+        CHECK(has_action_label(game, state, "Bet 50"));
+        CHECK(game.action_count(game.infoset(state)) == 3);
+    }
+
+    {
+        // Ordered edits: AddSize then Force keeps only the injected size.
+        StreetConfig ordered = tiny_turn_one_bet();
+        ordered.tree_edits.append(add_size_along(LinePath{}, 0.33));
+        ordered.tree_edits.append(force_root("b33"));
+        const StreetGame game(ordered);
+        const StreetGame::State open = game.child_chance(game.root(), 0);
+        CHECK(game.action_count(game.infoset(open)) == 1);
+        CHECK(has_action_label(game, open, "Bet 33"));
+        CHECK(!has_action_label(game, open, "Bet 50"));
+        CHECK(!has_action_label(game, open, "Check"));
+    }
+
+    // StreetBatch public tree applies the same Force/Remove/AddSize edits.
     {
         StreetConfig plain = tiny_turn_one_bet();
         StreetBatchSolver baseline(plain);
@@ -336,6 +412,17 @@ void run_tree_edit_tests()
         CHECK(removed_root.actions.size() == 1);
         CHECK(removed_root.actions[0].label == "Check");
         CHECK(removed_solver.public_decisions() == forced_solver.public_decisions());
+
+        StreetConfig with_add = tiny_turn_one_bet();
+        with_add.tree_edits.append(add_size_along(LinePath{}, 0.33));
+        StreetBatchSolver added_solver(with_add);
+        added_solver.prepare_inspection();
+        const auto added_root = added_solver.inspect_node(added_solver.root_node_id());
+        CHECK(added_root.actions.size() == 3);
+        CHECK(added_root.actions[0].label == "Check");
+        CHECK(added_root.actions[1].label == "Bet 33");
+        CHECK(added_root.actions[2].label == "Bet 50");
+        CHECK(added_solver.public_decisions() > baseline.public_decisions());
     }
 
     {
@@ -361,17 +448,39 @@ void run_tree_edit_tests()
         CHECK(after_check.actions[0].label == "Check");
     }
 
+    {
+        StreetConfig along = tiny_turn_one_bet();
+        LinePath path;
+        path.steps.push_back(LineStep{"Check"});
+        along.tree_edits.append(add_size_along(path, 0.25));
+        StreetBatchSolver solver(along);
+        solver.prepare_inspection();
+        const auto root = solver.inspect_node(solver.root_node_id());
+        CHECK(root.actions.size() == 2);
+        std::string check_child;
+        for (const auto& action : root.actions)
+        {
+            if (action.label == "Check")
+            {
+                check_child = action.child_id;
+            }
+        }
+        CHECK(!check_child.empty());
+        const auto after_check = solver.inspect_node(check_child);
+        CHECK(after_check.actions.size() == 3);
+        CHECK(after_check.actions[0].label == "Check");
+        CHECK(after_check.actions[1].label == "Bet 25");
+        CHECK(after_check.actions[2].label == "Bet 50");
+    }
+
     // street-config 1 round-trips tree-edit lines and rebuilds the same batch tree.
     {
         StreetConfig edited = tiny_turn_one_bet();
+        edited.tree_edits.append(add_size_along(LinePath{}, 0.33));
         edited.tree_edits.append(force_root("c"));
-        LineEdit add;
-        add.kind = LineEditKind::AddSize;
-        add.size_pot_fraction = 0.33;
-        edited.tree_edits.append(std::move(add));
         const std::string text = format_street_config(edited);
-        CHECK(text.find("tree-edit force - c\n") != std::string::npos);
         CHECK(text.find("tree-edit add-size - 0.33\n") != std::string::npos);
+        CHECK(text.find("tree-edit force - c\n") != std::string::npos);
         const StreetConfig parsed = parse_street_config(text);
         CHECK(format_street_config(parsed) == text);
         CHECK(parsed.tree_edits.size() == 2);
@@ -385,8 +494,10 @@ void run_tree_edit_tests()
         CHECK(original.public_terminals() == rebuilt.public_terminals());
         const auto left = original.inspect_node(original.root_node_id());
         const auto right = rebuilt.inspect_node(rebuilt.root_node_id());
+        // AddSize then Force: force wins at the root.
         CHECK(left.actions.size() == 1);
         CHECK(right.actions.size() == 1);
-        CHECK(left.actions[0].label == right.actions[0].label);
+        CHECK(left.actions[0].label == "Check");
+        CHECK(right.actions[0].label == "Check");
     }
 }
