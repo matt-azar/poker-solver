@@ -332,3 +332,20 @@ After the expand cache (`#46` / `5762d5c`), a short instrumented profile on the 
 | turn_half_pot | 4 | 1.176 | 1.093 | 1.08x |
 
 Instrumented 3-iter profile: flop `support_seconds` 0.050 → 0.018 at 1 thread; turn 0.010 → 0.0006. Allocated bytes rise with the mask table (flop 4 threads 176,644,816 → 177,166,000). Parity pins at iteration 30: 1-vs-4 and after-vs-main relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,547 assertions, 0 failures.
+
+## Fused showdown + supported-hand indexes (M6)
+
+After board-support masks (`#51` / `eaeffaf`), a short instrumented profile on the paired flop (3 warm CFR+ iters) still spent most of train in `showdown_seconds` (≈0.46 s of ≈1.12 s at 1 thread). Terminals retested `hand_live` over every indexed hand and paid repeated `slice_reach` / `combo_index` work.
+
+`cursor/engine-speed-3-e394` stores supported-hand index lists beside the `#51` masks, walks those lists in collect / fold / showdown, fuses worse/better/tie mass extraction after one `order_reach`, and caches same-combo twin indexes. Rank-order opponent weights are materialized once per prefix build. Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Short microbench only.
+
+### Reset-30 warm-cache vs engine-speed-2 tip (`9ce187e` / `#51`)
+
+`street_parallel_bench sample`, alternating before/after binaries, no walk profile:
+
+| Case | Threads | Before median train (s) | After median train (s) | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| flop_paired | 4 | 2.283 | 1.605 | **1.42x** |
+| turn_half_pot | 4 | 1.163 | 0.803 | **1.45x** |
+
+Instrumented 3-iter profile at 1 thread: flop `showdown_seconds` 0.458 → 0.229, train 1.119 → 0.891; turn showdown 0.202 → 0.075, train 0.400 → 0.254. Allocated bytes rise with twin indexes, ordered-amount scratch, and per-board index lists (flop 4 threads 177,166,040 → 177,667,784). Parity pins at iteration 30: 1-vs-4 and after-vs-`#51` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,547 assertions, 0 failures.
