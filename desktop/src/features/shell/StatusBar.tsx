@@ -9,6 +9,7 @@ interface Props {
   iterations?: number | null;
   nashGap?: number | null;
   pot?: number | null;
+  onReconnect?: () => void;
 }
 
 function formatGap(gap: number | null | undefined, pot: number | null | undefined): string {
@@ -29,11 +30,17 @@ export function StatusBar({
   iterations,
   nashGap,
   pot,
+  onReconnect,
 }: Props) {
   return (
     <footer className="status-bar" role="status">
       <span className="status-dot" data-state={connection} title={connection} />
       <span className="status-bar__msg">{message || "Ready"}</span>
+      {connection === "disconnected" && onReconnect ? (
+        <button type="button" className="toolbar-btn" onClick={onReconnect}>
+          Reconnect
+        </button>
+      ) : null}
       <span>Phase {phase}</span>
       <span>Iter {iterations ?? "—"}</span>
       <span>Nash {formatGap(nashGap, pot)}</span>

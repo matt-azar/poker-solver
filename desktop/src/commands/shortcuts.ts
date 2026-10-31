@@ -5,7 +5,8 @@ export type ShortcutAction =
   | "help"
   | "theme"
   | "save"
-  | "open";
+  | "open"
+  | "escape";
 
 export interface ShortcutBinding {
   key: string;
@@ -39,6 +40,9 @@ export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
     return null;
   }
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  if (key === "escape") {
+    return "escape";
+  }
   if (key === "?" || (event.shiftKey && key === "/")) {
     return "help";
   }

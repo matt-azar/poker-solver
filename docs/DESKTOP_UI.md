@@ -66,8 +66,20 @@ explorer   # serves desktop/dist when present
 2. **Study workspace** — tokens, adaptive layout, context/history, segmented strategy matrix, combo inspector, node navigation, solve controls against live API; optional dual-range layout
 3. Analysis dock + organized Build + Library — present against live APIs (ongoing polish)
 4. **Locks + Compare** — Lock drawer + Compare workspace wired to PUT/DELETE/resolve-locked/compare
-5. Tauri shell + Windows installer — not started; supported path remains browser client + `explorer`
+5. **Desktop packaging** — Tauri 2 sidecar / Windows installer **not shipped**. Supported path: run `explorer` and open the Vite app (dev) or `desktop/dist` via explorer (prod static). See [Desktop packaging](#desktop-packaging).
 6. Visual/a11y/perf acceptance — ongoing
+
+## Desktop packaging
+
+| Item | Status |
+| --- | --- |
+| Browser Study client + localhost `explorer` | Supported |
+| Vite `/api` proxy in `npm run dev` | Supported |
+| `explorer` serving `desktop/dist` | Supported |
+| Tauri 2 managed sidecar + installer | Not in tree yet — preserve EngineClient contract so a shell can wrap later |
+| Native Open/Save dialogs | Browser path uses typed path fields; native dialogs wait on Tauri |
+
+Do not claim an installed offline Windows app until a packaged smoke exists.
 
 | Lock / compare op | UI | Backend |
 | --- | --- | --- |

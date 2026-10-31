@@ -58,6 +58,10 @@ export function AppShell() {
         iterations={status?.iterations}
         nashGap={status?.nash_gap}
         pot={status?.pot}
+        onReconnect={() => {
+          startPolling();
+          void useStudyStore.getState().refresh();
+        }}
       />
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>

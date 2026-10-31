@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { matchShortcut, SHORTCUTS } from "../../commands/shortcuts";
 import type { ThemePreference } from "../../domain/types";
+import { getPlatform } from "../../platform/browser";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
@@ -23,6 +24,8 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
   const stop = useStudyStore((s) => s.stop);
   const saveSolution = useStudyStore((s) => s.saveSolution);
   const openSolution = useStudyStore((s) => s.openSolution);
+  const updateDraft = useStudyStore((s) => s.updateDraft);
+  const draftPath = useStudyStore((s) => s.draft.solutionPath);
   const toggleTheme = useStudyStore((s) => s.toggleTheme);
   const themePreference = useStudyStore((s) => s.themePreference);
   const setThemePreference = useStudyStore((s) => s.setThemePreference);
@@ -37,11 +40,26 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
   const resolveLocked = useStudyStore((s) => s.resolveLocked);
   const loadCompare = useStudyStore((s) => s.loadCompare);
   const baselineSolutionId = useStudyStore((s) => s.baselineSolutionId);
+  const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
+  const setHoverCell = useStudyStore((s) => s.setHoverCell);
+  const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const action = matchShortcut(event);
       if (!action) {
+        return;
+      }
+      if (action === "escape") {
+        if (lockDrawerOpen) {
+          setLockDrawerOpen(false);
+        } else if (helpOpen) {
+          onHelpOpen(false);
+        } else {
+          setSelectedCell(null);
+          setHoverCell(null);
+        }
+        event.preventDefault();
         return;
       }
       event.preventDefault();
@@ -57,7 +75,17 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [solve, stop, continueSolve, helpOpen, onHelpOpen]);
+  }, [
+    solve,
+    stop,
+    continueSolve,
+    helpOpen,
+    onHelpOpen,
+    lockDrawerOpen,
+    setLockDrawerOpen,
+    setSelectedCell,
+    setHoverCell,
+  ]);
 
   useEffect(() => {
     const onDoc = (event: MouseEvent) => {
@@ -81,8 +109,30 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
           open={openMenu}
           setOpen={setOpenMenu}
           items={[
-            { label: "Open solution…", onClick: () => void openSolution() },
-            { label: "Save solution", onClick: () => void saveSolution() },
+            {
+              label: "Open solution…",
+              onClick: () => {
+                void (async () => {
+                  const path = await getPlatform().pickOpenPath();
+                  if (path) {
+                    updateDraft({ solutionPath: path });
+                    await openSolution(path);
+                  }
+                })();
+              },
+            },
+            {
+              label: "Save solution…",
+              onClick: () => {
+                void (async () => {
+                  const path = await getPlatform().pickSavePath(draftPath);
+                  if (path) {
+                    updateDraft({ solutionPath: path });
+                    await saveSolution();
+                  }
+                })();
+              },
+            },
             { sep: true },
             { label: "Undo range", onClick: () => undoRange() },
             { label: "Redo range", onClick: () => redoRange() },
