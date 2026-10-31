@@ -379,3 +379,18 @@ An earlier noisier three-pair set was ~1.02x flop / ~1.06x turn. Instrumented 3-
 | turn_half_pot | 4 | 0.791 | 0.792 | **1.00x** |
 
 Instrumented 3-iter profile at 1 thread now reports non-zero `chance_seconds` for the outermost serial chance wall (flop ≈0.790 of ≈0.860 train; turn ≈0.214 of ≈0.256), confirming that bucket was previously unaccounted. Sparse idx* filters did not clear ~1.05x wall train at four threads: on the paired flop only ~11% of hole combos are board-blocked, so fill-zero then sparse assign for child reaches offsets the shorter EV reduce, and multi-thread chance wall remains dominated by nested child walks rather than the dense hand loops. Parity pins at iteration 30: 1-vs-4 and after-vs-`#52` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,717 assertions, 0 failures. Not shipped.
+
+## Lean order_reach + showdown collect + non-actor aev accumulate (M6)
+
+After fused showdown (`#52`), a fresh 1-thread instrumented profile still spent ~25% of train in `showdown_seconds` with `order_seconds` ≈40% of that, collect ≈10%, and decision/expand still material. Dense→idx* probes on decision and chance (engine-speed-4/5) had already failed the wall bar, so this change uses different levers: skip full zero-fills in `order_reach` (write `prefix[0]` and each card base only), skip by-card aggregates on the showdown collect path, and accumulate the non-acting player's action EVs into `here.ev` during the frozen action loop instead of copying them through `aev*`. Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Short microbench only.
+
+### Reset-30 warm-cache vs engine-speed-3 tip (`77aab28` / `#52`)
+
+`street_parallel_bench sample`, five alternating before/after pairs at four threads, quiet host, no walk profile:
+
+| Case | Threads | Before median train (s) | After median train (s) | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| flop_paired | 4 | 1.621 | 1.485 | **1.09x** |
+| turn_half_pot | 4 | 0.815 | 0.724 | **1.13x** |
+
+Instrumented 3-iter profile at 1 thread (flop): `order_seconds` 0.091 → 0.075, `showdown_seconds` 0.234 → 0.211, `decision_seconds` 0.141 → 0.106, `collect_seconds` 0.094 → 0.082, train 0.930 → 0.861. Allocated bytes unchanged at four threads (177,667,832). Parity pins at iteration 30: 1-vs-4 and after-vs-`#52` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,746 assertions, 0 failures.
