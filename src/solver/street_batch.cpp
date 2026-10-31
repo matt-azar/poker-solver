@@ -1022,6 +1022,10 @@ struct StreetBatchSolver::Engine
         std::pmr::vector<double> prefix_buf;
         // Compact card prefixes: one initial zero per card, then one weight per hole card.
         std::pmr::vector<double> block_buf;
+        // Opponent amounts in rank order for one showdown prefix build.
+        std::pmr::vector<double> ordered_buf;
+        // card_off[c] + c bases for the opponent side of the current order_reach.
+        std::uint32_t block_base[52] = {};
         // Structural support for the current (turn, river); filled by ensure_board_support.
         std::pmr::vector<char> live0;
         std::pmr::vector<char> live1;
@@ -1046,6 +1050,7 @@ struct StreetBatchSolver::Engine
             , amount_buf{std::pmr::vector<double>(alloc), std::pmr::vector<double>(alloc)}
             , prefix_buf(alloc)
             , block_buf(alloc)
+            , ordered_buf(alloc)
             , live0(alloc)
             , live1(alloc)
         {
@@ -1080,6 +1085,8 @@ struct StreetBatchSolver::Engine
     std::pmr::vector<int> hole_a[2];
     std::pmr::vector<int> hole_b[2];
     std::pmr::vector<int> hand_of[2];
+    // Same hole cards on the opposite side, or -1 when that combo is absent.
+    std::pmr::vector<int> twin_hand[2];
     mutable std::pmr::unordered_map<int, RunoutRanks> runout_ranks;
     // Structural hand_supported masks per walkable (turn, river), including
     // partial boards. Filled once; ensure_board_support only copies them.
@@ -1088,11 +1095,16 @@ struct StreetBatchSolver::Engine
         using allocator_type = std::pmr::polymorphic_allocator<std::byte>;
         std::pmr::vector<char> live0;
         std::pmr::vector<char> live1;
+        // Supported hand indexes for terminal loops (same liveness as live0/live1).
+        std::pmr::vector<std::uint16_t> idx0;
+        std::pmr::vector<std::uint16_t> idx1;
 
         template <typename Alloc>
         BoardSupport(std::allocator_arg_t, const Alloc& alloc)
             : live0(alloc)
             , live1(alloc)
+            , idx0(alloc)
+            , idx1(alloc)
         {
         }
 
@@ -1100,6 +1112,8 @@ struct StreetBatchSolver::Engine
         BoardSupport(std::allocator_arg_t, const Alloc& alloc, const BoardSupport& other)
             : live0(other.live0, alloc)
             , live1(other.live1, alloc)
+            , idx0(other.idx0, alloc)
+            , idx1(other.idx1, alloc)
         {
         }
 
@@ -1107,6 +1121,8 @@ struct StreetBatchSolver::Engine
         BoardSupport(std::allocator_arg_t, const Alloc& alloc, BoardSupport&& other)
             : live0(std::move(other.live0), alloc)
             , live1(std::move(other.live1), alloc)
+            , idx0(std::move(other.idx0), alloc)
+            , idx1(std::move(other.idx1), alloc)
         {
         }
     };
@@ -1209,6 +1225,7 @@ struct StreetBatchSolver::Engine
         , hole_a{std::pmr::vector<int>(heap_), std::pmr::vector<int>(heap_)}
         , hole_b{std::pmr::vector<int>(heap_), std::pmr::vector<int>(heap_)}
         , hand_of{std::pmr::vector<int>(heap_), std::pmr::vector<int>(heap_)}
+        , twin_hand{std::pmr::vector<int>(heap_), std::pmr::vector<int>(heap_)}
         , runout_ranks(heap_)
         , board_support_(heap_)
         , workspace(heap_)
@@ -1612,11 +1629,15 @@ struct StreetBatchSolver::Engine
         add(checked_mul(hands0 + hands1, sizeof(double), "plan"));
         add(checked_mul((hands0 + hands1) * 2, sizeof(int), "plan"));
         add(checked_mul(static_cast<std::uint64_t>(holdem::kComboCount) * 2, sizeof(int), "plan"));
+        // Same-combo twin indexes for showdown identical-hand correction.
+        add(checked_mul(hands0 + hands1, sizeof(int), "plan"));
         add(checked_mul(wide + 1, sizeof(double), "plan"));
         add(checked_mul(
             checked_add(checked_mul(wide, 2, "plan"), 52, "plan"),
             sizeof(double),
             "plan"));
+        // Rank-ordered opponent amounts for compact showdown prefixes.
+        add(checked_mul(wide, sizeof(double), "plan"));
         add(checked_mul(planned_slots_, sizeof(int), "plan"));
         add(checked_mul(hands0 + hands1, sizeof(double), "plan"));
         // Worker-local board support masks reused across decision actions.
@@ -1655,7 +1676,11 @@ struct StreetBatchSolver::Engine
         // This is a plan, not the measured allocation.
         const std::uint64_t map_node = 3ull * sizeof(void*) + sizeof(RunoutRanks);
         add(checked_mul(keys, checked_add(payload, map_node, "plan"), "plan"));
-        const std::uint64_t support_payload = checked_mul(hands0 + hands1, sizeof(char), "plan");
+        // live char masks plus dense supported-hand index lists per board.
+        const std::uint64_t support_payload = checked_add(
+            checked_mul(hands0 + hands1, sizeof(char), "plan"),
+            checked_mul(hands0 + hands1, sizeof(std::uint16_t), "plan"),
+            "plan");
         const std::uint64_t support_node = 3ull * sizeof(void*) + sizeof(BoardSupport);
         add(checked_mul(support_keys, checked_add(support_payload, support_node, "plan"), "plan"));
         if (config.threads > 1)
@@ -1673,6 +1698,7 @@ struct StreetBatchSolver::Engine
                     sizeof(double),
                     "plan"),
                 "plan"));
+            add(checked_mul(extra, checked_mul(wide, sizeof(double), "plan"), "plan"));
             add(checked_mul(extra, checked_mul(hands0 + hands1, sizeof(double), "plan"), "plan"));
             add(checked_mul(extra, checked_mul(hands0 + hands1, sizeof(char), "plan"), "plan"));
             add(checked_mul(52, hands0 * sizeof(double), "plan"));
@@ -2537,6 +2563,16 @@ struct StreetBatchSolver::Engine
                 hand_of[player][static_cast<std::size_t>(combo)] = static_cast<int>(hand);
             }
         }
+        for (int player = 0; player < 2; ++player)
+        {
+            const int opponent = 1 - player;
+            twin_hand[player].assign(combos[player].size(), -1);
+            for (std::size_t hand = 0; hand < combos[player].size(); ++hand)
+            {
+                const int combo = combos[player][hand];
+                twin_hand[player][hand] = hand_of[opponent][static_cast<std::size_t>(combo)];
+            }
+        }
         if (joint_mass_ <= 0.0)
         {
             throw std::logic_error("street ranges have no joint weight");
@@ -2570,6 +2606,7 @@ struct StreetBatchSolver::Engine
             "showdown prefix");
         ctx.prefix_buf.assign(static_cast<std::size_t>(wide + 1), 0.0);
         ctx.block_buf.assign(static_cast<std::size_t>(block_entries), 0.0);
+        ctx.ordered_buf.assign(static_cast<std::size_t>(wide), 0.0);
         budget_->set_stage("terminal_buffers");
         ctx.amount_buf[0].assign(static_cast<std::size_t>(n0), 0.0);
         ctx.amount_buf[1].assign(static_cast<std::size_t>(n1), 0.0);
@@ -2742,6 +2779,8 @@ struct StreetBatchSolver::Engine
             BoardSupport& masks = inserted.first->second;
             masks.live0.reserve(static_cast<std::size_t>(n0));
             masks.live1.reserve(static_cast<std::size_t>(n1));
+            masks.idx0.reserve(static_cast<std::size_t>(n0));
+            masks.idx1.reserve(static_cast<std::size_t>(n1));
         };
         reserve(-1, -1);
         if (config.board.size() == 3)
@@ -2794,15 +2833,25 @@ struct StreetBatchSolver::Engine
             }
             masks.live0.resize(static_cast<std::size_t>(n0));
             masks.live1.resize(static_cast<std::size_t>(n1));
+            masks.idx0.clear();
+            masks.idx1.clear();
             for (int hand = 0; hand < n0; ++hand)
             {
-                masks.live0[static_cast<std::size_t>(hand)] =
-                    hand_supported(0, hand, turn, river) ? 1 : 0;
+                const bool live = hand_supported(0, hand, turn, river);
+                masks.live0[static_cast<std::size_t>(hand)] = live ? 1 : 0;
+                if (live)
+                {
+                    masks.idx0.push_back(static_cast<std::uint16_t>(hand));
+                }
             }
             for (int hand = 0; hand < n1; ++hand)
             {
-                masks.live1[static_cast<std::size_t>(hand)] =
-                    hand_supported(1, hand, turn, river) ? 1 : 0;
+                const bool live = hand_supported(1, hand, turn, river);
+                masks.live1[static_cast<std::size_t>(hand)] = live ? 1 : 0;
+                if (live)
+                {
+                    masks.idx1.push_back(static_cast<std::uint16_t>(hand));
+                }
             }
         }
         support_ready_ = true;
@@ -3093,25 +3142,49 @@ struct StreetBatchSolver::Engine
         amount.assign(static_cast<std::size_t>(hands), 0.0);
         total = 0.0;
         std::fill(by_card, by_card + 52, 0.0);
-        for (int hand = 0; hand < hands; ++hand)
+        if (use_board)
         {
-            if (pi[hand] == 0.0)
+            const BoardSupport& masks = board_support_for(turn, river);
+            const std::pmr::vector<std::uint16_t>& live_idx = player == 0 ? masks.idx0 : masks.idx1;
+            const double* weights = range_w[player].data();
+            const int* hole0 = hole_a[player].data();
+            const int* hole1 = hole_b[player].data();
+            for (std::uint16_t hand_u : live_idx)
             {
-                continue;
+                const int hand = static_cast<int>(hand_u);
+                if (pi[hand] == 0.0)
+                {
+                    continue;
+                }
+                const double piece = weights[static_cast<std::size_t>(hand)] * pi[hand];
+                if (piece == 0.0)
+                {
+                    continue;
+                }
+                amount[static_cast<std::size_t>(hand)] = piece;
+                total += piece;
+                by_card[hole0[static_cast<std::size_t>(hand)]] += piece;
+                by_card[hole1[static_cast<std::size_t>(hand)]] += piece;
             }
-            if (use_board && !hand_live(player, hand, turn, river))
+        }
+        else
+        {
+            for (int hand = 0; hand < hands; ++hand)
             {
-                continue;
+                if (pi[hand] == 0.0)
+                {
+                    continue;
+                }
+                const double piece = range_w[player][static_cast<std::size_t>(hand)] * pi[hand];
+                if (piece == 0.0)
+                {
+                    continue;
+                }
+                amount[static_cast<std::size_t>(hand)] = piece;
+                total += piece;
+                by_card[hole_a[player][static_cast<std::size_t>(hand)]] += piece;
+                by_card[hole_b[player][static_cast<std::size_t>(hand)]] += piece;
             }
-            const double piece = range_w[player][static_cast<std::size_t>(hand)] * pi[hand];
-            if (piece == 0.0)
-            {
-                continue;
-            }
-            amount[static_cast<std::size_t>(hand)] = piece;
-            total += piece;
-            by_card[hole_a[player][static_cast<std::size_t>(hand)]] += piece;
-            by_card[hole_b[player][static_cast<std::size_t>(hand)]] += piece;
         }
         if (profile_)
         {
@@ -3186,8 +3259,7 @@ struct StreetBatchSolver::Engine
         const int c0 = hole_a[hero][static_cast<std::size_t>(hand)];
         const int c1 = hole_b[hero][static_cast<std::size_t>(hand)];
         double blocked = by_card[c0] + by_card[c1];
-        const int opp = 1 - hero;
-        const int opp_hand = hand_of[opp][static_cast<std::size_t>(holdem::Range::combo_index(c0, c1))];
+        const int opp_hand = twin_hand[hero][static_cast<std::size_t>(hand)];
         if (opp_hand >= 0)
         {
             blocked -= opp_amount[static_cast<std::size_t>(opp_hand)];
@@ -3292,6 +3364,7 @@ struct StreetBatchSolver::Engine
         const std::uint64_t blocks = static_cast<std::uint64_t>(hands) * 2u + 52u;
         if (ctx.prefix_buf.capacity() < amount.size() + 1
             || ctx.block_buf.capacity() < blocks
+            || ctx.ordered_buf.capacity() < amount.size()
             || static_cast<int>(table.order[player].size()) != hands
             || table.card_off[player].size() != 53
             || table.card_off[player][52] != static_cast<std::uint32_t>(hands) * 2u)
@@ -3300,24 +3373,31 @@ struct StreetBatchSolver::Engine
         }
         ctx.prefix_buf.assign(static_cast<std::size_t>(hands + 1), 0.0);
         ctx.block_buf.assign(static_cast<std::size_t>(blocks), 0.0);
+        ctx.ordered_buf.resize(static_cast<std::size_t>(hands));
+        double* ordered = ctx.ordered_buf.data();
+        double* prefix = ctx.prefix_buf.data();
+        const std::uint16_t* order = table.order[player].data();
         for (int index = 0; index < hands; ++index)
         {
-            const int hand = table.order[player][static_cast<std::size_t>(index)];
-            ctx.prefix_buf[static_cast<std::size_t>(index + 1)] =
-                ctx.prefix_buf[static_cast<std::size_t>(index)] + amount[static_cast<std::size_t>(hand)];
+            const double piece = amount[static_cast<std::size_t>(order[static_cast<std::size_t>(index)])];
+            ordered[static_cast<std::size_t>(index)] = piece;
+            prefix[static_cast<std::size_t>(index + 1)] =
+                prefix[static_cast<std::size_t>(index)] + piece;
         }
+        double* block = ctx.block_buf.data();
+        const std::uint32_t* card_off = table.card_off[player].data();
+        const std::uint16_t* card_pos = table.card_pos[player].data();
         for (int card = 0; card < 52; ++card)
         {
-            const std::uint32_t begin = table.card_off[player][static_cast<std::size_t>(card)];
-            const std::uint32_t end = table.card_off[player][static_cast<std::size_t>(card + 1)];
+            const std::uint32_t begin = card_off[static_cast<std::size_t>(card)];
+            const std::uint32_t end = card_off[static_cast<std::size_t>(card + 1)];
             const std::uint32_t base = begin + static_cast<std::uint32_t>(card);
+            ctx.block_base[static_cast<std::size_t>(card)] = base;
             double total = 0.0;
             for (std::uint32_t at = begin; at < end; ++at)
             {
-                const int index = table.card_pos[player][at];
-                const int hand = table.order[player][static_cast<std::size_t>(index)];
-                total += amount[static_cast<std::size_t>(hand)];
-                ctx.block_buf[static_cast<std::size_t>(base + (at - begin) + 1)] = total;
+                total += ordered[card_pos[at]];
+                block[static_cast<std::size_t>(base + (at - begin) + 1)] = total;
             }
         }
         if (profile_)
@@ -3435,7 +3515,6 @@ struct StreetBatchSolver::Engine
         const int opp = 1 - hero;
         const RunoutRanks& table = runout_for(turn, river);
         order_reach(ctx, opp, opp_amount, table);
-        const int hero_hands = static_cast<int>(ev.size());
         const int opp_hands = static_cast<int>(opp_amount.size());
         double amount_total = 0.0;
         if (stable)
@@ -3449,44 +3528,77 @@ struct StreetBatchSolver::Engine
             }
         }
         const bool need_ties = tie_pay != 0.0;
-        for (int hand = 0; hand < hero_hands; ++hand)
+        const BoardSupport& masks = board_support_for(turn, river);
+        const std::pmr::vector<std::uint16_t>& live_idx = hero == 0 ? masks.idx0 : masks.idx1;
+        std::fill(ev.begin(), ev.end(), 0.0);
+        const double* prefix = ctx.prefix_buf.data();
+        const double* block = ctx.block_buf.data();
+        const std::uint32_t* block_base = ctx.block_base;
+        const std::uint16_t* worse_end = table.worse_end[hero].data();
+        const std::uint16_t* better_begin = table.better_begin[hero].data();
+        const std::uint16_t* card_cut = table.card_cut[hero].data();
+        const std::uint32_t* card_off = table.card_off[opp].data();
+        const std::uint16_t* pos = table.pos[opp].data();
+        const int* hole0 = hole_a[hero].data();
+        const int* hole1 = hole_b[hero].data();
+        const int* twins = twin_hand[hero].data();
+        const double* weights = range_w[hero].data();
+        const double low_pay = hero == 0 ? win_pay : lose_pay;
+        const double high_pay = hero == 0 ? lose_pay : win_pay;
+        const double scale = joint_scale;
+        const double prefix_end = prefix[static_cast<std::size_t>(opp_hands)];
+        for (std::uint16_t hand_u : live_idx)
         {
-            if (!hand_live(hero, hand, turn, river))
-            {
-                ev[static_cast<std::size_t>(hand)] = 0.0;
-                continue;
-            }
-            const int worse = table.worse_end[hero][static_cast<std::size_t>(hand)];
-            const int after_tie = table.better_begin[hero][static_cast<std::size_t>(hand)];
-            const int c0 = hole_a[hero][static_cast<std::size_t>(hand)];
-            const int c1 = hole_b[hero][static_cast<std::size_t>(hand)];
+            const int hand = static_cast<int>(hand_u);
+            const int worse = worse_end[static_cast<std::size_t>(hand)];
+            const int after_tie = better_begin[static_cast<std::size_t>(hand)];
+            const int c0 = hole0[static_cast<std::size_t>(hand)];
+            const int c1 = hole1[static_cast<std::size_t>(hand)];
             const std::size_t cut_at = static_cast<std::size_t>(hand) * 4;
-            const int cut0_worse = table.card_cut[hero][cut_at];
-            const int cut1_worse = table.card_cut[hero][cut_at + 1];
-            const int cut0_better = table.card_cut[hero][cut_at + 2];
-            const int cut1_better = table.card_cut[hero][cut_at + 3];
+            const int cut0_worse = card_cut[cut_at];
+            const int cut1_worse = card_cut[cut_at + 1];
+            const int cut0_better = card_cut[cut_at + 2];
+            const int cut1_better = card_cut[cut_at + 3];
+            const std::uint32_t base0 = block_base[static_cast<std::size_t>(c0)];
+            const std::uint32_t base1 = block_base[static_cast<std::size_t>(c1)];
             const int len0 = static_cast<int>(
-                table.card_off[opp][static_cast<std::size_t>(c0 + 1)]
-                - table.card_off[opp][static_cast<std::size_t>(c0)]);
+                card_off[static_cast<std::size_t>(c0 + 1)] - card_off[static_cast<std::size_t>(c0)]);
             const int len1 = static_cast<int>(
-                table.card_off[opp][static_cast<std::size_t>(c1 + 1)]
-                - table.card_off[opp][static_cast<std::size_t>(c1)]);
-            const int opp_hand = hand_of[opp][static_cast<std::size_t>(holdem::Range::combo_index(c0, c1))];
-            const int add_hand = opp_hand >= 0 && opp_amount[static_cast<std::size_t>(opp_hand)] != 0.0
-                ? opp_hand : -1;
-            double worse_mass = slice_reach(
-                ctx, table, opp, 0, worse, c0, c1, 0, 0, cut0_worse, cut1_worse,
-                add_hand, opp_amount, table.pos[opp]);
-            double better_mass = slice_reach(
-                ctx, table, opp, after_tie, opp_hands, c0, c1, cut0_better, cut1_better, len0, len1,
-                add_hand, opp_amount, table.pos[opp]);
+                card_off[static_cast<std::size_t>(c1 + 1)] - card_off[static_cast<std::size_t>(c1)]);
+            const double b0_0 = block[static_cast<std::size_t>(base0)];
+            const double b0_w = block[static_cast<std::size_t>(base0 + static_cast<std::uint32_t>(cut0_worse))];
+            const double b0_b = block[static_cast<std::size_t>(base0 + static_cast<std::uint32_t>(cut0_better))];
+            const double b0_l = block[static_cast<std::size_t>(base0 + static_cast<std::uint32_t>(len0))];
+            const double b1_0 = block[static_cast<std::size_t>(base1)];
+            const double b1_w = block[static_cast<std::size_t>(base1 + static_cast<std::uint32_t>(cut1_worse))];
+            const double b1_b = block[static_cast<std::size_t>(base1 + static_cast<std::uint32_t>(cut1_better))];
+            const double b1_l = block[static_cast<std::size_t>(base1 + static_cast<std::uint32_t>(len1))];
+            const int twin = twins[static_cast<std::size_t>(hand)];
+            const int add_hand = twin >= 0 && opp_amount[static_cast<std::size_t>(twin)] != 0.0
+                ? twin : -1;
+            const int add_at = add_hand >= 0 ? static_cast<int>(pos[static_cast<std::size_t>(add_hand)]) : -1;
+            const double add_piece = add_hand >= 0 ? opp_amount[static_cast<std::size_t>(add_hand)] : 0.0;
+            double worse_mass = prefix[static_cast<std::size_t>(worse)] - prefix[0]
+                - (b0_w - b0_0) - (b1_w - b1_0);
+            if (add_at >= 0 && add_at < worse)
+            {
+                worse_mass += add_piece;
+            }
+            double better_mass = prefix_end - prefix[static_cast<std::size_t>(after_tie)]
+                - (b0_l - b0_b) - (b1_l - b1_b);
+            if (add_at >= after_tie && add_at < opp_hands)
+            {
+                better_mass += add_piece;
+            }
             double tie_mass = 0.0;
             if (need_ties)
             {
-                tie_mass = slice_reach(
-                    ctx, table, opp, worse, after_tie, c0, c1,
-                    cut0_worse, cut1_worse, cut0_better, cut1_better,
-                    add_hand, opp_amount, table.pos[opp]);
+                tie_mass = prefix[static_cast<std::size_t>(after_tie)] - prefix[static_cast<std::size_t>(worse)]
+                    - (b0_b - b0_w) - (b1_b - b1_w);
+                if (add_at >= worse && add_at < after_tie)
+                {
+                    tie_mass += add_piece;
+                }
             }
             if (stable)
             {
@@ -3501,15 +3613,13 @@ struct StreetBatchSolver::Engine
                         need_ties ? &tie_mass : nullptr);
                 }
             }
-            const double low_pay = hero == 0 ? win_pay : lose_pay;
-            const double high_pay = hero == 0 ? lose_pay : win_pay;
             double weighted = low_pay * worse_mass + high_pay * better_mass;
             if (need_ties)
             {
                 weighted += tie_pay * tie_mass;
             }
             ev[static_cast<std::size_t>(hand)] =
-                range_w[hero][static_cast<std::size_t>(hand)] * joint_scale * weighted;
+                weights[static_cast<std::size_t>(hand)] * scale * weighted;
         }
         if (profile_)
         {
@@ -3547,26 +3657,21 @@ struct StreetBatchSolver::Engine
                 node.folded,
                 0,
                 config.rake).utility[0];
-            for (int hand = 0; hand < n0; ++hand)
+            const BoardSupport& fold_masks = board_support_for(turn, river);
+            std::fill(ev0.begin(), ev0.end(), 0.0);
+            std::fill(ev1.begin(), ev1.end(), 0.0);
+            for (std::uint16_t hand_u : fold_masks.idx0)
             {
-                if (!hand_live(0, hand, turn, river))
-                {
-                    ev0[static_cast<std::size_t>(hand)] = 0.0;
-                    continue;
-                }
+                const int hand = static_cast<int>(hand_u);
                 const double open = stable
                     ? stable_compatible_mass(0, hand, 1, total1, by1, ctx.amount_buf[1])
                     : total1 - blocked_reach(0, hand, by1, ctx.amount_buf[1]);
                 ev0[static_cast<std::size_t>(hand)] =
                     pay * range_w[0][static_cast<std::size_t>(hand)] * joint_scale * open;
             }
-            for (int hand = 0; hand < n1; ++hand)
+            for (std::uint16_t hand_u : fold_masks.idx1)
             {
-                if (!hand_live(1, hand, turn, river))
-                {
-                    ev1[static_cast<std::size_t>(hand)] = 0.0;
-                    continue;
-                }
+                const int hand = static_cast<int>(hand_u);
                 const double open = stable
                     ? stable_compatible_mass(1, hand, 0, total0, by0, ctx.amount_buf[0])
                     : total0 - blocked_reach(1, hand, by0, ctx.amount_buf[0]);
