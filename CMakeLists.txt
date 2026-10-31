@@ -90,6 +90,7 @@ add_executable(poker_solver_tests
     tests/unit/test_range_library.cpp
     tests/unit/test_node_lock.cpp
     tests/unit/test_lock_apply.cpp
+    tests/unit/test_tree_edit.cpp
 )
 target_include_directories(poker_solver_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"

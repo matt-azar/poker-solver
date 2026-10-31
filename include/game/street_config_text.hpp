@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/street_game.hpp"
+#include "solver/tree_edit.hpp"
 
 #include <charconv>
 #include <cmath>
@@ -161,6 +162,29 @@ inline std::string format_street_config(const StreetConfig& config)
     append_specs(out, "oop-donk", config.oop_donk_sizes);
     append_numbers(out, "oop-raise-multiples", config.oop_raise_multiples);
     append_numbers(out, "ip-raise-multiples", config.ip_raise_multiples);
+    if (!config.tree_edits.empty())
+    {
+        if (!config.tree_edits.valid())
+        {
+            throw std::invalid_argument("street config tree_edits are invalid");
+        }
+        const std::string edits = poker::solver::format_tree_edits(config.tree_edits);
+        std::size_t cursor = 0;
+        while (cursor < edits.size())
+        {
+            std::size_t end = edits.find('\n', cursor);
+            if (end == std::string::npos)
+            {
+                end = edits.size();
+            }
+            const std::string_view line(edits.data() + cursor, end - cursor);
+            if (!line.empty())
+            {
+                append_line(out, "tree-edit", line);
+            }
+            cursor = end < edits.size() ? end + 1 : end;
+        }
+    }
     return out;
 }
 
@@ -339,6 +363,23 @@ inline StreetConfig parse_street_config(std::string_view text)
         const std::size_t space = line.find(' ');
         const std::string key(space == std::string_view::npos ? line : line.substr(0, space));
         const std::string_view value = space == std::string_view::npos ? std::string_view{} : line.substr(space + 1);
+        // tree-edit may repeat (one LineEdit per line). Other keys stay unique.
+        if (key == "tree-edit")
+        {
+            if (value.empty())
+            {
+                throw std::invalid_argument("tree-edit needs a value");
+            }
+            std::string edit_line(value);
+            edit_line.push_back('\n');
+            const poker::solver::TreeEditSet parsed = poker::solver::parse_tree_edits(edit_line);
+            if (parsed.size() != 1)
+            {
+                throw std::invalid_argument("tree-edit must describe one edit");
+            }
+            config.tree_edits.append(parsed.edits[0]);
+            continue;
+        }
         take_field(seen, key);
 
         if (key == "board")

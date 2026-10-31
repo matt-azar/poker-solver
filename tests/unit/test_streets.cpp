@@ -8,6 +8,7 @@
 #include "poker/range.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
+#include "solver/tree_edit.hpp"
 #include "solver/trainer.hpp"
 
 #include <algorithm>
@@ -1371,7 +1372,9 @@ bool same_config(const StreetConfig& left, const StreetConfig& right)
         && left.max_raises == right.max_raises
         && left.first_to_act == right.first_to_act
         && left.memory_mib == right.memory_mib
-        && left.threads == right.threads;
+        && left.threads == right.threads
+        && poker::solver::format_tree_edits(left.tree_edits)
+            == poker::solver::format_tree_edits(right.tree_edits);
 }
 
 void expect_same_opening(const StreetGame& left, const StreetGame& right)

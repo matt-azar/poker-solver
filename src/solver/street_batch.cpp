@@ -1,6 +1,7 @@
 #include "solver/street_batch.hpp"
 
 #include "game/street_config_text.hpp"
+#include "solver/tree_edit.hpp"
 #include "poker/card.hpp"
 #include "poker/hand_categories.hpp"
 #include "poker/hand_eval.hpp"
@@ -181,6 +182,197 @@ std::pmr::string chip_label(
         text += " all-in";
     }
     return text;
+}
+
+
+std::string compact_action_token(int code, int add, int street_total, bool all_in, bool facing)
+{
+    if (code == 0)
+    {
+        return "f";
+    }
+    if (code == 1)
+    {
+        return facing ? "call" : "c";
+    }
+    std::string token = facing ? "r" + std::to_string(street_total) : "b" + std::to_string(add);
+    if (all_in)
+    {
+        token += "ai";
+    }
+    return token;
+}
+
+bool token_matches_action(
+    std::string_view token,
+    int code,
+    int add,
+    int street_total,
+    bool all_in,
+    bool facing,
+    std::pmr::memory_resource* heap)
+{
+    if (token == chip_label(code, add, street_total, all_in, facing, heap))
+    {
+        return true;
+    }
+    return token == compact_action_token(code, add, street_total, all_in, facing);
+}
+
+std::string compact_from_display_label(std::string_view label)
+{
+    if (label == "Fold")
+    {
+        return "f";
+    }
+    if (label == "Check")
+    {
+        return "c";
+    }
+    if (label == "Call")
+    {
+        return "call";
+    }
+    bool all_in = false;
+    std::string_view core = label;
+    constexpr std::string_view kAllIn = " all-in";
+    if (core.size() > kAllIn.size() && core.substr(core.size() - kAllIn.size()) == kAllIn)
+    {
+        all_in = true;
+        core.remove_suffix(kAllIn.size());
+    }
+    if (core.size() > 4 && core.substr(0, 4) == "Bet ")
+    {
+        std::string token = "b";
+        token.append(core.substr(4));
+        if (all_in)
+        {
+            token += "ai";
+        }
+        return token;
+    }
+    constexpr std::string_view kRaise = "Raise to ";
+    if (core.size() > kRaise.size() && core.substr(0, kRaise.size()) == kRaise)
+    {
+        std::string token = "r";
+        token.append(core.substr(kRaise.size()));
+        if (all_in)
+        {
+            token += "ai";
+        }
+        return token;
+    }
+    return {};
+}
+
+bool path_token_matches_display(std::string_view token, std::string_view display)
+{
+    if (token == display)
+    {
+        return true;
+    }
+    const std::string compact = compact_from_display_label(display);
+    return !compact.empty() && token == compact;
+}
+
+bool path_matches_public_line(const poker::solver::LinePath& path, std::string_view public_path)
+{
+    std::vector<std::string_view> steps;
+    if (!public_path.empty())
+    {
+        std::size_t cursor = 0;
+        while (true)
+        {
+            const std::size_t slash = public_path.find('/', cursor);
+            if (slash == std::string_view::npos)
+            {
+                steps.push_back(public_path.substr(cursor));
+                break;
+            }
+            steps.push_back(public_path.substr(cursor, slash - cursor));
+            cursor = slash + 1;
+        }
+    }
+    if (path.size() != steps.size())
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < path.steps.size(); ++i)
+    {
+        if (!path_token_matches_display(path.steps[i].label, steps[i]))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+void apply_tree_edits(
+    Legal& legal,
+    const streets::StreetConfig& config,
+    const BetState& state,
+    std::string_view public_path,
+    std::pmr::memory_resource* heap)
+{
+    if (config.tree_edits.empty())
+    {
+        return;
+    }
+    for (const poker::solver::LineEdit& edit : config.tree_edits.edits)
+    {
+        if (edit.kind == poker::solver::LineEditKind::AddSize)
+        {
+            continue;
+        }
+        if (!path_matches_public_line(edit.path, public_path))
+        {
+            continue;
+        }
+        const bool facing = state.committed > state.contrib[state.acting];
+        if (edit.kind == poker::solver::LineEditKind::Force)
+        {
+            int keep = -1;
+            for (int i = 0; i < legal.count; ++i)
+            {
+                const int street_total = state.contrib[state.acting] + legal.add[i];
+                const bool all_in =
+                    legal.code[i] != 0 && street_total == config.stack && legal.add[i] > 0;
+                if (token_matches_action(
+                        edit.action, legal.code[i], legal.add[i], street_total, all_in, facing, heap))
+                {
+                    keep = i;
+                    break;
+                }
+            }
+            if (keep < 0)
+            {
+                continue;
+            }
+            legal.code[0] = legal.code[keep];
+            legal.add[0] = legal.add[keep];
+            legal.count = 1;
+            continue;
+        }
+        if (edit.kind == poker::solver::LineEditKind::Remove)
+        {
+            Legal filtered;
+            for (int i = 0; i < legal.count; ++i)
+            {
+                const int street_total = state.contrib[state.acting] + legal.add[i];
+                const bool all_in =
+                    legal.code[i] != 0 && street_total == config.stack && legal.add[i] > 0;
+                if (token_matches_action(
+                        edit.action, legal.code[i], legal.add[i], street_total, all_in, facing, heap))
+                {
+                    continue;
+                }
+                filtered.code[filtered.count] = legal.code[i];
+                filtered.add[filtered.count] = legal.add[i];
+                ++filtered.count;
+            }
+            legal = filtered;
+        }
+    }
 }
 
 Legal legal_actions(const streets::StreetConfig& config, const BetState& state)
@@ -1032,7 +1224,8 @@ struct StreetBatchSolver::Engine
             return id;
         }
 
-        const Legal legal = legal_actions(config, state);
+        Legal legal = legal_actions(config, state);
+        apply_tree_edits(legal, config, state, path, heap_);
         const bool facing = state.committed > state.contrib[state.acting];
         Node node(std::allocator_arg, heap_);
         node.player = state.acting;
