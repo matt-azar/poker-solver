@@ -39,6 +39,8 @@ inline std::string format_river_config(const RiverConfig& config)
     streets::append_ints(out, "first-to-act", config.first_to_act);
     streets::append_ints(out, "max-raises", config.max_raises);
     streets::append_flag(out, "allow-all-in", config.allow_all_in);
+    streets::append_line(out, "rake-rate", streets::format_number(config.rake.rate));
+    streets::append_line(out, "rake-cap", streets::format_number(config.rake.cap));
     streets::append_specs(out, "oop-bets", config.oop_bet_sizes);
     streets::append_specs(out, "ip-bets", config.ip_bet_sizes);
     streets::append_specs(out, "oop-raises", config.oop_raise_sizes);
@@ -124,6 +126,14 @@ inline RiverConfig parse_river_config(std::string_view text)
         else if (key == "allow-all-in")
         {
             config.allow_all_in = streets::parse_flag(value);
+        }
+        else if (key == "rake-rate")
+        {
+            config.rake.rate = streets::parse_finite(value);
+        }
+        else if (key == "rake-cap")
+        {
+            config.rake.cap = streets::parse_finite(value);
         }
         else if (key == "oop-bets")
         {

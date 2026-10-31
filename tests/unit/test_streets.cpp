@@ -1364,6 +1364,8 @@ bool same_config(const StreetConfig& left, const StreetConfig& right)
         && left.geometric == right.geometric
         && left.all_in_threshold == right.all_in_threshold
         && left.pot_cap == right.pot_cap
+        && left.rake.rate == right.rake.rate
+        && left.rake.cap == right.rake.cap
         && left.allow_all_in == right.allow_all_in
         && left.allow_three_bet == right.allow_three_bet
         && left.max_raises == right.max_raises
@@ -1423,6 +1425,8 @@ void expect_canonical_street_config()
         "geometric 0\n"
         "all-in-threshold 0\n"
         "pot-cap 1\n"
+        "rake-rate 0\n"
+        "rake-cap 0\n"
         "memory-mib 1024\n"
         "threads 1\n"
         "oop-bets 0.5 20c\n"
@@ -1519,6 +1523,8 @@ void expect_canonical_street_config()
         "geometric 0\n"
         "all-in-threshold 0\n"
         "pot-cap 0\n"
+        "rake-rate 0\n"
+        "rake-cap 0\n"
         "memory-mib 1024\n"
         "threads 1\n"
         "oop-bets 1\n"

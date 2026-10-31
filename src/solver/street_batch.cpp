@@ -5,6 +5,7 @@
 #include "poker/hand_categories.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
+#include "solver/chip_payoff.hpp"
 #include "solver/regret_matching.hpp"
 
 #include <algorithm>
@@ -985,6 +986,7 @@ struct StreetBatchSolver::Engine
         {
             throw std::invalid_argument("pot cap must be nonnegative");
         }
+        config.rake.validate();
         if (config.threads < 1 || config.threads > kMaxThreads)
         {
             throw std::invalid_argument(
@@ -1714,44 +1716,37 @@ struct StreetBatchSolver::Engine
 
     double payoff(const Node& node, const Deal& deal, int turn, int river) const
     {
-        const double half = static_cast<double>(config.pot) * 0.5;
-        if (node.folded == 0)
+        int outcome = 0;
+        if (node.folded < 0)
         {
-            return -(half + static_cast<double>(node.contrib[0]));
+            int board[5];
+            int count = 0;
+            for (int card : config.board)
+            {
+                board[count++] = card;
+            }
+            if (turn >= 0)
+            {
+                board[count++] = turn;
+            }
+            if (river >= 0)
+            {
+                board[count++] = river;
+            }
+            if (count != 5)
+            {
+                throw std::logic_error("showdown without five board cards");
+            }
+            outcome = holdem::compare_showdown(
+                deal.c0, deal.c1, deal.d0, deal.d1, std::span<const int>(board, 5));
         }
-        if (node.folded == 1)
-        {
-            return half + static_cast<double>(node.contrib[1]);
-        }
-        int board[5];
-        int count = 0;
-        for (int card : config.board)
-        {
-            board[count++] = card;
-        }
-        if (turn >= 0)
-        {
-            board[count++] = turn;
-        }
-        if (river >= 0)
-        {
-            board[count++] = river;
-        }
-        if (count != 5)
-        {
-            throw std::logic_error("showdown without five board cards");
-        }
-        const int outcome = holdem::compare_showdown(
-            deal.c0, deal.c1, deal.d0, deal.d1, std::span<const int>(board, 5));
-        if (outcome > 0)
-        {
-            return half + static_cast<double>(node.contrib[1]);
-        }
-        if (outcome < 0)
-        {
-            return -(half + static_cast<double>(node.contrib[0]));
-        }
-        return 0.0;
+        return ChipPayoff::terminal(
+            config.pot,
+            node.contrib[0],
+            node.contrib[1],
+            node.folded,
+            outcome,
+            config.rake).utility[0];
     }
 
     double cfr_deal(int node_index, double pi0, double pi1, double chance, const Deal& deal,
@@ -2952,13 +2947,18 @@ struct StreetBatchSolver::Engine
         int hand,
         std::span<const double> opp_amount,
         double& worse_mass,
-        double& better_mass) const
+        double& better_mass,
+        double* tie_mass = nullptr) const
     {
         const int opponent = 1 - hero;
         const int worse = table.worse_end[hero][static_cast<std::size_t>(hand)];
         const int after_tie = table.better_begin[hero][static_cast<std::size_t>(hand)];
         worse_mass = 0.0;
         better_mass = 0.0;
+        if (tie_mass != nullptr)
+        {
+            *tie_mass = 0.0;
+        }
         for (int other = 0; other < static_cast<int>(opp_amount.size()); ++other)
         {
             const double piece = opp_amount[static_cast<std::size_t>(other)];
@@ -2975,6 +2975,10 @@ struct StreetBatchSolver::Engine
             {
                 better_mass += piece;
             }
+            else if (tie_mass != nullptr)
+            {
+                *tie_mass += piece;
+            }
         }
     }
 
@@ -2985,6 +2989,7 @@ struct StreetBatchSolver::Engine
         int river,
         double win_pay,
         double lose_pay,
+        double tie_pay,
         std::span<const double> opp_amount,
         std::span<double> ev,
         bool stable) const
@@ -3008,6 +3013,7 @@ struct StreetBatchSolver::Engine
                 }
             }
         }
+        const bool need_ties = tie_pay != 0.0;
         for (int hand = 0; hand < hero_hands; ++hand)
         {
             if (!hand_live(hero, hand, turn, river))
@@ -3039,19 +3045,36 @@ struct StreetBatchSolver::Engine
             double better_mass = slice_reach(
                 ctx, table, opp, after_tie, opp_hands, c0, c1, cut0_better, cut1_better, len0, len1,
                 add_hand, opp_amount, table.pos[opp]);
+            double tie_mass = 0.0;
+            if (need_ties)
+            {
+                tie_mass = slice_reach(
+                    ctx, table, opp, worse, after_tie, c0, c1,
+                    cut0_worse, cut1_worse, cut0_better, cut1_better,
+                    add_hand, opp_amount, table.pos[opp]);
+            }
             if (stable)
             {
                 const bool worse_ok = difference_is_stable(amount_total, amount_total - worse_mass, worse_mass);
                 const bool better_ok = difference_is_stable(amount_total, amount_total - better_mass, better_mass);
-                if (!worse_ok || !better_ok)
+                const bool tie_ok = !need_ties
+                    || difference_is_stable(amount_total, amount_total - tie_mass, tie_mass);
+                if (!worse_ok || !better_ok || !tie_ok)
                 {
-                    direct_rank_masses(table, hero, hand, opp_amount, worse_mass, better_mass);
+                    direct_rank_masses(
+                        table, hero, hand, opp_amount, worse_mass, better_mass,
+                        need_ties ? &tie_mass : nullptr);
                 }
             }
             const double low_pay = hero == 0 ? win_pay : lose_pay;
             const double high_pay = hero == 0 ? lose_pay : win_pay;
-            ev[static_cast<std::size_t>(hand)] = range_w[hero][static_cast<std::size_t>(hand)] * joint_scale
-                * (low_pay * worse_mass + high_pay * better_mass);
+            double weighted = low_pay * worse_mass + high_pay * better_mass;
+            if (need_ties)
+            {
+                weighted += tie_pay * tie_mass;
+            }
+            ev[static_cast<std::size_t>(hand)] =
+                range_w[hero][static_cast<std::size_t>(hand)] * joint_scale * weighted;
         }
         if (profile_)
         {
@@ -3077,15 +3100,18 @@ struct StreetBatchSolver::Engine
         double by1[52];
         collect_reach(ctx, 0, turn, river, pi0, true, ctx.amount_buf[0], total0, by0);
         collect_reach(ctx, 1, turn, river, pi1, true, ctx.amount_buf[1], total1, by1);
-        const double half = static_cast<double>(config.pot) * 0.5;
         if (node.folded >= 0)
         {
             const auto fold_started = profile_
                 ? std::chrono::steady_clock::now()
                 : std::chrono::steady_clock::time_point{};
-            const double pay = node.folded == 0
-                ? -(half + static_cast<double>(node.contrib[0]))
-                : half + static_cast<double>(node.contrib[1]);
+            const double pay = ChipPayoff::terminal(
+                config.pot,
+                node.contrib[0],
+                node.contrib[1],
+                node.folded,
+                0,
+                config.rake).utility[0];
             for (int hand = 0; hand < n0; ++hand)
             {
                 if (!hand_live(0, hand, turn, river))
@@ -3119,10 +3145,14 @@ struct StreetBatchSolver::Engine
             }
             return;
         }
-        const double win_pay = half + static_cast<double>(node.contrib[1]);
-        const double lose_pay = -(half + static_cast<double>(node.contrib[0]));
-        showdown_side(ctx, 0, turn, river, win_pay, lose_pay, ctx.amount_buf[1], ev0, stable);
-        showdown_side(ctx, 1, turn, river, win_pay, lose_pay, ctx.amount_buf[0], ev1, stable);
+        const double win_pay = ChipPayoff::terminal(
+            config.pot, node.contrib[0], node.contrib[1], -1, 1, config.rake).utility[0];
+        const double lose_pay = ChipPayoff::terminal(
+            config.pot, node.contrib[0], node.contrib[1], -1, -1, config.rake).utility[0];
+        const double tie_pay = ChipPayoff::terminal(
+            config.pot, node.contrib[0], node.contrib[1], -1, 0, config.rake).utility[0];
+        showdown_side(ctx, 0, turn, river, win_pay, lose_pay, tie_pay, ctx.amount_buf[1], ev0, stable);
+        showdown_side(ctx, 1, turn, river, win_pay, lose_pay, tie_pay, ctx.amount_buf[0], ev1, stable);
     }
 
     void check_usable() const

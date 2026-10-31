@@ -26,6 +26,7 @@ void print_usage(const char* argv0)
               << " [--oop-bets 0.5,1] [--ip-bets 0.5,1]"
               << " [--oop-raises 1] [--ip-raises 1]"
               << " [--all-in | --no-all-in] [--max-raises N]"
+              << " [--rake-rate RATE] [--rake-cap CHIPS]"
               << " [--first oop|ip]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
               << " [--gap-threshold X] [--eval-every N] [--eval-interval N]"
@@ -298,6 +299,14 @@ void apply_config_text(const std::string& text, Options& options)
         options.have_ip_raises = true;
     }
     read_bool(text, "allow_all_in", options.config.allow_all_in);
+    if (read_number(text, "rake_rate", number))
+    {
+        options.config.rake.rate = number;
+    }
+    if (read_number(text, "rake_cap", number))
+    {
+        options.config.rake.cap = number;
+    }
     if (read_number(text, "max_raises", number))
     {
         options.config.max_raises = static_cast<int>(number);
@@ -477,6 +486,14 @@ int main(int argc, char** argv)
             else if (arg == "--max-raises")
             {
                 options.config.max_raises = std::atoi(need("--max-raises"));
+            }
+            else if (arg == "--rake-rate")
+            {
+                options.config.rake.rate = std::atof(need("--rake-rate"));
+            }
+            else if (arg == "--rake-cap")
+            {
+                options.config.rake.cap = std::atof(need("--rake-cap"));
             }
             else if (arg == "--first")
             {

@@ -18,6 +18,8 @@ Player 0's utility is net chips from the start of the river:
 
 An uncalled raise is not profit. Betting 100 into a pot of 100 and getting a fold wins 50, the same as winning a check-down. A called bet that wins is worth `pot / 2` plus the call.
 
+Optional pot rake (`RiverConfig::rake`, CLI `--rake-rate` / `--rake-cap`, and `rake-rate` / `rake-cap` on `river-config 1`) subtracts the house take from the winner, or half each on a tie. Zero rake keeps the chip rule above bit-for-bit. See [RAKE.md](RAKE.md).
+
 ## Sizes
 
 Fractions are of the pot, rounded to the nearest chip, with ties away from zero.
@@ -51,6 +53,7 @@ Check-down is worth +50 with aces and -50 with fives. A fold to the all-in wins 
 river_solver --config configs/river_default.json
 river_solver --iterations 2000 --algorithm cfr_plus
 river_solver --board Ah,Kd,7c,4s,2h --pot 100 --stack 200 --oop-range AA --ip-range KK --oop-bets 0.5,1 --ip-bets 0.5,1 --max-raises 2
+river_solver --board Ah,Kd,7c,4s,2h --oop-range AcAd --ip-range KsKc --no-all-in --max-raises 0 --rake-rate 0.05 --iterations 1
 river_solver --reference --iterations 30 --algorithm vanilla --oop-range 22+ --ip-range 22+
 river_solver --iterations 100000 --time-limit 5
 river_solver --iterations 200 --report report.txt
