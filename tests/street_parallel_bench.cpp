@@ -125,6 +125,10 @@ void profile_case(const char* name, poker::streets::StreetConfig config, int thr
               << " decision_seconds " << profile.decision_seconds
               << " chance_seconds " << profile.chance_seconds
               << " freeze_seconds " << profile.freeze_seconds
+              << " fold_seconds " << profile.fold_seconds
+              << " collect_seconds " << profile.collect_seconds
+              << " expand_seconds " << profile.expand_seconds
+              << " support_seconds " << profile.support_seconds
               << " train_seconds " << report.train_seconds
               << " cache_init_seconds " << report.cache_init_seconds
               << "\n";

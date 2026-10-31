@@ -297,3 +297,21 @@ One-thread gain is mostly the fused floor+freeze scan. Four-thread gain adds par
 ### Study flop `flop_srp_one_size` (~42.8 M infosets, ~4.27 GiB)
 
 Warm one frozen iteration, then time two more (no walk profile) at four threads: before `4.595` s/iter, after `3.833` s/iter (**1.20x**, about 16% less train time per iteration). After branch with walk profile on for two timed iterations: `freeze_seconds` 1.044 s/iter at one thread and 0.235 s/iter at four threads (**4.45x** on the freeze/floor scans alone); train 14.60 s/iter at one thread and 3.82 s/iter at four threads. Allocated bytes stay ~4.27 GiB. Parallel unit tables still match; `poker_solver_tests` reported 440,795 assertions and 0 failures on this branch.
+
+## Frozen decision expand cache (M6)
+
+After `a04eb8c`, a short instrumented `street_parallel_bench` profile on the paired flop (3 warm CFR+ iters, 1 thread) showed action expand — repeated `hand_supported` / `slot_index` across actions, plus EV copies — as the largest remaining bucket (`expand_seconds` ≈ 0.58 s of ≈ 1.84 s train), ahead of showdown and the timed decision mix. Freeze was already small.
+
+`cursor/engine-speed-e394` caches structural support masks per `(turn, river)` on each worker and stores acting-player infoset bases on the per-depth scratch frame, so each decision node pays those costs once per visit instead of once per action. `StreetWalkProfile` also reports `fold_seconds`, `collect_seconds`, `expand_seconds`, and `support_seconds`. Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Short microbench only.
+
+### Reset-30 warm-cache vs freeze tip (`6648754`)
+
+`street_parallel_bench sample`, alternating before/after rebuilds, no walk profile:
+
+| Case | Threads | Before median train (s) | After median train (s) | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| flop_paired | 4 | 3.452 | 2.374 | **1.45x** |
+| turn_half_pot | 4 | 1.468 | 1.197 | 1.23x |
+| flop_paired | 1 | ~15.5–16.7 (n=2) | ~10.2–10.5 (n=2) | ~1.55x |
+
+Instrumented 3-iter flop profile at 1 thread: `expand_seconds` 0.579 → 0.125; train 1.838 → 1.335. Allocated bytes rise slightly from the support/slot scratch (flop 4 threads 176,624,560 → 176,644,816). Parity pins at iteration 30: 1-vs-4 thread regret and strategy-sum relative delta 0 on both trees. `poker_solver_tests` 440,795 assertions, 0 failures.
