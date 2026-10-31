@@ -76,6 +76,18 @@ On top of the freeze tip, caching structural support and acting-player slot base
 
 On top of `#46`, precomputing structural `hand_supported` masks for every walkable `(turn, river)` cut paired-flop reset-30 train at four threads from median 2.301 s to 2.116 s (~1.09x); turn_half_pot 1.176 s to 1.093 s (~1.08x). Profiled `support_seconds` collapsed; showdown remains the largest remaining bucket. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
 
+## Fused showdown + supported-hand indexes (`cursor/engine-speed-3-e394`)
+
+On top of `#51` / latest `main`, walking precomputed supported-hand indexes through terminal collect/fold/showdown and fusing showdown mass extraction cut paired-flop reset-30 train at four threads from median 2.289 s to 1.678 s (~1.36x); turn_half_pot 1.162 s to 0.839 s (~1.39x). Profiled `showdown_seconds` roughly halved on the paired flop. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
+
+## Decision/expand idx* walk probe (`cursor/engine-speed-4-e394`, not shipped)
+
+On top of `#52`, walking the same supported-hand indexes through frozen decision expand / regret mix did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈0.99x). Profiled decision/expand buckets shrank, but wall train did not. Change reverted; details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md).
+
+## Sparse serial-chance reach / EV reduce probe (`cursor/engine-speed-5-e394`, not shipped)
+
+On top of `#52`, walking supported-hand indexes through frozen serial/parallel chance `pi` filters and EV reduces (and `card_reaches_pair`) did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈0.97x / 1.00x). One-thread `chance_seconds` became visible, but wall train did not move. Change reverted; details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md).
+
 ## Next measurement
 
-Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target. Showdown remains the next profile hotspot after support.
+Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target. Dense idx* walks over flop boards (few blocked combos) are exhausted for decision and chance bookkeeping after `#52`–speed-5 probes; remaining train is still nested showdown/chance-child work.

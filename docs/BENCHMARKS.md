@@ -332,3 +332,50 @@ After the expand cache (`#46` / `5762d5c`), a short instrumented profile on the 
 | turn_half_pot | 4 | 1.176 | 1.093 | 1.08x |
 
 Instrumented 3-iter profile: flop `support_seconds` 0.050 → 0.018 at 1 thread; turn 0.010 → 0.0006. Allocated bytes rise with the mask table (flop 4 threads 176,644,816 → 177,166,000). Parity pins at iteration 30: 1-vs-4 and after-vs-main relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,547 assertions, 0 failures.
+
+## Fused showdown + supported-hand indexes (M6)
+
+After board-support masks (`#51` / `eaeffaf`), a short instrumented profile on the paired flop (3 warm CFR+ iters) still spent most of train in `showdown_seconds` (≈0.46 s of ≈1.12 s at 1 thread). Terminals retested `hand_live` over every indexed hand and paid repeated `slice_reach` / `combo_index` work.
+
+`cursor/engine-speed-3-e394` stores supported-hand index lists beside the `#51` masks, walks those lists in collect / fold / showdown, fuses worse/better/tie mass extraction after one `order_reach`, and caches same-combo twin indexes. Rank-order opponent weights are materialized once per prefix build. Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Short microbench only.
+
+### Reset-30 warm-cache vs latest `origin/main` (includes `#51`)
+
+`street_parallel_bench sample`, alternating before/after binaries, no walk profile. Re-measured after rebase onto `main` with `#50,#51,#47,#49,#31`:
+
+| Case | Threads | Before median train (s) | After median train (s) | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| flop_paired | 4 | 2.289 | 1.678 | **1.36x** |
+| turn_half_pot | 4 | 1.162 | 0.839 | **1.39x** |
+
+Instrumented 3-iter profile at 1 thread: flop `showdown_seconds` 0.437 → 0.230, train 1.141 → 0.916; turn showdown 0.185 → 0.074, train 0.405 → 0.263. Allocated bytes rise with twin indexes, ordered-amount scratch, and per-board index lists (flop 4 threads 177,166,040 → 177,667,784). Parity pins at iteration 30: 1-vs-4 and after-vs-`main` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,644 assertions, 0 failures.
+
+## Decision/expand idx* walk probe (not shipped)
+
+`cursor/engine-speed-4-e394` tried walking `BoardSupport::{idx0,idx1}` through frozen `fill_actor_slot_bases`, action expand, and decision regret / average mix (same pattern as the `#52` terminal paths). Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Short microbench only; code change reverted.
+
+### Reset-30 warm-cache vs engine-speed-3 tip (`b3f3923` / `#52` pre-rebase tip)
+
+`street_parallel_bench sample`, five alternating before/after pairs at four threads, quiet host, no walk profile:
+
+| Case | Threads | Before median train (s) | After median train (s) | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| flop_paired | 4 | 1.589 | 1.600 | **0.99x** |
+| turn_half_pot | 4 | 0.795 | 0.805 | **0.99x** |
+
+An earlier noisier three-pair set was ~1.02x flop / ~1.06x turn. Instrumented 3-iter profile at 1 thread did shrink `decision_seconds` (flop ≈0.174 → 0.109) and `expand_seconds` (≈0.111 → 0.087), but wall train for reset-30 at four threads did not clear ~1.05x. On the paired flop only ~11% of hole combos are board-blocked, so the dense `live[]` scan was already cheap relative to showdown/chance, and zero-fills for unsupported reaches offset the sparse walk. Parity pins at iteration 30: 1-vs-4 and after-vs-`#52` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,666 assertions, 0 failures. Not shipped.
+
+## Sparse serial-chance reach / EV reduce probe (not shipped)
+
+`cursor/engine-speed-5-e394` tried walking `BoardSupport::{idx0,idx1}` through frozen serial-chance child `pi` filters and EV reduces, the parallel-chance EV reduce over active cards, worker chunk `pi` filters, and `card_reaches_pair`, plus a one-thread outermost `chance_seconds` wall timer. Linux cloud agent, g++ 13.3.0 Release, 4 logical CPUs. Short microbench only; code change reverted.
+
+### Reset-30 warm-cache vs engine-speed-3 tip (`5b04b41` / `#52`)
+
+`street_parallel_bench sample`, five alternating before/after pairs at four threads, quiet host, no walk profile:
+
+| Case | Threads | Before median train (s) | After median train (s) | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| flop_paired | 4 | 1.574 | 1.622 | **0.97x** |
+| turn_half_pot | 4 | 0.791 | 0.792 | **1.00x** |
+
+Instrumented 3-iter profile at 1 thread now reports non-zero `chance_seconds` for the outermost serial chance wall (flop ≈0.790 of ≈0.860 train; turn ≈0.214 of ≈0.256), confirming that bucket was previously unaccounted. Sparse idx* filters did not clear ~1.05x wall train at four threads: on the paired flop only ~11% of hole combos are board-blocked, so fill-zero then sparse assign for child reaches offsets the shorter EV reduce, and multi-thread chance wall remains dominated by nested child walks rather than the dense hand loops. Parity pins at iteration 30: 1-vs-4 and after-vs-`#52` relative regret / strategy-sum delta 0 on both trees. `poker_solver_tests` 441,717 assertions, 0 failures. Not shipped.
