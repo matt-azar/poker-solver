@@ -447,10 +447,25 @@
   flex-wrap: wrap;
 }
 
-.solve-controls .toolbar-btn:disabled {
-  opacity: 0.38;
+.solve-controls .toolbar-btn:disabled,
+.toolbar-btn:disabled {
+  opacity: 1;
   cursor: not-allowed;
-  filter: grayscale(0.25);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--secondary) 70%, transparent);
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  filter: none;
+  box-shadow: none;
+}
+
+.solve-controls .toolbar-btn.primary:disabled {
+  background: color-mix(in srgb, var(--accent) 28%, var(--secondary));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: color-mix(in srgb, #fff 55%, var(--muted));
+}
+
+.solve-controls .toolbar-btn.danger:disabled {
+  color: color-mix(in srgb, var(--danger) 40%, var(--muted));
 }
 
 .action-history {
@@ -1682,12 +1697,6 @@
 
 .toolbar-btn.danger {
   color: var(--danger);
-}
-
-.toolbar-btn:disabled {
-  opacity: 0.38;
-  cursor: not-allowed;
-  filter: grayscale(0.2);
 }
 
 .build-hardware-hint {
