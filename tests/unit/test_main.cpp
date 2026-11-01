@@ -42,6 +42,7 @@ int main()
     run_range_library_tests();
     run_node_lock_tests();
     run_lock_apply_tests();
+    run_strategy_edit_tests();
     run_tree_edit_tests();
     run_hand_history_tests();
     }

@@ -47,6 +47,7 @@ explorer   # serves desktop/dist when present
 | Equity | `GET …/equity` | Averages + hist | Equity tab: averages, clickable band filter, shape composition, top hands | Check-down (not chip EV); buckets + `oop_hands`/`ip_hands` | equity tests; `analysis.test.ts` |
 | Categories | `GET …/categories` | Table | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | hand categories; `analysis.test.ts` |
 | Locks | PUT/DELETE `…/locks` | Hand detail | Lock drawer + inspector | All-zero PUT rejected; 0%≠unlock | HTTP + `locks.test.ts` |
+| Strategy edits | PUT/DELETE `…/strategy-edits` | Hand detail | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | HTTP + `strategyEdits.test.ts` |
 | Resolve locked | `POST …/resolve-locked` | Resolve + warm-start | Solver menu + drawer | New solution + baseline | HTTP |
 | Compare | `GET /api/compare` | Note | Compare workspace | Decision node | HTTP |
 | Save / Open | `POST …/save`, `/open` | File fields | File menu / Build | PSOL v2 + locks; browser path fields | checkpoint HTTP |
@@ -72,7 +73,7 @@ explorer   # serves desktop/dist when present
 | Contracts + `EngineClient` | Done |
 | Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
 | Analysis dock + Build + Library | Done — Equity hist + band filter + composition; Categories made-hand/draws; Library nested range folders |
-| Locks + Compare | Done |
+| Locks + Strategy edits + Compare | Done |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |
 | Visual / a11y / perf polish | Partial — focus-visible, reduced-motion, compact ≤1280, light/dark themes |
 
@@ -107,16 +108,18 @@ npm ci && npm run build
 npm run tauri:build
 ```
 
-| Lock / compare op | UI | Backend |
+| Lock / strategy / compare op | UI | Backend |
 | --- | --- | --- |
 | Apply selected/full lock | Lock drawer / inspector | `PUT …/locks` |
 | Unlock | Lock drawer / inspector | `DELETE …/locks` |
+| Apply free-form strategy edit | Strategy editor / inspector | `PUT …/strategy-edits` |
+| Clear strategy edits | Strategy editor | `DELETE …/strategy-edits` |
 | Resolve locked | Solve/Tree menus + drawer | `POST …/resolve-locked` |
 | Compare revisions | Compare workspace | `GET /api/compare` |
 
 ## Validation notes
 
-- Unit: `cd desktop && npm test` (browse, locks, status/`gap_series`, cards, analysis helpers, action colors)
+- Unit: `cd desktop && npm test` (browse, locks, strategy edits, status/`gap_series`, cards, analysis helpers, action colors)
 - Build: `cd desktop && npm run build`
 - Live: solve against `explorer`; Graphs read `status.gap_series`; Status bar shows EV / NashConv / mem
 - Visual targets: 1440×900 dark/light, 1920×1080 dual-range, 1280×800 compact

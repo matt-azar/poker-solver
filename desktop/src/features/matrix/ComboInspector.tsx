@@ -12,7 +12,9 @@ export function ComboInspector() {
   const calculateEv = useStudyStore((s) => s.calculateEv);
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const selectCombosForLock = useStudyStore((s) => s.selectCombosForLock);
+  const selectCombosForStrategyEdit = useStudyStore((s) => s.selectCombosForStrategyEdit);
   const setLockDrawerOpen = useStudyStore((s) => s.setLockDrawerOpen);
+  const setStrategyEditDrawerOpen = useStudyStore((s) => s.setStrategyEditDrawerOpen);
   const toggleLockHand = useStudyStore((s) => s.toggleLockHand);
   const unlockHands = useStudyStore((s) => s.unlockHands);
   const lockDraft = useStudyStore((s) => s.lockDraft);
@@ -177,9 +179,25 @@ export function ComboInspector() {
             <button
               type="button"
               className="toolbar-btn"
+              onClick={() =>
+                selectCombosForStrategyEdit(cell.hands.map((hand) => hand.combo))
+              }
+            >
+              Edit strategy
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
               onClick={() => setLockDrawerOpen(true)}
             >
               Lock editor
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={() => setStrategyEditDrawerOpen(true)}
+            >
+              Strategy editor
             </button>
             {pinned ? (
               <button

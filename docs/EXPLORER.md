@@ -59,6 +59,14 @@ Node locks (street solutions; public-node id `pN.t-1.r-1` maps to infoset `N`):
 - `DELETE /api/solutions/{id}/locks?node_id=…&hand_index=K` removes one combo from a SelectedCombos lock (erases the node lock when none remain). Full-node locks unlock with `node_id` only
 - `GET /api/compare?baseline=sA&scenario=sB&node_id=...` returns root EV/gap for both revisions plus per-hand strategy vectors, deltas, and locked-hand marks
 
+Free-form strategy edits (distinct from locks — rewrite the prepared average profile for browse/EV; do not constrain CFR):
+
+- `GET /api/solutions/{id}/strategy-edits` lists session overlays (`edits` plus `persisted:false`)
+- `PUT /api/solutions/{id}/strategy-edits` with `{"node_id","kind":"full"|"selected","hand_indices","probs"}` validates nonnegative probs that sum to 1 (same tolerance as locks), applies them via `set_average_strategy`, and bumps `profile_epoch` so cached value pages drop
+- `DELETE /api/solutions/{id}/strategy-edits?node_id=...` (or omit the node) clears one node or all overlays and rebuilds the average from strategy sums; `hand_index` clears one SelectedCombos hand
+- Continue / resolve-locked discard session strategy edits (training rebuilds the average). Locks are unchanged by these routes
+- **PSOL limitation:** strategy edits are session-scoped only. PSOL v2 still persists `locks_text` only; free-form strategy overlays are not saved or restored
+
 Save/Open uses PSOL payload version 2 with a trailing `locks_text` field (`format_lock_set`). Version 1 files still open with empty locks. Algorithm tags are `0` vanilla, `1` CFR+, `2` linear, `3` DCFR(1.5,0,2); unknown tags fail without mutating the previous file. A reopened solution continues with its stored algorithm.
 
 ## Themes

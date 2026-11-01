@@ -16,6 +16,7 @@
 #include "solver/memory_plan.hpp"
 #include "solver/node_lock.hpp"
 #include "solver/river_batch.hpp"
+#include "solver/strategy_edit.hpp"
 #include "solver/street_batch.hpp"
 #include "solver/tree_edit.hpp"
 
@@ -350,6 +351,8 @@ struct HeldSolution
     std::vector<double> sample_values;
     std::vector<double> sample_gaps;
     poker::solver::LockSet locks;
+    // Session-scoped free-form average overlays. Not written to PSOL v2.
+    poker::solver::StrategyEditSet strategy_edits;
 };
 
 std::vector<double> optional_sizes(const std::string& text, const char* key)
@@ -1310,6 +1313,156 @@ std::string json_locks(const poker::solver::LockSet& locks)
     }
     out += "]}";
     return out;
+}
+
+std::string json_strategy_edits(const poker::solver::StrategyEditSet& edits)
+{
+    std::string out = "{\"edits\":[";
+    const std::vector<std::size_t> ids = edits.infoset_ids();
+    for (std::size_t i = 0; i < ids.size(); ++i)
+    {
+        const poker::solver::StrategyEdit* edit = edits.find(ids[i]);
+        if (edit == nullptr)
+        {
+            continue;
+        }
+        if (i > 0)
+        {
+            out += ',';
+        }
+        out += "{\"node_id\":";
+        append_escaped(out, node_id_for_infoset(edit->infoset_id));
+        out += ",\"infoset_id\":";
+        out += std::to_string(edit->infoset_id);
+        out += ",\"kind\":";
+        append_escaped(
+            out, edit->kind == poker::solver::StrategyEditKind::FullNode ? "full" : "selected");
+        out += ",\"hand_indices\":[";
+        for (std::size_t h = 0; h < edit->hand_indices.size(); ++h)
+        {
+            if (h > 0)
+            {
+                out += ',';
+            }
+            out += std::to_string(edit->hand_indices[h]);
+        }
+        out += "],\"probs\":[";
+        for (std::size_t a = 0; a < edit->probs.size(); ++a)
+        {
+            if (a > 0)
+            {
+                out += ',';
+            }
+            out += format_number(edit->probs[a]);
+        }
+        out += "]}";
+    }
+    out += "],\"persisted\":false}";
+    return out;
+}
+
+poker::solver::StreetInspection inspect_held_node(HeldSolution& held, const std::string& node_id)
+{
+    if (held.street)
+    {
+        return held.street->inspect_node(node_id);
+    }
+    if (held.river)
+    {
+        return held.river->inspect_node(node_id);
+    }
+    throw std::invalid_argument("solution has no solver");
+}
+
+void set_held_average_strategy(
+    HeldSolution& held,
+    const std::string& node_id,
+    int hand,
+    std::span<const double> probs)
+{
+    if (held.street)
+    {
+        held.street->set_average_strategy(node_id, hand, probs);
+        return;
+    }
+    if (held.river)
+    {
+        held.river->set_average_strategy(node_id, hand, probs);
+        return;
+    }
+    throw std::invalid_argument("solution has no solver");
+}
+
+void invalidate_held_average(HeldSolution& held)
+{
+    if (held.street)
+    {
+        held.street->invalidate_prepared_average();
+    }
+    else if (held.river)
+    {
+        held.river->invalidate_prepared_average();
+    }
+}
+
+void apply_strategy_edit_row(
+    HeldSolution& held,
+    const std::string& node_id,
+    const poker::solver::StrategyEdit& edit,
+    const poker::solver::StreetInspection& view)
+{
+    const std::span<const double> probs(edit.probs.data(), edit.probs.size());
+    if (edit.kind == poker::solver::StrategyEditKind::FullNode)
+    {
+        for (std::size_t hand = 0; hand < view.hands.size(); ++hand)
+        {
+            if (!view.hands[hand].structural)
+            {
+                continue;
+            }
+            set_held_average_strategy(held, node_id, static_cast<int>(hand), probs);
+        }
+        return;
+    }
+    for (const std::size_t hand : edit.hand_indices)
+    {
+        if (hand >= view.hands.size())
+        {
+            throw std::invalid_argument("hand index out of range");
+        }
+        if (!view.hands[hand].structural)
+        {
+            throw std::invalid_argument("hand has no information set on this node");
+        }
+        set_held_average_strategy(held, node_id, static_cast<int>(hand), probs);
+    }
+}
+
+void reapply_strategy_edits(HeldSolution& held)
+{
+    invalidate_held_average(held);
+    for (const std::size_t infoset_id : held.strategy_edits.infoset_ids())
+    {
+        const poker::solver::StrategyEdit* edit = held.strategy_edits.find(infoset_id);
+        if (edit == nullptr)
+        {
+            continue;
+        }
+        const std::string node_id = node_id_for_infoset(infoset_id);
+        const poker::solver::StreetInspection view = inspect_held_node(held, node_id);
+        apply_strategy_edit_row(held, node_id, *edit, view);
+    }
+}
+
+void clear_strategy_edits(HeldSolution& held)
+{
+    if (held.strategy_edits.empty())
+    {
+        invalidate_held_average(held);
+        return;
+    }
+    held.strategy_edits.clear();
+    invalidate_held_average(held);
 }
 
 std::shared_ptr<HeldSolution> clone_held_baseline(const HeldSolution& source)
@@ -2490,6 +2643,8 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
         held->nash_gap = gap;
         held->time_limit_reached = time_limit_reached;
         held->job_id = job_id;
+        // Training rebuilds the average from strategy_sum; drop session overlays.
+        held->strategy_edits.clear();
         if (held->street)
         {
             held->street->prepare_inspection();
@@ -2712,6 +2867,8 @@ void resolve_locked_job(
             g_session.abort_continuation(job_id, build_status(draft));
             return;
         }
+        // Locked re-solve rebuilds the average; drop any prior free-form overlays.
+        held->strategy_edits.clear();
         held->street->prepare_inspection();
         held->root_id = held->street->root_node_id();
         held->memory = held->street->memory_report();
@@ -3814,6 +3971,210 @@ void handle_client(socket_t client)
         }
         return;
     }
+    if (line.rfind("PUT /api/solutions/", 0) == 0 && line.find("/strategy-edits ") != std::string::npos)
+    {
+        const std::string prefix = "PUT /api/solutions/";
+        const std::string rest = line.substr(prefix.size());
+        const std::size_t slash = rest.find('/');
+        std::uint64_t id = 0;
+        if (slash == std::string::npos || !parse_prefixed_id(rest.substr(0, slash), 's', id))
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
+            return;
+        }
+        if (g_session.running())
+        {
+            send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
+            return;
+        }
+        g_session.wait_until_quiet();
+        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        if (!lease)
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+            return;
+        }
+        try
+        {
+            auto held = std::static_pointer_cast<HeldSolution>(lease.resource());
+            const std::string node_id = read_string(body, "node_id", "");
+            const std::string kind = read_string(body, "kind", "selected");
+            std::size_t infoset_id = 0;
+            if (!parse_public_node_index(node_id, infoset_id))
+            {
+                throw std::invalid_argument("bad node_id");
+            }
+            const poker::solver::StreetInspection view = inspect_held_node(*held, node_id);
+            if (view.kind != "decision")
+            {
+                throw std::invalid_argument("strategy edits apply only to decision nodes");
+            }
+            const int action_count = static_cast<int>(view.actions.size());
+            const std::vector<double> probs = read_number_array(body, "probs");
+            poker::solver::StrategyEdit edit;
+            edit.infoset_id = infoset_id;
+            edit.probs = poker::solver::make_strategy_probs(probs, action_count);
+            if (kind == "full")
+            {
+                edit.kind = poker::solver::StrategyEditKind::FullNode;
+            }
+            else if (kind == "selected")
+            {
+                edit.kind = poker::solver::StrategyEditKind::SelectedCombos;
+                const std::vector<double> hands = read_number_array(body, "hand_indices");
+                for (double hand : hands)
+                {
+                    if (!std::isfinite(hand) || hand < 0.0 || std::floor(hand) != hand)
+                    {
+                        throw std::invalid_argument("hand_indices must be non-negative integers");
+                    }
+                    const std::size_t index = static_cast<std::size_t>(hand);
+                    if (index >= view.hands.size())
+                    {
+                        throw std::invalid_argument("hand index out of range");
+                    }
+                    if (!view.hands[index].structural)
+                    {
+                        throw std::invalid_argument("hand has no information set on this node");
+                    }
+                    edit.hand_indices.push_back(index);
+                }
+            }
+            else
+            {
+                throw std::invalid_argument("kind must be full or selected");
+            }
+            // Upsert then rebuild overlays so a selected row can replace a prior
+            // full-node edit without leaving stale hands edited.
+            held->strategy_edits.upsert(std::move(edit));
+            reapply_strategy_edits(*held);
+            send_response(client, 200, "application/json", json_strategy_edits(held->strategy_edits));
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += '}';
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
+    if (line.rfind("DELETE /api/solutions/", 0) == 0
+        && (line.find("/strategy-edits?") != std::string::npos
+            || line.find("/strategy-edits/") != std::string::npos
+            || line.find("/strategy-edits ") != std::string::npos))
+    {
+        const std::string prefix = "DELETE /api/solutions/";
+        const std::string rest = line.substr(prefix.size());
+        const std::size_t slash = rest.find('/');
+        std::uint64_t id = 0;
+        if (slash == std::string::npos || !parse_prefixed_id(rest.substr(0, slash), 's', id))
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
+            return;
+        }
+        if (g_session.running())
+        {
+            send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
+            return;
+        }
+        std::string node_id;
+        bool have_hand_index = false;
+        std::size_t hand_index = 0;
+        const std::size_t edits_at = rest.find("/strategy-edits");
+        if (edits_at != std::string::npos)
+        {
+            const std::string after = rest.substr(edits_at + 15);
+            if (!after.empty() && after[0] == '/')
+            {
+                const std::size_t end = after.find(' ');
+                node_id = end == std::string::npos ? after.substr(1) : after.substr(1, end - 1);
+            }
+            else if (!after.empty() && after[0] == '?')
+            {
+                const auto query_value = [&](const char* key) -> std::string
+                {
+                    const std::string needle = std::string(key) + "=";
+                    const std::size_t at = after.find(needle);
+                    if (at == std::string::npos)
+                    {
+                        return {};
+                    }
+                    const std::size_t start = at + needle.size();
+                    const std::size_t amp = after.find('&', start);
+                    const std::size_t space = after.find(' ', start);
+                    const std::size_t end = std::min(
+                        amp == std::string::npos ? after.size() : amp,
+                        space == std::string::npos ? after.size() : space);
+                    return after.substr(start, end - start);
+                };
+                node_id = query_value("node_id");
+                const std::string hand_text = query_value("hand_index");
+                if (!hand_text.empty())
+                {
+                    char* end = nullptr;
+                    const unsigned long parsed = std::strtoul(hand_text.c_str(), &end, 10);
+                    if (end == hand_text.c_str() || *end != '\0')
+                    {
+                        send_response(
+                            client, 400, "application/json", "{\"error\":\"bad hand_index\"}");
+                        return;
+                    }
+                    hand_index = static_cast<std::size_t>(parsed);
+                    have_hand_index = true;
+                }
+            }
+        }
+        g_session.wait_until_quiet();
+        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        if (!lease)
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+            return;
+        }
+        try
+        {
+            auto held = std::static_pointer_cast<HeldSolution>(lease.resource());
+            if (node_id.empty())
+            {
+                clear_strategy_edits(*held);
+            }
+            else
+            {
+                std::size_t infoset_id = 0;
+                if (!parse_public_node_index(node_id, infoset_id))
+                {
+                    throw std::invalid_argument("bad node_id");
+                }
+                if (have_hand_index)
+                {
+                    const poker::solver::StrategyEdit* existing =
+                        held->strategy_edits.find(infoset_id);
+                    if (existing != nullptr
+                        && existing->kind == poker::solver::StrategyEditKind::FullNode)
+                    {
+                        throw std::invalid_argument(
+                            "full-node strategy edits clear with node_id only; omit hand_index");
+                    }
+                    held->strategy_edits.erase_hand(infoset_id, hand_index);
+                }
+                else
+                {
+                    held->strategy_edits.erase(infoset_id);
+                }
+                reapply_strategy_edits(*held);
+            }
+            send_response(client, 200, "application/json", json_strategy_edits(held->strategy_edits));
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += '}';
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
     if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/continue ") != std::string::npos)
     {
         if (g_session.running())
@@ -4237,6 +4598,12 @@ void handle_client(socket_t client)
             if (tail == "locks")
             {
                 send_response(client, 200, "application/json", json_locks(held->locks));
+                return;
+            }
+            if (tail == "strategy-edits")
+            {
+                send_response(
+                    client, 200, "application/json", json_strategy_edits(held->strategy_edits));
                 return;
             }
             if (tail.rfind("nodes/", 0) == 0)

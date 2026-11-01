@@ -328,6 +328,54 @@ export class EngineClient {
     this.ensureOk(response, data);
     return data;
   }
+
+  async listStrategyEdits(solutionId: string): Promise<unknown> {
+    const { response, data } = await this.request(
+      "GET",
+      `/api/solutions/${solutionId}/strategy-edits`,
+    );
+    this.ensureOk(response, data);
+    return data;
+  }
+
+  async putStrategyEdit(
+    solutionId: string,
+    body: {
+      node_id: string;
+      kind: "full" | "selected";
+      hand_indices?: number[];
+      probs: number[];
+    },
+  ): Promise<unknown> {
+    const { response, data } = await this.request(
+      "PUT",
+      `/api/solutions/${solutionId}/strategy-edits`,
+      body,
+    );
+    this.ensureOk(response, data);
+    return data;
+  }
+
+  async deleteStrategyEdit(
+    solutionId: string,
+    nodeId?: string,
+    handIndex?: number,
+  ): Promise<unknown> {
+    const query = new URLSearchParams();
+    if (nodeId) {
+      query.set("node_id", nodeId);
+    }
+    if (handIndex !== undefined) {
+      query.set("hand_index", String(handIndex));
+    }
+    const suffix = query.toString() ? `?${query}` : "";
+    const { response, data } = await this.request(
+      "DELETE",
+      `/api/solutions/${solutionId}/strategy-edits${suffix}`,
+    );
+    this.ensureOk(response, data);
+    return data;
+  }
 }
 
 export const engineClient = new EngineClient({ baseUrl: defaultEngineBaseUrl() });

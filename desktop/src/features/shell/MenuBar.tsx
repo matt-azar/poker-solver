@@ -37,12 +37,14 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
   const redoRange = useStudyStore((s) => s.redoRange);
   const phase = useStudyStore((s) => s.phase);
   const setLockDrawerOpen = useStudyStore((s) => s.setLockDrawerOpen);
+  const setStrategyEditDrawerOpen = useStudyStore((s) => s.setStrategyEditDrawerOpen);
   const resolveLocked = useStudyStore((s) => s.resolveLocked);
   const loadCompare = useStudyStore((s) => s.loadCompare);
   const baselineSolutionId = useStudyStore((s) => s.baselineSolutionId);
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const setHoverCell = useStudyStore((s) => s.setHoverCell);
   const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
+  const strategyEditDrawerOpen = useStudyStore((s) => s.strategyEditDrawerOpen);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -53,6 +55,8 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
       if (action === "escape") {
         if (lockDrawerOpen) {
           setLockDrawerOpen(false);
+        } else if (strategyEditDrawerOpen) {
+          setStrategyEditDrawerOpen(false);
         } else if (helpOpen) {
           onHelpOpen(false);
         } else {
@@ -83,6 +87,8 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
     onHelpOpen,
     lockDrawerOpen,
     setLockDrawerOpen,
+    strategyEditDrawerOpen,
+    setStrategyEditDrawerOpen,
     setSelectedCell,
     setHoverCell,
   ]);
@@ -171,6 +177,10 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
             {
               label: "Open lock editor",
               onClick: () => setLockDrawerOpen(true),
+            },
+            {
+              label: "Open strategy editor",
+              onClick: () => setStrategyEditDrawerOpen(true),
             },
             {
               label: "Resolve locked",

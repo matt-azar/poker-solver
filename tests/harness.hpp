@@ -57,5 +57,6 @@ void run_template_tests();
 void run_range_library_tests();
 void run_node_lock_tests();
 void run_lock_apply_tests();
+void run_strategy_edit_tests();
 void run_tree_edit_tests();
 void run_hand_history_tests();

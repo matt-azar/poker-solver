@@ -391,8 +391,18 @@ public:
     // The next successful evaluation throws before its page can replace the cache.
     void arm_value_cache_failure_for_test();
     int completed_iterations() const;
-    // Replace one structural hand's average at a node. Inspection reads this
-    // profile instead of recomputing it.
+    // Replace one structural hand's prepared average at a node. Inspection and
+    // value queries read this profile. Does not rewrite strategy_sum, so a later
+    // invalidate_prepared_average() restores the CFR average. Validates
+    // nonnegative probs that sum to 1 within lock tolerance. Bumps profile_epoch.
+    void set_average_strategy(
+        const std::string& node_id,
+        int hand,
+        std::span<const double> probability);
+    // Drop the prepared average overlay so the next inspect rebuilds from
+    // strategy_sum. Bumps profile_epoch and clears the value cache.
+    void invalidate_prepared_average();
+    // Test alias for set_average_strategy (same validation and epoch bump).
     void set_average_for_test(
         const std::string& node_id,
         int hand,

@@ -95,6 +95,7 @@ add_executable(poker_solver_tests
     tests/unit/test_range_library.cpp
     tests/unit/test_node_lock.cpp
     tests/unit/test_lock_apply.cpp
+    tests/unit/test_strategy_edit.cpp
     tests/unit/test_tree_edit.cpp
     tests/unit/test_hand_history.cpp
 )
