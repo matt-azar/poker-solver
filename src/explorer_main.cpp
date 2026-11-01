@@ -13,9 +13,11 @@
 #include "poker/card.hpp"
 #include "poker/hand_categories.hpp"
 #include "poker/range.hpp"
+#include "solver/memory_plan.hpp"
 #include "solver/node_lock.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
+#include "solver/tree_edit.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -322,6 +324,7 @@ struct Job
     int memory_mib = 1024;
     int threads = 1;
     poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
+    poker::solver::TreeEditSet tree_edits{};
 };
 
 struct HeldSolution
@@ -470,6 +473,40 @@ Job parse_job(const std::string& text)
     job.max_raises = static_cast<int>(read_number(text, "max_raises", 2));
     job.iterations = static_cast<int>(read_number(text, "iterations", 200));
     job.samples = static_cast<int>(read_number(text, "samples", 5));
+    if (find_key(text, "tree_edits") != std::string::npos)
+    {
+        // Accept either a single TreeEditSet text blob or an array of edit lines.
+        const std::size_t at = find_key(text, "tree_edits");
+        const std::size_t value = value_at(text, at);
+        if (value < text.size() && text[value] == '[')
+        {
+            std::string joined;
+            for (const std::string& line : read_string_array(text, "tree_edits"))
+            {
+                if (line.empty())
+                {
+                    continue;
+                }
+                joined += line;
+                if (joined.back() != '\n')
+                {
+                    joined += '\n';
+                }
+            }
+            if (!joined.empty())
+            {
+                job.tree_edits = poker::solver::parse_tree_edits(joined);
+            }
+        }
+        else
+        {
+            const std::string edits_text = read_string(text, "tree_edits", "");
+            if (!edits_text.empty())
+            {
+                job.tree_edits = poker::solver::parse_tree_edits(edits_text);
+            }
+        }
+    }
     const std::string algorithm = read_string(text, "algorithm", "cfr_plus");
     if (algorithm == "vanilla" || algorithm == "vanilla_cfr")
     {
@@ -1045,7 +1082,124 @@ poker::streets::StreetConfig street_config(const Job& job)
     config.icm.payouts = job.icm_payouts;
     config.memory_mib = job.memory_mib;
     config.threads = job.threads;
+    config.tree_edits = job.tree_edits;
     return config;
+}
+
+void append_tree_edits_json(std::string& out, const poker::solver::TreeEditSet& edits)
+{
+    out += "\"tree_edits\":[";
+    if (!edits.empty())
+    {
+        const std::string text = poker::solver::format_tree_edits(edits);
+        std::size_t cursor = 0;
+        bool first = true;
+        while (cursor < text.size())
+        {
+            std::size_t end = text.find('\n', cursor);
+            if (end == std::string::npos)
+            {
+                end = text.size();
+            }
+            const std::string line = text.substr(cursor, end - cursor);
+            cursor = end < text.size() ? end + 1 : end;
+            if (line.empty())
+            {
+                continue;
+            }
+            if (!first)
+            {
+                out += ',';
+            }
+            first = false;
+            append_escaped(out, line);
+        }
+    }
+    out += ']';
+}
+
+std::string memory_plan_json(const poker::solver::StreetMemoryPlan& plan)
+{
+    std::string out = "{\"estimated_peak_bytes\":";
+    out += std::to_string(plan.estimated_peak_bytes);
+    out += ",\"memory_budget_bytes\":";
+    out += std::to_string(plan.memory_budget_bytes);
+    out += ",\"deals\":";
+    out += std::to_string(plan.deals);
+    out += ",\"infosets\":";
+    out += std::to_string(plan.infosets);
+    out += ",\"decision_nodes\":";
+    out += std::to_string(plan.decision_nodes);
+    out += ",\"terminals\":";
+    out += std::to_string(plan.terminals);
+    out += ",\"public_decisions\":";
+    out += std::to_string(plan.public_decisions);
+    out += ",\"threads\":";
+    out += std::to_string(plan.thread_count);
+    out += ",\"fits_budget\":";
+    out += poker::solver::plan_fits_budget(plan) ? "true" : "false";
+    out += ",\"dry_run\":";
+    out += plan.dry_run ? "true" : "false";
+    out += '}';
+    return out;
+}
+
+std::string public_tree_json(
+    const std::vector<poker::solver::StreetPublicNode>& nodes,
+    const poker::solver::TreeEditSet& edits)
+{
+    std::string out = "{\"nodes\":[";
+    for (std::size_t i = 0; i < nodes.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        const poker::solver::StreetPublicNode& node = nodes[i];
+        out += "{\"index\":";
+        out += std::to_string(node.index);
+        out += ",\"terminal\":";
+        out += node.terminal ? "true" : "false";
+        out += ",\"chance\":";
+        out += node.chance ? "true" : "false";
+        out += ",\"player\":";
+        out += std::to_string(node.player);
+        out += ",\"street\":";
+        out += std::to_string(node.street);
+        out += ",\"path\":";
+        append_escaped(out, node.path);
+        out += ",\"chance_child\":";
+        out += std::to_string(node.chance_child);
+        out += ",\"actions\":[";
+        for (std::size_t a = 0; a < node.actions.size(); ++a)
+        {
+            if (a > 0)
+            {
+                out += ',';
+            }
+            out += "{\"label\":";
+            append_escaped(out, node.actions[a].label);
+            out += ",\"compact\":";
+            append_escaped(out, node.actions[a].compact);
+            out += ",\"child_index\":";
+            out += std::to_string(node.actions[a].child_index);
+            out += '}';
+        }
+        out += "],\"children\":[";
+        for (std::size_t c = 0; c < node.children.size(); ++c)
+        {
+            if (c > 0)
+            {
+                out += ',';
+            }
+            out += std::to_string(node.children[c]);
+        }
+        out += "]}";
+    }
+    out += "],";
+    append_tree_edits_json(out, edits);
+    out += '}';
+    return out;
 }
 
 std::vector<poker::solver::RiverStrategyEntry> street_entries(
@@ -2814,6 +2968,7 @@ Job job_from_street(const poker::streets::StreetConfig& config)
     job.icm_payouts = config.icm.payouts;
     job.memory_mib = config.memory_mib;
     job.threads = config.threads;
+    job.tree_edits = config.tree_edits;
     return job;
 }
 
@@ -3784,6 +3939,70 @@ void handle_client(socket_t client)
         send_response(client, 202, "application/json", accepted);
         return;
     }
+    if (line.rfind("POST /api/plan-memory", 0) == 0)
+    {
+        try
+        {
+            poker::streets::StreetConfig config;
+            const std::string text = read_string(body, "text", "");
+            if (!text.empty())
+            {
+                if (text.rfind("street-config ", 0) != 0)
+                {
+                    throw std::invalid_argument("plan-memory text must be a street-config 1 document");
+                }
+                config = poker::streets::parse_street_config(text);
+            }
+            else
+            {
+                config = street_config(parse_job(body));
+            }
+            const poker::solver::StreetMemoryPlan plan = poker::solver::plan_street_memory(std::move(config));
+            send_response(client, 200, "application/json", memory_plan_json(plan));
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += "}";
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
+    if (line.rfind("POST /api/tree-preview", 0) == 0)
+    {
+        try
+        {
+            poker::streets::StreetConfig config;
+            const std::string text = read_string(body, "text", "");
+            if (!text.empty())
+            {
+                if (text.rfind("street-config ", 0) != 0)
+                {
+                    throw std::invalid_argument("tree-preview text must be a street-config 1 document");
+                }
+                config = poker::streets::parse_street_config(text);
+            }
+            else
+            {
+                config = street_config(parse_job(body));
+            }
+            poker::solver::StreetBatchSolver preview(std::move(config), poker::solver::kPlanOnly);
+            send_response(
+                client,
+                200,
+                "application/json",
+                public_tree_json(preview.public_tree(), preview.config().tree_edits));
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += "}";
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
     if (line.rfind("POST /api/config", 0) == 0)
     {
         try
@@ -3852,6 +4071,8 @@ void handle_client(socket_t client)
                 write_sizes("oop_river_bets", job.oop_river_bets);
                 write_sizes("ip_river_bets", job.ip_river_bets);
                 write_sizes("oop_donk", job.oop_donk);
+                payload += ',';
+                append_tree_edits_json(payload, job.tree_edits);
                 payload += '}';
             }
             else if (text.rfind("river-config ", 0) == 0)

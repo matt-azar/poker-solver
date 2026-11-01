@@ -1,6 +1,7 @@
 import { useStudyStore } from "../../state/studyStore";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
+import { TreeLineEditor } from "./TreeLineEditor";
 
 export function BuildWorkspace() {
   const draft = useStudyStore((s) => s.draft);
@@ -272,6 +273,8 @@ export function BuildWorkspace() {
             </label>
           </div>
         </section>
+
+        <TreeLineEditor />
 
         <section className="build-section">
           <h2>Solve settings</h2>
