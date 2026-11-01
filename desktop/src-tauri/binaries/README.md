@@ -18,6 +18,11 @@ this directory using the **target triple** suffix:
 At runtime / in the NSIS payload the sidecar is exposed as `holdem-explorer.exe`
 beside the app (basename of `binaries/holdem-explorer`).
 
+The Windows Installer workflow builds `explorer` with the **static MSVC CRT**
+(`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`) so end users do not need a separate
+Visual C++ Redistributable. NSIS POSTINSTALL verifies this file exists and runs
+`Unblock-File` on the UI and engine exes.
+
 ## Source binary
 
 Build the C++ `explorer` target from the repo root, then:
@@ -29,4 +34,5 @@ cp path/to/explorer.exe \
 ```
 
 Do not commit large binaries here; `.gitkeep` only reserves the folder.
-The Study UI talks to `http://127.0.0.1:8765` on this process.
+The Study UI talks to `http://127.0.0.1:8765` on this process. The Tauri shell
+command `ensure_engine` spawns the sidecar and waits until that port accepts TCP.

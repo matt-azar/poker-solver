@@ -17,7 +17,7 @@ Download the unsigned NSIS setup from the latest Windows release:
 
 Windows SmartScreen may warn because the binary is not code-signed — **More info → Run anyway**.
 
-The app starts the `holdem-explorer` engine sidecar and opens the Study UI. No CMake or npm required.
+The installer places `holdem-explorer.exe` next to the UI, unblocks both binaries, and fails if the engine is missing. On launch the shell starts that sidecar on `127.0.0.1:8765` and waits until it accepts connections before the Study UI connects. No CMake or npm required.
 
 Maintainers can also rebuild via Actions → **Windows Installer**. Details: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
 
