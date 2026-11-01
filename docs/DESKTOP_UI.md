@@ -85,7 +85,7 @@ explorer   # serves desktop/dist when present
 | Browser Study client + localhost `explorer` | Supported |
 | Vite `/api` proxy in `npm run dev` | Supported |
 | `explorer` serving `desktop/dist` | Supported |
-| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns `binaries/holdem-explorer` on port 8765, waits until the port accepts connections, exposes `ensure_engine` for Reconnect; webview loads Vite `dist`. Explorer responses include CORS (`Access-Control-Allow-Origin: *` + OPTIONS preflight) so the webview origin (`https://tauri.localhost`) can `fetch` `http://127.0.0.1:8765` |
+| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns installed `holdem-explorer` beside the app (absolute path; not `binaries/…`) on port 8765, waits until the port accepts connections, exposes `ensure_engine` for Reconnect; webview loads Vite `dist`. Explorer responses include CORS (`Access-Control-Allow-Origin: *` + OPTIONS preflight) so the webview origin (`https://tauri.localhost`) can `fetch` `http://127.0.0.1:8765` |
 | Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer`. Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe` (plus the versioned Tauri NSIS name). POSTINSTALL requires `holdem-explorer.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. Packaged explorer uses the static MSVC CRT |
 | Native Open/Save dialogs | Browser prompts; Tauri adapter uses `@tauri-apps/plugin-dialog` when present (prompt fallback) |
 | Code-signed official release | Not yet — CI artifact is unsigned |
