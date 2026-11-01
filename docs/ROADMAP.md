@@ -38,7 +38,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Stop-and-keep, pause/continue, accuracy stopping | Present; construction-time stop/pause still publishes nothing | M4 |
 | Full saves, resumable checkpoints, compact saves, lazy load | Versioned PSOL + recent files; compact/lazy open | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Study corpus + benches; Pio parity unproven | M6 |
-| Full and combo node locking, editing, re-solving | Street-first locks + compare; richer strategy editing open | M7 |
+| Full and combo node locking, editing, re-solving | Street-first locks + compare; StrategyEditSet + Study editor drawer | M7 |
 | Rake, ICM, opponent incentives | Wired on solve path; CategoryTag / dual-utility BR / explorer incentives JSON open | M8 |
 | Turn/river and multi-flop aggregation, filtered reports | `strategy-report 1` root export; aggregation open | M9 |
 | Scriptable engine, durable batch queue, exports | CLI + HTTP; durable queue open | M9 |
@@ -125,7 +125,7 @@ Five-card boards already solve on the shared production tree. Cards still to com
 
 ### M7 — Strategy editing, node locking and constrained re-solving
 
-The immutable node-lock data model landed in `include/solver/node_lock.hpp`, and locked rows are applied during regret matching on `CfrTrainer`, `StreetBatchSolver`, and `RiverBatchSolver` (`solve` / `continue_*` / `run_*`). Explorer exposes lock CRUD, `resolve-locked` (reset + re-solve with Session baseline retention), `/api/compare`, and PSOL v2 `locks_text`. StreetBatch and RiverBatch key locks by public-node index with SelectedCombos on acting-player hand index. Explorer locking remains street-first; richer strategy editing remains ahead.
+The immutable node-lock data model landed in `include/solver/node_lock.hpp`, and locked rows are applied during regret matching on `CfrTrainer`, `StreetBatchSolver`, and `RiverBatchSolver` (`solve` / `continue_*` / `run_*`). Explorer exposes lock CRUD, `resolve-locked` (reset + re-solve with Session baseline retention), `/api/compare`, and PSOL v2 `locks_text`. StreetBatch and RiverBatch key locks by public-node index with SelectedCombos on acting-player hand index. Explorer locking remains street-first. Free-form strategy edits land via `StrategyEditSet` + explorer `/strategy-edits` and the Study Strategy editor drawer (session overlays; not in PSOL v2).
 
 Implement immutable scenario forks, manual strategy editing, full-node and selected-combo locks, validated probability rows, lock visualization, copy/paste, presets, undo, unlock and reset. The UI separates editing a stored strategy from locking selected hands against later updates [S5].
 
@@ -223,7 +223,7 @@ Choose explicit release service-level targets after measuring a representative c
 
 Main path: M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0; five-card production already shares the street tree — scale that one kernel. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after required features land.
 
-Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets with study filtering/composition, five-card made-hand categories, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, resumable PSOL, runout EV comparison, recent-files list, street-config templates, named range presets, street-first node locks. Still ahead: compact saves, richer strategy editing, reports/queue, trainer, preflop. M3 visual line editor + plan-memory dry-run landed on this track.
+Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets with study filtering/composition, five-card made-hand categories, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, resumable PSOL, runout EV comparison, recent-files list, street-config templates, named range presets, street-first node locks. Still ahead: compact saves, reports/queue, trainer, preflop. M3 visual line editor + plan-memory dry-run and M7 free-form strategy editing landed on this track.
 
 Per milestone: small specification, invariants and failure modes, reviewable commits, relevant checks, user-workflow demo, ledger update with evidence. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 
