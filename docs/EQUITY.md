@@ -1,6 +1,6 @@
 # Check-down showdown equity
 
-Standalone exact equity for a flop, turn, or river. The library, `equity_calculator`, and `equity_tests` are on the development line with the street-configuration and continuation work. The explorer calls it with strategy-conditioned reaching weights. It does not edit ranges, build a betting tree, or read solver state. The default work limit admits a full-range river and still rejects a full-range turn. This is not a claim of Pio equity parity.
+Exact check-down showdown equity for a flop, turn, or river. Library, `equity_calculator`, and `equity_tests`. Explorer calls it with strategy-conditioned reaching weights. Does not edit ranges, build a betting tree, or read solver state. Default work limit admits a full-range river and rejects a full-range turn. Not a Pio equity-parity claim.
 
 ## Model
 
@@ -111,14 +111,6 @@ Coverage includes river certainty, a royal-flush tie, 990 and 44 completions, bl
 
 One earlier direct development-suite run, before this correction, reported `passed=438629 failed=1` at `test_value_worker.cpp:149` (`reader_count() == 0` immediately after resubmitting node A). Resubmitting A is a new request on the current solution, so the worker may borrow before that assertion. An isolated rerun was clean and is not the fix. Equity code does not call that worker, and this commit does not change that test.
 
-## Study-screen adapter
+## Explorer / study use
 
-Explorer node `/equity` builds two `Range` values from strategy-conditioned reaching weights and calls `showdown_equity` with that node's board. Those weights stay finite and nonnegative and are treated as check-down input weights (not chip EV). The JSON keeps the ten-bucket histogram and adds compact `oop_hands` / `ip_hands` rows (`combo`, check-down `equity`, raw `weight`) so the desktop Study Equity tab can filter histogram bands and inspect pair/suited/offsuit composition. Zero-weight and undefined combos remain omitted from those rows.
-
-## Proposed ledger row
-
-For the primary agent after integration:
-
-| Family | Status | Milestone | Evidence | Limitation |
-| --- | --- | --- | --- | --- |
-| Exact check-down showdown equity | partial | M2 | `equity_calculator` and `equity_tests` on `cursor/exact-equity-core`, rebased onto `27236ac` | Pending independent review. No range editor, categories, strategy-conditioned adapter, HTTP route, or study screen. No Pio comparison. |
+Explorer node `/equity` builds two `Range` values from strategy-conditioned reaching weights and calls `showdown_equity` with that node's board. Those weights stay finite and nonnegative and are treated as check-down input weights (not chip EV). The calculator does not read the tree, the average strategy, or the engine budget. The JSON keeps the ten-bucket histogram and adds compact `oop_hands` / `ip_hands` rows (`combo`, check-down `equity`, raw `weight`) so the desktop Study Equity tab can filter histogram bands and inspect pair/suited/offsuit composition. Zero-weight and undefined combos remain omitted from those rows. Ledger status: [FEATURE_PARITY.md](FEATURE_PARITY.md).

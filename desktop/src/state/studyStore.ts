@@ -497,7 +497,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
 
   status: null,
   phase: "idle",
-  message: "Start the explorer engine, then Solve a spot.",
+  message: "Connecting to local engine…",
   connection: "connecting",
   solutionId: null,
   baselineSolutionId: null,
@@ -808,12 +808,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         });
       }
     } catch (error) {
+      const detail =
+        error instanceof Error ? error.message : "Engine unreachable";
       set({
         connection: "disconnected",
-        message:
-          error instanceof Error
-            ? `Engine unreachable: ${error.message}`
-            : "Engine unreachable",
+        message: `Engine unreachable: ${detail}. Use Reconnect — the installer should have placed holdem-explorer beside the app.`,
       });
     }
   },

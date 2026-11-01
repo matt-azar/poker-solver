@@ -17,9 +17,9 @@ Before spawning sibling agents, changing solvers, or claiming a milestone is don
 
 **Architecture / correctness (short)**
 
-- On `main`, 3–4 card boards use `StreetBatchSolver`; 5 cards use `RiverBatchSolver`. Do not retire `river_solver` before five-card StreetBatch pins match `RiverGame`.
+- On `main`, flop/turn/river (3/4/5 cards) use `StreetBatchSolver`. `river_solver` is a thin CLI onto that path. `RiverGame` stays the five-card oracle; `RiverBatchSolver` is oracle/legacy only.
 - Pin production batch changes against `CfrTrainer<*Game>` / `--reference`. Kuhn/Leduc stay on `CfrTrainer` only. `include/` must not depend on `ui/`.
 - Nash gap is NashConv (sum of BR gains), not Pio’s averaged exploitability. Accuracy uses NashConv/pot.
 - Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; equity ≠ chip EV.
-- Street config is `street-config 1` text; river explorer defaults are often JSON — do not mix formats. Empty bet arrays mean check-only; absent keys mean defaults.
+- Street config is `street-config 1` text; river CLI defaults are often JSON — do not mix formats. Empty bet arrays mean check-only; absent keys mean defaults.
 - Do not change `LICENSE`. Update `FEATURE_PARITY.md` only with the commit that demonstrates the row.

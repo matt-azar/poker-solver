@@ -1,9 +1,6 @@
 # Opponent incentives
 
-Planning date: October 30, 2026. Action-label / category-tag utility overlay on
-top of a base `PlayerPayoff` (chip or ICM), with optional wiring through
-street/river solve terminals. Chip EV stays on `ChipPayoff`
-([RAKE.md](RAKE.md)); ICM deltas stay on `IcmPayoff` ([ICM.md](ICM.md)).
+Action-label / category-tag utility overlay on a base `PlayerPayoff` (chip or ICM), optionally wired through street/river solve terminals. Chip EV: [RAKE.md](RAKE.md). ICM: [ICM.md](ICM.md).
 
 ## Model
 

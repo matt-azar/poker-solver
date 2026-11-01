@@ -1,8 +1,6 @@
 # Postflop study benchmarks
 
-Reference workloads for a realistic river, turn, and flop study. The ranges are study inputs. They are not solved preflop equilibria.
-
-The historical identical `QQ,JJ,TT,99` flop is not the representative flop. That spot is only described in `docs/BENCHMARKS.md`.
+Reference workloads for river, turn, and flop study. Ranges are study inputs, not solved preflop equilibria. The historical `QQ,JJ,TT,99` flop is not the representative flop; see `docs/BENCHMARKS.md`.
 
 ## What is measured
 

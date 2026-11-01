@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
+import { ensureEngine } from "../../platform/engine";
 import { BuildWorkspace } from "../build/BuildWorkspace";
 import { CompareWorkspace } from "../compare/CompareWorkspace";
 import { LibraryWorkspace } from "../library/LibraryWorkspace";
@@ -31,6 +32,23 @@ export function AppShell() {
     return () => stopPolling();
   }, [startPolling, stopPolling]);
 
+  async function reconnectEngine() {
+    useStudyStore.setState({
+      connection: "connecting",
+      message: "Starting local engine…",
+    });
+    const result = await ensureEngine();
+    if (!result.ok) {
+      useStudyStore.setState({
+        connection: "disconnected",
+        message: `Engine setup failed: ${result.error}`,
+      });
+      return;
+    }
+    startPolling();
+    await useStudyStore.getState().refresh();
+  }
+
   let body: ReactNode;
   if (workspace === "study") {
     body = <StudyWorkspace />;
@@ -57,8 +75,7 @@ export function AppShell() {
         phase={phase}
         status={status}
         onReconnect={() => {
-          startPolling();
-          void useStudyStore.getState().refresh();
+          void reconnectEngine();
         }}
       />
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />

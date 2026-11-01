@@ -208,4 +208,29 @@ inline RiverConfig parse_river_config(std::string_view text)
     return config;
 }
 
+// Map a river spot onto the shared five-card StreetConfig used by
+// StreetBatchSolver / StreetGame. River-only fields (board length, bet lists,
+// rake/ICM/incentives) copy through; street-only knobs keep StreetConfig
+// defaults (memory budget, threads, donk/geometric/pot-cap, tree edits).
+inline streets::StreetConfig street_config_from_river(const RiverConfig& river)
+{
+    streets::StreetConfig config;
+    config.board.assign(river.board.begin(), river.board.end());
+    config.pot = river.pot;
+    config.stack = river.stack;
+    config.oop = river.oop;
+    config.ip = river.ip;
+    config.oop_bet_sizes = river.oop_bet_sizes;
+    config.ip_bet_sizes = river.ip_bet_sizes;
+    config.oop_raise_sizes = river.oop_raise_sizes;
+    config.ip_raise_sizes = river.ip_raise_sizes;
+    config.allow_all_in = river.allow_all_in;
+    config.max_raises = river.max_raises;
+    config.first_to_act = river.first_to_act;
+    config.rake = river.rake;
+    config.icm = river.icm;
+    config.incentives = river.incentives;
+    return config;
+}
+
 } // namespace poker::river

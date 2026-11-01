@@ -1,9 +1,9 @@
-# River CLI example
+# River CLI
 
 ```sh
 river_solver --config configs/river_default.json
-river_solver --iterations 2000 --algorithm vanilla --oop-range AA --ip-range KK
-river_solver --reference --config configs/river_default.json
+river_solver --iterations 2000 --algorithm cfr_plus
+river_solver --reference --iterations 30 --algorithm vanilla
 ```
 
-Rules and the pot-fraction convention: [docs/RIVER.md](../docs/RIVER.md).
+Maps a five-card spot onto the shared street tree. Rules: [docs/RIVER.md](../docs/RIVER.md).

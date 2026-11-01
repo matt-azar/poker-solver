@@ -292,10 +292,27 @@
 }
 
 .board-card[data-suit="h"],
-.board-card[data-suit="d"],
 .card-picker-cell[data-suit="h"],
-.card-picker-cell[data-suit="d"] {
-  color: var(--danger);
+.toolbar-btn[data-suit="h"] {
+  color: var(--suit-heart);
+}
+
+.board-card[data-suit="d"],
+.card-picker-cell[data-suit="d"],
+.toolbar-btn[data-suit="d"] {
+  color: var(--suit-diamond);
+}
+
+.board-card[data-suit="c"],
+.card-picker-cell[data-suit="c"],
+.toolbar-btn[data-suit="c"] {
+  color: var(--suit-club);
+}
+
+.board-card[data-suit="s"],
+.card-picker-cell[data-suit="s"],
+.toolbar-btn[data-suit="s"] {
+  color: var(--suit-spade);
 }
 
 .board-card:hover,

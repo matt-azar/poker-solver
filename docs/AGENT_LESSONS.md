@@ -58,25 +58,25 @@ Report: tip SHA, files touched, test command + counts, compare URL.
 
 ## 2. Architecture and module boundaries
 
-### Two production postflop engines (until M6 finishes)
+### One production postflop engine (M6)
 
-A flop, turn, and river are **one** betting tree with two, one, or zero cards left. The **current `main` tip** still splits by board length:
+A flop, turn, and river are **one** betting tree with two, one, or zero cards left. Production paths share `StreetBatchSolver`:
 
 | Board | Production path | Reference enumerator |
 | --- | --- | --- |
-| 3 or 4 cards | `StreetBatchSolver` | `StreetGame` + `CfrTrainer` (`--reference`) |
-| 5 cards | `RiverBatchSolver` | `RiverGame` + `CfrTrainer` (`--reference`) |
+| 3, 4, or 5 cards | `StreetBatchSolver` | `StreetGame` + `CfrTrainer` (`--reference`) |
 
-Open work (do not invent a third story): StreetBatch accepting five-card boards, then explorer routing five-card through StreetBatch, then retiring `river_solver` as a product entry only after pins match `RiverGame`.
+`river_solver` is a thin CLI that maps river JSON/flags into five-card `StreetConfig` and solves on that path. `RiverGame` remains the five-card oracle forever; `RiverBatchSolver` remains for internal oracle and legacy fixtures only.
 
-**Do:** Keep `RiverGame` as the five-card oracle forever.  
-**Don't:** Delete `river_solver` or switch explorer before five-card StreetBatch pins land.  
-**Pointers:** `docs/ARCHITECTURE.md`, `docs/ROADMAP.md` M6, `include/game/street_game.hpp` (on `main`: rejects non-3/4 boards).
+**Do:** Keep `RiverGame` as the five-card oracle forever. Keep five-card StreetBatch pins against `RiverGame`.  
+**Don't:** Reintroduce `RiverBatchSolver` as the product `river_solver` path. Don't delete `RiverGame` or RiverBatch oracle tests.  
+**Pointers:** `docs/ARCHITECTURE.md`, `docs/ROADMAP.md` M6, `include/game/street_game.hpp`, `src/river_main.cpp`.
 
 ### `*Game` vs `*Batch`
 
 - `RiverGame` / `StreetGame` — full deal enumeration; oracle for strategy, values, best response.
-- `RiverBatchSolver` / `StreetBatchSolver` — one public betting tree, same CFR/CFR+ update, production default.
+- `StreetBatchSolver` — one public betting tree; production default for flop/turn/river.
+- `RiverBatchSolver` — public-tree river helper for oracle/legacy fixtures only (not the product CLI path).
 
 **Do:** Pin batch changes against `--reference` / `CfrTrainer<*Game>` on small fixtures.  
 **Don't:** “Optimize” by changing only the batch kernel without an oracle gate.
@@ -255,7 +255,7 @@ Release A emphasis: M0→M5 plus **core M6**. Most `FEATURE_PARITY.md` rows are 
 | Conditional action EV “done” | M1 gate: profile epoch, tiny compatible mass, value-worker shutdown |
 | M2 study screen “done” | Categories/draws/composition/undo still thin even if one slice lands |
 | M5 saves “done” | PSOL exists; compact/lazy/multi-file library does not |
-| M6 “done” | Need five-card StreetBatch pins **and** production path join; then retire CLI |
+| M6 “done” | Five-card StreetBatch pins against `RiverGame` **and** `river_solver` on StreetBatch (not RiverBatch product path) |
 | M8 rake/ICM | Needs dual-player payoff first; chip path is still player-0 scalar + negation |
 | “As fast as Pio” | Forbidden without matched protocol (`docs/ROADMAP.md` §6) |
 

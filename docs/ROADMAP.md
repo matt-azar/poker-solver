@@ -1,14 +1,8 @@
 # Roadmap to a complete Pio-like solver
 
-Planning baseline: October 27, 2026. Repository: matt-azar/poker-solver, branch `main`, reviewed through `2d6738657aa0ec78aa208aaf37c909459bbe8cb5`. Cursor implements; ChatGPT supplies mathematical review, milestone specifications, and independent verification. This roadmap supplements the conditional-action-EV specification. Each milestone is its own pass.
+Heads-up NLHE study application with solving, analysis, automation, persistence, training, and interface capabilities comparable to PioSolver/PioViewer — in this project's own design. Target includes postflop and Edge-style preflop. Living ledger: [FEATURE_PARITY.md](FEATURE_PARITY.md).
 
-## 1. What “finished” means
-
-Build a reliable heads-up NLHE study application with the solving, analysis, automation, persistence, training, and interface capabilities of PioSolver/PioViewer. Target functional and workflow parity in our own design and implementation. The final target includes postflop and the Edge-style preflop workflow.
-
-The finished product is used through a modern, easy-to-use GUI. Numerical correctness and engine scale are required; they are incomplete until a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train without a terminal or developer tools. The current local explorer is the study surface for early milestones. A coherent desktop interface remains a release requirement.
-
-Freeze the initial comparison target at the documented PioSolver 3.11 release. Its release notes include custom trainer themes and multiline training scenarios [S1]. Pio's manual covers a partial product [S2]. This is a complete implementation roadmap. Exhaustive feature parity requires a version-pinned, hands-on menu and workflow audit. Mark unverified details unverified. “All features” means the audited list.
+Finished means a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train through a GUI without a terminal. Study surface today: `explorer` + React desktop client ([DESKTOP_UI.md](DESKTOP_UI.md)). Comparison target: documented PioSolver 3.11 [S1][S2]. Mark unverified details unverified. “All features” means the audited list.
 
 Separate three releases:
 
@@ -22,15 +16,13 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 ## 2. Starting point and evidence
 
-We already have a substantial tested foundation: Kuhn/Leduc reference games, river and street engines, pass-frozen CFR variants, active-player CFR+ flooring, correct counterfactual reach handling, compact blocker-aware showdowns, deterministic first-public-card parallelism, enforced engine allocation budgets, and node-scoped browsing. The current budget defaults to 1024 MiB and threads default to one.
+Foundation in place: shared street/river public tree, pass-frozen CFR variants, active-player CFR+ flooring, blocker-aware showdowns, first-public-card parallelism, engine allocation budgets (default 1024 MiB), node-scoped browsing, Kuhn/Leduc reference games on `CfrTrainer`. Threads default to one.
 
-A flop, a turn, and a river are one betting tree with two, one, or zero cards still to come. `StreetGame` and `StreetBatchSolver` accept three-, four-, and five-card boards. Pinned five-card fixtures match `RiverGame` on strategies, values, and best response. The explorer routes five-card jobs through that shared tree. M6 finishes by moving `river_solver` onto the same path and retiring it as a separate product entry point. `RiverGame` stays the reference enumerator. Kuhn and Leduc stay on `CfrTrainer`.
+Flop, turn, and river are one betting tree (two, one, or zero cards left). `StreetGame` / `StreetBatchSolver` accept 3/4/5-card boards. Five-card pins match `RiverGame`. Explorer and `river_solver` both use that shared tree; `river_solver` is a thin CLI, not a separate `RiverBatchSolver` product path. `RiverGame` is the five-card oracle.
 
-The latest Windows report is 438,860 assertions / zero failures. Independent GCC review of the previous chance-page commit passed 364,907 assertions; Windows HTTP tests are skipped there. Session-focused ThreadSanitizer passed 56 assertions on the review host. That run covered the session tests. Publication now builds the completed status before it stores a terminal phase or a queryable result. If that builder throws, the job stays running and the existing failure path can record it.
+Also landed: conditional action EV on flop/turn/river decisions; stop-and-keep / pause / continue; versioned PSOL; runout EV comparison; check-down equity (+ buckets); five-card made-hand categories; node locks + compare; pot rake / ICM / action-label incentives; Windows NSIS Study installer. Draws/backdoors, compact saves, durable batch queue, trainer packs, and preflop are still open. No head-to-head Pio performance or solution-quality equivalence.
 
-Completed-average conditional action EV is implemented for flop and turn decision nodes. The profile cache follows training, reset, continuation, and explicit average edits. A stop after at least one completed iteration keeps that solve. A versioned solution file can be saved, closed, reopened, and continued. A chance node can list every legal next card with its conditional probability and both players' continuation EVs. Check-down equity is available from the strategy-conditioned reaches at a node and is labeled separately from chip EV. Made-hand category composition on five-card boards is available from strategy-weighted reaches; draws and backdoors are not. Node locks, compact saves, tournament/rake utilities, production packaging, and preflop remain substantial work. No head-to-head Pio performance or solution-quality equivalence has been established.
-
-Full-range check-down measures whether a large tree fits and runs. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them.
+Full-range check-down measures whether a large tree fits. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them. Assertion counts and sanitizer notes: [TESTING.md](TESTING.md), [BENCHMARKS.md](BENCHMARKS.md).
 
 ## 3. Feature coverage ledger
 
@@ -38,22 +30,22 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 
 | Feature family | Current position | Delivery |
 |---|---|---|
-| Heads-up postflop CFR, chance, blocker handling, best responses | Established foundation. Shared tree accepts five-card boards and pins against `RiverGame`; explorer uses that tree for five cards; `river_solver` remains a CLI until M6 retires it | M0, M6 |
-| Conditional combo/action EV; both-player values | Flop, turn, and river decision nodes on the shared street tree (RiverBatch still carries oracle fixtures) | M1 |
-| Equity, action ranges, distributions, hand categories | Limited browsing foundation | M2 |
-| Weighted range editing, range libraries, board input | Basic configuration; complete visual workflow needed | M2–M3 |
-| Configurable betting trees and visual line editing | Basic parameters exist | M3 |
-| Stop-and-keep, pause/continue, accuracy stopping | Cancellation, accuracy stopping, pause/continue, CLI `--time-limit` / `--eval-every`, and explorer GUI/API `time_limit` + `samples` exist; construction-time stop/pause still publishes nothing | M4 |
-| Full saves, resumable checkpoints, compact saves, lazy load | One versioned `PSOL` save/open/continue works (HTTP + GUI); compact/lazy formats still missing | M5, M10 |
-| Broad practical betting-tree scale and competitive convergence | Small benchmark set; parity unproven | M6 |
-| Full and combo node locking, editing, re-solving | Missing | M7 |
-| Rake, ICM, opponent incentives | Pot-rake wired through street/river configs, CLI, explorer Job JSON/GUI, and solve terminals (`docs/RAKE.md`); ICM calculator + HU chip→ICM adapter; optional `IcmConfig` / CLI wired through street/river solve terminals (`docs/ICM.md`); explorer Job JSON / GUI `icm_stacks` + `icm_payouts`; optional `IncentiveConfig` path-attributes ActionLabelMatch at street/river terminals (`docs/INCENTIVES.md`); CategoryTag tags, dual-utility BR, explorer incentives JSON still ahead | M8 |
-| Turn/river and multi-flop aggregation, filtered reports | Missing | M9 |
-| Scriptable engine, durable batch queue, exports | Basic endpoints/CLI; production coverage missing | M9 |
-| Drill trainer, packs, session statistics, hand histories | `hand-history 1` export schema only; packs and session stats missing | M11 |
+| Heads-up postflop CFR, chance, blocker handling, best responses | Shared tree for 3/4/5 cards; pins against `RiverGame`; explorer and `river_solver` on that path | M0, M6 |
+| Conditional combo/action EV; both-player values | Flop, turn, and river decision nodes on the shared street tree | M1 |
+| Equity, action ranges, distributions, hand categories | Check-down equity + buckets; made-hand categories; draws/backdoors open | M2 |
+| Weighted range editing, range libraries, board input | 13×13 paint, presets; nested folders open | M2–M3 |
+| Configurable betting trees and visual line editing | `street-config 1` + TreeEditSet; visual editor open | M3 |
+| Stop-and-keep, pause/continue, accuracy stopping | Present; construction-time stop/pause still publishes nothing | M4 |
+| Full saves, resumable checkpoints, compact saves, lazy load | Versioned PSOL + recent files; compact/lazy open | M5, M10 |
+| Broad practical betting-tree scale and competitive convergence | Study corpus + benches; Pio parity unproven | M6 |
+| Full and combo node locking, editing, re-solving | Street-first locks + compare; richer strategy editing open | M7 |
+| Rake, ICM, opponent incentives | Wired on solve path; CategoryTag / dual-utility BR / explorer incentives JSON open | M8 |
+| Turn/river and multi-flop aggregation, filtered reports | `strategy-report 1` root export; aggregation open | M9 |
+| Scriptable engine, durable batch queue, exports | CLI + HTTP; durable queue open | M9 |
+| Drill trainer, packs, session statistics, hand histories | `hand-history 1` schema only | M11 |
 | Preflop solver, weighted flop subsets, chart editor | Missing | M12 |
-| Modern study GUI: layouts, two-player grids, shortcuts, themes, localization | Basic web explorer | Land with each feature; finish in M13 |
-| Stable delivery, help, upgrade/recovery, complete validation | Development workflow | Continuous; M13 release gate |
+| Modern study GUI: layouts, two-player grids, shortcuts, themes, localization | React Study UI + themes/shortcuts; saved layouts / localization open | Land with each feature; finish in M13 |
+| Stable delivery, help, upgrade/recovery, complete validation | Unsigned Windows installer + CI; signed upgrade story open | Continuous; M13 release gate |
 
 The audit must also inspect small utilities: standalone equity calculator, preflop chart image export, clipboard formats, all-lines/line-frequency views, strategy simplification tools, range selection predicates, links/bookmarks, report exports, settings persistence, and diagnostics. Determine exact reference behavior before claiming each utility matches. Compare desktop Pro and Edge. PioCloud hosting, commercial licensing, and proprietary file compatibility enter the ledger only after an explicit scope decision.
 
@@ -127,9 +119,9 @@ Investigate exact suit isomorphisms, compact slot indexing, memory layout, SIMD,
 
 Address stored-index limits with checked wider/segmented representations when required. Keep the small enumerator as an oracle. Scale one batch solver, and publish a hardware profile for each supported tree size, including which trees fit in 1 GiB.
 
-Solve a five-card board in that same production tree. Cards still to come are two, one, or zero. A turn tree already solves a river after each river card; the standalone river solver is that subtree entered with the turn card known. `StreetGame` and `StreetBatchSolver` already accept a five-card board and match `RiverGame` on the pinned fixtures. The explorer now routes five-card jobs through that shared tree. Finish by moving `river_solver` onto the same path, then remove it as a separate product entry point. `RiverGame` remains the oracle for the zero-card case, on the same footing as `--reference` against `StreetGame`. Do this before scaling the flop/turn kernel and the river kernel as two products.
+Five-card boards already solve on the shared production tree. Cards still to come are two, one, or zero. `StreetGame` / `StreetBatchSolver` accept a five-card board and match `RiverGame` on the pinned fixtures. Explorer and `river_solver` both use that path (`river_solver` maps river JSON/CLI into `StreetConfig`). `RiverGame` is the five-card oracle; `RiverBatchSolver` is oracle/legacy only. Remaining M6 work is scale, algorithm alternatives, and time-to-accuracy — not a second river product kernel.
 
-**Gate:** each optimization passes an appropriate oracle/parity gate and budget failure tests. A five-card public tree matches `RiverGame` on the pinned river fixtures before `river_solver` is removed as a product entry point. Algebra-preserving kernel changes should retain pins; algorithm and precision changes are compared on solution quality. Publish same-machine paired measurements, including evaluation cost and variance. Multi-size full-range betting trees must converge within a declared hardware envelope before broad practical parity is claimed.
+**Gate:** each optimization passes an appropriate oracle/parity gate and budget failure tests. Five-card public-tree pins against `RiverGame` stay green. Algebra-preserving kernel changes retain pins; algorithm and precision changes compare on solution quality. Publish same-machine paired measurements, including evaluation cost and variance. Multi-size full-range betting trees must converge within a declared hardware envelope before broad practical parity is claimed.
 
 ### M7 — Strategy editing, node locking and constrained re-solving
 
@@ -229,13 +221,11 @@ Choose explicit release service-level targets after measuring a representative c
 
 ## 7. Dependencies and execution policy for Cursor
 
-The main path is M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0 and includes joining the five-card production path to the shared postflop tree before the two current kernels are scaled separately. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after all required features land.
+Main path: M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0; five-card production already shares the street tree — scale that one kernel. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after required features land.
 
-Check-down equity, equity-distribution buckets with study filtering/composition, made-hand category composition on five-card boards, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, one resumable solution file, runout EV comparison, a bounded recent-files list for Save/Open paths, saved street-config templates, and named range presets are implemented and covered by the unit tests. They are not a completed M2 or a Pio parity claim. Node locking and compact saves are tracked elsewhere.
+Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets with study filtering/composition, five-card made-hand categories, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, resumable PSOL, runout EV comparison, recent-files list, street-config templates, named range presets, street-first node locks. Still ahead: compact saves, richer strategy editing, reports/queue, trainer, preflop.
 
-For each milestone: write a small specification, identify invariants and failure modes, implement reviewable commits, run relevant checks, demonstrate the user workflow, then update the ledger with exact evidence. Keep changes on the development branch unless explicitly instructed otherwise. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
-
-Estimate each milestone after its design spike. Product work, exact solver scale, general-sum modes, compact reconstruction, and preflop have different uncertainty. Track actual cycle time and revise forecasts at release gates. The tested CFR kernel is the foundation. The remaining work is the analysis product and a modern, easy-to-use GUI that presents it.
+Per milestone: small specification, invariants and failure modes, reviewable commits, relevant checks, user-workflow demo, ledger update with evidence. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 
 ## 8. Sources and reference boundaries
 
@@ -274,5 +264,5 @@ The phases below were the kernel plan through the baseline reviewed above. They 
 | 9. Graphical strategy explorer | Complete |
 | 10. Full HUNL research | Complete |
 
-Phase 10 records the scope of these trees. [HUNL.md](HUNL.md) describes that scope and one measured alternative weighting, linear CFR, on Kuhn.
+Phase 10 recorded abstraction limits for unrestricted HUNL. [HUNL.md](HUNL.md) is the current write-up.
 
