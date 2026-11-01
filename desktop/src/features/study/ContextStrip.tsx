@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { boardBlockers } from "../../domain/cards";
+import { engineActivityMessage, phaseLabel } from "../../domain/solveActivity";
 import { useStudyStore } from "../../state/studyStore";
 import { CardPicker } from "../tree/CardPicker";
 import { SolveControls } from "./SolveControls";
@@ -38,8 +39,15 @@ export function ContextStrip() {
   const status = useStudyStore((s) => s.status);
   const currentNode = useStudyStore((s) => s.currentNode);
   const phase = useStudyStore((s) => s.phase);
+  const message = useStudyStore((s) => s.message);
   const solutionId = useStudyStore((s) => s.solutionId);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const activity = engineActivityMessage(phase, status, message);
+  const live =
+    phase === "solving" ||
+    phase === "building" ||
+    phase === "pause_requested" ||
+    phase === "stop_requested";
 
   const cards = boardList(currentNode?.board ?? status?.board, draft.boardText);
   const blockers = boardBlockers(cards);
@@ -108,10 +116,20 @@ export function ContextStrip() {
         </span>
       </div>
       <div className="context-strip__grow" />
-      <span className="phase-pill" data-phase={phase}>
-        {phase}
-        {solutionId ? ` · ${solutionId.slice(0, 8)}` : ""}
-      </span>
+      <div className="context-strip__engine" title={activity}>
+        <span className="phase-pill" data-phase={phase} data-live={live ? "true" : "false"}>
+          {phaseLabel(phase)}
+          {live && status?.iterations != null
+            ? ` · ${status.iterations}${
+                status.iterations_requested
+                  ? `/${status.iterations_requested}`
+                  : ""
+              }`
+            : ""}
+          {!live && solutionId ? ` · ${solutionId.slice(0, 8)}` : ""}
+        </span>
+        <span className="context-strip__activity muted">{activity}</span>
+      </div>
       <SolveControls />
     </div>
   );

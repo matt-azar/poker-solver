@@ -1,16 +1,25 @@
 import { useCallback, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useStudyStore } from "../../state/studyStore";
-import { ConvergenceChart } from "./ConvergenceChart";
 import { RangeExplorerPanel } from "./RangeExplorerPanel";
 import { RunoutTable } from "./RunoutTable";
 
 const TABS = [
   { id: "explorer", label: "Range Explorer" },
-  { id: "convergence", label: "Graphs" },
   { id: "runouts", label: "Runouts" },
   { id: "equity", label: "Equity" },
   { id: "categories", label: "Categories" },
 ] as const;
+
+const DOCK_MIN = 120;
+/** Allow nearly full-viewport docks so matrix / equity charts are never trapped. */
+const DOCK_MAX_VH = 0.72;
+
+function dockMaxPx(): number {
+  if (typeof window === "undefined") {
+    return 720;
+  }
+  return Math.max(DOCK_MIN, Math.floor(window.innerHeight * DOCK_MAX_VH));
+}
 
 export function LowerDock() {
   const layout = useStudyStore((s) => s.layout);
@@ -28,8 +37,8 @@ export function LowerDock() {
           return;
         }
         const next = Math.min(
-          420,
-          Math.max(120, dragRef.current.startH - (ev.clientY - dragRef.current.startY)),
+          dockMaxPx(),
+          Math.max(DOCK_MIN, dragRef.current.startH - (ev.clientY - dragRef.current.startY)),
         );
         setLayout({ lowerDockHeight: next });
       };
@@ -51,18 +60,15 @@ export function LowerDock() {
   let body: ReactNode;
   if (analysisTab === "runouts") {
     body = <RunoutTable />;
-  } else if (
-    analysisTab === "equity" ||
-    analysisTab === "categories" ||
-    analysisTab === "explorer"
-  ) {
-    body = <RangeExplorerPanel />;
   } else {
-    body = <ConvergenceChart />;
+    body = <RangeExplorerPanel />;
   }
 
   return (
-    <section className="lower-dock" style={{ height: layout.lowerDockHeight }}>
+    <section
+      className="lower-dock"
+      style={{ height: layout.lowerDockHeight, maxHeight: dockMaxPx() }}
+    >
       <div
         className="resize-handle resize-handle--top"
         onPointerDown={onPointerDown}

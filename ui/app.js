@@ -222,6 +222,136 @@ function sizes(text) {
   return text.split(",").map((part) => part.trim()).filter(Boolean).map(Number).filter((value) => !Number.isNaN(value));
 }
 
+/* hardware-defaults — mirrors desktop fastSolveDefaults */
+const THREAD_CAP = 64;
+const MEMORY_MIN_MIB = 1024;
+const MEMORY_MAX_MIB = 32768;
+const FALLBACK_DEVICE_GIB = 8;
+
+function readLogicalCores() {
+  if (typeof navigator === "undefined") {
+    return 4;
+  }
+  const cores = Number(navigator.hardwareConcurrency);
+  return Number.isFinite(cores) && cores >= 1 ? Math.floor(cores) : 4;
+}
+
+function readDeviceMemoryGib() {
+  if (typeof navigator === "undefined") {
+    return FALLBACK_DEVICE_GIB;
+  }
+  const deviceMemory = Number(navigator.deviceMemory);
+  return Number.isFinite(deviceMemory) && deviceMemory > 0
+    ? deviceMemory
+    : FALLBACK_DEVICE_GIB;
+}
+
+function fastSolveDefaults(cores, deviceMemoryGib) {
+  const logical = Math.max(1, Math.floor(cores == null ? readLogicalCores() : cores));
+  const gib = deviceMemoryGib == null ? readDeviceMemoryGib() : deviceMemoryGib;
+  const threads =
+    logical <= 2 ? logical : Math.min(THREAD_CAP, Math.max(1, logical - 1));
+  const halfRamMib = Math.floor(gib * 1024 * 0.5);
+  const memoryMib = Math.min(MEMORY_MAX_MIB, Math.max(MEMORY_MIN_MIB, halfRamMib));
+  return {threads, memoryMib, frozen: true};
+}
+
+function applyFastSolveDefaults() {
+  const defaults = fastSolveDefaults();
+  const threads = $("threads");
+  const memory = $("memory-mib");
+  const frozen = $("frozen");
+  if (threads) {
+    threads.value = String(defaults.threads);
+  }
+  if (memory) {
+    memory.value = String(defaults.memoryMib);
+  }
+  if (frozen && !frozen.dataset.touched) {
+    frozen.checked = true;
+  }
+}
+/* end-hardware-defaults */
+
+function formatNashGap(gap, pot) {
+  if (gap === null || gap === undefined || Number.isNaN(Number(gap))) {
+    return null;
+  }
+  const abs = Number(gap).toFixed(3);
+  if (pot && Number(pot) > 0) {
+    return abs + " (" + ((Number(gap) / Number(pot)) * 100).toFixed(2) + "% pot)";
+  }
+  return abs;
+}
+
+function activityMessage(status) {
+  if (!status) {
+    return "";
+  }
+  if (status.error) {
+    return String(status.error);
+  }
+  if (status.message && String(status.message).trim()) {
+    return String(status.message).trim();
+  }
+  const iter = Number(status.iterations) || 0;
+  const target = status.iterations_requested;
+  const iterPart =
+    target != null && Number(target) > 0
+      ? iter + " / " + Number(target) + " iterations"
+      : iter + " iterations";
+  const gap = formatNashGap(status.nash_gap, status.pot);
+  const gapPart = gap ? " · Nash " + gap : "";
+  const spotPart = status.spot ? " · " + status.spot : "";
+  if (status.running) {
+    return "Solving — " + iterPart + gapPart + spotPart;
+  }
+  if (status.paused) {
+    return "Paused at " + iterPart + gapPart;
+  }
+  if (status.cancelled) {
+    return "Stopped at " + iterPart + gapPart;
+  }
+  if (status.time_limit_reached) {
+    return "Time limit at " + iterPart + gapPart;
+  }
+  if (iter > 0) {
+    return "Solve complete — " + iterPart + gapPart;
+  }
+  return "";
+}
+
+/** Mirror desktop solveControlFlags for the legacy Solve / Continue / Pause / Stop row. */
+function syncSolveControls(status) {
+  const running = Boolean(status && status.running);
+  const hasSolution = Boolean(
+    (status && status.solution_id) || solutionId
+  );
+  const run = $("run");
+  const cont = $("continue");
+  const pause = $("pause");
+  const stop = $("stop");
+  if (run) {
+    run.disabled = running;
+  }
+  if (cont) {
+    // Continue must not look clickable while solving.
+    cont.disabled = running || !hasSolution;
+  }
+  if (pause) {
+    pause.disabled = !running;
+  }
+  if (stop) {
+    stop.disabled = !running;
+  }
+  if ($("resolve-locked")) {
+    $("resolve-locked").disabled = running || !hasSolution;
+  }
+  if ($("save-solution")) {
+    $("save-solution").disabled = running || !hasSolution;
+  }
+}
+
 // Lines separated by `;`. Spelling matches street-config:
 //   label|tag PLAYER KEY DELTA
 function parseIncentives(text) {
@@ -797,9 +927,7 @@ $("algorithm").addEventListener("change", () => {
 $("setup").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("message").textContent = "Solving…";
-  $("run").disabled = true;
-  $("pause").disabled = false;
-  $("stop").disabled = false;
+  syncSolveControls({running: true, solution_id: solutionId});
   const body = {
     board: boardCards($("board").value),
     oop_range: $("oop").value,
@@ -847,9 +975,7 @@ $("setup").addEventListener("submit", async (event) => {
   if (!response.ok && response.status !== 202) {
     const failed = await response.json().catch(() => ({error: response.statusText}));
     $("message").textContent = failed.error || "Solve failed";
-    $("run").disabled = false;
-    $("pause").disabled = true;
-    $("stop").disabled = true;
+    syncSolveControls({running: false, solution_id: solutionId});
     return;
   }
   if (poll) {
@@ -864,13 +990,7 @@ $("continue").addEventListener("click", async () => {
     return;
   }
   $("message").textContent = "Continuing…";
-  $("run").disabled = true;
-  $("continue").disabled = true;
-  if ($("resolve-locked")) {
-    $("resolve-locked").disabled = true;
-  }
-  $("pause").disabled = false;
-  $("stop").disabled = false;
+  syncSolveControls({running: true, solution_id: solutionId});
   const continueBody = {iterations: Number($("iterations").value)};
   const continueTimeLimit = $("time-limit").value.trim();
   if (continueTimeLimit !== "") {
@@ -884,13 +1004,7 @@ $("continue").addEventListener("click", async () => {
   if (!response.ok && response.status !== 202) {
     const failed = await response.json().catch(() => ({error: response.statusText}));
     $("message").textContent = failed.error || "Continue failed";
-    $("run").disabled = false;
-    $("continue").disabled = false;
-    if ($("resolve-locked")) {
-      $("resolve-locked").disabled = !solutionId;
-    }
-    $("pause").disabled = true;
-    $("stop").disabled = true;
+    syncSolveControls({running: false, solution_id: solutionId});
     return;
   }
   dropDisplayedSolution();
@@ -911,11 +1025,7 @@ if ($("resolve-locked")) {
     $("message").textContent = warmStart
       ? "Resolving with locks (warm-start)…"
       : "Resolving with locks (reset + re-solve)…";
-    $("run").disabled = true;
-    $("continue").disabled = true;
-    $("resolve-locked").disabled = true;
-    $("pause").disabled = false;
-    $("stop").disabled = false;
+    syncSolveControls({running: true, solution_id: solutionId});
     const body = {
       iterations: Number($("iterations").value),
       warm_start: warmStart ? 1 : 0
@@ -932,11 +1042,7 @@ if ($("resolve-locked")) {
     if (!response.ok && response.status !== 202) {
       const failed = await response.json().catch(() => ({error: response.statusText}));
       $("message").textContent = failed.error || "Resolve locked failed";
-      $("run").disabled = false;
-      $("continue").disabled = false;
-      $("resolve-locked").disabled = false;
-      $("pause").disabled = true;
-      $("stop").disabled = true;
+      syncSolveControls({running: false, solution_id: solutionId});
       return;
     }
     dropDisplayedSolution();
@@ -1068,17 +1174,8 @@ async function refresh() {
   if (!status.running && poll) {
     clearInterval(poll);
     poll = null;
-    $("run").disabled = false;
-    $("pause").disabled = true;
-    $("stop").disabled = true;
   }
-  $("pause").disabled = !status.running;
-  $("stop").disabled = !status.running;
-  $("continue").disabled = Boolean(status.running) || !status.solution_id;
-  if ($("resolve-locked")) {
-    $("resolve-locked").disabled = Boolean(status.running) || !status.solution_id;
-  }
-  $("save-solution").disabled = Boolean(status.running) || !status.solution_id;
+  syncSolveControls(status);
   $("export").disabled = !(currentNode || riverExport);
   baselineSolutionId = status.baseline_solution_id || null;
   if ($("show-baseline")) {
@@ -1251,18 +1348,9 @@ async function loadRiverExport() {
 }
 
 function render(status) {
-  if (status.error) {
-    $("message").textContent = status.error;
-  } else if (status.running) {
-    $("message").textContent = "Iteration " + status.iterations + (status.spot ? " · " + status.spot : "");
-  } else if (status.paused) {
-    $("message").textContent = "Paused at iteration " + status.iterations;
-  } else if (status.cancelled) {
-    $("message").textContent = "Stopped at iteration " + status.iterations;
-  } else if (status.time_limit_reached) {
-    $("message").textContent = "Time limit at iteration " + status.iterations;
-  } else if (status.iterations > 0) {
-    $("message").textContent = "Finished";
+  const message = activityMessage(status);
+  if (message) {
+    $("message").textContent = message;
   }
   if (!status.iterations) {
     return;
@@ -1277,14 +1365,12 @@ function render(status) {
   $("show-value").textContent = status.player0_expected_utility === null || status.player0_expected_utility === undefined
     ? "—"
     : Number(status.player0_expected_utility).toFixed(4);
-  $("show-gap").textContent = status.nash_gap === null || status.nash_gap === undefined
-    ? "—"
-    : Number(status.nash_gap).toPrecision(4);
+  const gapLabel = formatNashGap(status.nash_gap, status.pot);
+  $("show-gap").textContent = gapLabel || "—";
   const pot = Number(status.pot) || 1;
   $("show-fraction").textContent = status.nash_gap === null || status.nash_gap === undefined
     ? "—"
-    : (Number(status.nash_gap) / pot).toPrecision(3);
-  drawChart(status.gap_series || []);
+    : ((Number(status.nash_gap) / pot) * 100).toFixed(2) + "%";
   if (currentNode) {
     renderNode(currentNode);
     return;
@@ -1423,23 +1509,6 @@ function matrixFromNode(node, mode) {
 function frequencyLabel(mode, node) {
   const match = frequencyOptions(node).find((option) => option.id === mode);
   return match ? match.label : "Bet or raise";
-}
-
-function drawChart(series) {
-  const svg = $("chart");
-  $("chart-wrap").hidden = series.length === 0;
-  if (series.length === 0) {
-    return;
-  }
-  const maxGap = Math.max(...series.map((point) => point.nash_gap), 1e-9);
-  const maxIter = Math.max(...series.map((point) => point.iterations), 1);
-  const coords = series.map((point) => {
-    const x = 40 + (point.iterations / maxIter) * 580;
-    const y = 20 + (1 - point.nash_gap / maxGap) * 140;
-    return x + "," + y;
-  });
-  const stroke = cssToken("--ink", "#1c1915");
-  svg.innerHTML = "<polyline fill='none' stroke='" + stroke + "' stroke-width='2' points='" + coords.join(" ") + "'/>";
 }
 
 function drawGrid(id, cells, player) {
@@ -1795,8 +1864,7 @@ async function openSolution() {
     }
   }
   $("message").textContent = "Opened " + path;
-  $("save-solution").disabled = !body.solution_id;
-  $("continue").disabled = !body.solution_id;
+  syncSolveControls(body);
   await refreshRecentSolutions();
 }
 
@@ -2185,8 +2253,10 @@ $("theme-toggle").addEventListener("click", () => {
   }
 });
 
+applyFastSolveDefaults();
 readText("oop", $("oop").value);
 readText("ip", $("ip").value);
 updateSpot();
 syncRangeHistoryButtons();
+syncSolveControls({running: false, solution_id: null});
 refresh();

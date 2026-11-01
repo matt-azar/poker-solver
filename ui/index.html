@@ -98,10 +98,10 @@
     <label class="check"><input id="geometric" type="checkbox"> Geometric size</label>
     <label>All-in threshold <input id="threshold" type="number" value="0" min="0" max="1" step="0.05"></label>
     <label class="check"><input id="all-in" type="checkbox" checked> Allow all-in</label>
-    <label class="check"><input id="frozen" type="checkbox"> Frozen combo pass</label>
+    <label class="check"><input id="frozen" type="checkbox" checked> Frozen combo pass</label>
     <label>Iterations <input id="iterations" type="number" value="200"></label>
-    <label>Memory MiB <input id="memory-mib" type="number" value="1024" min="1"></label>
-    <label>Threads <input id="threads" type="number" value="1" min="1" max="64"></label>
+    <label>Memory MiB <input id="memory-mib" type="number" value="4096" min="1"></label>
+    <label>Threads <input id="threads" type="number" value="3" min="1" max="64"></label>
     <label>Algorithm
       <select id="algorithm">
         <option value="cfr_plus" selected>CFR+</option>
@@ -148,10 +148,6 @@
     <div><span>Nash gap</span><strong id="show-gap"></strong></div>
     <div><span>Gap / pot</span><strong id="show-fraction"></strong></div>
     <div><span>Baseline</span><strong id="show-baseline"></strong></div>
-  </section>
-  <section id="chart-wrap" hidden>
-    <h2>Nash gap</h2>
-    <svg id="chart" viewBox="0 0 640 180"></svg>
   </section>
   <section class="grids">
     <div>

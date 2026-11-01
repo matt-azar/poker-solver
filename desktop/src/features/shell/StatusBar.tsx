@@ -1,4 +1,8 @@
-import { statusRootEv } from "../../domain/status";
+import {
+  engineActivityMessage,
+  phaseLabel,
+  statusMetrics,
+} from "../../domain/solveActivity";
 import type { SolvePhase, StatusPayload } from "../../domain/types";
 
 export type ConnectionState = "connected" | "disconnected" | "connecting";
@@ -11,46 +15,44 @@ interface Props {
   onReconnect?: () => void;
 }
 
-function formatGap(gap: number | null | undefined, pot: number | null | undefined): string {
-  if (gap == null || Number.isNaN(gap)) {
-    return "—";
-  }
-  const abs = gap.toFixed(3);
-  if (pot && pot > 0) {
-    return `${abs} (${((gap / pot) * 100).toFixed(2)}% pot)`;
-  }
-  return abs;
-}
-
-function formatBytes(bytes: number | null | undefined): string {
-  if (bytes == null || !(bytes > 0)) {
-    return "—";
-  }
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KiB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-}
-
 export function StatusBar({ message, connection, phase, status, onReconnect }: Props) {
-  const ev = statusRootEv(status);
+  const activity = engineActivityMessage(phase, status, message);
+  const metrics = statusMetrics(status);
+  const live =
+    phase === "solving" ||
+    phase === "building" ||
+    phase === "pause_requested" ||
+    phase === "stop_requested";
+
   return (
-    <footer className="status-bar" role="status">
+    <footer className="status-bar" role="status" aria-live="polite">
       <span className="status-dot" data-state={connection} title={connection} />
-      <span className="status-bar__msg">{message || "Ready"}</span>
+      <span
+        className="status-bar__phase"
+        data-phase={phase}
+        data-live={live ? "true" : "false"}
+        title={`Engine phase: ${phase}`}
+      >
+        {phaseLabel(phase)}
+      </span>
+      <span className="status-bar__msg" title={activity}>
+        {activity || "Ready"}
+      </span>
       {connection === "disconnected" && onReconnect ? (
         <button type="button" className="toolbar-btn" onClick={onReconnect}>
           Reconnect
         </button>
       ) : null}
-      <span>Phase {phase}</span>
-      <span>Iter {status?.iterations ?? "—"}</span>
-      <span className="tabular">
-        EV {ev == null ? "—" : ev.toFixed(3)}
-      </span>
-      <span>Nash {formatGap(status?.nash_gap, status?.pot)}</span>
-      <span title="engine_allocated">
-        Mem {formatBytes(status?.engine_allocated ?? status?.engine_heap_bytes)}
+      <span className="status-bar__metrics tabular" aria-label="Solve metrics">
+        <span title="Completed / requested iterations">
+          Iter {metrics.iterations}
+          {metrics.target !== "—" ? `/${metrics.target}` : ""}
+        </span>
+        <span title="Elapsed solve time">Time {metrics.runtime}</span>
+        <span title="Iterations per second">Rate {metrics.rate}</span>
+        <span title="Root OOP EV (chips)">EV {metrics.ev}</span>
+        <span title="NashConv (absolute and % of pot)">Nash {metrics.nash}</span>
+        <span title="Engine-allocated heap">Mem {metrics.memory}</span>
       </span>
     </footer>
   );

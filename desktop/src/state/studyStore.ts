@@ -222,7 +222,8 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
     geometric: draft.geometric ? 1 : 0,
     all_in_threshold: draft.allInThreshold || 0,
     allow_all_in: draft.allowAllIn ? 1 : 0,
-    frozen: draft.frozen ? 1 : 0,
+    // Desktop always uses the frozen pass (required for multi-thread / CFR+).
+    frozen: 1,
     accuracy: draft.accuracy.trim() === "" ? -1 : Number(draft.accuracy),
     max_raises: draft.maxRaises,
     iterations: draft.iterations,
@@ -358,7 +359,7 @@ interface StudyState {
   setEvDisplayBasis: (basis: "local" | "root_centered") => void;
   actionFilter: number | null;
   setActionFilter: (index: number | null) => void;
-  analysisTab: "explorer" | "runouts" | "equity" | "categories" | "convergence";
+  analysisTab: "explorer" | "runouts" | "equity" | "categories";
   setAnalysisTab: (tab: StudyState["analysisTab"]) => void;
   warmStart: boolean;
   setWarmStart: (value: boolean) => void;
@@ -770,7 +771,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   setActionFilter(index) {
     set({ actionFilter: index });
   },
-  analysisTab: "convergence",
+  analysisTab: "explorer",
   setAnalysisTab(tab) {
     set({ analysisTab: tab });
   },
@@ -1245,10 +1246,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           get().currentNode?.node_id || rootNodeId(status.root_node_id),
         );
       } else if (status.running) {
+        const requested = status.iterations_requested;
+        const iterLabel =
+          requested != null && Number(requested) > 0
+            ? `${status.iterations ?? 0}/${requested}`
+            : `${status.iterations ?? 0}`;
         set({
           message: status.paused
             ? "Pause requested — finishing current sample…"
-            : `Solving… ${status.iterations ?? 0} iterations`,
+            : `Solving — ${iterLabel} iterations`,
         });
       }
     } catch (error) {

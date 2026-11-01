@@ -1,7 +1,9 @@
+import { solveControlFlags } from "../../domain/solveControls";
 import { useStudyStore } from "../../state/studyStore";
 
 export function SolveControls() {
   const phase = useStudyStore((s) => s.phase);
+  const solutionId = useStudyStore((s) => s.solutionId);
   const solve = useStudyStore((s) => s.solve);
   const continueSolve = useStudyStore((s) => s.continueSolve);
   const pause = useStudyStore((s) => s.pause);
@@ -10,37 +12,71 @@ export function SolveControls() {
   const saveSolution = useStudyStore((s) => s.saveSolution);
   const openSolution = useStudyStore((s) => s.openSolution);
 
-  const busy = phase === "solving" || phase === "building";
-  const canContinue = phase === "paused" || phase === "complete" || phase === "stop_requested";
+  const { canSolve, canContinue, canPause, canStop } = solveControlFlags(phase);
+  const hasSolution = Boolean(solutionId);
 
   return (
-    <div className="solve-controls">
-      <button type="button" className="toolbar-btn primary" onClick={() => void solve()}>
+    <div className="solve-controls" role="group" aria-label="Solve controls">
+      <button
+        type="button"
+        className="toolbar-btn primary"
+        disabled={!canSolve}
+        title={
+          canSolve
+            ? "Start a new solve from the current build settings"
+            : "Stop or wait for the current solve before starting another"
+        }
+        onClick={() => void solve()}
+      >
         Solve
       </button>
       <button
         type="button"
         className="toolbar-btn"
-        disabled={!canContinue && !busy}
+        disabled={!canContinue}
+        title={
+          canContinue
+            ? "Resume or add iterations to the current solution"
+            : "Continue is available after Pause, Stop, or Complete"
+        }
         onClick={() => void continueSolve()}
       >
         Continue
       </button>
-      <button type="button" className="toolbar-btn" disabled={!busy} onClick={() => void pause()}>
+      <button
+        type="button"
+        className="toolbar-btn"
+        disabled={!canPause}
+        title={canPause ? "Pause after the current sample" : "Nothing is solving"}
+        onClick={() => void pause()}
+      >
         Pause
       </button>
       <button
         type="button"
         className="toolbar-btn danger"
-        disabled={!busy && phase !== "pause_requested"}
+        disabled={!canStop}
+        title={canStop ? "Stop and keep completed iterations" : "Nothing is solving"}
         onClick={() => void stop()}
       >
         Stop
       </button>
-      <button type="button" className="toolbar-btn" onClick={() => void calculateEv()}>
+      <button
+        type="button"
+        className="toolbar-btn"
+        disabled={!hasSolution}
+        title={hasSolution ? "Compute action EVs for the current node" : "Solve first"}
+        onClick={() => void calculateEv()}
+      >
         EV
       </button>
-      <button type="button" className="toolbar-btn" onClick={() => void saveSolution()}>
+      <button
+        type="button"
+        className="toolbar-btn"
+        disabled={!hasSolution}
+        title={hasSolution ? "Save the current solution" : "Solve first"}
+        onClick={() => void saveSolution()}
+      >
         Save
       </button>
       <button type="button" className="toolbar-btn" onClick={() => void openSolution()}>

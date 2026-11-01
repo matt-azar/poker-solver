@@ -1,5 +1,9 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { useStudyStore } from "../../state/studyStore";
+import {
+  fastSolveDefaults,
+  formatHardwareHint,
+} from "../../domain/hardwareDefaults";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
 import { AssistantPanel } from "../assistant/AssistantPanel";
@@ -147,6 +151,8 @@ export function BuildWorkspace() {
   const potProvenance = provenanceHint(setupMeta, "pot");
   const stackProvenance = provenanceHint(setupMeta, "stack");
   const solveBlocked = setupMeta != null && !setupMeta.canSolve;
+  const machineDefaults = useMemo(() => fastSolveDefaults(), []);
+  const hardwareHint = formatHardwareHint(machineDefaults);
 
   return (
     <div className="build-workspace">
@@ -387,6 +393,22 @@ export function BuildWorkspace() {
 
         <section className="build-section">
           <h2>Solve settings</h2>
+          <p className="build-hardware-hint muted" title="Defaults match a fast local solve">
+            Fast defaults · {hardwareHint}
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={() =>
+                updateDraft({
+                  threads: machineDefaults.threads,
+                  memoryMib: machineDefaults.memoryMib,
+                  frozen: true,
+                })
+              }
+            >
+              Reset to fast
+            </button>
+          </p>
           <div className="build-inline">
             <label>
               Iterations
@@ -435,25 +457,25 @@ export function BuildWorkspace() {
               Threads
               <input
                 type="number"
+                min={1}
+                max={64}
                 value={draft.threads}
-                onChange={(event) => updateDraft({ threads: Number(event.target.value) })}
+                onChange={(event) =>
+                  updateDraft({
+                    threads: Number(event.target.value),
+                    frozen: true,
+                  })
+                }
               />
             </label>
             <label>
               Memory MiB
               <input
                 type="number"
+                min={64}
                 value={draft.memoryMib}
                 onChange={(event) => updateDraft({ memoryMib: Number(event.target.value) })}
               />
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={draft.frozen}
-                onChange={(event) => updateDraft({ frozen: event.target.checked })}
-              />
-              Frozen
             </label>
           </div>
           <div className="build-inline">

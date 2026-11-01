@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { matchShortcut, SHORTCUTS } from "../../commands/shortcuts";
+import { solveControlFlags } from "../../domain/solveControls";
 import type { ThemePreference } from "../../domain/types";
 import { getPlatform } from "../../platform/browser";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
@@ -66,14 +67,27 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
         event.preventDefault();
         return;
       }
-      event.preventDefault();
+      const flags = solveControlFlags(useStudyStore.getState().phase);
       if (action === "solve") {
+        if (!flags.canSolve) {
+          return;
+        }
+        event.preventDefault();
         void solve();
       } else if (action === "stop") {
+        if (!flags.canStop) {
+          return;
+        }
+        event.preventDefault();
         void stop();
       } else if (action === "continue") {
+        if (!flags.canContinue) {
+          return;
+        }
+        event.preventDefault();
         void continueSolve();
       } else if (action === "help") {
+        event.preventDefault();
         onHelpOpen(!helpOpen);
       }
     };
@@ -103,7 +117,7 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const busy = phase === "solving" || phase === "building";
+  const { canSolve, canContinue, canPause, canStop } = solveControlFlags(phase);
 
   return (
     <header className="menu-bar" ref={rootRef}>
@@ -150,10 +164,25 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
           open={openMenu}
           setOpen={setOpenMenu}
           items={[
-            { label: "Solve", shortcut: "S", onClick: () => void solve() },
-            { label: "Continue", shortcut: "C", onClick: () => void continueSolve() },
-            { label: "Pause", onClick: () => void pause(), disabled: !busy },
-            { label: "Stop", shortcut: "X", onClick: () => void stop(), disabled: !busy },
+            {
+              label: "Solve",
+              shortcut: "S",
+              onClick: () => void solve(),
+              disabled: !canSolve,
+            },
+            {
+              label: "Continue",
+              shortcut: "C",
+              onClick: () => void continueSolve(),
+              disabled: !canContinue,
+            },
+            { label: "Pause", onClick: () => void pause(), disabled: !canPause },
+            {
+              label: "Stop",
+              shortcut: "X",
+              onClick: () => void stop(),
+              disabled: !canStop,
+            },
             { sep: true },
             { label: "Calculate EV", onClick: () => void calculateEv() },
             { sep: true },

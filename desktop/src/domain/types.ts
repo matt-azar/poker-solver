@@ -1,3 +1,5 @@
+import { fastSolveDefaults } from "./hardwareDefaults";
+
 export type PlayerSeat = "oop" | "ip";
 
 export type MatrixMode =
@@ -288,6 +290,8 @@ export const RANKS = [
   "2",
 ] as const;
 
+const FAST = fastSolveDefaults();
+
 export const DEFAULT_SPOT: SpotDraft = {
   boardText: "Ah Kd 7c 4s 2h",
   oopRange: "AA",
@@ -308,12 +312,12 @@ export const DEFAULT_SPOT: SpotDraft = {
   geometric: false,
   allInThreshold: 0,
   allowAllIn: true,
-  frozen: false,
+  frozen: true,
   accuracy: "",
   maxRaises: 2,
   iterations: 200,
-  memoryMib: 1024,
-  threads: 1,
+  memoryMib: FAST.memoryMib,
+  threads: FAST.threads,
   algorithm: "cfr_plus",
   samples: 5,
   rakeRate: 0,

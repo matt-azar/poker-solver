@@ -1,15 +1,16 @@
-import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import type { NodeActionChild, NodeCardChild } from "../../domain/types";
+import { useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { mapActionColors } from "../../domain/actionColors";
+import {
+  actorLabel,
+  formatChoiceFrequency,
+  lineCrumbs,
+  nextChoicesFromNode,
+} from "../../domain/actionHistory";
 import { useStudyStore } from "../../state/studyStore";
-
-function isActionChild(
-  child: NodeActionChild | NodeCardChild | string,
-): child is NodeActionChild {
-  return typeof child === "object" && child !== null && ("action" in child || "label" in child);
-}
 
 export function ActionHistory() {
   const currentNode = useStudyStore((s) => s.currentNode);
+  const status = useStudyStore((s) => s.status);
   const layout = useStudyStore((s) => s.layout);
   const setLayout = useStudyStore((s) => s.setLayout);
   const navigateTo = useStudyStore((s) => s.navigateTo);
@@ -25,9 +26,13 @@ export function ActionHistory() {
         if (!dragRef.current) {
           return;
         }
+        const maxHistory =
+          typeof window === "undefined"
+            ? 280
+            : Math.max(96, Math.floor(window.innerHeight * 0.35));
         const next = Math.min(
-          280,
-          Math.max(64, dragRef.current.startH + (ev.clientY - dragRef.current.startY)),
+          maxHistory,
+          Math.max(56, dragRef.current.startH + (ev.clientY - dragRef.current.startY)),
         );
         setLayout({ historyHeight: next });
       };
@@ -42,80 +47,110 @@ export function ActionHistory() {
     [layout.historyHeight, setLayout],
   );
 
-  const children = currentNode?.children ?? [];
-  const line = currentNode?.line;
+  const rootId = status?.root_node_id || "p0.t-1.r-1";
+  const crumbs = useMemo(
+    () => lineCrumbs(currentNode?.line, rootId),
+    [currentNode?.line, rootId],
+  );
+  const choices = useMemo(() => nextChoicesFromNode(currentNode), [currentNode]);
+  const colors = useMemo(
+    () => mapActionColors(currentNode?.actions ?? []),
+    [currentNode?.actions],
+  );
+  const actor = actorLabel(currentNode?.to_act, currentNode?.player ?? null);
+  const chance = currentNode?.kind === "chance";
+  const terminal = currentNode?.kind === "terminal";
 
   return (
     <section className="action-history" style={{ height: layout.historyHeight }}>
-      <div className="action-history__head">
-        <span>Action history</span>
-        <span>{line || "No line"}</span>
-      </div>
-      <div className="action-history__list">
-        {currentNode?.node_id ? (
-          <button
-            type="button"
-            className="history-chip"
-            data-active="true"
-            onClick={() => void navigateTo(currentNode.node_id)}
-          >
-            {currentNode.node_id}
-          </button>
+      <div className="action-history__row action-history__line">
+        <span className="action-history__label">Line</span>
+        {currentNode ? (
+          <nav className="action-history__crumbs" aria-label="Action line">
+            {crumbs.map((crumb, index) => {
+              const last = index === crumbs.length - 1;
+              const clickable = Boolean(crumb.nodeId);
+              return (
+                <span key={`${crumb.label}-${index}`} className="action-history__crumb-wrap">
+                  {index > 0 ? (
+                    <span className="action-history__sep" aria-hidden>
+                      ›
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="action-history__crumb"
+                    data-current={last ? "true" : "false"}
+                    disabled={!clickable}
+                    title={clickable ? `Go to ${crumb.label}` : crumb.label}
+                    onClick={() => {
+                      if (crumb.nodeId) {
+                        void navigateTo(crumb.nodeId);
+                      }
+                    }}
+                  >
+                    {crumb.label}
+                  </button>
+                </span>
+              );
+            })}
+          </nav>
         ) : (
           <span className="empty-hint">Solve a spot to browse the tree.</span>
         )}
-        {children.map((child, index) => {
-          if (typeof child === "string") {
-            return (
-              <button
-                key={`${child}-${index}`}
-                type="button"
-                className="history-chip"
-                onClick={() => void followAction(child)}
-              >
-                {child}
-              </button>
-            );
-          }
-          if (isActionChild(child)) {
-            const label = child.label || child.action || "action";
-            const id = child.node_id;
-            return (
-              <button
-                key={`${label}-${index}`}
-                type="button"
-                className="history-chip"
-                disabled={!id}
-                onClick={() => {
-                  if (id) {
-                    void followAction(id);
-                  }
-                }}
-              >
-                {label}
-                {child.frequency != null ? ` ${(child.frequency * 100).toFixed(0)}%` : ""}
-              </button>
-            );
-          }
-          const card = child.card || "?";
-          const id = child.node_id;
-          return (
-            <button
-              key={`${card}-${index}`}
-              type="button"
-              className="history-chip"
-              disabled={!id}
-              onClick={() => {
-                if (id) {
-                  void followAction(id);
-                }
-              }}
-            >
-              {card}
-            </button>
-          );
-        })}
+        {currentNode ? (
+          <span className="action-history__actor tabular">
+            {chance ? "Deal" : terminal ? "Showdown" : `${actor} to act`}
+          </span>
+        ) : null}
       </div>
+
+      <div className="action-history__row action-history__next">
+        <span className="action-history__label">{chance ? "Cards" : "Next"}</span>
+        <div className="action-history__choices" role="group" aria-label="Next actions">
+          {!currentNode ? (
+            <span className="empty-hint">—</span>
+          ) : terminal ? (
+            <span className="muted">Terminal node</span>
+          ) : choices.length === 0 ? (
+            <span className="muted">No branches</span>
+          ) : (
+            choices.map((choice, index) => {
+              const freq = formatChoiceFrequency(choice.frequency);
+              const color =
+                choice.kind === "action" ? colors.byIndex[index] : undefined;
+              return (
+                <button
+                  key={choice.key}
+                  type="button"
+                  className="history-choice"
+                  data-kind={choice.kind}
+                  disabled={!choice.nodeId}
+                  style={
+                    color
+                      ? { ["--choice-swatch" as string]: color }
+                      : undefined
+                  }
+                  onClick={() => {
+                    if (choice.nodeId) {
+                      void followAction(choice.nodeId);
+                    }
+                  }}
+                >
+                  {choice.kind === "action" ? (
+                    <span className="history-choice__swatch" aria-hidden />
+                  ) : null}
+                  <span className="history-choice__label">{choice.label}</span>
+                  {freq ? (
+                    <span className="history-choice__freq tabular">{freq}</span>
+                  ) : null}
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+
       <div
         className="resize-handle"
         onPointerDown={onPointerDown}
