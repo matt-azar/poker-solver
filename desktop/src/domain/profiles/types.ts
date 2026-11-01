@@ -34,6 +34,11 @@ export interface ProfileRake {
 }
 
 export interface ProfileLabels {
+  /**
+   * Rake / stakes-environment key such as "100NL".
+   * Not a personal player-profile name; used with pot type, positions, and stacks
+   * to select standard/GTO catalogue ranges for that rake structure.
+   */
   stakes?: string;
   site?: string;
   pool?: string;
@@ -96,9 +101,19 @@ export interface RangeProfileQuery {
   preflopActions?: PreflopAction[];
   /** Convenience: open size in bb (also derived from preflopActions). */
   openSizeBb?: number;
+  /**
+   * Starting stack in bb. When the player is silent on stacks, callers should
+   * pass 100 (default) rather than omitting — never invent from an NL label.
+   */
   stackBb?: number;
   format?: GameFormat;
+  /**
+   * Rake / stakes-environment label (e.g. "100NL"). Soft filter with other
+   * strategic keys; never sufficient alone and never a personal profile id.
+   */
   stakesLabel?: string;
+  /** Prefop pot family; when set, must agree with catalogue action history. */
+  potType?: "SRP" | "3BP" | "4BP";
   rake?: Partial<ProfileRake>;
 }
 

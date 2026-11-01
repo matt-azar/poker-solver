@@ -83,7 +83,7 @@ describe("matchRangeProfiles", () => {
     expect(legacyOnly.exact).toEqual([]);
   });
 
-  it('stakes label "100NL" alone does not exact-match', () => {
+  it('rake/stakes label "100NL" alone does not exact-match', () => {
     const result = matchRangeProfiles({ stakesLabel: "100NL" }, catalogue);
     expect(result.exact).toEqual([]);
     // May surface as alternatives via shared stakes, with incomplete-constraint note
@@ -93,10 +93,27 @@ describe("matchRangeProfiles", () => {
     ).toBe(true);
   });
 
+  it("cEV + positions + stack + open exact-matches the cEV fixture", () => {
+    const result = matchRangeProfiles(
+      {
+        stakesLabel: "cEV",
+        potType: "SRP",
+        positions: { oop: "BB", ip: "CO" },
+        stackBb: 100,
+        openSizeBb: 2.5,
+        format: "cash_6max",
+      },
+      catalogue,
+    );
+    expect(result.exact.map((p) => p.id)).toEqual([
+      "fixture-co-bb-srp-100bb-2.5x",
+    ]);
+  });
+
   it("stakes + mismatched stack still not exact even when stakes agree", () => {
     const result = matchRangeProfiles(
       {
-        stakesLabel: "100NL",
+        stakesLabel: "cEV",
         positions: { oop: "BB", ip: "CO" },
         stackBb: 40,
         openSizeBb: 2.5,

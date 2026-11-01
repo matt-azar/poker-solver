@@ -1,4 +1,5 @@
 export type {
+  PotType,
   PreflopAction,
   PreflopActionKind,
   SetupConflict,
@@ -15,9 +16,13 @@ export type {
 } from "./types";
 
 export {
+  DEFAULT_RAKE_ENVIRONMENT,
+  DEFAULT_STARTING_STACK_BB,
   assignSrpSeats,
   derivePostflopPotAndStacks,
   parseStakesLabelStackBb,
+  potTypeFromActions,
+  resolveStartingStackBb,
   seatsForCoVsBbSrp,
   stakesLabelImpliesStack,
   type BlindStructure,

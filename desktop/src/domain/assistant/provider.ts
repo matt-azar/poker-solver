@@ -1,4 +1,5 @@
-import type { StudySetupIntent, StudySetupTreePreset } from "../setup/types";
+import { potTypeFromActions } from "../setup/derive";
+import type { PotType, StudySetupIntent, StudySetupTreePreset } from "../setup/types";
 
 /**
  * Soft upper bound on natural-language request text sent to a provider.
@@ -15,7 +16,9 @@ export interface ProfileMeta {
   startingStackBb: number;
   openSizeBb?: number;
   format: string;
+  /** Rake / stakes-environment label (e.g. 100NL) — not a personal profile name. */
   stakesLabel?: string;
+  potType?: PotType;
   legacyPreset?: boolean;
 }
 
@@ -115,6 +118,9 @@ export function profileToMeta(
       }
     }
   }
+  const potType = profile.preflopActions
+    ? potTypeFromActions(profile.preflopActions)
+    : undefined;
   return {
     id: profile.id,
     displayName: profile.displayName,
@@ -124,6 +130,7 @@ export function profileToMeta(
     openSizeBb: resolvedOpen,
     format: profile.format,
     stakesLabel: profile.labels?.stakes,
+    potType,
     legacyPreset: profile.legacyPreset,
   };
 }

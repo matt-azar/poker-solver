@@ -29,6 +29,15 @@ const fixture25 = parseRangeProfileDocument(
     "utf8",
   ),
 );
+const fixture25Nl = parseRangeProfileDocument(
+  readFileSync(
+    join(
+      here,
+      "../../../../configs/range-profiles/fixture-co-bb-srp-100bb-2.5x-100nl.json",
+    ),
+    "utf8",
+  ),
+);
 const fixture3x = parseRangeProfileDocument(
   readFileSync(
     join(
@@ -40,13 +49,17 @@ const fixture3x = parseRangeProfileDocument(
 );
 
 describe("resolveAssistantProposal", () => {
-  const catalogue = createRangeProfileCatalogue([fixture25, fixture3x]);
+  const catalogue = createRangeProfileCatalogue([
+    fixture25,
+    fixture25Nl,
+    fixture3x,
+  ]);
   const prefs = emptyStudySetupPreferences();
   const provider = new FakeAssistantProvider();
 
-  it("CO vs BB fixture → BB OOP / CO IP ranges, pot 5.5, stack 97.5, canSolve false without board", async () => {
+  it("CO vs BB SRP cEV → BB OOP / CO IP ranges, pot 5.5, stack 97.5, canSolve false without board", async () => {
     const proposal = await provider.interpret({
-      text: "Set up CO vs BB using my 100NL profile",
+      text: "Set up CO vs BB SRP",
       setupSummary: "",
       availableProfiles: catalogueProfileMetas(catalogue),
       capabilities: ["prepare_study"],
@@ -76,11 +89,36 @@ describe("resolveAssistantProposal", () => {
           line.includes(fixture25.displayName),
       ),
     ).toBe(true);
+    expect(result.summary.some((line) => /cEV|chip EV/i.test(line))).toBe(true);
+    expect(result.summary.some((line) => /100bb starting/i.test(line))).toBe(
+      true,
+    );
     expect(result.profile?.id).toBe(fixture25.id);
     expect(result.requestRevision).toBe(3);
   });
 
-  it("100NL alone does not set 100bb without a profile match path", async () => {
+  it("100NL SRP path matches the 100NL-labelled catalogue entry", async () => {
+    const proposal = await provider.interpret({
+      text: "Set up CO vs BB SRP with 100NL ranges",
+      setupSummary: "",
+      availableProfiles: catalogueProfileMetas(catalogue),
+      capabilities: ["prepare_study"],
+      draftRevision: 4,
+    });
+    expect(proposal.kind).toBe("prepare_study");
+    const result = resolveAssistantProposal({
+      proposal,
+      baseDraft: createBlankSetupDraft("create"),
+      catalogue,
+      preferences: prefs,
+      draftRevision: 4,
+    });
+    expect(result.profile?.id).toBe(fixture25Nl.id);
+    expect(result.pot).toBeCloseTo(5.5, 10);
+    expect(result.stack).toBeCloseTo(97.5, 10);
+  });
+
+  it("100NL alone does not set 100bb without positions/pot type", async () => {
     const clarify = await provider.interpret({
       text: "100NL",
       setupSummary: "",
@@ -100,7 +138,7 @@ describe("resolveAssistantProposal", () => {
     expect(clarified.canSolve).toBe(false);
     expect(clarified.draftPatch.stack).toBeUndefined();
 
-    // With fixture match, stack depth comes from profile derivation — not from "100NL"≡100bb.
+    // With fixture match, remaining stack comes from profile derivation — not from "100NL"≡100bb.
     const prepared = resolveAssistantProposal({
       proposal: {
         kind: "prepare_study",
@@ -108,11 +146,14 @@ describe("resolveAssistantProposal", () => {
           mode: "create",
           oopPosition: "BB",
           ipPosition: "CO",
+          potType: "SRP",
           stakesLabel: "100NL",
-          profileQuery: fixture25.id,
+          stackBb: 100,
+          profileQuery: fixture25Nl.id,
         },
-        selectedProfileId: fixture25.id,
+        selectedProfileId: fixture25Nl.id,
         stakesLabel: "100NL",
+        stackBb: 100,
       },
       baseDraft: createBlankSetupDraft("create"),
       catalogue,
@@ -120,9 +161,9 @@ describe("resolveAssistantProposal", () => {
       draftRevision: 2,
     });
     expect(prepared.stack).toBeCloseTo(97.5, 10);
-    expect(prepared.summary.some((line) => /does not set stack/i.test(line))).toBe(
-      true,
-    );
+    expect(
+      prepared.summary.some((line) => /does not set stack/i.test(line)),
+    ).toBe(true);
   });
 
   it("board update preserves existing ranges", async () => {

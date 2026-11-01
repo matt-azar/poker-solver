@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "fixture-co-bb-srp-100bb-2.5x-100nl",
+  "dataRevision": "1",
+  "displayName": "FIXTURE: CO vs BB SRP 100bb 2.5x 100NL (synthetic standard/GTO-style)",
+  "format": "cash_6max",
+  "playerCount": 6,
+  "positions": {
+    "oop": "BB",
+    "ip": "CO"
+  },
+  "preflopActions": [
+    { "position": "UTG", "kind": "fold" },
+    { "position": "HJ", "kind": "fold" },
+    { "position": "CO", "kind": "open", "sizeBb": 2.5 },
+    { "position": "BTN", "kind": "fold" },
+    { "position": "SB", "kind": "fold" },
+    { "position": "BB", "kind": "call", "sizeBb": 1.5 }
+  ],
+  "startingStackBb": 100,
+  "blinds": { "sb": 0.5, "bb": 1 },
+  "rake": {
+    "rate": 0,
+    "cap": 0,
+    "collection": "unknown",
+    "known": false
+  },
+  "labels": {
+    "stakes": "100NL",
+    "intendedUse": "demo_and_tests_only_standard_gto_catalogue_shape"
+  },
+  "ranges": {
+    "oop": "22+,A2s+,K9s+,Q9s+,J9s+,T8s+,98s,87s,76s,ATo+,KJo+,QJo,AKo:0.5,AQo:0.75",
+    "ip": "22+,A2s+,K9s+,Q9s+,JTs,T9s,98s,87s,ATo+,KJo+,QJo,AKo:0.5,KQo:0.75,JJ+:1"
+  },
+  "provenance": {
+    "source": "configs/range-profiles/fixture-co-bb-srp-100bb-2.5x-100nl.json",
+    "classification": "synthetic_fixture",
+    "notes": "SYNTHETIC FIXTURE for demo and automated tests only. Standard/GTO-catalogue shape keyed by 100NL rake structure + CO vs BB SRP at 100bb. NOT verified 100NL population or equilibrium data. Rake numerics unknown (known:false); the stakes label selects the rake environment, not a personal profile."
+  }
+}

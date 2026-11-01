@@ -56,7 +56,7 @@ explorer   # serves desktop/dist when present
 | Config parse | `POST /api/config` | Load config | Build | street/river text only; street echoes `tree_edits` | indirect |
 | Memory plan dry-run | `POST /api/plan-memory` | — | Build line editor | Labeled `estimated_peak_bytes`; not RSS | explorer HTTP |
 | Tree preview / line edits | `POST /api/tree-preview` | — | Build `TreeLineEditor` Force/Remove/AddSize | Canonical labels; edits into draft → solve | explorer HTTP + tree_edit |
-| Study setup assistant | Client-side interpret → profile catalogue → `SpotDraft` | — | Build → Setup assistant | Fake demo adapter + optional OpenAI; no parallel config model; synthetic fixtures only | `src/domain/{setup,profiles,assistant}` + integration tests — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md) |
+| Study setup assistant | Client-side interpret → GTO/standard catalogue (rake + pot type + positions + stacks) → `SpotDraft` | — | Build → Setup assistant | Fake demo adapter + optional OpenAI; pot type required; silent rake → cEV, silent stack → 100bb; synthetic fixtures only | `src/domain/{setup,profiles,assistant}` + integration tests — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md) |
 
 ## Numerical labels (do not relabel without math)
 

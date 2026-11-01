@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_RAKE_ENVIRONMENT,
+  DEFAULT_STARTING_STACK_BB,
   assignSrpSeats,
   derivePostflopPotAndStacks,
   parseStakesLabelStackBb,
+  potTypeFromActions,
+  resolveStartingStackBb,
   seatsForCoVsBbSrp,
   stakesLabelImpliesStack,
 } from "./derive";
@@ -21,6 +25,37 @@ describe("stakes labels vs stack depth", () => {
     expect(parseStakesLabelStackBb("100NL")).toBeUndefined();
     expect(parseStakesLabelStackBb("200NL")).toBeUndefined();
     expect(parseStakesLabelStackBb("100bb")).toBeUndefined();
+  });
+
+  it("defaults silent stack to 100bb without reading NL labels", () => {
+    expect(resolveStartingStackBb({})).toEqual({
+      stackBb: DEFAULT_STARTING_STACK_BB,
+      source: "default",
+    });
+    expect(resolveStartingStackBb({ explicitStackBb: 150 }).source).toBe(
+      "explicit",
+    );
+    expect(DEFAULT_RAKE_ENVIRONMENT).toBe("cEV");
+  });
+
+  it("classifies pot type from aggressive preflop actions", () => {
+    expect(
+      potTypeFromActions([{ kind: "open" }, { kind: "call" }, { kind: "fold" }]),
+    ).toBe("SRP");
+    expect(
+      potTypeFromActions([
+        { kind: "open" },
+        { kind: "raise" },
+        { kind: "call" },
+      ]),
+    ).toBe("3BP");
+    expect(
+      potTypeFromActions([
+        { kind: "open" },
+        { kind: "raise" },
+        { kind: "raise" },
+      ]),
+    ).toBe("4BP");
   });
 });
 

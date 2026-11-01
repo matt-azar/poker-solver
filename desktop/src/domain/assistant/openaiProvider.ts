@@ -136,9 +136,13 @@ export class OpenAiAssistantProvider implements AssistantProvider {
 const SYSTEM_PROMPT = [
   "You interpret poker study-setup requests for a postflop solver Build workspace.",
   "Emit only the emit_study_setup_proposal tool with schema-constrained fields.",
-  "Identify profiles by id from availableProfiles. Never invent or emit range weight strings.",
+  "Identify standard/GTO catalogue entries by id from availableProfiles. Never invent or emit range weight strings.",
   "Never emit scripts, shell commands, file paths, or network URLs.",
-  "100NL is a stakes label and must not set stack depth.",
+  "Pot type (SRP / 3BP / 4BP) is required for prepare_study — clarify if missing; never guess.",
+  "100NL names a rake structure / stakes environment, not a personal player profile, and must not set stack depth.",
+  "Phrases like “my 100NL profile” mean standard/GTO ranges for that rake structure plus the stated action — not a personal profile picker.",
+  "When no rake structure is named, set stakesLabel to cEV (chip EV / no rake).",
+  "When stack depth is not mentioned, set stackBb to 100. Never infer 100bb from an NL label alone.",
   "Use clarify when ambiguous, unsupported for strategy explanations/preflop solves, unrelated for non-poker text.",
 ].join(" ");
 
@@ -166,6 +170,7 @@ function sanitizeProfileMeta(meta: ProfileMeta): ProfileMeta {
     openSizeBb: meta.openSizeBb,
     format: meta.format,
     stakesLabel: meta.stakesLabel,
+    potType: meta.potType,
     legacyPreset: meta.legacyPreset,
   };
 }
@@ -349,6 +354,13 @@ function normalizeIntent(
   if (typeof src.oopPosition === "string") intent.oopPosition = src.oopPosition;
   if (typeof src.ipPosition === "string") intent.ipPosition = src.ipPosition;
   if (typeof src.stakesLabel === "string") intent.stakesLabel = src.stakesLabel;
+  if (
+    src.potType === "SRP" ||
+    src.potType === "3BP" ||
+    src.potType === "4BP"
+  ) {
+    intent.potType = src.potType;
+  }
   if (typeof src.stackBb === "number") intent.stackBb = src.stackBb;
   if (typeof src.openSizeBb === "number") intent.openSizeBb = src.openSizeBb;
   if (typeof src.board === "string") intent.board = src.board;

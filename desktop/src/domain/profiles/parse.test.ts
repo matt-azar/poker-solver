@@ -25,7 +25,9 @@ describe("parseRangeProfile", () => {
     expect(profile.positions).toEqual({ oop: "BB", ip: "CO" });
     expect(profile.startingStackBb).toBe(100);
     expect(profile.provenance.classification).toBe("synthetic_fixture");
-    expect(profile.rake.known).toBe(false);
+    expect(profile.rake.known).toBe(true);
+    expect(profile.labels?.stakes).toBe("cEV");
+    expect(profile.rake.collection).toBe("none");
     expect(profile.legacyPreset).toBeUndefined();
   });
 
@@ -57,7 +59,7 @@ describe("parseRangeProfile", () => {
   it("keeps synthetic_fixture classification (no fabricated completeness)", () => {
     const profile = parseRangeProfileDocument(readFileSync(fixturePath, "utf8"));
     expect(profile.provenance.classification).toBe("synthetic_fixture");
-    expect(profile.provenance.notes).toMatch(/NOT verified/i);
+    expect(profile.provenance.notes).toMatch(/NOT a production strategic pack/i);
   });
 });
 

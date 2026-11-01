@@ -1,7 +1,10 @@
 import {
+  DEFAULT_RAKE_ENVIRONMENT,
+  DEFAULT_STARTING_STACK_BB,
   createBlankSetupDraft,
   derivePostflopPotAndStacks,
   mergeSetupPatch,
+  resolveStartingStackBb,
   seatsForCoVsBbSrp,
   type SetupDraftResult,
   type SetupPatch,
@@ -106,15 +109,31 @@ export function resolveAssistantProposal(
         ? "duplicate"
         : "edit");
 
+  const rawStackBb = proposal.stackBb ?? proposal.intent.stackBb;
+  const rawStakes = proposal.stakesLabel ?? proposal.intent.stakesLabel;
   const intent: StudySetupIntent = {
     ...proposal.intent,
     mode,
     board: proposal.board ?? proposal.intent.board,
-    stackBb: proposal.stackBb ?? proposal.intent.stackBb,
     openSizeBb: proposal.openSizeBb ?? proposal.intent.openSizeBb,
-    stakesLabel: proposal.stakesLabel ?? proposal.intent.stakesLabel,
+    potType: proposal.intent.potType,
     treePreset: proposal.treeEdits ?? proposal.intent.treePreset,
   };
+
+  // Create: silent stack → 100bb; silent rake structure → cEV. Never from NL alone.
+  if (mode === "create") {
+    const stackResolved = resolveStartingStackBb({
+      explicitStackBb: rawStackBb,
+      preferenceStackBb: preferences.defaultStackBb,
+    });
+    intent.stackBb = stackResolved.stackBb;
+    intent.stakesLabel = rawStakes?.trim()
+      ? rawStakes.trim()
+      : DEFAULT_RAKE_ENVIRONMENT;
+  } else {
+    if (rawStackBb !== undefined) intent.stackBb = rawStackBb;
+    if (rawStakes !== undefined) intent.stakesLabel = rawStakes;
+  }
 
   // Duplicate / update without a profile selection: apply field edits only.
   const needsProfile =
@@ -167,7 +186,24 @@ export function resolveAssistantProposal(
         ? createBlankSetupDraft("duplicate", args.baseDraft)
         : args.baseDraft;
 
-  return mergeSetupPatch(base, patch, preferences);
+  const result = mergeSetupPatch(base, patch, preferences);
+  if (mode === "create") {
+    const stackWasSilent =
+      proposal.stackBb === undefined && proposal.intent.stackBb === undefined;
+    const rakeWasSilent =
+      !(proposal.stakesLabel ?? proposal.intent.stakesLabel)?.trim();
+    if (stackWasSilent && intent.stackBb === DEFAULT_STARTING_STACK_BB) {
+      result.summary.push(
+        `Assumed ${DEFAULT_STARTING_STACK_BB}bb starting stacks (stack depth not specified)`,
+      );
+    }
+    if (rakeWasSilent && intent.stakesLabel === DEFAULT_RAKE_ENVIRONMENT) {
+      result.summary.push(
+        "Assumed cEV (chip EV / no rake) because no rake structure was specified",
+      );
+    }
+  }
+  return result;
 }
 
 /**
@@ -436,8 +472,9 @@ function intentToQuery(intent: StudySetupIntent): RangeProfileQuery {
     if (intent.ipPosition) query.positions.ip = intent.ipPosition;
   }
   if (intent.stakesLabel) query.stakesLabel = intent.stakesLabel;
+  if (intent.potType) query.potType = intent.potType;
   if (intent.openSizeBb !== undefined) query.openSizeBb = intent.openSizeBb;
-  // Never treat stakes as stack. Only explicit stackBb on intent.
+  // Never treat rake/stakes labels as stack. Stack comes from intent (default 100bb on create).
   if (intent.stackBb !== undefined && intent.mode !== "duplicate") {
     query.stackBb = intent.stackBb;
   }
@@ -491,8 +528,13 @@ function buildSetupPatch(args: {
   if (intent.stakesLabel) {
     explicit.stakesLabel = intent.stakesLabel;
   }
+  // Starting-stack intent drives catalogue matching. The draft `stack` field is
+  // remaining stack after preflop (from derived). Only write stackBb into the
+  // draft patch for duplicate/edit overrides or create-without-profile.
   if (intent.stackBb !== undefined) {
-    explicit.stackBb = intent.stackBb;
+    if (mode === "duplicate" || mode === "edit" || (mode === "create" && !profile)) {
+      explicit.stackBb = intent.stackBb;
+    }
   }
   if (intent.openSizeBb !== undefined) {
     explicit.openSizeBb = intent.openSizeBb;
@@ -530,6 +572,11 @@ function buildSetupPatch(args: {
       openSizeBb,
     };
 
+    const startingStackBb =
+      mode === "duplicate" && intent.stackBb !== undefined
+        ? intent.stackBb
+        : profile.startingStackBb;
+
     if (mode === "duplicate" && intent.stackBb !== undefined) {
       // Recheck compatibility: explicit starting stack vs profile starting stack.
       patch.profileFields.stackBb = profile.startingStackBb;
@@ -537,7 +584,7 @@ function buildSetupPatch(args: {
         // Conflict surfaces via mergeSetupPatch; do not silently re-derive.
       } else if (openSizeBb !== undefined) {
         const derived = derivePostflopPotAndStacks({
-          startingStackBb: intent.stackBb,
+          startingStackBb,
           openSizeBb,
           blinds: profile.blinds,
           openerSeat: seats.ip,
@@ -551,7 +598,7 @@ function buildSetupPatch(args: {
       }
     } else if (openSizeBb !== undefined) {
       const derived = derivePostflopPotAndStacks({
-        startingStackBb: profile.startingStackBb,
+        startingStackBb,
         openSizeBb,
         blinds: profile.blinds,
         openerSeat: seats.ip,
@@ -563,6 +610,7 @@ function buildSetupPatch(args: {
         stackBb: derived.stackBb,
       };
     }
+
   } else if (intent.stackBb !== undefined && mode === "duplicate") {
     // Stack-only duplicate without reloading a profile.
     patch.explicitFields = {

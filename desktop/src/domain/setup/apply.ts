@@ -293,8 +293,12 @@ export function mergeSetupPatch(
       conflictedFields,
     );
     if (patch.explicitFields.stakesLabel) {
+      const label = patch.explicitFields.stakesLabel;
+      const isCev = /^cev$/i.test(label.trim());
       summary.push(
-        `Stakes label ${patch.explicitFields.stakesLabel} recorded; does not set stack`,
+        isCev
+          ? "Rake environment cEV (chip EV / no rake); does not set stack"
+          : `Rake/stakes environment ${label} recorded; does not set stack`,
       );
       provenance.stakesLabel = "explicit_request";
     }

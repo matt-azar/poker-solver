@@ -66,7 +66,7 @@ describe("mergeSetupPatch", () => {
     expect(result.draftPatch.stack).toBeCloseTo(97.5, 10);
   });
 
-  it("does not set stack from a 100NL stakes label alone", () => {
+  it("does not set stack from a 100NL rake/stakes label alone", () => {
     const base = createBlankSetupDraft("create");
     const result = mergeSetupPatch(base, {
       mode: "create",
@@ -78,6 +78,9 @@ describe("mergeSetupPatch", () => {
     expect(result.summary.some((line) => /does not set stack/i.test(line))).toBe(
       true,
     );
+    expect(
+      result.summary.some((line) => /rake\/stakes environment/i.test(line)),
+    ).toBe(true);
   });
 
   it("surfaces explicit vs profile stack conflict instead of silent override", () => {

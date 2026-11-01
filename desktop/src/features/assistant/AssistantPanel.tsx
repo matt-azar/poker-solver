@@ -16,7 +16,8 @@ import { useStudyStore } from "../../state/studyStore";
 type ProviderMode = "fake" | "openai";
 
 const EXAMPLES = [
-  "Set up CO vs BB using my 100NL profile",
+  "Set up CO vs BB SRP with 100NL ranges",
+  "Set up CO vs BB SRP",
   "Change the flop to As 7d 2c",
   "Use 33% and 75% flop bets for IP",
   "Duplicate this setup at 150bb",
@@ -196,7 +197,7 @@ export function AssistantPanel() {
             <textarea
               rows={2}
               value={text}
-              placeholder="e.g. Set up CO vs BB using my 100NL profile"
+              placeholder="e.g. Set up CO vs BB SRP with 100NL ranges"
               disabled={busy}
               onChange={(event) => setText(event.target.value)}
               onKeyDown={(event) => {
