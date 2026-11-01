@@ -402,7 +402,7 @@ export function BuildWorkspace() {
                 updateDraft({
                   threads: machineDefaults.threads,
                   memoryMib: machineDefaults.memoryMib,
-                  frozen: machineDefaults.frozen,
+                  frozen: true,
                 })
               }
             >
@@ -460,13 +460,12 @@ export function BuildWorkspace() {
                 min={1}
                 max={64}
                 value={draft.threads}
-                onChange={(event) => {
-                  const threads = Number(event.target.value);
+                onChange={(event) =>
                   updateDraft({
-                    threads,
-                    frozen: threads > 1 ? true : draft.frozen,
-                  });
-                }}
+                    threads: Number(event.target.value),
+                    frozen: true,
+                  })
+                }
               />
             </label>
             <label>
@@ -477,20 +476,6 @@ export function BuildWorkspace() {
                 value={draft.memoryMib}
                 onChange={(event) => updateDraft({ memoryMib: Number(event.target.value) })}
               />
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={draft.frozen}
-                disabled={draft.threads > 1}
-                title={
-                  draft.threads > 1
-                    ? "Frozen is required when threads > 1"
-                    : "Frozen strategy pass (required for multi-thread)"
-                }
-                onChange={(event) => updateDraft({ frozen: event.target.checked })}
-              />
-              Frozen
             </label>
           </div>
           <div className="build-inline">

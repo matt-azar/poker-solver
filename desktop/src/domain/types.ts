@@ -312,7 +312,7 @@ export const DEFAULT_SPOT: SpotDraft = {
   geometric: false,
   allInThreshold: 0,
   allowAllIn: true,
-  frozen: FAST.frozen,
+  frozen: true,
   accuracy: "",
   maxRaises: 2,
   iterations: 200,

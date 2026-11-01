@@ -222,7 +222,8 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
     geometric: draft.geometric ? 1 : 0,
     all_in_threshold: draft.allInThreshold || 0,
     allow_all_in: draft.allowAllIn ? 1 : 0,
-    frozen: draft.frozen ? 1 : 0,
+    // Desktop always uses the frozen pass (required for multi-thread / CFR+).
+    frozen: 1,
     accuracy: draft.accuracy.trim() === "" ? -1 : Number(draft.accuracy),
     max_raises: draft.maxRaises,
     iterations: draft.iterations,
