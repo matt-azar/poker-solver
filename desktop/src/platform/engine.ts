@@ -1,5 +1,6 @@
 /** Tauri engine sidecar helpers — no-ops / soft-fail in the browser. */
 
+import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "./index";
 
 export type EnsureEngineResult =
@@ -15,20 +16,12 @@ export async function ensureEngine(): Promise<EnsureEngineResult> {
     return { ok: true, status: "browser — use a separate explorer process" };
   }
   try {
-    const spec = "@tauri-apps/api/core";
-    const { invoke } = (await import(/* @vite-ignore */ spec)) as {
-      invoke: (cmd: string) => Promise<unknown>;
-    };
     const status = String(await invoke("ensure_engine"));
     return { ok: true, status };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     let status = "unknown";
     try {
-      const spec = "@tauri-apps/api/core";
-      const { invoke } = (await import(/* @vite-ignore */ spec)) as {
-        invoke: (cmd: string) => Promise<unknown>;
-      };
       status = String(await invoke("engine_status"));
     } catch {
       // ignore
@@ -42,10 +35,6 @@ export async function readEngineStatus(): Promise<string | null> {
     return null;
   }
   try {
-    const spec = "@tauri-apps/api/core";
-    const { invoke } = (await import(/* @vite-ignore */ spec)) as {
-      invoke: (cmd: string) => Promise<unknown>;
-    };
     return String(await invoke("engine_status"));
   } catch {
     return null;
