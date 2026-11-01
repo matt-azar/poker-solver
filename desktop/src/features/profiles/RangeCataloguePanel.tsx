@@ -1,10 +1,14 @@
 import { useMemo, useRef, useState } from "react";
 import {
+  composeSpotFromSeatActions,
+  getSeatActionCatalogue,
+  loadBundledSeatActions,
   matchRangeProfiles,
   normalizeRakeEnvironmentLabel,
   rankNearestNeighbors,
   type RangeProfile,
   type RangeProfileQuery,
+  type SeatActionRange,
 } from "../../domain/profiles";
 import { openSizeFromActions } from "../../domain/profiles/parse";
 import { prepareStudyFromProfile } from "../../domain/assistant";
@@ -63,6 +67,22 @@ export function RangeCataloguePanel() {
   }, [getSetupCatalogue, tick]);
 
   const profiles = useMemo(() => catalogue.listProfiles(), [catalogue, tick]);
+  const seatAtoms = useMemo(() => {
+    void tick;
+    return getSeatActionCatalogue(loadBundledSeatActions).list();
+  }, [tick]);
+  const [seatFilter, setSeatFilter] = useState("");
+  const visibleSeats = useMemo(() => {
+    const needle = seatFilter.trim().toLowerCase();
+    if (!needle) return seatAtoms;
+    return seatAtoms.filter((a) =>
+      [a.id, a.displayName, a.heroPosition, a.villainPosition, a.action, a.vsAction]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [seatAtoms, seatFilter]);
 
   const query: RangeProfileQuery | null = useMemo(() => {
     if (!matchPot && !matchRake.trim() && !matchStack.trim()) {
@@ -211,10 +231,106 @@ export function RangeCataloguePanel() {
       {open ? (
         <>
           <p className="assistant-lede">
-            Import paired schema-v1 JSON from a <strong>reliable source</strong> (
-            <code>configs/range-profiles/packs/</code>). Bundled fixture rows are synthetic demos
-            only — not study-quality GTO. Nearest-neighbor ranking helps when stack/rake miss exact.
+            Preferred grain is <strong>seat×action</strong> atoms from Matt’s Ranges.zip (bundled
+            under packs/seat-action). The assistant composes them into OOP/IP for a spot. Paired
+            JSON import remains available; synthetic fixtures are demos only.
           </p>
+
+          <h3 className="catalogue-subhead">Seat×action atoms ({seatAtoms.length})</h3>
+          <label>
+            Filter atoms
+            <input
+              value={seatFilter}
+              placeholder="BB call CO, BTN open, 3bet…"
+              onChange={(event) => setSeatFilter(event.target.value)}
+            />
+          </label>
+          <div className="catalogue-table-wrap">
+            <table className="catalogue-table">
+              <thead>
+                <tr>
+                  <th>Atom</th>
+                  <th>Hero</th>
+                  <th>Action</th>
+                  <th>Vs</th>
+                  <th>Villain</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleSeats.slice(0, 40).map((atom: SeatActionRange) => (
+                  <tr key={atom.id}>
+                    <td>
+                      <div className="catalogue-name">{atom.displayName}</div>
+                      <div className="catalogue-id tabular">{atom.id}</div>
+                    </td>
+                    <td>{atom.heroPosition}</td>
+                    <td>{atom.action}</td>
+                    <td>{atom.vsAction}</td>
+                    <td>{atom.villainPosition ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {visibleSeats.length > 40 ? (
+            <p className="assistant-hint">Showing 40 of {visibleSeats.length} atoms</p>
+          ) : null}
+          <div className="catalogue-row-actions">
+            <button
+              type="button"
+              className="toolbar-btn primary"
+              onClick={() => {
+                const composed = composeSpotFromSeatActions(seatAtoms, {
+                  potType: matchPot || "SRP",
+                  oopPosition: "BB",
+                  ipPosition: "CO",
+                });
+                if (!composed.oopRange || !composed.ipRange) {
+                  setStatus(
+                    `Cannot compose: missing ${composed.missing.join(", ") || "atoms"}`,
+                  );
+                  return;
+                }
+                const draft = prepareStudyFromProfile(
+                  {
+                    schemaVersion: 1,
+                    id: `composed-co-bb-${matchPot || "SRP"}`,
+                    dataRevision: "1",
+                    displayName: `Composed CO vs BB ${matchPot || "SRP"}`,
+                    format: "cash_6max",
+                    playerCount: 6,
+                    positions: { oop: "BB", ip: "CO" },
+                    preflopActions: [
+                      { position: "CO", kind: "open", sizeBb: 2.5 },
+                      { position: "BB", kind: "call", sizeBb: 1.5 },
+                    ],
+                    startingStackBb: 100,
+                    blinds: { sb: 0.5, bb: 1 },
+                    rake: { rate: 0, cap: 0, collection: "none", known: false },
+                    labels: { intendedUse: "seat_action_composed" },
+                    ranges: { oop: composed.oopRange, ip: composed.ipRange },
+                    provenance: {
+                      source: "seat-action-compose",
+                      classification: "population_estimate",
+                      notes: composed.summary.join("; "),
+                    },
+                  },
+                  readPrefs(),
+                  draftRevision,
+                );
+                const outcome = applySetupDraft(draft, { force: true });
+                setStatus(
+                  outcome.ok
+                    ? `Applied composed CO vs BB ${matchPot || "SRP"} from seat×action atoms`
+                    : outcome.message,
+                );
+              }}
+            >
+              Apply composed CO vs BB SRP
+            </button>
+          </div>
+
+          <h3 className="catalogue-subhead">Paired profiles</h3>
 
           <div className="catalogue-filters">
             <label>

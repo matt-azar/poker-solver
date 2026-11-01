@@ -61,13 +61,15 @@ describe("assistant → Build transaction integration", () => {
     expect(run.status).toBe("draft");
     expect(run.result).toBeTruthy();
     const result = run.result!;
-    expect(result.draftPatch.oopRange).toBe(fixture25Nl.ranges.oop);
-    expect(result.draftPatch.ipRange).toBe(fixture25Nl.ranges.ip);
+    // Prefer seat×action pack composition over synthetic paired fixtures.
+    expect(result.profile?.id).toMatch(/^seat-action:/);
+    expect(result.provenance.oopRange).toBe("seat_action_composed");
+    expect(result.draftPatch.oopRange).toMatch(/^JJ:/);
+    expect(result.draftPatch.ipRange).toBeTruthy();
+    expect(result.draftPatch.oopRange).not.toEqual(result.draftPatch.ipRange);
     expect(result.pot).toBeCloseTo(5.5, 10);
     expect(result.stack).toBeCloseTo(97.5, 10);
     expect(result.canSolve).toBe(false);
-    expect(result.profile?.classification).toBe("synthetic_fixture");
-    expect(result.profile?.id).toBe(fixture25Nl.id);
 
     const applied = applySetupTransaction({
       currentDraft: draft,
@@ -84,11 +86,8 @@ describe("assistant → Build transaction integration", () => {
     weights = applied.weights;
     revision = applied.draftRevision;
 
-    expect(draft.oopRange).toMatch(/AKo/);
     expect(draft.oopRange).not.toEqual(draft.ipRange);
-    expect(weights.ip[0][0]).toBe(1); // AA from IP open shape
-    // Mixed AKo weight from the 100NL fixture survives
-    expect(weights.oop[1][0]).toBeCloseTo(0.3, 8);
+    expect(weights.ip[0][0]).toBeGreaterThan(0);
 
     const beforeBoard = validateSetupForSolve(draft);
     expect(beforeBoard.ok).toBe(false);
@@ -125,8 +124,8 @@ describe("assistant → Build transaction integration", () => {
       preferences: emptyStudySetupPreferences(),
     });
     expect(run.status).toBe("draft");
-    expect(run.result?.profile?.id).toBe(fixture25.id);
-    expect(run.result?.summary.some((line) => /cEV|chip EV/i.test(line))).toBe(
+    expect(run.result?.profile?.id).toMatch(/^seat-action:/);
+    expect(run.result?.summary.some((line) => /seat×action|composed/i.test(line))).toBe(
       true,
     );
   });

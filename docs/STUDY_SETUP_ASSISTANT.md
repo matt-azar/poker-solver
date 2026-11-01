@@ -66,7 +66,9 @@ Conflicts between explicit values and a catalogue entry surface for the player; 
 
 ## Range catalogue import
 
-**Build → Range catalogue** lists bundled **synthetic demo** fixtures and user imports. Use **Import JSON…** for schema-v1 files from a **reliable source** (`configs/range-profiles/packs/`). Match filters cover pot type, rake, and stack; nearest-neighbor ranking surfaces close rows. Bundled fixtures are plumbing-only (OOP≠IP placeholders, not GTO).
+Preferred catalogue grain is **seat×action** atoms from Matt’s `Ranges.zip` (61 charts under `configs/range-profiles/packs/seat-action/`, e.g. `CO.txt`, `BBvCOcall.txt`). The assistant **composes** OOP/IP for a spot (SRP/3BP) from those atoms.
+
+**Build → Range catalogue** also lists paired profiles and synthetic demos. Use **Import JSON…** for schema-v1 pair files; fixtures remain plumbing-only.
 
 ## Generated ranges & interpolation
 

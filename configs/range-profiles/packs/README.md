@@ -1,24 +1,28 @@
-# Reliable range packs (import here)
+# Reliable range packs
 
-Bundled `fixture-*.json` files are **synthetic plumbing demos**. They are not study-quality GTO or population ranges.
+## Seat×action pack (preferred)
 
-## What belongs here
+Source: Matt’s `Ranges.zip` (Google Drive). Copied under `seat-action/` as individual `.txt` weighted charts.
 
-Drop schema-v1 paired JSON profiles from a **trusted source** you control, for example:
+Grain is **position vs action**, not OOP/IP pair files:
 
-- Solver exports you generated (with known rake, pot type, seats, stacks)
-- Licensed / purchased preflop range libraries you have rights to use
-- Your own reviewed equilibrium or population models
+| Example file | Meaning |
+| --- | --- |
+| `CO.txt` | CO open |
+| `BBvCOcall.txt` | BB call vs CO open |
+| `BBvCO3bet.txt` | BB 3bet vs CO open |
+| `COvBB3bcall.txt` | CO call vs BB 3bet |
+| `BU.txt` | BTN open |
+| `HU2.5.txt` / `HU3bcall200bb.txt` | Heads-up sized/depth variants |
 
-Name files clearly, e.g. `co-bb-srp-100bb-2.5x-100nl.json`, set:
+Study setup **composes** atoms (e.g. CO open + BB call → CO vs BB SRP). Desktop loads these via `loadBundledSeatActions()` / `composeSpotFromSeatActions()`.
 
-- `provenance.classification`: prefer `equilibrium_model` or `population_estimate`
-- `labels.stakes`: rake environment (`cEV`, `100NL`, …)
-- Distinct OOP vs IP weights for the actual seats
+Classification: `population_estimate` (user-provided). Stack/rake often unspecified in filenames — silence defaults still apply at study level.
 
-## How to load them into Study
+## Paired JSON profiles
 
-1. **Build → Range catalogue → Import JSON…** (persists under `holdem-study-range-profiles`), or
-2. Copy into this folder and wire a future pack loader / ship as user-provided assets (do not relabel synthetic fixtures as equilibrium).
+Schema-v1 paired JSON (legacy/alternate) can still be imported via Build → Range catalogue. Prefer adding new charts as seat×action `.txt` atoms in this folder.
 
-Depth ladders (100 / 150 / 200bb, …) enable stack interpolation (e.g. 170bb blend). Import both bracket endpoints with matching pot type, seats, and rake.
+## Synthetic fixtures
+
+Repo-root `fixture-*.json` remain plumbing demos only — not study-quality.

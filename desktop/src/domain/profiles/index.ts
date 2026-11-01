@@ -67,3 +67,33 @@ export {
   getRangeProfileCatalogue,
   resetRangeProfileCatalogueForTests,
 } from "./catalogueSingleton";
+
+export {
+  SEAT_ACTION_SCHEMA_VERSION,
+  SEAT_ACTION_STORAGE_KEY,
+  type SeatActionKind,
+  type SeatActionQuery,
+  type SeatActionRange,
+} from "./seatActionTypes";
+
+export {
+  parseSeatActionFilename,
+  seatActionFromTextFile,
+  type FilenameParseResult,
+} from "./seatActionParse";
+
+export {
+  composeSpotFromSeatActions,
+  type ComposeSpotRequest,
+  type ComposeSpotResult,
+} from "./seatActionCompose";
+
+export {
+  createSeatActionCatalogue,
+  getSeatActionCatalogue,
+  resetSeatActionCatalogueForTests,
+  type SeatActionCatalogue,
+  type SeatActionStorage,
+} from "./seatActionCatalogue";
+
+export { loadBundledSeatActions } from "./bundledSeatActions";
