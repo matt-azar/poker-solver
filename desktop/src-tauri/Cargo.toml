@@ -1,0 +1,63 @@
+[package]
+name = "poker-solver-study"
+version = "0.1.0"
+description = "Hold'em Study desktop shell (Tauri 2 + explorer sidecar)"
+authors = ["Matt Azar"]
+edition = "2021"
+# No license is granted. Do not treat this as MIT / open source.
+license = "UNLICENSED"
+publish = false
+rust-version = "1.83"
+
+[lib]
+name = "poker_solver_study"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+# Pin exact 2.x line compatible with rustc 1.83 (newer tauri-build needs 1.90+).
+tauri-build = { version = "=2.2.0", features = [] }
+
+[dependencies]
+# Prefer 2.1–2.5; pin exact so Cargo does not float to 2.12+ (rustc 1.90).
+tauri = { version = "=2.5.1", features = [] }
+tauri-plugin-shell = "=2.2.0"
+# tauri-plugin-dialog (=2.2) can be added later for file pickers; omit for now to
+# keep the Linux resolve graph off zbus/ashpd crates that float past rustc 1.83.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Keep the Linux/webview transitive graph on rustc-1.83-friendly crates.
+# Newer tauri-runtime-wry (≥2.7) pulls tao 0.34.8 → dlopen2 0.8 (edition2024 / rustc 1.85+).
+tauri-runtime-wry = "=2.6.0"
+tauri-runtime = "=2.6.0"
+tao = "=0.33.0"
+dlopen2 = "=0.7.0"
+dlopen2_derive = "=0.4.0"
+
+# Build/windows resource + TOML / ICU pins (avoid edition2024 crates floated by carets).
+tauri-winres = "=0.3.1"
+embed-resource = "=3.0.2"
+cargo_toml = "=0.22.1"
+toml = "=0.8.19"
+toml_datetime = "=0.6.8"
+serde_with = "=3.12.0"
+plist = "=1.7.0"
+time = "=0.3.36"
+idna_adapter = "=1.2.1"
+icu_normalizer = "=2.1.1"
+icu_normalizer_data = "=2.1.1"
+icu_properties = "=2.1.1"
+icu_properties_data = "=2.1.1"
+icu_provider = "=2.1.1"
+icu_collections = "=2.1.1"
+icu_locale_core = "=2.1.1"
+uuid = "=1.11.0"
+encoding_rs = "=0.8.35"
+indexmap = "=2.7.1"
+tokio = { version = "=1.53.3", features = ["rt", "rt-multi-thread", "sync", "macros", "io-util", "net", "time"] }
+unicode-segmentation = "=1.12.0"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true

@@ -1,0 +1,91 @@
+# Windows NSIS installer for Hold'em Study (Tauri + explorer sidecar).
+#
+# Prerequisites (not owned by this workflow):
+# - desktop/package.json must define "tauri": "tauri" and depend on @tauri-apps/cli
+# - desktop/src-tauri must be configured for an externalBin sidecar named "explorer"
+# - No code signing is required or performed
+#
+# Artifact: holdem-study-windows-installer (NSIS *.exe under bundle/nsis)
+
+name: Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "desktop/**"
+      - "src/explorer_main.cpp"
+      - ".github/workflows/windows-installer.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "src/explorer_main.cpp"
+      - ".github/workflows/windows-installer.yml"
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Configure CMake (Release)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build explorer (Release)
+        run: cmake --build build --config Release --target explorer
+
+      - name: Install desktop npm dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build desktop UI
+        working-directory: desktop
+        run: npm run build
+
+      - name: Prepare explorer sidecar binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path desktop/src-tauri/binaries | Out-Null
+          $hostTriple = (rustc -vV | Select-String "host:").ToString().Split()[1]
+          Write-Host "rustc host triple: $hostTriple"
+          # Expected on windows-latest: x86_64-pc-windows-msvc
+          # Sidecar basename is holdem-explorer (not explorer) to avoid Windows Shell collisions.
+          Copy-Item -Force build/Release/explorer.exe `
+            "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe"
+          Get-Item "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe" |
+            Format-List FullName, Length, LastWriteTime
+
+      - name: Build Tauri NSIS installer
+        # Requires package.json script: "tauri": "tauri" (with @tauri-apps/cli installed).
+        working-directory: desktop
+        run: npm run tauri build
+
+      - name: Upload NSIS installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: holdem-study-windows-installer
+          # productName is "Holdem Study" (no apostrophe) — NSIS rejects Hold'em in shortcuts.
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/nsis/**/*.exe
+          if-no-files-found: error
+
+      - name: List bundle outputs (diagnostics)
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse desktop/src-tauri/target/release/bundle -ErrorAction SilentlyContinue |
+            Select-Object FullName, Length

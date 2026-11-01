@@ -69,8 +69,8 @@ explorer   # serves desktop/dist when present
 2. **Study workspace** — tokens, adaptive layout, context/history, segmented strategy matrix, combo inspector, node navigation, solve controls against live API; optional dual-range layout; interactive board + chance card picker
 3. **Analysis dock + Build + Library** — Range Explorer, Graphs (`gap_series`), Runouts, Equity (OOP/IP hist), Categories (seat toggle), organized Build, Library lists
 4. **Locks + Compare** — Lock drawer + Compare workspace wired to PUT/DELETE/resolve-locked/compare
-5. **Desktop packaging** — Tauri 2 sidecar / Windows installer **not shipped**. Supported path: run `explorer` and open the Vite app (dev) or `desktop/dist` via explorer (prod static). See [Desktop packaging](#desktop-packaging).
-6. **Visual/a11y/perf** — focus-visible + reduced-motion; compact collapse ≤1280; themes light/dark. Scaling/perf evidence captured as screenshots; packaged offline smoke remains a packaging follow-on.
+5. **Desktop packaging** — Tauri 2 shell + `holdem-explorer` sidecar + Windows NSIS installer via CI artifact (unsigned). Browser + Vite/`explorer` path remains supported. See [Desktop packaging](#desktop-packaging).
+6. **Visual/a11y/perf** — focus-visible + reduced-motion; compact collapse ≤1280; themes light/dark. Scaling/perf evidence captured as screenshots.
 
 ## Desktop packaging
 
@@ -79,11 +79,29 @@ explorer   # serves desktop/dist when present
 | Browser Study client + localhost `explorer` | Supported |
 | Vite `/api` proxy in `npm run dev` | Supported |
 | `explorer` serving `desktop/dist` | Supported |
-| Tauri 2 managed sidecar + installer | **Not shipped** — accurately labeled limitation; preserve `EngineClient` / platform adapter so a shell can wrap later |
-| Native Open/Save dialogs | Browser path uses typed path fields via platform adapter; native dialogs wait on Tauri |
-| Orphaned-engine / installer DoD items | Not applicable until a packaged shell exists |
+| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns `binaries/holdem-explorer` on port 8765; webview loads Vite `dist` |
+| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads `holdem-study-windows-installer` (`Holdem Study_0.1.0_x64-setup.exe`) |
+| Native Open/Save dialogs | Browser prompts; Tauri adapter uses `@tauri-apps/plugin-dialog` when present (prompt fallback) |
+| Code-signed official release | Not yet — CI artifact is unsigned |
 
-Do not claim an installed offline Windows app until a packaged smoke exists.
+### Windows installer (end users)
+
+1. Open the packaging PR / Actions → **Windows Installer** (or download the artifact from a green run).
+2. Download artifact `holdem-study-windows-installer`.
+3. Run `Holdem Study_0.1.0_x64-setup.exe` (current-user install; WebView2 may bootstrap if missing).
+4. Launch **Holdem Study** from the Start menu — no CMake/`npm` required.
+
+Installer product name is `Holdem Study` (no apostrophe) because NSIS shortcut macros reject `Hold'em`. The window title remains `Hold'em Study`.
+
+### Local packaging (maintainers)
+
+```sh
+# build explorer (MSVC), copy sidecar with target triple, then:
+cd desktop
+npm ci && npm run build
+# place holdem-explorer-x86_64-pc-windows-msvc.exe under src-tauri/binaries/
+npm run tauri:build
+```
 
 | Lock / compare op | UI | Backend |
 | --- | --- | --- |
