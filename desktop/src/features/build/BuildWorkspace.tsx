@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useStudyStore } from "../../state/studyStore";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
@@ -15,12 +16,122 @@ function provenanceHint(
   return source.replace(/_/g, " ");
 }
 
+function cellFromPoint(
+  root: HTMLElement,
+  clientX: number,
+  clientY: number,
+): { row: number; col: number } | null {
+  const hit = document.elementFromPoint(clientX, clientY);
+  const button = hit?.closest<HTMLElement>("[data-row][data-col]");
+  if (!button || !root.contains(button)) {
+    return null;
+  }
+  const row = Number(button.dataset.row);
+  const col = Number(button.dataset.col);
+  if (!Number.isInteger(row) || !Number.isInteger(col)) {
+    return null;
+  }
+  return { row, col };
+}
+
+function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
+  const weights = useStudyStore((s) => s.weights[player]);
+  const beginPaintStroke = useStudyStore((s) => s.beginPaintStroke);
+  const continuePaintStroke = useStudyStore((s) => s.continuePaintStroke);
+  const endPaintStroke = useStudyStore((s) => s.endPaintStroke);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const paintingRef = useRef(false);
+
+  const finishStroke = () => {
+    if (!paintingRef.current) {
+      return;
+    }
+    paintingRef.current = false;
+    endPaintStroke();
+  };
+
+  return (
+    <div
+      ref={gridRef}
+      className="range-paint-grid"
+      role="grid"
+      aria-label={`${player} range`}
+      onPointerDown={(event) => {
+        if (event.button !== 0 || !gridRef.current) {
+          return;
+        }
+        const cell = cellFromPoint(gridRef.current, event.clientX, event.clientY);
+        if (!cell) {
+          return;
+        }
+        event.preventDefault();
+        paintingRef.current = true;
+        beginPaintStroke(player, cell.row, cell.col);
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        if (!paintingRef.current || !gridRef.current) {
+          return;
+        }
+        const cell = cellFromPoint(gridRef.current, event.clientX, event.clientY);
+        if (!cell) {
+          return;
+        }
+        continuePaintStroke(player, cell.row, cell.col);
+      }}
+      onPointerUp={finishStroke}
+      onPointerCancel={finishStroke}
+      onLostPointerCapture={finishStroke}
+    >
+      {RANKS.map((rowRank, row) =>
+        RANKS.map((colRank, col) => {
+          const weight = weights[row][col];
+          const label =
+            row === col
+              ? `${rowRank}${colRank}`
+              : row < col
+                ? `${rowRank}${colRank}s`
+                : `${colRank}${rowRank}o`;
+          return (
+            <button
+              key={`${player}-${row}-${col}`}
+              type="button"
+              className="paint-cell"
+              data-row={row}
+              data-col={col}
+              data-on={weight > 0}
+              style={
+                weight > 0
+                  ? {
+                      background: `rgba(63, 143, 107, ${0.25 + 0.75 * Math.min(weight, 1)})`,
+                    }
+                  : undefined
+              }
+              title={label}
+              onClick={(event) => {
+                // Pointer strokes paint on pointerdown (preventDefault suppresses the
+                // mouse click). Keyboard activation still synthesizes click.
+                if (event.detail !== 0) {
+                  return;
+                }
+                beginPaintStroke(player, row, col);
+                endPaintStroke();
+              }}
+            >
+              {label}
+            </button>
+          );
+        }),
+      )}
+    </div>
+  );
+}
+
 export function BuildWorkspace() {
   const draft = useStudyStore((s) => s.draft);
   const updateDraft = useStudyStore((s) => s.updateDraft);
   const weights = useStudyStore((s) => s.weights);
   const setRangeText = useStudyStore((s) => s.setRangeText);
-  const paintCell = useStudyStore((s) => s.paintCell);
   const paintWeight = useStudyStore((s) => s.paintWeight);
   const setPaintWeight = useStudyStore((s) => s.setPaintWeight);
   const clearRange = useStudyStore((s) => s.clearRange);
@@ -152,38 +263,7 @@ export function BuildWorkspace() {
                 value={player === "oop" ? draft.oopRange : draft.ipRange}
                 onChange={(event) => setRangeText(player, event.target.value)}
               />
-              <div className="range-paint-grid" role="grid" aria-label={`${player} range`}>
-                {RANKS.map((rowRank, row) =>
-                  RANKS.map((colRank, col) => {
-                    const weight = weights[player][row][col];
-                    const label =
-                      row === col
-                        ? `${rowRank}${colRank}`
-                        : row < col
-                          ? `${rowRank}${colRank}s`
-                          : `${colRank}${rowRank}o`;
-                    return (
-                      <button
-                        key={`${player}-${row}-${col}`}
-                        type="button"
-                        className="paint-cell"
-                        data-on={weight > 0}
-                        style={
-                          weight > 0
-                            ? {
-                                background: `rgba(63, 143, 107, ${0.25 + 0.75 * Math.min(weight, 1)})`,
-                              }
-                            : undefined
-                        }
-                        onClick={() => paintCell(player, row, col)}
-                        title={label}
-                      >
-                        {label}
-                      </button>
-                    );
-                  }),
-                )}
-              </div>
+              <RangePaintGrid player={player} />
             </div>
           ))}
         </section>
