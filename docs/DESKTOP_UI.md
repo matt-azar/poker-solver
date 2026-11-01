@@ -44,14 +44,14 @@ explorer   # serves desktop/dist when present
 | Action EV | `GET …/values` | Calculate EVs | Inspector / Analysis | Decision only; may 202 | value worker |
 | Runouts | `GET …/runouts` | Compare runouts | Lower dock + suit filter; row navigates | Chance / street only | engine; sparse HTTP |
 | Next-card picker | chance `children` | Card grid | Board buttons → rank×suit picker | Legal cards from node only; board blockers marked | `cards.test.ts` |
-| Equity | `GET …/equity` | Averages only | Equity tab: averages + OOP/IP histograms | Check-down; work limit; buckets = input mass | equity tests; `analysis.test.ts` |
-| Categories | `GET …/categories` | Table | Categories tab with OOP/IP seat toggle | Five-card made-hand; parallel `categories`+`fractions` arrays | hand categories; `analysis.test.ts` |
+| Equity | `GET …/equity` | Averages + hist | Equity tab: averages, clickable band filter, shape composition, top hands | Check-down (not chip EV); buckets + `oop_hands`/`ip_hands` | equity tests; `analysis.test.ts` |
+| Categories | `GET …/categories` | Table | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | hand categories; `analysis.test.ts` |
 | Locks | PUT/DELETE `…/locks` | Hand detail | Lock drawer + inspector | All-zero PUT rejected; 0%≠unlock | HTTP + `locks.test.ts` |
 | Resolve locked | `POST …/resolve-locked` | Resolve + warm-start | Solver menu + drawer | New solution + baseline | HTTP |
 | Compare | `GET /api/compare` | Note | Compare workspace | Decision node | HTTP |
 | Save / Open | `POST …/save`, `/open` | File fields | File menu / Build | PSOL v2 + locks; browser path fields | checkpoint HTTP |
 | Recent | `GET /api/recent-solutions` | Dropdown | Library + File menu | Cap 10 | recent_files |
-| Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Build + Library | Flat dirs | templates/range lib |
+| Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Build + Library (ranges grouped by folder) | Nested `configs/ranges` folders; template dirs still flat | templates/range lib |
 | Config parse | `POST /api/config` | Load config | Build | street/river text only | indirect |
 
 ## Numerical labels (do not relabel without math)
@@ -59,15 +59,15 @@ explorer   # serves desktop/dist when present
 - Chip EV: root-centered, units `chips`
 - Accuracy / Nash gap: NashConv (sum of BR gains); accuracy is NashConv/pot
 - Equity: check-down, fraction of pot — not chip EV
-- Equity histograms: ten fixed buckets on [0,1]; weights are raw input masses (`equity_distribution` OOP, `ip_equity_distribution` IP)
-- Categories: strategy-weighted reach; seat fractions align with the `categories` name list
+- Equity histograms: ten fixed buckets on [0,1]; weights are raw input masses (`equity_distribution` OOP, `ip_equity_distribution` IP); Study filters bands client-side using `oop_hands`/`ip_hands`
+- Categories: strategy-weighted reach; seat fractions align with the `categories` name list; `exclusive` false for draw tags
 - A 0% action inside a lock row that sums to 1 is a constraint; unlock is DELETE. All-zero PUT rows are rejected by the engine.
 
 ## Slice status
 
 1. **Audit + contracts** — this document + `EngineClient`
 2. **Study workspace** — tokens, adaptive layout, context/history, segmented strategy matrix, combo inspector, node navigation, solve controls against live API; optional dual-range layout; interactive board + chance card picker
-3. **Analysis dock + Build + Library** — Range Explorer, Graphs (`gap_series`), Runouts, Equity (OOP/IP hist), Categories (seat toggle), organized Build, Library lists
+3. **Analysis dock + Build + Library** — Range Explorer, Graphs (`gap_series`), Runouts, Equity (hist + band filter + composition), Categories (made-hand / draws), organized Build, Library lists with nested range folders
 4. **Locks + Compare** — Lock drawer + Compare workspace wired to PUT/DELETE/resolve-locked/compare
 5. **Desktop packaging** — Tauri 2 shell + `holdem-explorer` sidecar + Windows NSIS installer via CI artifact (unsigned). Browser + Vite/`explorer` path remains supported. See [Desktop packaging](#desktop-packaging).
 6. **Visual/a11y/perf** — focus-visible + reduced-motion; compact collapse ≤1280; themes light/dark. Scaling/perf evidence captured as screenshots.

@@ -111,9 +111,9 @@ Coverage includes river certainty, a royal-flush tie, 990 and 44 completions, bl
 
 One earlier direct development-suite run, before this correction, reported `passed=438629 failed=1` at `test_value_worker.cpp:149` (`reader_count() == 0` immediately after resubmitting node A). Resubmitting A is a new request on the current solution, so the worker may borrow before that assertion. An isolated rerun was clean and is not the fix. Equity code does not call that worker, and this commit does not change that test.
 
-## Later M2 adapter
+## Study-screen adapter
 
-A study-screen adapter can build two `Range` values from strategy-conditioned combo weights at one node and call `showdown_equity` with that node's board. Those weights must stay finite and nonnegative. The calculator will treat them as check-down input weights. It will not read the tree, the average strategy, or the engine budget. Zero-weight hands remain omitted, so a hand removed by a filter is absent from the rows. This document does not add that adapter, an HTTP route, or UI controls.
+Explorer node `/equity` builds two `Range` values from strategy-conditioned reaching weights and calls `showdown_equity` with that node's board. Those weights stay finite and nonnegative and are treated as check-down input weights (not chip EV). The JSON keeps the ten-bucket histogram and adds compact `oop_hands` / `ip_hands` rows (`combo`, check-down `equity`, raw `weight`) so the desktop Study Equity tab can filter histogram bands and inspect pair/suited/offsuit composition. Zero-weight and undefined combos remain omitted from those rows.
 
 ## Proposed ledger row
 

@@ -948,6 +948,55 @@ std::vector<EquityDistributionBucket> equity_distribution(const PlayerShowdown& 
     return equity_distribution(equities, weights);
 }
 
+std::vector<EquityHandRow> equity_hand_rows(const PlayerShowdown& player)
+{
+    std::vector<EquityHandRow> rows;
+    rows.reserve(player.combos.size());
+    for (const ComboShowdown& row : player.combos)
+    {
+        if (!row.defined || !(row.input_weight > 0.0) || !std::isfinite(row.input_weight)
+            || !std::isfinite(row.equity))
+        {
+            continue;
+        }
+        EquityHandRow out;
+        out.combo = row.combo;
+        out.equity = row.equity;
+        if (out.equity < 0.0)
+        {
+            out.equity = 0.0;
+        }
+        else if (out.equity > 1.0)
+        {
+            out.equity = 1.0;
+        }
+        out.weight = row.input_weight;
+        rows.push_back(std::move(out));
+    }
+    return rows;
+}
+
+std::string equity_hand_rows_json(std::span<const EquityHandRow> rows)
+{
+    std::string out = "[";
+    for (std::size_t index = 0; index < rows.size(); ++index)
+    {
+        if (index != 0)
+        {
+            out += ',';
+        }
+        out += "{\"combo\":\"";
+        out += rows[index].combo;
+        out += "\",\"equity\":";
+        out += format_number(rows[index].equity);
+        out += ",\"weight\":";
+        out += format_number(rows[index].weight);
+        out += '}';
+    }
+    out += ']';
+    return out;
+}
+
 std::string showdown_equity_json(
     const ShowdownEquity& equity,
     std::span<const int> board,

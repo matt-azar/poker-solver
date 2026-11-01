@@ -20,21 +20,23 @@ namespace poker::explorer
 // 3. configs/ranges next to the executable, then one or two parents up
 //    (same layout search as the explorer ui/ root)
 // The first existing directory wins. An empty path means none was found.
-// The library is flat: only regular files in that directory are listed.
+// Nested folders are supported: ids use forward slashes (e.g. open/utg-open).
 
 struct RangePresetInfo
 {
     std::string id;
     std::string name;
+    // Relative folder under the ranges root (empty for top-level files).
+    std::string folder;
 };
 
-inline bool is_safe_range_id(std::string_view id)
+inline bool is_safe_range_segment(std::string_view segment)
 {
-    if (id.empty() || id == "." || id == "..")
+    if (segment.empty() || segment == "." || segment == "..")
     {
         return false;
     }
-    for (char character : id)
+    for (char character : segment)
     {
         const bool ok = (character >= 'a' && character <= 'z')
             || (character >= 'A' && character <= 'Z')
@@ -48,9 +50,51 @@ inline bool is_safe_range_id(std::string_view id)
     return true;
 }
 
+// Accepts flat ids ("utg-open") and nested ids ("open/utg-open").
+// Rejects empty, ".", "..", backslashes, absolute paths, and empty segments.
+inline bool is_safe_range_id(std::string_view id)
+{
+    if (id.empty() || id.front() == '/' || id.back() == '/')
+    {
+        return false;
+    }
+    if (id.find('\\') != std::string_view::npos)
+    {
+        return false;
+    }
+    if (id.find("//") != std::string_view::npos)
+    {
+        return false;
+    }
+    std::size_t start = 0;
+    while (start <= id.size())
+    {
+        const std::size_t slash = id.find('/', start);
+        const std::string_view segment = slash == std::string_view::npos
+            ? id.substr(start)
+            : id.substr(start, slash - start);
+        if (!is_safe_range_segment(segment))
+        {
+            return false;
+        }
+        if (slash == std::string_view::npos)
+        {
+            break;
+        }
+        start = slash + 1;
+    }
+    return true;
+}
+
 inline std::string range_display_name(std::string_view id)
 {
-    std::string name(id);
+    std::string_view leaf = id;
+    const std::size_t slash = id.find_last_of('/');
+    if (slash != std::string_view::npos)
+    {
+        leaf = id.substr(slash + 1);
+    }
+    std::string name(leaf);
     for (char& character : name)
     {
         if (character == '-' || character == '_')
@@ -59,6 +103,16 @@ inline std::string range_display_name(std::string_view id)
         }
     }
     return name;
+}
+
+inline std::string range_folder_of(std::string_view id)
+{
+    const std::size_t slash = id.find_last_of('/');
+    if (slash == std::string_view::npos)
+    {
+        return {};
+    }
+    return std::string(id.substr(0, slash));
 }
 
 inline std::filesystem::path resolve_ranges_directory(
@@ -105,13 +159,30 @@ inline std::optional<std::filesystem::path> range_file_for_id(
     {
         return std::nullopt;
     }
-    const std::filesystem::path with_txt = directory / (std::string(id) + ".txt");
+    std::filesystem::path relative;
+    std::size_t start = 0;
+    while (start <= id.size())
+    {
+        const std::size_t slash = id.find('/', start);
+        const std::string_view segment = slash == std::string_view::npos
+            ? id.substr(start)
+            : id.substr(start, slash - start);
+        relative /= std::string(segment);
+        if (slash == std::string_view::npos)
+        {
+            break;
+        }
+        start = slash + 1;
+    }
+
+    const std::filesystem::path with_txt =
+        directory / (relative.string() + ".txt");
     std::error_code error;
     if (std::filesystem::is_regular_file(with_txt, error))
     {
         return with_txt;
     }
-    const std::filesystem::path bare = directory / std::string(id);
+    const std::filesystem::path bare = directory / relative;
     if (std::filesystem::is_regular_file(bare, error))
     {
         return bare;
@@ -131,25 +202,70 @@ inline std::vector<RangePresetInfo> list_range_presets(const std::filesystem::pa
     {
         return presets;
     }
+    const std::filesystem::path root = std::filesystem::weakly_canonical(directory, error);
+    if (error || root.empty())
+    {
+        return presets;
+    }
     for (const std::filesystem::directory_entry& entry :
-         std::filesystem::directory_iterator(directory, error))
+         std::filesystem::recursive_directory_iterator(root, error))
     {
         if (error || !entry.is_regular_file(error))
         {
             continue;
         }
         const std::filesystem::path path = entry.path();
-        const std::string stem = path.stem().string();
         const std::string extension = path.extension().string();
         if (!(extension.empty() || extension == ".txt"))
         {
             continue;
         }
-        if (!is_safe_range_id(stem))
+        std::filesystem::path relative = std::filesystem::relative(path, root, error);
+        if (error || relative.empty())
         {
             continue;
         }
-        presets.push_back(RangePresetInfo{stem, range_display_name(stem)});
+        relative = relative.lexically_normal();
+        std::string id;
+        bool ok = true;
+        const std::filesystem::path parent = relative.parent_path();
+        for (const std::filesystem::path& part : parent)
+        {
+            const std::string segment = part.string();
+            if (segment.empty() || segment == ".")
+            {
+                continue;
+            }
+            if (segment == ".." || !is_safe_range_segment(segment))
+            {
+                ok = false;
+                break;
+            }
+            if (!id.empty())
+            {
+                id.push_back('/');
+            }
+            id += segment;
+        }
+        if (!ok)
+        {
+            continue;
+        }
+        const std::string leaf = path.stem().string();
+        if (!is_safe_range_segment(leaf))
+        {
+            continue;
+        }
+        if (!id.empty())
+        {
+            id.push_back('/');
+        }
+        id += leaf;
+        if (!is_safe_range_id(id))
+        {
+            continue;
+        }
+        presets.push_back(RangePresetInfo{id, range_display_name(id), range_folder_of(id)});
     }
     std::sort(
         presets.begin(),
