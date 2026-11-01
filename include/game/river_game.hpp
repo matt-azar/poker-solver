@@ -380,6 +380,7 @@ private:
                 legal.code[action], legal.add[action], street_total, all_in, facing);
             edge.compact_label = poker::solver::incentive_compact_token(
                 legal.code[action], legal.add[action], street_total, all_in, facing);
+            poker::solver::attach_edge_tags(edge, config_.incentives);
             path.push_back(std::move(edge));
             cursor = apply(cursor, legal, action);
         }

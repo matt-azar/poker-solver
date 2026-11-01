@@ -36,6 +36,7 @@ void print_usage(const char* argv0)
               << " [--rake-rate RATE] [--rake-cap CHIPS]"
               << " [--icm-stacks S0,S1,...] [--icm-payouts P1,P2,...]"
               << " [--incentive label|tag,PLAYER,KEY,DELTA] (repeatable)"
+              << " [--edge-tag [PLAYER,]ACTION,TAG[,TAG...]] (repeatable)"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus|dcfr]"
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
@@ -479,6 +480,46 @@ int main(int argc, char** argv)
                 rule.key = parts[2];
                 rule.delta = std::atof(parts[3].c_str());
                 config.incentives.add(std::move(rule));
+            }
+            else if (arg == "--edge-tag")
+            {
+                const std::string text = need("--edge-tag");
+                std::vector<std::string> parts;
+                std::size_t start = 0;
+                while (start <= text.size())
+                {
+                    const std::size_t comma = text.find(',', start);
+                    parts.push_back(text.substr(
+                        start,
+                        comma == std::string::npos ? std::string::npos : comma - start));
+                    if (comma == std::string::npos)
+                    {
+                        break;
+                    }
+                    start = comma + 1;
+                }
+                if (parts.size() < 2)
+                {
+                    throw std::invalid_argument(
+                        "--edge-tag needs ACTION,TAG (optional PLAYER, first)");
+                }
+                poker::solver::IncentiveEdgeTagSpec spec;
+                std::size_t tag_at = 1;
+                if (parts.size() >= 3 && (parts[0] == "0" || parts[0] == "1"))
+                {
+                    spec.player = std::atoi(parts[0].c_str());
+                    spec.action_key = parts[1];
+                    tag_at = 2;
+                }
+                else
+                {
+                    spec.action_key = parts[0];
+                }
+                for (std::size_t i = tag_at; i < parts.size(); ++i)
+                {
+                    spec.tags.push_back(parts[i]);
+                }
+                config.incentives.add_edge_tag(std::move(spec));
             }
             else if (arg == "--accuracy")
             {

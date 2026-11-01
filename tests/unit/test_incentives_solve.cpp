@@ -12,6 +12,7 @@
 #include "solver/street_batch.hpp"
 #include "solver/trainer.hpp"
 
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -332,5 +333,121 @@ void run_incentives_solve_tests()
         const poker::solver::SolveStats stats =
             batch.solve(solve, poker::solver::Algorithm::CfrPlus);
         CHECK_NEAR(stats.p1_expected_utility, 51.0, 1e-9);
+    }
+
+    // Mid-tree CategoryTag: edge-tag assigns "bluff" to b100; tag rule fires.
+    {
+        StreetConfig cfg;
+        cfg.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+        cfg.pot = 100;
+        cfg.stack = 200;
+        cfg.oop = Range::parse("AcAd");
+        cfg.ip = Range::parse("KsKc");
+        cfg.oop_bet_sizes = {1.0};
+        cfg.allow_all_in = false;
+        cfg.max_raises = 1;
+        cfg.incentives.add_edge_tag(poker::solver::IncentiveEdgeTagSpec{
+            -1, "b100", {"bluff"}});
+        cfg.incentives.add(IncentiveRule{
+            IncentiveKind::CategoryTag, "bluff", 0, 5.0});
+        const StreetGame game(cfg);
+        StreetGame::State state = game.child_chance(game.root(), 0);
+        state = game.child_action(state, find_street_action(game, state, "Bet 100"));
+        state = game.child_action(state, find_street_action(game, state, "Fold"));
+        const PlayerPayoff paid = game.terminal_payoff(state);
+        CHECK_NEAR(paid.utility[0], 55.0, 1e-12);
+        CHECK_NEAR(paid.utility[1], -50.0, 1e-12);
+        const std::string text = poker::streets::format_street_config(cfg);
+        CHECK(text.find("edge-tag b100 bluff\n") != std::string::npos);
+        CHECK(text.find("incentive tag 0 bluff 5\n") != std::string::npos);
+        const StreetConfig parsed = poker::streets::parse_street_config(text);
+        CHECK(parsed.incentives.edge_tags.size() == 1);
+        CHECK(parsed.incentives.edge_tags[0].action_key == "b100");
+    }
+
+    // CategoryTag without edge-tag does not fire on the solve path.
+    {
+        StreetConfig cfg;
+        cfg.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+        cfg.pot = 100;
+        cfg.stack = 200;
+        cfg.oop = Range::parse("AcAd");
+        cfg.ip = Range::parse("KsKc");
+        cfg.oop_bet_sizes = {1.0};
+        cfg.allow_all_in = false;
+        cfg.max_raises = 1;
+        cfg.incentives.add(IncentiveRule{
+            IncentiveKind::CategoryTag, "bluff", 0, 5.0});
+        const StreetGame game(cfg);
+        StreetGame::State state = game.child_chance(game.root(), 0);
+        state = game.child_action(state, find_street_action(game, state, "Bet 100"));
+        state = game.child_action(state, find_street_action(game, state, "Fold"));
+        CHECK_NEAR(game.terminal_payoff(state).utility[0], 50.0, 1e-12);
+    }
+
+    // Dual-utility: player-1-only fold incentive is visible in terminal_payoff
+    // and in player-1 BR / training signal (modeled utility[1]).
+    {
+        StreetConfig cfg;
+        cfg.board = {
+            card("Ah"), card("Kd"), card("7c"), card("4s"), card("2h")};
+        cfg.pot = 100;
+        cfg.stack = 100;
+        cfg.oop = Range::parse("AcAd");
+        cfg.ip = Range::parse("KsKc");
+        cfg.allow_all_in = false;
+        cfg.max_raises = 0;
+        cfg.memory_mib = 64;
+        cfg.incentives.add(IncentiveRule{
+            IncentiveKind::ActionLabelMatch, "c", 1, 7.0});
+        // Check-down path: OOP check (p0) then IP check (p1). Only IP's check
+        // matches → utility[1] += 7; utility[0] stays chip EV 50.
+        const StreetGame game(cfg);
+        StreetGame::State state = game.child_chance(game.root(), 0);
+        state = game.child_action(state, find_street_action(game, state, "Check"));
+        state = game.child_action(state, find_street_action(game, state, "Check"));
+        const PlayerPayoff paid = game.terminal_payoff(state);
+        CHECK_NEAR(paid.utility[0], 50.0, 1e-12);
+        CHECK_NEAR(paid.utility[1], -50.0 + 7.0, 1e-12);
+
+        poker::solver::CfrTrainer<StreetGame> trainer(game, poker::solver::Algorithm::CfrPlus);
+        poker::solver::SolveConfig solve;
+        solve.max_iterations = 20;
+        const poker::solver::SolveStats stats = trainer.solve(solve);
+        // Player-0 chip EV stays near +50; player-1 modeled BR includes +7.
+        CHECK_NEAR(stats.p1_expected_utility, 50.0, 1e-6);
+        CHECK(stats.p2_best_response_utility > -50.0 + 6.0);
+        // Nash-gap helpers remain defined but must not be claimed as chip Nash.
+        CHECK(std::isfinite(stats.nash_gap));
+
+        StreetBatchSolver batch(cfg);
+        const poker::solver::SolveStats batch_stats =
+            batch.solve(solve, poker::solver::Algorithm::CfrPlus);
+        CHECK_NEAR(batch_stats.p1_expected_utility, 50.0, 1e-6);
+        CHECK(batch_stats.p2_best_response_utility > -50.0 + 6.0);
+    }
+
+    // StreetBatch CategoryTag via edge-tag shifts player-0 scalar.
+    {
+        StreetConfig cfg;
+        cfg.board = {
+            card("Ah"), card("Kd"), card("7c"), card("4s"), card("2h")};
+        cfg.pot = 100;
+        cfg.stack = 100;
+        cfg.oop = Range::parse("AcAd");
+        cfg.ip = Range::parse("KsKc");
+        cfg.allow_all_in = false;
+        cfg.max_raises = 0;
+        cfg.memory_mib = 64;
+        cfg.incentives.add_edge_tag(poker::solver::IncentiveEdgeTagSpec{
+            0, "c", {"slowplay"}});
+        cfg.incentives.add(IncentiveRule{
+            IncentiveKind::CategoryTag, "slowplay", 0, 2.0});
+        StreetBatchSolver batch(cfg);
+        poker::solver::SolveConfig solve;
+        solve.max_iterations = 1;
+        const poker::solver::SolveStats stats =
+            batch.solve(solve, poker::solver::Algorithm::CfrPlus);
+        CHECK_NEAR(stats.p1_expected_utility, 52.0, 1e-9);
     }
 }

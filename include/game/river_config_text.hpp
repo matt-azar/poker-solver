@@ -55,6 +55,22 @@ inline std::string format_river_config(const RiverConfig& config)
         value += streets::format_number(rule.delta);
         streets::append_line(out, "incentive", value);
     }
+    for (const poker::solver::IncentiveEdgeTagSpec& spec : config.incentives.edge_tags)
+    {
+        std::string value;
+        if (spec.player >= 0)
+        {
+            value += std::to_string(spec.player);
+            value.push_back(' ');
+        }
+        value += spec.action_key;
+        for (const std::string& tag : spec.tags)
+        {
+            value.push_back(' ');
+            value += tag;
+        }
+        streets::append_line(out, "edge-tag", value);
+    }
     streets::append_specs(out, "oop-bets", config.oop_bet_sizes);
     streets::append_specs(out, "ip-bets", config.ip_bet_sizes);
     streets::append_specs(out, "oop-raises", config.oop_raise_sizes);
@@ -125,6 +141,36 @@ inline RiverConfig parse_river_config(std::string_view text)
             rule.key = std::string(tokens[2]);
             rule.delta = streets::parse_finite(tokens[3]);
             config.incentives.add(std::move(rule));
+            continue;
+        }
+        if (key == "edge-tag")
+        {
+            const std::vector<std::string_view> tokens = streets::split_tokens(value);
+            if (tokens.size() < 2)
+            {
+                throw std::invalid_argument(
+                    "edge-tag needs ACTION TAG (optional PLAYER first)");
+            }
+            poker::solver::IncentiveEdgeTagSpec spec;
+            std::size_t tag_at = 1;
+            if (!tokens[0].empty()
+                && (tokens[0][0] == '0' || tokens[0][0] == '1')
+                && tokens[0].size() == 1
+                && tokens.size() >= 3)
+            {
+                spec.player = streets::parse_int(tokens[0]);
+                spec.action_key = std::string(tokens[1]);
+                tag_at = 2;
+            }
+            else
+            {
+                spec.action_key = std::string(tokens[0]);
+            }
+            for (std::size_t i = tag_at; i < tokens.size(); ++i)
+            {
+                spec.tags.emplace_back(tokens[i]);
+            }
+            config.incentives.add_edge_tag(std::move(spec));
             continue;
         }
         streets::take_field(seen, key);

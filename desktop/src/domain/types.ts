@@ -57,6 +57,17 @@ export interface SolveJobRequest {
   rake_cap?: number;
   icm_stacks?: number[];
   icm_payouts?: number[];
+  incentives?: Array<{
+    kind: string;
+    player: number;
+    key: string;
+    delta: number;
+  }>;
+  edge_tags?: Array<{
+    player?: number;
+    action: string;
+    tags: string[];
+  }>;
   time_limit?: number;
   /** TreeEditSet lines (`force - c`, `remove Check/Bet 50 b50`, `add-size - 0.33`). */
   tree_edits?: string[];
@@ -246,6 +257,8 @@ export interface SpotDraft {
   rakeCap: number;
   icmStacks: string;
   icmPayouts: string;
+  incentives: string;
+  edgeTags: string;
   timeLimit: string;
   solutionPath: string;
   /** One TreeEditSet line per entry (Force/Remove/AddSize). */
@@ -300,6 +313,8 @@ export const DEFAULT_SPOT: SpotDraft = {
   rakeCap: 0,
   icmStacks: "",
   icmPayouts: "",
+  incentives: "",
+  edgeTags: "",
   timeLimit: "",
   solutionPath: "",
   treeEdits: [],

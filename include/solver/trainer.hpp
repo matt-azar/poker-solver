@@ -2,6 +2,7 @@
 
 #include "solver/dcfr.hpp"
 #include "solver/node_lock.hpp"
+#include "solver/payoff.hpp"
 #include "solver/regret_matching.hpp"
 
 #include <algorithm>
@@ -12,6 +13,7 @@
 #include <cstddef>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -72,8 +74,14 @@ struct SolveStats
 
 struct BestResponseResult
 {
+    // Modeled utility for player 0 under (BR0, σ1). Chip EV only when the
+    // payoff model is plain chips (no rake/ICM/incentives).
     double p1_utility_when_p1_responds = 0.0;
+    // Modeled utility for player 1 under (σ0, BR1). Under zero-sum chip EV this
+    // equals -u0(σ0, BR1); with incentives it is utility[1] directly.
     double p2_utility_when_p2_responds = 0.0;
+    // Sum of unilateral BR gains in modeled utility. Valid as general-sum
+    // NashConv; do not claim chip Nash-gap under active incentives.
     double nash_gap = 0.0;
 };
 
@@ -143,8 +151,10 @@ inline Algorithm algorithm_from_tag(std::uint8_t tag)
     throw std::invalid_argument("checkpoint algorithm is unknown");
 }
 
-// Two-player zero-sum extensive game with perfect recall.
-// Utilities returned by the game are player 1's net chips. Player 2's are the negation.
+// Two-player extensive game with perfect recall.
+// p1_utility is player 0's modeled terminal utility. Zero-sum chip games may
+// omit terminal_payoff and treat player 1 as the negation. Dual-utility games
+// expose terminal_payoff so each seat maximizes its own component.
 // acting_player is 0 or 1. Local actions are 0 .. action_count(infoset)-1.
 template <typename Game>
 concept ExtensiveGame = requires(Game game, typename Game::State state, int index)
@@ -162,6 +172,29 @@ concept ExtensiveGame = requires(Game game, typename Game::State state, int inde
     { game.action_count(index) } -> std::convertible_to<int>;
     { game.child_action(state, index) } -> std::same_as<typename Game::State>;
 };
+
+template <typename Game>
+concept DualUtilityGame = ExtensiveGame<Game> && requires(Game game, typename Game::State state)
+{
+    { game.terminal_payoff(state) } -> std::convertible_to<PlayerPayoff>;
+};
+
+template <ExtensiveGame Game>
+PlayerPayoff terminal_modeled_payoff(const Game& game, const typename Game::State& state)
+{
+    if constexpr (DualUtilityGame<Game>)
+    {
+        return game.terminal_payoff(state);
+    }
+    else
+    {
+        const double u0 = game.p1_utility(state);
+        PlayerPayoff paid;
+        paid.utility[0] = u0;
+        paid.utility[1] = -u0;
+        return paid;
+    }
+}
 
 inline constexpr int kMaxActionsPerInfoset = 8;
 
@@ -229,24 +262,26 @@ std::vector<int> decision_depths(const Game& game)
 }
 
 template <ExtensiveGame Game>
-double expected_p1_from_strategy(const Game& game,
-                                 const typename Game::State& state,
-                                 const std::vector<double>& strategy,
-                                 const std::vector<int>& offset)
+PlayerPayoff expected_payoff_from_strategy(const Game& game,
+                                           const typename Game::State& state,
+                                           const std::vector<double>& strategy,
+                                           const std::vector<int>& offset)
 {
     if (game.is_terminal(state))
     {
-        return game.p1_utility(state);
+        return terminal_modeled_payoff(game, state);
     }
     if (game.is_chance(state))
     {
-        double value = 0.0;
+        PlayerPayoff value;
         const int count = game.chance_count(state);
         for (int outcome = 0; outcome < count; ++outcome)
         {
             const double probability = game.chance_probability(state, outcome);
-            value += probability * expected_p1_from_strategy(
+            const PlayerPayoff child = expected_payoff_from_strategy(
                 game, game.child_chance(state, outcome), strategy, offset);
+            value.utility[0] += probability * child.utility[0];
+            value.utility[1] += probability * child.utility[1];
         }
         return value;
     }
@@ -254,24 +289,35 @@ double expected_p1_from_strategy(const Game& game,
     const int infoset = game.infoset(state);
     const int count = game.action_count(infoset);
     const int base = offset[static_cast<std::size_t>(infoset)];
-    double value = 0.0;
+    PlayerPayoff value;
     for (int action = 0; action < count; ++action)
     {
         const double probability = strategy[static_cast<std::size_t>(base + action)];
-        value += probability * expected_p1_from_strategy(
+        const PlayerPayoff child = expected_payoff_from_strategy(
             game, game.child_action(state, action), strategy, offset);
+        value.utility[0] += probability * child.utility[0];
+        value.utility[1] += probability * child.utility[1];
     }
     return value;
 }
 
+template <ExtensiveGame Game>
+double expected_p1_from_strategy(const Game& game,
+                                 const typename Game::State& state,
+                                 const std::vector<double>& strategy,
+                                 const std::vector<int>& offset)
+{
+    return expected_payoff_from_strategy(game, state, strategy, offset).utility[0];
+}
+
 // Exact best response. Infosets of the responding player are solved deepest-first,
 // so continuation values already use an optimal action at every later infoset.
-// The chosen action maximizes the sum of opponent-and-chance-weighted utilities
-// over histories in the infoset. It does not depend on the responder's own reach.
+// The chosen action maximizes the responder's own modeled utility, weighted by
+// opponent×chance reach. It does not depend on the responder's own reach.
 template <ExtensiveGame Game>
-double p1_utility_of_best_response(const Game& game,
-                                   const std::vector<double>& strategy,
-                                   int responding_player)
+PlayerPayoff payoff_of_best_response(const Game& game,
+                                     const std::vector<double>& strategy,
+                                     int responding_player)
 {
     const std::vector<int> offset = action_offsets(game);
     const std::vector<int> depth = decision_depths(game);
@@ -279,6 +325,10 @@ double p1_utility_of_best_response(const Game& game,
     if (static_cast<int>(strategy.size()) != offset.back())
     {
         throw std::logic_error("strategy vector has the wrong length");
+    }
+    if (responding_player != 0 && responding_player != 1)
+    {
+        throw std::invalid_argument("responding player must be 0 or 1");
     }
 
     std::vector<int> order;
@@ -348,10 +398,10 @@ double p1_utility_of_best_response(const Game& game,
             {
                 for (int action = 0; action < count; ++action)
                 {
-                    const double utility = expected_p1_from_strategy(
+                    const PlayerPayoff paid = expected_payoff_from_strategy(
                         game, game.child_action(state, action), profile, offset);
-                    const double responder_utility = responding_player == 0 ? utility : -utility;
-                    action_value[static_cast<std::size_t>(action)] += reach * responder_utility;
+                    action_value[static_cast<std::size_t>(action)] +=
+                        reach * paid.utility[responding_player];
                 }
                 return;
             }
@@ -419,17 +469,31 @@ double p1_utility_of_best_response(const Game& game,
             profile[static_cast<std::size_t>(base + action)] = action == chosen ? 1.0 : 0.0;
         }
     }
-    return expected_p1_from_strategy(game, game.root(), profile, offset);
+    return expected_payoff_from_strategy(game, game.root(), profile, offset);
+}
+
+// Legacy helper: modeled player-0 utility when `responding_player` best-responds.
+// Prefer payoff_of_best_response / compute_best_response for dual-utility seats.
+template <ExtensiveGame Game>
+double p1_utility_of_best_response(const Game& game,
+                                   const std::vector<double>& strategy,
+                                   int responding_player)
+{
+    return payoff_of_best_response(game, strategy, responding_player).utility[0];
 }
 
 template <ExtensiveGame Game>
 BestResponseResult compute_best_response(const Game& game, const std::vector<double>& strategy)
 {
     BestResponseResult result;
-    result.p1_utility_when_p1_responds = p1_utility_of_best_response(game, strategy, 0);
-    const double p1_when_p2_responds = p1_utility_of_best_response(game, strategy, 1);
-    result.p2_utility_when_p2_responds = -p1_when_p2_responds;
-    result.nash_gap = result.p1_utility_when_p1_responds + result.p2_utility_when_p2_responds;
+    const std::vector<int> offset = action_offsets(game);
+    const PlayerPayoff on_path = expected_payoff_from_strategy(game, game.root(), strategy, offset);
+    const PlayerPayoff when_p0 = payoff_of_best_response(game, strategy, 0);
+    const PlayerPayoff when_p1 = payoff_of_best_response(game, strategy, 1);
+    result.p1_utility_when_p1_responds = when_p0.utility[0];
+    result.p2_utility_when_p2_responds = when_p1.utility[1];
+    result.nash_gap = (when_p0.utility[0] - on_path.utility[0])
+        + (when_p1.utility[1] - on_path.utility[1]);
     return result;
 }
 
@@ -629,6 +693,8 @@ public:
 private:
     // updating_player < 0 updates both players (vanilla). Otherwise only that player.
     // weight is 1 for vanilla and the 1-based iteration index for CFR+.
+    // Returns player-0 modeled utility for the legacy scalar callers; regrets use
+    // each seat's own modeled utility (dual-utility / general-sum safe).
     double cfr(typename Game::State state,
                double pi1,
                double pi2,
@@ -636,24 +702,36 @@ private:
                int updating_player,
                double weight)
     {
+        return cfr_payoff(state, pi1, pi2, pi_chance, updating_player, weight).utility[0];
+    }
+
+    PlayerPayoff cfr_payoff(typename Game::State state,
+                            double pi1,
+                            double pi2,
+                            double pi_chance,
+                            int updating_player,
+                            double weight)
+    {
         if (game_.is_terminal(state))
         {
-            return game_.p1_utility(state);
+            return terminal_modeled_payoff(game_, state);
         }
         if (game_.is_chance(state))
         {
-            double value = 0.0;
+            PlayerPayoff value;
             const int count = game_.chance_count(state);
             for (int outcome = 0; outcome < count; ++outcome)
             {
                 const double probability = game_.chance_probability(state, outcome);
-                value += probability * cfr(
+                const PlayerPayoff child = cfr_payoff(
                     game_.child_chance(state, outcome),
                     pi1,
                     pi2,
                     pi_chance * probability,
                     updating_player,
                     weight);
+                value.utility[0] += probability * child.utility[0];
+                value.utility[1] += probability * child.utility[1];
             }
             return value;
         }
@@ -671,13 +749,13 @@ private:
             accumulate_average(strategy_sum_.data() + base, sigma, count, weight * reach);
         }
 
-        std::array<double, kMaxActionsPerInfoset> action_utility{};
-        double node_utility = 0.0;
+        std::array<PlayerPayoff, kMaxActionsPerInfoset> action_utility{};
+        PlayerPayoff node_utility;
         for (int action = 0; action < count; ++action)
         {
             if (actor == 0)
             {
-                action_utility[static_cast<std::size_t>(action)] = cfr(
+                action_utility[static_cast<std::size_t>(action)] = cfr_payoff(
                     game_.child_action(state, action),
                     pi1 * sigma[action],
                     pi2,
@@ -687,7 +765,7 @@ private:
             }
             else
             {
-                action_utility[static_cast<std::size_t>(action)] = cfr(
+                action_utility[static_cast<std::size_t>(action)] = cfr_payoff(
                     game_.child_action(state, action),
                     pi1,
                     pi2 * sigma[action],
@@ -695,7 +773,10 @@ private:
                     updating_player,
                     weight);
             }
-            node_utility += sigma[action] * action_utility[static_cast<std::size_t>(action)];
+            node_utility.utility[0] +=
+                sigma[action] * action_utility[static_cast<std::size_t>(action)].utility[0];
+            node_utility.utility[1] +=
+                sigma[action] * action_utility[static_cast<std::size_t>(action)].utility[1];
         }
 
         if (update_this)
@@ -703,9 +784,9 @@ private:
             const double opponent_reach = (actor == 0 ? pi2 : pi1) * pi_chance;
             for (int action = 0; action < count; ++action)
             {
-                const double instantaneous = actor == 0
-                    ? (action_utility[static_cast<std::size_t>(action)] - node_utility)
-                    : (node_utility - action_utility[static_cast<std::size_t>(action)]);
+                const double instantaneous =
+                    action_utility[static_cast<std::size_t>(action)].utility[actor]
+                    - node_utility.utility[actor];
                 const double regret_weight = algorithm_ == Algorithm::LinearCfr ? weight : 1.0;
                 pass_delta_[static_cast<std::size_t>(base + action)] +=
                     regret_weight * opponent_reach * instantaneous;

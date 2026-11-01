@@ -230,24 +230,66 @@ inline std::string incentive_chip_label(
     return text;
 }
 
-// One taken action on a root-to-terminal path. Category tags stay empty until a
-// later PR attaches hand-category tags mid-tree.
+// One taken action on a root-to-terminal path. CategoryTag rules match `tags`
+// (assigned from IncentiveConfig::edge_tags via attach_edge_tags).
 struct IncentiveEdge
 {
     int player = 0;
     std::string display_label;
     std::string compact_label;
+    std::vector<std::string> tags{};
 };
+
+// Public-tree tag assignment: when an edge's seat/label matches, copy `tags`
+// onto that IncentiveEdge. player < 0 means either seat. action_key matches the
+// edge compact token or display chip label (same spelling as ActionLabelMatch).
+struct IncentiveEdgeTagSpec
+{
+    int player = -1;
+    std::string action_key;
+    std::vector<std::string> tags;
+};
+
+inline void validate_edge_tag_spec(const IncentiveEdgeTagSpec& spec)
+{
+    if (spec.player < -1 || spec.player > 1)
+    {
+        throw std::invalid_argument("edge-tag player must be -1, 0, or 1");
+    }
+    if (spec.action_key.empty())
+    {
+        throw std::invalid_argument("edge-tag action key must be non-empty");
+    }
+    if (spec.tags.empty())
+    {
+        throw std::invalid_argument("edge-tag needs at least one tag");
+    }
+    for (const std::string& tag : spec.tags)
+    {
+        if (tag.empty())
+        {
+            throw std::invalid_argument("edge-tag entries must be non-empty");
+        }
+    }
+}
 
 // Optional solve-path overlay. Empty rules leave chip/ICM terminals unchanged.
 // See docs/INCENTIVES.md.
 struct IncentiveConfig
 {
     std::vector<IncentiveRule> rules{};
+    // Mid-tree CategoryTag sources. Does not by itself change payoffs; it only
+    // labels edges so `incentive tag …` rules can match on the solve path.
+    std::vector<IncentiveEdgeTagSpec> edge_tags{};
 
     bool enabled() const noexcept
     {
         return !rules.empty();
+    }
+
+    bool has_edge_tags() const noexcept
+    {
+        return !edge_tags.empty();
     }
 
     void validate() const
@@ -256,6 +298,10 @@ struct IncentiveConfig
         {
             validate_incentive_rule(rule);
         }
+        for (const IncentiveEdgeTagSpec& spec : edge_tags)
+        {
+            validate_edge_tag_spec(spec);
+        }
     }
 
     void add(IncentiveRule rule)
@@ -263,10 +309,52 @@ struct IncentiveConfig
         validate_incentive_rule(rule);
         rules.push_back(std::move(rule));
     }
+
+    void add_edge_tag(IncentiveEdgeTagSpec spec)
+    {
+        validate_edge_tag_spec(spec);
+        edge_tags.push_back(std::move(spec));
+    }
 };
 
-// ActionLabelMatch accepts display or compact keys. CategoryTag needs tags on
-// the edge (solve-path edges currently carry none, so those rules never fire).
+// Attach configured category tags onto an edge (idempotent union, stable order).
+inline void attach_edge_tags(IncentiveEdge& edge, const IncentiveConfig& incentives)
+{
+    if (incentives.edge_tags.empty())
+    {
+        return;
+    }
+    for (const IncentiveEdgeTagSpec& spec : incentives.edge_tags)
+    {
+        if (spec.player >= 0 && spec.player != edge.player)
+        {
+            continue;
+        }
+        if (spec.action_key != edge.compact_label && spec.action_key != edge.display_label)
+        {
+            continue;
+        }
+        for (const std::string& tag : spec.tags)
+        {
+            bool seen = false;
+            for (const std::string& existing : edge.tags)
+            {
+                if (existing == tag)
+                {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen)
+            {
+                edge.tags.push_back(tag);
+            }
+        }
+    }
+}
+
+// ActionLabelMatch accepts display or compact keys. CategoryTag matches edge.tags
+// (and any extra `tags` span for standalone callers).
 inline void apply_incentive_edge(
     PlayerPayoff& inout,
     std::span<const IncentiveRule> rules,
@@ -294,6 +382,20 @@ inline void apply_incentive_edge(
             {
                 inout.utility[rule.player] += rule.delta;
             }
+            continue;
+        }
+        bool matched = false;
+        for (const std::string& tag : edge.tags)
+        {
+            if (tag == rule.key)
+            {
+                inout.utility[rule.player] += rule.delta;
+                matched = true;
+                break;
+            }
+        }
+        if (matched)
+        {
             continue;
         }
         for (const std::string& tag : tags)
