@@ -1,19 +1,63 @@
 name: CI
 
+# push only on main + pull_request avoids duplicate runs on the same PR head.
 on:
   push:
+    branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+
 jobs:
+  # Path gate: skip the C++ matrix for docs/UI-only changes while still
+  # reporting a terminal `ci` check (see aggregate job below).
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'include/**'
+              - 'tests/**'
+              - 'cmake/**'
+              - 'CMakeLists.txt'
+              - 'python/**'
+              - 'tools/**'
+              - '.github/workflows/ci.yml'
+
   windows:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
       - name: Production targets
+        env:
+          SCCACHE_GHA_ENABLED: "true"
         run: cmake --build build --config Release --target kuhn_solver --target leduc_solver --target river_solver --target street_solver --target explorer --target equity_calculator
       - name: Unit tests
+        env:
+          SCCACHE_GHA_ENABLED: "true"
         run: cmake --build build --config Release --target poker_solver_tests --target equity_tests
       - name: CTest
         run: ctest --test-dir build -C Release --output-on-failure
@@ -21,11 +65,22 @@ jobs:
         run: node tests/ui/browse.test.js
 
   linux:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: linux-release
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Production targets
         run: cmake --build build --target kuhn_solver --target leduc_solver --target river_solver --target street_solver --target explorer --target equity_calculator
       - name: Unit tests
@@ -35,7 +90,14 @@ jobs:
       - name: JavaScript
         run: node tests/ui/browse.test.js
 
+  # Sanitizer: main + non-draft PRs only; waits for linux Release to fail fast.
   linux-sanitizer:
+    needs: [changes, linux]
+    if: |
+      always()
+      && needs.changes.outputs.code == 'true'
+      && needs.linux.result == 'success'
+      && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -43,13 +105,46 @@ jobs:
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
       - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: linux-sanitizer
       - name: Configure
         run: |
-          cmake -S . -B build-san \
+          cmake -S . -B build-san -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
       - name: Unit tests
         run: cmake --build build-san --target poker_solver_tests --target equity_tests --target equity_calculator
       - name: CTest
         run: ctest --test-dir build-san --output-on-failure
+
+  # Single status for branch protection: green on docs/UI-only skips and when
+  # the code matrix (plus sanitizer when scheduled) succeeds.
+  ci:
+    needs: [changes, windows, linux, linux-sanitizer]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate matrix
+        run: |
+          set -euo pipefail
+          echo "code=${{ needs.changes.outputs.code }}"
+          echo "windows=${{ needs.windows.result }}"
+          echo "linux=${{ needs.linux.result }}"
+          echo "sanitizer=${{ needs.linux-sanitizer.result }}"
+          if [[ "${{ needs.changes.outputs.code }}" != "true" ]]; then
+            echo "Docs/UI-only change; C++ matrix skipped"
+            exit 0
+          fi
+          [[ "${{ needs.windows.result }}" == "success" ]]
+          [[ "${{ needs.linux.result }}" == "success" ]]
+          case "${{ needs.linux-sanitizer.result }}" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
