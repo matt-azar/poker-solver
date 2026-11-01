@@ -4,6 +4,7 @@ import { ActionSummary } from "../matrix/ActionSummary";
 import { ComboInspector } from "../matrix/ComboInspector";
 import { OpponentRangePanel } from "../matrix/OpponentRangePanel";
 import { RangeMatrix } from "../matrix/RangeMatrix";
+import { StrategyEditDrawer } from "../strategy/StrategyEditDrawer";
 import { NodeNavigator } from "../tree/NodeNavigator";
 import { useStudyStore } from "../../state/studyStore";
 import { ActionHistory } from "./ActionHistory";
@@ -15,6 +16,7 @@ export function StudyWorkspace() {
   const dualRange = useStudyStore((s) => s.layout.dualRange);
   const inspectorWidth = useStudyStore((s) => s.layout.inspectorWidth);
   const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
+  const strategyEditDrawerOpen = useStudyStore((s) => s.strategyEditDrawerOpen);
 
   return (
     <div className="study-workspace">
@@ -46,6 +48,7 @@ export function StudyWorkspace() {
       </div>
       {lowerDock ? <LowerDock /> : null}
       {lockDrawerOpen ? <LockDrawer /> : null}
+      {strategyEditDrawerOpen ? <StrategyEditDrawer /> : null}
     </div>
   );
 }

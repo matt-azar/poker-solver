@@ -80,6 +80,15 @@ public:
         const std::string& node_id,
         const std::atomic<bool>* cancel = nullptr) const;
     std::uint64_t profile_epoch() const;
+    // Free-form average edit for browse/EV. Does not rewrite strategy_sum, so
+    // invalidate_prepared_average() restores the CFR average. Validates
+    // nonnegative probs that sum to 1. Bumps profile_epoch.
+    void set_average_strategy(
+        const std::string& node_id,
+        int hand,
+        std::span<const double> probability);
+    void invalidate_prepared_average();
+    // Legacy test helper: also rewrites strategy_sum (survives average rebuild).
     void set_average_for_test(
         const std::string& node_id,
         int hand,

@@ -1,6 +1,7 @@
 #include "solver/street_batch.hpp"
 
 #include "game/street_config_text.hpp"
+#include "solver/strategy_edit.hpp"
 #include "solver/tree_edit.hpp"
 #include "poker/card.hpp"
 #include "poker/hand_categories.hpp"
@@ -5479,7 +5480,7 @@ struct StreetBatchSolver::Engine
         return view;
     }
 
-    void set_average_for_test(const std::string& text, int hand, std::span<const double> probability)
+    void set_average_strategy(const std::string& text, int hand, std::span<const double> probability)
     {
         ensure_average();
         int node_index = 0;
@@ -5496,6 +5497,10 @@ struct StreetBatchSolver::Engine
         {
             throw std::invalid_argument("average hand or action count");
         }
+        if (!validate_strategy_probs(probability, node.n_actions))
+        {
+            throw std::invalid_argument("invalid strategy probability row");
+        }
         if (!hand_supported(node.player, hand, turn, river))
         {
             throw std::invalid_argument("hand has no information set on this node");
@@ -5511,6 +5516,16 @@ struct StreetBatchSolver::Engine
             average[static_cast<std::size_t>(stored.base + action)] = probability[static_cast<std::size_t>(action)];
         }
         average_ready = true;
+    }
+
+    void invalidate_prepared_average()
+    {
+        average_ready = false;
+    }
+
+    void set_average_for_test(const std::string& text, int hand, std::span<const double> probability)
+    {
+        set_average_strategy(text, hand, probability);
     }
 
     void throw_if_cancelled(const std::atomic<bool>* cancel) const
@@ -7072,7 +7087,7 @@ int StreetBatchSolver::completed_iterations() const
     return engine_->trained;
 }
 
-void StreetBatchSolver::set_average_for_test(
+void StreetBatchSolver::set_average_strategy(
     const std::string& node_id,
     int hand,
     std::span<const double> probability)
@@ -7080,7 +7095,23 @@ void StreetBatchSolver::set_average_for_test(
     std::lock_guard<std::mutex> lock(value_mu_);
     ++profile_epoch_;
     value_cache_valid_ = false;
-    engine_->set_average_for_test(node_id, hand, probability);
+    engine_->set_average_strategy(node_id, hand, probability);
+}
+
+void StreetBatchSolver::invalidate_prepared_average()
+{
+    std::lock_guard<std::mutex> lock(value_mu_);
+    ++profile_epoch_;
+    value_cache_valid_ = false;
+    engine_->invalidate_prepared_average();
+}
+
+void StreetBatchSolver::set_average_for_test(
+    const std::string& node_id,
+    int hand,
+    std::span<const double> probability)
+{
+    set_average_strategy(node_id, hand, probability);
 }
 
 std::vector<StreetStrategyEntry> StreetBatchSolver::average_strategy_entries() const

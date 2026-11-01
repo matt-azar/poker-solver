@@ -7,6 +7,7 @@
 #include "solver/icm.hpp"
 #include "solver/incentives.hpp"
 #include "solver/regret_matching.hpp"
+#include "solver/strategy_edit.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1610,6 +1611,39 @@ struct RiverBatchSolver::Engine
         return page;
     }
 
+    void set_average_strategy(const std::string& text, int hand, std::span<const double> probability)
+    {
+        ensure_average();
+        const int node_index = locate_node(text);
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (node.terminal)
+        {
+            throw std::invalid_argument("average edits require a decision node");
+        }
+        const int hands = node.player == 0 ? n0 : n1;
+        if (hand < 0 || hand >= hands)
+        {
+            throw std::invalid_argument("hand is out of range");
+        }
+        if (!validate_strategy_probs(probability, node.n_actions))
+        {
+            throw std::invalid_argument("invalid strategy probability row");
+        }
+        const int base = node.hand_base + hand * node.n_actions;
+        for (int action = 0; action < node.n_actions; ++action)
+        {
+            average[static_cast<std::size_t>(base + action)] =
+                probability[static_cast<std::size_t>(action)];
+        }
+        average_ready = true;
+    }
+
+    void invalidate_prepared_average()
+    {
+        average_ready = false;
+    }
+
+    // Legacy test helper: also rewrites strategy_sum so the edit survives rebuild.
     void set_average_for_test(const std::string& text, int hand, std::span<const double> probability)
     {
         ensure_average();
@@ -1771,6 +1805,21 @@ StreetActionValues RiverBatchSolver::action_values(
 std::uint64_t RiverBatchSolver::profile_epoch() const
 {
     return profile_epoch_;
+}
+
+void RiverBatchSolver::set_average_strategy(
+    const std::string& node_id,
+    int hand,
+    std::span<const double> probability)
+{
+    engine_->set_average_strategy(node_id, hand, probability);
+    note_profile_mutation();
+}
+
+void RiverBatchSolver::invalidate_prepared_average()
+{
+    engine_->invalidate_prepared_average();
+    note_profile_mutation();
 }
 
 void RiverBatchSolver::set_average_for_test(

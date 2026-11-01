@@ -681,6 +681,87 @@ void check_lock_resolve_compare_workflow()
     std::remove(checkpoint.c_str());
 }
 
+// Free-form strategy edit round-trip: PUT → node strategy changes → clear restores;
+// locks remain independent.
+void check_strategy_edit_workflow()
+{
+    const std::string solve =
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\"],\"oop_range\":\"2c3d,2h3h\",\"ip_range\":\"AhAd\","
+        "\"pot\":100,\"stack\":100,\"iterations\":10,\"samples\":2,\"max_raises\":1,"
+        "\"allow_all_in\":0,\"oop_bets\":[1.0],\"ip_bets\":[],\"oop_turn_bets\":[1.0],"
+        "\"memory_mib\":128,\"algorithm\":\"vanilla\"}";
+    HttpResult accepted;
+    CHECK(http_exchange("POST", "/api/solve", solve, accepted));
+    CHECK(accepted.status == 202);
+    HttpResult solved;
+    CHECK(wait_for_completion(solved));
+    const std::string solution = json_string(solved.body, "solution_id");
+    CHECK(!solution.empty());
+    const std::string root = json_string(solved.body, "root_node_id");
+    CHECK(root == "p0.t-1.r-1");
+
+    HttpResult before_node;
+    CHECK(http_exchange("GET", "/api/solutions/" + solution + "/nodes/" + root, "", before_node));
+    CHECK(before_node.status == 200);
+    CHECK(before_node.body.find("\"strategy\":[") != std::string::npos);
+
+    HttpResult edited;
+    CHECK(http_exchange(
+        "PUT",
+        "/api/solutions/" + solution + "/strategy-edits",
+        "{\"node_id\":\"" + root + "\",\"kind\":\"selected\",\"hand_indices\":[0],\"probs\":[0,1]}",
+        edited));
+    CHECK(edited.status == 200);
+    CHECK(edited.body.find("\"edits\":[") != std::string::npos);
+    CHECK(edited.body.find("\"persisted\":false") != std::string::npos);
+    CHECK(edited.body.find(root) != std::string::npos);
+
+    HttpResult listed;
+    CHECK(http_exchange("GET", "/api/solutions/" + solution + "/strategy-edits", "", listed));
+    CHECK(listed.status == 200);
+    CHECK(listed.body.find(root) != std::string::npos);
+
+    HttpResult after_node;
+    CHECK(http_exchange("GET", "/api/solutions/" + solution + "/nodes/" + root, "", after_node));
+    CHECK(after_node.status == 200);
+    // Hand 0 pure on the second action (check/bet).
+    CHECK(after_node.body.find("[0,1]") != std::string::npos
+        || after_node.body.find("[0, 1]") != std::string::npos
+        || after_node.body.find("0,1") != std::string::npos);
+
+    // Locks still work independently of strategy edits.
+    HttpResult locked;
+    CHECK(http_exchange(
+        "PUT",
+        "/api/solutions/" + solution + "/locks",
+        "{\"node_id\":\"" + root + "\",\"kind\":\"selected\",\"hand_indices\":[1],\"probs\":[1,0]}",
+        locked));
+    CHECK(locked.status == 200);
+    CHECK(locked.body.find(root) != std::string::npos);
+
+    HttpResult cleared;
+    CHECK(http_exchange(
+        "DELETE",
+        "/api/solutions/" + solution + "/strategy-edits",
+        "",
+        cleared));
+    CHECK(cleared.status == 200);
+    CHECK(cleared.body.find("\"edits\":[]") != std::string::npos);
+
+    HttpResult locks_after;
+    CHECK(http_exchange("GET", "/api/solutions/" + solution + "/locks", "", locks_after));
+    CHECK(locks_after.status == 200);
+    CHECK(locks_after.body.find(root) != std::string::npos);
+
+    HttpResult bad_probs;
+    CHECK(http_exchange(
+        "PUT",
+        "/api/solutions/" + solution + "/strategy-edits",
+        "{\"node_id\":\"" + root + "\",\"kind\":\"selected\",\"hand_indices\":[0],\"probs\":[0,0]}",
+        bad_probs));
+    CHECK(bad_probs.status == 400);
+}
+
 } // namespace
 
 void run_explorer_http_tests()
@@ -1024,6 +1105,7 @@ void run_explorer_http_tests()
 
     check_persistence_workflow_under_value_load();
     check_lock_resolve_compare_workflow();
+    check_strategy_edit_workflow();
 
     // Mid-construction dry-run plan and visual tree-edit preview / config round-trip.
     {
