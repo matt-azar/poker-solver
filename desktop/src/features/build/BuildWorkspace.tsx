@@ -2,6 +2,7 @@ import { useStudyStore } from "../../state/studyStore";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
 import { AssistantPanel } from "../assistant/AssistantPanel";
+import { RangeCataloguePanel } from "../profiles/RangeCataloguePanel";
 import { TreeLineEditor } from "./TreeLineEditor";
 
 function provenanceHint(
@@ -71,6 +72,7 @@ export function BuildWorkspace() {
       </header>
 
       <AssistantPanel />
+      <RangeCataloguePanel />
 
       <div className="build-grid">
         <section className="build-section">

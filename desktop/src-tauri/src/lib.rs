@@ -1,11 +1,15 @@
 // Copyright (c) Matt Azar. UNLICENSED — no license is granted.
 //! Hold'em Study Tauri shell: loads the Vite UI and manages the explorer sidecar.
 
+use std::collections::HashMap;
+use std::fs;
+use std::io::Write;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, RunEvent, State};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
@@ -78,6 +82,116 @@ fn engine_port() -> u16 {
 #[tauri::command]
 fn engine_status(state: State<'_, EngineState>) -> String {
     state.status_text()
+}
+
+/// Filename under the app config dir for assistant secrets (prototype).
+/// Not OS keychain / Stronghold — see docs for backend-proxy product path.
+const ASSISTANT_SECRETS_FILE: &str = "assistant_secrets.json";
+
+#[derive(Default, Serialize, Deserialize)]
+struct AssistantSecretsFile {
+    /// service → secret value. Values are never logged by these commands.
+    secrets: HashMap<String, String>,
+}
+
+fn assistant_secrets_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|err| format!("app config dir unavailable: {err}"))?;
+    fs::create_dir_all(&dir).map_err(|err| format!("create config dir: {err}"))?;
+    Ok(dir.join(ASSISTANT_SECRETS_FILE))
+}
+
+fn read_assistant_secrets(path: &Path) -> Result<AssistantSecretsFile, String> {
+    if !path.is_file() {
+        return Ok(AssistantSecretsFile::default());
+    }
+    let raw = fs::read_to_string(path).map_err(|err| format!("read secrets: {err}"))?;
+    if raw.trim().is_empty() {
+        return Ok(AssistantSecretsFile::default());
+    }
+    serde_json::from_str(&raw).map_err(|err| format!("parse secrets: {err}"))
+}
+
+fn write_assistant_secrets(path: &Path, file: &AssistantSecretsFile) -> Result<(), String> {
+    let raw = serde_json::to_string_pretty(file).map_err(|err| format!("serialize secrets: {err}"))?;
+    let tmp = path.with_extension("json.tmp");
+    {
+        let mut out = fs::File::create(&tmp).map_err(|err| format!("create secrets tmp: {err}"))?;
+        out
+            .write_all(raw.as_bytes())
+            .map_err(|err| format!("write secrets tmp: {err}"))?;
+        out.sync_all().ok();
+    }
+    fs::rename(&tmp, path).map_err(|err| format!("replace secrets file: {err}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+fn normalize_secret_service(service: &str) -> Result<String, String> {
+    let trimmed = service.trim();
+    if trimmed.is_empty() || trimmed.len() > 64 {
+        return Err("service name must be 1..=64 characters".into());
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err("service name must be ascii alphanumeric/_/-".into());
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Read one assistant credential from the native config-dir store.
+/// Prefer this over webview localStorage for the desktop prototype.
+#[tauri::command]
+fn assistant_secret_get(app: AppHandle, service: String) -> Result<Option<String>, String> {
+    let key = normalize_secret_service(&service)?;
+    let path = assistant_secrets_path(&app)?;
+    let file = read_assistant_secrets(&path)?;
+    Ok(file.secrets.get(&key).cloned())
+}
+
+#[tauri::command]
+fn assistant_secret_set(app: AppHandle, service: String, value: String) -> Result<(), String> {
+    let key = normalize_secret_service(&service)?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("secret value must be non-empty".into());
+    }
+    if trimmed.len() > 8192 {
+        return Err("secret value too long".into());
+    }
+    let path = assistant_secrets_path(&app)?;
+    let mut file = read_assistant_secrets(&path)?;
+    file.secrets.insert(key, trimmed.to_string());
+    write_assistant_secrets(&path, &file)
+}
+
+#[tauri::command]
+fn assistant_secret_clear(app: AppHandle, service: String) -> Result<(), String> {
+    let key = normalize_secret_service(&service)?;
+    let path = assistant_secrets_path(&app)?;
+    let mut file = read_assistant_secrets(&path)?;
+    file.secrets.remove(&key);
+    if file.secrets.is_empty() && path.is_file() {
+        fs::remove_file(&path).map_err(|err| format!("remove secrets file: {err}"))?;
+        return Ok(());
+    }
+    write_assistant_secrets(&path, &file)
+}
+
+#[tauri::command]
+fn assistant_secret_has(app: AppHandle, service: String) -> Result<bool, String> {
+    let key = normalize_secret_service(&service)?;
+    let path = assistant_secrets_path(&app)?;
+    let file = read_assistant_secrets(&path)?;
+    Ok(file.secrets.contains_key(&key))
 }
 
 /// Ensure the explorer sidecar is running and accepting connections.
@@ -306,7 +420,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             engine_port,
             engine_status,
-            ensure_engine
+            ensure_engine,
+            assistant_secret_get,
+            assistant_secret_set,
+            assistant_secret_clear,
+            assistant_secret_has
         ])
         .build(tauri::generate_context!())
         .expect("error while building Hold'em Study")

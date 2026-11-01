@@ -130,4 +130,21 @@ describe("matchRangeProfiles", () => {
     expect(result.alternatives).toEqual([]);
     expect(result.none).toMatch(/no range profiles matched/i);
   });
+
+  it("exact-matches BTN vs BB 3BP 100NL synthetic fixture", () => {
+    const fixture3bp = loadFixture("fixture-btn-bb-3bp-100bb-100nl.json");
+    const result = matchRangeProfiles(
+      {
+        potType: "3BP",
+        stakesLabel: "100NL",
+        positions: { oop: "BB", ip: "BTN" },
+        stackBb: 100,
+        format: "cash_6max",
+      },
+      [fixture3bp, fixture25],
+    );
+    expect(result.exact.map((p) => p.id)).toEqual([
+      "fixture-btn-bb-3bp-100bb-100nl",
+    ]);
+  });
 });

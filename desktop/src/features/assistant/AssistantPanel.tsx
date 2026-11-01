@@ -11,6 +11,15 @@ import {
   loadStudySetupPreferences,
   type StudySetupPreferences,
 } from "../../domain/setup";
+import {
+  clearAssistantOpenAiCredential,
+  describeCredentialSource,
+  getAssistantOpenAiCredential,
+  hasAssistantOpenAiCredential,
+  setAssistantOpenAiCredential,
+  type CredentialSource,
+} from "../../platform/credentials";
+import { isTauriRuntime } from "../../platform";
 import { useStudyStore } from "../../state/studyStore";
 
 type ProviderMode = "fake" | "openai";
@@ -55,11 +64,26 @@ export function AssistantPanel() {
   const [lastRun, setLastRun] = useState<AssistantRunResult | null>(null);
   const [statusNote, setStatusNote] = useState<string | null>(null);
   const [appliedRunId, setAppliedRunId] = useState<number | null>(null);
+  const [credSource, setCredSource] = useState<CredentialSource>("none");
+  const [credPresent, setCredPresent] = useState(false);
+  const [credDraft, setCredDraft] = useState("");
 
   const session = useMemo(() => createAssistantSession(), []);
   const abortRef = useRef<AbortController | null>(null);
 
+  async function refreshCredentialState() {
+    const present = await hasAssistantOpenAiCredential();
+    setCredPresent(present);
+    if (!present) {
+      setCredSource("none");
+      return;
+    }
+    const lookup = await getAssistantOpenAiCredential();
+    setCredSource(lookup.source);
+  }
+
   useEffect(() => {
+    void refreshCredentialState();
     return () => {
       session.cancel();
       abortRef.current?.abort();
@@ -72,14 +96,8 @@ export function AssistantPanel() {
     }
     return createOpenAiAssistantProvider({
       getCredential: async () => {
-        // Browser prototype: optional localStorage key set outside the bundle.
-        // Desktop builds should inject via native secure storage later.
-        try {
-          const key = localStorage.getItem("holdem-study-openai-key");
-          return key && key.trim() ? key.trim() : null;
-        } catch {
-          return null;
-        }
+        const lookup = await getAssistantOpenAiCredential();
+        return lookup.value;
       },
     });
   }
@@ -175,6 +193,69 @@ export function AssistantPanel() {
               ? " interprets requests locally for demos — not a hosted language model."
               : " sends setup summaries and profile metadata only (not full private ranges)."}
           </p>
+
+          {providerMode === "openai" ? (
+            <div className="assistant-credentials">
+              <p className="assistant-hint">
+                {credPresent
+                  ? `Credential present via ${describeCredentialSource(credSource)}.`
+                  : isTauriRuntime()
+                    ? "No credential. Paste a key to store in the Tauri app-config secret file (prototype — not OS keychain)."
+                    : "No credential. Paste a key for localStorage prototype storage, or set holdem-study-openai-key outside the bundle."}{" "}
+                Distributed builds should use an authenticated backend proxy — never ship keys in
+                JS, installer, or source.
+              </p>
+              <div className="assistant-compose-actions">
+                <input
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="OpenAI API key"
+                  value={credDraft}
+                  disabled={busy}
+                  onChange={(event) => setCredDraft(event.target.value)}
+                  aria-label="OpenAI API key"
+                />
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  disabled={busy || !credDraft.trim()}
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        const source = await setAssistantOpenAiCredential(credDraft);
+                        setCredDraft("");
+                        setCredPresent(true);
+                        setCredSource(source);
+                        setStatusNote(`Saved credential (${source})`);
+                      } catch (err) {
+                        setStatusNote(
+                          err instanceof Error ? err.message : String(err),
+                        );
+                      }
+                    })();
+                  }}
+                >
+                  Save key
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-btn danger"
+                  disabled={busy || !credPresent}
+                  onClick={() => {
+                    void (async () => {
+                      await clearAssistantOpenAiCredential();
+                      setCredPresent(false);
+                      setCredSource("none");
+                      setStatusNote("Cleared assistant credential");
+                    })();
+                  }}
+                >
+                  Clear key
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="assistant-examples">
             {EXAMPLES.map((example) => (

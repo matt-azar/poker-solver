@@ -64,19 +64,36 @@ Bundled fixtures are **synthetic** and labelled as such — not verified product
 
 Conflicts between explicit values and a catalogue entry surface for the player; they are not silently overridden. Pot/stack for SRP examples are derived in `derivePostflopPotAndStacks` (e.g. 100bb / 2.5bb open → 5.5bb pot, 97.5bb stack before rake).
 
-## Provider / deployment
+## Range catalogue import
+
+**Build → Range catalogue** lists bundled synthetic fixtures and user imports. Use **Import JSON…** to load a schema-v1 file from `configs/range-profiles/` (or your own paired GTO/standard ranges). Match filters cover pot type and rake structure; **Apply** uses the same draft path as the assistant. See `configs/range-profiles/README.md`.
+
+## Provider / credentials
 
 | Mode | Status |
 | --- | --- |
 | Fake adapter | Deterministic local interpreter for tests and demos |
 | OpenAI adapter | Structured tool/function calling; default model `gpt-4.1-mini` |
-| Credential in JS bundle / installer | **Not supported** — never commit keys |
-| Browser prototype credential | Optional `localStorage` key `holdem-study-openai-key` (user-provided, outside source) |
-| Tauri secure storage / backend proxy | Documented intent; not required for the fake demo path |
+| Credential in JS bundle / installer / source | **Not supported** — never commit keys |
+| Tauri desktop prototype | Native commands `assistant_secret_*` store the key under the app config dir (`assistant_secrets.json`, mode `0600` on Unix) — outside the webview bundle. Not OS keychain / Stronghold yet. |
+| Browser prototype credential | Optional `localStorage` key `holdem-study-openai-key`, or paste in the OpenAI provider UI |
+| Authenticated backend proxy | **Not built** — required for a distributed product so clients do not hold long-lived vendor keys |
 
-The standalone browser build needs a user-provided key or a future authenticated backend. Solving remains local via `explorer`.
+Credential lookup prefers Tauri storage when running inside the shell, then the browser prototype key. Solving remains local via `explorer`.
 
 External processing disclosure: the OpenAI path sends setup summaries, preference summaries, and catalogue **metadata** (ids, labels, stacks, pot type) — not full private range strings when identifiers suffice.
+
+## Live OpenAI eval (not ordinary CI)
+
+Representative interpretation cases live in `desktop/src/domain/assistant/liveEvalCases.ts` (varied wording, missing pot type, 100NL vs 100bb, cEV default, SRP/3BP, …). Offline scoring is covered by `npm test`. The real adapter runs only when a key is present:
+
+```bash
+cd desktop
+HOLDEM_STUDY_OPENAI_KEY=sk-... npm run test:assistant-live
+# or OPENAI_API_KEY=...
+```
+
+Without a key the script exits 0 and reports `skipped`. Ordinary `npm test` / CI never call the live harness.
 
 ## Architecture map
 
@@ -85,13 +102,17 @@ External processing disclosure: the OpenAI path sends setup summaries, preferenc
 | Intent / patch / merge / derive | `desktop/src/domain/setup/` |
 | Catalogue / match | `desktop/src/domain/profiles/` |
 | Provider + resolve + session | `desktop/src/domain/assistant/` |
+| Live eval cases + scoring | `desktop/src/domain/assistant/liveEvalCases.ts` |
+| Live eval runner | `desktop/scripts/run-assistant-live-eval.mjs` |
+| Credential lookup | `desktop/src/platform/credentials.ts` + Tauri `assistant_secret_*` |
 | Apply transaction + revision | `studyStore.applySetupDraft` |
-| UI | `desktop/src/features/assistant/AssistantPanel.tsx` |
+| UI | `AssistantPanel.tsx`, `RangeCataloguePanel.tsx` |
 
 ## Limits / unresolved
 
-- Live OpenAI extraction quality is not gated in CI (credentials / cost / nondeterminism)
+- Live OpenAI field accuracy is measured by `npm run test:assistant-live` with credentials; not gated in ordinary CI (cost / nondeterminism)
 - No bundled production strategic pack — user import or synthetic fixtures only
+- Tauri credential store is an app-config file, not OS keychain; distributed products should proxy through an authenticated backend
 - Full-draft undo covers assistant transactions; ordinary Build field edits still use range-only undo plus revision bumps
 - Chat history is not persisted; study reproducibility uses draft + catalogue snapshot
 - Strategy explanations and autonomous research are out of scope
