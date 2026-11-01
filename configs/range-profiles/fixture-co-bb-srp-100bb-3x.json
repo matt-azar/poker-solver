@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "fixture-co-bb-srp-100bb-3x",
   "dataRevision": "1",
-  "displayName": "FIXTURE: CO vs BB SRP 100bb 3x (synthetic)",
+  "displayName": "FIXTURE: CO vs BB SRP 100bb 3x cEV (synthetic standard/GTO-style)",
   "format": "cash_6max",
   "playerCount": 6,
   "positions": {
@@ -22,12 +22,12 @@
   "rake": {
     "rate": 0,
     "cap": 0,
-    "collection": "unknown",
-    "known": false
+    "collection": "none",
+    "known": true
   },
   "labels": {
-    "stakes": "100NL",
-    "intendedUse": "demo_and_tests_only"
+    "stakes": "cEV",
+    "intendedUse": "demo_and_tests_only_standard_gto_catalogue_shape"
   },
   "ranges": {
     "oop": "33+,A2s+,KTs+,QTs+,JTs,T9s,98s,AJo+,KQo,AKo:0.4,AQo:0.6",
@@ -36,6 +36,6 @@
   "provenance": {
     "source": "configs/range-profiles/fixture-co-bb-srp-100bb-3x.json",
     "classification": "synthetic_fixture",
-    "notes": "SYNTHETIC FIXTURE for alternative-match tests (3x open). NOT verified 100NL population or equilibrium data. Use alongside the 2.5x fixture to verify open-size alternatives are labelled, never silently substituted."
+    "notes": "SYNTHETIC FIXTURE for alternative-match tests (3x open) under cEV. NOT a production strategic pack. Use alongside the 2.5x cEV fixture to verify open-size alternatives are labelled, never silently substituted."
   }
 }

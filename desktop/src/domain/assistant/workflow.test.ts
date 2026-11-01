@@ -41,7 +41,7 @@ describe("createAssistantSession", () => {
     let draft = createBlankSetupDraft("create");
     let revision = initialRevision(1);
 
-    const run = await session.run("Set up CO vs BB using my 100NL profile", {
+    const run = await session.run("Set up CO vs BB SRP", {
       provider: new FakeAssistantProvider(),
       catalogue,
       getDraft: () => draft,

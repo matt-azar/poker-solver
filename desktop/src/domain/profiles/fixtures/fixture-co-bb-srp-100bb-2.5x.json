@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "fixture-co-bb-srp-100bb-2.5x",
   "dataRevision": "1",
-  "displayName": "FIXTURE: CO vs BB SRP 100bb 2.5x (synthetic)",
+  "displayName": "FIXTURE: CO vs BB SRP 100bb 2.5x cEV (synthetic standard/GTO-style)",
   "format": "cash_6max",
   "playerCount": 6,
   "positions": {
@@ -22,12 +22,12 @@
   "rake": {
     "rate": 0,
     "cap": 0,
-    "collection": "unknown",
-    "known": false
+    "collection": "none",
+    "known": true
   },
   "labels": {
-    "stakes": "100NL",
-    "intendedUse": "demo_and_tests_only"
+    "stakes": "cEV",
+    "intendedUse": "demo_and_tests_only_standard_gto_catalogue_shape"
   },
   "ranges": {
     "oop": "22+,A2s+,K9s+,Q9s+,J9s+,T8s+,98s,87s,76s,ATo+,KJo+,QJo,AKo:0.5,AQo:0.75",
@@ -36,6 +36,6 @@
   "provenance": {
     "source": "configs/range-profiles/fixture-co-bb-srp-100bb-2.5x.json",
     "classification": "synthetic_fixture",
-    "notes": "SYNTHETIC FIXTURE for demo and automated tests only. NOT verified 100NL population or equilibrium data. BB range is a calling range vs CO 2.5x open (not a full defend/3-bet range). Rake unknown (known:false)."
+    "notes": "SYNTHETIC FIXTURE for demo and automated tests only. Standard/GTO-catalogue shape for cEV (chip EV / no rake) CO vs BB SRP at 100bb. NOT a production strategic pack. BB range is a calling range vs CO 2.5x open (not a full defend/3-bet range)."
   }
 }

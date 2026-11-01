@@ -41,6 +41,12 @@ export interface StudySetupTreePreset {
   maxRaises?: number;
 }
 
+/**
+ * Preflop pot type / action family. Required for create when matching ranges;
+ * never guess SRP vs 3BP vs 4BP from positions alone.
+ */
+export type PotType = "SRP" | "3BP" | "4BP";
+
 /** Structured intent extracted from natural language (model proposal). */
 export interface StudySetupIntent {
   mode: SetupMode;
@@ -48,12 +54,22 @@ export interface StudySetupIntent {
   oopPosition?: string;
   /** Postflop IP position label, e.g. "CO". */
   ipPosition?: string;
-  /** Stake/pool label such as "100NL". Never implies stack depth. */
+  /**
+   * Rake / stakes-environment label such as "100NL".
+   * Identifies a rake structure, not a personal player profile and never stack depth.
+   */
   stakesLabel?: string;
+  /** Preflop pot type (SRP / 3BP / 4BP). Required for create; do not invent. */
+  potType?: PotType;
+  /**
+   * Starting stack in bb. When omitted on create, application code assumes
+   * 100bb — never inferred from an NL / rake label.
+   */
   stackBb?: number;
   openSizeBb?: number;
   board?: string;
   treePreset?: StudySetupTreePreset;
+  /** Catalogue id or display-name query for a standard/GTO range entry. */
   profileQuery?: string;
   preflopActions?: PreflopAction[];
   needsClarification?: string[];

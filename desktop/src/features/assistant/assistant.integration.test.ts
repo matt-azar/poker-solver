@@ -25,10 +25,18 @@ const fixture25 = parseRangeProfile(
     ),
   ),
 );
+const fixture25Nl = parseRangeProfile(
+  JSON.parse(
+    readFileSync(
+      "/workspace/configs/range-profiles/fixture-co-bb-srp-100bb-2.5x-100nl.json",
+      "utf8",
+    ),
+  ),
+);
 
 describe("assistant → Build transaction integration", () => {
-  it("CO vs BB fake request applies BB OOP / CO IP ranges with derived pot", async () => {
-    const catalogue = createRangeProfileCatalogue([fixture25]);
+  it("CO vs BB SRP with 100NL applies BB OOP / CO IP ranges with derived pot", async () => {
+    const catalogue = createRangeProfileCatalogue([fixture25, fixture25Nl]);
     const session = createAssistantSession();
     let revision = 0;
     let draft = {
@@ -42,7 +50,7 @@ describe("assistant → Build transaction integration", () => {
       ip: parseRangeText(""),
     };
 
-    const run = await session.run("Set up CO vs BB using my 100NL profile", {
+    const run = await session.run("Set up CO vs BB SRP with 100NL ranges", {
       provider: createFakeAssistantProvider(),
       catalogue,
       getDraft: () => draft,
@@ -53,12 +61,13 @@ describe("assistant → Build transaction integration", () => {
     expect(run.status).toBe("draft");
     expect(run.result).toBeTruthy();
     const result = run.result!;
-    expect(result.draftPatch.oopRange).toBe(fixture25.ranges.oop);
-    expect(result.draftPatch.ipRange).toBe(fixture25.ranges.ip);
+    expect(result.draftPatch.oopRange).toBe(fixture25Nl.ranges.oop);
+    expect(result.draftPatch.ipRange).toBe(fixture25Nl.ranges.ip);
     expect(result.pot).toBeCloseTo(5.5, 10);
     expect(result.stack).toBeCloseTo(97.5, 10);
     expect(result.canSolve).toBe(false);
     expect(result.profile?.classification).toBe("synthetic_fixture");
+    expect(result.profile?.id).toBe(fixture25Nl.id);
 
     const applied = applySetupTransaction({
       currentDraft: draft,
@@ -97,6 +106,28 @@ describe("assistant → Build transaction integration", () => {
     expect(viaDirect.pot).toBeCloseTo(5.5, 10);
     expect(viaDirect.stack).toBeCloseTo(97.5, 10);
     expect(viaDirect.draftPatch.oopRange).toBe(fixture25.ranges.oop);
+  });
+
+  it("omitted rake assumes cEV catalogue entry", async () => {
+    const catalogue = createRangeProfileCatalogue([fixture25, fixture25Nl]);
+    const session = createAssistantSession();
+    const run = await session.run("Set up CO vs BB SRP", {
+      provider: createFakeAssistantProvider(),
+      catalogue,
+      getDraft: () => ({
+        ...DEFAULT_SPOT,
+        boardText: "",
+        oopRange: "",
+        ipRange: "",
+      }),
+      getRevision: () => 0,
+      preferences: emptyStudySetupPreferences(),
+    });
+    expect(run.status).toBe("draft");
+    expect(run.result?.profile?.id).toBe(fixture25.id);
+    expect(run.result?.summary.some((line) => /cEV|chip EV/i.test(line))).toBe(
+      true,
+    );
   });
 
   it("stale apply after manual edit is rejected", async () => {

@@ -1,3 +1,7 @@
+import {
+  DEFAULT_RAKE_ENVIRONMENT,
+  potTypeFromActions,
+} from "../setup/derive";
 import { openSizeFromActions } from "./parse";
 import type {
   MatchAlternative,
@@ -7,6 +11,26 @@ import type {
   RangeProfile,
   RangeProfileQuery,
 } from "./types";
+
+/** Normalize rake/stakes-environment keys; absent / chip-EV aliases → cEV. */
+export function normalizeRakeEnvironmentLabel(
+  label: string | null | undefined,
+): string {
+  const raw = (label ?? "").trim().toUpperCase();
+  if (
+    !raw ||
+    raw === "CEV" ||
+    raw === "CHIP EV" ||
+    raw === "CHIP_EV" ||
+    raw === "CHIP-EV" ||
+    raw === "NONE" ||
+    raw === "NO RAKE" ||
+    raw === "NORAKE"
+  ) {
+    return DEFAULT_RAKE_ENVIRONMENT.toUpperCase();
+  }
+  return raw.replace(/\s+/g, "");
+}
 
 function normPos(value: string | undefined): string | undefined {
   return value?.trim().toUpperCase();
@@ -125,13 +149,23 @@ function stakesLabelAgree(profile: RangeProfile, query: RangeProfileQuery): bool
   if (!query.stakesLabel) {
     return true;
   }
-  const label = profile.labels?.stakes?.trim().toUpperCase();
-  return label === query.stakesLabel.trim().toUpperCase();
+  return (
+    normalizeRakeEnvironmentLabel(profile.labels?.stakes) ===
+    normalizeRakeEnvironmentLabel(query.stakesLabel)
+  );
+}
+
+function potTypeAgree(profile: RangeProfile, query: RangeProfileQuery): boolean {
+  if (!query.potType) {
+    return true;
+  }
+  const got = potTypeFromActions(profile.preflopActions);
+  return got === query.potType;
 }
 
 /**
  * Key strategic fields that must all agree for an exact match.
- * Stakes alone is never sufficient — see {@link isExactMatch}.
+ * Rake/stakes labels alone are never sufficient — see {@link isExactMatch}.
  */
 function keyFieldsAgree(profile: RangeProfile, query: RangeProfileQuery): boolean {
   return (
@@ -139,7 +173,8 @@ function keyFieldsAgree(profile: RangeProfile, query: RangeProfileQuery): boolea
     formatAgree(profile, query) &&
     stackAgree(profile, query) &&
     openAgree(profile, query) &&
-    actionSequenceAgree(profile, query)
+    actionSequenceAgree(profile, query) &&
+    potTypeAgree(profile, query)
   );
 }
 
@@ -162,11 +197,12 @@ export function isExactMatch(profile: RangeProfile, query: RangeProfileQuery): b
     return false;
   }
 
-  // Stakes-only query: never exact.
+  // Rake/stakes-only query: never exact (100NL is an environment key, not a match alone).
   const hasStrategicConstraint =
     query.positions !== undefined ||
     query.stackBb !== undefined ||
     query.format !== undefined ||
+    query.potType !== undefined ||
     queryOpenSize(query) !== undefined ||
     (query.preflopActions !== undefined && query.preflopActions.length > 0);
 
@@ -247,8 +283,17 @@ function collectDifferences(
 
   if (query.stakesLabel && !stakesLabelAgree(profile, query)) {
     differences.push(
-      `different stakes label (profile ${profile.labels?.stakes ?? "none"}, query ${query.stakesLabel})`,
+      `different rake/stakes environment (profile ${profile.labels?.stakes ?? "none"}, query ${query.stakesLabel})`,
     );
+  }
+
+  if (query.potType) {
+    const got = potTypeFromActions(profile.preflopActions);
+    if (got !== query.potType) {
+      differences.push(
+        `different pot type (profile ${got ?? "unknown"}, query ${query.potType})`,
+      );
+    }
   }
 
   if (profile.legacyPreset) {
@@ -281,7 +326,18 @@ function isNearMiss(profile: RangeProfile, query: RangeProfileQuery): boolean {
 
   const shareStakes = query.stakesLabel !== undefined && stakesLabelAgree(profile, query);
 
-  return sharePosition || shareFormat || shareOpen || shareStack || shareStakes;
+  const sharePotType =
+    query.potType !== undefined &&
+    potTypeFromActions(profile.preflopActions) === query.potType;
+
+  return (
+    sharePosition ||
+    shareFormat ||
+    shareOpen ||
+    shareStack ||
+    shareStakes ||
+    sharePotType
+  );
 }
 
 /**

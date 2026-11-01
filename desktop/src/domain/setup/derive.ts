@@ -1,4 +1,17 @@
-import type { PreflopAction } from "./types";
+import type { PreflopAction, PotType } from "./types";
+
+/**
+ * Default preflop starting stack when the player does not mention stack depth.
+ * Independent of rake/stakes labels such as "100NL" (those never imply stack).
+ */
+export const DEFAULT_STARTING_STACK_BB = 100;
+
+/**
+ * Default rake / stakes-environment key when the player does not name one.
+ * cEV = chip EV (no rake). Distinct from labels like "100NL" that select a
+ * rake structure; never implies stack depth.
+ */
+export const DEFAULT_RAKE_ENVIRONMENT = "cEV";
 
 export interface BlindStructure {
   sb: number;
@@ -33,8 +46,9 @@ export interface DerivePostflopResult {
 const DEFAULT_BLINDS: BlindStructure = { sb: 0.5, bb: 1 };
 
 /**
- * Stakes labels (e.g. "100NL") never imply stack depth. 100NL ≠ 100bb.
- * Stack comes only from an explicit request, selected profile, or saved preference.
+ * Rake/stakes-environment labels (e.g. "100NL") never imply stack depth.
+ * 100NL ≠ 100bb. Unspecified stacks default via {@link DEFAULT_STARTING_STACK_BB}
+ * in the assistant/resolver — not by parsing the NL label.
  */
 export function stakesLabelImpliesStack(
   _stakesLabel: string | null | undefined,
@@ -46,6 +60,63 @@ export function parseStakesLabelStackBb(
   _stakesLabel: string | null | undefined,
 ): number | undefined {
   return undefined;
+}
+
+/**
+ * Resolve the starting-stack assumption for matching/derivation.
+ * Explicit request/preference wins; otherwise assume 100bb when stacks are silent.
+ * Never derive from a rake label such as "100NL".
+ */
+export function resolveStartingStackBb(args: {
+  explicitStackBb?: number;
+  preferenceStackBb?: number;
+  profileStackBb?: number;
+}): { stackBb: number; source: "explicit" | "preference" | "profile" | "default" } {
+  if (
+    args.explicitStackBb !== undefined &&
+    Number.isFinite(args.explicitStackBb) &&
+    args.explicitStackBb > 0
+  ) {
+    return { stackBb: args.explicitStackBb, source: "explicit" };
+  }
+  if (
+    args.preferenceStackBb !== undefined &&
+    Number.isFinite(args.preferenceStackBb) &&
+    args.preferenceStackBb > 0
+  ) {
+    return { stackBb: args.preferenceStackBb, source: "preference" };
+  }
+  if (
+    args.profileStackBb !== undefined &&
+    Number.isFinite(args.profileStackBb) &&
+    args.profileStackBb > 0
+  ) {
+    return { stackBb: args.profileStackBb, source: "profile" };
+  }
+  return { stackBb: DEFAULT_STARTING_STACK_BB, source: "default" };
+}
+
+/** Classify preflop history into SRP / 3BP / 4BP from aggressive actions. */
+export function potTypeFromActions(
+  actions: ReadonlyArray<{ kind: string }>,
+): PotType | undefined {
+  let aggressive = 0;
+  for (const step of actions) {
+    const kind = step.kind.toLowerCase();
+    if (kind === "open" || kind === "raise" || kind === "bet") {
+      aggressive += 1;
+    }
+  }
+  if (aggressive <= 0) {
+    return undefined;
+  }
+  if (aggressive === 1) {
+    return "SRP";
+  }
+  if (aggressive === 2) {
+    return "3BP";
+  }
+  return "4BP";
 }
 
 export interface PostflopSeatAssignment {

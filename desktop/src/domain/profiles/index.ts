@@ -31,7 +31,11 @@ export {
   type ParseResult,
 } from "./parse";
 
-export { isExactMatch, matchRangeProfiles } from "./match";
+export {
+  isExactMatch,
+  matchRangeProfiles,
+  normalizeRakeEnvironmentLabel,
+} from "./match";
 
 export {
   createRangeProfileCatalogue,

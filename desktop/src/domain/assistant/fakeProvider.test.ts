@@ -19,6 +19,15 @@ const fixture25 = parseRangeProfileDocument(
     "utf8",
   ),
 );
+const fixture25Nl = parseRangeProfileDocument(
+  readFileSync(
+    join(
+      here,
+      "../../../../configs/range-profiles/fixture-co-bb-srp-100bb-2.5x-100nl.json",
+    ),
+    "utf8",
+  ),
+);
 const fixture3x = parseRangeProfileDocument(
   readFileSync(
     join(
@@ -29,7 +38,9 @@ const fixture3x = parseRangeProfileDocument(
   ),
 );
 
-const profiles = [fixture25, fixture3x].map((p) => profileToMeta(p));
+const profiles = [fixture25, fixture25Nl, fixture3x].map((p) =>
+  profileToMeta(p),
+);
 
 function request(text: string) {
   return {
@@ -44,22 +55,57 @@ function request(text: string) {
 describe("FakeAssistantProvider", () => {
   const provider = createFakeAssistantProvider();
 
-  it("prepares CO vs BB SRP with 100NL profile id (no range weights)", async () => {
+  it("prepares CO vs BB SRP with 100NL as rake structure (no range weights)", async () => {
     const proposal = await provider.interpret(
-      request("Set up CO vs BB SRP using my 100NL profile"),
+      request("Set up CO vs BB SRP with 100NL ranges"),
     );
     expect(proposal.kind).toBe("prepare_study");
     if (proposal.kind !== "prepare_study") return;
     expect(proposal.intent.mode).toBe("create");
     expect(proposal.intent.oopPosition).toBe("BB");
     expect(proposal.intent.ipPosition).toBe("CO");
+    expect(proposal.intent.potType).toBe("SRP");
     expect(proposal.intent.stakesLabel).toBe("100NL");
-    expect(proposal.selectedProfileId).toBe(fixture25.id);
+    // Stack still omitted — resolve assumes 100bb; 100NL must not imply stack.
+    expect(proposal.intent.stackBb).toBeUndefined();
+    expect(proposal.selectedProfileId).toBe(fixture25Nl.id);
     const serialized = JSON.stringify(proposal);
-    expect(serialized).not.toContain(fixture25.ranges.oop);
-    expect(serialized).not.toContain(fixture25.ranges.ip);
-    // Must not dump thousands of raw combos.
+    expect(serialized).not.toContain(fixture25Nl.ranges.oop);
+    expect(serialized).not.toContain(fixture25Nl.ranges.ip);
     expect(serialized.length).toBeLessThan(2000);
+  });
+
+  it("omits rake/stack on the proposal when silent so resolve can assume cEV / 100bb", async () => {
+    const proposal = await provider.interpret(
+      request("Set up CO vs BB SRP"),
+    );
+    expect(proposal.kind).toBe("prepare_study");
+    if (proposal.kind !== "prepare_study") return;
+    // Silence defaults are applied in resolve, not invented as explicit request fields.
+    expect(proposal.intent.stakesLabel).toBeUndefined();
+    expect(proposal.intent.stackBb).toBeUndefined();
+    expect(proposal.stakesLabel).toBeUndefined();
+    expect(proposal.stackBb).toBeUndefined();
+    expect(proposal.intent.potType).toBe("SRP");
+    expect(proposal.selectedProfileId).toBe(fixture25.id);
+  });
+
+  it("clarifies when pot type / preflop action is missing", async () => {
+    const proposal = await provider.interpret(
+      request("Set up CO vs BB with 100NL ranges"),
+    );
+    expect(proposal.kind).toBe("clarify");
+    if (proposal.kind !== "clarify") return;
+    expect(proposal.questions[0]).toMatch(/pot type|SRP|3BP|4BP/i);
+  });
+
+  it("does not treat “my 100NL profile” as a personal profile without pot type", async () => {
+    const proposal = await provider.interpret(
+      request("Set up CO vs BB using my 100NL profile"),
+    );
+    expect(proposal.kind).toBe("clarify");
+    if (proposal.kind !== "clarify") return;
+    expect(proposal.questions[0]).toMatch(/pot type|SRP|3BP|4BP/i);
   });
 
   it("updates board without emitting ranges", async () => {
@@ -124,9 +170,12 @@ describe("FakeAssistantProvider", () => {
     expect(preflop.kind).toBe("unsupported");
   });
 
-  it("clarifies ambiguous stakes-only requests", async () => {
+  it("clarifies rake-only requests and does not invent stack from 100NL", async () => {
     const proposal = await provider.interpret(request("100NL"));
     expect(proposal.kind).toBe("clarify");
+    if (proposal.kind !== "clarify") return;
+    expect(proposal.questions[0]).toMatch(/rake structure|stakes environment/i);
+    expect(proposal.questions[0]).not.toMatch(/100bb/i);
   });
 
   it("is constructible via class export", () => {
