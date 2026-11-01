@@ -424,6 +424,8 @@ void expect_oracle(
     CHECK(page.combos.size() == view.hands.size());
     CHECK(page.utility_basis == "root_centered");
     CHECK(page.units == "chips");
+    // Local decision EV is root-centered + local_offset (Fold → 0 under chip/ICM).
+    CHECK(std::isfinite(page.local_offset));
     CHECK(page.reach_defined == view.reach_defined);
     for (std::size_t action = 0; action < view.actions.size(); ++action)
     {
@@ -547,6 +549,8 @@ void test_turn_bluff_fixture()
     CHECK(response.ev_defined[static_cast<std::size_t>(aces)]);
     CHECK_NEAR(page_action(response, aces, fold), -50.0, 1e-9);
     CHECK_NEAR(page_action(response, aces, call), -50.0, 1e-9);
+    CHECK_NEAR(response.local_offset, 50.0, 1e-9);
+    CHECK_NEAR(page_action(response, aces, fold) + response.local_offset, 0.0, 1e-9);
     expect_oracle(config, solver, root, 1e-9);
     expect_oracle(config, solver, facing, 1e-9);
     const StreetActionValues again = solver.action_values(facing);
@@ -1348,6 +1352,8 @@ void test_river_bluff_fixture()
     CHECK(response.ev_defined[static_cast<std::size_t>(aces)]);
     CHECK_NEAR(page_action(response, aces, fold), -50.0, 1e-9);
     CHECK_NEAR(page_action(response, aces, call), -50.0, 1e-9);
+    CHECK_NEAR(response.local_offset, 50.0, 1e-9);
+    CHECK_NEAR(page_action(response, aces, fold) + response.local_offset, 0.0, 1e-9);
     const StreetActionValues again = solver.action_values(facing);
     CHECK(again.query_seconds == 0.0);
     CHECK_NEAR(page_action(again, aces, call), -50.0, 1e-9);

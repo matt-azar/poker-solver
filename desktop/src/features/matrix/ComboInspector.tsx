@@ -7,6 +7,7 @@ import { useStudyStore } from "../../state/studyStore";
 export function ComboInspector() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const nodeValues = useStudyStore((s) => s.nodeValues);
+  const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
   const selectedCell = useStudyStore((s) => s.selectedCell);
   const hoverCell = useStudyStore((s) => s.hoverCell);
   const calculateEv = useStudyStore((s) => s.calculateEv);
@@ -38,7 +39,10 @@ export function ComboInspector() {
     [locks, currentNode],
   );
 
-  const ev = cell && currentNode ? groupEv(currentNode, nodeValues, cell) : null;
+  const ev =
+    cell && currentNode
+      ? groupEv(currentNode, nodeValues, cell, evDisplayBasis)
+      : null;
   const pinned = Boolean(selectedCell);
 
   return (
@@ -65,7 +69,9 @@ export function ComboInspector() {
               </strong>
             </div>
             <div>
-              <span className="muted">Mixed EV</span>
+              <span className="muted">
+                {evDisplayBasis === "local" ? "Mixed EV (local)" : "Mixed EV (global)"}
+              </span>
               <strong className="tabular">
                 {ev ? ev.mixed.toFixed(3) : nodeValues?.pending ? "…" : "—"}
               </strong>

@@ -186,12 +186,16 @@ public:
 // Chips are root-centered: the same terminal utility as the recorded solver EV.
 // ev_defined is independent of reach_defined. A zero-reach hand can still have
 // a counterfactual action value when some compatible opponent reach remains.
+// local_offset is -U_i(fold-now) for the acting seat: add it to root-centered
+// values for local decision EV (chips already invested are sunk; fold → 0 under
+// ordinary chip/ICM terminals without path incentives on Fold).
 struct StreetActionValues
 {
     std::string node_id;
     int player = -1;
     std::string units = "chips";
     std::string utility_basis = "root_centered";
+    double local_offset = 0.0;
     bool reach_defined = false;
     bool node_ev_defined = false;
     double node_ev = 0.0;

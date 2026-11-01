@@ -189,6 +189,8 @@ export interface NodePayload {
   [key: string]: unknown;
 }
 
+export type EvDisplayBasis = "local" | "root_centered";
+
 export interface ActionValuesPayload {
   pending?: boolean;
   solution_id?: string;
@@ -196,12 +198,17 @@ export interface ActionValuesPayload {
   status_generation?: number;
   node_id?: string;
   units?: string;
+  /** Engine values are root_centered; UI defaults to local via withEvBasis. */
   utility_basis?: string;
+  /** Add to root-centered chips for local decision EV (fold → 0 under chip/ICM). */
+  local_offset?: number | null;
+  actions?: string[];
   combos?: string[];
   value?: Array<number | null>;
   action_ev?: Array<Array<number | null>>;
   ev_defined?: boolean[];
   node_ev?: number | null;
+  node_ev_defined?: boolean;
   [key: string]: unknown;
 }
 

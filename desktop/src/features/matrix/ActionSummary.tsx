@@ -18,6 +18,8 @@ export function ActionSummary() {
   const setActionFilter = useStudyStore((s) => s.setActionFilter);
   const followAction = useStudyStore((s) => s.followAction);
   const nodeValues = useStudyStore((s) => s.nodeValues);
+  const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
+  const setEvDisplayBasis = useStudyStore((s) => s.setEvDisplayBasis);
 
   const actions = currentNode?.actions;
 
@@ -92,6 +94,26 @@ export function ActionSummary() {
             </button>
           );
         })}
+      </div>
+      <div className="action-summary__modes" role="group" aria-label="EV basis">
+        <button
+          type="button"
+          className="mode-btn"
+          aria-pressed={evDisplayBasis === "local"}
+          title="Local decision EV: chips already invested are sunk; Fold = 0"
+          onClick={() => setEvDisplayBasis("local")}
+        >
+          Local EV
+        </button>
+        <button
+          type="button"
+          className="mode-btn"
+          aria-pressed={evDisplayBasis === "root_centered"}
+          title="Root-centered chip EV including earlier investments"
+          onClick={() => setEvDisplayBasis("root_centered")}
+        >
+          Global EV
+        </button>
       </div>
       {(actions ?? []).map((label, index) => (
         <button

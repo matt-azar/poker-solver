@@ -15,6 +15,13 @@ let valuePoll = null;
 let categoryToken = 0;
 let selected = null;
 let drag = null;
+let evDisplayBasis = "local";
+try {
+  const storedEvBasis = localStorage.getItem("explorer-ev-basis");
+  if (storedEvBasis === "root_centered" || storedEvBasis === "local") {
+    evDisplayBasis = storedEvBasis;
+  }
+} catch (error) {}
 
 const weights = {oop: blank(), ip: blank()};
 
@@ -991,6 +998,12 @@ document.addEventListener("keydown", (event) => {
 $("calculate-ev").addEventListener("click", () => {
   calculateEv();
 });
+if ($("ev-basis")) {
+  $("ev-basis").value = evDisplayBasis;
+  $("ev-basis").addEventListener("change", (event) => {
+    setEvDisplayBasis(event.target.value);
+  });
+}
 
 $("save-solution").addEventListener("click", saveSolution);
 $("open-solution").addEventListener("click", openSolution);
@@ -1297,6 +1310,9 @@ function render(status) {
   $("node-line").textContent = "";
   $("node-meta").textContent = "";
   $("calculate-ev").hidden = true;
+  if ($("ev-basis-label")) {
+    $("ev-basis-label").hidden = true;
+  }
   $("compare-runouts").hidden = true;
   $("node-equity").hidden = !riverExport;
   $("node-categories").hidden = !riverExport;
@@ -1323,6 +1339,12 @@ function renderNode(node) {
   const host = $("node-actions");
   host.innerHTML = "";
   $("calculate-ev").hidden = node.kind !== "decision";
+  if ($("ev-basis-label")) {
+    $("ev-basis-label").hidden = node.kind !== "decision";
+    if ($("ev-basis")) {
+      $("ev-basis").value = evDisplayBasis;
+    }
+  }
   $("compare-runouts").hidden = node.kind !== "chance";
   $("node-equity").hidden = false;
   const boardLen = Array.isArray(node.board) ? node.board.length : 0;
@@ -1460,8 +1482,19 @@ function formatChips(value) {
   return Number(value).toFixed(3);
 }
 
+function displayValues(values) {
+  return withEvBasis(values, evDisplayBasis, currentNode && currentNode.actions);
+}
+
 function evSummary(values) {
-  const nodeEv = values.node_ev_defined ? formatChips(values.node_ev) + " chips" : "undefined";
+  const shown = displayValues(values) || values;
+  const nodeEv = shown.node_ev_defined || (shown.node_ev !== null && shown.node_ev !== undefined)
+    ? formatChips(shown.node_ev) + " chips"
+    : "undefined";
+  if (evDisplayBasis === "local") {
+    return "Node EV " + nodeEv
+      + ". Local decision EV (chips already invested are sunk; Fold = 0).";
+  }
   return "Node EV " + nodeEv + ". Chips, root-centered, including earlier investments.";
 }
 
@@ -1469,18 +1502,40 @@ function handEv(combo) {
   if (!nodeValues || !currentNode || nodeValues.pending || nodeValues.node_id !== currentNode.node_id) {
     return null;
   }
-  const index = (nodeValues.combos || []).indexOf(combo);
+  const shown = displayValues(nodeValues);
+  const index = (shown.combos || []).indexOf(combo);
   if (index < 0) {
     return null;
   }
-  if (!nodeValues.ev_defined[index]) {
+  if (!shown.ev_defined[index]) {
     return {defined: false};
   }
   return {
     defined: true,
-    actions: nodeValues.action_ev[index],
-    mixed: nodeValues.value[index]
+    actions: shown.action_ev[index],
+    mixed: shown.value[index]
   };
+}
+
+function setEvDisplayBasis(basis) {
+  evDisplayBasis = basis === "root_centered" ? "root_centered" : "local";
+  try {
+    localStorage.setItem("explorer-ev-basis", evDisplayBasis);
+  } catch (error) {}
+  const select = $("ev-basis");
+  if (select) {
+    select.value = evDisplayBasis;
+  }
+  if (currentNode) {
+    renderNode(currentNode);
+    if (selected) {
+      const cells = groupHands(currentNode);
+      const cell = cells.find((entry) => entry.text === selected.text);
+      if (cell) {
+        paintDetail(selected.player, cell);
+      }
+    }
+  }
 }
 
 function showCell(player, cell, button) {
@@ -1497,7 +1552,7 @@ function paintDetail(player, cell) {
   const mode = $("frequency") ? ($("frequency").value || "aggression") : "aggression";
   let text = cell.range_combos + " combos, " + frequencyLabel(mode, currentNode || {actions: []}) + " " + frequency;
   if (currentNode && nodeValues && !nodeValues.pending && nodeValues.node_id === currentNode.node_id) {
-    const grouped = groupEv(currentNode, nodeValues, cell);
+    const grouped = groupEv(currentNode, nodeValues, cell, evDisplayBasis);
     if (!grouped) {
       text += ". Group EV undefined";
     } else {

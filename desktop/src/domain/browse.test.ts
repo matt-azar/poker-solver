@@ -78,6 +78,36 @@ describe("browse strategy grouping", () => {
     expect(groupEv(node, values, kk)).toBeNull();
   });
 
+  it("defaults to local EV so Fold displays as 0", () => {
+    const node = {
+      reach_defined: true,
+      actions: ["Fold", "Call"],
+      combos: ["AhAd"],
+      marginal: [1],
+      strategy: [[0.5, 0.5]],
+      node_id: "facing",
+    };
+    const values = {
+      node_id: "facing",
+      utility_basis: "root_centered",
+      local_offset: 50,
+      actions: ["Fold", "Call"],
+      combos: ["AhAd"],
+      ev_defined: [true],
+      value: [-50],
+      action_ev: [[-50, -50]],
+      node_ev: -50,
+    };
+    const aa = cellOf(node, "AA");
+    const local = groupEv(node, values, aa, "local");
+    expect(local?.action[0]).toBeCloseTo(0, 12);
+    expect(local?.action[1]).toBeCloseTo(0, 12);
+    expect(local?.mixed).toBeCloseTo(0, 12);
+    const global = groupEv(node, values, aa, "root_centered");
+    expect(global?.action[0]).toBeCloseTo(-50, 12);
+    expect(global?.mixed).toBeCloseTo(-50, 12);
+  });
+
   it("gates stale fetches and generations", () => {
     expect(shouldApply(3, 3, "s1", "s1")).toBe(true);
     expect(shouldApply(2, 3, "s1", "s1")).toBe(false);

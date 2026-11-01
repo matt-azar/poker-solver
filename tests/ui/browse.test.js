@@ -15,6 +15,7 @@ const {
   groupHands,
   frequencyOf,
   groupEv,
+  withEvBasis,
   shouldApply,
   nextGeneration,
   solutionNeedsReload,
@@ -137,6 +138,36 @@ const zeroMass = {
 assert.strictEqual(groupEv(zeroMass, splitValues, cellOf(zeroMass, "AKs")), null);
 assert.strictEqual(groupEv(split, Object.assign({}, splitValues, {pending: true}), cellOf(split, "AKs")), null);
 assert.strictEqual(groupEv(Object.assign({}, split, {reach_defined: false}), splitValues, cellOf(split, "AKs")), null);
+
+const facingEvNode = {
+  node_id: "facing",
+  reach_defined: true,
+  actions: ["Fold", "Call"],
+  combos: ["AhAd"],
+  marginal: [1],
+  strategy: [[0.5, 0.5]]
+};
+const facingEvValues = {
+  node_id: "facing",
+  utility_basis: "root_centered",
+  local_offset: 50,
+  actions: ["Fold", "Call"],
+  combos: ["AhAd"],
+  pending: false,
+  ev_defined: [true],
+  action_ev: [[-50, -25]],
+  value: [-37.5],
+  node_ev: -37.5
+};
+const localFacing = groupEv(facingEvNode, facingEvValues, cellOf(facingEvNode, "AA"), "local");
+assert.ok(Math.abs(localFacing.action[0] - 0) < 1e-12);
+assert.ok(Math.abs(localFacing.action[1] - 25) < 1e-12);
+assert.ok(Math.abs(localFacing.mixed - 12.5) < 1e-12);
+const globalFacing = groupEv(facingEvNode, facingEvValues, cellOf(facingEvNode, "AA"), "root_centered");
+assert.ok(Math.abs(globalFacing.action[0] + 50) < 1e-12);
+const localized = withEvBasis(facingEvValues, "local");
+assert.strictEqual(localized.utility_basis, "local");
+assert.ok(Math.abs(Number(localized.node_ev) - 12.5) < 1e-12);
 
 function blankGrid() {
   return Array.from({length: 13}, () => Array(13).fill(0));

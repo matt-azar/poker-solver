@@ -1,11 +1,74 @@
 import type {
   ActionValuesPayload,
+  EvDisplayBasis,
   FrequencyMode,
   GroupEv,
   HandCell,
   NodePayload,
 } from "./types";
 import { RANKS } from "./types";
+
+export function foldActionIndex(actions: string[] | null | undefined): number {
+  if (!actions) {
+    return -1;
+  }
+  return actions.findIndex((label) => label === "Fold");
+}
+
+/**
+ * Map root-centered action values onto the requested display basis.
+ * Local EV treats chips already invested as sunk: EV(fold) = 0 when Fold is legal
+ * (or when the engine local_offset matches the fold terminal).
+ */
+export function withEvBasis(
+  values: ActionValuesPayload | null | undefined,
+  basis: EvDisplayBasis = "local",
+  actionLabels?: string[] | null,
+): ActionValuesPayload | null | undefined {
+  if (!values || values.pending || basis === "root_centered") {
+    return values;
+  }
+  if (values.utility_basis === "local") {
+    return values;
+  }
+  const actions = actionLabels || values.actions || [];
+  const foldIdx = foldActionIndex(actions);
+  const offset = Number(values.local_offset ?? 0);
+  const actionEv = (values.action_ev || []).map((row, hand) => {
+    if (!row || !values.ev_defined?.[hand]) {
+      return row;
+    }
+    const baseline =
+      foldIdx >= 0 ? Number(row[foldIdx] ?? 0) : -offset;
+    return row.map((entry) =>
+      entry == null || Number.isNaN(Number(entry))
+        ? entry
+        : Number(entry) - baseline,
+    );
+  });
+  const mixed = (values.value || []).map((entry, hand) => {
+    if (!values.ev_defined?.[hand] || entry == null || Number.isNaN(Number(entry))) {
+      return entry;
+    }
+    const row = values.action_ev?.[hand];
+    const baseline =
+      foldIdx >= 0 && row
+        ? Number(row[foldIdx] ?? 0)
+        : -offset;
+    return Number(entry) - baseline;
+  });
+  const nodeEv =
+    values.node_ev == null || Number.isNaN(Number(values.node_ev))
+      ? values.node_ev
+      : Number(values.node_ev) + offset;
+  return {
+    ...values,
+    utility_basis: "local",
+    action_ev: actionEv,
+    value: mixed,
+    node_ev: nodeEv ?? null,
+  };
+}
 
 export function isAggressive(label: string): boolean {
   return label.startsWith("Bet") || label.startsWith("Raise");
@@ -131,14 +194,16 @@ export function groupEv(
   node: NodePayload | null | undefined,
   values: ActionValuesPayload | null | undefined,
   cell: HandCell | null | undefined,
+  basis: EvDisplayBasis = "local",
 ): GroupEv | null {
-  if (!node || !node.reach_defined || !values || values.pending || !cell) {
+  const displayed = withEvBasis(values, basis, node?.actions);
+  if (!node || !node.reach_defined || !displayed || displayed.pending || !cell) {
     return null;
   }
-  if (values.node_id && node.node_id && values.node_id !== node.node_id) {
+  if (displayed.node_id && node.node_id && displayed.node_id !== node.node_id) {
     return null;
   }
-  const combos = values.combos || node.combos || [];
+  const combos = displayed.combos || node.combos || [];
   let mass = 0;
   let mixed = 0;
   const action = (node.actions || []).map(() => 0);
@@ -152,12 +217,12 @@ export function groupEv(
     if (!(marginal > 0)) {
       continue;
     }
-    if (!values.ev_defined || !values.ev_defined[valueIndex]) {
+    if (!displayed.ev_defined || !displayed.ev_defined[valueIndex]) {
       return null;
     }
-    const row = values.action_ev?.[valueIndex] || [];
+    const row = displayed.action_ev?.[valueIndex] || [];
     mass += marginal;
-    mixed += marginal * Number(values.value?.[valueIndex] ?? 0);
+    mixed += marginal * Number(displayed.value?.[valueIndex] ?? 0);
     action.forEach((_, index) => {
       action[index] += marginal * Number(row[index] ?? 0);
     });
