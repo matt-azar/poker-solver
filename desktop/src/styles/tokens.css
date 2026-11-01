@@ -12,6 +12,11 @@
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --danger: #a33b32;
   --ok: #2f7a52;
+  /* Four-color deck: hearts red, diamonds blue, clubs green, spades dark. */
+  --suit-heart: #a33b32;
+  --suit-diamond: #1f5fbf;
+  --suit-club: #2f7a52;
+  --suit-spade: #1c2530;
   --hover-outline: #8a97a8;
   --selection-outline: #285f99;
   --empty-cell: #e4e8ed;
@@ -31,6 +36,10 @@
   --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
   --danger: #d07168;
   --ok: #6fb08a;
+  --suit-heart: #d07168;
+  --suit-diamond: #7fa8d1;
+  --suit-club: #6fb08a;
+  --suit-spade: #e7ecf2;
   --hover-outline: #6a7788;
   --selection-outline: #7fa8d1;
   --empty-cell: #1a1e24;

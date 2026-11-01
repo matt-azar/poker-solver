@@ -81,8 +81,8 @@ explorer   # serves desktop/dist when present
 | Browser Study client + localhost `explorer` | Supported |
 | Vite `/api` proxy in `npm run dev` | Supported |
 | `explorer` serving `desktop/dist` | Supported |
-| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns `binaries/holdem-explorer` on port 8765; webview loads Vite `dist` |
-| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads `holdem-study-windows-installer` (`Holdem Study_0.1.0_x64-setup.exe`) |
+| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns `binaries/holdem-explorer` on port 8765, waits until the port accepts connections, exposes `ensure_engine` for Reconnect; webview loads Vite `dist` |
+| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads `holdem-study-windows-installer` (`Holdem Study_0.1.0_x64-setup.exe`). POSTINSTALL requires `holdem-explorer.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. Packaged explorer uses the static MSVC CRT |
 | Native Open/Save dialogs | Browser prompts; Tauri adapter uses `@tauri-apps/plugin-dialog` when present (prompt fallback) |
 | Code-signed official release | Not yet — CI artifact is unsigned |
 
@@ -90,8 +90,8 @@ explorer   # serves desktop/dist when present
 
 Prefer the [GitHub Release](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.0-windows), or Actions → **Windows Installer** → artifact `holdem-study-windows-installer`.
 
-1. Run `Holdem Study_0.1.0_x64-setup.exe` (current-user install; WebView2 may bootstrap if missing).
-2. Launch **Holdem Study** from the Start menu — no CMake/`npm` required.
+1. Run `Holdem Study_0.1.0_x64-setup.exe` (current-user install; WebView2 may bootstrap if missing). Setup fails loudly if the engine sidecar is missing and clears Mark-of-the-Web on the installed exes.
+2. Launch **Holdem Study** from the Start menu — the shell starts `holdem-explorer` on `127.0.0.1:8765` before the Study UI polls. No CMake/`npm` required.
 
 Installer product name is `Holdem Study` (no apostrophe) because NSIS shortcut macros reject `Hold'em`. The window title remains `Hold'em Study`.
 
