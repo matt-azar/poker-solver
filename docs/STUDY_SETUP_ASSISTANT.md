@@ -1,10 +1,12 @@
 # Study setup assistant
 
-Natural-language study creation and setup edits for the desktop Build workspace. The assistant interprets a request, resolves standard/GTO catalogue ranges and derived quantities in application code, then applies a draft through the same `SpotDraft` path as manual edits.
+Natural-language study creation and setup edits for Hold'em Study. The assistant interprets a request, resolves standard/GTO catalogue ranges and derived quantities in application code, then applies a draft through the same `SpotDraft` path as manual edits.
+
+The primary UX is the floating **Study assistant** (**Help → Study assistant…**): a hideable, movable, resizable chat available on every workspace. It answers product questions and proposes Build mutations (parameters, ranges, board, tree). Model-facing packs live under [`docs/ai-context/`](ai-context/README.md). The Build panel **Setup assistant** remains as an alternate entry for setup-only flows.
 
 ## What players can do
 
-From **Build → Setup assistant**:
+From **Help → Study assistant…** (or **Build → Setup assistant**):
 
 - Prepare a CO vs BB SRP (and similar) study from a matching catalogue entry keyed by pot type, rake structure, positions, and stacks
 - Change the board, flop bet sizes, or duplicate a setup at another stack
@@ -117,13 +119,15 @@ Without a key the script exits 0 and reports `skipped`. Ordinary `npm test` / CI
 | Live eval runner | `desktop/scripts/run-assistant-live-eval.mjs` |
 | Credential lookup | `desktop/src/platform/credentials.ts` + Tauri `assistant_secret_*` |
 | Apply transaction + revision | `studyStore.applySetupDraft` |
-| UI | `AssistantPanel.tsx`, `RangeCataloguePanel.tsx` |
+| UI | Floating `StudyAssistantWindow` (shell), Build `AssistantPanel.tsx`, `RangeCataloguePanel.tsx` |
+| Model context packs | `docs/ai-context/` (`unified.md`, `help.md`, `setup-assistant.md`) |
+| Unified chat router | `desktop/src/domain/assistant/unifiedChat.ts` |
 
 ## Limits / unresolved
 
 - Live OpenAI field accuracy is measured by `npm run test:assistant-live` with credentials; not gated in ordinary CI (cost / nondeterminism)
-- No bundled production strategic pack — user import or synthetic fixtures only
+- Floating chat geometry persists; message transcript is session-only (not durable)
+- Deep integration today covers help answers + study-setup mutations (ranges/board/tree/stacks). Theme/layout toggles and starting Solve from chat are not yet tools.
 - Tauri credential store is an app-config file, not OS keychain; distributed products should proxy through an authenticated backend
 - Full-draft undo covers assistant transactions; ordinary Build field edits still use range-only undo plus revision bumps
-- Chat history is not persisted; study reproducibility uses draft + catalogue snapshot
-- Strategy explanations and autonomous research are out of scope
+- Strategy explanations and autonomous research remain out of scope for truthful GTO claims

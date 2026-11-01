@@ -11,11 +11,19 @@ interface Props {
   onWorkspace: (id: WorkspaceId) => void;
   helpOpen: boolean;
   onHelpOpen: (open: boolean) => void;
+  /** Show the persistent Help chat window (does not close shortcuts overlay). */
+  onHelpChatOpen: () => void;
 }
 
 type MenuId = "file" | "solve" | "tree" | "view" | "help" | null;
 
-export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props) {
+export function MenuBar({
+  workspace,
+  onWorkspace,
+  helpOpen,
+  onHelpOpen,
+  onHelpChatOpen,
+}: Props) {
   const [openMenu, setOpenMenu] = useState<MenuId>(null);
   const rootRef = useRef<HTMLElement>(null);
 
@@ -264,6 +272,10 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
           open={openMenu}
           setOpen={setOpenMenu}
           items={[
+            {
+              label: "Study assistant…",
+              onClick: () => onHelpChatOpen(),
+            },
             {
               label: "Keyboard shortcuts",
               shortcut: "?",
