@@ -4,6 +4,7 @@ import { frequencyOf, groupEv, groupHands, strategyMix } from "../../domain/brow
 import {
   RANKS,
   type ActionValuesPayload,
+  type EvDisplayBasis,
   type FrequencyMode,
   type HandCell,
   type MatrixMode,
@@ -40,10 +41,11 @@ function maxAbsEv(
   cells: HandCell[],
   node: NodePayload,
   values: ActionValuesPayload,
+  basis: EvDisplayBasis,
 ): number {
   let max = 0;
   for (const cell of cells) {
-    const ev = groupEv(node, values, cell);
+    const ev = groupEv(node, values, cell, basis);
     if (ev) {
       max = Math.max(max, Math.abs(ev.mixed));
     }
@@ -56,6 +58,7 @@ export function RangeMatrix() {
   const nodeValues = useStudyStore((s) => s.nodeValues);
   const matrixMode = useStudyStore((s) => s.matrixMode);
   const frequencyMode = useStudyStore((s) => s.frequencyMode);
+  const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
   const selectedCell = useStudyStore((s) => s.selectedCell);
   const hoverCell = useStudyStore((s) => s.hoverCell);
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
@@ -82,8 +85,8 @@ export function RangeMatrix() {
     if (!currentNode || !nodeValues || nodeValues.pending) {
       return 1;
     }
-    return maxAbsEv(cells, currentNode, nodeValues);
-  }, [cells, currentNode, nodeValues]);
+    return maxAbsEv(cells, currentNode, nodeValues, evDisplayBasis);
+  }, [cells, currentNode, nodeValues, evDisplayBasis]);
 
   return (
     <div className="range-matrix-wrap">
@@ -112,6 +115,7 @@ export function RangeMatrix() {
             actionFilter={actionFilter}
             currentNode={currentNode}
             nodeValues={nodeValues}
+            evDisplayBasis={evDisplayBasis}
             evScale={evScale}
             setSelectedCell={setSelectedCell}
             setHoverCell={setHoverCell}
@@ -139,6 +143,7 @@ interface RowProps {
   actionFilter: number | null;
   currentNode: NodePayload | null;
   nodeValues: ActionValuesPayload | null;
+  evDisplayBasis: EvDisplayBasis;
   evScale: number;
   setSelectedCell: (cell: Selected | null) => void;
   setHoverCell: (cell: Selected | null) => void;
@@ -155,6 +160,7 @@ function MatrixRow({
   actionFilter,
   currentNode,
   nodeValues,
+  evDisplayBasis,
   evScale,
   setSelectedCell,
   setHoverCell,
@@ -202,7 +208,7 @@ function MatrixRow({
             solid = rangeFill(weight);
             sub = `${(weight * 100).toFixed(0)}`;
           } else if (matrixMode === "ev") {
-            const ev = groupEv(currentNode, nodeValues, cell);
+            const ev = groupEv(currentNode, nodeValues, cell, evDisplayBasis);
             if (ev) {
               solid = evFill(ev.mixed, evScale);
               sub = ev.mixed.toFixed(1);
@@ -217,7 +223,7 @@ function MatrixRow({
               sub = `${(freq * 100).toFixed(0)}`;
             }
           } else if (matrixMode === "strategy-ev") {
-            const ev = groupEv(currentNode, nodeValues, cell);
+            const ev = groupEv(currentNode, nodeValues, cell, evDisplayBasis);
             if (ev) {
               sub = ev.mixed.toFixed(1);
             }

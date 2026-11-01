@@ -6047,6 +6047,19 @@ struct StreetBatchSolver::Engine
         {
             page.node_ev = node_ev;
         }
+        // Sunk-cost shift for UI local EV: acting seat's utility if they folded now.
+        {
+            PlayerPayoff fold_pay = apply_icm_terminal(
+                config.icm,
+                ChipPayoff::terminal(
+                    config.pot,
+                    node.contrib[0],
+                    node.contrib[1],
+                    actor,
+                    0,
+                    config.rake));
+            page.local_offset = -fold_pay.utility[static_cast<std::size_t>(actor)];
+        }
         page.query_seconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - started).count();
         return page;

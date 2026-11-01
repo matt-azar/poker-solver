@@ -177,6 +177,12 @@
     </label>
     <div id="node-actions"></div>
     <button type="button" id="calculate-ev" hidden>Calculate EVs</button>
+    <label id="ev-basis-label" hidden>EV basis
+      <select id="ev-basis">
+        <option value="local" selected>Local (fold = 0)</option>
+        <option value="root_centered">Global (root-centered)</option>
+      </select>
+    </label>
     <button type="button" id="compare-runouts" hidden>Compare runouts</button>
     <button type="button" id="node-equity" hidden>Check-down equity</button>
     <button type="button" id="node-categories" hidden>Hand categories</button>

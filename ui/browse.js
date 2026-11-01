@@ -4,6 +4,59 @@ function isAggressive(label) {
   return label.startsWith("Bet") || label.startsWith("Raise");
 }
 
+function foldActionIndex(actions) {
+  if (!actions) {
+    return -1;
+  }
+  return actions.findIndex((label) => label === "Fold");
+}
+
+// Local EV treats chips already invested as sunk cost (fold → 0). Engine payloads
+// stay root_centered; pass basis "root_centered" to keep global chips.
+function withEvBasis(values, basis, actionLabels) {
+  const mode = basis || "local";
+  if (!values || values.pending || mode === "root_centered") {
+    return values;
+  }
+  if (values.utility_basis === "local") {
+    return values;
+  }
+  const actions = actionLabels || values.actions || [];
+  const foldIdx = foldActionIndex(actions);
+  const offset = Number(values.local_offset || 0);
+  const actionEv = (values.action_ev || []).map((row, hand) => {
+    if (!row || !values.ev_defined || !values.ev_defined[hand]) {
+      return row;
+    }
+    const baseline = foldIdx >= 0 ? Number(row[foldIdx] || 0) : -offset;
+    return row.map((entry) =>
+      entry === null || entry === undefined || Number.isNaN(Number(entry))
+        ? entry
+        : Number(entry) - baseline);
+  });
+  const mixed = (values.value || []).map((entry, hand) => {
+    if (!values.ev_defined || !values.ev_defined[hand]
+        || entry === null || entry === undefined || Number.isNaN(Number(entry))) {
+      return entry;
+    }
+    const row = values.action_ev && values.action_ev[hand];
+    const baseline = foldIdx >= 0 && row
+      ? Number(row[foldIdx] || 0)
+      : -offset;
+    return Number(entry) - baseline;
+  });
+  const nodeEv = values.node_ev === null || values.node_ev === undefined
+      || Number.isNaN(Number(values.node_ev))
+    ? values.node_ev
+    : Number(values.node_ev) + offset;
+  return Object.assign({}, values, {
+    utility_basis: "local",
+    action_ev: actionEv,
+    value: mixed,
+    node_ev: nodeEv
+  });
+}
+
 function frequencyOptions(node) {
   const options = [{id: "aggression", label: "Bet or raise"}];
   (node.actions || []).forEach((label, index) => {
@@ -100,14 +153,16 @@ function frequencyOf(cell, mode) {
 
 // Posterior-weighted. Each hand contributes its own mixed value, m(h) * V(h).
 // A zero-mass group stays null even when the counterfactual hand values exist.
-function groupEv(node, values, cell) {
-  if (!node || !node.reach_defined || !values || values.pending || !cell) {
+// Default display basis is local decision EV.
+function groupEv(node, values, cell, basis) {
+  const displayed = withEvBasis(values, basis || "local", node && node.actions);
+  if (!node || !node.reach_defined || !displayed || displayed.pending || !cell) {
     return null;
   }
-  if (values.node_id && node.node_id && values.node_id !== node.node_id) {
+  if (displayed.node_id && node.node_id && displayed.node_id !== node.node_id) {
     return null;
   }
-  const combos = values.combos || node.combos || [];
+  const combos = displayed.combos || node.combos || [];
   let mass = 0;
   let mixed = 0;
   const action = (node.actions || []).map(() => 0);
@@ -121,12 +176,12 @@ function groupEv(node, values, cell) {
     if (!(marginal > 0)) {
       continue;
     }
-    if (!values.ev_defined || !values.ev_defined[valueIndex]) {
+    if (!displayed.ev_defined || !displayed.ev_defined[valueIndex]) {
       return null;
     }
-    const row = values.action_ev[valueIndex] || [];
+    const row = displayed.action_ev[valueIndex] || [];
     mass += marginal;
-    mixed += marginal * Number(values.value[valueIndex]);
+    mixed += marginal * Number(displayed.value[valueIndex]);
     action.forEach((_, index) => {
       action[index] += marginal * Number(row[index]);
     });

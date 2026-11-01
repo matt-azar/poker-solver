@@ -1727,6 +1727,8 @@ std::string json_action_values(
     append_escaped(out, page.units);
     out += ",\"utility_basis\":";
     append_escaped(out, page.utility_basis);
+    out += ",\"local_offset\":";
+    out += format_number(page.local_offset);
     out += ",\"reach_defined\":";
     out += page.reach_defined ? "true" : "false";
     out += ",\"node_ev_defined\":";

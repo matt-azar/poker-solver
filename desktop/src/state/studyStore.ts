@@ -353,6 +353,9 @@ interface StudyState {
   setFrequencyMode: (mode: FrequencyMode) => void;
   matrixMode: MatrixMode;
   setMatrixMode: (mode: MatrixMode) => void;
+  /** UI display for action EV; engine payloads stay root_centered. Default local. */
+  evDisplayBasis: "local" | "root_centered";
+  setEvDisplayBasis: (basis: "local" | "root_centered") => void;
   actionFilter: number | null;
   setActionFilter: (index: number | null) => void;
   analysisTab: "explorer" | "runouts" | "equity" | "categories" | "convergence";
@@ -758,6 +761,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   matrixMode: "strategy",
   setMatrixMode(mode) {
     set({ matrixMode: mode });
+  },
+  evDisplayBasis: "local",
+  setEvDisplayBasis(basis) {
+    set({ evDisplayBasis: basis === "root_centered" ? "root_centered" : "local" });
   },
   actionFilter: null,
   setActionFilter(index) {
