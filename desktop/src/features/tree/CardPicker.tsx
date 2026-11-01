@@ -137,21 +137,16 @@ export function CardPicker({ open, onClose }: { open: boolean; onClose: () => vo
                         data-focused={focused ? "true" : "false"}
                         disabled={!legal}
                         aria-label={`${cell.card}${
-                          !isMissing(cell) && cell.weight != null
-                            ? ` weight ${cell.weight.toFixed(4)}`
-                            : cell.blocked
-                              ? " board blocker"
-                              : " unavailable"
+                          cell.blocked
+                            ? " board blocker"
+                            : isMissing(cell)
+                              ? " unavailable"
+                              : ""
                         }`}
                         onClick={() => selectCell(cell)}
                         onFocus={() => setFocusIndex(index)}
                       >
                         <span>{cell.card}</span>
-                        {!isMissing(cell) && cell.weight != null ? (
-                          <span className="card-picker-weight tabular">
-                            {(cell.weight * 100).toFixed(1)}%
-                          </span>
-                        ) : null}
                       </button>
                     );
                   })}

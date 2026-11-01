@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 import { mapActionColors } from "../../domain/actionColors";
+import { formatActionDisplay } from "../../domain/betSizes";
 import { groupHands } from "../../domain/browse";
 import type { MatrixMode } from "../../domain/types";
+import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 
 const MODES: Array<{ id: MatrixMode; label: string }> = [
@@ -12,16 +14,18 @@ const MODES: Array<{ id: MatrixMode; label: string }> = [
 
 export function ActionSummary() {
   const currentNode = useStudyStore((s) => s.currentNode);
+  const status = useStudyStore((s) => s.status);
+  const draft = useStudyStore((s) => s.draft);
   const matrixMode = useStudyStore((s) => s.matrixMode);
   const setMatrixMode = useStudyStore((s) => s.setMatrixMode);
   const actionFilter = useStudyStore((s) => s.actionFilter);
   const setActionFilter = useStudyStore((s) => s.setActionFilter);
   const followAction = useStudyStore((s) => s.followAction);
   const nodeValues = useStudyStore((s) => s.nodeValues);
-  const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
-  const setEvDisplayBasis = useStudyStore((s) => s.setEvDisplayBasis);
+  const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
 
   const actions = currentNode?.actions;
+  const pot = Number(currentNode?.pot ?? status?.pot ?? draft.pot ?? 0);
 
   const colors = useMemo(
     () => mapActionColors(actions ?? []),
@@ -95,40 +99,30 @@ export function ActionSummary() {
           );
         })}
       </div>
-      <div className="action-summary__modes" role="group" aria-label="EV basis">
-        <button
-          type="button"
-          className="mode-btn"
-          aria-pressed={evDisplayBasis === "local"}
-          title="Local decision EV: chips already invested are sunk; Fold = 0"
-          onClick={() => setEvDisplayBasis("local")}
-        >
-          Local EV
-        </button>
-        <button
-          type="button"
-          className="mode-btn"
-          aria-pressed={evDisplayBasis === "root_centered"}
-          title="Root-centered chip EV including earlier investments"
-          onClick={() => setEvDisplayBasis("root_centered")}
-        >
-          Global EV
-        </button>
-      </div>
-      {(actions ?? []).map((label, index) => (
-        <button
-          key={`${label}-${index}`}
-          type="button"
-          className="action-chip"
-          data-active={actionFilter === index}
-          title="Filter highlight"
-          onClick={() => setActionFilter(actionFilter === index ? null : index)}
-        >
-          <span className="action-swatch" style={{ background: colors.byIndex[index] }} />
-          <span>{label}</span>
-          <span className="action-chip__freq">{(freqs[index] * 100).toFixed(1)}%</span>
-        </button>
-      ))}
+      {(actions ?? []).map((label, index) => {
+        const display = formatActionDisplay(label, pot, betSizeDisplay);
+        return (
+          <button
+            key={`${label}-${index}`}
+            type="button"
+            className="action-chip"
+            data-active={actionFilter === index}
+            title={`${label} · filter highlight`}
+            onClick={() => setActionFilter(actionFilter === index ? null : index)}
+          >
+            <span className="action-swatch" style={{ background: colors.byIndex[index] }} />
+            <span className="action-chip__size">
+              <span className="action-chip__primary">{display.primary}</span>
+              {display.secondary ? (
+                <span className="action-chip__chips tabular">{display.secondary}</span>
+              ) : null}
+            </span>
+            <span className="action-chip__freq tabular">
+              {(freqs[index] * 100).toFixed(1)}%
+            </span>
+          </button>
+        );
+      })}
       {!actions?.length ? <span className="muted">No actions at this node</span> : null}
       <button
         type="button"

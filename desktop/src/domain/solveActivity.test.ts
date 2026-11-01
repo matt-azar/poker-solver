@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { engineActivityMessage, phaseLabel, statusMetrics } from "./solveActivity";
+import {
+  engineActivityMessage,
+  estimateRemainingSeconds,
+  phaseLabel,
+  statusMetrics,
+} from "./solveActivity";
 
 describe("solveActivity", () => {
   it("maps phases to short study labels", () => {
@@ -42,5 +47,16 @@ describe("solveActivity", () => {
     expect(metrics.nash).toContain("2.00% pot");
     expect(metrics.rate).toBe("6.0/s");
     expect(metrics.memory).toBe("2.0 MiB");
+    expect(metrics.eta).toBe("—");
+  });
+
+  it("estimates remaining time from iteration target and rate", () => {
+    const seconds = estimateRemainingSeconds({
+      running: true,
+      iterations: 40,
+      iterations_requested: 200,
+      runtime_seconds: 4,
+    });
+    expect(seconds).toBeCloseTo(16, 8);
   });
 });

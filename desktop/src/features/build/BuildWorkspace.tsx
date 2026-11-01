@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useStudyStore } from "../../state/studyStore";
 import {
   fastSolveDefaults,
@@ -8,7 +8,6 @@ import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
 import { AssistantPanel } from "../assistant/AssistantPanel";
 import { RangeCataloguePanel } from "../profiles/RangeCataloguePanel";
-import { TreeLineEditor } from "./TreeLineEditor";
 
 function provenanceHint(
   setupMeta: ReturnType<typeof useStudyStore.getState>["setupMeta"],
@@ -147,12 +146,25 @@ export function BuildWorkspace() {
   const setupMeta = useStudyStore((s) => s.setupMeta);
   const solve = useStudyStore((s) => s.solve);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
-  const boardLen = draft.boardText.trim().split(/[\s,]+/).filter(Boolean).length;
   const potProvenance = provenanceHint(setupMeta, "pot");
   const stackProvenance = provenanceHint(setupMeta, "stack");
   const solveBlocked = setupMeta != null && !setupMeta.canSolve;
   const machineDefaults = useMemo(() => fastSolveDefaults(), []);
   const hardwareHint = formatHardwareHint(machineDefaults);
+
+  const [showTextOop, setShowTextOop] = useState(false);
+  const [showTextIp, setShowTextIp] = useState(false);
+  const [catalogueOpen, setCatalogueOpen] = useState<"oop" | "ip" | null>(null);
+
+  const showTextFor = (player: "oop" | "ip") =>
+    player === "oop" ? showTextOop : showTextIp;
+  const setShowTextFor = (player: "oop" | "ip", next: boolean) => {
+    if (player === "oop") {
+      setShowTextOop(next);
+    } else {
+      setShowTextIp(next);
+    }
+  };
 
   return (
     <div className="build-workspace">
@@ -189,7 +201,40 @@ export function BuildWorkspace() {
       </header>
 
       <AssistantPanel />
-      <RangeCataloguePanel />
+
+      {catalogueOpen ? (
+        <div
+          className="catalogue-modal-overlay"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setCatalogueOpen(null);
+            }
+          }}
+        >
+          <div
+            className="catalogue-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${catalogueOpen.toUpperCase()} range catalogue`}
+          >
+            <div className="panel-title-row">
+              <h2>{catalogueOpen.toUpperCase()} range catalogue</h2>
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={() => setCatalogueOpen(null)}
+              >
+                Close
+              </button>
+            </div>
+            <p className="field-hint">
+              Catalogue apply updates both seats; opened from {catalogueOpen.toUpperCase()}.
+            </p>
+            <RangeCataloguePanel />
+          </div>
+        </div>
+      ) : null}
 
       <div className="build-grid">
         <section className="build-section">
@@ -258,19 +303,37 @@ export function BuildWorkspace() {
             <div key={player} className="range-editor">
               <div className="panel-title-row">
                 <h3>{player.toUpperCase()}</h3>
-                <button
-                  type="button"
-                  className="toolbar-btn"
-                  onClick={() => clearRange(player)}
-                >
-                  Clear
-                </button>
+                <div className="build-inline">
+                  <button
+                    type="button"
+                    className="toolbar-btn"
+                    onClick={() => setCatalogueOpen(player)}
+                  >
+                    Catalogue…
+                  </button>
+                  <button
+                    type="button"
+                    className="toolbar-btn"
+                    onClick={() => setShowTextFor(player, !showTextFor(player))}
+                  >
+                    {showTextFor(player) ? "Hide range text" : "Show range text"}
+                  </button>
+                  <button
+                    type="button"
+                    className="toolbar-btn"
+                    onClick={() => clearRange(player)}
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
-              <textarea
-                rows={3}
-                value={player === "oop" ? draft.oopRange : draft.ipRange}
-                onChange={(event) => setRangeText(player, event.target.value)}
-              />
+              {showTextFor(player) ? (
+                <textarea
+                  rows={3}
+                  value={player === "oop" ? draft.oopRange : draft.ipRange}
+                  onChange={(event) => setRangeText(player, event.target.value)}
+                />
+              ) : null}
               <RangePaintGrid player={player} />
             </div>
           ))}
@@ -278,88 +341,104 @@ export function BuildWorkspace() {
 
         <section className="build-section">
           <h2>Betting tree</h2>
+          <p className="field-hint">
+            Sizes are % of pot (75 = 75%). Use e / 2e / 3e for geometric when Geometric is off.
+          </p>
           <div className="build-inline">
             <label>
-              OOP bets
+              Flop OOP
               <input
-                value={draft.oopBets}
-                onChange={(event) => updateDraft({ oopBets: event.target.value })}
+                value={draft.oopFlop}
+                placeholder="50, 100"
+                onChange={(event) => updateDraft({ oopFlop: event.target.value })}
               />
             </label>
             <label>
-              IP bets
+              Flop IP
               <input
-                value={draft.ipBets}
-                onChange={(event) => updateDraft({ ipBets: event.target.value })}
+                value={draft.ipFlop}
+                placeholder="50, 100"
+                onChange={(event) => updateDraft({ ipFlop: event.target.value })}
               />
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={draft.donkFlop}
+                onChange={(event) => updateDraft({ donkFlop: event.target.checked })}
+              />
+              Donk
             </label>
           </div>
-          {boardLen <= 3 ? (
-            <div className="build-inline">
-              <label>
-                OOP flop
-                <input
-                  value={draft.oopFlop}
-                  onChange={(event) => updateDraft({ oopFlop: event.target.value })}
-                />
-              </label>
-              <label>
-                IP flop
-                <input
-                  value={draft.ipFlop}
-                  onChange={(event) => updateDraft({ ipFlop: event.target.value })}
-                />
-              </label>
-            </div>
-          ) : null}
-          {boardLen <= 4 ? (
-            <div className="build-inline">
-              <label>
-                OOP turn
-                <input
-                  value={draft.oopTurn}
-                  onChange={(event) => updateDraft({ oopTurn: event.target.value })}
-                />
-              </label>
-              <label>
-                IP turn
-                <input
-                  value={draft.ipTurn}
-                  onChange={(event) => updateDraft({ ipTurn: event.target.value })}
-                />
-              </label>
-            </div>
-          ) : null}
           <div className="build-inline">
             <label>
-              OOP river
+              Turn OOP
+              <input
+                value={draft.oopTurn}
+                placeholder="33, 75, e"
+                onChange={(event) => updateDraft({ oopTurn: event.target.value })}
+              />
+            </label>
+            <label>
+              Turn IP
+              <input
+                value={draft.ipTurn}
+                placeholder="33, 75, e"
+                onChange={(event) => updateDraft({ ipTurn: event.target.value })}
+              />
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={draft.donkTurn}
+                onChange={(event) => updateDraft({ donkTurn: event.target.checked })}
+              />
+              Donk
+            </label>
+          </div>
+          <div className="build-inline">
+            <label>
+              River OOP
               <input
                 value={draft.oopRiver}
+                placeholder="50, 100"
                 onChange={(event) => updateDraft({ oopRiver: event.target.value })}
               />
             </label>
             <label>
-              IP river
+              River IP
               <input
                 value={draft.ipRiver}
+                placeholder="50, 100"
                 onChange={(event) => updateDraft({ ipRiver: event.target.value })}
               />
             </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={draft.donkRiver}
+                onChange={(event) => updateDraft({ donkRiver: event.target.checked })}
+              />
+              Donk
+            </label>
           </div>
           <div className="build-inline">
-            <label>
-              OOP donk
-              <input
-                value={draft.oopDonk}
-                onChange={(event) => updateDraft({ oopDonk: event.target.value })}
-              />
-            </label>
             <label>
               Pot cap
               <input
                 type="number"
                 value={draft.potCap}
                 onChange={(event) => updateDraft({ potCap: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Merge threshold (%)
+              <input
+                type="number"
+                value={draft.mergeThresholdPct}
+                onChange={(event) =>
+                  updateDraft({ mergeThresholdPct: Number(event.target.value) })
+                }
               />
             </label>
             <label className="check">
@@ -388,8 +467,6 @@ export function BuildWorkspace() {
             </label>
           </div>
         </section>
-
-        <TreeLineEditor />
 
         <section className="build-section">
           <h2>Solve settings</h2>

@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { useHelpChatStore } from "../../state/helpChatStore";
 import { ensureEngine } from "../../platform/engine";
@@ -8,12 +9,16 @@ import { LibraryWorkspace } from "../library/LibraryWorkspace";
 import { StudyWorkspace } from "../study/StudyWorkspace";
 import { StudyAssistantWindow } from "../help/StudyAssistantWindow";
 import { HelpOverlay, MenuBar } from "./MenuBar";
+import { SettingsDialog } from "./SettingsDialog";
 import { StatusBar } from "./StatusBar";
 
 export function AppShell() {
   const workspace = useStudyStore((s) => s.workspace);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
   const theme = useStudyStore((s) => s.theme);
+  const setThemePreference = useStudyStore((s) => s.setThemePreference);
+  const setEvDisplayBasis = useStudyStore((s) => s.setEvDisplayBasis);
+  const settings = useSettingsStore((s) => s.settings);
   const message = useStudyStore((s) => s.message);
   const connection = useStudyStore((s) => s.connection);
   const phase = useStudyStore((s) => s.phase);
@@ -29,6 +34,16 @@ export function AppShell() {
     document.body.classList.remove("theme-light", "theme-dark");
     document.body.classList.add(`theme-${theme}`);
   }, [theme]);
+
+  useEffect(() => {
+    setThemePreference(settings.themePreference);
+    setEvDisplayBasis(settings.evDisplayBasis);
+  }, [
+    settings.themePreference,
+    settings.evDisplayBasis,
+    setThemePreference,
+    setEvDisplayBasis,
+  ]);
 
   useEffect(() => {
     // If boot already failed ensure_engine, keep that message until Reconnect.
@@ -88,6 +103,7 @@ export function AppShell() {
         }}
       />
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <SettingsDialog />
       <StudyAssistantWindow />
     </div>
   );
