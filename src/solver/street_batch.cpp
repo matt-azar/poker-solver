@@ -1,6 +1,7 @@
 #include "solver/street_batch.hpp"
 
 #include "game/street_config_text.hpp"
+#include "solver/strategy_edit.hpp"
 #include "solver/tree_edit.hpp"
 #include "poker/card.hpp"
 #include "poker/hand_categories.hpp"
@@ -1203,6 +1204,7 @@ struct StreetBatchSolver::Engine
     std::int64_t planned_cursor_ = 0;
     std::uint64_t estimated_peak_bytes_ = 0;
     std::uint64_t max_rank_keys_ = 0;
+    bool plan_only_ = false;
     double construction_seconds_ = 0.0;
     double train_seconds_ = 0.0;
     mutable double evaluation_seconds_ = 0.0;
@@ -1215,7 +1217,7 @@ struct StreetBatchSolver::Engine
     // Non-owning; set for the duration of solve()/solve_frozen() from SolveConfig::locks.
     const LockSet* locks_ = nullptr;
 
-    explicit Engine(streets::StreetConfig incoming, BudgetResource& budget)
+    explicit Engine(streets::StreetConfig incoming, BudgetResource& budget, bool plan_only = false)
         : config(std::move(incoming))
         , budget_(&budget)
         , heap_(&budget)
@@ -1246,6 +1248,7 @@ struct StreetBatchSolver::Engine
         , frozen_sigma(heap_)
         , result0_(heap_)
         , result1_(heap_)
+        , plan_only_(plan_only)
     {
         const auto started = std::chrono::steady_clock::now();
         validate();
@@ -1261,6 +1264,14 @@ struct StreetBatchSolver::Engine
         set_hand_counts();
         visit_slots(false);
         estimated_peak_bytes_ = checked_add(budget_->current(), planned_allocation_bytes(), "plan");
+        if (plan_only_)
+        {
+            // Dry-run: labeled peak and tree counts are ready. Skip deals, slot
+            // indexes, regret/strategy tables, reach, and worker contexts.
+            construction_seconds_ = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+            return;
+        }
         fill_deals();
         allocate_slot_of();
         allocate_slots();
@@ -3792,6 +3803,10 @@ struct StreetBatchSolver::Engine
 
     void check_usable() const
     {
+        if (plan_only_)
+        {
+            throw std::logic_error("plan-only StreetBatchSolver cannot train or evaluate");
+        }
         if (failed_)
         {
             throw std::logic_error(
@@ -4794,6 +4809,7 @@ struct StreetBatchSolver::Engine
         report.train_seconds = train_seconds_;
         report.evaluation_seconds = evaluation_seconds_;
         report.thread_count = config.threads;
+        report.plan_only = plan_only_;
         for (const BudgetResource::Component& item : budget_->components())
         {
             if (item.bytes == 0)
@@ -4806,6 +4822,48 @@ struct StreetBatchSolver::Engine
             report.components.push_back(std::move(component));
         }
         return report;
+    }
+
+    std::vector<StreetPublicNode> public_tree() const
+    {
+        std::vector<StreetPublicNode> out;
+        out.reserve(nodes.size());
+        for (int index = 0; index < static_cast<int>(nodes.size()); ++index)
+        {
+            const Node& node = nodes[static_cast<std::size_t>(index)];
+            StreetPublicNode item;
+            item.index = index;
+            item.terminal = node.terminal;
+            item.chance = node.chance;
+            item.player = node.player;
+            item.street = node.street;
+            item.path.assign(node.path.data(), node.path.size());
+            if (node.chance)
+            {
+                item.chance_child = node.child[0];
+            }
+            else if (!node.terminal)
+            {
+                item.actions.reserve(static_cast<std::size_t>(node.n_actions));
+                item.children.reserve(static_cast<std::size_t>(node.n_actions));
+                for (int action = 0; action < node.n_actions; ++action)
+                {
+                    StreetPublicAction step;
+                    step.label.assign(
+                        node.action_labels[action].data(), node.action_labels[action].size());
+                    step.compact = compact_from_display_label(step.label);
+                    if (step.compact.empty())
+                    {
+                        step.compact = step.label;
+                    }
+                    step.child_index = node.child[action];
+                    item.children.push_back(node.child[action]);
+                    item.actions.push_back(std::move(step));
+                }
+            }
+            out.push_back(std::move(item));
+        }
+        return out;
     }
 
     std::string root_node_id() const
@@ -5422,7 +5480,7 @@ struct StreetBatchSolver::Engine
         return view;
     }
 
-    void set_average_for_test(const std::string& text, int hand, std::span<const double> probability)
+    void set_average_strategy(const std::string& text, int hand, std::span<const double> probability)
     {
         ensure_average();
         int node_index = 0;
@@ -5439,6 +5497,10 @@ struct StreetBatchSolver::Engine
         {
             throw std::invalid_argument("average hand or action count");
         }
+        if (!validate_strategy_probs(probability, node.n_actions))
+        {
+            throw std::invalid_argument("invalid strategy probability row");
+        }
         if (!hand_supported(node.player, hand, turn, river))
         {
             throw std::invalid_argument("hand has no information set on this node");
@@ -5454,6 +5516,16 @@ struct StreetBatchSolver::Engine
             average[static_cast<std::size_t>(stored.base + action)] = probability[static_cast<std::size_t>(action)];
         }
         average_ready = true;
+    }
+
+    void invalidate_prepared_average()
+    {
+        average_ready = false;
+    }
+
+    void set_average_for_test(const std::string& text, int hand, std::span<const double> probability)
+    {
+        set_average_strategy(text, hand, probability);
     }
 
     void throw_if_cancelled(const std::atomic<bool>* cancel) const
@@ -6332,7 +6404,28 @@ StreetBatchSolver::StreetBatchSolver(
     engine_storage_ = budget_.allocate(sizeof(Engine), alignof(Engine));
     try
     {
-        engine_ = ::new (engine_storage_) Engine(std::move(config), budget_);
+        engine_ = ::new (engine_storage_) Engine(std::move(config), budget_, false);
+    }
+    catch (...)
+    {
+        budget_.deallocate(engine_storage_, sizeof(Engine), alignof(Engine));
+        engine_storage_ = nullptr;
+        throw;
+    }
+}
+
+StreetBatchSolver::StreetBatchSolver(
+    streets::StreetConfig config,
+    PlanOnlyTag,
+    std::pmr::memory_resource* upstream)
+    : upstream_(upstream != nullptr ? upstream : std::pmr::new_delete_resource())
+    , budget_(upstream_, budget_bytes(config.memory_mib))
+{
+    budget_.set_stage("engine");
+    engine_storage_ = budget_.allocate(sizeof(Engine), alignof(Engine));
+    try
+    {
+        engine_ = ::new (engine_storage_) Engine(std::move(config), budget_, true);
     }
     catch (...)
     {
@@ -6611,12 +6704,25 @@ double StreetBatchSolver::nash_gap() const
 
 std::uint64_t StreetBatchSolver::infoset_count() const
 {
-    return static_cast<std::uint64_t>(engine_->slots.size());
+    if (!engine_->slots.empty())
+    {
+        return static_cast<std::uint64_t>(engine_->slots.size());
+    }
+    return engine_->planned_slots_;
 }
 
 std::uint64_t StreetBatchSolver::deal_count() const
 {
-    return static_cast<std::uint64_t>(engine_->deals.size());
+    if (!engine_->deals.empty())
+    {
+        return static_cast<std::uint64_t>(engine_->deals.size());
+    }
+    return engine_->counted_deals_;
+}
+
+bool StreetBatchSolver::plan_only() const
+{
+    return engine_->plan_only_;
 }
 
 int StreetBatchSolver::public_decisions() const
@@ -6653,6 +6759,11 @@ std::size_t StreetBatchSolver::memory_bytes_estimate() const
 StreetMemoryReport StreetBatchSolver::memory_report() const
 {
     return engine_->memory_report();
+}
+
+std::vector<StreetPublicNode> StreetBatchSolver::public_tree() const
+{
+    return engine_->public_tree();
 }
 
 bool StreetBatchSolver::set_regret(const std::string& infoset, const std::string& action, double value)
@@ -6976,7 +7087,7 @@ int StreetBatchSolver::completed_iterations() const
     return engine_->trained;
 }
 
-void StreetBatchSolver::set_average_for_test(
+void StreetBatchSolver::set_average_strategy(
     const std::string& node_id,
     int hand,
     std::span<const double> probability)
@@ -6984,7 +7095,23 @@ void StreetBatchSolver::set_average_for_test(
     std::lock_guard<std::mutex> lock(value_mu_);
     ++profile_epoch_;
     value_cache_valid_ = false;
-    engine_->set_average_for_test(node_id, hand, probability);
+    engine_->set_average_strategy(node_id, hand, probability);
+}
+
+void StreetBatchSolver::invalidate_prepared_average()
+{
+    std::lock_guard<std::mutex> lock(value_mu_);
+    ++profile_epoch_;
+    value_cache_valid_ = false;
+    engine_->invalidate_prepared_average();
+}
+
+void StreetBatchSolver::set_average_for_test(
+    const std::string& node_id,
+    int hand,
+    std::span<const double> probability)
+{
+    set_average_strategy(node_id, hand, probability);
 }
 
 std::vector<StreetStrategyEntry> StreetBatchSolver::average_strategy_entries() const

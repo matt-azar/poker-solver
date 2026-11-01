@@ -26,6 +26,11 @@ import {
   type LockRecord,
   type LocksPayload,
 } from "../domain/locks";
+import type {
+  StrategyEditDraft,
+  StrategyEditRecord,
+  StrategyEditsPayload,
+} from "../domain/strategyEdits";
 import {
   DEFAULT_SPOT,
   type ActionValuesPayload,
@@ -64,6 +69,7 @@ export interface LibraryRecentEntry {
 export interface LibraryNamedEntry {
   id: string;
   name: string;
+  folder?: string;
 }
 
 export interface LibraryLists {
@@ -100,7 +106,12 @@ function asNamedList(data: unknown): LibraryNamedEntry[] {
       continue;
     }
     const name = String((entry as { name?: unknown }).name ?? id).trim() || id;
-    out.push({ id, name });
+    const folderRaw = (entry as { folder?: unknown }).folder;
+    const folder =
+      folderRaw == null || folderRaw === undefined
+        ? undefined
+        : String(folderRaw).trim();
+    out.push(folder ? { id, name, folder } : { id, name });
   }
   return out;
 }
@@ -154,6 +165,9 @@ function draftFromParsedConfig(body: Record<string, unknown>): Partial<SpotDraft
     partial.allInThreshold = Number(body.all_in_threshold) || 0;
     partial.memoryMib = Number(body.memory_mib) || 0;
     partial.threads = Number(body.threads) || 1;
+    if (Array.isArray(body.tree_edits)) {
+      partial.treeEdits = body.tree_edits.map((line) => String(line)).filter(Boolean);
+    }
   }
   return partial;
 }
@@ -220,6 +234,9 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
   };
   if (draft.timeLimit.trim() !== "") {
     body.time_limit = Number(draft.timeLimit);
+  }
+  if (draft.treeEdits.length > 0) {
+    body.tree_edits = [...draft.treeEdits];
   }
   return body;
 }
@@ -303,6 +320,23 @@ interface StudyState {
   unlockNode: () => Promise<void>;
   clearAllLocks: () => Promise<void>;
   isHandLockedAtCurrentNode: (handIndex: number) => boolean;
+
+  strategyEditDrawerOpen: boolean;
+  setStrategyEditDrawerOpen: (open: boolean) => void;
+  strategyEdits: StrategyEditRecord[];
+  strategyEditDraft: StrategyEditDraft;
+  strategyEditDraftBaseline: StrategyEditDraft | null;
+  setStrategyEditKind: (kind: StrategyEditDraft["kind"]) => void;
+  setStrategyEditProbAt: (index: number, value: number) => void;
+  toggleStrategyEditHand: (handIndex: number) => void;
+  selectCombosForStrategyEdit: (combos: string[]) => void;
+  seedStrategyEditFromStrategy: () => void;
+  revertStrategyEditDraft: () => void;
+  refreshStrategyEdits: () => Promise<void>;
+  applyStrategyEdit: () => Promise<void>;
+  clearStrategyEditHands: (handIndices?: number[]) => Promise<void>;
+  clearStrategyEditNode: () => Promise<void>;
+  clearAllStrategyEdits: () => Promise<void>;
 
   // theme/layout proxies for UI convenience
   theme: "light" | "dark";
@@ -634,6 +668,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         : defaultLockDraft(actions);
     set({
       lockDrawerOpen: true,
+      strategyEditDrawerOpen: false,
       lockDraft: draft,
       lockDraftBaseline: structuredClone(draft),
     });
@@ -673,6 +708,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       lockDraft: draft,
       lockDraftBaseline: structuredClone(draft),
       lockDrawerOpen: true,
+      strategyEditDrawerOpen: false,
     });
     void get().refreshLocks();
   },
@@ -815,6 +851,206 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     } catch (error) {
       set({
         message: error instanceof EngineError ? error.message : "Clear locks failed",
+      });
+    }
+  },
+
+  strategyEditDrawerOpen: false,
+  setStrategyEditDrawerOpen(open) {
+    if (!open) {
+      set({ strategyEditDrawerOpen: false });
+      return;
+    }
+    const actions = get().currentNode?.actions?.length ?? 0;
+    const existing = get().strategyEditDraft;
+    const draft =
+      existing.probs.length === actions ? existing : defaultLockDraft(actions);
+    set({
+      strategyEditDrawerOpen: true,
+      lockDrawerOpen: false,
+      strategyEditDraft: draft,
+      strategyEditDraftBaseline: structuredClone(draft),
+    });
+    void get().refreshStrategyEdits();
+  },
+  strategyEdits: [],
+  strategyEditDraft: defaultLockDraft(0),
+  strategyEditDraftBaseline: null,
+  setStrategyEditKind(kind) {
+    set({ strategyEditDraft: { ...get().strategyEditDraft, kind } });
+  },
+  setStrategyEditProbAt(index, value) {
+    const probs = get().strategyEditDraft.probs.slice();
+    probs[index] = value;
+    set({ strategyEditDraft: { ...get().strategyEditDraft, probs } });
+  },
+  toggleStrategyEditHand(handIndex) {
+    const handIndices = toggleHandIndex(get().strategyEditDraft.handIndices, handIndex);
+    set({
+      strategyEditDraft: { ...get().strategyEditDraft, handIndices, kind: "selected" },
+    });
+  },
+  selectCombosForStrategyEdit(combos) {
+    const node = get().currentNode;
+    if (!node?.combos) {
+      return;
+    }
+    const handIndices = combos
+      .map((combo) => handIndexForCombo(node.combos, combo))
+      .filter((index) => index >= 0);
+    const unique = [...new Set(handIndices)].sort((a, b) => a - b);
+    const actions = node.actions?.length ?? 0;
+    const probs = seedProbsFromStrategy(node.strategy ?? null, unique, actions);
+    const draft: StrategyEditDraft = { kind: "selected", handIndices: unique, probs };
+    set({
+      strategyEditDraft: draft,
+      strategyEditDraftBaseline: structuredClone(draft),
+      strategyEditDrawerOpen: true,
+      lockDrawerOpen: false,
+    });
+    void get().refreshStrategyEdits();
+  },
+  seedStrategyEditFromStrategy() {
+    const node = get().currentNode;
+    const actions = node?.actions?.length ?? 0;
+    const probs = seedProbsFromStrategy(
+      node?.strategy ?? null,
+      get().strategyEditDraft.handIndices,
+      actions,
+    );
+    set({ strategyEditDraft: { ...get().strategyEditDraft, probs } });
+  },
+  revertStrategyEditDraft() {
+    const baseline = get().strategyEditDraftBaseline;
+    if (!baseline) {
+      return;
+    }
+    set({ strategyEditDraft: structuredClone(baseline) });
+  },
+  async refreshStrategyEdits() {
+    const solutionId = get().solutionId;
+    if (!solutionId) {
+      set({ strategyEdits: [] });
+      return;
+    }
+    try {
+      const payload = (await engineClient.listStrategyEdits(solutionId)) as StrategyEditsPayload;
+      set({ strategyEdits: payload.edits || [] });
+    } catch (error) {
+      set({
+        message:
+          error instanceof EngineError ? error.message : "Failed to list strategy edits",
+      });
+    }
+  },
+  async applyStrategyEdit() {
+    const solutionId = get().solutionId;
+    const node = get().currentNode;
+    if (!solutionId || !node || node.kind !== "decision") {
+      set({ message: "Strategy edits require a published decision node." });
+      return;
+    }
+    const draft = get().strategyEditDraft;
+    if (draft.kind === "selected" && draft.handIndices.length === 0) {
+      set({ message: "Select at least one combo, or switch to full-node edit." });
+      return;
+    }
+    const normalized = normalizeProbs(draft.probs);
+    if (!normalized.valid) {
+      set({ message: normalized.reason || "Strategy probabilities are invalid." });
+      return;
+    }
+    try {
+      const body =
+        draft.kind === "full"
+          ? {
+              node_id: node.node_id,
+              kind: "full" as const,
+              probs: normalized.probs,
+            }
+          : {
+              node_id: node.node_id,
+              kind: "selected" as const,
+              hand_indices: draft.handIndices,
+              probs: normalized.probs,
+            };
+      const payload = (await engineClient.putStrategyEdit(
+        solutionId,
+        body,
+      )) as StrategyEditsPayload;
+      set({
+        strategyEdits: payload.edits || [],
+        strategyEditDraft: { ...draft, probs: normalized.probs },
+        strategyEditDraftBaseline: structuredClone({ ...draft, probs: normalized.probs }),
+        message:
+          draft.kind === "full"
+            ? `Full-node strategy edit applied at ${node.node_id}`
+            : `Edited ${draft.handIndices.length} combo(s) at ${node.node_id}`,
+      });
+      await get().navigateTo(node.node_id);
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Strategy edit failed",
+      });
+    }
+  },
+  async clearStrategyEditHands(handIndices) {
+    const solutionId = get().solutionId;
+    const node = get().currentNode;
+    if (!solutionId || !node) {
+      return;
+    }
+    const targets = handIndices ?? get().strategyEditDraft.handIndices;
+    if (!targets.length) {
+      set({ message: "No combo selected to clear." });
+      return;
+    }
+    try {
+      for (const handIndex of targets) {
+        await engineClient.deleteStrategyEdit(solutionId, node.node_id, handIndex);
+      }
+      await get().refreshStrategyEdits();
+      await get().navigateTo(node.node_id);
+      set({ message: `Cleared ${targets.length} strategy edit(s) at ${node.node_id}` });
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Clear strategy edit failed",
+      });
+    }
+  },
+  async clearStrategyEditNode() {
+    const solutionId = get().solutionId;
+    const node = get().currentNode;
+    if (!solutionId || !node) {
+      return;
+    }
+    try {
+      await engineClient.deleteStrategyEdit(solutionId, node.node_id);
+      await get().refreshStrategyEdits();
+      await get().navigateTo(node.node_id);
+      set({ message: `Cleared strategy edits at ${node.node_id}` });
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Clear node strategy edits failed",
+      });
+    }
+  },
+  async clearAllStrategyEdits() {
+    const solutionId = get().solutionId;
+    if (!solutionId) {
+      return;
+    }
+    try {
+      await engineClient.deleteStrategyEdit(solutionId);
+      await get().refreshStrategyEdits();
+      const nodeId = get().currentNode?.node_id;
+      if (nodeId) {
+        await get().navigateTo(nodeId);
+      }
+      set({ message: "Cleared all strategy edits on this solution." });
+    } catch (error) {
+      set({
+        message: error instanceof EngineError ? error.message : "Clear strategy edits failed",
       });
     }
   },

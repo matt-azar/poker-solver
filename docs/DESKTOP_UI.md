@@ -44,15 +44,18 @@ explorer   # serves desktop/dist when present
 | Action EV | `GET …/values` | Calculate EVs | Inspector / Analysis | Decision only; may 202 | value worker |
 | Runouts | `GET …/runouts` | Compare runouts | Lower dock + suit filter; row navigates | Chance / street only | engine; sparse HTTP |
 | Next-card picker | chance `children` | Card grid | Board buttons → rank×suit picker | Legal cards from node only; board blockers marked | `cards.test.ts` |
-| Equity | `GET …/equity` | Averages only | Equity tab: averages + OOP/IP histograms | Check-down; work limit; buckets = input mass | equity tests; `analysis.test.ts` |
-| Categories | `GET …/categories` | Table | Categories tab with OOP/IP seat toggle | Five-card made-hand; parallel `categories`+`fractions` arrays | hand categories; `analysis.test.ts` |
+| Equity | `GET …/equity` | Averages + hist | Equity tab: averages, clickable band filter, shape composition, top hands | Check-down (not chip EV); buckets + `oop_hands`/`ip_hands` | equity tests; `analysis.test.ts` |
+| Categories | `GET …/categories` | Table | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | hand categories; `analysis.test.ts` |
 | Locks | PUT/DELETE `…/locks` | Hand detail | Lock drawer + inspector | All-zero PUT rejected; 0%≠unlock | HTTP + `locks.test.ts` |
+| Strategy edits | PUT/DELETE `…/strategy-edits` | Hand detail | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | HTTP + `strategyEdits.test.ts` |
 | Resolve locked | `POST …/resolve-locked` | Resolve + warm-start | Solver menu + drawer | New solution + baseline | HTTP |
 | Compare | `GET /api/compare` | Note | Compare workspace | Decision node | HTTP |
 | Save / Open | `POST …/save`, `/open` | File fields | File menu / Build | PSOL v2 + locks; browser path fields | checkpoint HTTP |
 | Recent | `GET /api/recent-solutions` | Dropdown | Library + File menu | Cap 10 | recent_files |
-| Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Build + Library | Flat dirs | templates/range lib |
-| Config parse | `POST /api/config` | Load config | Build | street/river text only | indirect |
+| Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Build + Library (ranges grouped by folder) | Nested `configs/ranges` folders; template dirs still flat | templates/range lib |
+| Config parse | `POST /api/config` | Load config | Build | street/river text only; street echoes `tree_edits` | indirect |
+| Memory plan dry-run | `POST /api/plan-memory` | — | Build line editor | Labeled `estimated_peak_bytes`; not RSS | explorer HTTP |
+| Tree preview / line edits | `POST /api/tree-preview` | — | Build `TreeLineEditor` Force/Remove/AddSize | Canonical labels; edits into draft → solve | explorer HTTP + tree_edit |
 | Study setup assistant | Client-side interpret → profile catalogue → `SpotDraft` | — | Build → Setup assistant | Fake demo adapter + optional OpenAI; no parallel config model; synthetic fixtures only | `src/domain/{setup,profiles,assistant}` + integration tests — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md) |
 
 ## Numerical labels (do not relabel without math)
@@ -60,8 +63,8 @@ explorer   # serves desktop/dist when present
 - Chip EV: root-centered, units `chips`
 - Accuracy / Nash gap: NashConv (sum of BR gains); accuracy is NashConv/pot
 - Equity: check-down, fraction of pot — not chip EV
-- Equity histograms: ten fixed buckets on [0,1]; weights are raw input masses (`equity_distribution` OOP, `ip_equity_distribution` IP)
-- Categories: strategy-weighted reach; seat fractions align with the `categories` name list
+- Equity histograms: ten fixed buckets on [0,1]; weights are raw input masses (`equity_distribution` OOP, `ip_equity_distribution` IP); Study filters bands client-side using `oop_hands`/`ip_hands`
+- Categories: strategy-weighted reach; seat fractions align with the `categories` name list; `exclusive` false for draw tags
 - A 0% action inside a lock row that sums to 1 is a constraint; unlock is DELETE. All-zero PUT rows are rejected by the engine.
 
 ## Status
@@ -70,8 +73,8 @@ explorer   # serves desktop/dist when present
 | --- | --- |
 | Contracts + `EngineClient` | Done |
 | Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
-| Analysis dock + Build + Library | Done |
-| Locks + Compare | Done |
+| Analysis dock + Build + Library | Done — Equity hist + band filter + composition; Categories made-hand/draws; Library nested range folders |
+| Locks + Strategy edits + Compare | Done |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |
 | Visual / a11y / perf polish | Partial — focus-visible, reduced-motion, compact ≤1280, light/dark themes |
 
@@ -106,16 +109,18 @@ npm ci && npm run build
 npm run tauri:build
 ```
 
-| Lock / compare op | UI | Backend |
+| Lock / strategy / compare op | UI | Backend |
 | --- | --- | --- |
 | Apply selected/full lock | Lock drawer / inspector | `PUT …/locks` |
 | Unlock | Lock drawer / inspector | `DELETE …/locks` |
+| Apply free-form strategy edit | Strategy editor / inspector | `PUT …/strategy-edits` |
+| Clear strategy edits | Strategy editor | `DELETE …/strategy-edits` |
 | Resolve locked | Solve/Tree menus + drawer | `POST …/resolve-locked` |
 | Compare revisions | Compare workspace | `GET /api/compare` |
 
 ## Validation notes
 
-- Unit: `cd desktop && npm test` (browse, locks, status/`gap_series`, cards, analysis helpers, action colors)
+- Unit: `cd desktop && npm test` (browse, locks, strategy edits, status/`gap_series`, cards, analysis helpers, action colors)
 - Build: `cd desktop && npm run build`
 - Live: solve against `explorer`; Graphs read `status.gap_series`; Status bar shows EV / NashConv / mem
 - Visual targets: 1440×900 dark/light, 1920×1080 dual-range, 1280×800 compact

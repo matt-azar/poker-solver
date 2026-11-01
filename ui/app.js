@@ -673,7 +673,8 @@ async function populateRangePresets() {
     presets.forEach((entry) => {
       const option = document.createElement("option");
       option.value = entry.id;
-      option.textContent = entry.name || entry.id;
+      const label = entry.name || entry.id;
+      option.textContent = entry.folder ? entry.folder + " / " + label : label;
       select.appendChild(option);
     });
   } catch (error) {
@@ -1272,14 +1273,15 @@ function renderNode(node) {
   $("calculate-ev").hidden = node.kind !== "decision";
   $("compare-runouts").hidden = node.kind !== "chance";
   $("node-equity").hidden = false;
-  const boardComplete = Array.isArray(node.board) && node.board.length === 5;
-  $("node-categories").hidden = !boardComplete;
+  const boardLen = Array.isArray(node.board) ? node.board.length : 0;
+  const categoriesReady = boardLen === 3 || boardLen === 4 || boardLen === 5;
+  $("node-categories").hidden = !categoriesReady;
   if (!valuePoll) {
     $("ev-note").textContent = nodeValues && nodeValues.node_id === node.node_id && !nodeValues.pending
       ? evSummary(nodeValues)
       : "";
   }
-  if (boardComplete) {
+  if (categoriesReady) {
     loadCategories();
   }
   fillFrequency(node);
@@ -1946,10 +1948,14 @@ function renderCategories(body) {
   }
   host.innerHTML = "";
   if (!body.available) {
-    note.textContent = body.reason || "Made-hand categories require a five-card board.";
+    note.textContent = body.reason || "Categories require a flop, turn, or river board.";
     return;
   }
-  note.textContent = "Made-hand categories on the current board (not draws). Fractions of each player's positive reach mass.";
+  if (body.model === "draws") {
+    note.textContent = "Draw/backdoor tags on the current board (multi-label; fractions need not sum to 1).";
+  } else {
+    note.textContent = "Made-hand categories on the current board. Fractions of each player's positive reach mass.";
+  }
   const names = body.categories || [];
   const table = document.createElement("table");
   table.className = "categories";
@@ -2000,7 +2006,7 @@ async function loadCategories() {
     : "/api/solutions/" + solution + "/categories";
   const note = $("categories-note");
   if (note) {
-    note.textContent = "Loading made-hand categories…";
+    note.textContent = "Loading categories…";
   }
   const response = await fetch(path);
   const body = await readBody(response);

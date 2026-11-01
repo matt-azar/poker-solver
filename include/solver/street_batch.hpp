@@ -38,6 +38,11 @@ struct StreetMemoryComponent
 // reserved_bytes is unused reservation credit. The rank cache is allocated
 // before training, so that credit is zero after construction.
 // regret_strategy_sum_bytes is only the regret array plus the strategy-sum array.
+// Distinctions:
+//   estimated_peak_bytes — plan recorded mid-construction (payload + headers +
+//     map nodes). Available after a plan-only dry-run.
+//   allocated_bytes / peak_allocated_bytes — measured engine-budget charges.
+//   process_peak_working_set_bytes — whole-process RSS when the OS provides it.
 struct StreetMemoryReport
 {
     std::uint64_t memory_budget_bytes = 0;
@@ -58,8 +63,44 @@ struct StreetMemoryReport
     double train_seconds = 0.0;
     double evaluation_seconds = 0.0;
     int thread_count = 1;
+    // True when construction stopped after the plan (no deal/slot/table buffers).
+    bool plan_only = false;
     std::vector<StreetMemoryComponent> components;
 };
+
+// One legal action on the public betting tree (display + compact TreeEdit token).
+struct StreetPublicAction
+{
+    std::string label;
+    std::string compact;
+    int child_index = -1;
+};
+
+// Public-tree node for pre-solve preview / visual line editing. Identifiers are
+// indexes into the vector returned by public_tree(). Paths use display labels
+// separated by '/', matching StreetConfig::tree_edits path matching.
+struct StreetPublicNode
+{
+    int index = 0;
+    bool terminal = false;
+    bool chance = false;
+    int player = -1;
+    int street = 0;
+    std::string path;
+    std::vector<StreetPublicAction> actions;
+    std::vector<int> children;
+    int chance_child = -1;
+};
+
+// Tag for StreetBatchSolver construction that records estimated_peak_bytes and
+// cheap tree counts, then stops before allocating deals, slots, regret tables,
+// reach, and worker contexts.
+struct PlanOnlyTag
+{
+    explicit PlanOnlyTag() = default;
+};
+
+inline constexpr PlanOnlyTag kPlanOnly{};
 
 // Cached order and the production worse/better masses for one hero.
 // Endpoints are indexes in the opponent's rank order.
@@ -251,10 +292,18 @@ public:
     explicit StreetBatchSolver(
         streets::StreetConfig config,
         std::pmr::memory_resource* upstream = nullptr);
+    // Mid-construction dry-run: public tree + memory plan, no remaining
+    // training buffers. Training and evaluation APIs throw.
+    StreetBatchSolver(
+        streets::StreetConfig config,
+        PlanOnlyTag,
+        std::pmr::memory_resource* upstream = nullptr);
     ~StreetBatchSolver();
 
     StreetBatchSolver(const StreetBatchSolver&) = delete;
     StreetBatchSolver& operator=(const StreetBatchSolver&) = delete;
+
+    bool plan_only() const;
 
     // Called after an accuracy check with the iterations completed so far.
     // The stats iteration count and runtime are not filled in yet.
@@ -301,6 +350,9 @@ public:
     // Regret array plus strategy-sum array only.
     std::size_t memory_bytes_estimate() const;
     StreetMemoryReport memory_report() const;
+    // Public betting tree with canonical display and compact action labels.
+    // Available after full or plan-only construction.
+    std::vector<StreetPublicNode> public_tree() const;
 
     std::vector<StreetStrategyEntry> average_strategy_entries() const;
     // Normalize the average profile once. Later node queries only read it.
@@ -339,8 +391,18 @@ public:
     // The next successful evaluation throws before its page can replace the cache.
     void arm_value_cache_failure_for_test();
     int completed_iterations() const;
-    // Replace one structural hand's average at a node. Inspection reads this
-    // profile instead of recomputing it.
+    // Replace one structural hand's prepared average at a node. Inspection and
+    // value queries read this profile. Does not rewrite strategy_sum, so a later
+    // invalidate_prepared_average() restores the CFR average. Validates
+    // nonnegative probs that sum to 1 within lock tolerance. Bumps profile_epoch.
+    void set_average_strategy(
+        const std::string& node_id,
+        int hand,
+        std::span<const double> probability);
+    // Drop the prepared average overlay so the next inspect rebuilds from
+    // strategy_sum. Bumps profile_epoch and clears the value cache.
+    void invalidate_prepared_average();
+    // Test alias for set_average_strategy (same validation and epoch bump).
     void set_average_for_test(
         const std::string& node_id,
         int hand,

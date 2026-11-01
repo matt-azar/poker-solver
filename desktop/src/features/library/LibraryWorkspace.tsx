@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { groupRangesByFolder } from "../../domain/analysis";
 import { useStudyStore } from "../../state/studyStore";
 
 function formatMtime(mtime: number): string {
@@ -26,6 +27,11 @@ export function LibraryWorkspace() {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const disconnected = connection === "disconnected";
+
+  const rangeGroups = useMemo(
+    () => groupRangesByFolder(libraryLists.ranges),
+    [libraryLists.ranges],
+  );
 
   useEffect(() => {
     if (disconnected) {
@@ -185,27 +191,36 @@ export function LibraryWorkspace() {
             </div>
             {libraryLists.ranges.length === 0 ? (
               <p className="library-empty">
-                No range presets found. Place range strings under configs/ranges.
+                No range presets found. Place range strings under configs/ranges (folders allowed).
               </p>
             ) : (
-              <ul className="library-list">
-                {libraryLists.ranges.map((entry) => (
-                  <li key={entry.id} className="library-row">
-                    <div className="library-row__main">
-                      <span className="library-row__name">{entry.name}</span>
-                      <span className="library-row__meta">{entry.id}</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="toolbar-btn primary"
-                      disabled={busyId !== null}
-                      onClick={() => void onApplyRange(entry.id)}
-                    >
-                      {busyId === `range:${entry.id}` ? "Applying…" : `Apply → ${rangeTarget.toUpperCase()}`}
-                    </button>
-                  </li>
+              <div className="library-range-folders">
+                {rangeGroups.map((group) => (
+                  <div key={group.folder || "root"} className="library-folder">
+                    <h3 className="library-folder__title">{group.label}</h3>
+                    <ul className="library-list">
+                      {group.entries.map((entry) => (
+                        <li key={entry.id} className="library-row">
+                          <div className="library-row__main">
+                            <span className="library-row__name">{entry.name}</span>
+                            <span className="library-row__meta">{entry.id}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="toolbar-btn primary"
+                            disabled={busyId !== null}
+                            onClick={() => void onApplyRange(entry.id)}
+                          >
+                            {busyId === `range:${entry.id}`
+                              ? "Applying…"
+                              : `Apply → ${rangeTarget.toUpperCase()}`}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </section>
         </div>

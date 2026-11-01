@@ -10,8 +10,11 @@
 using poker::holdem::ComboShowdown;
 using poker::holdem::EquityDistributionBucket;
 using poker::holdem::EquityError;
+using poker::holdem::EquityHandRow;
 using poker::holdem::PlayerShowdown;
 using poker::holdem::equity_distribution;
+using poker::holdem::equity_hand_rows;
+using poker::holdem::equity_hand_rows_json;
 using poker::holdem::kEquityDistributionBuckets;
 
 namespace
@@ -119,6 +122,19 @@ void run_equity_dist_tests()
         CHECK_NEAR(bucket_weight_sum(from_player), 5.5, 1e-15);
         CHECK_NEAR(from_player[0].weight, 4.0, 1e-15);
         CHECK_NEAR(from_player[9].weight, 1.5, 1e-15);
+
+        player.combos[0].combo = "2c3d";
+        player.combos[3].combo = "AhAd";
+        const std::vector<EquityHandRow> hands = equity_hand_rows(player);
+        CHECK(hands.size() == 2);
+        CHECK(hands[0].combo == "2c3d");
+        CHECK_NEAR(hands[0].equity, 0.05, 1e-15);
+        CHECK_NEAR(hands[0].weight, 4.0, 1e-15);
+        CHECK(hands[1].combo == "AhAd");
+        CHECK_NEAR(hands[1].equity, 0.95, 1e-15);
+        const std::string hands_json = equity_hand_rows_json(hands);
+        CHECK(hands_json.find("\"combo\":\"2c3d\"") != std::string::npos);
+        CHECK(hands_json.find("\"combo\":\"AhAd\"") != std::string::npos);
     }
 
     {

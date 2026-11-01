@@ -2,6 +2,7 @@ import { useStudyStore } from "../../state/studyStore";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
 import { AssistantPanel } from "../assistant/AssistantPanel";
+import { TreeLineEditor } from "./TreeLineEditor";
 
 function provenanceHint(
   setupMeta: ReturnType<typeof useStudyStore.getState>["setupMeta"],
@@ -299,6 +300,8 @@ export function BuildWorkspace() {
             </label>
           </div>
         </section>
+
+        <TreeLineEditor />
 
         <section className="build-section">
           <h2>Solve settings</h2>

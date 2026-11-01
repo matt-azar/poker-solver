@@ -681,6 +681,87 @@ void check_lock_resolve_compare_workflow()
     std::remove(checkpoint.c_str());
 }
 
+// Free-form strategy edit round-trip: PUT → node strategy changes → clear restores;
+// locks remain independent.
+void check_strategy_edit_workflow()
+{
+    const std::string solve =
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\"],\"oop_range\":\"2c3d,2h3h\",\"ip_range\":\"AhAd\","
+        "\"pot\":100,\"stack\":100,\"iterations\":10,\"samples\":2,\"max_raises\":1,"
+        "\"allow_all_in\":0,\"oop_bets\":[1.0],\"ip_bets\":[],\"oop_turn_bets\":[1.0],"
+        "\"memory_mib\":128,\"algorithm\":\"vanilla\"}";
+    HttpResult accepted;
+    CHECK(http_exchange("POST", "/api/solve", solve, accepted));
+    CHECK(accepted.status == 202);
+    HttpResult solved;
+    CHECK(wait_for_completion(solved));
+    const std::string solution = json_string(solved.body, "solution_id");
+    CHECK(!solution.empty());
+    const std::string root = json_string(solved.body, "root_node_id");
+    CHECK(root == "p0.t-1.r-1");
+
+    HttpResult before_node;
+    CHECK(http_exchange("GET", "/api/solutions/" + solution + "/nodes/" + root, "", before_node));
+    CHECK(before_node.status == 200);
+    CHECK(before_node.body.find("\"strategy\":[") != std::string::npos);
+
+    HttpResult edited;
+    CHECK(http_exchange(
+        "PUT",
+        "/api/solutions/" + solution + "/strategy-edits",
+        "{\"node_id\":\"" + root + "\",\"kind\":\"selected\",\"hand_indices\":[0],\"probs\":[0,1]}",
+        edited));
+    CHECK(edited.status == 200);
+    CHECK(edited.body.find("\"edits\":[") != std::string::npos);
+    CHECK(edited.body.find("\"persisted\":false") != std::string::npos);
+    CHECK(edited.body.find(root) != std::string::npos);
+
+    HttpResult listed;
+    CHECK(http_exchange("GET", "/api/solutions/" + solution + "/strategy-edits", "", listed));
+    CHECK(listed.status == 200);
+    CHECK(listed.body.find(root) != std::string::npos);
+
+    HttpResult after_node;
+    CHECK(http_exchange("GET", "/api/solutions/" + solution + "/nodes/" + root, "", after_node));
+    CHECK(after_node.status == 200);
+    // Hand 0 pure on the second action (check/bet).
+    CHECK(after_node.body.find("[0,1]") != std::string::npos
+        || after_node.body.find("[0, 1]") != std::string::npos
+        || after_node.body.find("0,1") != std::string::npos);
+
+    // Locks still work independently of strategy edits.
+    HttpResult locked;
+    CHECK(http_exchange(
+        "PUT",
+        "/api/solutions/" + solution + "/locks",
+        "{\"node_id\":\"" + root + "\",\"kind\":\"selected\",\"hand_indices\":[1],\"probs\":[1,0]}",
+        locked));
+    CHECK(locked.status == 200);
+    CHECK(locked.body.find(root) != std::string::npos);
+
+    HttpResult cleared;
+    CHECK(http_exchange(
+        "DELETE",
+        "/api/solutions/" + solution + "/strategy-edits",
+        "",
+        cleared));
+    CHECK(cleared.status == 200);
+    CHECK(cleared.body.find("\"edits\":[]") != std::string::npos);
+
+    HttpResult locks_after;
+    CHECK(http_exchange("GET", "/api/solutions/" + solution + "/locks", "", locks_after));
+    CHECK(locks_after.status == 200);
+    CHECK(locks_after.body.find(root) != std::string::npos);
+
+    HttpResult bad_probs;
+    CHECK(http_exchange(
+        "PUT",
+        "/api/solutions/" + solution + "/strategy-edits",
+        "{\"node_id\":\"" + root + "\",\"kind\":\"selected\",\"hand_indices\":[0],\"probs\":[0,0]}",
+        bad_probs));
+    CHECK(bad_probs.status == 400);
+}
+
 } // namespace
 
 void run_explorer_http_tests()
@@ -1024,6 +1105,87 @@ void run_explorer_http_tests()
 
     check_persistence_workflow_under_value_load();
     check_lock_resolve_compare_workflow();
+    check_strategy_edit_workflow();
+
+    // Mid-construction dry-run plan and visual tree-edit preview / config round-trip.
+    {
+        const std::string plan_body =
+            "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+            "\"pot\":100,\"stack\":100,\"max_raises\":1,\"allow_all_in\":0,"
+            "\"oop_bets\":[1],\"ip_bets\":[1],\"memory_mib\":64,\"iterations\":1}";
+        HttpResult plan_result;
+        CHECK(http_exchange("POST", "/api/plan-memory", plan_body, plan_result));
+        CHECK(plan_result.status == 200);
+        CHECK(plan_result.body.find("\"dry_run\":true") != std::string::npos);
+        double peak = 0.0;
+        CHECK(json_number(plan_result.body, "estimated_peak_bytes", peak));
+        CHECK(peak > 0.0);
+        CHECK(plan_result.body.find("\"fits_budget\":") != std::string::npos);
+
+        HttpResult preview;
+        CHECK(http_exchange("POST", "/api/tree-preview", plan_body, preview));
+        CHECK(preview.status == 200);
+        CHECK(preview.body.find("\"nodes\":[") != std::string::npos);
+        CHECK(preview.body.find("\"compact\"") != std::string::npos);
+
+        const std::string forced =
+            "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+            "\"pot\":100,\"stack\":100,\"max_raises\":1,\"allow_all_in\":0,"
+            "\"oop_bets\":[1],\"ip_bets\":[1],\"memory_mib\":64,\"iterations\":1,"
+            "\"tree_edits\":[\"force - c\"]}";
+        HttpResult forced_preview;
+        CHECK(http_exchange("POST", "/api/tree-preview", forced, forced_preview));
+        CHECK(forced_preview.status == 200);
+        CHECK(forced_preview.body.find("\"tree_edits\":[\"force - c\"]") != std::string::npos);
+        // Root decision keeps only Check after force.
+        CHECK(forced_preview.body.find("\"compact\":\"c\"") != std::string::npos);
+
+        std::string config_job = "{\"text\":\"";
+        for (char character : std::string(
+                 "street-config 1\n"
+                 "board Kh Kd 7c 4s\n"
+                 "pot 100\n"
+                 "stack 100\n"
+                 "oop-range AhAd\n"
+                 "ip-range 2c3d\n"
+                 "first-to-act 0\n"
+                 "max-raises 1\n"
+                 "allow-all-in 0\n"
+                 "allow-three-bet 1\n"
+                 "geometric 0\n"
+                 "all-in-threshold 0\n"
+                 "pot-cap 0\n"
+                 "rake-rate 0\n"
+                 "rake-cap 0\n"
+                 "memory-mib 64\n"
+                 "threads 1\n"
+                 "oop-bets 1\n"
+                 "ip-bets 1\n"
+                 "tree-edit force - c\n"))
+        {
+            if (character == '\n')
+            {
+                config_job += "\\n";
+            }
+            else if (character == '"')
+            {
+                config_job += "\\\"";
+            }
+            else if (character == '\\')
+            {
+                config_job += "\\\\";
+            }
+            else
+            {
+                config_job += character;
+            }
+        }
+        config_job += "\"}";
+        HttpResult config_parsed;
+        CHECK(http_exchange("POST", "/api/config", config_job, config_parsed));
+        CHECK(config_parsed.status == 200);
+        CHECK(config_parsed.body.find("\"tree_edits\":[\"force - c\"]") != std::string::npos);
+    }
 
 #ifdef _WIN32
     WSACleanup();
