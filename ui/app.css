@@ -233,12 +233,6 @@ label[hidden] {
   outline: 2px solid var(--ink);
 }
 
-#chart {
-  width: 100%;
-  height: 180px;
-  background: var(--surface);
-}
-
 #line, #lines {
   background: var(--surface);
   padding: 12px;
