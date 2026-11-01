@@ -16,7 +16,7 @@ This branch merges the open stacks that share river / five-card / payoff / solve
 
 ## Resolution rules used
 
-- **Explorer five-card path:** always `StreetBatchSolver` for new solves (`#8`). `RiverBatchSolver` remains for older river-kind PSOL open and for `river_solver` CLI / oracle tests from `#3`.
+- **Explorer five-card path:** always `StreetBatchSolver` for new solves (`#8`). `river_solver` also maps onto `StreetBatchSolver` / `StreetGame` (`--reference`). `RiverBatchSolver` remains for older river-kind PSOL open and for oracle fixtures from `#3`.
 - **M8 siblings `#12` + `#15`:** keep StreetGame pins and call `run_rake_tests()`.
 - **CLI usage:** union of flags (`--time-limit`, `--eval-every`, `--report`).
 

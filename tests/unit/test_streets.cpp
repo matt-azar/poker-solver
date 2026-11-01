@@ -1,5 +1,6 @@
 #include "harness.hpp"
 
+#include "game/river_config_text.hpp"
 #include "game/river_game.hpp"
 #include "game/street_config_text.hpp"
 #include "game/street_game.hpp"
@@ -178,20 +179,7 @@ StreetConfig check_only(const std::vector<int>& board, const char* oop, const ch
 
 StreetConfig street_from_river(const RiverConfig& river)
 {
-    StreetConfig config;
-    config.board.assign(river.board.begin(), river.board.end());
-    config.pot = river.pot;
-    config.stack = river.stack;
-    config.oop = river.oop;
-    config.ip = river.ip;
-    config.oop_bet_sizes = river.oop_bet_sizes;
-    config.ip_bet_sizes = river.ip_bet_sizes;
-    config.oop_raise_sizes = river.oop_raise_sizes;
-    config.ip_raise_sizes = river.ip_raise_sizes;
-    config.allow_all_in = river.allow_all_in;
-    config.max_raises = river.max_raises;
-    config.first_to_act = river.first_to_act;
-    return config;
+    return poker::river::street_config_from_river(river);
 }
 
 void expect_street_matches_river(
@@ -1086,8 +1074,9 @@ void run_street_tests()
         expect_street_matches_river(full, poker::solver::Algorithm::VanillaCfr, 12, true);
         expect_street_matches_river(full, poker::solver::Algorithm::CfrPlus, 12, true);
 
-        // Explorer five-card jobs use StreetBatchSolver. Pin the HTTP check-down
-        // spot against RiverBatchSolver utility and street root inspection.
+        // Product five-card path (explorer + river_solver) uses StreetBatchSolver.
+        // Pin the check-down spot against RiverBatchSolver utility (oracle helper)
+        // and street root inspection. Also pin the river→street config bridge.
         {
             const std::vector<int> explorer_board = {
                 card("Kh"), card("Kd"), card("7c"), card("4s"), card("2h")};
@@ -1113,7 +1102,26 @@ void run_street_tests()
             river_pin.ip = Range::parse("2c3d");
             river_pin.max_raises = 0;
             river_pin.allow_all_in = false;
-            poker::solver::RiverBatchSolver river(river_pin);
+            river_pin.rake.rate = 0.05;
+            river_pin.rake.cap = 3.0;
+            river_pin.icm.stacks = {1000.0, 1000.0};
+            river_pin.icm.payouts = {70.0, 30.0};
+            const StreetConfig bridged = street_from_river(river_pin);
+            CHECK(bridged.board.size() == 5);
+            CHECK(bridged.pot == river_pin.pot);
+            CHECK(bridged.stack == river_pin.stack);
+            CHECK(bridged.max_raises == river_pin.max_raises);
+            CHECK(bridged.allow_all_in == river_pin.allow_all_in);
+            CHECK_NEAR(bridged.rake.rate, river_pin.rake.rate, 0.0);
+            CHECK_NEAR(bridged.rake.cap, river_pin.rake.cap, 0.0);
+            CHECK(bridged.icm.stacks.size() == river_pin.icm.stacks.size());
+            CHECK(bridged.icm.payouts.size() == river_pin.icm.payouts.size());
+
+            // Zero-rake/ICM oracle compare (same chip tree as explorer pin above).
+            RiverConfig chip_pin = river_pin;
+            chip_pin.rake = {};
+            chip_pin.icm = {};
+            poker::solver::RiverBatchSolver river(chip_pin);
             river.run_iterations(3, poker::solver::Algorithm::CfrPlus);
             CHECK_NEAR(street.expected_utility(), river.expected_utility(), 1e-9);
             CHECK_NEAR(street.nash_gap(), river.nash_gap(), 1e-9);

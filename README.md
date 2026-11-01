@@ -88,6 +88,7 @@ kuhn_solver --iterations 200000 --algorithm cfr_plus --print-strategies
 leduc_solver --iterations 1000 --algorithm cfr_plus
 river_solver --config configs/river_default.json
 river_solver --iterations 2000 --algorithm cfr_plus
+river_solver --reference --iterations 30 --algorithm vanilla
 street_solver
 street_solver --config configs/street_default.txt
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1
@@ -97,7 +98,7 @@ explorer
 
 `explorer` listens on `http://127.0.0.1:8765`. Solve, then use Save and Open on a `.psol` file to close the process and resume the same regrets and strategy sums. On a chance node, Compare runouts lists every legal next card. Check-down equity is a fraction of the pot and is separate from chip EV. `equity_calculator` is the standalone enumerator; its default work limit admits a full-range river and still rejects a full-range turn. Raise or lower the ceiling with `--max-pair-runouts` or `POKER_EQUITY_MAX_PAIR_RUNOUTS` on either binary.
 
-Kuhn chance is the six equally likely deals. Leduc chance deals two private cards and, if the hand continues, one board card. The river solver deals private hands from the two ranges on a fixed board. The street solver does that on a turn or a flop and then deals the missing board cards. `street_solver` uses one public betting tree; `--reference` walks `StreetGame` instead. `--memory-mib` sets the street solver's allocation budget in mebibytes. The default is 1024. That budget counts bytes the solver requests from its allocator. `--threads N` sets the frozen-pass thread count, including the caller. The default is 1, and a count above 1 requires `--frozen`. None of the solvers uses an RNG. Rules are in [docs/LEDUC.md](docs/LEDUC.md), [docs/RIVER.md](docs/RIVER.md), and [docs/STREETS.md](docs/STREETS.md).
+Kuhn chance is the six equally likely deals. Leduc chance deals two private cards and, if the hand continues, one board card. `river_solver` maps a fixed five-card board onto the shared street tree (`StreetBatchSolver`, or `StreetGame` with `--reference`). The street solver does the same on a turn or a flop and then deals the missing board cards. `street_solver` uses one public betting tree; `--reference` walks `StreetGame` instead. `--memory-mib` sets the street solver's allocation budget in mebibytes. The default is 1024. That budget counts bytes the solver requests from its allocator. `--threads N` sets the frozen-pass thread count, including the caller. The default is 1, and a count above 1 requires `--frozen`. None of the solvers uses an RNG. Rules are in [docs/LEDUC.md](docs/LEDUC.md), [docs/RIVER.md](docs/RIVER.md), and [docs/STREETS.md](docs/STREETS.md).
 
 For Kuhn, the expected value of the first player approaches `-1/18`. The reported **Nash gap** is NashConv `u1(BR1, σ2) + u2(σ1, BR2)`. Leduc has no closed form in this repository; the tests check that its Nash gap falls.
 

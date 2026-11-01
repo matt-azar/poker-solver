@@ -1,8 +1,10 @@
 # Heads-up river
 
-`RiverGame` is one no-limit betting street on a fixed five-card board. `CfrTrainer<RiverGame>` is the reference enumerator. `RiverBatchSolver` is the default: one public betting tree, the same per-deal regret update, and one best-response walk. Pass `--reference` to use the enumerator. Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 is out of position, player 1 is in position, and a pair of hands is legal only when the four private cards and the board are disjoint. There is no RNG.
+`RiverGame` is one no-limit betting street on a fixed five-card board. `CfrTrainer<RiverGame>` remains the five-card oracle forever. `RiverBatchSolver` stays available for internal oracle and legacy fixtures; it is not the product `river_solver` path.
 
-This program remains a CLI entry point for a five-card board. `StreetGame` and `StreetBatchSolver` also accept a five-card board and match `RiverGame` on the pinned fixtures. The explorer uses that shared street tree for five cards and saves street-config based PSOL files. M6 retires `river_solver` after the CLI path moves fully onto the shared tree. See [ROADMAP.md](ROADMAP.md) and [STREETS.md](STREETS.md).
+`river_solver` is a thin CLI over the shared five-card street tree. It maps river JSON/CLI flags into a `StreetConfig` (`street_config_from_river`) and solves with `StreetBatchSolver` by default, or `StreetGame` under `--reference`. Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 is out of position, player 1 is in position, and a pair of hands is legal only when the four private cards and the board are disjoint. There is no RNG.
+
+The explorer also uses that shared street tree for five cards and saves street-config based PSOL files. Five-card `StreetBatchSolver` pins match `RiverGame` on the fixtures in `tests/unit/test_streets.cpp`. See [ROADMAP.md](ROADMAP.md) and [STREETS.md](STREETS.md).
 
 This is an equilibrium of the configured bet-size tree.
 
@@ -65,4 +67,4 @@ The reported Nash gap is NashConv, `u0(BR0) + u1(BR1)`. Player 0 is out of posit
 
 ## Strategy report
 
-`--report FILE` writes a `strategy-report 1` document after the solve (`-` for stdout). Fields match the street solver export. Root-action probabilities are an **unweighted** mean of the CFR average strategy across root infosets whose label ends in `| open` (`weighting unweighted_infoset`). There is still no batch queue.
+`--report FILE` writes a `strategy-report 1` document after the solve (`-` for stdout). Fields match the street solver export. On the public-tree path, root-action probabilities are the **reach-weighted** mixture from root inspection (`weighting reach`), the same aggregation as `street_solver`. `--reference` falls back to an unweighted open-infoset mean. There is still no batch queue.
