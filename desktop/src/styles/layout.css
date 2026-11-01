@@ -1439,6 +1439,8 @@
   grid-template-columns: repeat(13, minmax(0, 1fr));
   gap: 1px;
   margin-top: 6px;
+  user-select: none;
+  touch-action: none;
 }
 
 .paint-cell {
@@ -1448,6 +1450,9 @@
   padding: 0;
   background: var(--empty-cell);
   color: var(--text);
+  user-select: none;
+  touch-action: none;
+  cursor: crosshair;
 }
 
 .paint-cell[data-on="true"] {

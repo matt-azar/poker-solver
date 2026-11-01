@@ -7,6 +7,7 @@ import {
   parseSizeList,
   rangeText,
   snapshotWeights,
+  snapshotsEqual,
   type WeightSnapshot,
 } from "../domain/range";
 import {
@@ -304,6 +305,12 @@ interface StudyState {
   paintWeight: number;
   setPaintWeight: (weight: number) => void;
   paintCell: (player: "oop" | "ip", row: number, column: number, weight?: number) => void;
+  /** Start a drag paint stroke; toggle weight is chosen from the first cell. */
+  beginPaintStroke: (player: "oop" | "ip", row: number, column: number) => void;
+  /** Paint the active stroke weight onto another cell (same player only). */
+  continuePaintStroke: (player: "oop" | "ip", row: number, column: number) => void;
+  /** Commit one undo entry for the stroke when anything changed. */
+  endPaintStroke: () => void;
   clearRange: (player: "oop" | "ip") => void;
   undoRange: () => void;
   redoRange: () => void;
@@ -435,12 +442,22 @@ function defaultLockDraft(actionCount: number): LockDraft {
 }
 
 const rangeHistory = createRangeHistory();
+type PaintStroke = {
+  player: "oop" | "ip";
+  weight: number;
+  before: WeightSnapshot;
+};
+let paintStroke: PaintStroke | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let nodeToken = 0;
 let valueToken = 0;
 let seenGeneration = -1;
 let continuationPending = false;
 let valuePollTimer: ReturnType<typeof setInterval> | null = null;
+
+function strokeWeightForCell(current: number, slider: number): number {
+  return slider <= 0 || Math.abs(current - slider) < 0.001 ? 0 : slider;
+}
 
 function clearValuePoll() {
   if (valuePollTimer) {
@@ -594,6 +611,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     set({ paintWeight: weight });
   },
   paintCell(player, row, column, weight) {
+    if (paintStroke) {
+      get().endPaintStroke();
+    }
     const before = snapshotWeights(get().weights);
     const nextWeight = weight === undefined ? get().paintWeight : weight;
     const grid = get().weights[player].map((line) => line.slice());
@@ -611,6 +631,53 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       canUndoRange: rangeHistory.canUndo(),
       canRedoRange: rangeHistory.canRedo(),
     });
+  },
+  beginPaintStroke(player, row, column) {
+    if (paintStroke) {
+      get().endPaintStroke();
+    }
+    const slider = get().paintWeight;
+    const current = get().weights[player][row][column];
+    const weight = strokeWeightForCell(current, slider);
+    paintStroke = {
+      player,
+      weight,
+      before: snapshotWeights(get().weights),
+    };
+    get().continuePaintStroke(player, row, column);
+  },
+  continuePaintStroke(player, row, column) {
+    if (!paintStroke || paintStroke.player !== player) {
+      return;
+    }
+    const weight = paintStroke.weight;
+    if (get().weights[player][row][column] === weight) {
+      return;
+    }
+    const grid = get().weights[player].map((line) => line.slice());
+    grid[row][column] = weight;
+    set({
+      weights: { ...get().weights, [player]: grid },
+      draft: {
+        ...get().draft,
+        [player === "oop" ? "oopRange" : "ipRange"]: rangeText(grid),
+      },
+      draftRevision: bumpRevision(get().draftRevision),
+    });
+  },
+  endPaintStroke() {
+    if (!paintStroke) {
+      return;
+    }
+    const before = paintStroke.before;
+    paintStroke = null;
+    if (!snapshotsEqual(before, snapshotWeights(get().weights))) {
+      rangeHistory.push(before);
+      set({
+        canUndoRange: rangeHistory.canUndo(),
+        canRedoRange: rangeHistory.canRedo(),
+      });
+    }
   },
   clearRange(player) {
     const before = snapshotWeights(get().weights);
