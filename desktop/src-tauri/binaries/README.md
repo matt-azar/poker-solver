@@ -18,6 +18,11 @@ this directory using the **target triple** suffix:
 At runtime / in the NSIS payload the sidecar is exposed as `holdem-explorer.exe`
 beside the app (basename of `binaries/holdem-explorer`).
 
+**Spawn footgun:** `shell().sidecar("binaries/holdem-explorer")` resolves to
+`<exe_dir>/binaries/holdem-explorer.exe`, which does **not** exist after install.
+The shell always spawns the absolute path beside the app (or
+`sidecar("holdem-explorer")` as a fallback).
+
 The Windows Installer workflow builds `explorer` with the **static MSVC CRT**
 (`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`) so end users do not need a separate
 Visual C++ Redistributable. NSIS POSTINSTALL verifies this file exists and runs

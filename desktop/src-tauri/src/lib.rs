@@ -13,10 +13,14 @@ use tauri_plugin_shell::ShellExt;
 /// HTTP port the production UI uses for API calls (`http://127.0.0.1:8765`).
 const ENGINE_PORT: u16 = 8765;
 
-/// Sidecar path as declared in `tauri.conf.json` `bundle.externalBin`.
-/// Named holdem-explorer (not explorer) so the installed binary is never
-/// confused with Windows File Explorer (`explorer.exe`).
-const EXPLORER_SIDECAR: &str = "binaries/holdem-explorer";
+/// Bundle key in `tauri.conf.json` `bundle.externalBin` (build-time path under
+/// `src-tauri/`). At install time Tauri places only the **basename** next to the
+/// app (`holdem-explorer.exe`). Do not pass this string to `shell().sidecar()` —
+/// that joins it under the exe dir and looks for a non-existent `binaries/` folder.
+const EXPLORER_EXTERNAL_BIN: &str = "binaries/holdem-explorer";
+
+/// Runtime sidecar basename beside the app executable (and under target/debug).
+const EXPLORER_SIDECAR_BASENAME: &str = "holdem-explorer";
 
 /// How long to wait for the sidecar to accept TCP on ENGINE_PORT after spawn.
 const ENGINE_READY_TIMEOUT: Duration = Duration::from_secs(12);
@@ -155,14 +159,69 @@ fn kill_stored_child(state: &EngineState) {
     }
 }
 
+/// Build a shell Command that runs the installed/dev sidecar.
+///
+/// Prefer an absolute on-disk path. `shell().sidecar("binaries/holdem-explorer")`
+/// wrongly resolves to `<exe_dir>/binaries/holdem-explorer[.exe]` even though
+/// the NSIS payload places `<exe_dir>/holdem-explorer.exe` (basename only).
+fn explorer_command(
+    app: &AppHandle,
+    on_disk: Option<&Path>,
+) -> Result<(tauri_plugin_shell::process::Command, String), String> {
+    if let Some(path) = on_disk {
+        let label = path.display().to_string();
+        return Ok((app.shell().command(path.as_os_str()), label));
+    }
+    // Dev / odd layouts: try basename first, then the externalBin key as a last resort.
+    match app.shell().sidecar(EXPLORER_SIDECAR_BASENAME) {
+        Ok(cmd) => Ok((cmd, EXPLORER_SIDECAR_BASENAME.to_string())),
+        Err(basename_err) => app
+            .shell()
+            .sidecar(EXPLORER_EXTERNAL_BIN)
+            .map(|cmd| (cmd, EXPLORER_EXTERNAL_BIN.to_string()))
+            .map_err(|err| {
+                format!(
+                    "missing sidecar `{EXPLORER_SIDECAR_BASENAME}` (basename: {basename_err}; \
+                     externalBin `{EXPLORER_EXTERNAL_BIN}`: {err}). \
+                     Reinstall so holdem-explorer.exe is next to the app."
+                )
+            }),
+    }
+}
+
+fn spawn_once(
+    app: &AppHandle,
+    state: &EngineState,
+    on_disk: Option<&Path>,
+    port: &str,
+) -> Result<(), String> {
+    let (cmd, label) = explorer_command(app, on_disk).map_err(|err| {
+        state.set_status(err.clone());
+        err
+    })?;
+    let (_rx, child) = cmd.args(["--port", port]).spawn().map_err(|err| {
+        let msg = format!(
+            "spawn failed for `{label}` on port {ENGINE_PORT}: {err}. \
+             Check Windows Defender quarantine and that port {ENGINE_PORT} is free."
+        );
+        state.set_status(msg.clone());
+        msg
+    })?;
+    state.store_child(child);
+    state.set_status(format!("starting on port {ENGINE_PORT}…"));
+    Ok(())
+}
+
 fn spawn_and_wait(app: &AppHandle, state: &EngineState) -> Result<String, String> {
-    if let Some(path) = sidecar_on_disk(app) {
-        unblock_path(&path);
+    let on_disk = sidecar_on_disk(app);
+    if let Some(ref path) = on_disk {
+        unblock_path(path);
         eprintln!("info: explorer sidecar on disk at {}", path.display());
     } else {
         eprintln!(
             "warning: could not resolve holdem-explorer next to the app; \
-             relying on Tauri sidecar lookup for `{EXPLORER_SIDECAR}`"
+             trying sidecar basename `{EXPLORER_SIDECAR_BASENAME}` \
+             (bundle key `{EXPLORER_EXTERNAL_BIN}`)"
         );
     }
 
@@ -174,28 +233,8 @@ fn spawn_and_wait(app: &AppHandle, state: &EngineState) -> Result<String, String
     }
 
     let port = ENGINE_PORT.to_string();
-    let cmd = app
-        .shell()
-        .sidecar(EXPLORER_SIDECAR)
-        .map_err(|err| {
-            let msg = format!(
-                "missing sidecar `{EXPLORER_SIDECAR}`: {err}. \
-                 Reinstall so holdem-explorer.exe is next to the app."
-            );
-            state.set_status(msg.clone());
-            msg
-        })?;
-
-    let (_rx, child) = cmd.args(["--port", &port]).spawn().map_err(|err| {
-        let msg = format!(
-            "spawn failed for `{EXPLORER_SIDECAR}` on port {ENGINE_PORT}: {err}. \
-             Check Windows Defender quarantine and that port {ENGINE_PORT} is free."
-        );
-        state.set_status(msg.clone());
-        msg
-    })?;
-    state.store_child(child);
-    state.set_status(format!("starting on port {ENGINE_PORT}…"));
+    let path_ref = on_disk.as_deref();
+    spawn_once(app, state, path_ref, &port)?;
 
     let deadline = Instant::now() + ENGINE_READY_TIMEOUT;
     if wait_until_engine_ready(deadline) {
@@ -214,17 +253,11 @@ fn spawn_and_wait(app: &AppHandle, state: &EngineState) -> Result<String, String
         return Ok(msg);
     }
 
-    let cmd = app.shell().sidecar(EXPLORER_SIDECAR).map_err(|err| {
-        let msg = format!("missing sidecar on retry: {err}");
-        state.set_status(msg.clone());
-        msg
-    })?;
-    let (_rx, child) = cmd.args(["--port", &port]).spawn().map_err(|err| {
+    spawn_once(app, state, path_ref, &port).map_err(|err| {
         let msg = format!("spawn retry failed: {err}");
         state.set_status(msg.clone());
         msg
     })?;
-    state.store_child(child);
 
     let deadline = Instant::now() + ENGINE_READY_TIMEOUT;
     if wait_until_engine_ready(deadline) {

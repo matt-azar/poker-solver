@@ -9,6 +9,11 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
+          "name": "holdem-explorer",
+          "sidecar": true,
+          "args": true
+        },
+        {
           "name": "binaries/holdem-explorer",
           "sidecar": true,
           "args": true
@@ -18,6 +23,11 @@
     {
       "identifier": "shell:allow-execute",
       "allow": [
+        {
+          "name": "holdem-explorer",
+          "sidecar": true,
+          "args": true
+        },
         {
           "name": "binaries/holdem-explorer",
           "sidecar": true,

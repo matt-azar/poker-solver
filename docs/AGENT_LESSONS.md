@@ -155,6 +155,7 @@ Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fract
 - On **`main`**, `tests/unit/test_explorer_http.cpp` still **SKIPs on non-Windows**. A green Linux CTest alone is not HTTP coverage. (Linux HTTP port may live on a separate PR — check before claiming the gap is closed.)
 - Some working-set / card-delay asserts are Windows-only (`#ifdef _WIN32`).
 - Assertion totals differ by compiler; fail missing parity checkpoints instead of skipping (`cc12bc8`).
+- **Tauri sidecar spawn:** `bundle.externalBin` may be `binaries/holdem-explorer`, but the installed file is `<exe_dir>/holdem-explorer.exe`. `shell().sidecar("binaries/holdem-explorer")` looks under a non-existent `binaries/` folder (os error 3). Spawn the absolute path beside the app (or `sidecar("holdem-explorer")`). Packaged UI must also **statically import** `@tauri-apps/api/core` — `@vite-ignore` dynamic imports leave a bare specifier that fails at runtime.
 
 ### Licensing
 
