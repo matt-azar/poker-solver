@@ -9,6 +9,7 @@ import {
   type InterpretProposal,
   type InterpretRequest,
   type ProfileMeta,
+  type StudyFieldEdits,
 } from "./provider";
 
 /**
@@ -206,6 +207,7 @@ const INTERPRET_JSON_SCHEMA = {
       minItems: 2,
       maxItems: 2,
     },
+    fieldEdits: { type: "object" },
     questions: { type: "array", items: { type: "string" } },
     candidates: { type: "array", items: { type: "object" } },
     message: { type: "string" },
@@ -327,6 +329,7 @@ export function parseInterpretProposal(raw: unknown): InterpretProposal {
           : intent.stakesLabel,
       generatedRanges: asGeneratedRanges(obj.generatedRanges),
       interpolateFromIds: asInterpolateIds(obj.interpolateFromIds),
+      fieldEdits: asFieldEdits(obj.fieldEdits),
     };
     rejectUnguardedRangeWeights(proposal);
     return proposal;
@@ -406,6 +409,66 @@ function asTreeEdits(raw: unknown): StudySetupTreePreset | undefined {
   if (typeof src.noThreeBet === "boolean") out.noThreeBet = src.noThreeBet;
   if (typeof src.geometric === "boolean") out.geometric = src.geometric;
   if (typeof src.maxRaises === "number") out.maxRaises = src.maxRaises;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+const FIELD_EDIT_NUMBERS = [
+  "pot",
+  "stack",
+  "iterations",
+  "threads",
+  "memoryMib",
+  "samples",
+  "maxRaises",
+  "mergeThresholdPct",
+  "potCap",
+] as const;
+
+const FIELD_EDIT_STRINGS = ["accuracy", "timeLimit", "incentives", "edgeTags"] as const;
+
+const FIELD_EDIT_BOOLS = [
+  "geometric",
+  "noThreeBet",
+  "allowAllIn",
+  "donkFlop",
+  "donkTurn",
+  "donkRiver",
+] as const;
+
+const ALGORITHMS = new Set(["cfr_plus", "cfr", "dcfr"]);
+
+/** Whitelist Build fields the model may write. Drops anything else. */
+export function asFieldEdits(raw: unknown): StudyFieldEdits | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const src = raw as Record<string, unknown>;
+  const out: StudyFieldEdits = {};
+  for (const key of FIELD_EDIT_NUMBERS) {
+    const value = src[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      out[key] = value;
+    }
+  }
+  for (const key of FIELD_EDIT_STRINGS) {
+    const value = src[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      out[key] = String(value);
+    } else if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed && !DANGEROUS_VALUE_RE.test(trimmed)) {
+        out[key] = trimmed;
+      }
+    }
+  }
+  for (const key of FIELD_EDIT_BOOLS) {
+    if (typeof src[key] === "boolean") {
+      out[key] = src[key];
+    }
+  }
+  if (typeof src.algorithm === "string" && ALGORITHMS.has(src.algorithm)) {
+    out.algorithm = src.algorithm;
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 }
 

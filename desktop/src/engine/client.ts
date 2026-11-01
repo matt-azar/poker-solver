@@ -6,6 +6,7 @@ import type {
   StatusPayload,
   TreePreviewPayload,
 } from "../domain/types";
+import { presentUserText } from "../domain/userText";
 import { isTauriRuntime } from "../platform";
 
 function defaultEngineBaseUrl(): string {
@@ -26,7 +27,7 @@ export class EngineError extends Error {
   body: unknown;
 
   constructor(message: string, status: number, body: unknown) {
-    super(message);
+    super(presentUserText(message));
     this.name = "EngineError";
     this.status = status;
     this.body = body;

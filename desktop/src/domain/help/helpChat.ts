@@ -158,14 +158,14 @@ export class FakeHelpChatClient implements HelpChatClient {
       return {
         provider: "fake",
         message:
-          "Describe the study in this Study assistant (e.g. Set up CO vs BB SRP with 100NL ranges). Setup proposals Apply through the validated Build draft path. You can also use Build → Setup assistant.",
+          "Describe the study in this Study assistant (e.g. Set up CO vs BB SRP with 100NL ranges). Conflict-free changes are written onto the Build fields. Undo is available in the assistant.",
       };
     }
     if (/\b(shortcuts?|hotkeys?|keyboard)\b/.test(q)) {
       return {
         provider: "fake",
         message:
-          "Open Help → Keyboard shortcuts (or press ?) for the shortcut list. Common ones: S solve, C continue, X stop. Shortcuts are ignored while typing in a field.",
+          "Press ? for the shortcut list. Common ones: S solve, C continue, X stop. Shortcuts are ignored while typing in a field.",
       };
     }
     if (/solve|pause|continue|stop/.test(q)) {

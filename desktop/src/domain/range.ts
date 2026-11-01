@@ -93,15 +93,14 @@ export function parseSizeList(text: string): number[] {
     .filter((value): value is number => value !== null);
 }
 
-/** Absolute numeric list (ICM stacks/payouts) — not Pio percent sizing. */
+/** Absolute numeric list (ICM stacks/payouts) — not Pio percent sizing. Blank tokens are omitted. */
 export function parseAbsoluteNumberList(text: string): number[] {
   return text
     .split(",")
-    .map((part) => {
-      const value = Number(part.trim());
-      return Number.isFinite(value) ? value : null;
-    })
-    .filter((value): value is number => value !== null);
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .map((part) => Number(part))
+    .filter((value) => Number.isFinite(value));
 }
 
 export function boardCards(text: string): string[] {

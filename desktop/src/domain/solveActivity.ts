@@ -1,5 +1,6 @@
-import type { SolvePhase, StatusPayload } from "./types";
 import { statusRootEv } from "./status";
+import type { SolvePhase, StatusPayload } from "./types";
+import { presentUserText } from "./userText";
 
 /** Short label for the study phase pill (Pio-style activity word). */
 export function phaseLabel(phase: SolvePhase): string {
@@ -89,7 +90,7 @@ export function engineActivityMessage(
   fallbackMessage: string,
 ): string {
   if (status?.error) {
-    return String(status.error);
+    return presentUserText(String(status.error));
   }
   if (status?.message && String(status.message).trim()) {
     return String(status.message).trim();
@@ -142,7 +143,7 @@ export function engineActivityMessage(
           ? `Time limit at ${iterPart}${gapPart}${timePart}`
           : `Solve complete — ${iterPart}${gapPart}${timePart}`;
     case "failed":
-      return status?.error ? String(status.error) : "Solve failed.";
+      return status?.error ? presentUserText(String(status.error)) : "Solve failed.";
     case "loading":
       return "Loading solution…";
     case "saving":

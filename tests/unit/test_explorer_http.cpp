@@ -1090,7 +1090,7 @@ void run_explorer_http_tests()
         "\"memory_mib\":128}",
         bad_icm_stacks));
     CHECK(bad_icm_stacks.status == 400);
-    CHECK(bad_icm_stacks.body.find("icm") != std::string::npos);
+    CHECK(bad_icm_stacks.body.find("ICM") != std::string::npos);
 
     HttpResult bad_icm_cover;
     CHECK(http_exchange(
@@ -1102,7 +1102,7 @@ void run_explorer_http_tests()
         "\"memory_mib\":128}",
         bad_icm_cover));
     CHECK(bad_icm_cover.status == 400);
-    CHECK(bad_icm_cover.body.find("icm") != std::string::npos);
+    CHECK(bad_icm_cover.body.find("ICM") != std::string::npos);
 
     // HU WTA on a tiny check-only river: chip EV 50 → ICM 2.5 (stacks 1000/1000, prize 100).
     const std::string icm_job =

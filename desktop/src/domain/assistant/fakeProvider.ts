@@ -12,6 +12,7 @@ import {
   type InterpretProposal,
   type InterpretRequest,
   type ProfileMeta,
+  type StudyFieldEdits,
 } from "./provider";
 
 /**
@@ -110,6 +111,18 @@ export class FakeAssistantProvider implements AssistantProvider {
         kind: "update_study",
         intent,
         treeEdits,
+      };
+    }
+
+    const fieldEdits = extractFieldEdits(text);
+    if (
+      fieldEdits &&
+      !/\b(set up|setup|prepare|duplicate)\b/i.test(text)
+    ) {
+      return {
+        kind: "update_study",
+        intent: { mode: "edit" },
+        fieldEdits,
       };
     }
 
@@ -422,6 +435,72 @@ function extractBoard(text: string): string | undefined {
     return run.join(" ");
   }
   return undefined;
+}
+
+function grabLabeledNumber(text: string, label: string): number | undefined {
+  const re = new RegExp(
+    `\\b${label}\\b(?:\\s*(?:to|=|:|of))?\\s*(\\d+(?:\\.\\d+)?)`,
+    "i",
+  );
+  const match = text.match(re);
+  if (!match) {
+    return undefined;
+  }
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+/** Pull explicit Build-field assignments out of demo wording. */
+function extractFieldEdits(text: string): StudyFieldEdits | undefined {
+  const edits: StudyFieldEdits = {};
+  const pot = grabLabeledNumber(text, "pot");
+  if (pot !== undefined && /\bpot\b/i.test(text)) {
+    edits.pot = pot;
+  }
+  const stack = grabLabeledNumber(text, "stack");
+  if (stack !== undefined) {
+    edits.stack = stack;
+  }
+  const iterations =
+    grabLabeledNumber(text, "iterations") ?? grabLabeledNumber(text, "iters");
+  if (iterations !== undefined) {
+    edits.iterations = iterations;
+  }
+  const threads = grabLabeledNumber(text, "threads");
+  if (threads !== undefined) {
+    edits.threads = Math.max(1, Math.round(threads));
+  }
+  const samples = grabLabeledNumber(text, "samples");
+  if (samples !== undefined) {
+    edits.samples = Math.max(0, Math.round(samples));
+  }
+  const memory =
+    grabLabeledNumber(text, "memory") ?? grabLabeledNumber(text, "memory mib");
+  if (memory !== undefined && /\bmemory\b/i.test(text)) {
+    edits.memoryMib = memory;
+  }
+  const accuracy = text.match(
+    /\baccuracy\b(?:\s*(?:to|=|:|of))?\s*([0-9]+(?:\.[0-9]+)?%?)/i,
+  );
+  if (accuracy) {
+    edits.accuracy = accuracy[1];
+  }
+  const timeLimit = text.match(
+    /\btime\s*limit\b(?:\s*(?:to|=|:|of))?\s*([0-9]+(?:\.[0-9]+)?)/i,
+  );
+  if (timeLimit) {
+    edits.timeLimit = timeLimit[1];
+  }
+  if (/\balgorithm\b/i.test(text) || /\buse\s+(?:dcfr|cfr\+|cfr plus|vanilla)\b/i.test(text)) {
+    if (/\bdcfr\b/i.test(text)) {
+      edits.algorithm = "dcfr";
+    } else if (/\bvanilla\b/i.test(text)) {
+      edits.algorithm = "cfr";
+    } else if (/\bcfr\s*\+|cfr\s*plus|cfr_plus\b/i.test(text)) {
+      edits.algorithm = "cfr_plus";
+    }
+  }
+  return Object.keys(edits).length > 0 ? edits : undefined;
 }
 
 function extractTreeEdits(text: string): StudySetupTreePreset | undefined {

@@ -33,6 +33,7 @@ import type {
   StrategyEditRecord,
   StrategyEditsPayload,
 } from "../domain/strategyEdits";
+import { presentUserText } from "../domain/userText";
 import {
   DEFAULT_SPOT,
   type ActionValuesPayload,
@@ -173,6 +174,25 @@ function draftFromParsedConfig(body: Record<string, unknown>): Partial<SpotDraft
       partial.treeEdits = body.tree_edits.map((line) => String(line)).filter(Boolean);
     }
   }
+  if (Array.isArray(body.icm_stacks)) {
+    const stacks = body.icm_stacks
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value));
+    if (stacks.length >= 2) {
+      partial.useIcm = true;
+      partial.icmStacks = stacks.join(", ");
+      partial.icmPayouts = Array.isArray(body.icm_payouts)
+        ? body.icm_payouts
+            .map((value) => Number(value))
+            .filter((value) => Number.isFinite(value))
+            .join(", ")
+        : "";
+    } else {
+      partial.useIcm = false;
+      partial.icmStacks = "";
+      partial.icmPayouts = "";
+    }
+  }
   return partial;
 }
 
@@ -243,6 +263,12 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
         ? oopRiver
         : [];
 
+  const icmStacks = draft.useIcm ? parseAbsoluteNumberList(draft.icmStacks) : [];
+  const icmPayouts = draft.useIcm ? parseAbsoluteNumberList(draft.icmPayouts) : [];
+  if (draft.useIcm && icmStacks.length < 2) {
+    throw new Error("ICM stacks need at least two seats.");
+  }
+
   const body: SolveJobRequest = {
     board,
     oop_range: draft.oopRange,
@@ -274,8 +300,8 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
     samples: Math.max(1, Math.min(20, draft.samples || 5)),
     rake_rate: draft.rakeRate || 0,
     rake_cap: draft.rakeCap || 0,
-    icm_stacks: parseAbsoluteNumberList(draft.icmStacks),
-    icm_payouts: parseAbsoluteNumberList(draft.icmPayouts),
+    icm_stacks: icmStacks,
+    icm_payouts: icmPayouts,
     incentives: parseIncentiveRules(draft.incentives),
     edge_tags: parseEdgeTagSpecs(draft.edgeTags),
   };
@@ -296,11 +322,11 @@ function parseIncentiveRules(text: string): SolveJobRequest["incentives"] {
     .map((line) => {
       const tokens = line.split(/[\s,]+/).filter(Boolean);
       if (tokens.length !== 4) {
-        throw new Error("incentive needs kind player key delta");
+        throw new Error("Incentive needs kind, player, key, and delta.");
       }
       const kind = tokens[0];
       if (kind !== "label" && kind !== "tag") {
-        throw new Error("incentive kind must be label or tag");
+        throw new Error("Incentive kind must be label or tag.");
       }
       return {
         kind,
@@ -319,7 +345,7 @@ function parseEdgeTagSpecs(text: string): SolveJobRequest["edge_tags"] {
     .map((line) => {
       const tokens = line.split(/[\s,]+/).filter(Boolean);
       if (tokens.length < 2) {
-        throw new Error("edge-tag needs ACTION TAG");
+        throw new Error("Edge tag needs an action and a tag.");
       }
       let player = -1;
       let actionAt = 0;
@@ -1334,7 +1360,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     } catch (error) {
       set({
         phase: "failed",
-        message: error instanceof EngineError ? error.message : "Solve failed",
+        message:
+          error instanceof Error ? presentUserText(error.message) : "Solve failed",
       });
     }
   },

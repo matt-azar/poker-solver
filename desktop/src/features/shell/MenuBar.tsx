@@ -12,18 +12,19 @@ interface Props {
   onWorkspace: (id: WorkspaceId) => void;
   helpOpen: boolean;
   onHelpOpen: (open: boolean) => void;
-  /** Show the persistent Help chat window (does not close shortcuts overlay). */
-  onHelpChatOpen: () => void;
+  assistantOpen: boolean;
+  onAssistantToggle: () => void;
 }
 
-type MenuId = "file" | "solve" | "tree" | "view" | "settings" | "help" | null;
+type MenuId = "file" | "solve" | "tree" | "view" | "settings" | null;
 
 export function MenuBar({
   workspace,
   onWorkspace,
   helpOpen,
   onHelpOpen,
-  onHelpChatOpen,
+  assistantOpen,
+  onAssistantToggle,
 }: Props) {
   const [openMenu, setOpenMenu] = useState<MenuId>(null);
   const rootRef = useRef<HTMLElement>(null);
@@ -285,23 +286,14 @@ export function MenuBar({
             },
           ]}
         />
-        <Menu
-          id="help"
-          label="Help"
-          open={openMenu}
-          setOpen={setOpenMenu}
-          items={[
-            {
-              label: "Study assistant…",
-              onClick: () => onHelpChatOpen(),
-            },
-            {
-              label: "Keyboard shortcuts",
-              shortcut: "?",
-              onClick: () => onHelpOpen(true),
-            },
-          ]}
-        />
+        <button
+          type="button"
+          className="menu-bar__assistant"
+          aria-pressed={assistantOpen}
+          onClick={onAssistantToggle}
+        >
+          Assistant
+        </button>
       </nav>
       <WorkspaceSwitcher workspace={workspace} onChange={onWorkspace} />
       <div className="menu-bar__spacer" />

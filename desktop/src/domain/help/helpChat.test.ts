@@ -24,13 +24,13 @@ describe("ai context packs", () => {
 });
 
 describe("FakeHelpChatClient", () => {
-  it("points setup-style questions at the Setup assistant", async () => {
+  it("points setup-style questions at the Study assistant", async () => {
     const client = createFakeHelpChatClient();
     const reply = await client.ask({
       question: "How do I set up CO vs BB SRP with 100NL ranges?",
     });
     expect(reply.provider).toBe("fake");
-    expect(reply.message).toMatch(/Setup assistant/i);
+    expect(reply.message).toMatch(/Study assistant/i);
   });
 
   it("answers solve-control questions", async () => {

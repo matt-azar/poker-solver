@@ -178,6 +178,16 @@ describe("FakeAssistantProvider", () => {
     expect(proposal.questions[0]).not.toMatch(/100bb/i);
   });
 
+  it("writes named Build fields without inventing a new study", async () => {
+    const proposal = await provider.interpret(
+      request("set pot to 55 and iterations to 400"),
+    );
+    expect(proposal.kind).toBe("update_study");
+    if (proposal.kind !== "update_study") return;
+    expect(proposal.fieldEdits).toMatchObject({ pot: 55, iterations: 400 });
+    expect(proposal.intent.potType).toBeUndefined();
+  });
+
   it("is constructible via class export", () => {
     expect(new FakeAssistantProvider()).toBeInstanceOf(FakeAssistantProvider);
   });

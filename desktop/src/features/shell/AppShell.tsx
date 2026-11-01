@@ -25,7 +25,8 @@ export function AppShell() {
   const status = useStudyStore((s) => s.status);
   const startPolling = useStudyStore((s) => s.startPolling);
   const stopPolling = useStudyStore((s) => s.stopPolling);
-  const setHelpChatVisible = useHelpChatStore((s) => s.setVisible);
+  const assistantOpen = useHelpChatStore((s) => s.layout.visible);
+  const toggleAssistant = useHelpChatStore((s) => s.toggleVisible);
   const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
@@ -90,7 +91,8 @@ export function AppShell() {
         onWorkspace={(id: WorkspaceId) => setWorkspace(id)}
         helpOpen={helpOpen}
         onHelpOpen={setHelpOpen}
-        onHelpChatOpen={() => setHelpChatVisible(true)}
+        assistantOpen={assistantOpen}
+        onAssistantToggle={toggleAssistant}
       />
       <div className="app-body">{body}</div>
       <StatusBar

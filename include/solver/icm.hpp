@@ -29,26 +29,26 @@ inline void validate_icm_inputs(
 {
     if (stacks.empty())
     {
-        throw std::invalid_argument("icm stacks must be non-empty");
+        throw std::invalid_argument("ICM stacks must be non-empty");
     }
     double total = 0.0;
     for (double s : stacks)
     {
         if (!(s >= 0.0) || !std::isfinite(s))
         {
-            throw std::invalid_argument("icm stacks must be finite and nonnegative");
+            throw std::invalid_argument("ICM stacks must be finite and nonnegative");
         }
         total += s;
     }
     if (!(total > 0.0))
     {
-        throw std::invalid_argument("icm total stack must be positive");
+        throw std::invalid_argument("ICM total stack must be positive");
     }
     for (double prize : payouts)
     {
         if (!(prize >= 0.0) || !std::isfinite(prize))
         {
-            throw std::invalid_argument("icm payouts must be finite and nonnegative");
+            throw std::invalid_argument("ICM payouts must be finite and nonnegative");
         }
     }
 }
@@ -159,13 +159,13 @@ struct IcmPayoff
     {
         if (stacks.size() < 2)
         {
-            throw std::invalid_argument("icm chip terminal needs at least two stacks");
+            throw std::invalid_argument("ICM chip terminal needs at least two stacks");
         }
         validate_icm_inputs(stacks, payouts);
         if (!std::isfinite(chip_terminal.utility[0])
             || !std::isfinite(chip_terminal.utility[1]))
         {
-            throw std::invalid_argument("icm chip terminal utilities must be finite");
+            throw std::invalid_argument("ICM chip terminal utilities must be finite");
         }
 
         std::vector<double> post(stacks.begin(), stacks.end());
@@ -173,7 +173,7 @@ struct IcmPayoff
         post[1] += chip_terminal.utility[1];
         if (!(post[0] >= 0.0) || !(post[1] >= 0.0))
         {
-            throw std::invalid_argument("icm post-terminal stacks must be nonnegative");
+            throw std::invalid_argument("ICM post-terminal stacks must be nonnegative");
         }
         // Rake (or bust) may leave a zero total; treat as all remaining equity 0.
         double post_total = 0.0;
@@ -222,19 +222,19 @@ struct IcmConfig
         }
         if (stacks.size() < 2)
         {
-            throw std::invalid_argument("icm stacks need at least two seats");
+            throw std::invalid_argument("ICM stacks need at least two seats");
         }
         validate_icm_inputs(stacks, payouts);
         if (pot < 0 || effective_stack < 0)
         {
-            throw std::invalid_argument("icm hand pot and stack must be nonnegative");
+            throw std::invalid_argument("ICM hand pot and stack must be nonnegative");
         }
         const double need =
             0.5 * static_cast<double>(pot) + static_cast<double>(effective_stack);
         if (stacks[0] < need || stacks[1] < need)
         {
             throw std::invalid_argument(
-                "icm stacks must cover pot/2 + effective stack for both heroes");
+                "ICM stacks must cover pot/2 + effective stack for both heroes");
         }
     }
 };

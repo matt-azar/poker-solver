@@ -1,13 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useStudyStore } from "../../state/studyStore";
-import {
-  fastSolveDefaults,
-  formatHardwareHint,
-} from "../../domain/hardwareDefaults";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
-import { AssistantPanel } from "../assistant/AssistantPanel";
-import { RangeCataloguePanel } from "../profiles/RangeCataloguePanel";
+import { SeatActionCatalogueTree } from "./SeatActionCatalogueTree";
 
 function provenanceHint(
   setupMeta: ReturnType<typeof useStudyStore.getState>["setupMeta"],
@@ -149,8 +144,6 @@ export function BuildWorkspace() {
   const potProvenance = provenanceHint(setupMeta, "pot");
   const stackProvenance = provenanceHint(setupMeta, "stack");
   const solveBlocked = setupMeta != null && !setupMeta.canSolve;
-  const machineDefaults = useMemo(() => fastSolveDefaults(), []);
-  const hardwareHint = formatHardwareHint(machineDefaults);
 
   const [showTextOop, setShowTextOop] = useState(false);
   const [showTextIp, setShowTextIp] = useState(false);
@@ -200,8 +193,6 @@ export function BuildWorkspace() {
         </div>
       </header>
 
-      <AssistantPanel />
-
       {catalogueOpen ? (
         <div
           className="catalogue-modal-overlay"
@@ -218,8 +209,8 @@ export function BuildWorkspace() {
             aria-modal="true"
             aria-label={`${catalogueOpen.toUpperCase()} range catalogue`}
           >
-            <div className="panel-title-row">
-              <h2>{catalogueOpen.toUpperCase()} range catalogue</h2>
+            <div className="range-editor__head">
+              <h2>{catalogueOpen.toUpperCase()} range</h2>
               <button
                 type="button"
                 className="toolbar-btn"
@@ -228,16 +219,18 @@ export function BuildWorkspace() {
                 Close
               </button>
             </div>
-            <p className="field-hint">
-              Catalogue apply updates both seats; opened from {catalogueOpen.toUpperCase()}.
-            </p>
-            <RangeCataloguePanel />
+            <SeatActionCatalogueTree
+              onPick={(atom) => {
+                setRangeText(catalogueOpen, atom.range);
+                setCatalogueOpen(null);
+              }}
+            />
           </div>
         </div>
       ) : null}
 
       <div className="build-grid">
-        <section className="build-section">
+        <section className="build-section" data-span="2">
           <h2>Spot</h2>
           <label>
             Board
@@ -275,72 +268,8 @@ export function BuildWorkspace() {
               />
             </label>
           </div>
-        </section>
 
-        <section className="build-section">
-          <h2>Ranges</h2>
-          <div className="range-toolbar">
-            <label>
-              Paint weight
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={paintWeight}
-                onChange={(event) => setPaintWeight(Number(event.target.value))}
-              />
-              <span className="tabular">{paintWeight.toFixed(2)}</span>
-            </label>
-            <button type="button" className="toolbar-btn" disabled={!canUndoRange} onClick={undoRange}>
-              Undo
-            </button>
-            <button type="button" className="toolbar-btn" disabled={!canRedoRange} onClick={redoRange}>
-              Redo
-            </button>
-          </div>
-          {(["oop", "ip"] as const).map((player) => (
-            <div key={player} className="range-editor">
-              <div className="panel-title-row">
-                <h3>{player.toUpperCase()}</h3>
-                <div className="build-inline">
-                  <button
-                    type="button"
-                    className="toolbar-btn"
-                    onClick={() => setCatalogueOpen(player)}
-                  >
-                    Catalogue…
-                  </button>
-                  <button
-                    type="button"
-                    className="toolbar-btn"
-                    onClick={() => setShowTextFor(player, !showTextFor(player))}
-                  >
-                    {showTextFor(player) ? "Hide range text" : "Show range text"}
-                  </button>
-                  <button
-                    type="button"
-                    className="toolbar-btn"
-                    onClick={() => clearRange(player)}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-              {showTextFor(player) ? (
-                <textarea
-                  rows={3}
-                  value={player === "oop" ? draft.oopRange : draft.ipRange}
-                  onChange={(event) => setRangeText(player, event.target.value)}
-                />
-              ) : null}
-              <RangePaintGrid player={player} />
-            </div>
-          ))}
-        </section>
-
-        <section className="build-section">
-          <h2>Betting tree</h2>
+          <h3 className="build-subhead">Betting tree</h3>
           <p className="field-hint">
             Sizes are % of pot (75 = 75%). Use e / 2e / 3e for geometric when Geometric is off.
           </p>
@@ -466,26 +395,8 @@ export function BuildWorkspace() {
               All-in
             </label>
           </div>
-        </section>
 
-        <section className="build-section">
-          <h2>Solve settings</h2>
-          <p className="build-hardware-hint muted" title="Defaults match a fast local solve">
-            Fast defaults · {hardwareHint}
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() =>
-                updateDraft({
-                  threads: machineDefaults.threads,
-                  memoryMib: machineDefaults.memoryMib,
-                  frozen: true,
-                })
-              }
-            >
-              Reset to fast
-            </button>
-          </p>
+          <h3 className="build-subhead">Stop</h3>
           <div className="build-inline">
             <label>
               Iterations
@@ -511,78 +422,67 @@ export function BuildWorkspace() {
                 onChange={(event) => updateDraft({ timeLimit: event.target.value })}
               />
             </label>
-            <label>
-              Samples
-              <input
-                type="number"
-                value={draft.samples}
-                onChange={(event) => updateDraft({ samples: Number(event.target.value) })}
-              />
-            </label>
-            <label>
-              Algorithm
-              <select
-                value={draft.algorithm}
-                onChange={(event) => updateDraft({ algorithm: event.target.value })}
-              >
-                <option value="cfr_plus">CFR+</option>
-                <option value="cfr">Vanilla CFR</option>
-                <option value="dcfr">DCFR</option>
-              </select>
-            </label>
-            <label>
-              Threads
-              <input
-                type="number"
-                min={1}
-                max={64}
-                value={draft.threads}
-                onChange={(event) =>
-                  updateDraft({
-                    threads: Number(event.target.value),
-                    frozen: true,
-                  })
-                }
-              />
-            </label>
-            <label>
-              Memory MiB
-              <input
-                type="number"
-                min={64}
-                value={draft.memoryMib}
-                onChange={(event) => updateDraft({ memoryMib: Number(event.target.value) })}
-              />
-            </label>
           </div>
-          <div className="build-inline">
+        </section>
+
+        <section className="build-section" data-span="2">
+          <h2>Ranges</h2>
+          <div className="range-toolbar">
             <label>
-              Solution path
+              Paint weight
               <input
-                value={draft.solutionPath}
-                onChange={(event) => updateDraft({ solutionPath: event.target.value })}
-                placeholder="/tmp/spot.psol"
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={paintWeight}
+                onChange={(event) => setPaintWeight(Number(event.target.value))}
               />
+              <span className="tabular">{paintWeight.toFixed(2)}</span>
             </label>
+            <button type="button" className="toolbar-btn" disabled={!canUndoRange} onClick={undoRange}>
+              Undo
+            </button>
+            <button type="button" className="toolbar-btn" disabled={!canRedoRange} onClick={redoRange}>
+              Redo
+            </button>
           </div>
-          <div className="build-inline">
-            <label>
-              Incentives
-              <input
-                value={draft.incentives}
-                onChange={(event) => updateDraft({ incentives: event.target.value })}
-                placeholder="label 0 b100 3.5; tag 1 bluff -2"
-              />
-            </label>
-            <label>
-              Edge tags
-              <input
-                value={draft.edgeTags}
-                onChange={(event) => updateDraft({ edgeTags: event.target.value })}
-                placeholder="b100 bluff; 1 f give_up"
-              />
-            </label>
-          </div>
+          {(["oop", "ip"] as const).map((player) => (
+            <div key={player} className="range-editor">
+              <div className="range-editor__head">
+                <h3>{player.toUpperCase()}</h3>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  onClick={() => setCatalogueOpen(player)}
+                >
+                  Catalogue
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  onClick={() => setShowTextFor(player, !showTextFor(player))}
+                >
+                  {showTextFor(player) ? "Hide range text" : "Show range text"}
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  onClick={() => clearRange(player)}
+                >
+                  Clear
+                </button>
+              </div>
+              {showTextFor(player) ? (
+                <textarea
+                  rows={3}
+                  value={player === "oop" ? draft.oopRange : draft.ipRange}
+                  onChange={(event) => setRangeText(player, event.target.value)}
+                />
+              ) : null}
+              <RangePaintGrid player={player} />
+            </div>
+          ))}
         </section>
       </div>
     </div>
