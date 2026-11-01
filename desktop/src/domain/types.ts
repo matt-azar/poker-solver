@@ -249,6 +249,12 @@ export interface SpotDraft {
   oopRiver: string;
   ipRiver: string;
   oopDonk: string;
+  /** When true, OOP flop sizes are also used as donk sizes on that street. */
+  donkFlop: boolean;
+  donkTurn: boolean;
+  donkRiver: boolean;
+  /** Merge near bet sizes within this percent of chip amount (0 = off). */
+  mergeThresholdPct: number;
   potCap: number;
   noThreeBet: boolean;
   geometric: boolean;
@@ -298,15 +304,19 @@ export const DEFAULT_SPOT: SpotDraft = {
   ipRange: "KK",
   pot: 100,
   stack: 200,
-  oopBets: "0.5, 1",
-  ipBets: "0.5, 1",
-  oopFlop: "",
-  ipFlop: "",
-  oopTurn: "",
-  ipTurn: "",
-  oopRiver: "",
-  ipRiver: "",
+  oopBets: "50, 100",
+  ipBets: "50, 100",
+  oopFlop: "50, 100",
+  ipFlop: "50, 100",
+  oopTurn: "50, 100",
+  ipTurn: "50, 100",
+  oopRiver: "50, 100",
+  ipRiver: "50, 100",
   oopDonk: "",
+  donkFlop: false,
+  donkTurn: false,
+  donkRiver: false,
+  mergeThresholdPct: 10,
   potCap: 0,
   noThreeBet: false,
   geometric: false,

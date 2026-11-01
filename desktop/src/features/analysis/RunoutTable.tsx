@@ -66,7 +66,7 @@ export function RunoutTable() {
       </div>
       {runouts?.pending ? <p className="empty-hint">Loading…</p> : null}
       {!rows.length ? (
-        <p className="empty-hint">Open a chance node, then Refresh.</p>
+        <p className="empty-hint">Open a deal (next-card) node, then Refresh.</p>
       ) : (
         <table>
           <thead>

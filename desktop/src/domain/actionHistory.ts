@@ -102,7 +102,7 @@ export function nextChoicesFromNode(node: NodePayload | null | undefined): NextA
         key: `card-${card}-${index}`,
         label: card,
         nodeId: child.node_id ?? null,
-        frequency: child.weight ?? null,
+        frequency: null,
         kind: "card",
       });
     });
@@ -114,7 +114,7 @@ export function nextChoicesFromNode(node: NodePayload | null | undefined): NextA
       key: `card-${card.card ?? index}-${index}`,
       label: card.card || "?",
       nodeId: card.child_id ?? card.node_id ?? null,
-      frequency: card.weight ?? null,
+      frequency: null,
       kind: "card" as const,
     }));
   }

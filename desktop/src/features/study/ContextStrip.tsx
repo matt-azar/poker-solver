@@ -54,9 +54,11 @@ export function ContextStrip() {
   const pot = Number(currentNode?.pot ?? status?.pot ?? draft.pot);
   const stack = Number(status?.stack ?? draft.stack);
   const spr = pot > 0 ? (stack / pot).toFixed(2) : "—";
-  const toAct = toActLabel(currentNode?.to_act, currentNode?.player ?? null);
+  const dealNode = currentNode?.kind === "chance";
+  const toAct = dealNode
+    ? "Deal"
+    : toActLabel(currentNode?.to_act, currentNode?.player ?? null);
   const line = currentNode?.line || currentNode?.node_id || "root";
-  const chanceNode = currentNode?.kind === "chance";
 
   return (
     <div className="context-strip">
@@ -71,8 +73,12 @@ export function ContextStrip() {
                 className="board-card"
                 data-suit={card.slice(1, 2)?.toLowerCase()}
                 data-blocker={blockers.has(card) ? "true" : "false"}
-                title={chanceNode ? "Open next-card picker" : card}
-                onClick={() => setPickerOpen(true)}
+                title={dealNode ? "Open next-card picker" : card}
+                onClick={() => {
+                  if (dealNode) {
+                    setPickerOpen(true);
+                  }
+                }}
               >
                 {card}
               </button>
@@ -80,7 +86,7 @@ export function ContextStrip() {
           ) : (
             <span className="context-strip__value">—</span>
           )}
-          {chanceNode ? (
+          {dealNode ? (
             <button
               type="button"
               className="toolbar-btn"

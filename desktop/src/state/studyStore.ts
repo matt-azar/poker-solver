@@ -1,10 +1,11 @@
 import { create } from "zustand";
+import { resolveSizeList } from "../domain/betSizes";
 import {
   boardCards,
   blankGrid,
   createRangeHistory,
   parseRangeText,
-  parseSizeList,
+  parseAbsoluteNumberList,
   rangeText,
   snapshotWeights,
   snapshotsEqual,
@@ -202,21 +203,61 @@ function rootNodeId(statusRoot?: string | null): string {
 }
 
 function buildJob(draft: SpotDraft): SolveJobRequest {
+  const board = boardCards(draft.boardText);
+  const boardLen = board.length;
+  const sizeOpts = {
+    pot: draft.pot,
+    stack: draft.stack,
+    boardLen,
+    geometricFlag: draft.geometric,
+    mergeThresholdPct: draft.mergeThresholdPct ?? 0,
+  };
+  const oopFlop = resolveSizeList(draft.oopFlop, sizeOpts);
+  const ipFlop = resolveSizeList(draft.ipFlop, sizeOpts);
+  const oopTurn = resolveSizeList(draft.oopTurn, sizeOpts);
+  const ipTurn = resolveSizeList(draft.ipTurn, sizeOpts);
+  const oopRiver = resolveSizeList(draft.oopRiver, sizeOpts);
+  const ipRiver = resolveSizeList(draft.ipRiver, sizeOpts);
+  // Shared bet lists remain for engine fallbacks when a street list is empty.
+  const oopShared =
+    oopRiver[0] != null
+      ? oopRiver
+      : oopTurn[0] != null
+        ? oopTurn
+        : oopFlop[0] != null
+          ? oopFlop
+          : resolveSizeList(draft.oopBets, sizeOpts);
+  const ipShared =
+    ipRiver[0] != null
+      ? ipRiver
+      : ipTurn[0] != null
+        ? ipTurn
+        : ipFlop[0] != null
+          ? ipFlop
+          : resolveSizeList(draft.ipBets, sizeOpts);
+  const oopDonk = draft.donkFlop
+    ? oopFlop
+    : draft.donkTurn
+      ? oopTurn
+      : draft.donkRiver
+        ? oopRiver
+        : [];
+
   const body: SolveJobRequest = {
-    board: boardCards(draft.boardText),
+    board,
     oop_range: draft.oopRange,
     ip_range: draft.ipRange,
     pot: draft.pot,
     stack: draft.stack,
-    oop_bets: parseSizeList(draft.oopBets),
-    ip_bets: parseSizeList(draft.ipBets),
-    oop_flop_bets: parseSizeList(draft.oopFlop),
-    ip_flop_bets: parseSizeList(draft.ipFlop),
-    oop_turn_bets: parseSizeList(draft.oopTurn),
-    ip_turn_bets: parseSizeList(draft.ipTurn),
-    oop_river_bets: parseSizeList(draft.oopRiver),
-    ip_river_bets: parseSizeList(draft.ipRiver),
-    oop_donk: parseSizeList(draft.oopDonk),
+    oop_bets: oopShared,
+    ip_bets: ipShared,
+    oop_flop_bets: oopFlop,
+    ip_flop_bets: ipFlop,
+    oop_turn_bets: oopTurn,
+    ip_turn_bets: ipTurn,
+    oop_river_bets: oopRiver,
+    ip_river_bets: ipRiver,
+    oop_donk: oopDonk,
     pot_cap: draft.potCap || 0,
     allow_three_bet: draft.noThreeBet ? 0 : 1,
     geometric: draft.geometric ? 1 : 0,
@@ -233,8 +274,8 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
     samples: Math.max(1, Math.min(20, draft.samples || 5)),
     rake_rate: draft.rakeRate || 0,
     rake_cap: draft.rakeCap || 0,
-    icm_stacks: parseSizeList(draft.icmStacks),
-    icm_payouts: parseSizeList(draft.icmPayouts),
+    icm_stacks: parseAbsoluteNumberList(draft.icmStacks),
+    icm_payouts: parseAbsoluteNumberList(draft.icmPayouts),
     incentives: parseIncentiveRules(draft.incentives),
     edge_tags: parseEdgeTagSpecs(draft.edgeTags),
   };

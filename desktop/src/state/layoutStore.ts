@@ -18,9 +18,52 @@ export const DEFAULT_LAYOUT: StudyLayout = {
   dualRange: false,
   inspectorWidth: 320,
   historyHeight: 72,
-  lowerDockHeight: 200,
+  lowerDockHeight: 240,
   density: "comfortable",
 };
+
+const DOCK_MIN = 140;
+const HISTORY_MIN = 56;
+
+function dockMaxPx(): number {
+  if (typeof window === "undefined") {
+    return 720;
+  }
+  return Math.max(DOCK_MIN, Math.floor(window.innerHeight * 0.72));
+}
+
+function historyMaxPx(): number {
+  if (typeof window === "undefined") {
+    return 280;
+  }
+  return Math.max(96, Math.floor(window.innerHeight * 0.35));
+}
+
+export function clampDockHeight(height: number): number {
+  return Math.min(dockMaxPx(), Math.max(DOCK_MIN, Math.round(height)));
+}
+
+export function clampHistoryHeight(height: number): number {
+  return Math.min(historyMaxPx(), Math.max(HISTORY_MIN, Math.round(height)));
+}
+
+function sanitizeLayout(raw: Partial<StudyLayout>): StudyLayout {
+  const merged = { ...DEFAULT_LAYOUT, ...raw };
+  return {
+    ...merged,
+    lowerDock: merged.lowerDock !== false,
+    lowerDockHeight: clampDockHeight(
+      Number(merged.lowerDockHeight) || DEFAULT_LAYOUT.lowerDockHeight,
+    ),
+    historyHeight: clampHistoryHeight(
+      Number(merged.historyHeight) || DEFAULT_LAYOUT.historyHeight,
+    ),
+    inspectorWidth: Math.min(
+      520,
+      Math.max(220, Number(merged.inspectorWidth) || DEFAULT_LAYOUT.inspectorWidth),
+    ),
+  };
+}
 
 function loadLayout(): StudyLayout {
   try {
@@ -28,7 +71,7 @@ function loadLayout(): StudyLayout {
     if (!raw) {
       return { ...DEFAULT_LAYOUT };
     }
-    return { ...DEFAULT_LAYOUT, ...JSON.parse(raw) };
+    return sanitizeLayout(JSON.parse(raw) as Partial<StudyLayout>);
   } catch {
     return { ...DEFAULT_LAYOUT };
   }
@@ -51,7 +94,18 @@ interface LayoutState {
 export const useLayoutStore = create<LayoutState>((set, get) => ({
   layout: typeof localStorage === "undefined" ? { ...DEFAULT_LAYOUT } : loadLayout(),
   setLayout(partial) {
-    const layout = { ...get().layout, ...partial };
+    const next: Partial<StudyLayout> = { ...partial };
+    if (next.lowerDockHeight != null) {
+      next.lowerDockHeight = clampDockHeight(next.lowerDockHeight);
+    }
+    if (next.historyHeight != null) {
+      next.historyHeight = clampHistoryHeight(next.historyHeight);
+    }
+    // Turning the dock back on with a tiny height restores a usable size.
+    if (next.lowerDock === true && (get().layout.lowerDockHeight ?? 0) < DOCK_MIN) {
+      next.lowerDockHeight = DEFAULT_LAYOUT.lowerDockHeight;
+    }
+    const layout = sanitizeLayout({ ...get().layout, ...next });
     saveLayout(layout);
     set({ layout });
   },

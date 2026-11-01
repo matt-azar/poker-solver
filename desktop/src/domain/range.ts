@@ -1,3 +1,4 @@
+import { parseSizeToken as parseBetSizeToken } from "./betSizes";
 import { RANKS } from "./types";
 
 export type WeightGrid = number[][];
@@ -80,24 +81,26 @@ export function createRangeHistory(limit = RANGE_HISTORY_LIMIT) {
   };
 }
 
-/** Accept `0.5`, `50%`, or `50` when clearly percent-styled with `%`. */
+/** Pio-style pot-size token: `75` → 0.75, `0.5` stays 0.5, `75%` → 0.75. */
 export function parseSizeToken(token: string): number | null {
-  const raw = token.trim();
-  if (!raw) {
-    return null;
-  }
-  if (raw.endsWith("%")) {
-    const pct = Number(raw.slice(0, -1).trim());
-    return Number.isFinite(pct) ? pct / 100 : null;
-  }
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : null;
+  return parseBetSizeToken(token);
 }
 
 export function parseSizeList(text: string): number[] {
   return text
     .split(",")
     .map((part) => parseSizeToken(part))
+    .filter((value): value is number => value !== null);
+}
+
+/** Absolute numeric list (ICM stacks/payouts) — not Pio percent sizing. */
+export function parseAbsoluteNumberList(text: string): number[] {
+  return text
+    .split(",")
+    .map((part) => {
+      const value = Number(part.trim());
+      return Number.isFinite(value) ? value : null;
+    })
     .filter((value): value is number => value !== null);
 }
 
