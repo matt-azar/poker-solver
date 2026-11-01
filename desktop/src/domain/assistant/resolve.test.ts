@@ -75,29 +75,22 @@ describe("resolveAssistantProposal", () => {
       draftRevision: 3,
     });
 
-    expect(result.draftPatch.oopRange).toBe(fixture25.ranges.oop);
-    expect(result.draftPatch.ipRange).toBe(fixture25.ranges.ip);
+    expect(result.profile?.id).toMatch(/^seat-action:/);
+    expect(result.provenance.oopRange).toBe("seat_action_composed");
+    expect(result.draftPatch.oopRange).toBeTruthy();
+    expect(result.draftPatch.ipRange).toBeTruthy();
+    expect(result.draftPatch.oopRange).not.toEqual(result.draftPatch.ipRange);
     expect(result.pot).toBeCloseTo(5.5, 10);
     expect(result.stack).toBeCloseTo(97.5, 10);
     expect(result.canSolve).toBe(false);
     expect(result.missing.some((m) => m.field === "board")).toBe(true);
-    expect(
-      result.summary.some(
-        (line) =>
-          /synthetic/i.test(line) ||
-          /fixture/i.test(line) ||
-          line.includes(fixture25.displayName),
-      ),
-    ).toBe(true);
-    expect(result.summary.some((line) => /cEV|chip EV/i.test(line))).toBe(true);
-    expect(result.summary.some((line) => /100bb starting/i.test(line))).toBe(
+    expect(result.summary.some((line) => /seat×action|composed/i.test(line))).toBe(
       true,
     );
-    expect(result.profile?.id).toBe(fixture25.id);
     expect(result.requestRevision).toBe(3);
   });
 
-  it("100NL SRP path matches the 100NL-labelled catalogue entry", async () => {
+  it("100NL SRP path still composes seat×action atoms (pack preferred over synthetic 100NL fixture)", async () => {
     const proposal = await provider.interpret({
       text: "Set up CO vs BB SRP with 100NL ranges",
       setupSummary: "",
@@ -113,7 +106,7 @@ describe("resolveAssistantProposal", () => {
       preferences: prefs,
       draftRevision: 4,
     });
-    expect(result.profile?.id).toBe(fixture25Nl.id);
+    expect(result.profile?.id).toMatch(/^seat-action:/);
     expect(result.pot).toBeCloseTo(5.5, 10);
     expect(result.stack).toBeCloseTo(97.5, 10);
   });

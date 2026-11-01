@@ -2975,3 +2975,8 @@
   flex-wrap: wrap;
   gap: 6px;
 }
+
+.catalogue-subhead {
+  margin: var(--space-2) 0 0;
+  font-size: 13px;
+}

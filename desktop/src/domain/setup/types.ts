@@ -10,6 +10,7 @@ export type SetupFieldProvenance =
   | "derived"
   | "model_generated"
   | "interpolated"
+  | "seat_action_composed"
   | "unresolved";
 
 export type PreflopActionKind =

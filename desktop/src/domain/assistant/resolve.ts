@@ -13,7 +13,10 @@ import {
   type StudySetupPreferences,
 } from "../setup";
 import {
+  composeSpotFromSeatActions,
+  getSeatActionCatalogue,
   interpolateProfilesByStack,
+  loadBundledSeatActions,
   matchRangeProfiles,
   openSizeFromActions,
   pickStackBracket,
@@ -161,6 +164,59 @@ export function resolveAssistantProposal(
         },
       ],
     });
+  }
+
+  // --- Seat×action composition (preferred grain over synthetic pair packs) ---
+  if (
+    mode === "create" &&
+    intent.potType &&
+    intent.oopPosition &&
+    intent.ipPosition &&
+    !proposal.generatedRanges &&
+    !proposal.interpolateFromIds
+  ) {
+    const selectedMeta = proposal.selectedProfileId
+      ? args.catalogue.getProfile(proposal.selectedProfileId)
+      : undefined;
+    const selectedIsSynthetic =
+      selectedMeta?.provenance.classification === "synthetic_fixture";
+    // Prefer seat×action atoms unless the player explicitly picked a non-synthetic pack.
+    if (!proposal.selectedProfileId || selectedIsSynthetic) {
+      const seatCat = getSeatActionCatalogue(loadBundledSeatActions);
+      const composed = composeSpotFromSeatActions(seatCat.list(), {
+        potType: intent.potType,
+        oopPosition: intent.oopPosition,
+        ipPosition: intent.ipPosition,
+        openerPosition: intent.ipPosition,
+        openSizeBb: intent.openSizeBb,
+        stackBb: intent.stackBb,
+      });
+      if (composed.oopRange && composed.ipRange) {
+        return finalizeGeneratedOrInterpolated({
+          args,
+          mode,
+          intent,
+          draftRevision,
+          preferences,
+          oopRange: composed.oopRange,
+          ipRange: composed.ipRange,
+          provenanceKind: "seat_action_composed",
+          profileRef: {
+            id: `seat-action:${composed.oopAtom?.id ?? "oop"}+${composed.ipAtom?.id ?? "ip"}`,
+            revision: draftRevision,
+            displayName: `Composed ${intent.oopPosition}/${intent.ipPosition} ${intent.potType}`,
+            classification: "population_estimate",
+          },
+          summaryExtra: [
+            ...composed.summary,
+            "Ranges composed from seat×action pack atoms (user Ranges.zip)",
+            selectedIsSynthetic
+              ? "Preferred seat×action pack over synthetic paired fixture"
+              : "",
+          ].filter(Boolean),
+        });
+      }
+    }
   }
 
   // --- Guarded generation (highest explicit range authority from the model) ---
@@ -362,7 +418,7 @@ function finalizeGeneratedOrInterpolated(args: {
   preferences: StudySetupPreferences;
   oopRange: string;
   ipRange: string;
-  provenanceKind: "model_generated" | "interpolated";
+  provenanceKind: "model_generated" | "interpolated" | "seat_action_composed";
   profileRef: SetupProfileRef;
   summaryExtra: string[];
 }): SetupDraftResult {
