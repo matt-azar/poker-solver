@@ -1,7 +1,8 @@
-#include "game/river_game.hpp"
+#include "game/river_config_text.hpp"
+#include "game/street_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
-#include "solver/river_batch.hpp"
+#include "solver/street_batch.hpp"
 #include "solver/strategy_report.hpp"
 #include "solver/trainer.hpp"
 
@@ -365,40 +366,73 @@ void apply_config_text(const std::string& text, Options& options)
     }
 }
 
-std::string board_text(const std::array<int, 5>& board)
+std::string board_text(const std::vector<int>& board)
 {
     std::string text;
-    for (int i = 0; i < 5; ++i)
+    for (std::size_t i = 0; i < board.size(); ++i)
     {
         if (i > 0)
         {
             text += ' ';
         }
-        text += poker::holdem::format_card(board[static_cast<std::size_t>(i)]);
+        text += poker::holdem::format_card(board[i]);
     }
     return text;
 }
 
 poker::solver::StrategyReport make_base_report(
-    const Options& options,
+    const poker::streets::StreetConfig& config,
+    poker::solver::Algorithm algorithm,
     const poker::solver::SolveStats& stats)
 {
     poker::solver::StrategyReport report;
-    report.board = board_text(options.config.board);
-    report.pot = options.config.pot;
-    report.stack = options.config.stack;
-    report.algorithm = poker::solver::algorithm_name(options.algorithm);
+    report.board = board_text(config.board);
+    report.pot = config.pot;
+    report.stack = config.stack;
+    report.algorithm = poker::solver::algorithm_name(algorithm);
     report.iterations = stats.iterations;
     report.has_nash_gap = true;
     report.nash_gap = stats.nash_gap;
-    report.weighting = "unweighted_infoset";
-    report.root_player = options.config.first_to_act;
+    report.weighting = "reach";
+    report.root_player = config.first_to_act;
     return report;
+}
+
+void fill_root_from_inspection(
+    poker::solver::StrategyReport& report,
+    const poker::solver::StreetInspection& view)
+{
+    if (view.kind != "decision")
+    {
+        return;
+    }
+    report.root_player = view.player;
+    report.weighting = "reach";
+    std::vector<std::string> labels;
+    labels.reserve(view.actions.size());
+    for (const poker::solver::StreetInspectAction& action : view.actions)
+    {
+        labels.push_back(action.label);
+    }
+    std::vector<double> reaches;
+    std::vector<std::vector<double>> strategies;
+    reaches.reserve(view.hands.size());
+    strategies.reserve(view.hands.size());
+    for (const poker::solver::StreetInspectHand& hand : view.hands)
+    {
+        if (!hand.structural || hand.strategy.size() != labels.size())
+        {
+            continue;
+        }
+        reaches.push_back(hand.reach);
+        strategies.push_back(hand.strategy);
+    }
+    report.root_actions = poker::solver::aggregate_reach_weighted(labels, reaches, strategies);
 }
 
 void fill_root_from_entries(
     poker::solver::StrategyReport& report,
-    const std::vector<poker::solver::RiverStrategyEntry>& entries)
+    const std::vector<poker::solver::StreetStrategyEntry>& entries)
 {
     std::vector<std::string> infosets;
     std::vector<std::string> actions;
@@ -406,7 +440,7 @@ void fill_root_from_entries(
     infosets.reserve(entries.size());
     actions.reserve(entries.size());
     probabilities.reserve(entries.size());
-    for (const poker::solver::RiverStrategyEntry& entry : entries)
+    for (const poker::solver::StreetStrategyEntry& entry : entries)
     {
         infosets.push_back(entry.infoset);
         actions.push_back(entry.action);
@@ -643,6 +677,11 @@ int main(int argc, char** argv)
             throw std::invalid_argument("eval-every must be a positive integer");
         }
 
+        // Product path: map river JSON/CLI into five-card StreetConfig and solve
+        // with StreetBatchSolver (or StreetGame under --reference). RiverGame
+        // remains the five-card oracle in tests; RiverBatchSolver is not used here.
+        poker::streets::StreetConfig street = poker::river::street_config_from_river(options.config);
+
         poker::solver::SolveConfig solve_config;
         solve_config.max_iterations = options.iterations;
         solve_config.nash_gap_threshold = options.gap_threshold;
@@ -652,16 +691,17 @@ int main(int argc, char** argv)
         std::cout.setf(std::ios::fmtflags(0), std::ios::floatfield);
         std::cout.precision(12);
         std::cout << "game: river\n";
-        std::cout << "board: " << board_text(options.config.board) << "\n";
+        std::cout << "board: " << board_text(street.board) << "\n";
         std::cout << "algorithm: " << poker::solver::algorithm_name(options.algorithm) << "\n";
         std::cout << "traversal: " << (options.reference ? "reference_enumerator" : "public_tree") << "\n";
-        std::cout << "pot: " << options.config.pot << "\n";
-        std::cout << "stack: " << options.config.stack << "\n";
+        std::cout << "engine: " << (options.reference ? "StreetGame" : "StreetBatchSolver") << "\n";
+        std::cout << "pot: " << street.pot << "\n";
+        std::cout << "stack: " << street.stack << "\n";
 
         if (options.reference)
         {
-            const poker::river::RiverGame game(options.config);
-            poker::solver::CfrTrainer<poker::river::RiverGame> trainer(game, options.algorithm);
+            const poker::streets::StreetGame game(street);
+            poker::solver::CfrTrainer<poker::streets::StreetGame> trainer(game, options.algorithm);
             const poker::solver::SolveStats stats = trainer.solve(solve_config);
             const std::vector<double> strategy = trainer.average_strategy();
             std::cout << "deals: " << game.deal_count() << "\n";
@@ -706,11 +746,10 @@ int main(int argc, char** argv)
             }
             if (!options.report_path.empty())
             {
-                poker::solver::StrategyReport report = make_base_report(options, stats);
+                poker::solver::StrategyReport report =
+                    make_base_report(street, options.algorithm, stats);
                 const auto offsets = poker::solver::action_offsets(game);
-                std::vector<std::string> infosets;
-                std::vector<std::string> actions;
-                std::vector<double> probabilities;
+                std::vector<poker::solver::StreetStrategyEntry> entries;
                 for (int infoset = 0; infoset < game.infoset_count(); ++infoset)
                 {
                     const std::string label = game.infoset_label(infoset);
@@ -718,25 +757,25 @@ int main(int argc, char** argv)
                     const int base = offsets[static_cast<std::size_t>(infoset)];
                     for (int action = 0; action < count; ++action)
                     {
-                        infosets.push_back(label);
-                        actions.push_back(game.action_label(infoset, action));
-                        probabilities.push_back(strategy[static_cast<std::size_t>(base + action)]);
+                        poker::solver::StreetStrategyEntry entry;
+                        entry.infoset = label;
+                        entry.action = game.action_label(infoset, action);
+                        entry.probability = strategy[static_cast<std::size_t>(base + action)];
+                        entries.push_back(std::move(entry));
                     }
                 }
-                // RiverGame labels use the same "| open" root marker as RiverBatchSolver.
-                report.root_actions = poker::solver::aggregate_open_infosets_unweighted(
-                    infosets, actions, probabilities);
+                fill_root_from_entries(report, entries);
                 poker::solver::write_strategy_report(options.report_path, report);
             }
         }
         else
         {
-            poker::solver::RiverBatchSolver batch(options.config);
+            poker::solver::StreetBatchSolver batch(street);
             const poker::solver::SolveStats stats = batch.solve(solve_config, options.algorithm);
             std::cout << "deals: " << batch.deal_count() << "\n";
             std::cout << "infosets: " << batch.infoset_count() << "\n";
-            std::cout << "decision_nodes: " << batch.deal_count() * batch.public_decisions() << "\n";
-            std::cout << "terminals: " << batch.deal_count() * batch.public_terminals() << "\n";
+            std::cout << "decision_nodes: " << batch.decision_node_count() << "\n";
+            std::cout << "terminals: " << batch.terminal_count() << "\n";
             std::cout << "iterations: " << stats.iterations << "\n";
             std::cout << "runtime_seconds: " << stats.runtime_seconds << "\n";
             std::cout << "memory_bytes_estimate: " << stats.memory_bytes_estimate << "\n";
@@ -756,15 +795,15 @@ int main(int argc, char** argv)
             std::cout << "time_limit_reached: " << (stats.time_limit_reached ? "1" : "0") << "\n";
             std::cout << "deterministic: yes (deals enumerated; no RNG)\n";
             std::cout << "abstraction: fixed bet sizes, not every legal chip amount\n";
-            const std::vector<poker::solver::RiverStrategyEntry> entries =
+            const std::vector<poker::solver::StreetStrategyEntry> entries =
                 (!options.report_path.empty() || options.print_strategies)
                     ? batch.average_strategy_entries()
-                    : std::vector<poker::solver::RiverStrategyEntry>{};
+                    : std::vector<poker::solver::StreetStrategyEntry>{};
             if (options.print_strategies)
             {
                 std::cout << "average_strategy:\n";
                 std::string current;
-                for (const poker::solver::RiverStrategyEntry& entry : entries)
+                for (const poker::solver::StreetStrategyEntry& entry : entries)
                 {
                     if (entry.infoset != current)
                     {
@@ -781,8 +820,10 @@ int main(int argc, char** argv)
             }
             if (!options.report_path.empty())
             {
-                poker::solver::StrategyReport report = make_base_report(options, stats);
-                fill_root_from_entries(report, entries);
+                poker::solver::StrategyReport report =
+                    make_base_report(street, options.algorithm, stats);
+                batch.prepare_inspection();
+                fill_root_from_inspection(report, batch.inspect_node(batch.root_node_id()));
                 poker::solver::write_strategy_report(options.report_path, report);
             }
         }
