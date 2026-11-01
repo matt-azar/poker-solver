@@ -2539,3 +2539,133 @@
   font-size: 9px;
   color: var(--muted);
 }
+
+/* Setup assistant (Build) */
+
+.build-profile-note {
+  margin: 4px 0 0;
+  font-size: var(--label-size);
+  color: var(--muted);
+}
+
+.field-hint {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.assistant-panel {
+  gap: var(--space-2);
+}
+
+.assistant-header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.assistant-header h2 {
+  margin: 0;
+}
+
+.assistant-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.assistant-provider {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.assistant-provider select {
+  min-width: 140px;
+}
+
+.assistant-lede {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 72ch;
+}
+
+.assistant-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.assistant-examples .toolbar-btn {
+  font-size: 11px;
+}
+
+.assistant-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.assistant-compose textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 52px;
+}
+
+.assistant-compose-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.assistant-status {
+  margin: 0;
+  font-size: 12px;
+}
+
+.assistant-status.muted {
+  color: var(--muted);
+}
+
+.assistant-result,
+.assistant-meta {
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.assistant-result-title {
+  font-weight: 600;
+}
+
+.assistant-result ul,
+.assistant-flags ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.assistant-flags.warn {
+  color: var(--danger);
+}
+
+.assistant-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.assistant-hint.ok {
+  color: var(--ok);
+}
