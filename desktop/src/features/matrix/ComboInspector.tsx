@@ -73,12 +73,7 @@ export function ComboInspector() {
             <button type="button" className="toolbar-btn" onClick={() => void calculateEv()}>
               Calculate action EVs
             </button>
-          ) : (
-            <p className="hint">
-              Units: {nodeValues.units || "chips"}, basis:{" "}
-              {nodeValues.utility_basis || "root_centered"}
-            </p>
-          )}
+          ) : null}
           <div className="inspector-actions">
             {(currentNode.actions || []).map((label, index) => {
               const share =

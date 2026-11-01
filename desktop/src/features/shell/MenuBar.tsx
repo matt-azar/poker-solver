@@ -236,25 +236,6 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
       <WorkspaceSwitcher workspace={workspace} onChange={onWorkspace} />
       <div className="menu-bar__spacer" />
       <div className="menu-bar__actions">
-        <button type="button" className="toolbar-btn primary" onClick={() => void solve()}>
-          Solve
-        </button>
-        <button
-          type="button"
-          className="toolbar-btn"
-          disabled={!busy && phase !== "paused"}
-          onClick={() => void continueSolve()}
-        >
-          Continue
-        </button>
-        <button
-          type="button"
-          className="toolbar-btn danger"
-          disabled={!busy}
-          onClick={() => void stop()}
-        >
-          Stop
-        </button>
         <button type="button" className="icon-btn" onClick={() => toggleTheme()} title="Theme">
           Theme
         </button>

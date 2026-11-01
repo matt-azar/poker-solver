@@ -63,9 +63,9 @@ export function RunoutTable() {
           </button>
         </div>
       </div>
-      {runouts?.pending ? <p className="empty-hint">Pending…</p> : null}
+      {runouts?.pending ? <p className="empty-hint">Loading…</p> : null}
       {!rows.length ? (
-        <p className="empty-hint">Compare runouts on a chance node.</p>
+        <p className="empty-hint">Open a chance node, then Refresh.</p>
       ) : (
         <table>
           <thead>

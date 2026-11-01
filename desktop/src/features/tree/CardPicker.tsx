@@ -107,15 +107,9 @@ export function CardPicker({ open, onClose }: { open: boolean; onClose: () => vo
           </button>
         </div>
         {!chanceReady ? (
-          <p className="empty-hint">
-            Card picker is available on chance nodes with legal next cards from the engine.
-          </p>
+          <p className="empty-hint">No next cards at this node.</p>
         ) : (
           <>
-            <p className="hint">
-              Conditional weights from the node — board blockers marked. Arrow keys move; Enter
-              follows the line.
-            </p>
             <div className="card-picker-grid" role="grid" aria-label="Rank and suit">
               <div className="card-picker-corner" />
               {CARD_SUITS.map((suit) => (

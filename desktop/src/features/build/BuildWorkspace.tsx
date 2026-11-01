@@ -24,9 +24,6 @@ export function BuildWorkspace() {
       <header className="build-header">
         <div>
           <h1>Build</h1>
-          <p className="muted">
-            Spot · Ranges · Betting · Solve — draft stays separate from the published revision.
-          </p>
         </div>
         <div className="build-summary">
           <span>{draft.boardText || "no board"}</span>
@@ -165,10 +162,6 @@ export function BuildWorkspace() {
 
         <section className="build-section">
           <h2>Betting tree</h2>
-          <p className="hint">
-            Enter pot fractions such as <code>0.5, 1</code>. Empty street boxes use the shared list;
-            an explicit empty array is check-only on the engine boundary when sent as [].
-          </p>
           <div className="build-inline">
             <label>
               OOP bets

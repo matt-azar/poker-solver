@@ -25,12 +25,10 @@ export function ConvergenceChart() {
   return (
     <div className="convergence-chart">
       <div className="panel-title-row">
-        <h2 className="panel-title">NashConv samples</h2>
-        <span className="muted">
-          {samples.length
-            ? `${samples.length} point(s) from gap_series`
-            : "gap vs iteration — not a fabricated ETA"}
-        </span>
+        <h2 className="panel-title">NashConv</h2>
+        {samples.length ? (
+          <span className="muted tabular">{samples.length} samples</span>
+        ) : null}
       </div>
       {samples.length ? (
         <>
@@ -39,7 +37,7 @@ export function ConvergenceChart() {
             preserveAspectRatio="none"
             className="convergence-svg"
             role="img"
-            aria-label="NashConv gap versus iteration"
+            aria-label="NashConv versus iteration"
           >
             <path
               d={path}
@@ -52,13 +50,13 @@ export function ConvergenceChart() {
           <div className="convergence-legend tabular muted">
             {samples.map((sample) => (
               <span key={sample.iteration}>
-                i{sample.iteration}: {sample.nash_gap.toFixed(3)}
+                {sample.iteration}: {sample.nash_gap.toFixed(3)}
               </span>
             ))}
           </div>
         </>
       ) : (
-        <p className="empty-hint">Progress samples appear in status.gap_series while solving.</p>
+        <p className="empty-hint">Samples appear while solving.</p>
       )}
     </div>
   );

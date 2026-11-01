@@ -2,7 +2,6 @@ import { pairName } from "../../domain/range";
 import { RANKS } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
 
-/** Non-acting player's input range (draft weights) — not invented action frequencies. */
 export function OpponentRangePanel() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const weights = useStudyStore((s) => s.weights);
@@ -14,7 +13,6 @@ export function OpponentRangePanel() {
     <section className="matrix-pane opponent-range-pane" aria-label={`${seat.toUpperCase()} range`}>
       <div className="panel-title-row">
         <h2 className="panel-title">{seat.toUpperCase()} range</h2>
-        <span className="muted">Input weights · not strategy at this decision</span>
       </div>
       <div className="range-paint-grid" role="grid">
         {RANKS.map((rowRank, row) =>

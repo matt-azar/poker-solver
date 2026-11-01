@@ -120,10 +120,6 @@ export function LockDrawer() {
               Full node
             </button>
           </div>
-          <p className="hint">
-            A 0% action inside a row that sums to 1 is a real constraint. An all-zero row is
-            rejected — use Unlock (DELETE) to remove a lock.
-          </p>
         </section>
 
         <section className="lock-drawer__section" aria-label="Selected hands">
@@ -136,9 +132,7 @@ export function LockDrawer() {
             </span>
           </div>
           {lockDraft.kind === "selected" && lockDraft.handIndices.length === 0 ? (
-            <p className="empty-hint">
-              Select combos in the inspector, or toggle rows below after seeding.
-            </p>
+            <p className="empty-hint">Select combos in the inspector.</p>
           ) : (
             <ul className="lock-hand-list">
               {selectedHands.map(({ index, combo }) => {
@@ -306,10 +300,7 @@ export function LockDrawer() {
               checked={warmStart}
               onChange={(event) => setWarmStart(event.target.checked)}
             />
-            <span>
-              Warm-start from current strategy
-              <span className="muted"> (unchecked = reset re-solve)</span>
-            </span>
+            <span>Warm-start from current strategy</span>
           </label>
           <div className="lock-drawer__actions">
             <button
@@ -334,10 +325,6 @@ export function LockDrawer() {
               Compare to baseline
             </button>
           </div>
-          <p className="hint">
-            Resolve keeps the baseline solution and publishes a new solution id for the
-            locked scenario.
-          </p>
         </section>
 
         <section className="lock-drawer__section" aria-label="Existing locks">

@@ -65,7 +65,6 @@ export function CompareWorkspace() {
       <div className="compare-toolbar">
         <div className="compare-toolbar__title">
           <h1>Compare</h1>
-          <p className="muted">Baseline revision vs locked scenario at a decision node.</p>
         </div>
         <div className="compare-toolbar__actions">
           <button
@@ -89,26 +88,20 @@ export function CompareWorkspace() {
 
       {missingBaseline ? (
         <div className="compare-empty" role="status">
-          <h2>No baseline revision</h2>
+          <h2>No baseline</h2>
           <p>
-            Compare needs a retained baseline. Apply node locks, then run{" "}
-            <strong>Resolve locked</strong> — the engine keeps the prior solution as baseline and
-            publishes a new scenario id. Status exposes <code>baseline_solution_id</code>; open this
-            workspace again after resolve completes.
-          </p>
-          <p className="muted">
-            Scenario: {solutionId ?? "none"} · Node: {nodeId ?? "none"}
+            Lock hands in Study, then run <strong>Resolve locked</strong> to create a baseline.
           </p>
         </div>
       ) : !solutionId ? (
         <div className="compare-empty" role="status">
-          <h2>No scenario solution</h2>
-          <p>Load or solve a solution, then resolve-locked so both baseline and scenario exist.</p>
+          <h2>No solution</h2>
+          <p>Solve or open a solution first.</p>
         </div>
       ) : !nodeId ? (
         <div className="compare-empty" role="status">
           <h2>No decision node</h2>
-          <p>Open Study, navigate to a decision node, then refresh compare.</p>
+          <p>Select a decision node in Study, then refresh.</p>
         </div>
       ) : compareNote ? (
         <>
@@ -137,13 +130,7 @@ export function CompareWorkspace() {
         <div className="compare-empty" role="status">
           <h2>{busy ? "Loading compare…" : "Compare not loaded"}</h2>
           {message ? <p className="compare-store-message">{message}</p> : null}
-          {!busy ? (
-            <p className="muted">
-              Baseline {baselineSolutionId} → scenario {solutionId} at {nodeId}. Press Refresh
-              compare. If revisions disagree on action arity at this node, the API errors and the
-              store message appears here — zeros are not invented for missing actions.
-            </p>
-          ) : null}
+          {!busy ? <p className="muted">Press Refresh compare.</p> : null}
         </div>
       )}
     </div>

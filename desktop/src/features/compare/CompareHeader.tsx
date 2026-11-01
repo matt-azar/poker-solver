@@ -33,7 +33,7 @@ export function CompareHeader({ note }: Props) {
         </div>
       </div>
 
-      <div className="compare-metrics" aria-label="Root-centered chip EV">
+      <div className="compare-metrics" aria-label="Chip EV and NashConv">
         <div className="compare-metric">
           <span className="compare-label">Baseline EV</span>
           <span className="compare-metric__value tabular">
@@ -65,12 +65,6 @@ export function CompareHeader({ note }: Props) {
           </span>
         </div>
       </div>
-
-      <p className="compare-utility-note">
-        Utility is <strong>root-centered chips</strong> (including earlier investments) — not Pio
-        exploitability. Nash gaps are NashConv (sum of best-response gains), not averaged
-        exploitability.
-      </p>
     </header>
   );
 }
