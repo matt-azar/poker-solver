@@ -75,9 +75,6 @@ export function LibraryWorkspace() {
       <header className="library-header">
         <div>
           <h1>Library</h1>
-          <p className="library-muted">
-            Recent solutions, street-config templates, and named range presets from the engine.
-          </p>
         </div>
         <button
           type="button"
@@ -91,7 +88,7 @@ export function LibraryWorkspace() {
 
       {disconnected ? (
         <p className="library-empty" role="status">
-          Engine disconnected — start the explorer to load recent files, templates, and ranges.
+          Engine disconnected.
         </p>
       ) : (
         <div className="library-grid">

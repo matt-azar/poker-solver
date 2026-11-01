@@ -977,7 +977,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         set({
           nodeValues: values,
           phase: phaseFromStatus(get().status, "complete"),
-          message: `Action EVs ready (${values.units || "chips"}, ${values.utility_basis || "root_centered"}).`,
+          message: "Action EVs ready.",
           matrixMode: get().matrixMode === "strategy" ? "strategy-ev" : get().matrixMode,
         });
       },
@@ -1007,7 +1007,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       () =>
         engineClient.getRunouts(solutionId, node.node_id) as Promise<{ pending?: boolean }>,
       (runouts) => {
-        set({ runouts, message: "Runout comparison ready." });
+        set({ runouts, message: "Runouts ready." });
       },
       (message) => set({ message, runouts: null }),
     );
@@ -1021,7 +1021,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const token = ++valueToken;
     set({
-      message: "Loading check-down equity…",
+      message: "Loading equity…",
       analysisTab: "equity",
       equity: { pending: true },
     });
@@ -1030,7 +1030,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       () =>
         engineClient.getEquity(solutionId, node.node_id) as Promise<{ pending?: boolean }>,
       (equity) => {
-        set({ equity, message: "Check-down equity ready (fraction of pot)." });
+        set({ equity, message: "Equity ready." });
       },
       (message) => set({ message }),
     );
@@ -1044,7 +1044,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const token = ++valueToken;
     set({
-      message: "Loading made-hand categories…",
+      message: "Loading categories…",
       analysisTab: "categories",
       categories: { pending: true },
     });
@@ -1053,7 +1053,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       () =>
         engineClient.getCategories(solutionId, node.node_id) as Promise<{ pending?: boolean }>,
       (categories) => {
-        set({ categories, message: "Made-hand categories ready." });
+        set({ categories, message: "Categories ready." });
       },
       (message) => set({ message }),
     );

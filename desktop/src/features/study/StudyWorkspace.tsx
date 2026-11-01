@@ -8,7 +8,6 @@ import { NodeNavigator } from "../tree/NodeNavigator";
 import { useStudyStore } from "../../state/studyStore";
 import { ActionHistory } from "./ActionHistory";
 import { ContextStrip } from "./ContextStrip";
-import { SolveControls } from "./SolveControls";
 
 export function StudyWorkspace() {
   const leftNav = useStudyStore((s) => s.layout.leftNav);
@@ -23,9 +22,6 @@ export function StudyWorkspace() {
         <button type="button" className="study-tab" role="tab" aria-selected>
           Spot 1
         </button>
-        <div className="study-tabs__controls">
-          <SolveControls />
-        </div>
       </div>
       <ContextStrip />
       <ActionHistory />

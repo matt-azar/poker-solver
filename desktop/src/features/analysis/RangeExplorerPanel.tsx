@@ -43,12 +43,11 @@ function EquityHistogram({
 }) {
   const rows = useMemo(() => normalizeBucketWeights(buckets), [buckets]);
   if (!rows.length) {
-    return <p className="empty-hint">{title}: no distribution buckets.</p>;
+    return <p className="empty-hint">No distribution.</p>;
   }
   return (
     <div className="equity-hist">
       <h3 className="panel-subtitle">{title}</h3>
-      <p className="hint">Mass convention: engine input weights (normalized for bar width).</p>
       <div className="equity-bars" role="img" aria-label={`${title} equity histogram`}>
         {rows.map((bucket) => (
           <div key={`${bucket.lo}-${bucket.hi}`} className="equity-bar-row">
@@ -61,9 +60,7 @@ function EquityHistogram({
                 style={{ width: `${Math.min(100, bucket.fraction * 100)}%` }}
               />
             </span>
-            <span className="tabular" title={`raw weight ${bucket.weight}`}>
-              {(bucket.fraction * 100).toFixed(1)}%
-            </span>
+            <span className="tabular">{(bucket.fraction * 100).toFixed(1)}%</span>
           </div>
         ))}
       </div>
@@ -115,15 +112,11 @@ export function RangeExplorerPanel() {
           </button>
         </div>
         {!equity ? (
-          <p className="empty-hint">Request equity for the current node.</p>
+          <p className="empty-hint">Click Refresh to load equity.</p>
         ) : equity.pending ? (
-          <p className="empty-hint">Pending…</p>
+          <p className="empty-hint">Loading…</p>
         ) : (
           <>
-            <p className="hint">
-              Model: {equity.model || "check-down"} · Units:{" "}
-              {equity.units || "fraction of pot"} · not chip EV
-            </p>
             <div className="inspector-meta">
               <div>
                 <span className="muted">OOP</span>
@@ -153,10 +146,9 @@ export function RangeExplorerPanel() {
       <div className="range-explorer">
         <div className="panel-title-row">
           <h2 className="panel-title">Range explorer</h2>
-          <span className="muted">Heaviest groups at this node</span>
         </div>
         {!topCells.length ? (
-          <p className="empty-hint">Range mass appears after a solve.</p>
+          <p className="empty-hint">No range at this node.</p>
         ) : (
           <table className="data-table">
             <thead>
@@ -233,19 +225,13 @@ export function RangeExplorerPanel() {
         </div>
       </div>
       {!categories ? (
-        <p className="empty-hint">Available on five-card boards after solve.</p>
+        <p className="empty-hint">Click Refresh to load categories.</p>
       ) : categories.pending ? (
-        <p className="empty-hint">Pending…</p>
+        <p className="empty-hint">Loading…</p>
       ) : categories.available === false ? (
         <p className="empty-hint">{categories.reason || "Not available on this board."}</p>
       ) : (
         <>
-          <p className="hint">
-            Model: {categories.model || "made-hand"} · strategy-weighted reach
-            {categoryView.totalMass != null
-              ? ` · total mass ${categoryView.totalMass.toFixed(3)}`
-              : ""}
-          </p>
           <table className="data-table">
             <thead>
               <tr>
