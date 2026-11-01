@@ -1069,6 +1069,43 @@ void run_explorer_http_tests()
     CHECK(json_number(icm_status.body, "player0_expected_utility", icm_ev));
     CHECK_NEAR(icm_ev, 2.5, 1e-6);
 
+    // Incentive Job JSON: ActionLabelMatch + CategoryTag with edge_tags; status echoes.
+    HttpResult bad_incentive;
+    CHECK(http_exchange(
+        "POST",
+        "/api/solve",
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":1,\"samples\":1,\"max_raises\":0,\"allow_all_in\":0,"
+        "\"oop_bets\":[],\"ip_bets\":[],\"memory_mib\":128,"
+        "\"incentives\":[{\"kind\":\"nope\",\"player\":0,\"key\":\"c\",\"delta\":1}]}",
+        bad_incentive));
+    CHECK(bad_incentive.status == 400);
+    CHECK(bad_incentive.body.find("incentive") != std::string::npos);
+
+    const std::string incentive_job =
+        "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":3,\"samples\":1,\"max_raises\":0,\"allow_all_in\":0,"
+        "\"oop_bets\":[],\"ip_bets\":[],\"memory_mib\":128,"
+        "\"incentives\":["
+        "{\"kind\":\"label\",\"player\":0,\"key\":\"c\",\"delta\":1},"
+        "{\"kind\":\"tag\",\"player\":0,\"key\":\"slowplay\",\"delta\":1}"
+        "],"
+        "\"edge_tags\":[{\"player\":0,\"action\":\"c\",\"tags\":[\"slowplay\"]}]}";
+    HttpResult incentive_accepted;
+    CHECK(http_exchange("POST", "/api/solve", incentive_job, incentive_accepted));
+    CHECK(incentive_accepted.status == 202);
+    HttpResult incentive_status;
+    CHECK(wait_for_completion(incentive_status));
+    CHECK(incentive_status.body.find("\"incentives\":[") != std::string::npos);
+    CHECK(incentive_status.body.find("\"kind\":\"label\"") != std::string::npos);
+    CHECK(incentive_status.body.find("\"kind\":\"tag\"") != std::string::npos);
+    CHECK(incentive_status.body.find("\"edge_tags\":[") != std::string::npos);
+    CHECK(incentive_status.body.find("\"slowplay\"") != std::string::npos);
+    double incentive_ev = 0.0;
+    CHECK(json_number(incentive_status.body, "player0_expected_utility", incentive_ev));
+    // Check-down: OOP check matches label +1 and tagged +1 → modeled u0 = 52.
+    CHECK_NEAR(incentive_ev, 52.0, 1e-6);
+
     // time_limit 0 stops after the first completed sample chunk and keeps the solve.
     const std::string timed =
         "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","

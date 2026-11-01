@@ -259,8 +259,9 @@ struct RiverBatchSolver::Engine
         int parent = -1;
         int parent_action = -1;
         int hand_base = 0;
-        // Path-attributed player-0 incentive delta (0 when incentives empty).
+        // Path-attributed incentive deltas per seat (0 when incentives empty).
         double incentive_u0 = 0.0;
+        double incentive_u1 = 0.0;
         std::string path;
         std::string action_labels[8];
     };
@@ -363,6 +364,7 @@ struct RiverBatchSolver::Engine
                 {
                     edge.compact_label = edge.display_label;
                 }
+                attach_edge_tags(edge, config.incentives);
                 rev.push_back(std::move(edge));
                 at = child.parent;
             }
@@ -370,8 +372,10 @@ struct RiverBatchSolver::Engine
             PlayerPayoff zero;
             zero.utility[0] = 0.0;
             zero.utility[1] = 0.0;
-            node.incentive_u0 =
-                apply_path_incentives(config.incentives, zero, path).utility[0];
+            const PlayerPayoff path_delta =
+                apply_path_incentives(config.incentives, zero, path);
+            node.incentive_u0 = path_delta.utility[0];
+            node.incentive_u1 = path_delta.utility[1];
         }
     }
 
@@ -527,7 +531,7 @@ struct RiverBatchSolver::Engine
         average.assign(static_cast<std::size_t>(cursor), 0.0);
     }
 
-    double payoff(const Node& node, int h0, int h1) const
+    PlayerPayoff terminal_modeled(const Node& node, int h0, int h1) const
     {
         const int outcome = node.folded < 0
             ? showdown[static_cast<std::size_t>(h0 * n1 + h1)]
@@ -539,16 +543,24 @@ struct RiverBatchSolver::Engine
             node.folded,
             outcome,
             config.rake);
-        return apply_icm_terminal(config.icm, chips).utility[0] + node.incentive_u0;
+        PlayerPayoff paid = apply_icm_terminal(config.icm, chips);
+        paid.utility[0] += node.incentive_u0;
+        paid.utility[1] += node.incentive_u1;
+        return paid;
     }
 
-    double cfr_deal(int node_index, double pi0, double pi1, double chance, int h0, int h1,
-                    int updating, double weight_iter)
+    double payoff(const Node& node, int h0, int h1) const
+    {
+        return terminal_modeled(node, h0, h1).utility[0];
+    }
+
+    PlayerPayoff cfr_deal_payoff(int node_index, double pi0, double pi1, double chance, int h0, int h1,
+                                int updating, double weight_iter)
     {
         const Node& node = nodes[static_cast<std::size_t>(node_index)];
         if (node.terminal)
         {
-            return payoff(node, h0, h1);
+            return terminal_modeled(node, h0, h1);
         }
         const int hand = node.player == 0 ? h0 : h1;
         const int base = node.hand_base + hand * node.n_actions;
@@ -559,34 +571,41 @@ struct RiverBatchSolver::Engine
             const double reach = node.player == 0 ? pi0 : pi1;
             accumulate_average(strategy_sum.data() + base, sigma, node.n_actions, weight_iter * reach);
         }
-        double action_utility[8];
-        double node_utility = 0.0;
+        PlayerPayoff action_utility[8];
+        PlayerPayoff node_utility;
         for (int action = 0; action < node.n_actions; ++action)
         {
             if (node.player == 0)
             {
-                action_utility[action] = cfr_deal(
+                action_utility[action] = cfr_deal_payoff(
                     node.child[action], pi0 * sigma[action], pi1, chance, h0, h1, updating, weight_iter);
             }
             else
             {
-                action_utility[action] = cfr_deal(
+                action_utility[action] = cfr_deal_payoff(
                     node.child[action], pi0, pi1 * sigma[action], chance, h0, h1, updating, weight_iter);
             }
-            node_utility += sigma[action] * action_utility[action];
+            node_utility.utility[0] += sigma[action] * action_utility[action].utility[0];
+            node_utility.utility[1] += sigma[action] * action_utility[action].utility[1];
         }
         if (update)
         {
             const double opponent_reach = (node.player == 0 ? pi1 : pi0) * chance;
             for (int action = 0; action < node.n_actions; ++action)
             {
-                const double instant = node.player == 0
-                    ? (action_utility[action] - node_utility)
-                    : (node_utility - action_utility[action]);
+                const double instant = action_utility[action].utility[node.player]
+                    - node_utility.utility[node.player];
                 regret[static_cast<std::size_t>(base + action)] += opponent_reach * instant;
             }
         }
         return node_utility;
+    }
+
+    double cfr_deal(int node_index, double pi0, double pi1, double chance, int h0, int h1,
+                    int updating, double weight_iter)
+    {
+        return cfr_deal_payoff(
+            node_index, pi0, pi1, chance, h0, h1, updating, weight_iter).utility[0];
     }
 
     // When locks_ is set, locked rows replace RM for matching public nodes.
@@ -715,7 +734,7 @@ struct RiverBatchSolver::Engine
                 {
                     continue;
                 }
-                sum += mass * payoff(node, h0, h1);
+                sum += mass * terminal_modeled(node, h0, h1).utility[0];
             }
             v0[h0] = sum;
         }
@@ -733,7 +752,7 @@ struct RiverBatchSolver::Engine
                 {
                     continue;
                 }
-                sum += mass * payoff(node, h0, h1);
+                sum += mass * terminal_modeled(node, h0, h1).utility[1];
             }
             v1[h1] = sum;
         }
@@ -854,7 +873,7 @@ struct RiverBatchSolver::Engine
                 for (int action = 1; action < node.n_actions; ++action)
                 {
                     const double value = action_values[static_cast<std::size_t>(action * n1 + hand)];
-                    if (value < best_value)
+                    if (value > best_value)
                     {
                         best = action;
                         best_value = value;
@@ -1585,10 +1604,10 @@ struct RiverBatchSolver::Engine
             double mixed = 0.0;
             for (int action = 0; action < node.n_actions; ++action)
             {
+                // aev0 / aev1 hold each seat's own modeled utility (dual-utility).
                 const double stored_raw = raw[static_cast<std::size_t>(action * raw_stride + hand)];
-                const double signed_raw = actor == 0 ? stored_raw : -stored_raw;
                 const double denom = prior * joint_scale * open;
-                const double conditional = signed_raw / denom;
+                const double conditional = stored_raw / denom;
                 page.action_ev[static_cast<std::size_t>(hand * node.n_actions + action)] = conditional;
                 const double played = average[static_cast<std::size_t>(
                     node.hand_base + hand * node.n_actions + action)];
@@ -1927,7 +1946,8 @@ double RiverBatchSolver::p1_best_response_utility() const
 
 double RiverBatchSolver::p2_best_response_utility() const
 {
-    return -engine_->utility_when_p1_responds();
+    // Modeled player-1 utility when player 1 best-responds (dual-utility).
+    return engine_->utility_when_p1_responds();
 }
 
 double RiverBatchSolver::nash_gap() const

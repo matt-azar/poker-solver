@@ -1,10 +1,12 @@
 #include "explorer/checkpoint.hpp"
+#include "explorer/incentives_job.hpp"
 #include "explorer/range_library.hpp"
 #include "explorer/recent_files.hpp"
 #include "explorer/retained_training.hpp"
 #include "explorer/session.hpp"
 #include "explorer/templates.hpp"
 #include "explorer/value_worker.hpp"
+#include "solver/incentives.hpp"
 #include "game/river_config_text.hpp"
 #include "game/river_game.hpp"
 #include "game/street_config_text.hpp"
@@ -319,6 +321,7 @@ struct Job
     double rake_cap = 0.0;
     std::vector<double> icm_stacks{};
     std::vector<double> icm_payouts{};
+    poker::solver::IncentiveConfig incentives{};
     int max_raises = 2;
     int iterations = 200;
     int samples = 5;
@@ -473,6 +476,7 @@ Job parse_job(const std::string& text)
         icm.payouts = job.icm_payouts;
         icm.validate(job.pot, job.stack);
     }
+    job.incentives = poker::explorer::parse_incentive_config_json(text);
     job.max_raises = static_cast<int>(read_number(text, "max_raises", 2));
     job.iterations = static_cast<int>(read_number(text, "iterations", 200));
     job.samples = static_cast<int>(read_number(text, "samples", 5));
@@ -728,7 +732,9 @@ std::string build_status(const StatusDraft& draft)
         }
         out += format_number(job.icm_payouts[i]);
     }
-    out += "],\"frozen\":";
+    out += "],";
+    poker::explorer::append_incentive_config_json(out, job.incentives);
+    out += ",\"frozen\":";
     out += job.frozen ? "true" : "false";
     out += ",\"memory_mib\":";
     out += std::to_string(job.memory_mib);
@@ -1083,6 +1089,7 @@ poker::streets::StreetConfig street_config(const Job& job)
     config.rake.cap = job.rake_cap;
     config.icm.stacks = job.icm_stacks;
     config.icm.payouts = job.icm_payouts;
+    config.incentives = job.incentives;
     config.memory_mib = job.memory_mib;
     config.threads = job.threads;
     config.tree_edits = job.tree_edits;
@@ -3123,6 +3130,7 @@ Job job_from_street(const poker::streets::StreetConfig& config)
     job.rake_cap = config.rake.cap;
     job.icm_stacks = config.icm.stacks;
     job.icm_payouts = config.icm.payouts;
+    job.incentives = config.incentives;
     job.memory_mib = config.memory_mib;
     job.threads = config.threads;
     job.tree_edits = config.tree_edits;
@@ -3147,6 +3155,7 @@ Job job_from_river(const poker::river::RiverConfig& config)
     job.rake_cap = config.rake.cap;
     job.icm_stacks = config.icm.stacks;
     job.icm_payouts = config.icm.payouts;
+    job.incentives = config.incentives;
     return job;
 }
 

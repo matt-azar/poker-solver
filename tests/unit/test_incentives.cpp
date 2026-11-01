@@ -5,12 +5,17 @@
 
 #include <stdexcept>
 
+using poker::solver::IncentiveConfig;
 using poker::solver::IncentiveContext;
+using poker::solver::IncentiveEdge;
+using poker::solver::IncentiveEdgeTagSpec;
 using poker::solver::IncentiveKind;
 using poker::solver::IncentiveRule;
 using poker::solver::IncentiveTable;
 using poker::solver::PlayerPayoff;
+using poker::solver::apply_incentive_edge;
 using poker::solver::apply_incentives;
+using poker::solver::attach_edge_tags;
 
 void run_incentives_tests()
 {
@@ -97,6 +102,39 @@ void run_incentives_tests()
         const PlayerPayoff p1 = table.apply(base, IncentiveContext{1, "c", {}});
         CHECK_NEAR(p1.utility[0], 10.0, 1e-12);
         CHECK_NEAR(p1.utility[1], -8.0, 1e-12);
+    }
+
+    // Edge-tag attachment feeds CategoryTag matching on IncentiveEdge.
+    {
+        IncentiveConfig config;
+        config.add_edge_tag(IncentiveEdgeTagSpec{-1, "b100", {"bluff", "overbet"}});
+        config.add_edge_tag(IncentiveEdgeTagSpec{1, "f", {"give_up"}});
+        IncentiveEdge edge;
+        edge.player = 0;
+        edge.compact_label = "b100";
+        edge.display_label = "Bet 100";
+        attach_edge_tags(edge, config);
+        CHECK(edge.tags.size() == 2);
+        CHECK(edge.tags[0] == "bluff");
+        CHECK(edge.tags[1] == "overbet");
+
+        IncentiveEdge fold;
+        fold.player = 0;
+        fold.compact_label = "f";
+        fold.display_label = "Fold";
+        attach_edge_tags(fold, config);
+        CHECK(fold.tags.empty()); // player filter is seat 1 only
+
+        fold.player = 1;
+        attach_edge_tags(fold, config);
+        CHECK(fold.tags.size() == 1);
+        CHECK(fold.tags[0] == "give_up");
+
+        config.add(IncentiveRule{IncentiveKind::CategoryTag, "bluff", 0, 4.0});
+        PlayerPayoff paid{10.0, -10.0};
+        apply_incentive_edge(paid, config.rules, edge);
+        CHECK_NEAR(paid.utility[0], 14.0, 1e-12);
+        CHECK_NEAR(paid.utility[1], -10.0, 1e-12);
     }
 
     // Reject bad player / non-finite inputs.

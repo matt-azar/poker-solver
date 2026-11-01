@@ -231,6 +231,8 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
     rake_cap: draft.rakeCap || 0,
     icm_stacks: parseSizeList(draft.icmStacks),
     icm_payouts: parseSizeList(draft.icmPayouts),
+    incentives: parseIncentiveRules(draft.incentives),
+    edge_tags: parseEdgeTagSpecs(draft.edgeTags),
   };
   if (draft.timeLimit.trim() !== "") {
     body.time_limit = Number(draft.timeLimit);
@@ -239,6 +241,53 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
     body.tree_edits = [...draft.treeEdits];
   }
   return body;
+}
+
+function parseIncentiveRules(text: string): SolveJobRequest["incentives"] {
+  return String(text || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const tokens = line.split(/[\s,]+/).filter(Boolean);
+      if (tokens.length !== 4) {
+        throw new Error("incentive needs kind player key delta");
+      }
+      const kind = tokens[0];
+      if (kind !== "label" && kind !== "tag") {
+        throw new Error("incentive kind must be label or tag");
+      }
+      return {
+        kind,
+        player: Number(tokens[1]),
+        key: tokens[2],
+        delta: Number(tokens[3]),
+      };
+    });
+}
+
+function parseEdgeTagSpecs(text: string): SolveJobRequest["edge_tags"] {
+  return String(text || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const tokens = line.split(/[\s,]+/).filter(Boolean);
+      if (tokens.length < 2) {
+        throw new Error("edge-tag needs ACTION TAG");
+      }
+      let player = -1;
+      let actionAt = 0;
+      if ((tokens[0] === "0" || tokens[0] === "1") && tokens.length >= 3) {
+        player = Number(tokens[0]);
+        actionAt = 1;
+      }
+      return {
+        player,
+        action: tokens[actionAt],
+        tags: tokens.slice(actionAt + 1),
+      };
+    });
 }
 
 interface StudyState {

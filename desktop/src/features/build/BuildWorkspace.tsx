@@ -384,6 +384,24 @@ export function BuildWorkspace() {
               />
             </label>
           </div>
+          <div className="build-inline">
+            <label>
+              Incentives
+              <input
+                value={draft.incentives}
+                onChange={(event) => updateDraft({ incentives: event.target.value })}
+                placeholder="label 0 b100 3.5; tag 1 bluff -2"
+              />
+            </label>
+            <label>
+              Edge tags
+              <input
+                value={draft.edgeTags}
+                onChange={(event) => updateDraft({ edgeTags: event.target.value })}
+                placeholder="b100 bluff; 1 f give_up"
+              />
+            </label>
+          </div>
         </section>
       </div>
     </div>

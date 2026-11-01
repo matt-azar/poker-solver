@@ -820,8 +820,9 @@ struct StreetBatchSolver::Engine
         int contrib[2] = {};
         int n_actions = 0;
         int child[8] = {};
-        // Path-attributed player-0 incentive delta (0 when incentives empty).
+        // Path-attributed incentive deltas per seat (0 when incentives empty).
         double incentive_u0 = 0.0;
+        double incentive_u1 = 0.0;
         std::pmr::vector<int> slot_of;
         std::pmr::string path;
         std::pmr::string action_labels[8];
@@ -868,6 +869,7 @@ struct StreetBatchSolver::Engine
             contrib[1] = other.contrib[1];
             n_actions = other.n_actions;
             incentive_u0 = other.incentive_u0;
+            incentive_u1 = other.incentive_u1;
             for (int index = 0; index < 8; ++index)
             {
                 child[index] = other.child[index];
@@ -2109,7 +2111,7 @@ struct StreetBatchSolver::Engine
             + " reach " + std::to_string(reach));
     }
 
-    double payoff(const Node& node, const Deal& deal, int turn, int river) const
+    PlayerPayoff terminal_modeled(const Node& node, const Deal& deal, int turn, int river) const
     {
         int outcome = 0;
         if (node.folded < 0)
@@ -2142,23 +2144,31 @@ struct StreetBatchSolver::Engine
             node.folded,
             outcome,
             config.rake);
-        return apply_icm_terminal(config.icm, chips).utility[0] + node.incentive_u0;
+        PlayerPayoff paid = apply_icm_terminal(config.icm, chips);
+        paid.utility[0] += node.incentive_u0;
+        paid.utility[1] += node.incentive_u1;
+        return paid;
     }
 
-    double cfr_deal(int node_index, double pi0, double pi1, double chance, const Deal& deal,
-                    int turn, int river, int updating, double weight_iter)
+    double payoff(const Node& node, const Deal& deal, int turn, int river) const
+    {
+        return terminal_modeled(node, deal, turn, river).utility[0];
+    }
+
+    PlayerPayoff cfr_deal_payoff(int node_index, double pi0, double pi1, double chance, const Deal& deal,
+                                 int turn, int river, int updating, double weight_iter)
     {
         const Node& node = nodes[static_cast<std::size_t>(node_index)];
         if (node.terminal)
         {
-            return payoff(node, deal, turn, river);
+            return terminal_modeled(node, deal, turn, river);
         }
         if (node.chance)
         {
             int cards[52];
             const int count = remaining(deal, turn, river, cards);
             const double probability = 1.0 / static_cast<double>(count);
-            double value = 0.0;
+            PlayerPayoff value;
             for (int i = 0; i < count; ++i)
             {
                 int next_turn = turn;
@@ -2171,9 +2181,11 @@ struct StreetBatchSolver::Engine
                 {
                     next_river = cards[i];
                 }
-                value += probability * cfr_deal(
+                const PlayerPayoff child = cfr_deal_payoff(
                     node.child[0], pi0, pi1, chance * probability, deal,
                     next_turn, next_river, updating, weight_iter);
+                value.utility[0] += probability * child.utility[0];
+                value.utility[1] += probability * child.utility[1];
             }
             return value;
         }
@@ -2188,36 +2200,43 @@ struct StreetBatchSolver::Engine
         {
             accumulate_average(strategy_sum.data() + base, sigma, node.n_actions, weight_iter * reach);
         }
-        double action_utility[8];
-        double node_utility = 0.0;
+        PlayerPayoff action_utility[8];
+        PlayerPayoff node_utility;
         for (int action = 0; action < node.n_actions; ++action)
         {
             if (node.player == 0)
             {
-                action_utility[action] = cfr_deal(
+                action_utility[action] = cfr_deal_payoff(
                     node.child[action], pi0 * sigma[action], pi1, chance, deal,
                     turn, river, updating, weight_iter);
             }
             else
             {
-                action_utility[action] = cfr_deal(
+                action_utility[action] = cfr_deal_payoff(
                     node.child[action], pi0, pi1 * sigma[action], chance, deal,
                     turn, river, updating, weight_iter);
             }
-            node_utility += sigma[action] * action_utility[action];
+            node_utility.utility[0] += sigma[action] * action_utility[action].utility[0];
+            node_utility.utility[1] += sigma[action] * action_utility[action].utility[1];
         }
         if (update)
         {
             const double opponent_reach = (node.player == 0 ? pi1 : pi0) * chance;
             for (int action = 0; action < node.n_actions; ++action)
             {
-                const double instant = node.player == 0
-                    ? (action_utility[action] - node_utility)
-                    : (node_utility - action_utility[action]);
+                const double instant = action_utility[action].utility[node.player]
+                    - node_utility.utility[node.player];
                 regret[static_cast<std::size_t>(base + action)] += opponent_reach * instant;
             }
         }
         return node_utility;
+    }
+
+    double cfr_deal(int node_index, double pi0, double pi1, double chance, const Deal& deal,
+                    int turn, int river, int updating, double weight_iter)
+    {
+        return cfr_deal_payoff(
+            node_index, pi0, pi1, chance, deal, turn, river, updating, weight_iter).utility[0];
     }
 
     void reset()
@@ -2533,7 +2552,7 @@ struct StreetBatchSolver::Engine
                 for (int action = 1; action < node.n_actions; ++action)
                 {
                     if (here.aev1[static_cast<std::size_t>(action * n1 + h1)]
-                        < here.aev1[static_cast<std::size_t>(best * n1 + h1)])
+                        > here.aev1[static_cast<std::size_t>(best * n1 + h1)])
                     {
                         best = action;
                     }
@@ -3741,7 +3760,7 @@ struct StreetBatchSolver::Engine
             const auto fold_started = profile_
                 ? std::chrono::steady_clock::now()
                 : std::chrono::steady_clock::time_point{};
-            const double pay = apply_icm_terminal(
+            PlayerPayoff fold_pay = apply_icm_terminal(
                 config.icm,
                 ChipPayoff::terminal(
                     config.pot,
@@ -3749,8 +3768,9 @@ struct StreetBatchSolver::Engine
                     node.contrib[1],
                     node.folded,
                     0,
-                    config.rake)).utility[0]
-                + node.incentive_u0;
+                    config.rake));
+            fold_pay.utility[0] += node.incentive_u0;
+            fold_pay.utility[1] += node.incentive_u1;
             const BoardSupport& fold_masks = board_support_for(turn, river);
             std::fill(ev0.begin(), ev0.end(), 0.0);
             std::fill(ev1.begin(), ev1.end(), 0.0);
@@ -3761,7 +3781,8 @@ struct StreetBatchSolver::Engine
                     ? stable_compatible_mass(0, hand, 1, total1, by1, ctx.amount_buf[1])
                     : total1 - blocked_reach(0, hand, by1, ctx.amount_buf[1]);
                 ev0[static_cast<std::size_t>(hand)] =
-                    pay * range_w[0][static_cast<std::size_t>(hand)] * joint_scale * open;
+                    fold_pay.utility[0] * range_w[0][static_cast<std::size_t>(hand)]
+                    * joint_scale * open;
             }
             for (std::uint16_t hand_u : fold_masks.idx1)
             {
@@ -3770,7 +3791,8 @@ struct StreetBatchSolver::Engine
                     ? stable_compatible_mass(1, hand, 0, total0, by0, ctx.amount_buf[0])
                     : total0 - blocked_reach(1, hand, by0, ctx.amount_buf[0]);
                 ev1[static_cast<std::size_t>(hand)] =
-                    pay * range_w[1][static_cast<std::size_t>(hand)] * joint_scale * open;
+                    fold_pay.utility[1] * range_w[1][static_cast<std::size_t>(hand)]
+                    * joint_scale * open;
             }
             if (profile_)
             {
@@ -3782,23 +3804,34 @@ struct StreetBatchSolver::Engine
         // Showdown only needs hand-indexed amounts; skip by-card aggregates.
         collect_reach(ctx, 0, turn, river, pi0, true, ctx.amount_buf[0], total0, nullptr);
         collect_reach(ctx, 1, turn, river, pi1, true, ctx.amount_buf[1], total1, nullptr);
-        const double win_pay = apply_icm_terminal(
+        PlayerPayoff win_paid = apply_icm_terminal(
             config.icm,
             ChipPayoff::terminal(
-                config.pot, node.contrib[0], node.contrib[1], -1, 1, config.rake)).utility[0]
-            + node.incentive_u0;
-        const double lose_pay = apply_icm_terminal(
+                config.pot, node.contrib[0], node.contrib[1], -1, 1, config.rake));
+        PlayerPayoff lose_paid = apply_icm_terminal(
             config.icm,
             ChipPayoff::terminal(
-                config.pot, node.contrib[0], node.contrib[1], -1, -1, config.rake)).utility[0]
-            + node.incentive_u0;
-        const double tie_pay = apply_icm_terminal(
+                config.pot, node.contrib[0], node.contrib[1], -1, -1, config.rake));
+        PlayerPayoff tie_paid = apply_icm_terminal(
             config.icm,
             ChipPayoff::terminal(
-                config.pot, node.contrib[0], node.contrib[1], -1, 0, config.rake)).utility[0]
-            + node.incentive_u0;
-        showdown_side(ctx, 0, turn, river, win_pay, lose_pay, tie_pay, ctx.amount_buf[1], ev0, stable);
-        showdown_side(ctx, 1, turn, river, win_pay, lose_pay, tie_pay, ctx.amount_buf[0], ev1, stable);
+                config.pot, node.contrib[0], node.contrib[1], -1, 0, config.rake));
+        win_paid.utility[0] += node.incentive_u0;
+        win_paid.utility[1] += node.incentive_u1;
+        lose_paid.utility[0] += node.incentive_u0;
+        lose_paid.utility[1] += node.incentive_u1;
+        tie_paid.utility[0] += node.incentive_u0;
+        tie_paid.utility[1] += node.incentive_u1;
+        showdown_side(
+            ctx, 0, turn, river,
+            win_paid.utility[0], lose_paid.utility[0], tie_paid.utility[0],
+            ctx.amount_buf[1], ev0, stable);
+        // Pass player-1 utilities: showdown_side swaps win/lose for hero 1 so
+        // beating worse opponents scores lose_paid.utility[1] (p0 lost).
+        showdown_side(
+            ctx, 1, turn, river,
+            win_paid.utility[1], lose_paid.utility[1], tie_paid.utility[1],
+            ctx.amount_buf[0], ev1, stable);
     }
 
     void check_usable() const
@@ -4583,8 +4616,9 @@ struct StreetBatchSolver::Engine
                         strategy_sum.data() + base, sigma, node.n_actions, weight_iter * pi1[h1]);
                     for (int action = 0; action < node.n_actions; ++action)
                     {
+                        // Own-utility regret: ev1 holds player-1 modeled utility.
                         regret[static_cast<std::size_t>(base + action)] +=
-                            mix - here.aev1[static_cast<std::size_t>(action * n1 + h1)];
+                            here.aev1[static_cast<std::size_t>(action * n1 + h1)] - mix;
                     }
                 }
             }
@@ -5217,6 +5251,7 @@ struct StreetBatchSolver::Engine
                     {
                         edge.compact_label = edge.display_label;
                     }
+                    attach_edge_tags(edge, config.incentives);
                     rev.push_back(std::move(edge));
                 }
                 at = link.parent;
@@ -5225,8 +5260,10 @@ struct StreetBatchSolver::Engine
             PlayerPayoff zero;
             zero.utility[0] = 0.0;
             zero.utility[1] = 0.0;
-            node.incentive_u0 =
-                apply_path_incentives(config.incentives, zero, path).utility[0];
+            const PlayerPayoff path_delta =
+                apply_path_incentives(config.incentives, zero, path);
+            node.incentive_u0 = path_delta.utility[0];
+            node.incentive_u1 = path_delta.utility[1];
         }
     }
 
@@ -5990,10 +6027,10 @@ struct StreetBatchSolver::Engine
             double mixed = 0.0;
             for (int action = 0; action < node.n_actions; ++action)
             {
+                // aev0 / aev1 hold each seat's own modeled utility (dual-utility).
                 const double stored_raw = raw[static_cast<std::size_t>(action * raw_stride + hand)];
-                const double signed_raw = actor == 0 ? stored_raw : -stored_raw;
                 const double denom = prior * joint_scale * open;
-                const double conditional = signed_raw / denom;
+                const double conditional = stored_raw / denom;
                 page.action_ev[static_cast<std::size_t>(hand * node.n_actions + action)] = conditional;
                 const double played = average[static_cast<std::size_t>(stored.base + action)];
                 mixed += played * conditional;
@@ -6138,10 +6175,10 @@ struct StreetBatchSolver::Engine
                 }
                 continue;
             }
+            // ev0 / ev1 hold each seat's own modeled utility (dual-utility).
             const double stored_raw = raw[static_cast<std::size_t>(hand)];
-            const double signed_raw = player == 0 ? stored_raw : -stored_raw;
             node_ev += marginal[static_cast<std::size_t>(hand)]
-                * (signed_raw / (prior * joint_scale * open));
+                * (stored_raw / (prior * joint_scale * open));
             any = true;
         }
         result.defined = node_ok && any;
@@ -6694,7 +6731,8 @@ double StreetBatchSolver::p1_best_response_utility() const
 
 double StreetBatchSolver::p2_best_response_utility() const
 {
-    return -engine_->utility_of_response(1);
+    // Modeled player-1 utility when player 1 best-responds (dual-utility).
+    return engine_->utility_of_response(1);
 }
 
 double StreetBatchSolver::nash_gap() const
