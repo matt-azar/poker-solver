@@ -34,9 +34,17 @@ export interface InterpretRequest {
   draftRevision: number;
 }
 
+/** Optional model-emitted weighted ranges (guarded + provenance in resolve). */
+export interface GeneratedRangesProposal {
+  oop: string;
+  ip: string;
+  note?: string;
+}
+
 /**
- * Schema-constrained model proposal. Range weights are never included —
- * only profile ids and structured field edits. The resolver loads ranges.
+ * Schema-constrained model proposal.
+ * Prefer catalogue ids; may include guarded generatedRanges or a two-id
+ * interpolation bracket when no exact catalogue row exists.
  */
 export type InterpretProposal =
   | {
@@ -48,6 +56,16 @@ export type InterpretProposal =
       stackBb?: number;
       openSizeBb?: number;
       stakesLabel?: string;
+      /**
+       * Guarded weighted range strings. Validated in resolve; labelled
+       * model_generated — not an equilibrium claim.
+       */
+      generatedRanges?: GeneratedRangesProposal;
+      /**
+       * Two catalogue/import ids to blend by stack (low/high order optional).
+       * App code performs combo-weight interpolation.
+       */
+      interpolateFromIds?: [string, string];
     }
   | {
       kind: "clarify";
@@ -93,6 +111,8 @@ export const DEFAULT_ASSISTANT_CAPABILITIES: readonly string[] = [
   "clarify",
   "unsupported",
   "unrelated",
+  "generate_ranges",
+  "interpolate_ranges",
 ];
 
 export function profileToMeta(

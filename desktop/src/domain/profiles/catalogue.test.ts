@@ -54,8 +54,9 @@ describe("createRangeProfileCatalogue", () => {
       dataRevision: fixture.dataRevision,
       ranges: { oop: fixture.ranges.oop, ip: fixture.ranges.ip },
     });
-    expect(snap.ranges.oop).toContain("AKo:0.5");
-    expect(snap.ranges.ip).toContain("AKo:0.5");
+    expect(snap.ranges.oop).toMatch(/AKo/);
+    expect(snap.ranges.ip).toMatch(/AKo/);
+    expect(snap.ranges.oop).not.toEqual(snap.ranges.ip);
 
     // Reopen path uses snapshot ranges without needing the live catalogue.
     const applied = rangesFromSnapshot(snap);
@@ -65,7 +66,7 @@ describe("createRangeProfileCatalogue", () => {
     expect(applied.dataRevision).toBe(fixture.dataRevision);
 
     const oopGrid = parseRangeText(applied.oopRange);
-    expect(oopGrid[1][0]).toBeCloseTo(0.5, 8);
+    expect(oopGrid[1][0]).toBeCloseTo(0.35, 8);
   });
 
   it("getProfileRevision does not silently return a newer revision", () => {

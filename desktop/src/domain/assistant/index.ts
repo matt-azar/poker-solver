@@ -51,3 +51,12 @@ export {
   type LiveEvalExpect,
   type LiveEvalSummary,
 } from "./liveEvalCases";
+
+export {
+  GENERATED_RANGE_MAX_CHARS,
+  validateGeneratedRanges,
+  type GeneratedRangesPayload,
+  type GeneratedRangesValidation,
+} from "./generatedRanges";
+
+export type { GeneratedRangesProposal } from "./provider";

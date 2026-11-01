@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "fixture-btn-bb-3bp-100bb-100nl",
   "dataRevision": "1",
-  "displayName": "FIXTURE: BTN vs BB 3BP 100bb 100NL (synthetic standard/GTO-style)",
+  "displayName": "DEMO ONLY: BTN vs BB 3BP 100bb 100NL (synthetic — not GTO)",
   "format": "cash_6max",
   "playerCount": 6,
   "positions": {

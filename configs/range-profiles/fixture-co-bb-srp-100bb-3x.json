@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "fixture-co-bb-srp-100bb-3x",
-  "dataRevision": "1",
-  "displayName": "FIXTURE: CO vs BB SRP 100bb 3x cEV (synthetic standard/GTO-style)",
+  "dataRevision": "2",
+  "displayName": "DEMO ONLY: CO vs BB SRP 100bb 3x cEV (synthetic — not GTO)",
   "format": "cash_6max",
   "playerCount": 6,
   "positions": {
@@ -27,15 +27,15 @@
   },
   "labels": {
     "stakes": "cEV",
-    "intendedUse": "demo_and_tests_only_standard_gto_catalogue_shape"
+    "intendedUse": "plumbing_tests_only_not_study_quality"
   },
   "ranges": {
-    "oop": "33+,A2s+,KTs+,QTs+,JTs,T9s,98s,AJo+,KQo,AKo:0.4,AQo:0.6",
-    "ip": "22+,A2s+,KTs+,QTs+,JTs,T9s,AJo+,KQo,AKo:0.6,JJ+:1"
+    "oop": "33+,A2s+,KTs+,QTs+,J9s+,T9s,98s,87s,ATo+,KQo,AKo:0.45,AQo:0.65",
+    "ip": "88+,ATs+,KJs+,QJs,JTs,AJo+,KQo,AKo,AQo:0.8"
   },
   "provenance": {
     "source": "configs/range-profiles/fixture-co-bb-srp-100bb-3x.json",
     "classification": "synthetic_fixture",
-    "notes": "SYNTHETIC FIXTURE for alternative-match tests (3x open) under cEV. NOT a production strategic pack. Use alongside the 2.5x cEV fixture to verify open-size alternatives are labelled, never silently substituted."
+    "notes": "SYNTHETIC DEMO alternative open-size row for matcher tests. OOP≠IP placeholders only — NOT verified GTO. Import a reliable pack for real study."
   }
 }

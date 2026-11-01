@@ -8,6 +8,8 @@ export type SetupFieldProvenance =
   | "saved_preference"
   | "default"
   | "derived"
+  | "model_generated"
+  | "interpolated"
   | "unresolved";
 
 export type PreflopActionKind =

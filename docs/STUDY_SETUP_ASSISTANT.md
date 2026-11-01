@@ -66,7 +66,16 @@ Conflicts between explicit values and a catalogue entry surface for the player; 
 
 ## Range catalogue import
 
-**Build → Range catalogue** lists bundled synthetic fixtures and user imports. Use **Import JSON…** to load a schema-v1 file from `configs/range-profiles/` (or your own paired GTO/standard ranges). Match filters cover pot type and rake structure; **Apply** uses the same draft path as the assistant. See `configs/range-profiles/README.md`.
+**Build → Range catalogue** lists bundled **synthetic demo** fixtures and user imports. Use **Import JSON…** for schema-v1 files from a **reliable source** (`configs/range-profiles/packs/`). Match filters cover pot type, rake, and stack; nearest-neighbor ranking surfaces close rows. Bundled fixtures are plumbing-only (OOP≠IP placeholders, not GTO).
+
+## Generated ranges & interpolation
+
+When no catalogue row fits, the assistant may:
+
+1. Emit **guarded `generatedRanges`** (validated weighted text) labelled `model_generated` — not equilibrium.
+2. Set **`interpolateFromIds`** to two imported depth packs; app code blends per-combo weights (`linear_stack_blend`) labelled `interpolated`.
+
+Exact catalogue match still preferred when a reliable pack exists.
 
 ## Provider / credentials
 

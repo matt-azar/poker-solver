@@ -38,6 +38,22 @@ export {
 } from "./match";
 
 export {
+  rankNearestNeighbors,
+  neighborsStraddleStack,
+  type NeighborScore,
+} from "./nearest";
+
+export {
+  blendRangeTexts,
+  blendWeightGrids,
+  interpolateProfilesByStack,
+  pickStackBracket,
+  type InterpolationMethod,
+  type StackInterpolationInput,
+  type StackInterpolationResult,
+} from "./interpolate";
+
+export {
   createRangeProfileCatalogue,
   rangesFromSnapshot,
   type ImportProfileResult,

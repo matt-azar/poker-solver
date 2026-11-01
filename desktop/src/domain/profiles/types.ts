@@ -50,6 +50,8 @@ export type ProfileClassification =
   | "population_estimate"
   | "personal_adjustment"
   | "synthetic_fixture"
+  | "model_generated"
+  | "interpolated"
   | "unknown";
 
 export interface ProfileProvenance {

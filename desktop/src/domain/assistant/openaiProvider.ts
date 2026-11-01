@@ -4,6 +4,7 @@ import {
   AssistantProviderError,
   DEFAULT_ASSISTANT_CAPABILITIES,
   type AssistantProvider,
+  type GeneratedRangesProposal,
   type InterpretProposal,
   type InterpretRequest,
   type ProfileMeta,
@@ -136,13 +137,16 @@ export class OpenAiAssistantProvider implements AssistantProvider {
 const SYSTEM_PROMPT = [
   "You interpret poker study-setup requests for a postflop solver Build workspace.",
   "Emit only the emit_study_setup_proposal tool with schema-constrained fields.",
-  "Identify standard/GTO catalogue entries by id from availableProfiles. Never invent or emit range weight strings.",
+  "Prefer exact availableProfiles ids when they match pot type, rake structure, seats, and stack.",
+  "When no exact profile fits but two profiles straddle the target stack (same seats/pot/rake), set interpolateFromIds to those two ids and the target stackBb — do not invent frequencies.",
+  "When no catalogue row and no interpolatable bracket exist, you may set generatedRanges {oop,ip} as weighted combo text (AA,AKs,AKo:0.5,…). Mark note that it is model-proposed, not equilibrium.",
   "Never emit scripts, shell commands, file paths, or network URLs.",
   "Pot type (SRP / 3BP / 4BP) is required for prepare_study — clarify if missing; never guess.",
   "100NL names a rake structure / stakes environment, not a personal player profile, and must not set stack depth.",
   "Phrases like “my 100NL profile” mean standard/GTO ranges for that rake structure plus the stated action — not a personal profile picker.",
   "When no rake structure is named, set stakesLabel to cEV (chip EV / no rake).",
   "When stack depth is not mentioned, set stackBb to 100. Never infer 100bb from an NL label alone.",
+  "Prefer non-synthetic catalogue rows (equilibrium_model / population_estimate / imports) over synthetic_fixture demos.",
   "Use clarify when ambiguous, unsupported for strategy explanations/preflop solves, unrelated for non-poker text.",
 ].join(" ");
 
@@ -198,6 +202,22 @@ const INTERPRET_JSON_SCHEMA = {
     stackBb: { type: "number" },
     openSizeBb: { type: "number" },
     stakesLabel: { type: "string" },
+    generatedRanges: {
+      type: "object",
+      additionalProperties: false,
+      required: ["oop", "ip"],
+      properties: {
+        oop: { type: "string" },
+        ip: { type: "string" },
+        note: { type: "string" },
+      },
+    },
+    interpolateFromIds: {
+      type: "array",
+      items: { type: "string" },
+      minItems: 2,
+      maxItems: 2,
+    },
     questions: { type: "array", items: { type: "string" } },
     candidates: { type: "array", items: { type: "object" } },
     message: { type: "string" },
@@ -317,8 +337,10 @@ export function parseInterpretProposal(raw: unknown): InterpretProposal {
         typeof obj.stakesLabel === "string"
           ? obj.stakesLabel
           : intent.stakesLabel,
+      generatedRanges: asGeneratedRanges(obj.generatedRanges),
+      interpolateFromIds: asInterpolateIds(obj.interpolateFromIds),
     };
-    rejectRangeWeights(proposal);
+    rejectUnguardedRangeWeights(proposal);
     return proposal;
   }
 
@@ -343,6 +365,7 @@ function normalizeIntent(
   }
   const src = raw as Record<string, unknown>;
   rejectDangerousPayload(src);
+  // Intent must not smuggle raw ranges — use top-level generatedRanges instead.
   rejectRangeWeightFields(src);
 
   const intent: StudySetupIntent = {
@@ -446,21 +469,46 @@ function rejectRangeWeightFields(obj: Record<string, unknown>): void {
     if (RANGE_WEIGHT_KEYS.has(key)) {
       throw new AssistantProviderError(
         "rejected_payload",
-        "Model must not emit range weight fields — use profile ids only",
+        "Range weights belong in generatedRanges, not intent fields",
       );
     }
   }
 }
 
-function rejectRangeWeights(proposal: InterpretProposal): void {
-  const serialized = JSON.stringify(proposal);
-  // Heuristic: thousands of combos look like long comma-separated hand lists.
-  if (serialized.length > 4000 && /,[A-Z0-9]{2}/.test(serialized)) {
-    throw new AssistantProviderError(
-      "rejected_payload",
-      "Proposal appears to contain raw range weights",
-    );
+function asGeneratedRanges(raw: unknown): GeneratedRangesProposal | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
   }
+  const src = raw as Record<string, unknown>;
+  if (typeof src.oop !== "string" || typeof src.ip !== "string") {
+    return undefined;
+  }
+  return {
+    oop: src.oop,
+    ip: src.ip,
+    note: typeof src.note === "string" ? src.note : undefined,
+  };
+}
+
+function asInterpolateIds(raw: unknown): [string, string] | undefined {
+  if (!Array.isArray(raw) || raw.length !== 2) {
+    return undefined;
+  }
+  const a = raw[0];
+  const b = raw[1];
+  if (typeof a !== "string" || typeof b !== "string") {
+    return undefined;
+  }
+  const left = a.trim();
+  const right = b.trim();
+  if (!left || !right) {
+    return undefined;
+  }
+  return [left, right];
+}
+
+/** Allow guarded generatedRanges; reject smuggled intent range fields. */
+function rejectUnguardedRangeWeights(proposal: InterpretProposal): void {
   if (
     proposal.kind === "prepare_study" ||
     proposal.kind === "update_study" ||
