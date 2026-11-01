@@ -8,17 +8,22 @@ import {
   seatsForCoVsBbSrp,
   type SetupDraftResult,
   type SetupPatch,
+  type SetupProfileRef,
   type StudySetupIntent,
   type StudySetupPreferences,
 } from "../setup";
 import {
+  interpolateProfilesByStack,
   matchRangeProfiles,
   openSizeFromActions,
+  pickStackBracket,
+  rankNearestNeighbors,
   type RangeProfile,
   type RangeProfileCatalogue,
   type RangeProfileQuery,
 } from "../profiles";
 import type { SpotDraft } from "../types";
+import { validateGeneratedRanges } from "./generatedRanges";
 import { profileToMeta, type InterpretProposal, type ProfileMeta } from "./provider";
 
 export interface CatalogueLike {
@@ -38,7 +43,8 @@ export interface ResolveAssistantProposalArgs {
 
 /**
  * Resolve a model/fake proposal into a SetupDraftResult using the catalogue
- * and shared merge/derive helpers. Never trusts model-emitted range weights.
+ * and shared merge/derive helpers. Guarded generatedRanges / interpolation are
+ * validated here and labelled in provenance — never treated as equilibrium.
  */
 export function resolveAssistantProposal(
   args: ResolveAssistantProposalArgs,
@@ -135,6 +141,131 @@ export function resolveAssistantProposal(
     if (rawStakes !== undefined) intent.stakesLabel = rawStakes;
   }
 
+  if (
+    mode === "create" &&
+    !intent.potType &&
+    !proposal.selectedProfileId &&
+    !proposal.generatedRanges &&
+    !proposal.interpolateFromIds
+  ) {
+    return incompleteResult({
+      draftRevision,
+      summary: [
+        "Pot type / preflop action is required (SRP / 3BP / 4BP) before ranges can be resolved",
+      ],
+      missing: [
+        {
+          field: "potType",
+          message: "Which pot type — SRP, 3BP, or 4BP?",
+          reason: "needs_clarification",
+        },
+      ],
+    });
+  }
+
+  // --- Guarded generation (highest explicit range authority from the model) ---
+  if (proposal.generatedRanges) {
+    const validated = validateGeneratedRanges(proposal.generatedRanges);
+    if (!validated.ok) {
+      return incompleteResult({
+        draftRevision,
+        summary: [`Rejected generated ranges: ${validated.error}`],
+        missing: [
+          {
+            field: "ranges",
+            message: validated.error,
+            reason: "invalid_generated_ranges",
+          },
+        ],
+      });
+    }
+    return finalizeGeneratedOrInterpolated({
+      args,
+      mode,
+      intent,
+      draftRevision,
+      preferences,
+      oopRange: validated.oop,
+      ipRange: validated.ip,
+      provenanceKind: "model_generated",
+      profileRef: {
+        id: "model-generated",
+        revision: draftRevision,
+        displayName: "Model-generated ranges",
+        classification: "model_generated",
+      },
+      summaryExtra: [
+        `Model-generated ranges (not equilibrium) · OOP≈${validated.oopCombos.toFixed(1)} · IP≈${validated.ipCombos.toFixed(1)} combos`,
+        validated.note ?? "Review weights before solving — not a verified GTO pack",
+      ],
+    });
+  }
+
+  // --- Combo-weight interpolation from two reference profiles ---
+  if (proposal.interpolateFromIds && proposal.interpolateFromIds.length === 2) {
+    const [idA, idB] = proposal.interpolateFromIds;
+    const lowRef = args.catalogue.getProfile(idA);
+    const highRef = args.catalogue.getProfile(idB);
+    if (!lowRef || !highRef) {
+      return incompleteResult({
+        draftRevision,
+        summary: [
+          `Interpolation refs not found: ${!lowRef ? idA : ""} ${!highRef ? idB : ""}`.trim(),
+        ],
+        missing: [
+          {
+            field: "profile",
+            message: "Both interpolateFromIds must exist in the catalogue",
+            reason: "profile_not_found",
+          },
+        ],
+      });
+    }
+    const targetStack = intent.stackBb ?? preferences.defaultStackBb ?? DEFAULT_STARTING_STACK_BB;
+    try {
+      const blended = interpolateProfilesByStack({
+        low: lowRef,
+        high: highRef,
+        targetStackBb: targetStack,
+      });
+      return finalizeGeneratedOrInterpolated({
+        args,
+        mode,
+        intent: { ...intent, stackBb: targetStack },
+        draftRevision,
+        preferences,
+        oopRange: blended.oopRange,
+        ipRange: blended.ipRange,
+        provenanceKind: "interpolated",
+        profileRef: {
+          id: `interp:${blended.lowId}+${blended.highId}@${targetStack}`,
+          revision: draftRevision,
+          displayName: `Interpolated ${targetStack}bb (${blended.lowStackBb}–${blended.highStackBb})`,
+          classification: "interpolated",
+        },
+        summaryExtra: [
+          `Interpolated ${blended.method} t=${blended.t.toFixed(3)} from ${blended.lowId}@${blended.lowStackBb}bb + ${blended.highId}@${blended.highStackBb}bb → ${targetStack}bb`,
+          ...blended.notes,
+          "Interpolated weights are not an equilibrium solve — review before trusting",
+        ],
+      });
+    } catch (err) {
+      return incompleteResult({
+        draftRevision,
+        summary: [
+          `Interpolation failed: ${err instanceof Error ? err.message : String(err)}`,
+        ],
+        missing: [
+          {
+            field: "ranges",
+            message: "Could not interpolate reference profiles",
+            reason: "interpolation_failed",
+          },
+        ],
+      });
+    }
+  }
+
   // Duplicate / update without a profile selection: apply field edits only.
   const needsProfile =
     mode === "create" ||
@@ -151,6 +282,26 @@ export function resolveAssistantProposal(
       preferences,
     });
     if (matched.kind !== "ok") {
+      // Auto-bracket interpolate when seats/pot/rake allow and stacks straddle.
+      const auto = tryAutoStackInterpolation({
+        intent,
+        catalogue: args.catalogue,
+        draftRevision,
+      });
+      if (auto) {
+        return finalizeGeneratedOrInterpolated({
+          args,
+          mode,
+          intent,
+          draftRevision,
+          preferences,
+          oopRange: auto.oopRange,
+          ipRange: auto.ipRange,
+          provenanceKind: "interpolated",
+          profileRef: auto.profileRef,
+          summaryExtra: auto.summaryExtra,
+        });
+      }
       return incompleteResult({
         draftRevision,
         summary: matched.summary,
@@ -159,14 +310,6 @@ export function resolveAssistantProposal(
       });
     }
     profile = matched.profile;
-  }
-
-  // Duplicate with explicit stack vs profile compatibility.
-  if (mode === "duplicate" && profile && intent.stackBb !== undefined) {
-    if (profile.startingStackBb !== intent.stackBb) {
-      // Still allow apply path via merge conflict: explicit vs profile stack.
-      // Caller sees the conflict rather than a silent override.
-    }
   }
 
   const patch = buildSetupPatch({
@@ -202,8 +345,121 @@ export function resolveAssistantProposal(
         "Assumed cEV (chip EV / no rake) because no rake structure was specified",
       );
     }
+    if (profile?.provenance.classification === "synthetic_fixture") {
+      result.summary.push(
+        "Catalogue row is a synthetic fixture — import a reliable pack for study-quality ranges",
+      );
+    }
   }
   return result;
+}
+
+function finalizeGeneratedOrInterpolated(args: {
+  args: ResolveAssistantProposalArgs;
+  mode: StudySetupIntent["mode"];
+  intent: StudySetupIntent;
+  draftRevision: number;
+  preferences: StudySetupPreferences;
+  oopRange: string;
+  ipRange: string;
+  provenanceKind: "model_generated" | "interpolated";
+  profileRef: SetupProfileRef;
+  summaryExtra: string[];
+}): SetupDraftResult {
+  const { mode, intent, draftRevision, preferences } = args;
+  const openSizeBb = intent.openSizeBb ?? preferences.defaultOpenSizeBb ?? 2.5;
+  const startingStackBb =
+    intent.stackBb ?? preferences.defaultStackBb ?? DEFAULT_STARTING_STACK_BB;
+  const oop = intent.oopPosition ?? "BB";
+  const ip = intent.ipPosition ?? "CO";
+  const derived = derivePostflopPotAndStacks({
+    startingStackBb,
+    openSizeBb,
+    openerSeat: ip,
+    callerSeat: oop,
+  });
+
+  const patch: SetupPatch = {
+    mode,
+    requestRevision: draftRevision,
+    profile: args.profileRef,
+    profileId: args.profileRef.id,
+    profileRevision: args.profileRef.revision,
+    // Top-level ranges keep model_generated / interpolated provenance tags.
+    oopRange: args.oopRange,
+    ipRange: args.ipRange,
+    explicitFields: {
+      openSizeBb,
+      boardText: intent.board,
+      stakesLabel: intent.stakesLabel,
+    },
+    derived: {
+      potBb: derived.potBb,
+      stackBb: derived.stackBb,
+    },
+    provenance: {
+      oopRange: args.provenanceKind,
+      ipRange: args.provenanceKind,
+      pot: "derived",
+      stack: "derived",
+    },
+  };
+
+  const base =
+    mode === "create"
+      ? createBlankSetupDraft("create", args.args.baseDraft)
+      : mode === "duplicate"
+        ? createBlankSetupDraft("duplicate", args.args.baseDraft)
+        : args.args.baseDraft;
+
+  const result = mergeSetupPatch(base, patch, preferences);
+  result.summary.push(...args.summaryExtra);
+  result.profile = args.profileRef;
+  return result;
+}
+
+function tryAutoStackInterpolation(args: {
+  intent: StudySetupIntent;
+  catalogue: CatalogueLike;
+  draftRevision: number;
+}): {
+  oopRange: string;
+  ipRange: string;
+  profileRef: SetupProfileRef;
+  summaryExtra: string[];
+} | null {
+  if (!args.intent.oopPosition || !args.intent.ipPosition || args.intent.stackBb === undefined) {
+    return null;
+  }
+  const bracket = pickStackBracket(args.catalogue.listProfiles(), {
+    targetStackBb: args.intent.stackBb,
+    positions: { oop: args.intent.oopPosition, ip: args.intent.ipPosition },
+    potType: args.intent.potType,
+    stakesLabel: args.intent.stakesLabel,
+  });
+  if (!bracket) {
+    return null;
+  }
+  const blended = interpolateProfilesByStack({
+    low: bracket.low,
+    high: bracket.high,
+    targetStackBb: args.intent.stackBb,
+  });
+  return {
+    oopRange: blended.oopRange,
+    ipRange: blended.ipRange,
+    profileRef: {
+      id: `interp:${blended.lowId}+${blended.highId}@${args.intent.stackBb}`,
+      revision: args.draftRevision,
+      displayName: `Interpolated ${args.intent.stackBb}bb (${blended.lowStackBb}–${blended.highStackBb})`,
+      classification: "interpolated",
+    },
+    summaryExtra: [
+      `Auto-interpolated ${blended.method} from nearest stack bracket ${blended.lowId}@${blended.lowStackBb}bb + ${blended.highId}@${blended.highStackBb}bb`,
+      ...blended.notes,
+      "Interpolated weights are not an equilibrium solve — review before trusting",
+    ],
+  };
 }
 
 /**
@@ -358,36 +614,49 @@ function resolveProfile(args: {
     };
   }
 
-  const match = matchRangeProfiles(query, catalogue.listProfiles());
+  const listed = catalogue.listProfiles();
+  const match = matchRangeProfiles(query, listed);
   if (match.exact.length === 1) {
-    return { kind: "ok", profile: match.exact[0]! };
+    return { kind: "ok", profile: preferNonSynthetic(match.exact)[0]! };
   }
   if (match.exact.length > 1) {
-    return ambiguous(match.exact);
+    return ambiguous(preferNonSynthetic(match.exact));
   }
-  if (match.alternatives.length > 0) {
-    const alts = match.alternatives.map((a) => a.profile);
+
+  const neighbors = rankNearestNeighbors(query, listed, 6);
+  if (match.alternatives.length > 0 || neighbors.length > 0) {
+    const alts = preferNonSynthetic(match.alternatives.map((a) => a.profile));
+    const neighborLines = neighbors.map(
+      (n) =>
+        `near ${n.profile.id} (Δ=${n.distance.toFixed(1)}): ${n.reasons.join("; ") || "close"}`,
+    );
+    const altLines = match.alternatives.map(
+      (a) => `${a.profile.id}: ${a.differences.join("; ")}`,
+    );
+    const options = [
+      ...alts.map((p) => p.id),
+      ...neighbors.map((n) => n.profile.id),
+    ].filter((id, index, arr) => arr.indexOf(id) === index);
     return {
       kind: "ambiguous",
       summary: [
-        "No exact profile match; choose among labelled alternatives",
-        ...match.alternatives.map(
-          (a) =>
-            `${a.profile.id}: ${a.differences.join("; ")}`,
-        ),
+        "No exact profile match; nearest catalogue rows:",
+        ...altLines,
+        ...neighborLines,
+        "Import a reliable pack, pick a neighbor, or ask the assistant to generate/interpolate ranges",
       ],
       missing: [
         {
           field: "profile",
-          message: "Choose a compatible range profile",
+          message: "Select a compatible range profile or import one",
           reason: "needs_clarification",
         },
       ],
       conflicts: [
         {
           field: "profile",
-          message: "No exact match — alternatives available",
-          options: alts.map((p) => p.id),
+          message: "No exact match — nearest neighbors available",
+          options,
         },
       ],
     };
@@ -395,7 +664,10 @@ function resolveProfile(args: {
 
   return {
     kind: "missing",
-    summary: [match.none ?? "No range profiles matched"],
+    summary: [
+      match.none ?? "No range profiles matched",
+      "Import a reliable paired profile or request guarded model-generated ranges",
+    ],
     missing: [
       {
         field: "profile",
@@ -405,6 +677,14 @@ function resolveProfile(args: {
     ],
     conflicts: [],
   };
+}
+
+/** Prefer imported / equilibrium rows over synthetic demos when tied. */
+function preferNonSynthetic(profiles: RangeProfile[]): RangeProfile[] {
+  const preferred = profiles.filter(
+    (p) => p.provenance.classification !== "synthetic_fixture",
+  );
+  return preferred.length > 0 ? preferred : profiles;
 }
 
 function ambiguous(profiles: RangeProfile[]): ProfileMatch {

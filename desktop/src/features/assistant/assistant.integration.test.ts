@@ -84,10 +84,11 @@ describe("assistant → Build transaction integration", () => {
     weights = applied.weights;
     revision = applied.draftRevision;
 
-    expect(draft.oopRange).toContain("AKo:0.5");
-    expect(weights.ip[0][0]).toBe(1); // AA from JJ+/pairs in IP open text — JJ+ sets JJ..AA
-    // Mixed weight survives
-    expect(weights.oop[1][0]).toBeCloseTo(0.5, 8);
+    expect(draft.oopRange).toMatch(/AKo/);
+    expect(draft.oopRange).not.toEqual(draft.ipRange);
+    expect(weights.ip[0][0]).toBe(1); // AA from IP open shape
+    // Mixed AKo weight from the 100NL fixture survives
+    expect(weights.oop[1][0]).toBeCloseTo(0.3, 8);
 
     const beforeBoard = validateSetupForSolve(draft);
     expect(beforeBoard.ok).toBe(false);

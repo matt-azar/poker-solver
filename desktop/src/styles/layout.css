@@ -2675,6 +2675,14 @@
   color: var(--ok);
 }
 
+.assistant-hint.warn {
+  color: var(--danger);
+}
+
+.catalogue-table tr[data-synthetic="true"] {
+  opacity: 0.92;
+}
+
 .assistant-credentials {
   display: flex;
   flex-direction: column;

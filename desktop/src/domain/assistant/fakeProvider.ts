@@ -217,12 +217,25 @@ export class FakeAssistantProvider implements AssistantProvider {
       }
 
       if (candidates.length === 0) {
+        // Guarded generation demo when the catalogue has no row (not GTO).
+        const intent: StudySetupIntent = {
+          mode: "create",
+          oopPosition: "BB",
+          ipPosition: "CO",
+          potType,
+        };
+        if (explicitRake) intent.stakesLabel = explicitRake;
+        if (explicitStack !== undefined) intent.stackBb = explicitStack;
         return {
-          kind: "clarify",
-          questions: [
-            `No matching standard/GTO CO vs BB ${potType} catalogue entry was found for ${rakeLabel} at ${stackBb}bb. Import ranges or pick one from the catalogue.`,
-          ],
-          candidates: request.availableProfiles,
+          kind: "prepare_study",
+          intent,
+          stackBb: explicitStack,
+          stakesLabel: explicitRake,
+          generatedRanges: {
+            oop: "22+,A2s+,KTs+,QTs+,J9s+,T9s,98s,ATo+,KQo,AKo:0.4,AQo:0.55",
+            ip: "88+,ATs+,KJs+,QJs,JTs,AJo+,KQo,AKo,AQo:0.75",
+            note: `Fake-adapter generated placeholder for CO vs BB ${potType} @ ${stackBb}bb / ${rakeLabel} — not GTO. Import a reliable pack or interpolate from depth brackets.`,
+          },
         };
       }
 

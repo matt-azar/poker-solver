@@ -34,8 +34,9 @@ describe("parseRangeProfile", () => {
   it("preserves mixed-weight range text through parse round-trip", () => {
     const raw = readFileSync(fixturePath, "utf8");
     const profile = parseRangeProfileDocument(raw);
-    expect(profile.ranges.ip).toContain("AKo:0.5");
-    expect(profile.ranges.oop).toContain("AKo:0.5");
+    expect(profile.ranges.ip).toMatch(/AKo/);
+    expect(profile.ranges.oop).toMatch(/AKo/);
+    expect(profile.ranges.oop).not.toEqual(profile.ranges.ip);
 
     const reparsed = parseRangeProfile(JSON.parse(JSON.stringify(profile)));
     expect(reparsed.ranges.oop).toBe(profile.ranges.oop);
@@ -44,8 +45,9 @@ describe("parseRangeProfile", () => {
     const oopGrid = parseRangeText(profile.ranges.oop);
     const ipGrid = parseRangeText(profile.ranges.ip);
     // AKo is offsuit → lower triangle (row > col) for A=0, K=1 → grid[1][0]
-    expect(oopGrid[1][0]).toBeCloseTo(0.5, 8);
-    expect(ipGrid[1][0]).toBeCloseTo(0.5, 8);
+    expect(oopGrid[1][0]).toBeCloseTo(0.35, 8);
+    // IP open shape lists AKo at full weight in the revised fixture.
+    expect(ipGrid[1][0]).toBeCloseTo(1, 8);
   });
 
   it("rejects missing required fields", () => {
@@ -59,7 +61,7 @@ describe("parseRangeProfile", () => {
   it("keeps synthetic_fixture classification (no fabricated completeness)", () => {
     const profile = parseRangeProfileDocument(readFileSync(fixturePath, "utf8"));
     expect(profile.provenance.classification).toBe("synthetic_fixture");
-    expect(profile.provenance.notes).toMatch(/NOT a production strategic pack/i);
+    expect(profile.provenance.notes).toMatch(/NOT verified GTO|not study|Import a reliable pack/i);
   });
 });
 

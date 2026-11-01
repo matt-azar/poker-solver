@@ -9,16 +9,26 @@ This catalogue sits **alongside** the flat text presets in `configs/ranges/*.txt
 - **Rake structure** (e.g. `100NL`, `cEV`) selects the stakes/rake environment — not a personal player profile and not stack depth.
 - **Pot type** (`SRP` / `3BP` / `4BP`) is required for matching create flows.
 - Prefer **standard/GTO catalogue** language over “my profile”.
+- Assistant may **generate** guarded ranges or **interpolate** between imported stack brackets; those paths are labelled `model_generated` / `interpolated` and are not equilibrium claims.
+
+## Reliable packs vs fixtures
+
+| Kind | Location | Use |
+| --- | --- | --- |
+| **Reliable packs** | `packs/` (your imports) + Build → Import JSON | Study-quality; set classification to `equilibrium_model` / `population_estimate` |
+| **Synthetic fixtures** | `fixture-*.json` | Matcher / assistant plumbing tests only |
+
+Fixtures deliberately use different OOP vs IP placeholder shapes but remain **wrong vs real GTO**. Do not study from them. See `packs/README.md`.
 
 ## Documented import path (Study desktop)
 
 1. Open **Build → Range catalogue**.
-2. Click **Import JSON…** and choose a schema-v1 file (this folder’s `fixture-*.json` files work as import demos).
-3. The UI lists **rake / pot / seats / stack / open** columns, supports match filters, and can **Apply** a row onto Build through `prepareStudyFromProfile`.
-4. User imports persist under the localStorage key `holdem-study-range-profiles` (bundled fixtures stay separate and cannot be removed).
-5. Programmatic import: `catalogue.importProfile(rawJson)` in `desktop/src/domain/profiles/catalogue.ts`.
+2. Click **Import JSON…** and choose a schema-v1 file.
+3. Match filters cover pot type and rake; nearest-neighbor ranking surfaces close rows when exact match fails.
+4. **Apply** loads ranges through `prepareStudyFromProfile`.
+5. User imports persist under `holdem-study-range-profiles`.
 
-There is **no** bundled production strategic pack — only synthetic fixtures plus whatever you import.
+Programmatic: `catalogue.importProfile(rawJson)`.
 
 ## Import format
 
@@ -39,21 +49,17 @@ Each file is a single JSON object matching schema version 1:
 | `antes` | Optional |
 | `rake` | `{ rate, cap, collection, known }` — set `known: false` when unverified |
 | `labels` | Optional `{ stakes, site, pool, intendedUse }` — `stakes` is the rake-environment key |
-| `ranges` | `{ oop, ip }` weighted combo text for the existing desktop parser (`AA`, `AKs`, `AKo:0.5`, `QQ+`, …) |
+| `ranges` | `{ oop, ip }` weighted combo text for the existing desktop parser |
 | `provenance` | `{ source, classification, notes? }` |
 | `legacyPreset` | Optional; incomplete wrappers only |
 
-`classification` must be one of: `equilibrium_model`, `population_estimate`, `personal_adjustment`, `synthetic_fixture`, `unknown`.
-
-Applying a profile to a study snapshots `{ profileId, dataRevision, ranges }` so reopen does not need the live catalogue.
+`classification` must be one of: `equilibrium_model`, `population_estimate`, `personal_adjustment`, `synthetic_fixture`, `model_generated`, `interpolated`, `unknown`.
 
 ## Fixtures in this folder
 
-Files named `fixture-*.json` are **synthetic**. They are for demos, imports practice, and automated matching tests only. They are **not** verified population or equilibrium data. Do not present them as production strategic packs.
-
 | File | Shape |
 | --- | --- |
-| `fixture-co-bb-srp-100bb-2.5x.json` | CO vs BB SRP, cEV, 2.5x |
-| `fixture-co-bb-srp-100bb-2.5x-100nl.json` | CO vs BB SRP, 100NL rake key, 2.5x |
-| `fixture-co-bb-srp-100bb-3x.json` | CO vs BB SRP, cEV, 3x (alternative) |
-| `fixture-btn-bb-3bp-100bb-100nl.json` | BTN vs BB 3BP, 100NL rake key |
+| `fixture-co-bb-srp-100bb-2.5x.json` | DEMO CO vs BB SRP cEV 2.5x |
+| `fixture-co-bb-srp-100bb-2.5x-100nl.json` | DEMO CO vs BB SRP 100NL 2.5x |
+| `fixture-co-bb-srp-100bb-3x.json` | DEMO CO vs BB SRP cEV 3x |
+| `fixture-btn-bb-3bp-100bb-100nl.json` | DEMO BTN vs BB 3BP 100NL |

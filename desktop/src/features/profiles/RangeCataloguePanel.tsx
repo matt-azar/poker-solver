@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import {
   matchRangeProfiles,
   normalizeRakeEnvironmentLabel,
+  rankNearestNeighbors,
   type RangeProfile,
   type RangeProfileQuery,
 } from "../../domain/profiles";
@@ -53,6 +54,7 @@ export function RangeCataloguePanel() {
   const [filter, setFilter] = useState("");
   const [matchPot, setMatchPot] = useState<"" | "SRP" | "3BP" | "4BP">("");
   const [matchRake, setMatchRake] = useState("");
+  const [matchStack, setMatchStack] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const catalogue = useMemo(() => {
@@ -63,7 +65,7 @@ export function RangeCataloguePanel() {
   const profiles = useMemo(() => catalogue.listProfiles(), [catalogue, tick]);
 
   const query: RangeProfileQuery | null = useMemo(() => {
-    if (!matchPot && !matchRake.trim()) {
+    if (!matchPot && !matchRake.trim() && !matchStack.trim()) {
       return null;
     }
     const q: RangeProfileQuery = {};
@@ -73,8 +75,12 @@ export function RangeCataloguePanel() {
     if (matchRake.trim()) {
       q.stakesLabel = matchRake.trim();
     }
+    const stack = Number(matchStack);
+    if (matchStack.trim() && Number.isFinite(stack) && stack > 0) {
+      q.stackBb = stack;
+    }
     return q;
-  }, [matchPot, matchRake]);
+  }, [matchPot, matchRake, matchStack]);
 
   const matchResult = useMemo(() => {
     if (!query) {
@@ -83,14 +89,24 @@ export function RangeCataloguePanel() {
     return matchRangeProfiles(query, profiles);
   }, [query, profiles]);
 
+  const neighbors = useMemo(() => {
+    if (!query) {
+      return [];
+    }
+    return rankNearestNeighbors(query, profiles, 6);
+  }, [query, profiles]);
+
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     let list = profiles;
     if (matchResult) {
       const exactIds = new Set(matchResult.exact.map((p) => p.id));
       const altIds = new Set(matchResult.alternatives.map((a) => a.profile.id));
-      list = profiles.filter((p) => exactIds.has(p.id) || altIds.has(p.id));
-      if (list.length === 0 && matchResult.none) {
+      const nearIds = new Set(neighbors.map((n) => n.profile.id));
+      list = profiles.filter(
+        (p) => exactIds.has(p.id) || altIds.has(p.id) || nearIds.has(p.id),
+      );
+      if (list.length === 0 && matchResult.none && neighbors.length === 0) {
         list = [];
       }
     }
@@ -112,7 +128,7 @@ export function RangeCataloguePanel() {
         .toLowerCase();
       return hay.includes(needle);
     });
-  }, [profiles, filter, matchResult]);
+  }, [profiles, filter, matchResult, neighbors]);
 
   function refresh() {
     setTick((n) => n + 1);
@@ -195,10 +211,9 @@ export function RangeCataloguePanel() {
       {open ? (
         <>
           <p className="assistant-lede">
-            Paired OOP/IP GTO/standard ranges keyed by rake structure, pot type, positions, and
-            stacks. Import schema-v1 JSON from{" "}
-            <code>configs/range-profiles/</code> (or your own files). Bundled rows are synthetic
-            fixtures — not a production strategic pack.
+            Import paired schema-v1 JSON from a <strong>reliable source</strong> (
+            <code>configs/range-profiles/packs/</code>). Bundled fixture rows are synthetic demos
+            only — not study-quality GTO. Nearest-neighbor ranking helps when stack/rake miss exact.
           </p>
 
           <div className="catalogue-filters">
@@ -232,9 +247,17 @@ export function RangeCataloguePanel() {
                 onChange={(event) => setMatchRake(event.target.value)}
               />
             </label>
+            <label>
+              Match stack
+              <input
+                value={matchStack}
+                placeholder="e.g. 170"
+                onChange={(event) => setMatchStack(event.target.value)}
+              />
+            </label>
           </div>
 
-          {matchResult?.none ? (
+          {matchResult?.none && neighbors.length === 0 ? (
             <p className="assistant-status muted">{matchResult.none}</p>
           ) : null}
           {matchResult && matchResult.exact.length > 0 ? (
@@ -247,6 +270,15 @@ export function RangeCataloguePanel() {
             <p className="assistant-hint">
               {matchResult.alternatives.length} labelled alternative
               {matchResult.alternatives.length === 1 ? "" : "s"}
+            </p>
+          ) : null}
+          {neighbors.length > 0 && (!matchResult || matchResult.exact.length === 0) ? (
+            <p className="assistant-hint">
+              Nearest neighbors:{" "}
+              {neighbors
+                .slice(0, 4)
+                .map((n) => `${n.profile.id} (Δ${n.distance.toFixed(0)})`)
+                .join(" · ")}
             </p>
           ) : null}
 
@@ -272,18 +304,31 @@ export function RangeCataloguePanel() {
                   const alt = matchResult?.alternatives.find(
                     (a) => a.profile.id === profile.id,
                   );
+                  const near = neighbors.find((n) => n.profile.id === profile.id);
+                  const synthetic =
+                    profile.provenance.classification === "synthetic_fixture";
                   return (
                     <tr
                       key={catalogueRowKey(profile)}
                       data-selected={selectedId === profile.id ? "true" : undefined}
                       data-exact={exact ? "true" : undefined}
+                      data-synthetic={synthetic ? "true" : undefined}
                     >
                       <td>
                         <div className="catalogue-name">{profile.displayName}</div>
                         <div className="catalogue-id tabular">{profile.id}</div>
+                        {synthetic ? (
+                          <div className="assistant-hint warn">synthetic demo — not GTO</div>
+                        ) : null}
                         {alt ? (
                           <div className="assistant-hint">
                             alt: {alt.differences.join(", ")}
+                          </div>
+                        ) : null}
+                        {near && !exact ? (
+                          <div className="assistant-hint">
+                            near Δ{near.distance.toFixed(1)}
+                            {near.reasons.length ? `: ${near.reasons.join(", ")}` : ""}
                           </div>
                         ) : null}
                       </td>

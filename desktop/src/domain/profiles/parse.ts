@@ -75,6 +75,8 @@ const CLASSIFICATIONS: ReadonlySet<string> = new Set([
   "population_estimate",
   "personal_adjustment",
   "synthetic_fixture",
+  "model_generated",
+  "interpolated",
   "unknown",
 ]);
 
