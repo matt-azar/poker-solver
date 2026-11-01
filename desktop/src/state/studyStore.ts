@@ -52,6 +52,8 @@ import {
 } from "../domain/setup";
 import { getRangeProfileCatalogue } from "../domain/profiles";
 import { EngineError, engineClient } from "../engine/client";
+import { isTauriRuntime } from "../platform";
+import { readEngineStatus } from "../platform/engine";
 import { useThemeStore } from "./themeStore";
 import { useLayoutStore } from "./layoutStore";
 
@@ -1178,9 +1180,16 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     } catch (error) {
       const detail =
         error instanceof Error ? error.message : "Engine unreachable";
+      let shellHint = "";
+      if (isTauriRuntime()) {
+        const shellStatus = await readEngineStatus();
+        if (shellStatus) {
+          shellHint = ` Shell: ${shellStatus}.`;
+        }
+      }
       set({
         connection: "disconnected",
-        message: `Engine unreachable: ${detail}. Use Reconnect — the installer should have placed holdem-explorer beside the app.`,
+        message: `Engine unreachable: ${detail}.${shellHint} Use Reconnect — the installer should have placed holdem-explorer beside the app.`,
       });
     }
   },

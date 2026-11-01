@@ -1,5 +1,6 @@
 #include "harness.hpp"
 
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -150,14 +151,31 @@ private:
 struct HttpResult
 {
     int status = 0;
+    std::string headers;
     std::string body;
 };
+
+bool header_has_ci(const std::string& headers, const std::string& needle)
+{
+    std::string lower_headers = headers;
+    std::string lower_needle = needle;
+    for (char& ch : lower_headers)
+    {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    for (char& ch : lower_needle)
+    {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return lower_headers.find(lower_needle) != std::string::npos;
+}
 
 bool http_exchange(
     const std::string& method,
     const std::string& path,
     const std::string& payload,
-    HttpResult& result)
+    HttpResult& result,
+    const std::string& extra_headers = {})
 {
     const socket_t sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == kInvalidSocket)
@@ -174,6 +192,7 @@ bool http_exchange(
         return false;
     }
     std::string request = method + " " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n";
+    request += extra_headers;
     if (!payload.empty())
     {
         request += "Content-Type: application/json\r\nContent-Length: " + std::to_string(payload.size()) + "\r\n";
@@ -212,6 +231,7 @@ bool http_exchange(
         return false;
     }
     result.status = std::atoi(raw.c_str() + 9);
+    result.headers = raw.substr(0, split);
     result.body = raw.substr(split + 4);
     return true;
 }
@@ -784,6 +804,36 @@ void run_explorer_http_tests()
 #endif
     CHECK(server.started());
     CHECK(wait_until_listening());
+
+    // Tauri Study webview is cross-origin; CORS must be present or fetch fails.
+    {
+        HttpResult cors_status;
+        CHECK(http_exchange(
+            "GET",
+            "/api/status",
+            "",
+            cors_status,
+            "Origin: https://tauri.localhost\r\n"));
+        CHECK(cors_status.status == 200);
+        CHECK(header_has_ci(cors_status.headers, "Access-Control-Allow-Origin: *"));
+        CHECK(header_has_ci(cors_status.headers, "Access-Control-Allow-Private-Network: true"));
+
+        HttpResult preflight;
+        CHECK(http_exchange(
+            "OPTIONS",
+            "/api/solve",
+            "",
+            preflight,
+            "Origin: https://tauri.localhost\r\n"
+            "Access-Control-Request-Method: POST\r\n"
+            "Access-Control-Request-Headers: content-type\r\n"
+            "Access-Control-Request-Private-Network: true\r\n"));
+        CHECK(preflight.status == 204);
+        CHECK(header_has_ci(preflight.headers, "Access-Control-Allow-Origin: *"));
+        CHECK(header_has_ci(preflight.headers, "Access-Control-Allow-Methods:"));
+        CHECK(header_has_ci(preflight.headers, "Access-Control-Allow-Headers:"));
+        CHECK(header_has_ci(preflight.headers, "Access-Control-Allow-Private-Network: true"));
+    }
 
     // Five-card boards publish a street solution (shared tree), not RiverBatch.
     const std::string river =

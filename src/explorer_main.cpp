@@ -3011,6 +3011,15 @@ bool safe_static_asset_path(const std::string& path)
     return path.find("..") == std::string::npos;
 }
 
+// Study UI in the Tauri webview is cross-origin (https://tauri.localhost →
+// http://127.0.0.1:8765). Without these headers the browser reports
+// TypeError: Failed to fetch even when the sidecar is listening.
+constexpr const char* kCorsHeaders =
+    "Access-Control-Allow-Origin: *\r\n"
+    "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
+    "Access-Control-Allow-Headers: Content-Type\r\n"
+    "Access-Control-Allow-Private-Network: true\r\n";
+
 void send_response(
     socket_t client,
     int status,
@@ -3020,6 +3029,7 @@ void send_response(
 {
     const char* reason = status == 200 ? "OK"
         : status == 202 ? "Accepted"
+        : status == 204 ? "No Content"
         : status == 404 ? "Not Found"
         : status == 409 ? "Conflict"
         : "Bad Request";
@@ -3027,6 +3037,7 @@ void send_response(
     header += "Content-Type: " + type + "\r\n";
     header += "Content-Length: " + std::to_string(body.size()) + "\r\n";
     header += "Cache-Control: no-store\r\n";
+    header += kCorsHeaders;
     header += extra_headers;
     header += "Connection: close\r\n\r\n";
     header += body;
@@ -3298,6 +3309,13 @@ void handle_client(socket_t client)
     const std::string line = request.substr(0, line_end);
     const std::size_t body_at = request.find("\r\n\r\n");
     const std::string body = body_at == std::string::npos ? std::string() : request.substr(body_at + 4);
+
+    // Preflight for JSON POSTs/PUTs from the Tauri webview (and Private Network Access).
+    if (line.rfind("OPTIONS ", 0) == 0)
+    {
+        send_response(client, 204, "text/plain", "");
+        return;
+    }
 
     if (line.rfind("GET /api/status", 0) == 0)
     {
