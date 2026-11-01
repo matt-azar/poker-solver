@@ -2,7 +2,7 @@
 #
 # Prerequisites (not owned by this workflow):
 # - desktop/package.json must define "tauri": "tauri" and depend on @tauri-apps/cli
-# - desktop/src-tauri must be configured for an externalBin sidecar named "explorer"
+# - desktop/src-tauri must be configured for an externalBin sidecar named "holdem-explorer"
 # - No code signing is required or performed
 #
 # Artifact: holdem-study-windows-installer (NSIS *.exe under bundle/nsis)
@@ -41,8 +41,13 @@ jobs:
       - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Configure CMake (Release)
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Configure CMake (Release, static MSVC CRT)
+        # Static CRT so the shipped holdem-explorer sidecar does not depend on a
+        # separate Visual C++ Redistributable on the end-user machine.
+        run: >
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
 
       - name: Build explorer (Release)
         run: cmake --build build --config Release --target explorer
@@ -70,8 +75,27 @@ jobs:
 
       - name: Build Tauri NSIS installer
         # Requires package.json script: "tauri": "tauri" (with @tauri-apps/cli installed).
+        # NSIS POSTINSTALL verifies holdem-explorer.exe and Unblock-Files the engine+UI.
         working-directory: desktop
         run: npm run tauri build
+
+      - name: Verify release payload includes holdem-explorer sidecar
+        shell: pwsh
+        run: |
+          $sidecar = Get-ChildItem -Recurse desktop/src-tauri/target/release `
+            -Filter "holdem-explorer*.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 5 FullName, Length
+          $sidecar | Format-Table -AutoSize
+          if (-not $sidecar) {
+            throw "holdem-explorer sidecar missing from Tauri release output"
+          }
+          $nsis = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis -Filter "*.exe" `
+            -ErrorAction SilentlyContinue
+          if (-not $nsis) {
+            throw "NSIS installer exe missing under bundle/nsis"
+          }
+          Write-Host "NSIS installer(s):"
+          $nsis | Format-Table FullName, Length -AutoSize
 
       - name: Upload NSIS installer artifact
         uses: actions/upload-artifact@v4
