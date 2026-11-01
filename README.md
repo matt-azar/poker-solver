@@ -8,9 +8,9 @@ Flop, turn, and river share one public betting tree (`StreetBatchSolver`). Conve
 
 ## Windows installer
 
-Download the unsigned NSIS setup from the latest Windows release:
+Download the unsigned NSIS setup from the [latest GitHub Release](https://github.com/matt-azar/poker-solver/releases/latest) (Windows cuts use tags like `v0.1.0-windows`):
 
-**[Holdem Study 0.1.0 (Windows)](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.0-windows)** → `Holdem-Study-0.1.0-x64-setup.exe`
+**[Holdem Study (Windows)](https://github.com/matt-azar/poker-solver/releases/latest/download/Holdem-Study-windows-x64-setup.exe)** → `Holdem-Study-windows-x64-setup.exe`
 
 1. Run the setup (current-user install; WebView2 may bootstrap)
 2. Launch **Holdem Study** from the Start menu
@@ -19,7 +19,7 @@ Windows SmartScreen may warn because the binary is not code-signed — **More in
 
 The installer places `holdem-explorer.exe` next to the UI, unblocks both binaries, and fails if the engine is missing. On launch the shell starts that sidecar on `127.0.0.1:8765` and waits until it accepts connections before the Study UI connects. No CMake or npm required.
 
-Maintainers rebuild via Actions → **Windows Installer**. Packaging notes: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
+Maintainers: CI rebuilds the artifact on desktop changes (Actions → **Windows Installer**). Publishing a Release is intentional — push a `v*-windows` tag (see packaging notes). Packaging notes: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
 
 ## Study UI (developers)
 

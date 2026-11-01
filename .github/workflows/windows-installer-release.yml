@@ -1,0 +1,20 @@
+# Tag → build → attach NSIS to a GitHub Release.
+# Kept separate from windows-installer.yml so path filters on main/PR cannot
+# suppress intentional v*-windows tag publishes.
+#
+# Does not run on main merges. Cut a release by pushing e.g. v0.1.1-windows.
+
+name: Windows Installer Release
+
+on:
+  push:
+    tags:
+      - "v*-windows"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: ./.github/workflows/windows-installer.yml
+    secrets: inherit
