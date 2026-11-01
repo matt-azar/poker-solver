@@ -48,13 +48,13 @@ export function ComboInspector() {
   return (
     <aside className="combo-inspector" aria-label="Combo inspector">
       <div className="panel-title-row">
-        <h2 className="panel-title">{focus?.text ?? "No selection"}</h2>
+        <h2 className="panel-title">{focus?.text ?? "Hand"}</h2>
         <span className="muted">{pinned ? "Pinned" : focus ? "Hover" : ""}</span>
       </div>
       {!currentNode ? (
-        <p className="empty-hint">Load a solved node to inspect combos.</p>
+        <p className="empty-hint">Solve a spot, then hover a hand in the grid.</p>
       ) : !cell ? (
-        <p className="empty-hint">Select a hand class in the matrix.</p>
+        <p className="empty-hint">Hover a hand in the grid.</p>
       ) : (
         <>
           <div className="inspector-meta">

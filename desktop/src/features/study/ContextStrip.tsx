@@ -134,7 +134,6 @@ export function ContextStrip() {
             : ""}
           {!live && solutionId ? ` · ${solutionId.slice(0, 8)}` : ""}
         </span>
-        <span className="context-strip__activity muted">{activity}</span>
       </div>
       <SolveControls />
     </div>
