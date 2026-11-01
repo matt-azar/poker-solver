@@ -156,20 +156,38 @@ void test_street_memory_plan_matches_solver_report()
     config.memory_mib = 64;
 
     const poker::solver::StreetMemoryPlan plan = poker::solver::plan_street_memory(config);
+    poker::solver::StreetBatchSolver dry(config, poker::solver::kPlanOnly);
     poker::solver::StreetBatchSolver solver(config);
+    const poker::solver::StreetMemoryReport dry_report = dry.memory_report();
     const poker::solver::StreetMemoryReport report = solver.memory_report();
 
+    CHECK(plan.dry_run);
+    CHECK(dry.plan_only());
+    CHECK(!solver.plan_only());
+    CHECK(dry_report.plan_only);
+    CHECK(!report.plan_only);
     CHECK(plan.estimated_peak_bytes == report.estimated_peak_bytes);
+    CHECK(dry_report.estimated_peak_bytes == report.estimated_peak_bytes);
     CHECK(plan.memory_budget_bytes == report.memory_budget_bytes);
     CHECK(plan.deals == solver.deal_count());
+    CHECK(plan.deals == dry.deal_count());
     CHECK(plan.infosets == solver.infoset_count());
+    CHECK(plan.infosets == dry.infoset_count());
     CHECK(plan.decision_nodes == solver.decision_node_count());
+    CHECK(plan.decision_nodes == dry.decision_node_count());
     CHECK(plan.terminals == solver.terminal_count());
+    CHECK(plan.terminals == dry.terminal_count());
     CHECK(plan.public_decisions == solver.public_decisions());
+    CHECK(plan.public_decisions == dry.public_decisions());
     CHECK(plan.thread_count == solver.thread_count());
     CHECK(plan.estimated_peak_bytes > 0);
     CHECK(plan.deals == 1);
     CHECK(poker::solver::plan_fits_budget(plan));
+    // Dry-run must not allocate the remaining training buffers.
+    CHECK(dry_report.regret_strategy_sum_bytes == 0);
+    CHECK(dry_report.allocated_bytes < report.allocated_bytes);
+    CHECK(dry.public_tree().size() == solver.public_tree().size());
+    CHECK(dry.public_tree().size() > 0);
 }
 
 } // namespace

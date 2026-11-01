@@ -58,6 +58,44 @@ export interface SolveJobRequest {
   icm_stacks?: number[];
   icm_payouts?: number[];
   time_limit?: number;
+  /** TreeEditSet lines (`force - c`, `remove Check/Bet 50 b50`, `add-size - 0.33`). */
+  tree_edits?: string[];
+}
+
+export interface MemoryPlanPayload {
+  estimated_peak_bytes: number;
+  memory_budget_bytes: number;
+  deals: number;
+  infosets: number;
+  decision_nodes: number;
+  terminals: number;
+  public_decisions: number;
+  threads: number;
+  fits_budget: boolean;
+  dry_run: boolean;
+}
+
+export interface TreePreviewAction {
+  label: string;
+  compact: string;
+  child_index: number;
+}
+
+export interface TreePreviewNode {
+  index: number;
+  terminal: boolean;
+  chance: boolean;
+  player: number;
+  street: number;
+  path: string;
+  chance_child: number;
+  actions: TreePreviewAction[];
+  children: number[];
+}
+
+export interface TreePreviewPayload {
+  nodes: TreePreviewNode[];
+  tree_edits: string[];
 }
 
 export interface GapSeriesPoint {
@@ -210,6 +248,8 @@ export interface SpotDraft {
   icmPayouts: string;
   timeLimit: string;
   solutionPath: string;
+  /** One TreeEditSet line per entry (Force/Remove/AddSize). */
+  treeEdits: string[];
 }
 
 export const RANKS = [
@@ -262,4 +302,5 @@ export const DEFAULT_SPOT: SpotDraft = {
   icmPayouts: "",
   timeLimit: "",
   solutionPath: "",
+  treeEdits: [],
 };

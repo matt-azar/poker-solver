@@ -1454,6 +1454,104 @@
   color: #fff;
 }
 
+.tree-editor-help,
+.tree-editor-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tree-editor-error {
+  color: var(--danger, #b33);
+}
+
+.memory-plan {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  font-size: 12px;
+  color: var(--text);
+  padding: 6px 8px;
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
+}
+
+.tree-meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tree-edits-list ul,
+.tree-preview,
+.tree-actions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tree-edits-list li,
+.tree-actions li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tree-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.tree-node {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: var(--secondary);
+}
+
+.tree-node-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.tree-path {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tree-action-label code {
+  margin-left: 6px;
+  color: var(--muted);
+}
+
+.tree-action-btns,
+.tree-add-size,
+.tree-add-dialog {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.tree-add-size {
+  margin-top: 6px;
+}
+
+.tree-add-dialog {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
 .range-toolbar,
 .panel-title-row {
   display: flex;

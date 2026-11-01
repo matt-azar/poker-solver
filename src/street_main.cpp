@@ -46,6 +46,7 @@ void print_usage(const char* argv0)
 void print_memory_plan(const poker::solver::StreetMemoryPlan& plan)
 {
     std::cout << "phase: memory_plan\n";
+    std::cout << "dry_run: " << (plan.dry_run ? "yes" : "no") << "\n";
     std::cout << "estimated_peak_bytes: " << plan.estimated_peak_bytes << "\n";
     std::cout << "memory_budget_bytes: " << plan.memory_budget_bytes << "\n";
     std::cout << "deals: " << plan.deals << "\n";

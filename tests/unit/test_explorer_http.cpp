@@ -1025,6 +1025,86 @@ void run_explorer_http_tests()
     check_persistence_workflow_under_value_load();
     check_lock_resolve_compare_workflow();
 
+    // Mid-construction dry-run plan and visual tree-edit preview / config round-trip.
+    {
+        const std::string plan_body =
+            "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+            "\"pot\":100,\"stack\":100,\"max_raises\":1,\"allow_all_in\":0,"
+            "\"oop_bets\":[1],\"ip_bets\":[1],\"memory_mib\":64,\"iterations\":1}";
+        HttpResult plan_result;
+        CHECK(http_exchange("POST", "/api/plan-memory", plan_body, plan_result));
+        CHECK(plan_result.status == 200);
+        CHECK(plan_result.body.find("\"dry_run\":true") != std::string::npos);
+        double peak = 0.0;
+        CHECK(json_number(plan_result.body, "estimated_peak_bytes", peak));
+        CHECK(peak > 0.0);
+        CHECK(plan_result.body.find("\"fits_budget\":") != std::string::npos);
+
+        HttpResult preview;
+        CHECK(http_exchange("POST", "/api/tree-preview", plan_body, preview));
+        CHECK(preview.status == 200);
+        CHECK(preview.body.find("\"nodes\":[") != std::string::npos);
+        CHECK(preview.body.find("\"compact\"") != std::string::npos);
+
+        const std::string forced =
+            "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
+            "\"pot\":100,\"stack\":100,\"max_raises\":1,\"allow_all_in\":0,"
+            "\"oop_bets\":[1],\"ip_bets\":[1],\"memory_mib\":64,\"iterations\":1,"
+            "\"tree_edits\":[\"force - c\"]}";
+        HttpResult forced_preview;
+        CHECK(http_exchange("POST", "/api/tree-preview", forced, forced_preview));
+        CHECK(forced_preview.status == 200);
+        CHECK(forced_preview.body.find("\"tree_edits\":[\"force - c\"]") != std::string::npos);
+        // Root decision keeps only Check after force.
+        CHECK(forced_preview.body.find("\"compact\":\"c\"") != std::string::npos);
+
+        std::string config_job = "{\"text\":\"";
+        for (char character : std::string(
+                 "street-config 1\n"
+                 "board Kh Kd 7c 4s\n"
+                 "pot 100\n"
+                 "stack 100\n"
+                 "oop-range AhAd\n"
+                 "ip-range 2c3d\n"
+                 "first-to-act 0\n"
+                 "max-raises 1\n"
+                 "allow-all-in 0\n"
+                 "allow-three-bet 1\n"
+                 "geometric 0\n"
+                 "all-in-threshold 0\n"
+                 "pot-cap 0\n"
+                 "rake-rate 0\n"
+                 "rake-cap 0\n"
+                 "memory-mib 64\n"
+                 "threads 1\n"
+                 "oop-bets 1\n"
+                 "ip-bets 1\n"
+                 "tree-edit force - c\n"))
+        {
+            if (character == '\n')
+            {
+                config_job += "\\n";
+            }
+            else if (character == '"')
+            {
+                config_job += "\\\"";
+            }
+            else if (character == '\\')
+            {
+                config_job += "\\\\";
+            }
+            else
+            {
+                config_job += character;
+            }
+        }
+        config_job += "\"}";
+        HttpResult config_parsed;
+        CHECK(http_exchange("POST", "/api/config", config_job, config_parsed));
+        CHECK(config_parsed.status == 200);
+        CHECK(config_parsed.body.find("\"tree_edits\":[\"force - c\"]") != std::string::npos);
+    }
+
 #ifdef _WIN32
     WSACleanup();
 #endif

@@ -52,7 +52,9 @@ explorer   # serves desktop/dist when present
 | Save / Open | `POST …/save`, `/open` | File fields | File menu / Build | PSOL v2 + locks; browser path fields | checkpoint HTTP |
 | Recent | `GET /api/recent-solutions` | Dropdown | Library + File menu | Cap 10 | recent_files |
 | Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Build + Library (ranges grouped by folder) | Nested `configs/ranges` folders; template dirs still flat | templates/range lib |
-| Config parse | `POST /api/config` | Load config | Build | street/river text only | indirect |
+| Config parse | `POST /api/config` | Load config | Build | street/river text only; street echoes `tree_edits` | indirect |
+| Memory plan dry-run | `POST /api/plan-memory` | — | Build line editor | Labeled `estimated_peak_bytes`; not RSS | explorer HTTP |
+| Tree preview / line edits | `POST /api/tree-preview` | — | Build `TreeLineEditor` Force/Remove/AddSize | Canonical labels; edits into draft → solve | explorer HTTP + tree_edit |
 
 ## Numerical labels (do not relabel without math)
 

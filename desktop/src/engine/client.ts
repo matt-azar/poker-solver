@@ -1,8 +1,10 @@
 import type {
   ActionValuesPayload,
+  MemoryPlanPayload,
   NodePayload,
   SolveJobRequest,
   StatusPayload,
+  TreePreviewPayload,
 } from "../domain/types";
 import { isTauriRuntime } from "../platform";
 
@@ -258,6 +260,18 @@ export class EngineClient {
     const { response, data } = await this.request("POST", "/api/config", { text });
     this.ensureOk(response, data);
     return data as Record<string, unknown>;
+  }
+
+  async planMemory(job: SolveJobRequest | { text: string }): Promise<MemoryPlanPayload> {
+    const { response, data } = await this.request("POST", "/api/plan-memory", job);
+    this.ensureOk(response, data);
+    return data as MemoryPlanPayload;
+  }
+
+  async treePreview(job: SolveJobRequest | { text: string }): Promise<TreePreviewPayload> {
+    const { response, data } = await this.request("POST", "/api/tree-preview", job);
+    this.ensureOk(response, data);
+    return data as TreePreviewPayload;
   }
 
   async compare(baseline: string, scenario: string, nodeId: string): Promise<unknown> {

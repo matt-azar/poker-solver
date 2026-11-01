@@ -34,7 +34,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Conditional combo/action EV; both-player values | Flop, turn, and river decision nodes on the shared street tree | M1 |
 | Equity, action ranges, distributions, hand categories | Check-down equity + buckets; made-hand categories; draws/backdoors open | M2 |
 | Weighted range editing, range libraries, board input | 13×13 paint, presets; nested folders open | M2–M3 |
-| Configurable betting trees and visual line editing | `street-config 1` + TreeEditSet; visual editor open | M3 |
+| Configurable betting trees and visual line editing | `street-config 1` + TreeEditSet; Study Build line editor + `plan-memory` dry-run | M3 |
 | Stop-and-keep, pause/continue, accuracy stopping | Present; construction-time stop/pause still publishes nothing | M4 |
 | Full saves, resumable checkpoints, compact saves, lazy load | Versioned PSOL + recent files; compact/lazy open | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Study corpus + benches; Pio parity unproven | M6 |
@@ -87,7 +87,7 @@ Version a canonical game/tree configuration. Include board, initial contribution
 
 Pio's documented builder includes sizing expressions, betting caps, forced lines and line editing [S3]. Turn these into leaf items in our ledger, including less-used spread-limit/limit-style options if required for literal reference coverage. A size restriction and a node lock are separate ledger items.
 
-Add a visual tree preview with add/remove/force line operations, explicit canonical action labels, saved templates, and a pre-build memory plan. Distinguish estimated engine allocation from measured allocation and whole-process memory. Validate before destructive replacement of a useful current solution. `street_solver --plan-memory` and `plan_street_memory` expose the labeled engine peak for a config without training; a mid-construction dry-run that avoids allocating the remaining buffers is still open. `TreeEditSet` Force/Remove/AddSize already apply on `StreetGame` and `StreetBatchSolver` legal actions and round-trip in `street-config 1`; the visual editor is still ahead.
+Add a visual tree preview with add/remove/force line operations, explicit canonical action labels, saved templates, and a pre-build memory plan. Distinguish estimated engine allocation from measured allocation and whole-process memory. Validate before destructive replacement of a useful current solution. `street_solver --plan-memory` / `plan_street_memory` / `POST /api/plan-memory` use a mid-construction dry-run (`StreetBatchSolver` + `kPlanOnly`) that records the labeled peak without allocating the remaining training buffers. `TreeEditSet` Force/Remove/AddSize apply on `StreetGame` and `StreetBatchSolver` and round-trip in `street-config 1`; the Study Build workspace ships a visual line editor over `POST /api/tree-preview`.
 
 **Gate:** canonical configuration rebuilds the same tree; every displayed sizing rule has legal-edge-case tests; edits invalidate derived results; failed estimates/builds explain the offending configuration. Curated small trees match independent enumerators.
 
@@ -223,7 +223,7 @@ Choose explicit release service-level targets after measuring a representative c
 
 Main path: M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0; five-card production already shares the street tree — scale that one kernel. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after required features land.
 
-Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets with study filtering/composition, five-card made-hand categories, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, resumable PSOL, runout EV comparison, recent-files list, street-config templates, named range presets, street-first node locks. Still ahead: compact saves, richer strategy editing, reports/queue, trainer, preflop.
+Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets with study filtering/composition, five-card made-hand categories, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, resumable PSOL, runout EV comparison, recent-files list, street-config templates, named range presets, street-first node locks. Still ahead: compact saves, richer strategy editing, reports/queue, trainer, preflop. M3 visual line editor + plan-memory dry-run landed on this track.
 
 Per milestone: small specification, invariants and failure modes, reviewable commits, relevant checks, user-workflow demo, ledger update with evidence. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 

@@ -148,6 +148,9 @@ function draftFromParsedConfig(body: Record<string, unknown>): Partial<SpotDraft
     partial.allInThreshold = Number(body.all_in_threshold) || 0;
     partial.memoryMib = Number(body.memory_mib) || 0;
     partial.threads = Number(body.threads) || 1;
+    if (Array.isArray(body.tree_edits)) {
+      partial.treeEdits = body.tree_edits.map((line) => String(line)).filter(Boolean);
+    }
   }
   return partial;
 }
@@ -214,6 +217,9 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
   };
   if (draft.timeLimit.trim() !== "") {
     body.time_limit = Number(draft.timeLimit);
+  }
+  if (draft.treeEdits.length > 0) {
+    body.tree_edits = [...draft.treeEdits];
   }
   return body;
 }
