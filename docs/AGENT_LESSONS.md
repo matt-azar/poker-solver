@@ -75,7 +75,8 @@ A flop, turn, and river are **one** betting tree with two, one, or zero cards le
 ### `*Game` vs `*Batch`
 
 - `RiverGame` / `StreetGame` — full deal enumeration; oracle for strategy, values, best response.
-- `RiverBatchSolver` / `StreetBatchSolver` — one public betting tree, same CFR/CFR+ update, production default.
+- `StreetBatchSolver` — one public betting tree; production default for flop/turn/river.
+- `RiverBatchSolver` — public-tree river helper for oracle/legacy fixtures only (not the product CLI path).
 
 **Do:** Pin batch changes against `--reference` / `CfrTrainer<*Game>` on small fixtures.  
 **Don't:** “Optimize” by changing only the batch kernel without an oracle gate.

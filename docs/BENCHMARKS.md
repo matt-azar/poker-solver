@@ -1,6 +1,10 @@
+# Benchmarks
+
+Primary production measurements are the **Street** and **River** sections below and [benchmarks/study/](../benchmarks/study/). Kuhn and Leduc tables are reference-trainer history.
+
 ## Kuhn vanilla CFR and CFR+
 
-The table below is historical. It was measured when CFR+ floored each regret during the traversal. The current update freezes the strategy for a pass and floors only the player who just finished that pass.
+Historical table from when CFR+ floored each regret during the traversal. The current update freezes the strategy for a pass and floors only the player who just finished that pass.
 
 Historical measurement: `build\Release\kuhn_solver.exe` on Windows 10.0.26200, MSVC 19.40.33811.0, Release, x64. Runtime is the regret-update loop. Memory is the regret table, the strategy-sum table, and the information-set offset table: `2 * 24 * 8 + 13 * 4` = 436 bytes.
 

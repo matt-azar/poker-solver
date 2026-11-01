@@ -1,6 +1,6 @@
 # Testing
 
-Tests use a small in-repo harness (`tests/harness.hpp`) and CTest. There is no Catch2/GoogleTest dependency.
+In-repo harness (`tests/harness.hpp`) + CTest. No Catch2/GoogleTest.
 
 ```sh
 cmake --build build
@@ -9,25 +9,25 @@ ctest --test-dir build --output-on-failure
 
 On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 
-Build the solver and explorer binaries without compiling tests or benchmarks:
+Build production binaries without tests or benchmarks:
 
 ```sh
-cmake --build build --config Release --target kuhn_solver --target leduc_solver --target river_solver --target street_solver --target explorer
+cmake --build build --config Release --target street_solver --target river_solver --target explorer --target equity_calculator
 ```
 
-Omit `--config Release` on a single-config generator. A plain `cmake --build build` still compiles the test binary and the benchmark binaries. The benchmarks stay outside CTest.
+Omit `--config Release` on a single-config generator. A plain `cmake --build build` also compiles the test binary and benchmark binaries. Benchmarks stay outside CTest. Reference-game targets `kuhn_solver` and `leduc_solver` are optional.
 
-JavaScript checks, from the repository root:
+JavaScript checks from the repository root:
 
 ```sh
 node tests/ui/browse.test.js
 ```
 
-The explorer HTTP cases spawn a local `explorer` process on an ephemeral port and exercise the same assertion sequence on Windows and Linux. [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) builds the production targets, runs this C++ suite, and runs the JavaScript file on Windows and Linux. A second Linux job repeats the C++ suite under AddressSanitizer and UndefinedBehaviorSanitizer. The benchmark executables are not part of that workflow.
+Explorer HTTP cases spawn a local `explorer` on an ephemeral port on Windows and Linux. [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) builds production targets, runs the C++ suite, and runs the JavaScript file on Windows and Linux. A second Linux job repeats the C++ suite under AddressSanitizer and UndefinedBehaviorSanitizer.
 
-## Categories (Phase 2)
+## Categories
 
-**Game correctness** (`tests/unit/test_kuhn.cpp`)
+**Kuhn reference** (`tests/unit/test_kuhn.cpp`)
 
 - Six distinct deals; no duplicate cards
 - Legal actions and sequence transitions
@@ -180,7 +180,7 @@ Payoff accounting and exact best response are tested separately from the Nash ga
 ## CLI smoke
 
 ```sh
-kuhn_solver --iterations 1000 --print-strategies
+street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1
 ```
 
-Should print a Nash gap and a player-1 value. At 1,000 iterations the gap is still wide.
+Prints value and Nash gap for the check-only flop. Reference-game smoke: `kuhn_solver --iterations 1000 --print-strategies`.

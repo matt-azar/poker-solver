@@ -1,6 +1,6 @@
 # Hold'em Study client
 
-React + TypeScript + Vite workstation UI for the `explorer` HTTP API. See [docs/DESKTOP_UI.md](../docs/DESKTOP_UI.md).
+React + TypeScript + Vite UI for the `explorer` HTTP API. See [docs/DESKTOP_UI.md](../docs/DESKTOP_UI.md).
 
 ## Develop
 
