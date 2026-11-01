@@ -67,7 +67,11 @@ export function ActionHistory() {
   const terminal = currentNode?.kind === "terminal";
 
   return (
-    <section className="action-history" style={{ height: layout.historyHeight }}>
+    <section
+      className="action-history"
+      data-empty={currentNode ? "false" : "true"}
+      style={currentNode ? { height: layout.historyHeight } : undefined}
+    >
       <div className="action-history__row action-history__line">
         <span className="action-history__label">Line</span>
         {currentNode ? (

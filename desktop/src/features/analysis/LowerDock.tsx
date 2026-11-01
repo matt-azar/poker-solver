@@ -19,10 +19,10 @@ export function LowerDock() {
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
   useEffect(() => {
-    // Repair tiny / corrupted persisted heights so the dock is never a sliver.
+    // Repair a corrupted height without forcing the dock open over the matrix.
     const repaired = clampDockHeight(layout.lowerDockHeight);
     if (repaired !== layout.lowerDockHeight) {
-      setLayout({ lowerDockHeight: repaired, lowerDock: true });
+      setLayout({ lowerDockHeight: repaired });
     }
   }, [layout.lowerDockHeight, setLayout]);
 
@@ -51,22 +51,32 @@ export function LowerDock() {
     [layout.lowerDockHeight, setLayout],
   );
 
+  const openTab = (id: (typeof TABS)[number]["id"]) => {
+    setAnalysisTab(id);
+    setLayout({
+      lowerDock: true,
+      lowerDockHeight: Math.max(layout.lowerDockHeight, 200),
+    });
+  };
+
   if (!layout.lowerDock) {
     return (
-      <div className="lower-dock lower-dock--collapsed">
-        <button
-          type="button"
-          className="toolbar-btn"
-          onClick={() =>
-            setLayout({
-              lowerDock: true,
-              lowerDockHeight: Math.max(layout.lowerDockHeight, 240),
-            })
-          }
-        >
-          Show analysis dock
-        </button>
-      </div>
+      <section className="lower-dock lower-dock--collapsed" aria-label="Analysis">
+        <div className="lower-dock__tabs" role="tablist" aria-label="Analysis">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={false}
+              className="dock-tab"
+              onClick={() => openTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </section>
     );
   }
 

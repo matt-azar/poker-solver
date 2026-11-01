@@ -59,7 +59,7 @@ export function StatusBar({ message, connection, phase, status, onReconnect }: P
           title="Continue solve"
           onClick={() => void continueSolve()}
         >
-          Cont
+          Continue
         </button>
         <button
           type="button"

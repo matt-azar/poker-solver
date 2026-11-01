@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-const LAYOUT_KEY = "study-layout-v1";
+const LAYOUT_KEY = "study-layout-v2";
 
 export interface StudyLayout {
   leftNav: boolean;
@@ -14,22 +14,23 @@ export interface StudyLayout {
 
 export const DEFAULT_LAYOUT: StudyLayout = {
   leftNav: true,
-  lowerDock: true,
+  // Closed until the player opens an analysis tab, so the matrix owns the page.
+  lowerDock: false,
   dualRange: false,
-  inspectorWidth: 320,
+  inspectorWidth: 280,
   historyHeight: 72,
-  lowerDockHeight: 240,
+  lowerDockHeight: 200,
   density: "comfortable",
 };
 
-const DOCK_MIN = 140;
+const DOCK_MIN = 120;
 const HISTORY_MIN = 56;
 
 function dockMaxPx(): number {
   if (typeof window === "undefined") {
     return 720;
   }
-  return Math.max(DOCK_MIN, Math.floor(window.innerHeight * 0.72));
+  return Math.max(DOCK_MIN, Math.floor(window.innerHeight * 0.34));
 }
 
 function historyMaxPx(): number {

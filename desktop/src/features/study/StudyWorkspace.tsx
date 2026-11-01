@@ -14,24 +14,21 @@ export function StudyWorkspace() {
   const leftNav = useStudyStore((s) => s.layout.leftNav);
   const dualRange = useStudyStore((s) => s.layout.dualRange);
   const inspectorWidth = useStudyStore((s) => s.layout.inspectorWidth);
+  const currentNode = useStudyStore((s) => s.currentNode);
   const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
   const strategyEditDrawerOpen = useStudyStore((s) => s.strategyEditDrawerOpen);
+  const showNav = leftNav && Boolean(currentNode);
 
   return (
     <div className="study-workspace">
-      <div className="study-tabs" role="tablist" aria-label="Study documents">
-        <button type="button" className="study-tab" role="tab" aria-selected>
-          Spot 1
-        </button>
-      </div>
       <ContextStrip />
       <ActionHistory />
       <div
         className="study-main"
-        data-nav={leftNav ? "true" : "false"}
+        data-nav={showNav ? "true" : "false"}
         style={{ ["--inspector-w" as string]: `${inspectorWidth}px` }}
       >
-        {leftNav ? <NodeNavigator /> : null}
+        {showNav ? <NodeNavigator /> : null}
         <section
           className="matrix-pane"
           data-dual={dualRange ? "true" : "false"}
@@ -40,10 +37,9 @@ export function StudyWorkspace() {
           <ActionSummary />
           <div className={dualRange ? "matrix-dual" : "matrix-stage"}>
             <RangeMatrix />
-            {dualRange ? <OpponentRangePanel /> : null}
+            {dualRange ? <OpponentRangePanel /> : <ComboInspector />}
           </div>
         </section>
-        <ComboInspector />
       </div>
       <LowerDock />
       {lockDrawerOpen ? <LockDrawer /> : null}

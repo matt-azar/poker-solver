@@ -390,11 +390,9 @@
 
 .context-strip__engine {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
+  align-items: center;
   min-width: 0;
-  max-width: min(360px, 32vw);
+  flex-shrink: 0;
 }
 
 .context-strip__activity {
@@ -504,6 +502,18 @@
   flex-direction: column;
   gap: 0;
   padding: 4px 0 6px;
+}
+
+.action-history[data-empty="true"] {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  padding: 0;
+}
+
+.action-history[data-empty="true"] .action-history__next,
+.action-history[data-empty="true"] .resize-handle {
+  display: none;
 }
 
 .action-history__row {
@@ -659,14 +669,14 @@
 
 .study-main {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr);
   flex: 1 1 0;
-  min-height: 180px;
+  min-height: 0;
   overflow: hidden;
 }
 
 .study-main[data-nav="false"] {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .node-navigator {
@@ -731,17 +741,20 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--app-bg);
-  padding: var(--space-2);
-  gap: var(--space-2);
+  background: var(--panel);
+  padding: 0;
+  gap: 0;
   overflow: hidden;
 }
 
 .matrix-stage {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
-  display: flex;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: stretch;
 }
 
 .action-summary {
@@ -749,10 +762,12 @@
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 6px 8px;
+  flex: 0 0 auto;
+  background: var(--secondary);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 4px 8px;
 }
 
 .action-summary__modes {
@@ -810,29 +825,29 @@
 }
 
 .range-matrix-wrap {
-  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  width: 100%;
   height: 100%;
+  width: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
+  justify-content: stretch;
   overflow: hidden;
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 0;
+  border-radius: 0;
+  container-type: size;
 }
 
 .range-matrix {
   display: grid;
-  grid-template-columns: 18px repeat(13, minmax(0, 1fr));
-  grid-template-rows: 16px repeat(13, minmax(0, 1fr));
+  grid-template-columns: 22px repeat(13, minmax(0, 1fr));
+  grid-template-rows: 20px repeat(13, minmax(0, 1fr));
   gap: 1px;
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   background: var(--border);
-  border: 1px solid var(--border);
+  border: 0;
   user-select: none;
 }
 
@@ -878,12 +893,12 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  font-size: clamp(8px, 1.1vw, 11px);
-  font-weight: 600;
+  font-size: clamp(12px, 3.2cqh, 22px);
+  font-weight: 650;
   color: #fff;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.75);
   pointer-events: none;
-  line-height: 1.1;
+  line-height: 1.05;
 }
 
 .matrix-cell__sub {
@@ -920,12 +935,19 @@
 .combo-inspector {
   width: var(--inspector-w);
   min-width: 240px;
-  background: var(--panel);
+  background: var(--secondary);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   min-height: 0;
   position: relative;
+}
+
+.matrix-stage > .combo-inspector {
+  width: auto;
+  min-width: 0;
+  max-height: none;
+  height: 100%;
 }
 
 .combo-inspector__head {
@@ -990,7 +1012,7 @@
   flex: 0 1 auto;
   height: var(--dock-h);
   min-height: 96px;
-  max-height: min(72vh, 40%);
+  max-height: min(34vh, 320px);
   background: var(--panel);
   border-top: 1px solid var(--border);
   display: flex;
@@ -2118,7 +2140,7 @@
 
 .lock-drawer {
   position: absolute;
-  top: var(--tabs-h);
+  top: 0;
   right: 0;
   bottom: 0;
   z-index: 30;
@@ -2889,8 +2911,9 @@
     display: none;
   }
 
-  .study-main[data-nav="true"] {
-    grid-template-columns: 1fr var(--inspector-w);
+  .study-main[data-nav="true"],
+  .study-main[data-nav="false"] {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .node-navigator {
@@ -3262,14 +3285,15 @@
 }
 
 .lower-dock--collapsed {
-  min-height: 36px;
-  height: 36px;
-  max-height: 36px;
+  flex: 0 0 auto;
+  min-height: 0;
+  height: auto;
+  max-height: none;
   display: flex;
-  align-items: center;
-  padding: 0 8px;
+  align-items: stretch;
+  padding: 0;
   border-top: 1px solid var(--border);
-  background: var(--panel);
+  background: var(--secondary);
 }
 
 .lower-dock__hide {
