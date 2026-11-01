@@ -2669,3 +2669,80 @@
 .assistant-hint.ok {
   color: var(--ok);
 }
+
+.assistant-credentials {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.assistant-credentials input[type="password"] {
+  min-width: 220px;
+  flex: 1;
+}
+
+.range-catalogue-panel {
+  gap: var(--space-2);
+}
+
+.catalogue-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.catalogue-filters label {
+  min-width: 140px;
+}
+
+.catalogue-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.catalogue-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.catalogue-table th,
+.catalogue-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.catalogue-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.catalogue-table tr[data-exact="true"] {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.catalogue-table tr[data-selected="true"] {
+  outline: 1px solid var(--border);
+}
+
+.catalogue-name {
+  font-weight: 600;
+}
+
+.catalogue-id {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.catalogue-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

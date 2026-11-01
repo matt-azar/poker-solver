@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "fixture-btn-bb-3bp-100bb-100nl",
+  "dataRevision": "1",
+  "displayName": "FIXTURE: BTN vs BB 3BP 100bb 100NL (synthetic standard/GTO-style)",
+  "format": "cash_6max",
+  "playerCount": 6,
+  "positions": {
+    "oop": "BB",
+    "ip": "BTN"
+  },
+  "preflopActions": [
+    { "position": "UTG", "kind": "fold" },
+    { "position": "HJ", "kind": "fold" },
+    { "position": "CO", "kind": "fold" },
+    { "position": "BTN", "kind": "open", "sizeBb": 2.5 },
+    { "position": "SB", "kind": "fold" },
+    { "position": "BB", "kind": "raise", "sizeBb": 10 },
+    { "position": "BTN", "kind": "call", "sizeBb": 7.5 }
+  ],
+  "startingStackBb": 100,
+  "blinds": { "sb": 0.5, "bb": 1 },
+  "rake": {
+    "rate": 0,
+    "cap": 0,
+    "collection": "unknown",
+    "known": false
+  },
+  "labels": {
+    "stakes": "100NL",
+    "intendedUse": "demo_and_tests_only_standard_gto_catalogue_shape"
+  },
+  "ranges": {
+    "oop": "JJ+,AQs+,AKo,AJs:0.5,KQs:0.5",
+    "ip": "99+,AJs+,KQs,AQo+,ATs:0.5,KJs:0.35,QJs:0.25,AJo:0.25"
+  },
+  "provenance": {
+    "source": "configs/range-profiles/fixture-btn-bb-3bp-100bb-100nl.json",
+    "classification": "synthetic_fixture",
+    "notes": "SYNTHETIC FIXTURE for demo and automated tests only. Standard/GTO-catalogue shape keyed by 100NL rake structure + BTN vs BB 3BP at 100bb. NOT verified 100NL population or equilibrium data."
+  }
+}

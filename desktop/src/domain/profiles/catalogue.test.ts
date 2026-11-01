@@ -107,4 +107,26 @@ describe("createRangeProfileCatalogue", () => {
     expect(result.profile).toBeUndefined();
     expect(result.error).toMatch(/invalid|JSON|must/i);
   });
+
+  it("tracks and removes user imports without touching bundled seed", () => {
+    const storage = memoryStorage();
+    const catalogue = createRangeProfileCatalogue([fixture], storage);
+    expect(catalogue.isUserImport(fixture.id)).toBe(false);
+
+    const imported = catalogue.importProfile({
+      ...JSON.parse(JSON.stringify(fixture)),
+      id: "user-import-demo",
+      displayName: "User import demo",
+    });
+    expect(imported.error).toBeUndefined();
+    expect(catalogue.isUserImport("user-import-demo")).toBe(true);
+    expect(catalogue.listProfiles().some((p) => p.id === "user-import-demo")).toBe(
+      true,
+    );
+
+    expect(catalogue.removeUserImport("user-import-demo")).toBe(true);
+    expect(catalogue.getProfile("user-import-demo")).toBeUndefined();
+    expect(catalogue.getProfile(fixture.id)?.id).toBe(fixture.id);
+    expect(catalogue.removeUserImport(fixture.id)).toBe(false);
+  });
 });

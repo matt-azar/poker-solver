@@ -23,7 +23,18 @@ npm test
 npm run build
 ```
 
+Live OpenAI interpretation eval (skipped without a key; **not** part of ordinary CI):
+
+```sh
+HOLDEM_STUDY_OPENAI_KEY=sk-... npm run test:assistant-live
+```
+
 After `npm run build`, `explorer` prefers `desktop/dist` over legacy `ui/` when both are present.
+
+## Setup assistant notes
+
+- Range JSON import: Build → **Range catalogue** → Import JSON… (see `configs/range-profiles/README.md`).
+- OpenAI credentials: prefer Tauri `assistant_secret_*` storage in the packaged app; browser prototype may use `holdem-study-openai-key` localStorage. Never commit keys. A distributed product should use an authenticated backend proxy.
 
 ## License
 

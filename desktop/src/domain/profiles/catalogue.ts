@@ -28,6 +28,10 @@ export interface RangeProfileCatalogue {
   addLegacyPresets(presets: readonly LegacyPresetInput[]): void;
   /** Snapshot ranges + id/revision for study persistence. */
   snapshotForApply(profile: RangeProfile): AppliedProfileSnapshot;
+  /** True when the latest revision for `id` came from a user import. */
+  isUserImport(id: string): boolean;
+  /** Remove one user-imported id (all revisions). Bundled seed is untouched. */
+  removeUserImport(id: string): boolean;
   /** Clear user-imported entries from injectable storage (bundled seed remains). */
   clearUserImports(): void;
 }
@@ -208,6 +212,19 @@ export function createRangeProfileCatalogue(
           ip: profile.ranges.ip,
         },
       };
+    },
+
+    isUserImport(id: string) {
+      return userImports.has(id);
+    },
+
+    removeUserImport(id: string) {
+      if (!userImports.has(id)) {
+        return false;
+      }
+      userImports.delete(id);
+      persistUsers();
+      return true;
     },
 
     clearUserImports() {
