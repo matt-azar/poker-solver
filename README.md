@@ -1,10 +1,44 @@
 # poker-solver
 
-Heads-up no-limit Texas Hold'em GTO solver under incremental development. The core is C++20. Python bindings are planned later and are not required to build or run the solver. A local explorer is included.
+Heads-up no-limit Texas Hold'em GTO solver (C++20) with a local Study workstation. Python bindings are planned later and are not required to build or run.
 
-**Current milestone:** The kernel through the old Phase 10 is the foundation. The active plan is Release A, a dependable postflop study tool. The next implementation milestone is M0, then the already specified conditional-action-EV work. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/HUNL.md](docs/HUNL.md).
+**Current product surface:** postflop study via `explorer` + the React Study UI (`desktop/`), including locks, compare, and analysis. A Windows NSIS installer wraps that stack. See [docs/ROADMAP.md](docs/ROADMAP.md), [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md), and [docs/HUNL.md](docs/HUNL.md).
 
 Convergence on Kuhn, Leduc, or a fixed-size river tree is an equilibrium of that abstract game.
+
+## Windows installer (no CMake / npm)
+
+CI builds an unsigned NSIS setup from `main`:
+
+1. GitHub → **Actions** → workflow **Windows Installer** → latest green run  
+2. Download artifact `holdem-study-windows-installer`  
+3. Run `Holdem Study_0.1.0_x64-setup.exe` (current-user install; WebView2 may bootstrap)  
+4. Launch **Holdem Study** from the Start menu
+
+The installed app starts the `holdem-explorer` engine sidecar and opens the Study UI. No separate CMake or Node install is required for that path. The installer is not code-signed yet.
+
+Details: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
+
+## Study UI (developers)
+
+```sh
+# terminal 1 — after building explorer (see Build below)
+./build/explorer --port 8765          # Windows: build\Release\explorer.exe --port 8765
+
+# terminal 2
+cd desktop && npm install && npm run dev
+```
+
+Open `http://127.0.0.1:5173`. Vite proxies `/api` to the explorer.
+
+Production static serve (no Vite):
+
+```sh
+cd desktop && npm run build
+./build/explorer --port 8765          # prefers desktop/dist when present
+```
+
+Then open `http://127.0.0.1:8765`.
 
 ## Requirements
 
@@ -12,6 +46,7 @@ Convergence on Kuhn, Leduc, or a fixed-size river tree is an equilibrium of that
 - A C++20 compiler:
   - Windows: Visual Studio 2019+ (MSVC) or MinGW-w64 GCC
   - Linux / WSL2: GCC 10+ or Clang 11+
+- Node 22+ only for `desktop/` UI development or packaging
 
 No Python, pybind11, or other third-party libraries are required for the current C++ solver.
 
@@ -20,10 +55,12 @@ No Python, pybind11, or other third-party libraries are required for the current
 From a Developer Command Prompt or PowerShell with `cmake` and MSVC on `PATH`:
 
 ```bat
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+Use `"Visual Studio 16 2019"` if that is what you have installed. With the VS generator, prefer `--config Release` on the build/test steps rather than `-DCMAKE_BUILD_TYPE`.
 
 The CLIs are `build\Release\kuhn_solver.exe`, `build\Release\leduc_solver.exe`, `build\Release\river_solver.exe`, `build\Release\street_solver.exe`, and `build\Release\explorer.exe` (multi-config generators), or the same names without the `Release` directory for single-config generators.
 
@@ -42,7 +79,7 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-debug
 ```
 
-## Run
+## Run (CLI solvers)
 
 ```sh
 kuhn_solver --iterations 200000 --algorithm cfr_plus --print-strategies
@@ -71,14 +108,17 @@ include/game/     Kuhn, Leduc, the river, and turn/flop trees
 include/solver/   CFR, CFR+, regret matching, best response, public river tree
 include/poker/    Hold'em cards, hand evaluator, 1,326-hand ranges
 src/              Implementations and the CLIs
+desktop/          React Study UI + Tauri Windows shell (src-tauri/)
+ui/               Legacy explorer page (fallback)
 tests/            In-repo harness + CTest
-docs/             Architecture, mathematics, testing, roadmap
+docs/             Architecture, mathematics, testing, roadmap, desktop UI
 ```
 
-The `python/` directory is reserved for a later binding. `ui/` is the legacy local explorer page. `desktop/` is the React Study workstation client (Vite); see [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md). Run `explorer` for the engine, then `cd desktop && npm run dev` during UI development.
+The `python/` directory is reserved for a later binding.
 
 ## Documentation
 
+- [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md) — Study workstation + Windows packaging
 - [docs/HUNL.md](docs/HUNL.md)
 - [docs/EXPLORER.md](docs/EXPLORER.md)
 - [docs/STREETS.md](docs/STREETS.md)
