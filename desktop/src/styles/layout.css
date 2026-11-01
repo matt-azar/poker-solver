@@ -255,7 +255,8 @@
 
 .study-workspace {
   display: grid;
-  grid-template-rows: var(--tabs-h) var(--context-h) auto 1fr auto;
+  /* Keep the analysis dock from collapsing to a clipped sliver. */
+  grid-template-rows: var(--tabs-h) var(--context-h) auto minmax(0, 1fr) minmax(140px, auto);
   height: 100%;
   min-height: 0;
 }
@@ -968,7 +969,7 @@
 
 .lower-dock {
   height: var(--dock-h);
-  min-height: 120px;
+  min-height: 140px;
   max-height: 72vh;
   background: var(--panel);
   border-top: 1px solid var(--border);
@@ -976,6 +977,7 @@
   flex-direction: column;
   position: relative;
   flex-shrink: 0;
+  z-index: 2;
 }
 
 .lower-dock__tabs {
@@ -1125,8 +1127,10 @@
 }
 
 .resize-handle--top {
-  top: -3px;
+  top: 0;
   bottom: auto;
+  height: 8px;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
 }
 
 .inspector-meta {
@@ -1879,10 +1883,13 @@
 
 .resize-handle--top {
   position: absolute;
-  top: -3px;
+  top: 0;
   left: 0;
   right: 0;
+  height: 8px;
   z-index: 5;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+  cursor: ns-resize;
 }
 
 .hint {
@@ -2911,6 +2918,42 @@
 .assistant-credentials input[type="password"] {
   min-width: 220px;
   flex: 1;
+}
+
+.catalogue-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, #000 45%, transparent);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: var(--space-3);
+}
+
+.catalogue-modal {
+  width: min(960px, 100%);
+  max-height: min(860px, 92vh);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.catalogue-modal .range-catalogue-panel {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+  grid-column: auto;
+}
+
+.catalogue-modal .range-catalogue-panel > .panel-title-row h2 {
+  font-size: 13px;
 }
 
 .range-catalogue-panel {
