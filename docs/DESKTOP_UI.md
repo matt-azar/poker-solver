@@ -1,19 +1,19 @@
 # Desktop Study workstation
 
-Architecture decision and capability map for the React study client (`desktop/`) that talks to the existing `explorer` HTTP API. Numerical kernels are unchanged.
+React study client (`desktop/`) over the `explorer` HTTP API. Numerical kernels are unchanged.
 
-## Architecture decision (2026-10-31)
+## Stack
 
 | Choice | Decision |
 | --- | --- |
 | Web client | React 19 + TypeScript + Vite |
 | State | Zustand for study/layout/theme; query identity in the engine client |
-| Engine transport | Typed `EngineClient` over the existing localhost HTTP API |
-| Desktop shell | Tauri 2 planned for a later slice; browser + Vite proxy first |
+| Engine transport | Typed `EngineClient` over the localhost HTTP API |
+| Desktop shell | Tauri 2 + `holdem-explorer` sidecar; browser + Vite proxy still supported |
 | Static serving | Prefer `desktop/dist` when present; fall back to legacy `ui/` |
 | Legacy UI | Kept under `ui/` for regression and fallback |
 
-Rationale: the repository already exposes a proven explorer process boundary. Replacing the page with a typed client preserves solve/browse/save contracts without inventing a parallel API. Tauri packaging can wrap the same client and sidecar once the Study workspace is solid.
+The explorer process boundary is the engine API. The Study client is a typed UI over that API; Tauri packages the same client with a sidecar.
 
 ## Development
 
@@ -63,14 +63,16 @@ explorer   # serves desktop/dist when present
 - Categories: strategy-weighted reach; seat fractions align with the `categories` name list
 - A 0% action inside a lock row that sums to 1 is a constraint; unlock is DELETE. All-zero PUT rows are rejected by the engine.
 
-## Slice status
+## Status
 
-1. **Audit + contracts** — this document + `EngineClient`
-2. **Study workspace** — tokens, adaptive layout, context/history, segmented strategy matrix, combo inspector, node navigation, solve controls against live API; optional dual-range layout; interactive board + chance card picker
-3. **Analysis dock + Build + Library** — Range Explorer, Graphs (`gap_series`), Runouts, Equity (OOP/IP hist), Categories (seat toggle), organized Build, Library lists
-4. **Locks + Compare** — Lock drawer + Compare workspace wired to PUT/DELETE/resolve-locked/compare
-5. **Desktop packaging** — Tauri 2 shell + `holdem-explorer` sidecar + Windows NSIS installer via CI artifact (unsigned). Browser + Vite/`explorer` path remains supported. See [Desktop packaging](#desktop-packaging).
-6. **Visual/a11y/perf** — focus-visible + reduced-motion; compact collapse ≤1280; themes light/dark. Scaling/perf evidence captured as screenshots.
+| Slice | State |
+| --- | --- |
+| Contracts + `EngineClient` | Done |
+| Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
+| Analysis dock + Build + Library | Done |
+| Locks + Compare | Done |
+| Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |
+| Visual / a11y / perf polish | Partial — focus-visible, reduced-motion, compact ≤1280, light/dark themes |
 
 ## Desktop packaging
 
@@ -86,10 +88,10 @@ explorer   # serves desktop/dist when present
 
 ### Windows installer (end users)
 
-1. Open the packaging PR / Actions → **Windows Installer** (or download the artifact from a green run).
-2. Download artifact `holdem-study-windows-installer`.
-3. Run `Holdem Study_0.1.0_x64-setup.exe` (current-user install; WebView2 may bootstrap if missing). Setup fails loudly if the engine sidecar is missing and clears Mark-of-the-Web on the installed exes.
-4. Launch **Holdem Study** from the Start menu — the shell starts `holdem-explorer` on `127.0.0.1:8765` before the Study UI polls. No CMake/`npm` required.
+Prefer the [GitHub Release](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.0-windows), or Actions → **Windows Installer** → artifact `holdem-study-windows-installer`.
+
+1. Run `Holdem Study_0.1.0_x64-setup.exe` (current-user install; WebView2 may bootstrap if missing). Setup fails loudly if the engine sidecar is missing and clears Mark-of-the-Web on the installed exes.
+2. Launch **Holdem Study** from the Start menu — the shell starts `holdem-explorer` on `127.0.0.1:8765` before the Study UI polls. No CMake/`npm` required.
 
 Installer product name is `Holdem Study` (no apostrophe) because NSIS shortcut macros reject `Hold'em`. The window title remains `Hold'em Study`.
 

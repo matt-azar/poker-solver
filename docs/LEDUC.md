@@ -1,6 +1,6 @@
-# Leduc Hold'em
+# Leduc Hold'em (reference game)
 
-This is the two-player game from Southey et al., "Bayes' Bluff" (UAI 2005), with the same chip sizes as the default OpenSpiel `leduc_poker` game. It is a multi-street game used to test the shared CFR engine.
+Two-player game from Southey et al., "Bayes' Bluff" (UAI 2005), with the same chip sizes as OpenSpiel's default `leduc_poker`. Used to test the shared CFR engine. Not a Study product surface.
 
 ## Cards
 
@@ -17,17 +17,17 @@ Six cards, two suits of three ranks:
 
 Rank is `card / 2`. Suit is `card % 2`. A player observes their own card, including which copy it is. The opponent's card is never part of an information set.
 
-Chance deals player 0's card (6 equally likely cards), then player 1's card (5 remaining, equally likely), then, if the first street does not end in a fold, one board card (4 remaining, equally likely).
+Chance deals player 0's card (6 equally likely), then player 1's card (5 remaining), then, if the first street does not fold, one board card (4 remaining).
 
 ## Betting
 
 Each player antes 1 before any card is dealt. Player 0 acts first on both streets.
 
-A check is a call of zero chips. An opening bet is the first raise. The default cap is two raises per street, so the longest line is bet, raise, call. A further re-raise is illegal. The cap is configurable separately for each street (`LeducConfig`, or `--max-raises` / `--max-raises-round2`).
+A check is a call of zero chips. An opening bet is the first raise. The default cap is two raises per street (longest line: bet, raise, call). Cap is configurable per street (`LeducConfig`, or `--max-raises` / `--max-raises-round2`).
 
-Round 1 raise size is 2. Round 2 raise size is 4. The stake level carries over when the board is dealt; it is not reset to the ante.
+Round 1 raise size is 2. Round 2 raise size is 4. Stake level carries over when the board is dealt.
 
-Examples, with both players' contributions listed as `(player 0, player 1)`:
+Examples, contributions as `(player 0, player 1)`:
 
 | Line | Contributions after the line |
 | --- | --- |
@@ -39,12 +39,18 @@ Examples, with both players' contributions listed as `(player 0, player 1)`:
 
 ## Showdown
 
-A pair, meaning the private rank equals the board rank, beats a high card. Otherwise the higher rank wins. Equal ranks split the pot. Suits do not break ties. Only one card of the board's rank remains, so at most one player can pair.
+A pair (private rank equals board rank) beats a high card. Otherwise higher rank wins. Equal ranks split the pot. Suits do not break ties. Only one card of the board's rank remains, so at most one player can pair.
 
 Utilities are player 0's net chips. Player 1's payoff is the negation. Folds pay the folder's contribution to the opponent.
 
 ## Solver
 
-`LeducGame` implements the same extensive-game operations as Kuhn. `CfrTrainer<LeducGame>` runs vanilla CFR or CFR+. The regret update was not changed for this game. The indexed tree has 936 decision information sets, matching OpenSpiel's two-player count.
+`LeducGame` implements the same extensive-game operations as Kuhn. `CfrTrainer<LeducGame>` runs vanilla CFR or CFR+. The indexed tree has 936 decision information sets (OpenSpiel two-player count).
 
-There is no closed form used by the solver. Published solves put player 0's equilibrium value near -0.0856. A short run is not that value yet; the tests check that the Nash gap falls, that payoffs sum to zero, and that hidden cards stay out of information sets.
+There is no closed form in this repository. Published solves put player 0's equilibrium value near -0.0856. Tests check that the Nash gap falls, that payoffs sum to zero, and that hidden cards stay out of information sets.
+
+```sh
+leduc_solver --iterations 1000 --algorithm cfr_plus
+```
+
+Kuhn CLI and equilibrium family: [MATHEMATICS.md](MATHEMATICS.md). Architecture note: [ARCHITECTURE.md](ARCHITECTURE.md).

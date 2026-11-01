@@ -1,7 +1,6 @@
 # Pot rake
 
-Planning date: October 30, 2026. This page documents the M8 pot-rake model on
-`ChipPayoff`, and how street/river solvers pass it through training terminals.
+M8 pot-rake model on `ChipPayoff`, wired through street/river training terminals.
 
 ## Config
 

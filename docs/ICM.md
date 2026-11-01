@@ -1,9 +1,6 @@
 # ICM equities
 
-Planning date: October 30, 2026. Malmuth-Harville ICM calculator, heads-up
-chip→ICM payoff adapter, and optional wiring through street/river solve
-terminals. Chip EV stays on `ChipPayoff` ([RAKE.md](RAKE.md)). Opponent
-incentives remain separate ([INCENTIVES.md](INCENTIVES.md)).
+Malmuth-Harville ICM calculator, heads-up chip→ICM payoff adapter, and optional wiring through street/river solve terminals. Chip EV stays on `ChipPayoff` ([RAKE.md](RAKE.md)). Opponent incentives are separate ([INCENTIVES.md](INCENTIVES.md)).
 
 ## Algorithm
 

@@ -1,12 +1,12 @@
 # Heads-up river
 
-`RiverGame` is one no-limit betting street on a fixed five-card board. `CfrTrainer<RiverGame>` remains the five-card oracle forever. `RiverBatchSolver` stays available for internal oracle and legacy fixtures; it is not the product `river_solver` path.
+One no-limit betting street on a fixed five-card board. Equilibrium of the configured bet-size tree.
 
-`river_solver` is a thin CLI over the shared five-card street tree. It maps river JSON/CLI flags into a `StreetConfig` (`street_config_from_river`) and solves with `StreetBatchSolver` by default, or `StreetGame` under `--reference`. Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 is out of position, player 1 is in position, and a pair of hands is legal only when the four private cards and the board are disjoint. There is no RNG.
+`RiverGame` + `CfrTrainer` is the five-card oracle. `RiverBatchSolver` is for internal oracle and legacy fixtures only.
 
-The explorer also uses that shared street tree for five cards and saves street-config based PSOL files. Five-card `StreetBatchSolver` pins match `RiverGame` on the fixtures in `tests/unit/test_streets.cpp`. See [ROADMAP.md](ROADMAP.md) and [STREETS.md](STREETS.md).
+`river_solver` maps river JSON/CLI flags into a `StreetConfig` (`street_config_from_river`) and solves with `StreetBatchSolver` (or `StreetGame` under `--reference`). Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 OOP, player 1 IP; a hand pair is legal only when the four private cards and the board are disjoint. No RNG.
 
-This is an equilibrium of the configured bet-size tree.
+Explorer uses the same shared street tree for five cards and saves street-config PSOL files. Five-card `StreetBatchSolver` pins match `RiverGame` in `tests/unit/test_streets.cpp`. See [STREETS.md](STREETS.md).
 
 ## Chips
 

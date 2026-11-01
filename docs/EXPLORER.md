@@ -1,6 +1,6 @@
 # Hold'em explorer
 
-`explorer` is a local page for one flop, turn, or river. It is a separate program from the solvers.
+Local HTTP study server for one flop, turn, or river. Separate binary from the CLI solvers; same `StreetBatchSolver` engine.
 
 From the repository root:
 
@@ -86,4 +86,4 @@ When focus is not in an `input`, `textarea`, or `select`, these keys run the mat
 
 Modifier chords (`Ctrl`, `Alt`, `Meta`) are ignored. There is no Undo control on this page, so no undo shortcut.
 
-The default spot is aces versus kings on `Ah Kd 7c 4s 2h`. That is the same tree as `configs/river_default.json`, with 200 iterations instead of 500. A three-, four-, or five-card board calls `StreetBatchSolver`. `river_solver` remains the CLI entry over `RiverBatchSolver`. Every board length sends `memory_mib` (default 1024) and `threads` (default 1). The memory field is the street solver's heap budget. Threads above 1 require the frozen pass; a non-frozen request with more than one thread is rejected before the solve starts. If the tree does not fit, the page keeps running and shows the budget error. The 200,000-terminal limit belongs to the `StreetGame` reference enumerator.
+The default spot is aces versus kings on `Ah Kd 7c 4s 2h` (same tree as `configs/river_default.json`, 200 iterations instead of 500). Every board length uses `StreetBatchSolver` and sends `memory_mib` (default 1024) and `threads` (default 1). Threads above 1 require the frozen pass; a non-frozen multi-thread request is rejected before the solve starts. If the tree does not fit, the page keeps running and shows the budget error. The 200,000-terminal limit belongs to the `StreetGame` reference enumerator.
