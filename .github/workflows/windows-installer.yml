@@ -44,8 +44,10 @@ jobs:
       - name: Configure CMake (Release, static MSVC CRT)
         # Static CRT so the shipped holdem-explorer sidecar does not depend on a
         # separate Visual C++ Redistributable on the end-user machine.
+        # Keep the runner's default generator (do not force VS 17 — not always present).
         run: >
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
 
