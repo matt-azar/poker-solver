@@ -73,9 +73,9 @@ Preserve explicit player signs and the existing root-centered net-chip utility. 
 
 ### M2 — Range and equity analysis with a useful study screen
 
-Create a shared range model/editor: 13×13 grid, exact combos, arbitrary nonnegative weights, brush/select controls, text import/export, copy/paste, undo/redo, and presets. A flat named preset library under `configs/ranges` with explorer list/fetch is in place; nested folders remain open. Clearly distinguish input weights, strategy-conditioned weights, compatible-pair marginals, and combo counts.
+Create a shared range model/editor: 13×13 grid, exact combos, arbitrary nonnegative weights, brush/select controls, text import/export, copy/paste, undo/redo, and presets. Named presets under `configs/ranges` support nested folders via `GET /api/ranges` (`id` with `/`, `folder` field) and the Study Library UI. Clearly distinguish input weights, strategy-conditioned weights, compatible-pair marginals, and combo counts.
 
-Add exact showdown equity per combo and range, conditional on the current board and compatible opponent distribution. State whether an equity display assumes check-down, and keep that label separate from strategic EV. Check-down equity distributions are exposed as ten fixed buckets on the explorer equity JSON; a study-screen histogram, made-hand/draw/backdoor categories, filtering, and range composition remain. Support a standalone equity-calculator workflow.
+Add exact showdown equity per combo and range, conditional on the current board and compatible opponent distribution. State whether an equity display assumes check-down, and keep that label separate from strategic EV. Check-down equity distributions are ten fixed buckets on the explorer equity JSON; the Study Equity tab draws histograms, band filters, and shape composition from compact hand rows. Made-hand categories cover five-card boards; flop/turn expose multi-label draw/backdoor tags. Support a standalone equity-calculator workflow.
 
 Build coordinated OOP/IP grids, selected-combo details, all-action strategy bars, equity/EV modes, range-after-action views, and runout switching that preserves the intended betting history where legal. Make missing/unsupported data visibly different from zero.
 
@@ -223,7 +223,7 @@ Choose explicit release service-level targets after measuring a representative c
 
 Main path: M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0; five-card production already shares the street tree — scale that one kernel. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after required features land.
 
-Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets, five-card made-hand categories, stop-and-keep, resumable PSOL, runout EV comparison, recent-files list, street-config templates, named range presets, street-first node locks. Still ahead: draw/backdoor categories, compact saves, richer strategy editing, reports/queue, trainer, preflop.
+Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets with study filtering/composition, five-card made-hand categories, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, resumable PSOL, runout EV comparison, recent-files list, street-config templates, named range presets, street-first node locks. Still ahead: compact saves, richer strategy editing, reports/queue, trainer, preflop.
 
 Per milestone: small specification, invariants and failure modes, reviewable commits, relevant checks, user-workflow demo, ledger update with evidence. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 

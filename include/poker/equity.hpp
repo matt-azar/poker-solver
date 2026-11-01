@@ -129,6 +129,21 @@ std::vector<EquityDistributionBucket> equity_distribution(
 // zero-weight rows do not contribute.
 std::vector<EquityDistributionBucket> equity_distribution(const PlayerShowdown& player);
 
+// Compact check-down equity rows for study filtering / range composition.
+// Only defined combos with positive finite input_weight are included.
+// Fields: combo label, check-down equity in [0,1], raw input weight.
+struct EquityHandRow
+{
+    std::string combo;
+    double equity = 0.0;
+    double weight = 0.0;
+};
+
+std::vector<EquityHandRow> equity_hand_rows(const PlayerShowdown& player);
+
+// JSON array of {combo, equity, weight}. Check-down equity, not chip EV.
+std::string equity_hand_rows_json(std::span<const EquityHandRow> rows);
+
 // Board length is 3, 4, or 5. Weights must be finite and nonnegative.
 // An empty legal joint is a successful undefined result.
 ShowdownWork measure_showdown_work(

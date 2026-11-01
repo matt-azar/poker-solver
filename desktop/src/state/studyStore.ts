@@ -52,6 +52,7 @@ export interface LibraryRecentEntry {
 export interface LibraryNamedEntry {
   id: string;
   name: string;
+  folder?: string;
 }
 
 export interface LibraryLists {
@@ -88,7 +89,12 @@ function asNamedList(data: unknown): LibraryNamedEntry[] {
       continue;
     }
     const name = String((entry as { name?: unknown }).name ?? id).trim() || id;
-    out.push({ id, name });
+    const folderRaw = (entry as { folder?: unknown }).folder;
+    const folder =
+      folderRaw == null || folderRaw === undefined
+        ? undefined
+        : String(folderRaw).trim();
+    out.push(folder ? { id, name, folder } : { id, name });
   }
   return out;
 }

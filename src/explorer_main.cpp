@@ -1580,7 +1580,9 @@ std::string json_node_equity(
     std::uint64_t job_id,
     std::uint64_t generation,
     const std::vector<poker::holdem::EquityDistributionBucket>& oop_distribution = {},
-    const std::vector<poker::holdem::EquityDistributionBucket>& ip_distribution = {})
+    const std::vector<poker::holdem::EquityDistributionBucket>& ip_distribution = {},
+    const std::vector<poker::holdem::EquityHandRow>& oop_hands = {},
+    const std::vector<poker::holdem::EquityHandRow>& ip_hands = {})
 {
     std::string out = "{\"pending\":false,\"kind\":\"equity\",";
     out += value_identity(solution_id, job_id, page.node_id, generation);
@@ -1601,6 +1603,11 @@ std::string json_node_equity(
     append_equity_distribution(out, oop_distribution);
     out += ",\"ip_equity_distribution\":";
     append_equity_distribution(out, ip_distribution);
+    // Compact combo rows for study filtering / composition (check-down only).
+    out += ",\"oop_hands\":";
+    out += poker::holdem::equity_hand_rows_json(oop_hands);
+    out += ",\"ip_hands\":";
+    out += poker::holdem::equity_hand_rows_json(ip_hands);
     out += ",\"query_seconds\":";
     out += format_number(page.query_seconds);
     out += '}';
@@ -1615,7 +1622,7 @@ std::string json_categories(
     std::uint64_t generation,
     double query_seconds)
 {
-    // Made-hand category mass on the current board only. Draws are out of scope.
+    // Made-hand (river) or multi-label draw/backdoor (flop/turn) composition.
     std::string body = poker::holdem::category_composition_json(report, query_seconds);
     if (body.size() < 2 || body.front() != '{' || body.back() != '}')
     {
@@ -3066,6 +3073,8 @@ void handle_client(socket_t client)
             append_escaped(payload, presets[index].id);
             payload += ",\"name\":";
             append_escaped(payload, presets[index].name);
+            payload += ",\"folder\":";
+            append_escaped(payload, presets[index].folder);
             payload += '}';
         }
         payload += ']';
@@ -3076,7 +3085,38 @@ void handle_client(socket_t client)
     {
         const std::string rest = line.substr(std::string("GET /api/ranges/").size());
         const std::size_t end = rest.find(' ');
-        const std::string id = end == std::string::npos ? rest : rest.substr(0, end);
+        std::string id = end == std::string::npos ? rest : rest.substr(0, end);
+        // Accept nested ids as path segments or a single %2F-encoded id.
+        for (std::size_t index = 0; index + 2 < id.size(); ++index)
+        {
+            if (id[index] != '%')
+            {
+                continue;
+            }
+            const auto hex = [](char character) -> int
+            {
+                if (character >= '0' && character <= '9')
+                {
+                    return character - '0';
+                }
+                if (character >= 'a' && character <= 'f')
+                {
+                    return 10 + character - 'a';
+                }
+                if (character >= 'A' && character <= 'F')
+                {
+                    return 10 + character - 'A';
+                }
+                return -1;
+            };
+            const int high = hex(id[index + 1]);
+            const int low = hex(id[index + 2]);
+            if (high < 0 || low < 0)
+            {
+                continue;
+            }
+            id.replace(index, 3, 1, static_cast<char>((high << 4) | low));
+        }
         if (!poker::explorer::is_safe_range_id(id))
         {
             send_response(client, 404, "application/json", "{\"error\":\"unknown range\"}");
@@ -3091,6 +3131,8 @@ void handle_client(socket_t client)
         }
         std::string payload = "{\"id\":";
         append_escaped(payload, id);
+        payload += ",\"folder\":";
+        append_escaped(payload, poker::explorer::range_folder_of(id));
         payload += ",\"text\":";
         append_escaped(payload, *text);
         payload += '}';
@@ -4026,8 +4068,18 @@ void handle_client(socket_t client)
                         return;
                     }
                     held->street->inspect_node(node_path);
+                    // Prefer holdem::category_composition so flop/turn draws are
+                    // available even when StreetBatchSolver still gates made-hand.
+                    const poker::solver::StreetReachWeights weights =
+                        held->street->reaching_weights(node_path);
+                    const poker::holdem::Range oop = weights.oop.empty()
+                        ? poker::holdem::Range{}
+                        : poker::holdem::Range::parse(weights.oop);
+                    const poker::holdem::Range ip = weights.ip.empty()
+                        ? poker::holdem::Range{}
+                        : poker::holdem::Range::parse(weights.ip);
                     const poker::holdem::CategoryComposition report =
-                        held->street->category_composition(node_path);
+                        poker::holdem::category_composition(weights.board, oop, ip);
                     const double query_seconds = std::chrono::duration<double>(
                         std::chrono::steady_clock::now() - query_started).count();
                     const std::string payload = json_categories(
@@ -4486,12 +4538,16 @@ int run(int argc, char** argv)
                 page.defined = equity.joint_defined && equity.player0.defined && equity.player1.defined;
                 std::vector<poker::holdem::EquityDistributionBucket> oop_distribution;
                 std::vector<poker::holdem::EquityDistributionBucket> ip_distribution;
+                std::vector<poker::holdem::EquityHandRow> oop_hands;
+                std::vector<poker::holdem::EquityHandRow> ip_hands;
                 if (page.defined)
                 {
                     page.oop_equity = equity.player0.equity;
                     page.ip_equity = equity.player1.equity;
                     oop_distribution = poker::holdem::equity_distribution(equity.player0);
                     ip_distribution = poker::holdem::equity_distribution(equity.player1);
+                    oop_hands = poker::holdem::equity_hand_rows(equity.player0);
+                    ip_hands = poker::holdem::equity_hand_rows(equity.player1);
                 }
                 else
                 {
@@ -4511,7 +4567,9 @@ int run(int argc, char** argv)
                     request.job_id,
                     g_session.generation(),
                     oop_distribution,
-                    ip_distribution);
+                    ip_distribution,
+                    oop_hands,
+                    ip_hands);
             }
             if (held->river)
             {
@@ -4556,6 +4614,8 @@ int run(int argc, char** argv)
                     poker::holdem::equity_distribution(
                         std::span<const double>{}, std::span<const double>{});
                 std::vector<poker::holdem::EquityDistributionBucket> ip_distribution = oop_distribution;
+                std::vector<poker::holdem::EquityHandRow> oop_hands;
+                std::vector<poker::holdem::EquityHandRow> ip_hands;
                 if (!weights.oop.empty() && !weights.ip.empty())
                 {
                     const poker::holdem::ShowdownEquityOptions options = equity_options(cancel);
@@ -4571,6 +4631,8 @@ int run(int argc, char** argv)
                         page.ip_equity = equity.player1.equity;
                         oop_distribution = poker::holdem::equity_distribution(equity.player0);
                         ip_distribution = poker::holdem::equity_distribution(equity.player1);
+                        oop_hands = poker::holdem::equity_hand_rows(equity.player0);
+                        ip_hands = poker::holdem::equity_hand_rows(equity.player1);
                     }
                 }
                 page.query_seconds = std::chrono::duration<double>(
@@ -4585,7 +4647,9 @@ int run(int argc, char** argv)
                     request.job_id,
                     g_session.generation(),
                     oop_distribution,
-                    ip_distribution);
+                    ip_distribution,
+                    oop_hands,
+                    ip_hands);
             }
             const poker::solver::StreetActionValues page = held->street->action_values(request.node_id, &cancel);
             if (cancel.load() || g_session.current_solution() != request.solution_id)
