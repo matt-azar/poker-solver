@@ -8,16 +8,18 @@ Convergence on Kuhn, Leduc, or a fixed-size river tree is an equilibrium of that
 
 ## Windows installer (no CMake / npm)
 
-CI builds an unsigned NSIS setup from `main`:
+Download the unsigned NSIS setup from the latest Windows release:
 
-1. GitHub → **Actions** → workflow **Windows Installer** → latest green run  
-2. Download artifact `holdem-study-windows-installer`  
-3. Run `Holdem Study_0.1.0_x64-setup.exe` (current-user install; WebView2 may bootstrap)  
-4. Launch **Holdem Study** from the Start menu
+**[Holdem Study 0.1.0 (Windows)](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.0-windows)** → `Holdem-Study-0.1.0-x64-setup.exe`
 
-The installed app starts the `holdem-explorer` engine sidecar and opens the Study UI. No separate CMake or Node install is required for that path. The installer is not code-signed yet.
+1. Run the setup (current-user install; WebView2 may bootstrap)  
+2. Launch **Holdem Study** from the Start menu  
 
-Details: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
+Windows SmartScreen may warn because the binary is not code-signed — **More info → Run anyway**.
+
+The app starts the `holdem-explorer` engine sidecar and opens the Study UI. No CMake or npm required.
+
+Maintainers can also rebuild via Actions → **Windows Installer**. Details: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
 
 ## Study UI (developers)
 
