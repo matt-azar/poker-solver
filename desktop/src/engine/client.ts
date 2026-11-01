@@ -14,6 +14,7 @@ function defaultEngineBaseUrl(): string {
     return fromEnv;
   }
   // Tauri webview origin is not the explorer; hit the managed local explorer.
+  // Resolve lazily — __TAURI_INTERNALS__ may be injected after module evaluation.
   if (isTauriRuntime()) {
     return "http://127.0.0.1:8765";
   }
@@ -50,16 +51,24 @@ async function readBody(response: Response): Promise<unknown> {
 }
 
 export class EngineClient {
-  private readonly baseUrl: string;
+  private readonly baseUrlOverride: string | undefined;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: EngineClientOptions = {}) {
-    this.baseUrl = (options.baseUrl ?? "").replace(/\/$/, "");
+    this.baseUrlOverride =
+      options.baseUrl !== undefined ? options.baseUrl.replace(/\/$/, "") : undefined;
     this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
   }
 
+  private baseUrl(): string {
+    if (this.baseUrlOverride !== undefined) {
+      return this.baseUrlOverride;
+    }
+    return defaultEngineBaseUrl().replace(/\/$/, "");
+  }
+
   private url(path: string): string {
-    return `${this.baseUrl}${path}`;
+    return `${this.baseUrl()}${path}`;
   }
 
   private async request(
@@ -378,4 +387,5 @@ export class EngineClient {
   }
 }
 
-export const engineClient = new EngineClient({ baseUrl: defaultEngineBaseUrl() });
+/** Shared client; base URL resolved per request so Tauri detection is not racey. */
+export const engineClient = new EngineClient();

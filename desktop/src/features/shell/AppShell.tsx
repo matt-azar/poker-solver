@@ -28,11 +28,16 @@ export function AppShell() {
   }, [theme]);
 
   useEffect(() => {
+    // If boot already failed ensure_engine, keep that message until Reconnect.
+    if (useStudyStore.getState().connection === "disconnected") {
+      return () => stopPolling();
+    }
     startPolling();
     return () => stopPolling();
   }, [startPolling, stopPolling]);
 
   async function reconnectEngine() {
+    stopPolling();
     useStudyStore.setState({
       connection: "connecting",
       message: "Starting local engine…",
