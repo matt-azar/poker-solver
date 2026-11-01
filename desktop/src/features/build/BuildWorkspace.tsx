@@ -1,6 +1,18 @@
 import { useStudyStore } from "../../state/studyStore";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
+import { AssistantPanel } from "../assistant/AssistantPanel";
+
+function provenanceHint(
+  setupMeta: ReturnType<typeof useStudyStore.getState>["setupMeta"],
+  field: string,
+): string | null {
+  const source = setupMeta?.provenance?.[field];
+  if (!source) {
+    return null;
+  }
+  return source.replace(/_/g, " ");
+}
 
 export function BuildWorkspace() {
   const draft = useStudyStore((s) => s.draft);
@@ -15,15 +27,24 @@ export function BuildWorkspace() {
   const redoRange = useStudyStore((s) => s.redoRange);
   const canUndoRange = useStudyStore((s) => s.canUndoRange);
   const canRedoRange = useStudyStore((s) => s.canRedoRange);
+  const setupMeta = useStudyStore((s) => s.setupMeta);
   const solve = useStudyStore((s) => s.solve);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
   const boardLen = draft.boardText.trim().split(/[\s,]+/).filter(Boolean).length;
+  const potProvenance = provenanceHint(setupMeta, "pot");
+  const stackProvenance = provenanceHint(setupMeta, "stack");
+  const solveBlocked = setupMeta != null && !setupMeta.canSolve;
 
   return (
     <div className="build-workspace">
       <header className="build-header">
         <div>
           <h1>Build</h1>
+          {setupMeta?.profile ? (
+            <p className="build-profile-note">
+              Profile {setupMeta.profile.displayName} ({setupMeta.profile.classification})
+            </p>
+          ) : null}
         </div>
         <div className="build-summary">
           <span>{draft.boardText || "no board"}</span>
@@ -37,6 +58,7 @@ export function BuildWorkspace() {
           <button
             type="button"
             className="toolbar-btn primary"
+            title={solveBlocked ? "Finish missing setup fields before solving" : undefined}
             onClick={() => {
               void solve();
               setWorkspace("study");
@@ -47,6 +69,8 @@ export function BuildWorkspace() {
         </div>
       </header>
 
+      <AssistantPanel />
+
       <div className="build-grid">
         <section className="build-section">
           <h2>Spot</h2>
@@ -56,10 +80,13 @@ export function BuildWorkspace() {
               value={draft.boardText}
               onChange={(event) => updateDraft({ boardText: event.target.value })}
             />
+            {!draft.boardText.trim() ? (
+              <span className="field-hint">Required for a postflop solve</span>
+            ) : null}
           </label>
           <div className="build-inline">
             <label>
-              Pot
+              Pot{potProvenance ? ` · ${potProvenance}` : ""}
               <input
                 type="number"
                 value={draft.pot}
@@ -67,7 +94,7 @@ export function BuildWorkspace() {
               />
             </label>
             <label>
-              Stack
+              Stack{stackProvenance ? ` · ${stackProvenance}` : ""}
               <input
                 type="number"
                 value={draft.stack}

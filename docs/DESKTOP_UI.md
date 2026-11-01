@@ -53,6 +53,7 @@ explorer   # serves desktop/dist when present
 | Recent | `GET /api/recent-solutions` | Dropdown | Library + File menu | Cap 10 | recent_files |
 | Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Build + Library | Flat dirs | templates/range lib |
 | Config parse | `POST /api/config` | Load config | Build | street/river text only | indirect |
+| Study setup assistant | Client-side interpret → profile catalogue → `SpotDraft` | — | Build → Setup assistant | Fake demo adapter + optional OpenAI; no parallel config model; synthetic fixtures only | `src/domain/{setup,profiles,assistant}` + integration tests — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md) |
 
 ## Numerical labels (do not relabel without math)
 

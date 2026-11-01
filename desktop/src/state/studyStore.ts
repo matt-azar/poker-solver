@@ -37,9 +37,21 @@ import {
   type SpotDraft,
   type StatusPayload,
 } from "../domain/types";
+import {
+  applySetupTransaction,
+  bumpRevision,
+  initialRevision,
+  type SetupDraftResult,
+  type SetupStudyMeta,
+  type SetupTransactionSnapshot,
+} from "../domain/setup";
+import { getRangeProfileCatalogue } from "../domain/profiles";
 import { EngineError, engineClient } from "../engine/client";
 import { useThemeStore } from "./themeStore";
 import { useLayoutStore } from "./layoutStore";
+
+const SETUP_HISTORY_LIMIT = 30;
+const setupHistoryPast: SetupTransactionSnapshot[] = [];
 
 export type WorkspaceId = "study" | "build" | "compare" | "library";
 
@@ -216,6 +228,8 @@ interface StudyState {
   workspace: WorkspaceId;
   setWorkspace: (workspace: WorkspaceId) => void;
   draft: SpotDraft;
+  /** Bumps when the Build draft changes; assistant proposals must match. */
+  draftRevision: number;
   updateDraft: (partial: Partial<SpotDraft>) => void;
   weights: WeightSnapshot;
   setRangeText: (player: "oop" | "ip", text: string) => void;
@@ -227,6 +241,21 @@ interface StudyState {
   redoRange: () => void;
   canUndoRange: boolean;
   canRedoRange: boolean;
+
+  /** Provenance / profile snapshot from the last applied assistant or profile setup. */
+  setupMeta: SetupStudyMeta | null;
+  canUndoSetup: boolean;
+  /**
+   * Apply a resolved SetupDraftResult as one undoable transaction through the
+   * same draft + range path as manual edits. Rejects stale revisions.
+   */
+  applySetupDraft: (
+    result: SetupDraftResult,
+    options?: { force?: boolean },
+  ) => { ok: true } | { ok: false; reason: string; message: string };
+  undoSetupTransaction: () => void;
+  clearSetupMeta: () => void;
+  getSetupCatalogue: () => ReturnType<typeof getRangeProfileCatalogue>;
 
   status: StatusPayload | null;
   phase: SolvePhase;
@@ -395,8 +424,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     set({ workspace });
   },
   draft: { ...DEFAULT_SPOT },
+  draftRevision: initialRevision(0),
+  setupMeta: null,
+  canUndoSetup: false,
   updateDraft(partial) {
-    set({ draft: { ...get().draft, ...partial } });
+    set({
+      draft: { ...get().draft, ...partial },
+      draftRevision: bumpRevision(get().draftRevision),
+    });
   },
   weights: {
     oop: parseRangeText(DEFAULT_SPOT.oopRange),
@@ -413,9 +448,61 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         ...get().draft,
         [player === "oop" ? "oopRange" : "ipRange"]: text,
       },
+      draftRevision: bumpRevision(get().draftRevision),
       canUndoRange: rangeHistory.canUndo(),
       canRedoRange: rangeHistory.canRedo(),
     });
+  },
+  applySetupDraft(result, options) {
+    const state = get();
+    const applied = applySetupTransaction({
+      currentDraft: state.draft,
+      currentWeights: state.weights,
+      currentMeta: state.setupMeta,
+      draftRevision: state.draftRevision,
+      result,
+      force: options?.force,
+    });
+    if (!applied.ok) {
+      return { ok: false, reason: applied.reason, message: applied.message };
+    }
+    setupHistoryPast.push(applied.undoSnapshot);
+    while (setupHistoryPast.length > SETUP_HISTORY_LIMIT) {
+      setupHistoryPast.shift();
+    }
+    // Keep range undo stack coherent with the new grids.
+    rangeHistory.push(snapshotWeights(state.weights));
+    set({
+      draft: applied.draft,
+      weights: applied.weights,
+      setupMeta: applied.meta,
+      draftRevision: applied.draftRevision,
+      canUndoSetup: setupHistoryPast.length > 0,
+      canUndoRange: rangeHistory.canUndo(),
+      canRedoRange: rangeHistory.canRedo(),
+      message: applied.meta.summary[0] ?? "Setup applied",
+    });
+    return { ok: true };
+  },
+  undoSetupTransaction() {
+    const previous = setupHistoryPast.pop();
+    if (!previous) {
+      return;
+    }
+    set({
+      draft: previous.draft,
+      weights: previous.weights,
+      setupMeta: previous.meta,
+      draftRevision: bumpRevision(get().draftRevision),
+      canUndoSetup: setupHistoryPast.length > 0,
+      message: "Reverted assistant setup",
+    });
+  },
+  clearSetupMeta() {
+    set({ setupMeta: null });
+  },
+  getSetupCatalogue() {
+    return getRangeProfileCatalogue();
   },
   paintWeight: 1,
   setPaintWeight(weight) {
@@ -435,6 +522,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         ...get().draft,
         [player === "oop" ? "oopRange" : "ipRange"]: rangeText(grid),
       },
+      draftRevision: bumpRevision(get().draftRevision),
       canUndoRange: rangeHistory.canUndo(),
       canRedoRange: rangeHistory.canRedo(),
     });
@@ -450,6 +538,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         ...get().draft,
         [player === "oop" ? "oopRange" : "ipRange"]: "",
       },
+      draftRevision: bumpRevision(get().draftRevision),
       canUndoRange: rangeHistory.canUndo(),
       canRedoRange: rangeHistory.canRedo(),
     });
