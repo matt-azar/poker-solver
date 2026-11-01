@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
+import { useHelpChatStore } from "../../state/helpChatStore";
 import { ensureEngine } from "../../platform/engine";
 import { BuildWorkspace } from "../build/BuildWorkspace";
 import { CompareWorkspace } from "../compare/CompareWorkspace";
 import { LibraryWorkspace } from "../library/LibraryWorkspace";
 import { StudyWorkspace } from "../study/StudyWorkspace";
+import { StudyAssistantWindow } from "../help/StudyAssistantWindow";
 import { HelpOverlay, MenuBar } from "./MenuBar";
 import { SettingsDialog } from "./SettingsDialog";
 import { StatusBar } from "./StatusBar";
@@ -23,6 +25,7 @@ export function AppShell() {
   const status = useStudyStore((s) => s.status);
   const startPolling = useStudyStore((s) => s.startPolling);
   const stopPolling = useStudyStore((s) => s.stopPolling);
+  const setHelpChatVisible = useHelpChatStore((s) => s.setVisible);
   const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
@@ -87,6 +90,7 @@ export function AppShell() {
         onWorkspace={(id: WorkspaceId) => setWorkspace(id)}
         helpOpen={helpOpen}
         onHelpOpen={setHelpOpen}
+        onHelpChatOpen={() => setHelpChatVisible(true)}
       />
       <div className="app-body">{body}</div>
       <StatusBar
@@ -100,6 +104,7 @@ export function AppShell() {
       />
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
       <SettingsDialog />
+      <StudyAssistantWindow />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import type { StudySetupIntent, StudySetupTreePreset } from "../setup/types";
+import { buildSetupAssistantSystemPrompt } from "./contextPacks";
 import {
   ASSISTANT_MAX_TEXT_LENGTH,
   AssistantProviderError,
@@ -71,7 +72,7 @@ export class OpenAiAssistantProvider implements AssistantProvider {
       messages: [
         {
           role: "system",
-          content: SYSTEM_PROMPT,
+          content: SETUP_SYSTEM_PROMPT,
         },
         {
           role: "user",
@@ -134,21 +135,8 @@ export class OpenAiAssistantProvider implements AssistantProvider {
   }
 }
 
-const SYSTEM_PROMPT = [
-  "You interpret poker study-setup requests for a postflop solver Build workspace.",
-  "Emit only the emit_study_setup_proposal tool with schema-constrained fields.",
-  "Prefer exact availableProfiles ids when they match pot type, rake structure, seats, and stack.",
-  "When no exact profile fits but two profiles straddle the target stack (same seats/pot/rake), set interpolateFromIds to those two ids and the target stackBb — do not invent frequencies.",
-  "When no catalogue row and no interpolatable bracket exist, you may set generatedRanges {oop,ip} as weighted combo text (AA,AKs,AKo:0.5,…). Mark note that it is model-proposed, not equilibrium.",
-  "Never emit scripts, shell commands, file paths, or network URLs.",
-  "Pot type (SRP / 3BP / 4BP) is required for prepare_study — clarify if missing; never guess.",
-  "100NL names a rake structure / stakes environment, not a personal player profile, and must not set stack depth.",
-  "Phrases like “my 100NL profile” mean standard/GTO ranges for that rake structure plus the stated action — not a personal profile picker.",
-  "When no rake structure is named, set stakesLabel to cEV (chip EV / no rake).",
-  "When stack depth is not mentioned, set stackBb to 100. Never infer 100bb from an NL label alone.",
-  "Prefer non-synthetic catalogue rows (equilibrium_model / population_estimate / imports) over synthetic_fixture demos.",
-  "Use clarify when ambiguous, unsupported for strategy explanations/preflop solves, unrelated for non-poker text.",
-].join(" ");
+/** Built from docs/ai-context/setup-assistant.md plus operational tool rules. */
+const SETUP_SYSTEM_PROMPT = buildSetupAssistantSystemPrompt();
 
 function buildUserPayload(request: InterpretRequest): string {
   // Metadata only — no full ranges.

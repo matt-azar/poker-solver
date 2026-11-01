@@ -193,8 +193,9 @@ export function AssistantPanel() {
       {open ? (
         <>
           <p className="assistant-lede">
-            Describe a study setup. Changes apply through the same Build validation path as manual
-            edits. {providerLabel(providerMode)}
+            Build-panel setup entry (also available as the floating{" "}
+            <strong>Help → Study assistant…</strong> window on every workspace). Changes apply
+            through the same Build validation path as manual edits. {providerLabel(providerMode)}
             {providerMode === "fake"
               ? " interprets requests locally for demos — not a hosted language model."
               : " sends setup summaries and profile metadata only (not full private ranges)."}

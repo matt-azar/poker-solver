@@ -6,6 +6,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    fs: {
+      // Allow importing model context packs from docs/ai-context/*.md
+      allow: [".."],
+    },
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8765",

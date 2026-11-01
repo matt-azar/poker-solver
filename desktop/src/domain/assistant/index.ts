@@ -25,6 +25,28 @@ export {
 } from "./openaiProvider";
 
 export {
+  buildHelpSystemPrompt,
+  buildSetupAssistantSystemPrompt,
+  buildUnifiedAssistantSystemPrompt,
+  loadAssistantContextPack,
+  type AssistantContextKind,
+} from "./contextPacks";
+
+export {
+  FakeUnifiedChatClient,
+  OpenAiUnifiedChatClient,
+  createFakeUnifiedChatClient,
+  createOpenAiUnifiedChatClient,
+  looksLikeSetupRequest,
+  type UnifiedChatClient,
+  type UnifiedChatDeps,
+  type UnifiedChatMode,
+  type UnifiedChatOutcome,
+  type UnifiedChatRequest,
+  type OpenAiUnifiedChatOptions,
+} from "./unifiedChat";
+
+export {
   catalogueProfileMetas,
   prepareStudyFromProfile,
   resolveAssistantProposal,
