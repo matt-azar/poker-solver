@@ -6,22 +6,32 @@
 # - No code signing is required or performed
 #
 # Artifact: holdem-study-windows-installer (NSIS *.exe under bundle/nsis)
+#
+# Release channel (intentional tags only — not every main merge):
+# - Push tag v*-windows (e.g. v0.1.1-windows) → windows-installer-release.yml
+#   builds and attaches the installer to a GitHub Release.
+# - Stable download name: Holdem-Study-windows-x64-setup.exe
+#   (README /releases/latest/download/… stays current across cuts)
+# - Path-filtered main/PR pushes below only upload the Actions artifact.
 
 name: Windows Installer
 
 on:
   workflow_dispatch:
+  workflow_call:
   push:
     branches: [main]
     paths:
       - "desktop/**"
       - "src/explorer_main.cpp"
       - ".github/workflows/windows-installer.yml"
+      - ".github/workflows/windows-installer-release.yml"
   pull_request:
     paths:
       - "desktop/**"
       - "src/explorer_main.cpp"
       - ".github/workflows/windows-installer.yml"
+      - ".github/workflows/windows-installer-release.yml"
 
 concurrency:
   group: windows-installer-${{ github.event.pull_request.number || github.ref }}
@@ -31,11 +41,16 @@ env:
   CMAKE_BUILD_PARALLEL_LEVEL: 4
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
+  # Stable asset name for releases/latest/download/…
+  STABLE_INSTALLER_NAME: Holdem-Study-windows-x64-setup.exe
 
 jobs:
   windows-installer:
     runs-on: windows-latest
     timeout-minutes: 90
+    # Tag publishes (via workflow_call) need contents:write; artifact uploads do not.
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -136,6 +151,41 @@ jobs:
             desktop/src-tauri/target/release/bundle/nsis/*.exe
             desktop/src-tauri/target/release/bundle/nsis/**/*.exe
           if-no-files-found: error
+
+      - name: Stage GitHub Release assets
+        # Only when invoked for a v*-windows tag (release wrapper or direct tag ref).
+        if: github.ref_type == 'tag' && endsWith(github.ref_name, '-windows')
+        shell: pwsh
+        run: |
+          $nsis = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis -Filter "*.exe" |
+            Select-Object -First 1
+          if (-not $nsis) {
+            throw "No NSIS exe to stage for GitHub Release"
+          }
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          Copy-Item -Force $nsis.FullName "release-assets/$($nsis.Name)"
+          Copy-Item -Force $nsis.FullName "release-assets/$env:STABLE_INSTALLER_NAME"
+          Get-ChildItem release-assets | Format-Table Name, Length -AutoSize
+
+      - name: Publish GitHub Release
+        # Intentional v*-windows tags only. Never on main merge / PR.
+        if: github.ref_type == 'tag' && endsWith(github.ref_name, '-windows')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Unsigned Windows NSIS installer for Holdem Study.
+
+            - Installs for the current user
+            - Starts the holdem-explorer engine sidecar and opens the Study UI
+            - No CMake or npm required
+            - Windows SmartScreen may warn because the binary is not code-signed — More info → Run anyway
+            - WebView2 may install on first launch if missing
+
+            Stable download (README): `${{ env.STABLE_INSTALLER_NAME }}`
+            via https://github.com/${{ github.repository }}/releases/latest/download/${{ env.STABLE_INSTALLER_NAME }}
 
       - name: List bundle outputs (diagnostics)
         if: always()

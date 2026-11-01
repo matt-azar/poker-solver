@@ -86,16 +86,25 @@ explorer   # serves desktop/dist when present
 | Vite `/api` proxy in `npm run dev` | Supported |
 | `explorer` serving `desktop/dist` | Supported |
 | Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns `binaries/holdem-explorer` on port 8765, waits until the port accepts connections, exposes `ensure_engine` for Reconnect; webview loads Vite `dist` |
-| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads `holdem-study-windows-installer` (`Holdem Study_0.1.0_x64-setup.exe`). POSTINSTALL requires `holdem-explorer.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. Packaged explorer uses the static MSVC CRT |
+| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer`. Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe` (plus the versioned Tauri NSIS name). POSTINSTALL requires `holdem-explorer.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. Packaged explorer uses the static MSVC CRT |
 | Native Open/Save dialogs | Browser prompts; Tauri adapter uses `@tauri-apps/plugin-dialog` when present (prompt fallback) |
 | Code-signed official release | Not yet — CI artifact is unsigned |
 
 ### Windows installer (end users)
 
-Prefer the [GitHub Release](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.0-windows), or Actions → **Windows Installer** → artifact `holdem-study-windows-installer`.
+Prefer the [latest GitHub Release download](https://github.com/matt-azar/poker-solver/releases/latest/download/Holdem-Study-windows-x64-setup.exe), or Actions → **Windows Installer** → artifact `holdem-study-windows-installer`.
 
-1. Run `Holdem Study_0.1.0_x64-setup.exe` (current-user install; WebView2 may bootstrap if missing). Setup fails loudly if the engine sidecar is missing and clears Mark-of-the-Web on the installed exes.
+1. Run `Holdem-Study-windows-x64-setup.exe` (current-user install; WebView2 may bootstrap if missing). Setup fails loudly if the engine sidecar is missing and clears Mark-of-the-Web on the installed exes.
 2. Launch **Holdem Study** from the Start menu — the shell starts `holdem-explorer` on `127.0.0.1:8765` before the Study UI polls. No CMake/`npm` required.
+
+### Cutting a Windows Release (maintainers)
+
+Do **not** publish on every `main` merge. When a desktop cut is ready:
+
+1. Ensure `desktop/package.json` / `desktop/src-tauri/tauri.conf.json` version matches the intended cut (e.g. `0.1.1`).
+2. On the commit to ship: `git tag -a v0.1.1-windows -m "Holdem Study 0.1.1 (Windows)"` then `git push origin v0.1.1-windows`.
+3. Workflow **Windows Installer Release** builds NSIS and attaches assets to the GitHub Release for that tag (stable name + versioned Tauri name).
+4. README already points at `/releases/latest/download/Holdem-Study-windows-x64-setup.exe` — no README edit required when the new release is the latest.
 
 Installer product name is `Holdem Study` (no apostrophe) because NSIS shortcut macros reject `Hold'em`. The window title remains `Hold'em Study`.
 
