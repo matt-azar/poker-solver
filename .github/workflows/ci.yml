@@ -51,14 +51,14 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-      - name: Production targets
+      - name: Build
         env:
           SCCACHE_GHA_ENABLED: "true"
-        run: cmake --build build --config Release --target kuhn_solver --target leduc_solver --target river_solver --target street_solver --target explorer --target equity_calculator
-      - name: Unit tests
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-        run: cmake --build build --config Release --target poker_solver_tests --target equity_tests
+        run: >
+          cmake --build build --config Release --parallel
+          --target kuhn_solver --target leduc_solver --target river_solver
+          --target street_solver --target explorer --target equity_calculator
+          --target poker_solver_tests --target equity_tests
       - name: CTest
         run: ctest --test-dir build -C Release --output-on-failure
       - name: JavaScript
@@ -81,10 +81,12 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-      - name: Production targets
-        run: cmake --build build --target kuhn_solver --target leduc_solver --target river_solver --target street_solver --target explorer --target equity_calculator
-      - name: Unit tests
-        run: cmake --build build --target poker_solver_tests --target equity_tests
+      - name: Build
+        run: >
+          cmake --build build --parallel
+          --target kuhn_solver --target leduc_solver --target river_solver
+          --target street_solver --target explorer --target equity_calculator
+          --target poker_solver_tests --target equity_tests
       - name: CTest
         run: ctest --test-dir build --output-on-failure
       - name: JavaScript
@@ -119,8 +121,10 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
-      - name: Unit tests
-        run: cmake --build build-san --target poker_solver_tests --target equity_tests --target equity_calculator
+      - name: Build
+        run: >
+          cmake --build build-san --parallel
+          --target poker_solver_tests --target equity_tests --target equity_calculator
       - name: CTest
         run: ctest --test-dir build-san --output-on-failure
 
