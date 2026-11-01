@@ -17,8 +17,8 @@ export const DEFAULT_LAYOUT: StudyLayout = {
   lowerDock: true,
   dualRange: false,
   inspectorWidth: 320,
-  historyHeight: 120,
-  lowerDockHeight: 220,
+  historyHeight: 88,
+  lowerDockHeight: 200,
   density: "comfortable",
 };
 

@@ -25,9 +25,13 @@ export function ActionHistory() {
         if (!dragRef.current) {
           return;
         }
+        const maxHistory =
+          typeof window === "undefined"
+            ? 280
+            : Math.max(96, Math.floor(window.innerHeight * 0.35));
         const next = Math.min(
-          280,
-          Math.max(64, dragRef.current.startH + (ev.clientY - dragRef.current.startY)),
+          maxHistory,
+          Math.max(48, dragRef.current.startH + (ev.clientY - dragRef.current.startY)),
         );
         setLayout({ historyHeight: next });
       };
