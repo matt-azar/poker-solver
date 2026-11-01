@@ -1,4 +1,5 @@
-import { useCallback, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { clampDockHeight } from "../../state/layoutStore";
 import { useStudyStore } from "../../state/studyStore";
 import { RangeExplorerPanel } from "./RangeExplorerPanel";
 import { RunoutTable } from "./RunoutTable";
@@ -10,17 +11,6 @@ const TABS = [
   { id: "categories", label: "Categories" },
 ] as const;
 
-const DOCK_MIN = 120;
-/** Allow nearly full-viewport docks so matrix / equity charts are never trapped. */
-const DOCK_MAX_VH = 0.72;
-
-function dockMaxPx(): number {
-  if (typeof window === "undefined") {
-    return 720;
-  }
-  return Math.max(DOCK_MIN, Math.floor(window.innerHeight * DOCK_MAX_VH));
-}
-
 export function LowerDock() {
   const layout = useStudyStore((s) => s.layout);
   const setLayout = useStudyStore((s) => s.setLayout);
@@ -28,19 +18,27 @@ export function LowerDock() {
   const setAnalysisTab = useStudyStore((s) => s.setAnalysisTab);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
+  useEffect(() => {
+    // Repair tiny / corrupted persisted heights so the dock is never a sliver.
+    const repaired = clampDockHeight(layout.lowerDockHeight);
+    if (repaired !== layout.lowerDockHeight) {
+      setLayout({ lowerDockHeight: repaired, lowerDock: true });
+    }
+  }, [layout.lowerDockHeight, setLayout]);
+
   const onPointerDown = useCallback(
     (event: ReactPointerEvent) => {
       event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
       dragRef.current = { startY: event.clientY, startH: layout.lowerDockHeight };
       const onMove = (ev: PointerEvent) => {
         if (!dragRef.current) {
           return;
         }
-        const next = Math.min(
-          dockMaxPx(),
-          Math.max(DOCK_MIN, dragRef.current.startH - (ev.clientY - dragRef.current.startY)),
+        const next = clampDockHeight(
+          dragRef.current.startH - (ev.clientY - dragRef.current.startY),
         );
-        setLayout({ lowerDockHeight: next });
+        setLayout({ lowerDockHeight: next, lowerDock: true });
       };
       const onUp = () => {
         dragRef.current = null;
@@ -54,7 +52,22 @@ export function LowerDock() {
   );
 
   if (!layout.lowerDock) {
-    return null;
+    return (
+      <div className="lower-dock lower-dock--collapsed">
+        <button
+          type="button"
+          className="toolbar-btn"
+          onClick={() =>
+            setLayout({
+              lowerDock: true,
+              lowerDockHeight: Math.max(layout.lowerDockHeight, 240),
+            })
+          }
+        >
+          Show analysis dock
+        </button>
+      </div>
+    );
   }
 
   let body: ReactNode;
@@ -67,7 +80,7 @@ export function LowerDock() {
   return (
     <section
       className="lower-dock"
-      style={{ height: layout.lowerDockHeight, maxHeight: dockMaxPx() }}
+      style={{ height: clampDockHeight(layout.lowerDockHeight) }}
     >
       <div
         className="resize-handle resize-handle--top"
@@ -75,6 +88,7 @@ export function LowerDock() {
         role="separator"
         aria-orientation="horizontal"
         aria-label="Resize analysis dock"
+        title="Drag to resize"
       />
       <div className="lower-dock__tabs" role="tablist" aria-label="Analysis">
         {TABS.map((tab) => (
@@ -89,6 +103,14 @@ export function LowerDock() {
             {tab.label}
           </button>
         ))}
+        <button
+          type="button"
+          className="toolbar-btn lower-dock__hide"
+          title="Hide analysis dock"
+          onClick={() => setLayout({ lowerDock: false })}
+        >
+          Hide
+        </button>
       </div>
       <div className="lower-dock__body">{body}</div>
     </section>

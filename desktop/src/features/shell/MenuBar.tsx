@@ -3,6 +3,7 @@ import { matchShortcut, SHORTCUTS } from "../../commands/shortcuts";
 import { solveControlFlags } from "../../domain/solveControls";
 import type { ThemePreference } from "../../domain/types";
 import { getPlatform } from "../../platform/browser";
+import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
@@ -13,7 +14,7 @@ interface Props {
   onHelpOpen: (open: boolean) => void;
 }
 
-type MenuId = "file" | "solve" | "tree" | "view" | "help" | null;
+type MenuId = "file" | "solve" | "tree" | "view" | "settings" | "help" | null;
 
 export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props) {
   const [openMenu, setOpenMenu] = useState<MenuId>(null);
@@ -46,6 +47,8 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
   const setHoverCell = useStudyStore((s) => s.setHoverCell);
   const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
   const strategyEditDrawerOpen = useStudyStore((s) => s.strategyEditDrawerOpen);
+  const setSettingsOpen = useSettingsStore((s) => s.setSettingsOpen);
+  const updateSettings = useSettingsStore((s) => s.updateSettings);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -228,21 +231,6 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
           open={openMenu}
           setOpen={setOpenMenu}
           items={[
-            { label: "Toggle theme", onClick: () => toggleTheme() },
-            {
-              label: `Theme: ${themePreference}`,
-              onClick: () => {
-                const order: ThemePreference[] = ["system", "light", "dark"];
-                const current = (["system", "light", "dark"] as const).includes(
-                  themePreference as ThemePreference,
-                )
-                  ? (themePreference as ThemePreference)
-                  : "system";
-                const next = order[(order.indexOf(current) + 1) % order.length];
-                setThemePreference(next);
-              },
-            },
-            { sep: true },
             {
               label: layout.leftNav ? "Hide navigator" : "Show navigator",
               onClick: () => setLayout({ leftNav: !layout.leftNav }),
@@ -256,6 +244,37 @@ export function MenuBar({ workspace, onWorkspace, helpOpen, onHelpOpen }: Props)
               onClick: () => setLayout({ dualRange: !layout.dualRange }),
             },
             { label: "Reset layout", onClick: () => resetLayout() },
+          ]}
+        />
+        <Menu
+          id="settings"
+          label="Settings"
+          open={openMenu}
+          setOpen={setOpenMenu}
+          items={[
+            {
+              label: "Open settings…",
+              onClick: () => setSettingsOpen(true),
+            },
+            { sep: true },
+            {
+              label: `Theme: ${themePreference}`,
+              onClick: () => {
+                const order: ThemePreference[] = ["system", "light", "dark"];
+                const current = (["system", "light", "dark"] as const).includes(
+                  themePreference as ThemePreference,
+                )
+                  ? (themePreference as ThemePreference)
+                  : "system";
+                const next = order[(order.indexOf(current) + 1) % order.length];
+                setThemePreference(next);
+                updateSettings({ themePreference: next });
+              },
+            },
+            {
+              label: "Toggle light/dark",
+              onClick: () => toggleTheme(),
+            },
           ]}
         />
         <Menu

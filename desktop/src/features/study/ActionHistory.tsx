@@ -6,11 +6,15 @@ import {
   lineCrumbs,
   nextChoicesFromNode,
 } from "../../domain/actionHistory";
+import { formatActionDisplay } from "../../domain/betSizes";
+import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 
 export function ActionHistory() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const status = useStudyStore((s) => s.status);
+  const draft = useStudyStore((s) => s.draft);
+  const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
   const layout = useStudyStore((s) => s.layout);
   const setLayout = useStudyStore((s) => s.setLayout);
   const navigateTo = useStudyStore((s) => s.navigateTo);
@@ -57,8 +61,9 @@ export function ActionHistory() {
     () => mapActionColors(currentNode?.actions ?? []),
     [currentNode?.actions],
   );
+  const pot = Number(currentNode?.pot ?? status?.pot ?? draft.pot ?? 0);
   const actor = actorLabel(currentNode?.to_act, currentNode?.player ?? null);
-  const chance = currentNode?.kind === "chance";
+  const dealNode = currentNode?.kind === "chance";
   const terminal = currentNode?.kind === "terminal";
 
   return (
@@ -100,13 +105,13 @@ export function ActionHistory() {
         )}
         {currentNode ? (
           <span className="action-history__actor tabular">
-            {chance ? "Deal" : terminal ? "Showdown" : `${actor} to act`}
+            {dealNode ? "Deal" : terminal ? "Showdown" : `${actor} to act`}
           </span>
         ) : null}
       </div>
 
       <div className="action-history__row action-history__next">
-        <span className="action-history__label">{chance ? "Cards" : "Next"}</span>
+        <span className="action-history__label">{dealNode ? "Cards" : "Next"}</span>
         <div className="action-history__choices" role="group" aria-label="Next actions">
           {!currentNode ? (
             <span className="empty-hint">—</span>
@@ -119,6 +124,10 @@ export function ActionHistory() {
               const freq = formatChoiceFrequency(choice.frequency);
               const color =
                 choice.kind === "action" ? colors.byIndex[index] : undefined;
+              const display =
+                choice.kind === "action"
+                  ? formatActionDisplay(choice.label, pot, betSizeDisplay)
+                  : { primary: choice.label, secondary: null as string | null };
               return (
                 <button
                   key={choice.key}
@@ -140,7 +149,12 @@ export function ActionHistory() {
                   {choice.kind === "action" ? (
                     <span className="history-choice__swatch" aria-hidden />
                   ) : null}
-                  <span className="history-choice__label">{choice.label}</span>
+                  <span className="history-choice__label">{display.primary}</span>
+                  {display.secondary ? (
+                    <span className="history-choice__chips tabular">
+                      {display.secondary}
+                    </span>
+                  ) : null}
                   {freq ? (
                     <span className="history-choice__freq tabular">{freq}</span>
                   ) : null}

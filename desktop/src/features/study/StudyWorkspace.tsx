@@ -12,7 +12,6 @@ import { ContextStrip } from "./ContextStrip";
 
 export function StudyWorkspace() {
   const leftNav = useStudyStore((s) => s.layout.leftNav);
-  const lowerDock = useStudyStore((s) => s.layout.lowerDock);
   const dualRange = useStudyStore((s) => s.layout.dualRange);
   const inspectorWidth = useStudyStore((s) => s.layout.inspectorWidth);
   const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
@@ -46,7 +45,7 @@ export function StudyWorkspace() {
         </section>
         <ComboInspector />
       </div>
-      {lowerDock ? <LowerDock /> : null}
+      <LowerDock />
       {lockDrawerOpen ? <LockDrawer /> : null}
       {strategyEditDrawerOpen ? <StrategyEditDrawer /> : null}
     </div>

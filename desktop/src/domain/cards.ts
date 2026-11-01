@@ -58,7 +58,7 @@ function isCardChild(child: unknown): child is NodeCardChild {
   return typeof child === "object" && child !== null && "card" in child;
 }
 
-/** Legal next cards from a chance node for the rank×suit picker. */
+/** Legal next cards from a deal (next-card) node for the rank×suit picker. */
 export function chanceCardOptions(node: NodePayload | null | undefined): ChanceCardOption[] {
   if (!node || node.kind !== "chance") {
     return [];

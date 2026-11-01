@@ -162,6 +162,7 @@ export function statusMetrics(status: StatusPayload | null | undefined): {
   runtime: string;
   rate: string;
   memory: string;
+  eta: string;
 } {
   const ev = statusRootEv(status);
   const rate = iterationsPerSecond(status);
@@ -183,5 +184,91 @@ export function statusMetrics(status: StatusPayload | null | undefined): {
     memory: formatBytes(
       status?.engine_allocated ?? status?.engine_heap_bytes,
     ),
+    eta: formatEta(estimateRemainingSeconds(status)),
   };
+}
+
+function formatEta(seconds: number | null): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) {
+    return "—";
+  }
+  if (seconds < 60) {
+    return `~${Math.max(1, Math.round(seconds))}s`;
+  }
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds - mins * 60);
+  if (mins < 60) {
+    return `~${mins}m ${secs}s`;
+  }
+  const hours = Math.floor(mins / 60);
+  return `~${hours}h ${mins % 60}m`;
+}
+
+/**
+ * ETA to the active stop criterion when it is not a wall-clock time limit.
+ * Prefers remaining iterations / rate; falls back to Nash-gap extrapolation.
+ */
+export function estimateRemainingSeconds(
+  status: StatusPayload | null | undefined,
+): number | null {
+  if (!status?.running || status.paused) {
+    return null;
+  }
+  // Time-limit solves: the criterion *is* time — no separate ETA.
+  if (status.time_limit_reached) {
+    return null;
+  }
+  const timeLimit = Number(
+    (status as { time_limit?: number }).time_limit ?? NaN,
+  );
+  if (Number.isFinite(timeLimit) && timeLimit >= 0) {
+    return null;
+  }
+
+  const rate = iterationsPerSecond(status);
+  const iterations = Number(status.iterations ?? 0);
+  const target = Number(status.iterations_requested ?? 0);
+  if (rate != null && rate > 0 && target > iterations) {
+    return (target - iterations) / rate;
+  }
+
+  const pot = Number(status.pot ?? 0);
+  const gap = Number(status.nash_gap);
+  const accuracy =
+    status.accuracy != null
+      ? Number(status.accuracy)
+      : status.nash_gap_threshold != null
+        ? Number(status.nash_gap_threshold)
+        : NaN;
+  // Accuracy is NashConv/pot in the UI; engine threshold is absolute chips.
+  const gapTarget =
+    Number.isFinite(accuracy) && accuracy >= 0
+      ? pot > 0 && accuracy <= 1
+        ? accuracy * pot
+        : accuracy
+      : NaN;
+  if (!(rate != null && rate > 0) || !(gap > 0) || !(gapTarget >= 0) || gap <= gapTarget) {
+    return null;
+  }
+
+  const series = Array.isArray(status.gap_series) ? status.gap_series : [];
+  if (series.length >= 2) {
+    const a = series[series.length - 2]!;
+    const b = series[series.length - 1]!;
+    const iterA = Number(a.iterations ?? a.iteration ?? 0);
+    const iterB = Number(b.iterations ?? b.iteration ?? 0);
+    const gapA = Number(a.nash_gap);
+    const gapB = Number(b.nash_gap);
+    if (iterB > iterA && gapA > gapB && gapB > gapTarget && gapB > 0) {
+      // Log-linear decay toward the target gap.
+      const decay = Math.log(gapA / gapB) / (iterB - iterA);
+      if (decay > 0) {
+        const itersLeft = Math.log(gapB / gapTarget) / decay;
+        if (Number.isFinite(itersLeft) && itersLeft > 0) {
+          return itersLeft / rate;
+        }
+      }
+    }
+  }
+  return null;
 }
