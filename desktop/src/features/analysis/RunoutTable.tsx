@@ -51,6 +51,7 @@ export function RunoutTable() {
                 key={suit}
                 type="button"
                 className="toolbar-btn"
+                data-suit={suit === "all" ? undefined : suit}
                 aria-pressed={suitFilter === suit}
                 onClick={() => setSuitFilter(suit)}
               >
