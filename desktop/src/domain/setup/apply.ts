@@ -265,7 +265,8 @@ function assignFromSource(
 /**
  * Merge a setup patch onto the current draft.
  * Resolve order: explicit request > selected profile > saved prefs > defaults.
- * Explicit vs profile disagreements become conflicts (no silent override).
+ * Explicit vs profile disagreements are recorded as conflicts.
+ * The explicit value is still written so the request changes the draft.
  */
 export function mergeSetupPatch(
   base: SpotDraft,
@@ -283,14 +284,14 @@ export function mergeSetupPatch(
   const draftPatch: Partial<SpotDraft> & { oopRange?: string; ipRange?: string } =
     {};
 
-  // 1. Explicit request fields win.
+  // 1. Explicit request fields always write, even when they disagree with a profile.
   if (patch.explicitFields) {
     assignFromSource(
       draftPatch,
       provenance,
       patch.explicitFields,
       "explicit_request",
-      conflictedFields,
+      new Set(),
     );
     if (patch.explicitFields.stakesLabel) {
       const label = patch.explicitFields.stakesLabel;

@@ -38,7 +38,7 @@ export function StudyWorkspace() {
           aria-label="Strategy matrix"
         >
           <ActionSummary />
-          <div className={dualRange ? "matrix-dual" : undefined}>
+          <div className={dualRange ? "matrix-dual" : "matrix-stage"}>
             <RangeMatrix />
             {dualRange ? <OpponentRangePanel /> : null}
           </div>

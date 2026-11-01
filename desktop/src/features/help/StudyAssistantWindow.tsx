@@ -10,6 +10,7 @@ import { AssistantProviderError } from "../../domain/assistant/provider";
 import {
   emptyStudySetupPreferences,
   loadStudySetupPreferences,
+  type SetupDraftResult,
   type StudySetupPreferences,
 } from "../../domain/setup";
 import {
@@ -20,14 +21,12 @@ import {
   setAssistantOpenAiCredential,
   type CredentialSource,
 } from "../../platform/credentials";
-import { isTauriRuntime } from "../../platform";
 import {
   HELP_CHAT_MIN_HEIGHT,
   HELP_CHAT_MIN_WIDTH,
   useHelpChatStore,
 } from "../../state/helpChatStore";
 import { useStudyStore } from "../../state/studyStore";
-import type { AssistantRunResult } from "../../domain/assistant";
 
 type ProviderMode = "fake" | "openai";
 
@@ -37,13 +36,6 @@ interface ChatLine {
   /** When set, this assistant line carries an applyable setup run. */
   setupRunId?: number;
 }
-
-const SUGGESTIONS = [
-  "How do I run a solve?",
-  "Set up CO vs BB SRP",
-  "What does accuracy mean?",
-  "Change the flop to As 7d 2c",
-];
 
 function readPrefs(): StudySetupPreferences {
   try {
@@ -75,8 +67,6 @@ export function StudyAssistantWindow() {
   const [draftText, setDraftText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingRun, setPendingRun] = useState<AssistantRunResult | null>(null);
-  const [appliedRunId, setAppliedRunId] = useState<number | null>(null);
   const [credSource, setCredSource] = useState<CredentialSource>("none");
   const [credPresent, setCredPresent] = useState(false);
   const [credDraft, setCredDraft] = useState("");
@@ -105,7 +95,12 @@ export function StudyAssistantWindow() {
   }
 
   useEffect(() => {
-    void refreshCredentialState();
+    void (async () => {
+      await refreshCredentialState();
+      if (await hasAssistantOpenAiCredential()) {
+        setProviderMode("openai");
+      }
+    })();
     return () => {
       abortRef.current?.abort();
     };
@@ -115,7 +110,7 @@ export function StudyAssistantWindow() {
     if (!layout.visible) return;
     const el = transcriptRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, layout.visible, busy, pendingRun]);
+  }, [messages, layout.visible, busy]);
 
   function makeClient(): UnifiedChatClient {
     if (providerMode === "fake") {
@@ -146,7 +141,6 @@ export function StudyAssistantWindow() {
 
     setBusy(true);
     setError(null);
-    setPendingRun(null);
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((prev) => [...prev, { role: "user", content: question }]);
     setDraftText("");
@@ -174,10 +168,25 @@ export function StudyAssistantWindow() {
           preferences: readPrefs(),
         },
       );
-      setMessages((prev) => [...prev, outcomeToLine(outcome)]);
-      if (outcome.kind === "setup" && outcome.run?.status === "draft") {
-        setPendingRun(outcome.run);
+      let line = outcomeToLine(outcome);
+      if (
+        outcome.kind === "setup" &&
+        outcome.run?.result &&
+        outcome.run.status !== "cancelled" &&
+        outcome.run.status !== "error"
+      ) {
+        const applied = commitSetup(outcome.run.result);
+        if (applied.ok) {
+          setWorkspace("build");
+          line = {
+            ...line,
+            content: `${line.content}\n\nUpdated the spot.`,
+          };
+        } else if (applied.reason !== "empty") {
+          setError(applied.message);
+        }
       }
+      setMessages((prev) => [...prev, line]);
     } catch (err) {
       if (controller.signal.aborted) {
         setError("Cancelled");
@@ -191,24 +200,19 @@ export function StudyAssistantWindow() {
     }
   }
 
-  function applyPending(force = false) {
-    if (!pendingRun?.result || appliedRunId === pendingRun.runId) return;
-    const outcome = applySetupDraft(pendingRun.result, { force });
-    if (!outcome.ok) {
-      setError(outcome.message);
-      return;
+  function commitSetup(result: SetupDraftResult) {
+    const write = (requestRevision: number) =>
+      applySetupDraft(
+        requestRevision === result.requestRevision
+          ? result
+          : { ...result, requestRevision },
+        { force: true },
+      );
+    const first = write(result.requestRevision);
+    if (first.ok || first.reason !== "stale") {
+      return first;
     }
-    setAppliedRunId(pendingRun.runId);
-    setWorkspace("build");
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "assistant",
-        content: force
-          ? "Applied to Build with unresolved conflicts marked. Open Build to review, then Solve when ready."
-          : "Applied to Build. Open Build to review, then Solve when ready.",
-      },
-    ]);
+    return write(useStudyStore.getState().draftRevision);
   }
 
   function onTitlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -273,12 +277,6 @@ export function StudyAssistantWindow() {
     return null;
   }
 
-  const canApply =
-    pendingRun?.status === "draft" &&
-    pendingRun.result != null &&
-    Object.keys(pendingRun.result.draftPatch).length > 0 &&
-    appliedRunId !== pendingRun.runId;
-
   return (
     <div
       className="help-chat-window"
@@ -297,7 +295,21 @@ export function StudyAssistantWindow() {
       <div className="help-chat-window__title" onPointerDown={onTitlePointerDown}>
         <div className="help-chat-window__title-text">
           <strong>Study assistant</strong>
-          <span className="muted">Ask · set up · drag to move</span>
+          <span
+            className="assistant-ready-pill"
+            data-ready={providerMode === "fake" || credPresent ? "true" : "false"}
+            title={
+              providerMode === "openai" && credPresent
+                ? describeCredentialSource(credSource)
+                : undefined
+            }
+          >
+            {providerMode === "fake"
+              ? "Demo ready"
+              : credPresent
+                ? "OpenAI ready"
+                : "Not connected"}
+          </span>
         </div>
         <div className="help-chat-window__title-actions">
           <label className="help-chat-window__provider">
@@ -325,23 +337,8 @@ export function StudyAssistantWindow() {
       </div>
 
       <div className="help-chat-window__body">
-        <p className="help-chat-window__lede">
-          Persistent assistant for Hold&apos;em Study — questions, Build parameters, ranges, and
-          tree edits. Changes Apply through the same validated draft path as manual Build.
-          {providerMode === "openai"
-            ? " OpenAI uses the unified context packs (docs/ai-context)."
-            : " Demo mode routes locally (no network)."}
-        </p>
-
-        {providerMode === "openai" ? (
+        {providerMode === "openai" && !credPresent ? (
           <div className="help-chat-window__creds">
-            <p className="assistant-hint">
-              {credPresent
-                ? `Key via ${describeCredentialSource(credSource)}.`
-                : isTauriRuntime()
-                  ? "Paste a key (Tauri app-config store)."
-                  : "Paste a key (localStorage prototype)."}
-            </p>
             <div className="assistant-compose-actions">
               <input
                 type="password"
@@ -372,45 +369,30 @@ export function StudyAssistantWindow() {
               >
                 Save
               </button>
-              <button
-                type="button"
-                className="toolbar-btn danger"
-                disabled={busy || !credPresent}
-                onClick={() => {
-                  void (async () => {
-                    await clearAssistantOpenAiCredential();
-                    setCredPresent(false);
-                    setCredSource("none");
-                  })();
-                }}
-              >
-                Clear
-              </button>
             </div>
           </div>
         ) : null}
-
-        <div className="help-chat-window__suggestions">
-          {SUGGESTIONS.map((suggestion) => (
+        {providerMode === "openai" && credPresent ? (
+          <div className="assistant-compose-actions">
             <button
-              key={suggestion}
               type="button"
-              className="toolbar-btn"
+              className="toolbar-btn danger"
               disabled={busy}
-              onClick={() => void send(suggestion)}
+              onClick={() => {
+                void (async () => {
+                  await clearAssistantOpenAiCredential();
+                  setCredPresent(false);
+                  setCredSource("none");
+                })();
+              }}
             >
-              {suggestion}
+              Clear key
             </button>
-          ))}
-        </div>
+          </div>
+        ) : null}
 
         <div className="help-chat-window__transcript" ref={transcriptRef}>
-          {messages.length === 0 ? (
-            <p className="muted">
-              Ask how something works, or describe a study to prepare. Setup proposals need Apply
-              before Build updates.
-            </p>
-          ) : (
+          {messages.length === 0 ? null : (
             messages.map((message, index) => (
               <div
                 key={`${message.role}-${index}`}
@@ -428,44 +410,22 @@ export function StudyAssistantWindow() {
 
         {error ? <p className="assistant-status warn">{error}</p> : null}
 
-        {canApply || canUndoSetup ? (
+        {canUndoSetup ? (
           <div className="assistant-compose-actions">
-            {canApply ? (
-              <>
-                <button
-                  type="button"
-                  className="toolbar-btn primary"
-                  disabled={busy}
-                  onClick={() => applyPending(false)}
-                >
-                  Apply to Build
-                </button>
-                <button
-                  type="button"
-                  className="toolbar-btn"
-                  disabled={busy}
-                  onClick={() => applyPending(true)}
-                >
-                  Apply with conflicts
-                </button>
-              </>
-            ) : null}
-            {canUndoSetup ? (
-              <button
-                type="button"
-                className="toolbar-btn"
-                disabled={busy}
-                onClick={() => {
-                  undoSetupTransaction();
-                  setMessages((prev) => [
-                    ...prev,
-                    { role: "assistant", content: "Reverted the last applied assistant setup." },
-                  ]);
-                }}
-              >
-                Undo apply
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="toolbar-btn"
+              disabled={busy}
+              onClick={() => {
+                undoSetupTransaction();
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "assistant", content: "Reverted the last assistant change." },
+                ]);
+              }}
+            >
+              Undo
+            </button>
           </div>
         ) : null}
 
@@ -506,8 +466,6 @@ export function StudyAssistantWindow() {
               disabled={busy || messages.length === 0}
               onClick={() => {
                 setMessages([]);
-                setPendingRun(null);
-                setAppliedRunId(null);
                 setError(null);
               }}
             >

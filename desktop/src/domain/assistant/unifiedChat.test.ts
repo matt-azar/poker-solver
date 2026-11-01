@@ -43,6 +43,7 @@ function emptyDraft(): SpotDraft {
     samples: 0,
     rakeRate: 0,
     rakeCap: 0,
+    useIcm: false,
     icmStacks: "",
     icmPayouts: "",
     incentives: "",
@@ -58,6 +59,8 @@ describe("looksLikeSetupRequest", () => {
     expect(looksLikeSetupRequest("Set up CO vs BB SRP")).toBe(true);
     expect(looksLikeSetupRequest("Change the flop to As 7d 2c")).toBe(true);
     expect(looksLikeSetupRequest("Duplicate this setup at 150bb")).toBe(true);
+    expect(looksLikeSetupRequest("set iterations to 500")).toBe(true);
+    expect(looksLikeSetupRequest("set pot to 40")).toBe(true);
   });
 
   it("leaves product questions as non-setup", () => {

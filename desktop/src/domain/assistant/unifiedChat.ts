@@ -87,7 +87,11 @@ export function looksLikeSetupRequest(text: string): boolean {
   return (
     /\b(set up|setup|prepare|duplicate|change the (board|flop|turn|river)|board to|flop to|use \d|bet size|calling range|opening range|vs bb|vs btn|vs co|srp|3bet|3bp|4bp|100nl|generate (a )?range|interpolate)\b/i.test(
       lower,
-    ) || /\b(oop|ip)\b.*\brange\b/i.test(lower)
+    ) ||
+    /\b(oop|ip)\b.*\brange\b/i.test(lower) ||
+    /\b(set|change|update|use)\b[\s\S]{0,48}\b(pot|stack|iterations|iters|accuracy|time limit|threads|memory|samples|algorithm|max raises)\b/i.test(
+      lower,
+    )
   );
 }
 
@@ -105,7 +109,7 @@ function summarizeProposal(proposal: InterpretProposal): string {
   if (proposal.stakesLabel) bits.push(proposal.stakesLabel);
   if (proposal.generatedRanges) bits.push("with model-generated ranges");
   if (proposal.interpolateFromIds) bits.push("with stack interpolation");
-  bits.push("Review and Apply to update Build — Solve stays separate.");
+  bits.push("Those fields are written onto the spot. Solve stays separate.");
   return bits.join(" · ");
 }
 

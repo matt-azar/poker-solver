@@ -50,6 +50,15 @@ describe("solveActivity", () => {
     expect(metrics.eta).toBe("—");
   });
 
+  it("sentence-cases an all-lowercase engine failure", () => {
+    const message = engineActivityMessage(
+      "failed",
+      { error: "icm stacks need at least two seats" },
+      "",
+    );
+    expect(message).toBe("ICM stacks need at least two seats");
+  });
+
   it("estimates remaining time from iteration target and rate", () => {
     const seconds = estimateRemainingSeconds({
       running: true,

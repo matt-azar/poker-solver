@@ -42,6 +42,34 @@ export interface GeneratedRangesProposal {
 }
 
 /**
+ * Direct writes onto the live Build draft.
+ * Used when the player names a field ("set pot to 55", "iterations 500")
+ * rather than asking for a new study.
+ */
+export interface StudyFieldEdits {
+  pot?: number;
+  stack?: number;
+  iterations?: number;
+  accuracy?: string;
+  timeLimit?: string;
+  threads?: number;
+  memoryMib?: number;
+  algorithm?: string;
+  samples?: number;
+  maxRaises?: number;
+  mergeThresholdPct?: number;
+  potCap?: number;
+  geometric?: boolean;
+  noThreeBet?: boolean;
+  allowAllIn?: boolean;
+  donkFlop?: boolean;
+  donkTurn?: boolean;
+  donkRiver?: boolean;
+  incentives?: string;
+  edgeTags?: string;
+}
+
+/**
  * Schema-constrained model proposal.
  * Prefer catalogue ids; may include guarded generatedRanges or a two-id
  * interpolation bracket when no exact catalogue row exists.
@@ -66,6 +94,8 @@ export type InterpretProposal =
        * App code performs combo-weight interpolation.
        */
       interpolateFromIds?: [string, string];
+      /** Scalar / flag writes merged onto the current draft. */
+      fieldEdits?: StudyFieldEdits;
     }
   | {
       kind: "clarify";

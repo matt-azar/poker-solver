@@ -260,6 +260,32 @@ describe("resolveAssistantProposal", () => {
     });
     expect(result.draftPatch.ipFlop).toBe("0.33, 0.75");
   });
+
+  it("field edits land on the live draft and leave ranges alone", () => {
+    const base: SpotDraft = {
+      ...DEFAULT_SPOT,
+      oopRange: "AA",
+      ipRange: "KK",
+      pot: 100,
+      iterations: 200,
+    };
+    const result = resolveAssistantProposal({
+      proposal: {
+        kind: "update_study",
+        intent: { mode: "edit" },
+        fieldEdits: { pot: 55, iterations: 400, accuracy: "0.5" },
+      },
+      baseDraft: base,
+      catalogue,
+      preferences: prefs,
+      draftRevision: 3,
+    });
+    expect(result.draftPatch.pot).toBe(55);
+    expect(result.draftPatch.iterations).toBe(400);
+    expect(result.draftPatch.accuracy).toBe("0.5");
+    expect(result.draftPatch.oopRange).toBeUndefined();
+    expect(result.conflicts).toHaveLength(0);
+  });
 });
 
 describe("prepareStudyFromProfile", () => {

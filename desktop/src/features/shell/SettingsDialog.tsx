@@ -1,5 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import type { BetSizeDisplayMode } from "../../domain/betSizes";
+import {
+  fastSolveDefaults,
+  formatHardwareHint,
+} from "../../domain/hardwareDefaults";
 import type { ThemePreference } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
@@ -13,6 +17,10 @@ export function SettingsDialog() {
   const setThemePreference = useStudyStore((s) => s.setThemePreference);
   const setEvDisplayBasis = useStudyStore((s) => s.setEvDisplayBasis);
   const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
+  const draft = useStudyStore((s) => s.draft);
+  const updateDraft = useStudyStore((s) => s.updateDraft);
+  const machineDefaults = useMemo(() => fastSolveDefaults(), []);
+  const hardwareHint = formatHardwareHint(machineDefaults);
 
   useEffect(() => {
     if (!open) {
@@ -122,9 +130,130 @@ export function SettingsDialog() {
           </span>
         </label>
 
+        <h3 className="build-subhead">Solve</h3>
+        <p className="settings-hint">
+          Fast defaults · {hardwareHint}
+        </p>
+        <div className="settings-grid">
+          <label className="settings-field">
+            Algorithm
+            <select
+              value={draft.algorithm}
+              onChange={(event) => updateDraft({ algorithm: event.target.value })}
+            >
+              <option value="cfr_plus">CFR+</option>
+              <option value="cfr">Vanilla CFR</option>
+              <option value="dcfr">DCFR</option>
+            </select>
+          </label>
+          <label className="settings-field">
+            Samples
+            <input
+              type="number"
+              min={0}
+              value={draft.samples}
+              onChange={(event) => updateDraft({ samples: Number(event.target.value) })}
+            />
+          </label>
+          <label className="settings-field">
+            Threads
+            <input
+              type="number"
+              min={1}
+              max={64}
+              value={draft.threads}
+              onChange={(event) =>
+                updateDraft({ threads: Number(event.target.value), frozen: true })
+              }
+            />
+          </label>
+          <label className="settings-field">
+            Memory MiB
+            <input
+              type="number"
+              min={64}
+              value={draft.memoryMib}
+              onChange={(event) => updateDraft({ memoryMib: Number(event.target.value) })}
+            />
+          </label>
+        </div>
+        <label className="settings-field">
+          Solution path
+          <input
+            value={draft.solutionPath}
+            placeholder="/tmp/spot.psol"
+            onChange={(event) => updateDraft({ solutionPath: event.target.value })}
+          />
+        </label>
+        <label className="settings-field">
+          Incentives
+          <input
+            value={draft.incentives}
+            placeholder="label 0 b100 3.5; tag 1 bluff -2"
+            onChange={(event) => updateDraft({ incentives: event.target.value })}
+          />
+        </label>
+        <label className="settings-field">
+          Edge tags
+          <input
+            value={draft.edgeTags}
+            placeholder="b100 bluff; 1 f give_up"
+            onChange={(event) => updateDraft({ edgeTags: event.target.value })}
+          />
+        </label>
+
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={draft.useIcm}
+            onChange={(event) => updateDraft({ useIcm: event.target.checked })}
+          />
+          Use ICM
+        </label>
+        {draft.useIcm ? (
+          <>
+            <label className="settings-field">
+              ICM stacks
+              <input
+                value={draft.icmStacks}
+                placeholder="1000, 1000, 1000"
+                onChange={(event) => updateDraft({ icmStacks: event.target.value })}
+              />
+            </label>
+            <label className="settings-field">
+              ICM payouts
+              <input
+                value={draft.icmPayouts}
+                placeholder="500, 300, 200"
+                onChange={(event) => updateDraft({ icmPayouts: event.target.value })}
+              />
+              <span className="settings-hint">
+                Stacks need at least two seats. Places without a payout pay 0.
+              </span>
+            </label>
+          </>
+        ) : (
+          <span className="settings-hint">
+            Chip EV is used until ICM is checked. A normal solve does not send tournament stacks.
+          </span>
+        )}
+
         <div className="settings-actions">
+          <button
+            type="button"
+            className="toolbar-btn"
+            onClick={() =>
+              updateDraft({
+                threads: machineDefaults.threads,
+                memoryMib: machineDefaults.memoryMib,
+                frozen: true,
+              })
+            }
+          >
+            Reset to fast
+          </button>
           <button type="button" className="toolbar-btn" onClick={resetSettings}>
-            Reset defaults
+            Reset display defaults
           </button>
         </div>
       </div>

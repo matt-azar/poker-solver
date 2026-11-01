@@ -875,6 +875,13 @@ function buildSetupPatch(args: {
   if (intent.openSizeBb !== undefined) {
     explicit.openSizeBb = intent.openSizeBb;
   }
+  if (args.proposal.fieldEdits) {
+    for (const [key, value] of Object.entries(args.proposal.fieldEdits)) {
+      if (value !== undefined) {
+        (explicit as Record<string, unknown>)[key] = value;
+      }
+    }
+  }
 
   if (Object.keys(explicit).length > 0) {
     patch.explicitFields = explicit;

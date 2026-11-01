@@ -270,6 +270,8 @@ export interface SpotDraft {
   samples: number;
   rakeRate: number;
   rakeCap: number;
+  /** When false, solve uses chip EV and ignores ICM stacks/payouts. */
+  useIcm: boolean;
   icmStacks: string;
   icmPayouts: string;
   incentives: string;
@@ -332,6 +334,7 @@ export const DEFAULT_SPOT: SpotDraft = {
   samples: 5,
   rakeRate: 0,
   rakeCap: 0,
+  useIcm: false,
   icmStacks: "",
   icmPayouts: "",
   incentives: "",

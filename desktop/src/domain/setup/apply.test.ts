@@ -83,7 +83,7 @@ describe("mergeSetupPatch", () => {
     ).toBe(true);
   });
 
-  it("surfaces explicit vs profile stack conflict instead of silent override", () => {
+  it("records an explicit vs profile stack conflict and keeps the requested stack", () => {
     const base = createBlankSetupDraft("create");
     const result = mergeSetupPatch(base, {
       mode: "create",
@@ -99,7 +99,7 @@ describe("mergeSetupPatch", () => {
     });
     expect(result.conflicts.some((item) => item.field === "stack")).toBe(true);
     expect(result.canSolve).toBe(false);
-    expect(result.draftPatch.stack).toBeUndefined();
+    expect(result.draftPatch.stack).toBe(150);
     expect(result.ok).toBe(false);
   });
 
