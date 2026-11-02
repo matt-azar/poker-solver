@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { validateSetupForSolve } from "../../domain/setup";
 import { useStudyStore } from "../../state/studyStore";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
@@ -139,11 +140,19 @@ export function BuildWorkspace() {
   const canUndoRange = useStudyStore((s) => s.canUndoRange);
   const canRedoRange = useStudyStore((s) => s.canRedoRange);
   const setupMeta = useStudyStore((s) => s.setupMeta);
+  const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
   const solve = useStudyStore((s) => s.solve);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
   const potProvenance = provenanceHint(setupMeta, "pot");
   const stackProvenance = provenanceHint(setupMeta, "stack");
-  const solveBlocked = setupMeta != null && !setupMeta.canSolve;
+  const setupValidation = validateSetupForSolve(draft);
+  const profileBlocked = setupMeta != null && !setupMeta.canSolve;
+  const solveBlocked = !setupValidation.ok || profileBlocked;
+  const solveErrors = !setupValidation.ok
+    ? setupValidation.errors
+    : profileBlocked
+      ? ["Finish missing setup profile fields before solving"]
+      : solveValidationErrors;
 
   const [showTextOop, setShowTextOop] = useState(false);
   const [showTextIp, setShowTextIp] = useState(false);
@@ -182,16 +191,36 @@ export function BuildWorkspace() {
           <button
             type="button"
             className="toolbar-btn primary"
-            title={solveBlocked ? "Finish missing setup fields before solving" : undefined}
+            disabled={solveBlocked}
+            title={
+              solveBlocked
+                ? solveErrors[0] || "Finish missing setup fields before solving"
+                : "Solve uses the current Build draft"
+            }
             onClick={() => {
-              void solve();
-              setWorkspace("study");
+              void solve().then(() => {
+                // Stay on Build when client validation blocks; only switch after launch.
+                if (useStudyStore.getState().solveValidationErrors.length === 0) {
+                  setWorkspace("study");
+                }
+              });
             }}
           >
             Solve &amp; open Study
           </button>
         </div>
       </header>
+
+      {solveBlocked && solveErrors.length > 0 ? (
+        <div className="build-solve-errors" role="alert">
+          <p>Solve is blocked until the Build draft is valid:</p>
+          <ul>
+            {solveErrors.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {catalogueOpen ? (
         <div

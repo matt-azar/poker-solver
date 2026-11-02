@@ -2,7 +2,7 @@ street-config 1
 board Ah Kd 7c
 pot 100
 stack 100
-oop-range AhAd:1
+oop-range AcAd:1
 ip-range 2c3d:1
 first-to-act 0
 max-raises 0
