@@ -214,10 +214,20 @@ void expect_street_matches_river(
         }
     }
 
+    int stored_actions = 0;
+    for (int infoset = 0; infoset < game.infoset_count(); ++infoset)
+    {
+        const int count = game.action_count(infoset);
+        if (count > 1)
+        {
+            stored_actions += count;
+        }
+    }
+
     const std::vector<poker::solver::StreetStrategyEntry> entries = batch.average_strategy_entries();
     CHECK(static_cast<int>(entries.size()) == static_cast<int>(reference.size()));
     CHECK(batch.infoset_count() == game.infoset_count());
-    CHECK(batch.regret_entries() == static_cast<int>(strategy.size()));
+    CHECK(batch.regret_entries() == stored_actions);
     CHECK(batch.deal_count() == game.deal_count());
     CHECK(batch.public_decisions() * batch.deal_count() == game.decision_node_count());
     CHECK(batch.public_terminals() * batch.deal_count() == game.terminal_count());
@@ -293,10 +303,21 @@ void expect_street_batch(
         }
     }
 
+    int stored_actions = 0;
+    for (int infoset = 0; infoset < game.infoset_count(); ++infoset)
+    {
+        const int count = game.action_count(infoset);
+        if (count > 1)
+        {
+            stored_actions += count;
+        }
+    }
+
     const std::vector<poker::solver::StreetStrategyEntry> entries = batch.average_strategy_entries();
     CHECK(static_cast<int>(entries.size()) == static_cast<int>(reference.size()));
     CHECK(batch.infoset_count() == game.infoset_count());
-    CHECK(batch.regret_entries() == static_cast<int>(strategy.size()));
+    // One-action infosets are implicit (probability 1) and omit table rows.
+    CHECK(batch.regret_entries() == stored_actions);
     CHECK(batch.deal_count() == game.deal_count());
     CHECK(batch.decision_node_count() == game.decision_node_count());
     CHECK(batch.terminal_count() == game.terminal_count());
@@ -730,9 +751,13 @@ void expect_memory_budget()
         report.regret_strategy_sum_bytes + report.sigma_workspace_bytes
         == static_cast<std::uint64_t>(solver.regret_entries())
             * poker::solver::kPersistentTableBytesPerEntry);
-    CHECK(component_bytes(report, "regret") > 0);
-    CHECK(component_bytes(report, "strategy_sum") > 0);
-    CHECK(component_bytes(report, "sigma") > 0);
+    // Check-only trees elide every Slot and table row (implicit probability 1).
+    CHECK(solver.regret_entries() == 0);
+    CHECK(component_bytes(report, "slot_of") == 0);
+    CHECK(component_bytes(report, "slots") == 0);
+    CHECK(component_bytes(report, "regret") == 0);
+    CHECK(component_bytes(report, "strategy_sum") == 0);
+    CHECK(component_bytes(report, "sigma") == 0);
     CHECK(component_bytes(report, "average") == 0);
     CHECK(component_bytes(report, "frozen") == 0);
     CHECK(component_bytes(report, "rank_cache") > 100000);
@@ -743,6 +768,7 @@ void expect_memory_budget()
     CHECK(report.process_peak_working_set_bytes > 0);
 #endif
     CHECK(solver.public_decisions() == 6);
+    CHECK(solver.infoset_count() > 0);
     const std::uint64_t runouts = 45ull * 44ull;
     CHECK(solver.terminal_count() == solver.deal_count() * runouts);
     CHECK(solver.decision_node_count() == solver.deal_count() * 2ull * (1ull + 45ull + runouts));
@@ -759,6 +785,25 @@ void expect_memory_budget()
     tight.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
     CHECK_NEAR(solver.expected_utility(), tight.expected_utility(), 1e-8);
     CHECK_NEAR(solver.nash_gap(), tight.nash_gap(), 1e-8);
+
+    // Multi-action trees still allocate packed slots + float tables.
+    StreetConfig betting = check_only(flop, "QcQd", "JcJd");
+    betting.oop_bet_sizes = {1.0};
+    betting.ip_bet_sizes = {1.0};
+    betting.allow_all_in = true;
+    betting.memory_mib = 64;
+    poker::solver::StreetBatchSolver betting_solver(betting);
+    const poker::solver::StreetMemoryReport betting_report = betting_solver.memory_report();
+    CHECK(betting_solver.regret_entries() > 0);
+    CHECK(component_bytes(betting_report, "slot_of") > 0);
+    CHECK(component_bytes(betting_report, "slots") > 0);
+    CHECK(component_bytes(betting_report, "regret") > 0);
+    CHECK(component_bytes(betting_report, "strategy_sum") > 0);
+    CHECK(component_bytes(betting_report, "sigma") > 0);
+    CHECK(
+        betting_report.regret_strategy_sum_bytes + betting_report.sigma_workspace_bytes
+        == static_cast<std::uint64_t>(betting_solver.regret_entries())
+            * poker::solver::kPersistentTableBytesPerEntry);
     const poker::solver::StreetMemoryReport trained = solver.memory_report();
     CHECK(trained.train_seconds > 0.0);
     CHECK(trained.evaluation_seconds > 0.0);
@@ -804,12 +849,18 @@ void expect_suit_iso()
     const Range skewed = Range::parse("3d3h");
     CHECK(suit_iso_group(monotone, skewed, pairs).size() == 1);
 
+    // One-size betting (not check-only): compact indexing elides one-action
+    // rows, so suit-iso savings show up on multi-action stored slots.
     StreetConfig baseline = check_only(monotone, "33,44,55,66,77", "33,44,55,66,77");
     baseline.memory_mib = 64;
+    baseline.oop_bet_sizes = {1.0};
+    baseline.ip_bet_sizes = {1.0};
     StreetConfig iso_cfg = baseline;
     iso_cfg.suit_iso = true;
     StreetConfig skewed_cfg = check_only(monotone, "3d3h", "33,44,55,66,77");
     skewed_cfg.memory_mib = 64;
+    skewed_cfg.oop_bet_sizes = {1.0};
+    skewed_cfg.ip_bet_sizes = {1.0};
     skewed_cfg.suit_iso = true;
 
     poker::solver::StreetBatchSolver off(baseline);
@@ -1831,10 +1882,67 @@ void expect_allocation_audit()
     CHECK(wide_solver.nash_gap() >= -1e-8);
 }
 
+void expect_compact_indexing()
+{
+    const std::vector<int> turn = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+    const std::vector<int> flop = {card("Ah"), card("Kd"), card("7c")};
+
+    // Check-down: every decision has one action — no Slot / slot_of / tables.
+    StreetConfig turn_check = check_only(turn, "QcQd", "JcJd");
+    turn_check.memory_mib = 64;
+    poker::solver::StreetBatchSolver turn_check_solver(turn_check);
+    const poker::solver::StreetMemoryReport turn_check_report = turn_check_solver.memory_report();
+    CHECK(turn_check_solver.infoset_count() > 0);
+    CHECK(turn_check_solver.regret_entries() == 0);
+    CHECK(component_bytes(turn_check_report, "slot_of") == 0);
+    CHECK(component_bytes(turn_check_report, "slots") == 0);
+    turn_check_solver.run_frozen_iterations(2, poker::solver::Algorithm::CfrPlus);
+    CHECK_NEAR(turn_check_solver.nash_gap(), 0.0, 1e-8);
+    const auto turn_entries = turn_check_solver.average_strategy_entries();
+    CHECK(turn_entries.size() == turn_check_solver.infoset_count());
+    for (const poker::solver::StreetStrategyEntry& entry : turn_entries)
+    {
+        CHECK_NEAR(entry.probability, 1.0, 1e-12);
+    }
+
+    // One-size turn: legal-runout slot_of + packed Slot + elided one-action rows.
+    // Strategy parity versus StreetGame is covered by expect_street_batch.
+    StreetConfig turn_one = check_only(turn, "QcQd", "JcJd");
+    turn_one.oop_bet_sizes = {1.0};
+    turn_one.ip_bet_sizes = {1.0};
+    turn_one.allow_all_in = true;
+    turn_one.memory_mib = 64;
+    poker::solver::StreetBatchSolver turn_one_solver(turn_one);
+    const poker::solver::StreetMemoryReport turn_one_report = turn_one_solver.memory_report();
+    CHECK(turn_one_solver.regret_entries() > 0);
+    CHECK(component_bytes(turn_one_report, "slot_of") > 0);
+    CHECK(component_bytes(turn_one_report, "slots") > 0);
+    CHECK(turn_one_solver.infoset_count() > static_cast<std::uint64_t>(
+        turn_one_solver.regret_entries() / 2));
+    // Compact runout dim is 48 legal rivers (not 52); slot_of is well under a
+    // dense 52×hands×decisions map (public_decisions is an upper bound).
+    const std::uint64_t slot_of_bytes = component_bytes(turn_one_report, "slot_of");
+    const std::uint64_t dense_upper =
+        52ull * sizeof(int)
+        * static_cast<std::uint64_t>(turn_one_solver.public_decisions())
+        * 4ull;
+    CHECK(slot_of_bytes < dense_upper);
+
+    // Flop check-down still reports logical infosets with empty indexes.
+    StreetConfig flop_check = check_only(flop, "QcQd", "JcJd");
+    flop_check.memory_mib = 64;
+    poker::solver::StreetBatchSolver flop_check_solver(flop_check);
+    CHECK(flop_check_solver.infoset_count() > 1000);
+    CHECK(flop_check_solver.regret_entries() == 0);
+    CHECK(component_bytes(flop_check_solver.memory_report(), "slot_of") == 0);
+    CHECK(component_bytes(flop_check_solver.memory_report(), "slots") == 0);
+}
+
 void run_street_memory_tests()
 {
     expect_memory_budget();
     expect_allocation_audit();
+    expect_compact_indexing();
 }
 
 void check_raw_tables(
