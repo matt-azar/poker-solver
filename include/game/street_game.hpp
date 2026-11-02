@@ -88,6 +88,12 @@ struct StreetConfig
     // false keeps float TableScalar tables. PCFR+ prediction stays float.
     // Shared sigma workspace stays float. PSOL TrainingTables stay double.
     bool table_i16 = false;
+    // Exact suit isomorphism for StreetBatchSolver. Off by default. When on,
+    // the batch engine shares regret/strategy rows across board-stabilizer
+    // orbits that also preserve both weighted ranges. Asymmetric ranges,
+    // locks during training, or a trivial stabilizer fall back to identity
+    // (no sharing). Approximate bucketing is out of scope.
+    bool suit_iso = false;
     // Pot rake applied at terminals. Zero rate keeps the prior chip rule.
     // See docs/RAKE.md.
     poker::solver::RakeConfig rake{};

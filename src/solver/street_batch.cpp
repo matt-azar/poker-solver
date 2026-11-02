@@ -8,6 +8,7 @@
 #include "poker/hand_categories.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
+#include "poker/suit_iso.hpp"
 #include "solver/chip_payoff.hpp"
 #include "solver/dcfr.hpp"
 #include "solver/icm.hpp"
@@ -37,6 +38,7 @@
 #include <thread>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -1250,6 +1252,10 @@ struct StreetBatchSolver::Engine
     std::uint64_t board_mask = 0;
     // Non-owning; set for the duration of solve()/solve_frozen() from SolveConfig::locks.
     const LockSet* locks_ = nullptr;
+    // Exact suit isomorphism. Group always contains the identity when built.
+    // Sharing is active only when |group| > 1 after range/board filtering.
+    std::vector<holdem::SuitPerm> suit_iso_group_{};
+    bool suit_iso_sharing_ = false;
 
     explicit Engine(streets::StreetConfig incoming, BudgetResource& budget, bool plan_only = false)
         : config(std::move(incoming))
@@ -1301,6 +1307,7 @@ struct StreetBatchSolver::Engine
         index_parents();
         fill_terminal_incentives();
         count_and_index_hands();
+        init_suit_iso();
         set_hand_counts();
         visit_slots(false);
         estimated_peak_bytes_ = checked_add(budget_->current(), planned_allocation_bytes(), "plan");
@@ -1968,6 +1975,76 @@ struct StreetBatchSolver::Engine
         return (turn * 52 + river) * node.hands + hand;
     }
 
+    void init_suit_iso()
+    {
+        suit_iso_group_.clear();
+        suit_iso_sharing_ = false;
+        if (!config.suit_iso)
+        {
+            suit_iso_group_.push_back(holdem::identity_suit_perm());
+            return;
+        }
+        // Fail closed: path incentives are suit-agnostic; suit-iso stays allowed.
+        // Locks are rejected later when sharing is active (SelectedCombos hand
+        // indices are not stable under remapping).
+        suit_iso_group_ = holdem::suit_iso_group(config.board, config.oop, config.ip);
+        suit_iso_sharing_ = suit_iso_group_.size() > 1;
+    }
+
+    void reject_locks_with_suit_iso(const LockSet* locks) const
+    {
+        if (!suit_iso_sharing_ || locks == nullptr || locks->empty())
+        {
+            return;
+        }
+        throw std::invalid_argument(
+            "suit isomorphism sharing cannot be combined with node locks; "
+            "disable suit-iso or clear locks");
+    }
+
+    // Map a concrete (hand, turn, river) into the group's lexicographic
+    // canonical representative. When sharing is off, returns the inputs.
+    void canonicalize_slot(
+        int player, int hand, int turn, int river, int& out_hand, int& out_turn, int& out_river) const
+    {
+        if (!suit_iso_sharing_)
+        {
+            out_hand = hand;
+            out_turn = turn;
+            out_river = river;
+            return;
+        }
+        const int combo = combos[player][static_cast<std::size_t>(hand)];
+        int c0 = 0;
+        int c1 = 0;
+        holdem::Range::combo_cards(combo, c0, c1);
+        std::uint64_t best = ~std::uint64_t{0};
+        out_hand = hand;
+        out_turn = turn;
+        out_river = river;
+        for (const holdem::SuitPerm& perm : suit_iso_group_)
+        {
+            const int t2 = holdem::map_card(turn, perm);
+            const int r2 = holdem::map_card(river, perm);
+            const int mapped = holdem::Range::combo_index(
+                holdem::map_card(c0, perm), holdem::map_card(c1, perm));
+            const int h2 = combo_to_hand[player][static_cast<std::size_t>(mapped)];
+            if (h2 < 0)
+            {
+                throw std::logic_error(
+                    "suit isomorphism mapped a supported hand outside the indexed range");
+            }
+            const std::uint64_t key = holdem::suit_iso_key(t2, r2, h2);
+            if (key < best)
+            {
+                best = key;
+                out_hand = h2;
+                out_turn = t2;
+                out_river = r2;
+            }
+        }
+    }
+
     int remaining(const Deal& deal, int turn, int river, int* out) const
     {
         bool dead[52] = {};
@@ -2062,14 +2139,41 @@ struct StreetBatchSolver::Engine
         planned_cursor_ += node.n_actions;
     }
 
-    void consider_slot(bool commit, int node_index, int hand, int turn, int river)
+    void consider_slot(
+        bool commit,
+        int node_index,
+        int hand,
+        int turn,
+        int river,
+        std::unordered_set<std::uint64_t>* planned_keys)
     {
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        int canon_hand = hand;
+        int canon_turn = turn;
+        int canon_river = river;
+        canonicalize_slot(node.player, hand, turn, river, canon_hand, canon_turn, canon_river);
         if (commit)
         {
-            add_slot(node_index, hand, turn, river);
+            const int key = card_key(node, canon_hand, canon_turn, canon_river);
+            if (node.slot_of[static_cast<std::size_t>(key)] >= 0)
+            {
+                return;
+            }
+            add_slot(node_index, canon_hand, canon_turn, canon_river);
             return;
         }
-        note_planned_slot(nodes[static_cast<std::size_t>(node_index)]);
+        if (suit_iso_sharing_)
+        {
+            const int key = card_key(node, canon_hand, canon_turn, canon_river);
+            const std::uint64_t packed =
+                (static_cast<std::uint64_t>(static_cast<std::uint32_t>(node_index)) << 32)
+                | static_cast<std::uint32_t>(key);
+            if (planned_keys == nullptr || !planned_keys->insert(packed).second)
+            {
+                return;
+            }
+        }
+        note_planned_slot(node);
     }
 
     // Every legal deal keeps four distinct hole cards off the board, so each
@@ -2102,6 +2206,9 @@ struct StreetBatchSolver::Engine
             on_board[card] = true;
         }
         budget_->set_stage("registration");
+        std::unordered_set<std::uint64_t> planned_keys;
+        std::unordered_set<std::uint64_t>* planned_keys_ptr =
+            (!commit && suit_iso_sharing_) ? &planned_keys : nullptr;
         std::pmr::vector<int> card_a[2] = {std::pmr::vector<int>(heap_), std::pmr::vector<int>(heap_)};
         std::pmr::vector<int> card_b[2] = {std::pmr::vector<int>(heap_), std::pmr::vector<int>(heap_)};
         std::pmr::vector<int> hand_at[2] = {std::pmr::vector<int>(heap_), std::pmr::vector<int>(heap_)};
@@ -2180,7 +2287,7 @@ struct StreetBatchSolver::Engine
                 const int c1 = card_b[player][static_cast<std::size_t>(hand)];
                 if (node.card_mode == 0)
                 {
-                    consider_slot(commit, node_index, hand, -1, -1);
+                    consider_slot(commit, node_index, hand, -1, -1, planned_keys_ptr);
                     continue;
                 }
                 if (node.card_mode == 1)
@@ -2197,11 +2304,11 @@ struct StreetBatchSolver::Engine
                         }
                         if (node.mode1_is_turn)
                         {
-                            consider_slot(commit, node_index, hand, card, -1);
+                            consider_slot(commit, node_index, hand, card, -1, planned_keys_ptr);
                         }
                         else
                         {
-                            consider_slot(commit, node_index, hand, -1, card);
+                            consider_slot(commit, node_index, hand, -1, card, planned_keys_ptr);
                         }
                     }
                     continue;
@@ -2228,7 +2335,7 @@ struct StreetBatchSolver::Engine
                         {
                             continue;
                         }
-                        consider_slot(commit, node_index, hand, turn, river);
+                        consider_slot(commit, node_index, hand, turn, river, planned_keys_ptr);
                     }
                 }
             }
@@ -2261,7 +2368,11 @@ struct StreetBatchSolver::Engine
 
     int slot_index(const Node& node, int hand, int turn, int river, double reach) const
     {
-        const int key = card_key(node, hand, turn, river);
+        int canon_hand = hand;
+        int canon_turn = turn;
+        int canon_river = river;
+        canonicalize_slot(node.player, hand, turn, river, canon_hand, canon_turn, canon_river);
+        const int key = card_key(node, canon_hand, canon_turn, canon_river);
         const int index = node.slot_of[static_cast<std::size_t>(key)];
         if (index >= 0)
         {
@@ -2564,7 +2675,12 @@ struct StreetBatchSolver::Engine
 
     int stored_slot(const Node& node, int hand, int turn, int river) const
     {
-        return node.slot_of[static_cast<std::size_t>(card_key(node, hand, turn, river))];
+        int canon_hand = hand;
+        int canon_turn = turn;
+        int canon_river = river;
+        canonicalize_slot(node.player, hand, turn, river, canon_hand, canon_turn, canon_river);
+        return node.slot_of[static_cast<std::size_t>(
+            card_key(node, canon_hand, canon_turn, canon_river))];
     }
 
     // One public-tree pass. responding < 0 plays the sigma strategy.
@@ -7213,6 +7329,7 @@ void StreetBatchSolver::run_iterations(int count, Algorithm algorithm, const Loc
 {
     note_profile_mutation();
     engine_->check_usable();
+    engine_->reject_locks_with_suit_iso(locks);
     const LockSet* const previous_locks = engine_->locks_;
     engine_->locks_ = locks;
     try
@@ -7231,6 +7348,7 @@ void StreetBatchSolver::run_iterations(int count, Algorithm algorithm, const Loc
 void StreetBatchSolver::continue_iterations(int count, Algorithm algorithm, const LockSet* locks)
 {
     note_profile_mutation();
+    engine_->reject_locks_with_suit_iso(locks);
     const LockSet* const previous_locks = engine_->locks_;
     engine_->locks_ = locks;
     try
@@ -7249,6 +7367,7 @@ void StreetBatchSolver::run_frozen_iterations(int count, Algorithm algorithm, co
 {
     note_profile_mutation();
     engine_->check_usable();
+    engine_->reject_locks_with_suit_iso(locks);
     const LockSet* const previous_locks = engine_->locks_;
     engine_->locks_ = locks;
     try
@@ -7267,6 +7386,7 @@ void StreetBatchSolver::run_frozen_iterations(int count, Algorithm algorithm, co
 void StreetBatchSolver::continue_frozen_iterations(int count, Algorithm algorithm, const LockSet* locks)
 {
     note_profile_mutation();
+    engine_->reject_locks_with_suit_iso(locks);
     const LockSet* const previous_locks = engine_->locks_;
     engine_->locks_ = locks;
     try
@@ -7295,6 +7415,7 @@ SolveStats StreetBatchSolver::solve_frozen(
 {
     note_profile_mutation();
     engine_->check_usable();
+    engine_->reject_locks_with_suit_iso(config.locks);
     const LockSet* const previous_locks = engine_->locks_;
     engine_->locks_ = config.locks;
     if (algorithm == Algorithm::Dcfr)
@@ -7373,6 +7494,7 @@ SolveStats StreetBatchSolver::solve(
 {
     note_profile_mutation();
     engine_->check_usable();
+    engine_->reject_locks_with_suit_iso(config.locks);
     const LockSet* const previous_locks = engine_->locks_;
     engine_->locks_ = config.locks;
     const auto start = std::chrono::steady_clock::now();
@@ -7467,6 +7589,21 @@ std::uint64_t StreetBatchSolver::infoset_count() const
         return static_cast<std::uint64_t>(engine_->slots.size());
     }
     return engine_->planned_slots_;
+}
+
+bool StreetBatchSolver::suit_iso_requested() const
+{
+    return engine_->config.suit_iso;
+}
+
+bool StreetBatchSolver::suit_iso_active() const
+{
+    return engine_->suit_iso_sharing_;
+}
+
+int StreetBatchSolver::suit_iso_group_size() const
+{
+    return static_cast<int>(engine_->suit_iso_group_.size());
 }
 
 std::uint64_t StreetBatchSolver::deal_count() const

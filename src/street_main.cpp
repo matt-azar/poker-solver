@@ -42,7 +42,7 @@ void print_usage(const char* argv0)
               << " [--iterations N] [--algorithm vanilla|cfr_plus|dcfr|pcfr_plus]"
               << " [--dcfr-alpha A] [--dcfr-beta B] [--dcfr-gamma G]"
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
-              << " [--memory-mib N] [--threads N] [--table-i16]"
+              << " [--memory-mib N] [--threads N] [--table-i16] [--suit-iso]"
               << " [--plan-memory] [--reference] [--frozen] [--report file | -]\n";
 }
 
@@ -617,6 +617,10 @@ int main(int argc, char** argv)
             {
                 config.table_i16 = true;
             }
+            else if (arg == "--suit-iso")
+            {
+                config.suit_iso = true;
+            }
             else if (arg == "--algorithm")
             {
                 const std::string name = need("--algorithm");
@@ -777,6 +781,9 @@ int main(int argc, char** argv)
             std::cout << "solver: " << solver_name << "\n";
             std::cout << "deals: " << solver.deal_count() << "\n";
             std::cout << "infosets: " << solver.infoset_count() << "\n";
+            std::cout << "suit_iso_requested: " << (solver.suit_iso_requested() ? 1 : 0) << "\n";
+            std::cout << "suit_iso_active: " << (solver.suit_iso_active() ? 1 : 0) << "\n";
+            std::cout << "suit_iso_group_size: " << solver.suit_iso_group_size() << "\n";
             if (solver.public_decisions() > 0)
             {
                 std::cout << "public_decisions: " << solver.public_decisions() << "\n";
