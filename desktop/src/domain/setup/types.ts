@@ -22,10 +22,20 @@ export type PreflopActionKind =
   | "bet"
   | "all_in";
 
+/**
+ * How `sizeBb` should be applied to the contribution ledger.
+ * - `"to"`: total chips committed by this seat after the action (open/raise default).
+ * - `"add"`: chips added on this action (profile call sizes use this convention).
+ * When omitted, {@link derivePostflopPotAndStacks} infers carefully; callers that
+ * know the semantics (e.g. profile conversion) should set it explicitly.
+ */
+export type PreflopSizeMeaning = "to" | "add";
+
 export interface PreflopAction {
   seat: string;
   action: PreflopActionKind;
   sizeBb?: number;
+  sizeMeaning?: PreflopSizeMeaning;
 }
 
 export interface StudySetupTreePreset {
