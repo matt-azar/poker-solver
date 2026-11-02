@@ -118,6 +118,16 @@ void expect_scalar_oracle()
     const auto factors = poker::solver::dcfr_factors(1);
     CHECK_NEAR(factors.positive_discount, oracle_positive(1), 1e-15);
     CHECK_NEAR(factors.negative_discount, oracle_negative(), 1e-15);
+    // β=0 ⇒ t^0/(t^0+1)=1/2 for every t; γ=2 ⇒ t².
+    const auto at3 = poker::solver::dcfr_factors(3);
+    CHECK_NEAR(at3.negative_discount, 0.5, 1e-15);
+    CHECK_NEAR(at3.average_weight, 9.0, 1e-15);
+    poker::solver::DcfrParams alt{2.0, 0.5, 1.0};
+    const auto alt_f = poker::solver::dcfr_factors(4, alt);
+    const double t = 4.0;
+    CHECK_NEAR(alt_f.positive_discount, std::pow(t, 2.0) / (std::pow(t, 2.0) + 1.0), 1e-12);
+    CHECK_NEAR(alt_f.negative_discount, std::pow(t, 0.5) / (std::pow(t, 0.5) + 1.0), 1e-12);
+    CHECK_NEAR(alt_f.average_weight, t, 1e-12);
     CHECK_NEAR(factors.average_weight, oracle_average_weight(1), 1e-15);
 
     // Positive stays positive.

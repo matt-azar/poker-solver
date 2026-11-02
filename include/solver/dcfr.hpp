@@ -6,8 +6,15 @@
 namespace poker::solver
 {
 
-// Fixed DCFR(α=1.5, β=0, γ=2) from Brown & Sandholm, AAAI 2019.
-// Factors are a function of the 1-based iteration index t only.
+// DCFR(α, β, γ) from Brown & Sandholm, AAAI 2019.
+// Defaults are the fixed product triple (1.5, 0, 2).
+struct DcfrParams
+{
+    double alpha = 1.5;
+    double beta = 0.0;
+    double gamma = 2.0;
+};
+
 struct DcfrFactors
 {
     double positive_discount = 1.0;
@@ -16,19 +23,25 @@ struct DcfrFactors
 };
 
 // t is the completed-iteration index after the increment (1, 2, ...).
-// average_weight is t² with conversion to floating point before squaring.
-inline DcfrFactors dcfr_factors(int iteration)
+// positive: t^α/(t^α+1); negative: t^β/(t^β+1); average weight: t^γ.
+// With β=0, negative discount is exactly 1/2.
+inline DcfrFactors dcfr_factors(int iteration, DcfrParams params = {})
 {
     if (iteration <= 0)
     {
         throw std::invalid_argument("DCFR iteration index must be positive");
     }
+    if (!std::isfinite(params.alpha) || !std::isfinite(params.beta) || !std::isfinite(params.gamma))
+    {
+        throw std::invalid_argument("DCFR parameters must be finite");
+    }
     const double t = static_cast<double>(iteration);
-    const double t_pow = std::pow(t, 1.5);
+    const double t_pos = std::pow(t, params.alpha);
+    const double t_neg = std::pow(t, params.beta);
     DcfrFactors factors;
-    factors.positive_discount = t_pow / (t_pow + 1.0);
-    factors.negative_discount = 0.5;
-    factors.average_weight = t * t;
+    factors.positive_discount = t_pos / (t_pos + 1.0);
+    factors.negative_discount = t_neg / (t_neg + 1.0);
+    factors.average_weight = std::pow(t, params.gamma);
     return factors;
 }
 
