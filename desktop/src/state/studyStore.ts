@@ -987,14 +987,16 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!alternative.nodeId) {
       return;
     }
-    const pot = Number(
-      get().currentNode?.pot ?? get().status?.pot ?? get().draft.pot ?? 0,
+    // Alternative labels were compacted with the source pot when the step was
+    // recorded; pot here is unused by replaceTrailAlternative.
+    const potFallback = Number(
+      get().status?.pot ?? get().draft.pot ?? 0,
     );
     const nextTrail = replaceTrailAlternative(
       get().pathTrail,
       stepIndex,
       alternative,
-      pot,
+      potFallback,
     );
     if (!nextTrail) {
       return;
@@ -1743,10 +1745,20 @@ const previous = get().currentNode;
         return;
       }
 const rootId = get().status?.root_node_id || rootNodeId(undefined);
-      const pot = Number(node.pot ?? get().status?.pot ?? get().draft.pot ?? 0);
+      // Size tags use the source node's pot/basis inside advancePathTrail /
+      // edgeStepFromNode; pass previous pot only as a fallback when missing.
+      const potFallback = Number(
+        previous?.pot ?? get().status?.pot ?? get().draft.pot ?? 0,
+      );
       let pathTrail = get().pathTrail;
       if (historyMode !== "none") {
-        pathTrail = advancePathTrail(pathTrail, previous, node, pot, rootId);
+        pathTrail = advancePathTrail(
+          pathTrail,
+          previous,
+          node,
+          potFallback,
+          rootId,
+        );
         if (!pathTrail.length || pathTrail[0]?.nodeId !== rootId) {
           pathTrail = [
             rootPathStep(rootId, node.board, String(node.place ?? "")),

@@ -7,6 +7,7 @@ import {
   compactActionLabel,
   edgeStepFromNode,
   formatChoiceFrequency,
+  groupCrumbsByStreet,
   groupPathByStreet,
   isTerminalFold,
   lineCrumbs,
@@ -15,11 +16,14 @@ import {
   nodePot,
   nodeStatusLabel,
   pathCrumbsFromTrail,
+  pathEdgeSizePot,
   pushNavHistory,
   replaceTrailAlternative,
   rootPathStep,
+  rootStreetFromPlace,
   splitActionLine,
   streetFromPlace,
+  streetLabel,
 } from "./actionHistory";
 import type { NodePayload } from "./types";
 
@@ -175,6 +179,73 @@ describe("actionHistory helpers", () => {
     expect(edge?.alternatives).toEqual([
       { label: "Check", nodeId: "n-check", kind: "action" },
     ]);
+  });
+
+  it("tags path bets from source pot, not arrived pot (R10)", () => {
+    // Chip-unit pots (R01 tenths PR may still show tenths until merged).
+    const from: NodePayload = {
+      node_id: "root",
+      kind: "decision",
+      player: 0,
+      place: "flop",
+      board: ["Ah", "Kd", "7c"],
+      pot: 100,
+      to_call: 0,
+      actions: ["Check", "Bet 50", "Bet 100"],
+      children: ["n-check", "n-bet", "n-bet100"],
+    };
+    const arrived: NodePayload = {
+      node_id: "n-bet",
+      kind: "decision",
+      player: 1,
+      place: "flop",
+      board: ["Ah", "Kd", "7c"],
+      pot: 150, // destination pot after Bet 50 — must not drive the tag
+      to_call: 50,
+      line: "Bet 50",
+    };
+    expect(pathEdgeSizePot(from, arrived.pot ?? 0)).toBe(100);
+    // Even if the caller passes the arrived pot as fallback, source wins.
+    const edge = edgeStepFromNode(from, "n-bet", Number(arrived.pot));
+    expect(edge?.label).toBe("b50");
+    expect(edge?.label).not.toMatch(/b33|Bet 50%/i);
+    expect(edge?.alternatives?.map((alt) => alt.label)).toEqual([
+      "Check",
+      "b100",
+    ]);
+
+    const root = rootPathStep("root", from.board, "flop");
+    const trail = advancePathTrail([root], from, arrived, Number(arrived.pot), "root");
+    expect(trail[1]?.label).toBe("b50");
+    expect(trail[1]?.label).not.toBe("b33");
+  });
+
+  it("labels turn-only and river-only roots without inventing Flop", () => {
+    expect(rootStreetFromPlace("turn", 4)).toBe("turn");
+    expect(rootStreetFromPlace("river", 5)).toBe("river");
+    expect(rootStreetFromPlace("flop", 3)).toBe("flop");
+    // Multi-street deep place still maps root chrome to Flop.
+    expect(rootStreetFromPlace("turn As river Kd", 5)).toBe("flop");
+
+    const turnRoot = rootPathStep("root", ["Ah", "Kd", "7c", "2s"], "turn");
+    expect(turnRoot.street).toBe("turn");
+    expect(streetLabel(turnRoot.street)).toBe("Turn");
+
+    const riverRoot = rootPathStep(
+      "root",
+      ["Ah", "Kd", "7c", "2s", "9h"],
+      "river",
+    );
+    expect(riverRoot.street).toBe("river");
+    expect(streetLabel(riverRoot.street)).toBe("River");
+    expect(streetLabel(riverRoot.street)).not.toBe("Flop");
+
+    const crumbGroups = groupCrumbsByStreet(
+      [{ label: "Root", nodeId: "root", kind: "root" }],
+      ["Ah", "Kd", "7c", "2s", "9h"],
+      "river",
+    );
+    expect(crumbGroups[0]?.street).toBe("river");
   });
 
   it("advances and truncates the client path trail", () => {
