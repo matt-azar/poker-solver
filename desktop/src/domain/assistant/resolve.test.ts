@@ -405,6 +405,172 @@ describe("resolveAssistantProposal", () => {
   });
 });
 
+describe("A03 range-source vs solve rake", () => {
+  const catalogue = createRangeProfileCatalogue([
+    fixture25,
+    fixture25Nl,
+    fixture3x,
+  ]);
+  const prefs = emptyStudySetupPreferences();
+
+  it("loading 100NL ranges into a rake-free sim keeps solve rake unchanged", () => {
+    const base: SpotDraft = {
+      ...DEFAULT_SPOT,
+      rakeRate: 0,
+      rakeCap: 0,
+      boardText: "As 7d 2c",
+    };
+    const result = resolveAssistantProposal({
+      proposal: {
+        kind: "update_study",
+        intent: {
+          mode: "edit",
+          potType: "SRP",
+          oopPosition: "BB",
+          ipPosition: "CO",
+          stakesLabel: "100NL",
+          stackBb: 100,
+        },
+        selectedProfileId: fixture25Nl.id,
+        stakesLabel: "100NL",
+      },
+      baseDraft: base,
+      catalogue,
+      preferences: prefs,
+      draftRevision: 2,
+    });
+    expect(result.draftPatch.rakeRate).toBe(0);
+    expect(result.draftPatch.rakeCap).toBe(0);
+    expect(result.summary.some((l) => /Range-source environment:.*100NL/i.test(l))).toBe(
+      true,
+    );
+    expect(result.summary.some((l) => /Solve rake unchanged/i.test(l))).toBe(true);
+    // Must not copy profile.rake onto the draft.
+    expect(result.draftPatch.rakeRate).not.toBe(fixture25Nl.rake.rate || undefined);
+  });
+
+  it("loading cEV ranges into a raked sim preserves solve rake", () => {
+    const base: SpotDraft = {
+      ...DEFAULT_SPOT,
+      rakeRate: 0.05,
+      rakeCap: 3,
+      boardText: "As 7d 2c",
+      oopRange: "AA",
+      ipRange: "KK",
+    };
+    const result = resolveAssistantProposal({
+      proposal: {
+        kind: "update_study",
+        intent: {
+          mode: "edit",
+          potType: "SRP",
+          oopPosition: "BB",
+          ipPosition: "CO",
+          stakesLabel: "cEV",
+          stackBb: 100,
+        },
+        selectedProfileId: fixture25.id,
+        stakesLabel: "cEV",
+      },
+      baseDraft: base,
+      catalogue,
+      preferences: prefs,
+      draftRevision: 4,
+    });
+    expect(result.draftPatch.rakeRate).toBe(0.05);
+    expect(result.draftPatch.rakeCap).toBe(3);
+    expect(result.summary.some((l) => /Solve rake unchanged: rate=0\.05/i.test(l))).toBe(
+      true,
+    );
+  });
+
+  it("explicit make-sim-rake-free clears engine rake only", () => {
+    const base: SpotDraft = {
+      ...DEFAULT_SPOT,
+      rakeRate: 0.05,
+      rakeCap: 3,
+      oopRange: "AA,KK",
+      ipRange: "QQ+",
+    };
+    const result = resolveAssistantProposal({
+      proposal: {
+        kind: "update_study",
+        intent: { mode: "edit" },
+        fieldEdits: { rakeRate: 0, rakeCap: 0 },
+      },
+      baseDraft: base,
+      catalogue,
+      preferences: prefs,
+      draftRevision: 5,
+    });
+    expect(result.draftPatch.rakeRate).toBe(0);
+    expect(result.draftPatch.rakeCap).toBe(0);
+    expect(result.draftPatch.oopRange).toBeUndefined();
+    expect(result.draftPatch.ipRange).toBeUndefined();
+    expect(result.summary.some((l) => /Solve rake cleared/i.test(l))).toBe(true);
+  });
+
+  it("prepareStudyFromProfile preserves live solve rake and reports range-source separately", () => {
+    const live: SpotDraft = { ...DEFAULT_SPOT, rakeRate: 0.065, rakeCap: 2.5 };
+    const result = prepareStudyFromProfile(
+      fixture25Nl,
+      emptyStudySetupPreferences(),
+      9,
+      "As 7d 2c",
+      live,
+    );
+    expect(result.draftPatch.rakeRate).toBe(0.065);
+    expect(result.draftPatch.rakeCap).toBe(2.5);
+    expect(result.summary.some((l) => /Range-source environment/i.test(l))).toBe(true);
+    expect(result.summary.some((l) => /profile rake was not applied/i.test(l))).toBe(
+      true,
+    );
+  });
+});
+
+describe("A07 invalid field rejection", () => {
+  const catalogue = createRangeProfileCatalogue([fixture25]);
+  const prefs = emptyStudySetupPreferences();
+
+  it("rejects negative pot without mutating — ok:false not canSolve-only", () => {
+    const base: SpotDraft = { ...DEFAULT_SPOT, pot: 100 };
+    const result = resolveAssistantProposal({
+      proposal: {
+        kind: "update_study",
+        intent: { mode: "edit" },
+        fieldEdits: { pot: -5 },
+      },
+      baseDraft: base,
+      catalogue,
+      preferences: prefs,
+      draftRevision: 1,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.canSolve).toBe(false);
+    expect(result.conflicts.some((c) => c.field === "pot")).toBe(true);
+    expect(Object.keys(result.draftPatch)).toHaveLength(0);
+  });
+
+  it("rejects zero threads, fractional iterations, and negative memory", () => {
+    const result = resolveAssistantProposal({
+      proposal: {
+        kind: "update_study",
+        intent: { mode: "edit" },
+        fieldEdits: { threads: 0, iterations: 10.5, memoryMib: -1 },
+      },
+      baseDraft: { ...DEFAULT_SPOT },
+      catalogue,
+      preferences: prefs,
+      draftRevision: 2,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.conflicts.map((c) => c.field).sort()).toEqual(
+      expect.arrayContaining(["threads", "iterations", "memoryMib"]),
+    );
+    expect(Object.keys(result.draftPatch)).toHaveLength(0);
+  });
+});
+
 describe("prepareStudyFromProfile", () => {
   it("direct path loads fixture ranges and derived pot/stack", () => {
     const result = prepareStudyFromProfile(

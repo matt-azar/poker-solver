@@ -500,6 +500,24 @@ function extractFieldEdits(text: string): StudyFieldEdits | undefined {
       edits.algorithm = "cfr_plus";
     }
   }
+  // Explicit solve-rake edits only — never inferred from 100NL / cEV range wording.
+  if (
+    /\b(make\s+(the\s+)?sim(ulation)?\s+rake[-\s]?free|clear\s+(the\s+)?(solve\s+)?rake|rake[-\s]?free\s+sim)\b/i.test(
+      text,
+    )
+  ) {
+    edits.rakeRate = 0;
+    edits.rakeCap = 0;
+  } else {
+    const rate = grabLabeledNumber(text, "rake rate") ?? grabLabeledNumber(text, "rakeRate");
+    if (rate !== undefined && /\brake\s*rate\b/i.test(text)) {
+      edits.rakeRate = rate;
+    }
+    const cap = grabLabeledNumber(text, "rake cap") ?? grabLabeledNumber(text, "rakeCap");
+    if (cap !== undefined && /\brake\s*cap\b/i.test(text)) {
+      edits.rakeCap = cap;
+    }
+  }
   return Object.keys(edits).length > 0 ? edits : undefined;
 }
 

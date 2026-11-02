@@ -1,3 +1,7 @@
+import {
+  validateProposedFieldBag,
+  type LimitedSetupField,
+} from "../setup/fieldLimits";
 import type { StudySetupIntent, StudySetupTreePreset } from "../setup/types";
 import { buildSetupAssistantSystemPrompt } from "./contextPacks";
 import {
@@ -190,7 +194,11 @@ const INTERPRET_JSON_SCHEMA = {
     treeEdits: { type: "object" },
     stackBb: { type: "number" },
     openSizeBb: { type: "number" },
-    stakesLabel: { type: "string" },
+    stakesLabel: {
+      type: "string",
+      description:
+        "Range-source environment (catalogue matching / provenance, e.g. 100NL or cEV). Independent of engine solve rake — do not copy onto fieldEdits.rakeRate.",
+    },
     generatedRanges: {
       type: "object",
       additionalProperties: false,
@@ -207,7 +215,42 @@ const INTERPRET_JSON_SCHEMA = {
       minItems: 2,
       maxItems: 2,
     },
-    fieldEdits: { type: "object" },
+    fieldEdits: {
+      type: "object",
+      description:
+        "Direct Build writes. Use rakeRate/rakeCap only for explicit solve-rake changes (e.g. make sim rake-free → 0). Never set them from stakesLabel / 100NL / cEV range loads.",
+      properties: {
+        pot: { type: "number" },
+        stack: { type: "number" },
+        iterations: { type: "integer" },
+        threads: { type: "integer" },
+        memoryMib: { type: "number" },
+        samples: { type: "integer" },
+        maxRaises: { type: "integer" },
+        mergeThresholdPct: { type: "number" },
+        potCap: { type: "number" },
+        rakeRate: {
+          type: "number",
+          description: "Engine solve rake rate (not range-source stakesLabel)",
+        },
+        rakeCap: {
+          type: "number",
+          description: "Engine solve rake cap (not range-source stakesLabel)",
+        },
+        accuracy: { type: "string" },
+        timeLimit: { type: "string" },
+        algorithm: { type: "string", enum: ["cfr_plus", "cfr", "dcfr"] },
+        geometric: { type: "boolean" },
+        noThreeBet: { type: "boolean" },
+        allowAllIn: { type: "boolean" },
+        donkFlop: { type: "boolean" },
+        donkTurn: { type: "boolean" },
+        donkRiver: { type: "boolean" },
+        incentives: { type: "string" },
+        edgeTags: { type: "string" },
+      },
+      additionalProperties: false,
+    },
     questions: { type: "array", items: { type: "string" } },
     candidates: { type: "array", items: { type: "object" } },
     message: { type: "string" },
@@ -422,7 +465,9 @@ const FIELD_EDIT_NUMBERS = [
   "maxRaises",
   "mergeThresholdPct",
   "potCap",
-] as const;
+  "rakeRate",
+  "rakeCap",
+] as const satisfies readonly LimitedSetupField[];
 
 const FIELD_EDIT_STRINGS = ["accuracy", "timeLimit", "incentives", "edgeTags"] as const;
 
@@ -437,18 +482,36 @@ const FIELD_EDIT_BOOLS = [
 
 const ALGORITHMS = new Set(["cfr_plus", "cfr", "dcfr"]);
 
-/** Whitelist Build fields the model may write. Drops anything else. */
+/**
+ * Whitelist Build fields the model may write. Drops anything else.
+ * Rejects invalid limits (negative pot/stack/memory, zero threads, fractional
+ * iterations, negative solve rake) — do not silently coerce.
+ */
 export function asFieldEdits(raw: unknown): StudyFieldEdits | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return undefined;
   }
   const src = raw as Record<string, unknown>;
   const out: StudyFieldEdits = {};
+  const proposedNumbers: Partial<Record<LimitedSetupField, unknown>> = {};
   for (const key of FIELD_EDIT_NUMBERS) {
     const value = src[key];
     if (typeof value === "number" && Number.isFinite(value)) {
+      proposedNumbers[key] = value;
       out[key] = value;
+    } else if (value !== undefined && value !== null) {
+      throw new AssistantProviderError(
+        "invalid_response",
+        `fieldEdits.${key} must be a finite number`,
+      );
     }
+  }
+  const limitConflicts = validateProposedFieldBag(proposedNumbers);
+  if (limitConflicts.length > 0) {
+    throw new AssistantProviderError(
+      "invalid_response",
+      limitConflicts.map((c) => c.message).join("; "),
+    );
   }
   for (const key of FIELD_EDIT_STRINGS) {
     const value = src[key];

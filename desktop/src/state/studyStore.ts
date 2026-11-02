@@ -333,6 +333,7 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
     threads: draft.threads,
     algorithm: draft.algorithm,
     samples: Math.max(1, Math.min(20, draft.samples || 5)),
+    // Engine solve rake (independent of range-source / catalogue stakesLabel).
     rake_rate: draft.rakeRate || 0,
     rake_cap: draft.rakeCap || 0,
     icm_stacks: icmStacks,

@@ -130,7 +130,7 @@ export function AssistantPanel() {
         getRevision: () => useStudyStore.getState().draftRevision,
         preferences: prefs,
         signal: controller.signal,
-        setupSummary: `board=${draft.boardText || "(none)"} pot=${draft.pot} stack=${draft.stack} oop=${draft.oopRange.slice(0, 40)} ip=${draft.ipRange.slice(0, 40)} rev=${draftRevision}`,
+        setupSummary: `board=${draft.boardText || "(none)"} pot=${draft.pot} stack=${draft.stack} solveRake=rate:${draft.rakeRate}/cap:${draft.rakeCap} oop=${draft.oopRange.slice(0, 40)} ip=${draft.ipRange.slice(0, 40)} rev=${draftRevision}`,
       });
       setLastRun(run);
       if (run.status === "error") {

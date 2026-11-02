@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { parseRangeText, comboCount } from "../range";
+import { parseExactRange, parseRangeText, comboCount } from "../range";
 import {
+  blendExactRanges,
   blendWeightGrids,
   interpolateProfilesByStack,
   pickStackBracket,
@@ -91,5 +92,55 @@ describe("blendWeightGrids", () => {
     expect(blendWeightGrids(left, right, 0)[1][1]).toBe(0);
     expect(blendWeightGrids(left, right, 1)[0][0]).toBe(0);
     expect(blendWeightGrids(left, right, 1)[1][1]).toBe(1);
+  });
+});
+
+describe("A07 exact identity + compatible keys", () => {
+  it("blending AsAd:0.5 with itself preserves exact combo weight", () => {
+    const text = "AsAd:0.5";
+    const exact = parseExactRange(text).range;
+    const blended = blendExactRanges(exact, exact, 0.5);
+    expect(blended.get("AsAd")).toBeCloseTo(0.5, 9);
+    // Must not collapse into AA:0.083 via the aggregate-grid path.
+    expect(blended.size).toBe(1);
+    const mid = interpolateProfilesByStack({
+      low: profile({ id: "same-a", stack: 150, oop: text, ip: "AA" }),
+      high: profile({ id: "same-b", stack: 200, oop: text, ip: "AA" }),
+      targetStackBb: 175,
+    });
+    const oop = parseExactRange(mid.oopRange).range;
+    expect(oop.get("AsAd")).toBeCloseTo(0.5, 9);
+    expect([...oop.keys()]).toEqual(["AsAd"]);
+  });
+
+  it("rejects incompatible seats/rake as an actionable error", () => {
+    const low = profile({
+      id: "btn",
+      stack: 150,
+      oop: "AA",
+      ip: "KK",
+      stakes: "cEV",
+    });
+    const high = {
+      ...profile({
+        id: "co",
+        stack: 200,
+        oop: "AA",
+        ip: "KK",
+        stakes: "100NL",
+      }),
+      positions: { oop: "BB", ip: "CO" },
+    };
+    expect(() =>
+      interpolateProfilesByStack({ low, high, targetStackBb: 175 }),
+    ).toThrow(/Incompatible interpolation references/i);
+  });
+
+  it("rejects unsupported extrapolation outside the bracket", () => {
+    const low = profile({ id: "a", stack: 100, oop: "AA", ip: "KK" });
+    const high = profile({ id: "b", stack: 150, oop: "AA,KK", ip: "KK" });
+    expect(() =>
+      interpolateProfilesByStack({ low, high, targetStackBb: 200 }),
+    ).toThrow(/Unsupported extrapolation/i);
   });
 });

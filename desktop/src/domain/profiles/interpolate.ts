@@ -1,5 +1,12 @@
 import { potTypeFromActions } from "../setup/derive";
-import { blankGrid, parseRangeText, rangeText, type WeightGrid } from "../range";
+import {
+  blankGrid,
+  emptyExactRange,
+  parseExactRange,
+  serializeExactRange,
+  type ExactRange,
+  type WeightGrid,
+} from "../range";
 import { normalizeRakeEnvironmentLabel } from "./match";
 import type { RangeProfile } from "./types";
 
@@ -53,14 +60,93 @@ export function blendWeightGrids(
   return out;
 }
 
+/**
+ * Linear blend of exact combo weights. Identity-preserving: blending a range
+ * with itself (any t) keeps the same suit-specific combo keys and weights.
+ */
+export function blendExactRanges(
+  left: ExactRange,
+  right: ExactRange,
+  t: number,
+): ExactRange {
+  const w = clamp01(t);
+  if (w <= 1e-12) {
+    return new Map(left);
+  }
+  if (w >= 1 - 1e-12) {
+    return new Map(right);
+  }
+  const out = emptyExactRange();
+  const keys = new Set<string>([...left.keys(), ...right.keys()]);
+  for (const combo of keys) {
+    const blended = (left.get(combo) ?? 0) * (1 - w) + (right.get(combo) ?? 0) * w;
+    if (blended > 1e-9) {
+      out.set(combo, Math.min(1, blended));
+    }
+  }
+  return out;
+}
+
+/**
+ * Blend range texts via exact combo maps (not the aggregate 169-grid).
+ * Rejects either side when any token fails full-token parse.
+ */
 export function blendRangeTexts(left: string, right: string, t: number): string {
-  return rangeText(blendWeightGrids(parseRangeText(left), parseRangeText(right), t));
+  const leftParsed = parseExactRange(left);
+  const rightParsed = parseExactRange(right);
+  if (leftParsed.errors.length > 0 || rightParsed.errors.length > 0) {
+    const sample =
+      leftParsed.errors[0]?.token ?? rightParsed.errors[0]?.token ?? "unknown";
+    throw new Error(`interpolation range token invalid: ${sample}`);
+  }
+  return serializeExactRange(
+    blendExactRanges(leftParsed.range, rightParsed.range, t),
+  );
+}
+
+/**
+ * Require matching strategic keys before blending. Warnings alone are not enough
+ * for a meaningful study — mismatched seats/rake/pot/format become conflicts.
+ */
+export function assertCompatibleInterpolationRefs(
+  low: RangeProfile,
+  high: RangeProfile,
+): void {
+  const problems: string[] = [];
+  if (
+    low.positions.oop.toUpperCase() !== high.positions.oop.toUpperCase() ||
+    low.positions.ip.toUpperCase() !== high.positions.ip.toUpperCase()
+  ) {
+    problems.push(
+      `seats differ (${low.positions.oop}/${low.positions.ip} vs ${high.positions.oop}/${high.positions.ip})`,
+    );
+  }
+  const potLow = potTypeFromActions(low.preflopActions);
+  const potHigh = potTypeFromActions(high.preflopActions);
+  if (potLow && potHigh && potLow !== potHigh) {
+    problems.push(`pot type differs (${potLow} vs ${potHigh})`);
+  }
+  const stakesLow = normalizeRakeEnvironmentLabel(low.labels?.stakes);
+  const stakesHigh = normalizeRakeEnvironmentLabel(high.labels?.stakes);
+  if (stakesLow !== stakesHigh) {
+    problems.push(
+      `range-source rake/stakes differs (${low.labels?.stakes ?? "none"} vs ${high.labels?.stakes ?? "none"})`,
+    );
+  }
+  if (low.format !== high.format) {
+    problems.push(`format differs (${low.format} vs ${high.format})`);
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `Incompatible interpolation references: ${problems.join("; ")}. Choose matching seats, pot type, and range-source rake.`,
+    );
+  }
 }
 
 /**
  * Interpolate paired OOP/IP ranges between two profiles by starting-stack.
- * Callers must ensure strategic keys mostly agree (pot type, seats, rake);
- * this function only blends weights and records provenance fields.
+ * Requires compatible strategic keys; rejects unsupported extrapolation.
+ * Exact combo weights are preserved (identity blend of identical ranges).
  */
 export function interpolateProfilesByStack(
   input: StackInterpolationInput,
@@ -73,6 +159,8 @@ export function interpolateProfilesByStack(
     throw new Error("targetStackBb must be a positive finite number");
   }
 
+  assertCompatibleInterpolationRefs(a, b);
+
   let low = a;
   let high = b;
   if (a.startingStackBb > b.startingStackBb) {
@@ -81,22 +169,15 @@ export function interpolateProfilesByStack(
   }
 
   const notes: string[] = [];
-  if (low.positions.oop !== high.positions.oop || low.positions.ip !== high.positions.ip) {
-    notes.push("reference seats differ — blend may be strategically inconsistent");
-  }
-  if ((low.labels?.stakes ?? "") !== (high.labels?.stakes ?? "")) {
-    notes.push("reference rake/stakes labels differ");
-  }
-
   let t = 0;
   if (high.startingStackBb === low.startingStackBb) {
     t = 0;
     notes.push("reference stacks are equal — using the low profile weights");
   } else {
     t = (target - low.startingStackBb) / (high.startingStackBb - low.startingStackBb);
-    if (t < 0 || t > 1) {
-      notes.push(
-        `target ${target}bb is outside [${low.startingStackBb}, ${high.startingStackBb}] — clamping blend factor`,
+    if (t < -1e-9 || t > 1 + 1e-9) {
+      throw new Error(
+        `Unsupported extrapolation: target ${target}bb is outside bracket [${low.startingStackBb}, ${high.startingStackBb}]bb`,
       );
     }
     t = clamp01(t);

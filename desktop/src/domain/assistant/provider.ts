@@ -59,6 +59,13 @@ export interface StudyFieldEdits {
   maxRaises?: number;
   mergeThresholdPct?: number;
   potCap?: number;
+  /**
+   * Engine solve-rake rate for this simulation.
+   * Independent of range-source / catalogue stakesLabel (e.g. 100NL).
+   */
+  rakeRate?: number;
+  /** Engine solve-rake cap. Cleared with rakeRate when making the sim rake-free. */
+  rakeCap?: number;
   geometric?: boolean;
   noThreeBet?: boolean;
   allowAllIn?: boolean;
