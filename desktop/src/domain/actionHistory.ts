@@ -133,6 +133,36 @@ export function streetLabel(street: PathStreet): string {
   return "River";
 }
 
+/**
+ * Street bucket for the tree root / path chrome header.
+ *
+ * Turn-only and river-only spots keep Turn/River (do not invent Flop).
+ * Multi-street places that already mention earlier streets stay on Flop.
+ */
+export function rootStreetFromPlace(
+  place: string | null | undefined,
+  boardLen = 0,
+): PathStreet {
+  const p = (place || "").trim().toLowerCase();
+  const mentionsFlop = /\bflop\b/.test(p);
+  const mentionsTurn = /\bturn\b/.test(p);
+  const mentionsRiver = /\briver\b/.test(p);
+  const streetMentions = [mentionsFlop, mentionsTurn, mentionsRiver].filter(
+    Boolean,
+  ).length;
+  // e.g. `turn As river Kd` — root of a flop tree, not a river-only spot.
+  if (streetMentions > 1) {
+    return "flop";
+  }
+  if (mentionsRiver || (boardLen >= 5 && !mentionsTurn && !mentionsFlop)) {
+    return "river";
+  }
+  if (mentionsTurn || (boardLen === 4 && !mentionsFlop)) {
+    return "turn";
+  }
+  return "flop";
+}
+
 /** Board cards that belong visually with a street group. */
 export function boardCardsForStreet(
   street: PathStreet,
@@ -251,8 +281,7 @@ export function groupCrumbsByStreet(
   }
   const root = crumbs[0]!;
   const rest = crumbs.slice(1);
-  const rootStreet: PathStreet =
-    boardLen >= 5 ? "flop" : boardLen === 4 ? "flop" : "flop";
+  const rootStreet: PathStreet = rootStreetFromPlace(place, boardLen);
   const steps: PathStep[] = [
     {
       nodeId: root.nodeId || "",
@@ -483,29 +512,43 @@ export function rootPathStep(
   board?: string[] | string | null,
   place?: string | null,
 ): PathStep {
-  const street = streetFromPlace(place, boardCardList(board).length);
+  const street = rootStreetFromPlace(place, boardCardList(board).length);
   return {
     nodeId: rootNodeId,
     label: "Root",
     rawLabel: "Root",
     kind: "root",
-    street: street === "river" || street === "turn" ? "flop" : street,
+    street,
     actor: null,
     parentId: null,
   };
+}
+
+/**
+ * Size-tag pot for a path edge: always the **source** node's basis
+ * (`pot` + `to_call` when facing a bet), never the destination pot after the bet.
+ */
+export function pathEdgeSizePot(
+  from: NodePayload | null | undefined,
+  potFallback = 0,
+): number {
+  return actionSizePotBasis(from, potFallback);
 }
 
 /** Build the path step taken when leaving `from` toward `toNodeId`. */
 export function edgeStepFromNode(
   from: NodePayload,
   toNodeId: string,
-  pot: number,
+  potFallback = 0,
 ): PathStep | null {
   const choices = nextChoicesFromNode(from);
   const choice = choices.find((item) => item.nodeId === toNodeId);
   if (!choice) {
     return null;
   }
+  // Capture % tags from the source node pot/basis (Bet 50 into pot 100 → b50),
+  // not the arrived pot after chips go in.
+  const pot = pathEdgeSizePot(from, potFallback);
   const board = boardCardList(from.board);
   const place =
     typeof from.place === "string" ? from.place : null;
@@ -548,16 +591,34 @@ export function edgeStepFromNode(
   };
 }
 
+function rootStepForTrail(
+  trail: PathStep[],
+  rootNodeId: string,
+  board?: string[] | string | null,
+  place?: string | null,
+): PathStep {
+  const existing = trail.find(
+    (step) => step.kind === "root" && step.nodeId === rootNodeId,
+  );
+  if (existing) {
+    return { ...existing };
+  }
+  return rootPathStep(rootNodeId, board, place);
+}
+
 /**
  * Extend or repair the client trail after arriving at `arrived`.
  * If `from` is the trail tip, append `edge`; if jumping to an ancestor,
  * truncate; otherwise reset to root + synthetic edge when possible.
+ *
+ * `potFallback` is only used when `from.pot` is missing — size tags always
+ * prefer the source node's pot/basis via {@link pathEdgeSizePot}.
  */
 export function advancePathTrail(
   trail: PathStep[],
   from: NodePayload | null | undefined,
   arrived: NodePayload,
-  pot: number,
+  potFallback: number,
   rootNodeId: string,
 ): PathStep[] {
   const arrivedStepKind: PathStep["kind"] =
@@ -568,7 +629,14 @@ export function advancePathTrail(
         : "action";
 
   if (!from) {
-    return [rootPathStep(rootNodeId, arrived.board, String(arrived.place ?? ""))];
+    return [
+      rootStepForTrail(
+        trail,
+        rootNodeId,
+        arrived.board,
+        String(arrived.place ?? ""),
+      ),
+    ];
   }
 
   // Clicked an ancestor already on the trail.
@@ -579,7 +647,7 @@ export function advancePathTrail(
 
   const tip = trail[trail.length - 1];
   if (tip && tip.nodeId === from.node_id) {
-    const edge = edgeStepFromNode(from, arrived.node_id, pot);
+    const edge = edgeStepFromNode(from, arrived.node_id, potFallback);
     if (edge) {
       // Refine kind once we know the destination.
       if (arrived.kind === "terminal") {
@@ -589,9 +657,18 @@ export function advancePathTrail(
     }
   }
 
-  // Trail out of sync — rebuild from root using line labels (no mid node ids).
-  const base = [rootPathStep(rootNodeId, arrived.board, String(arrived.place ?? ""))];
-  const edge = from ? edgeStepFromNode(from, arrived.node_id, pot) : null;
+  // Trail out of sync — rebuild from root + synthetic edge when possible.
+  // Prefer an existing root street (turn/river-only) over inventing Flop from a
+  // deep `arrived.place` like `turn As river Kd`.
+  const base = [
+    rootStepForTrail(
+      trail,
+      rootNodeId,
+      from.board ?? arrived.board,
+      String(arrived.place ?? ""),
+    ),
+  ];
+  const edge = edgeStepFromNode(from, arrived.node_id, potFallback);
   if (edge) {
     if (arrived.kind === "terminal") {
       edge.kind = arrivedStepKind;
