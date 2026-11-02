@@ -447,6 +447,7 @@ export function BuildWorkspace() {
               Redo
             </button>
           </div>
+          <div className="range-pair">
           {(["oop", "ip"] as const).map((player) => (
             <div key={player} className="range-editor">
               <div className="range-editor__head">
@@ -483,6 +484,7 @@ export function BuildWorkspace() {
               <RangePaintGrid player={player} />
             </div>
           ))}
+          </div>
         </section>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { mapActionColors } from "../../domain/actionColors";
 import { frequencyOf, groupEv, groupHands, strategyMix } from "../../domain/browse";
 import {
@@ -64,6 +64,23 @@ export function RangeMatrix() {
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const setHoverCell = useStudyStore((s) => s.setHoverCell);
   const actionFilter = useStudyStore((s) => s.actionFilter);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [side, setSide] = useState(0);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) {
+      return;
+    }
+    const measure = () => {
+      const next = Math.max(0, Math.floor(Math.min(el.clientWidth, el.clientHeight)));
+      setSide((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const cells = useMemo(
     () => (currentNode ? groupHands(currentNode) : []),
@@ -89,11 +106,12 @@ export function RangeMatrix() {
   }, [cells, currentNode, nodeValues, evDisplayBasis]);
 
   return (
-    <div className="range-matrix-wrap">
+    <div className="range-matrix-wrap" ref={wrapRef}>
       <div
         className="range-matrix"
         role="grid"
         aria-label="Hand range matrix"
+        style={side > 0 ? { width: side, height: side } : undefined}
         onMouseLeave={() => setHoverCell(null)}
       >
         <div className="matrix-corner" />
