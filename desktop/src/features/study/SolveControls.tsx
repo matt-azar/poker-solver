@@ -1,3 +1,4 @@
+import { openSolutionFile, saveSolutionFile } from "../../commands/solutionFiles";
 import { solveControlFlags } from "../../domain/solveControls";
 import { useStudyStore } from "../../state/studyStore";
 
@@ -11,9 +12,19 @@ export function SolveControls() {
   const calculateEv = useStudyStore((s) => s.calculateEv);
   const saveSolution = useStudyStore((s) => s.saveSolution);
   const openSolution = useStudyStore((s) => s.openSolution);
+  const updateDraft = useStudyStore((s) => s.updateDraft);
 
   const { canSolve, canContinue, canPause, canStop } = solveControlFlags(phase);
   const hasSolution = Boolean(solutionId);
+
+  function solutionFileDeps() {
+    return {
+      getSolutionPath: () => useStudyStore.getState().draft.solutionPath,
+      updateDraft,
+      openSolution,
+      saveSolution,
+    };
+  }
 
   return (
     <div className="solve-controls" role="group" aria-label="Solve controls">
@@ -75,11 +86,15 @@ export function SolveControls() {
         className="toolbar-btn"
         disabled={!hasSolution}
         title={hasSolution ? "Save the current solution" : "Solve first"}
-        onClick={() => void saveSolution()}
+        onClick={() => void saveSolutionFile(solutionFileDeps())}
       >
         Save
       </button>
-      <button type="button" className="toolbar-btn" onClick={() => void openSolution()}>
+      <button
+        type="button"
+        className="toolbar-btn"
+        onClick={() => void openSolutionFile(solutionFileDeps())}
+      >
         Open
       </button>
     </div>
