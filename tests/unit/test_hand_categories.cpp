@@ -47,8 +47,8 @@ poker::streets::StreetConfig turn_config()
 {
     poker::streets::StreetConfig config;
     config.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse("AcAd");
     config.ip = Range::parse("KsKc");
     config.oop_bet_sizes = {0.5};

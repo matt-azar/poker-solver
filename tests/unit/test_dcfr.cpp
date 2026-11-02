@@ -38,8 +38,8 @@ StreetConfig tiny_river()
     StreetConfig config;
     config.board = {
         card("Ah"), card("Kd"), card("7c"), card("4s"), card("2h")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = poker::holdem::Range::parse("AcAd");
     config.ip = poker::holdem::Range::parse("KsKc");
     // Five-card boards read river-specific lists; shared sizes alone are fine
@@ -56,8 +56,8 @@ StreetConfig tiny_turn()
 {
     StreetConfig config;
     config.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = poker::holdem::Range::parse("AcAd");
     config.ip = poker::holdem::Range::parse("KsKc");
     config.oop_bet_sizes = {0.5};
@@ -72,8 +72,8 @@ StreetConfig tiny_flop()
 {
     StreetConfig config;
     config.board = {card("Ah"), card("Kd"), card("7c")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = poker::holdem::Range::parse("QcQd");
     config.ip = poker::holdem::Range::parse("JcJd");
     // Check-only flop still exercises chance/discount/averaging paths.
@@ -366,8 +366,8 @@ void expect_zero_own_reach_and_blockers()
 {
     StreetConfig config;
     config.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     // Shared queen blocks one side's combo; zero-weight twin still listed via range text
     // is not needed — use a live combo with a dead twin on the board.
     config.oop = poker::holdem::Range::parse("QcQd,JsJd");

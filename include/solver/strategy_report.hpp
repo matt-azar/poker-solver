@@ -1,5 +1,7 @@
 #pragma once
 
+#include "game/chips.hpp"
+
 #include <charconv>
 #include <cmath>
 #include <fstream>
@@ -165,8 +167,8 @@ inline std::string format_strategy_report(const StrategyReport& report)
     std::string out;
     out += "strategy-report 1\n";
     append_line(out, "board", report.board);
-    append_line(out, "pot", std::to_string(report.pot));
-    append_line(out, "stack", std::to_string(report.stack));
+    append_line(out, "pot", format_chips(report.pot));
+    append_line(out, "stack", format_chips(report.stack));
     append_line(out, "algorithm", report.algorithm);
     append_line(out, "iterations", std::to_string(report.iterations));
     if (report.has_nash_gap)
@@ -231,7 +233,7 @@ inline StrategyReport parse_strategy_report(std::string_view text)
                 throw std::invalid_argument("duplicate pot in strategy report");
             }
             seen_pot = true;
-            report.pot = parse_int(value);
+            report.pot = parse_chips(value);
         }
         else if (key == "stack")
         {
@@ -240,7 +242,7 @@ inline StrategyReport parse_strategy_report(std::string_view text)
                 throw std::invalid_argument("duplicate stack in strategy report");
             }
             seen_stack = true;
-            report.stack = parse_int(value);
+            report.stack = parse_chips(value);
         }
         else if (key == "algorithm")
         {

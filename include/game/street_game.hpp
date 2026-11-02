@@ -1,5 +1,6 @@
 #pragma once
 
+#include "game/chips.hpp"
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
@@ -32,8 +33,9 @@ inline constexpr int kMaxStreetHistory = 24;
 struct StreetConfig
 {
     std::vector<int> board;
-    int pot = 100;
-    int stack = 200;
+    // pot / stack are tenths of a chip (chip_units(100) == 100.0 chips).
+    int pot = chip_units(100);
+    int stack = chip_units(200);
     holdem::Range oop{};
     holdem::Range ip{};
     std::vector<double> oop_bet_sizes{};
@@ -420,14 +422,15 @@ private:
 
     static int round_chips(double fraction, int basis)
     {
-        return static_cast<int>(std::llround(fraction * static_cast<double>(basis)));
+        return poker::round_chips(fraction, basis);
     }
 
     static int chips_from_spec(double spec, int basis)
     {
         if (spec < 0.0)
         {
-            return static_cast<int>(std::llround(-spec));
+            // Negative size-list entry: absolute chips → tenths.
+            return absolute_chips_to_tenths(-spec);
         }
         return round_chips(spec, basis);
     }
@@ -611,11 +614,11 @@ private:
         }
         else if (!facing)
         {
-            text = "Bet " + std::to_string(add);
+            text = "Bet " + format_chips(add);
         }
         else
         {
-            text = "Raise to " + std::to_string(street_total);
+            text = "Raise to " + format_chips(street_total);
         }
         if (all_in && code != 0)
         {
@@ -625,6 +628,7 @@ private:
     }
 
     // Compact tokens accepted by TreeEditSet (no spaces): c, f, call, b50, r100.
+    // Chip amounts in bN / rN are chip units (one decimal when needed).
     static std::string compact_action_token(
         int code, int add, int street_total, bool all_in, bool facing)
     {
@@ -636,7 +640,8 @@ private:
         {
             return facing ? "call" : "c";
         }
-        std::string text = facing ? "r" + std::to_string(street_total) : "b" + std::to_string(add);
+        std::string text =
+            facing ? "r" + format_chips(street_total) : "b" + format_chips(add);
         if (all_in)
         {
             text += "ai";

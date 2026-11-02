@@ -1,5 +1,6 @@
 #pragma once
 
+#include "game/chips.hpp"
 #include "solver/payoff.hpp"
 
 #include <cmath>
@@ -212,8 +213,8 @@ struct IcmConfig
     }
 
     // Rejects malformed inputs. When pot/effective_stack are provided (solve
-    // build), also require both hero stacks cover the worst chip loss
-    // pot/2 + effective_stack so from_chip_terminal cannot see a negative post.
+    // build), they are tenths of a chip; convert to chip units before comparing
+    // with tournament stacks so from_chip_terminal cannot see a negative post.
     void validate(int pot = 0, int effective_stack = 0) const
     {
         if (!enabled())
@@ -230,7 +231,7 @@ struct IcmConfig
             throw std::invalid_argument("ICM hand pot and stack must be nonnegative");
         }
         const double need =
-            0.5 * static_cast<double>(pot) + static_cast<double>(effective_stack);
+            0.5 * tenths_to_chips(pot) + tenths_to_chips(effective_stack);
         if (stacks[0] < need || stacks[1] < need)
         {
             throw std::invalid_argument(

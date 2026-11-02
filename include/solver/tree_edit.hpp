@@ -1,5 +1,7 @@
 #pragma once
 
+#include "game/chips.hpp"
+
 #include <cstddef>
 #include <optional>
 #include <sstream>
@@ -87,6 +89,7 @@ struct LineEdit
     // (the new size is carried in size_*); prefer leaving action empty.
     std::string action;
     double size_pot_fraction = -1.0;
+    // Absolute AddSize amount in tenths of a chip (20c → 200).
     int size_chips = 0;
 
     bool uses_chip_size() const
@@ -236,7 +239,7 @@ inline std::string format_tree_edits(const TreeEditSet& set)
             out << ' ';
             if (edit.uses_chip_size())
             {
-                out << edit.size_chips << 'c';
+                out << format_chips(edit.size_chips) << 'c';
             }
             else
             {
@@ -323,10 +326,9 @@ inline TreeEditSet parse_tree_edits(std::string_view text)
         {
             if (!tail.empty() && tail.back() == 'c')
             {
-                const std::string chips(tail.substr(0, tail.size() - 1));
                 try
                 {
-                    edit.size_chips = std::stoi(chips);
+                    edit.size_chips = parse_chips(tail.substr(0, tail.size() - 1));
                 }
                 catch (const std::exception&)
                 {

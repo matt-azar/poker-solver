@@ -60,7 +60,8 @@ LineEdit add_chips_along(LinePath path, int chips)
     LineEdit edit;
     edit.kind = LineEditKind::AddSize;
     edit.path = std::move(path);
-    edit.size_chips = chips;
+    // chips argument is whole chips; size_chips stores tenths.
+    edit.size_chips = chips * 10;
     return edit;
 }
 
@@ -73,8 +74,8 @@ StreetConfig tiny_turn_one_bet()
 {
     StreetConfig config;
     config.board = {card("Ah"), card("Kd"), card("7c"), card("2s")};
-    config.pot = 100;
-    config.stack = 200;
+    config.pot = 1000;
+    config.stack = 2000;
     config.oop = Range::parse("QcQd");
     config.ip = Range::parse("JcJd");
     config.oop_bet_sizes = {0.5};
@@ -131,7 +132,7 @@ void run_tree_edit_tests()
     {
         LineEdit edit;
         edit.kind = LineEditKind::AddSize;
-        edit.size_chips = 20;
+        edit.size_chips = 200; // 20.0 chips
         CHECK(validate_line_edit(edit));
         CHECK(edit.uses_chip_size());
         edit.size_pot_fraction = 0.1;
@@ -159,7 +160,7 @@ void run_tree_edit_tests()
         LineEdit chips;
         chips.kind = LineEditKind::AddSize;
         chips.path.steps.push_back(LineStep{"b33"});
-        chips.size_chips = 20;
+        chips.size_chips = 200; // 20.0 chips
         set.append(std::move(chips));
 
         CHECK(set.size() == 4);
@@ -183,7 +184,7 @@ void run_tree_edit_tests()
         CHECK(round_trip.edits[1].action == "b50");
         CHECK(round_trip.edits[2].size_pot_fraction == 0.33);
         CHECK(round_trip.edits[3].uses_chip_size());
-        CHECK(round_trip.edits[3].size_chips == 20);
+        CHECK(round_trip.edits[3].size_chips == 200);
     }
 
     {

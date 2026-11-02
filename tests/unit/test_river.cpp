@@ -1,5 +1,6 @@
 #include "harness.hpp"
 
+#include "game/chips.hpp"
 #include "game/river_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
@@ -102,14 +103,14 @@ void walk(const RiverGame& game, const RiverGame::State& state, int depth)
     if (game.is_terminal(state))
     {
         const double utility = game.p1_utility(state);
-        const double half = game.config().pot * 0.5;
+        const double half = poker::tenths_to_chips(game.config().pot) * 0.5;
         if (state.folded == 0)
         {
-            CHECK_NEAR(utility, -(half + state.contrib[0]), 1e-9);
+            CHECK_NEAR(utility, -(half + poker::tenths_to_chips(state.contrib[0])), 1e-9);
         }
         else if (state.folded == 1)
         {
-            CHECK_NEAR(utility, half + state.contrib[1], 1e-9);
+            CHECK_NEAR(utility, half + poker::tenths_to_chips(state.contrib[1]), 1e-9);
         }
         else
         {
@@ -162,8 +163,8 @@ RiverConfig polar_config()
 {
     RiverConfig config;
     set_board(config);
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse("AcAd,5c5d");
     config.ip = Range::parse("KsKc");
     config.oop_bet_sizes = {1.0};
@@ -265,7 +266,7 @@ void run_river_tests()
 
     RiverConfig too_many;
     set_board(too_many);
-    too_many.stack = 5000;
+    too_many.stack = 50000;
     too_many.oop = Range::parse("AcAd");
     too_many.ip = Range::parse("KsKc");
     too_many.oop_bet_sizes = {0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0};
@@ -274,7 +275,7 @@ void run_river_tests()
 
     RiverConfig seven;
     set_board(seven);
-    seven.stack = 5000;
+    seven.stack = 50000;
     seven.oop = Range::parse("AcAd");
     seven.ip = Range::parse("KsKc");
     seven.oop_bet_sizes = {0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75};
@@ -288,7 +289,7 @@ void run_river_tests()
 
     RiverConfig shove;
     set_board(shove);
-    shove.stack = 150;
+    shove.stack = 1500;
     shove.oop = Range::parse("AcAd");
     shove.ip = Range::parse("KsKc");
     shove.oop_bet_sizes = {2.0};
@@ -366,8 +367,8 @@ void run_river_tests()
 
     RiverConfig sized;
     set_board(sized);
-    sized.pot = 100;
-    sized.stack = 1000;
+    sized.pot = 1000;
+    sized.stack = 10000;
     sized.oop = Range::parse("AcAd");
     sized.ip = Range::parse("KsKc");
     sized.oop_bet_sizes = {1.0};
@@ -398,8 +399,8 @@ void run_river_tests()
 
     const RiverGame::State raised = sized_game.child_action(
         facing, find_action(sized_game, facing, "Raise to 400"));
-    CHECK(raised.pot == 600);
-    CHECK(raised.contrib[1] == 400);
+    CHECK(raised.pot == 6000); // 600.0 chips in tenths
+    CHECK(raised.contrib[1] == 4000);
     const RiverGame::State oop_folds = sized_game.child_action(
         raised, find_action(sized_game, raised, "Fold"));
     CHECK_NEAR(sized_game.p1_utility(oop_folds), -150.0, 1e-9);
@@ -533,8 +534,8 @@ void run_river_tests()
 
     RiverConfig full;
     set_board(full);
-    full.pot = 100;
-    full.stack = 200;
+    full.pot = 1000;
+    full.stack = 2000;
     full.oop = Range::parse("AA");
     full.ip = Range::parse("KK");
     full.oop_bet_sizes = {0.5, 1.0};
@@ -550,8 +551,8 @@ void run_river_tests()
 
     RiverConfig wide;
     set_board(wide);
-    wide.pot = 100;
-    wide.stack = 200;
+    wide.pot = 1000;
+    wide.stack = 2000;
     wide.oop = Range::parse("22+");
     wide.ip = Range::parse("22+");
     wide.oop_bet_sizes = {0.5, 1.0};
@@ -594,5 +595,34 @@ void run_river_tests()
         CHECK(left_entries[i].infoset == right_entries[i].infoset);
         CHECK(left_entries[i].action == right_entries[i].action);
         CHECK_NEAR(left_entries[i].probability, right_entries[i].probability, 1e-12);
+    }
+
+    // 0.1-chip quantization: pot 5.0 chips, bet 0.75 → add 3.8 chips (38 tenths).
+    {
+        CHECK(poker::chips_to_tenths(5.0) == 50);
+        CHECK(poker::round_chips(0.75, 50) == 38);
+        CHECK(poker::format_chips(38) == "3.8");
+        CHECK(poker::format_chips(1000) == "100");
+        CHECK(poker::parse_chips("5.0") == 50);
+        CHECK(poker::parse_chips("3.8") == 38);
+
+        RiverConfig tenths;
+        set_board(tenths);
+        tenths.pot = poker::chips_to_tenths(5.0);
+        tenths.stack = poker::chip_units(20);
+        tenths.oop = Range::parse("AcAd");
+        tenths.ip = Range::parse("KsKc");
+        tenths.oop_bet_sizes = {0.75};
+        tenths.allow_all_in = false;
+        tenths.max_raises = 1;
+        const RiverGame tenths_game(tenths);
+        const RiverGame::State open = tenths_game.child_chance(tenths_game.root(), 0);
+        const int bet = find_action(tenths_game, open, "Bet 3.8");
+        CHECK(bet >= 0);
+        const RiverGame::State after = tenths_game.child_action(open, bet);
+        CHECK(after.contrib[0] == 38);
+        CHECK(after.pot == 50 + 38);
+        CHECK(tenths_game.action_label(tenths_game.infoset(open), bet).find("3.8")
+            != std::string::npos);
     }
 }

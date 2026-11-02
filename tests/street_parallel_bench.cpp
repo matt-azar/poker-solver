@@ -13,6 +13,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "game/chips.hpp"
 
 namespace
 {
@@ -63,8 +64,8 @@ poker::streets::StreetConfig turn_config()
         poker::holdem::parse_card("7c"),
         poker::holdem::parse_card("4s"),
     };
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = poker::holdem::Range::parse("random");
     config.ip = poker::holdem::Range::parse("random");
     config.oop_bet_sizes = {0.5};
@@ -85,8 +86,8 @@ poker::streets::StreetConfig flop_config()
         poker::holdem::parse_card("Kd"),
         poker::holdem::parse_card("7c"),
     };
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = poker::holdem::Range::parse("QQ,JJ,TT,99");
     config.ip = poker::holdem::Range::parse("QQ,JJ,TT,99");
     config.oop_bet_sizes = {0.5};
@@ -307,7 +308,7 @@ std::vector<Snapshot> converge_case(
         const double gain0 = br0 - ev;
         const double gain1 = br1 + ev;
         const double nash = br0 + br1;
-        const double nash_per_pot = nash / static_cast<double>(config.pot);
+        const double nash_per_pot = nash / poker::tenths_to_chips(config.pot);
         const poker::solver::StreetMemoryReport report = solver.memory_report();
         std::cout << "converge " << name << " threads " << threads
                   << " iteration " << done
@@ -369,8 +370,8 @@ std::vector<Snapshot> converge_case(
                               << "\n";
                     require(regret_delta <= 1e-12, "regret table drifted");
                     require(sum_delta <= 1e-12, "strategy sum drifted");
-                    require(std::abs(ev - match->ev) <= 1e-8 * config.pot, "EV drifted");
-                    require(std::abs(nash - match->nash) <= 1e-8 * config.pot, "NashConv drifted");
+                    require(std::abs(ev - match->ev) <= 1e-8 * poker::tenths_to_chips(config.pot), "EV drifted");
+                    require(std::abs(nash - match->nash) <= 1e-8 * poker::tenths_to_chips(config.pot), "NashConv drifted");
                 }
             }
             saved.push_back(std::move(shot));
@@ -541,7 +542,7 @@ std::vector<Snapshot> parity_solve(
                   << " train " << solver.memory_report().train_seconds
                   << " cache_init " << solver.memory_report().cache_init_seconds
                   << "\n";
-        const double pot = static_cast<double>(config.pot);
+        const double pot = poker::tenths_to_chips(config.pot);
         if (reference != nullptr)
         {
             match_snapshot(name, threads, done, pot, shot, regret, sum, *reference, "same");

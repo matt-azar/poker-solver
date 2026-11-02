@@ -156,7 +156,7 @@ void run_icm_tests()
     // pot 100, contrib 100/0, IP folds → chip (50, -50).
     // stacks 1000/1000, WTA 100 → post 1050/950 → delta (+2.5, -2.5).
     {
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 100, 0, 1, 0);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 1000, 0, 1, 0);
         CHECK_NEAR(chips.utility[0], 50.0, 1e-12);
         CHECK_NEAR(chips.utility[1], -50.0, 1e-12);
         const double stacks[] = {1000.0, 1000.0};
