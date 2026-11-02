@@ -3337,6 +3337,138 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
     return held;
 }
 
+void append_size_array_json(std::string& out, const char* key, const std::vector<double>& sizes)
+{
+    out += ",\"";
+    out += key;
+    out += "\":[";
+    for (std::size_t index = 0; index < sizes.size(); ++index)
+    {
+        if (index > 0)
+        {
+            out += ',';
+        }
+        out += format_number(sizes[index]);
+    }
+    out += ']';
+}
+
+// Structured spot config for an opened / completed solution so Study Open can
+// replace the Build draft wholesale (ranges, bets, tree edits, optional settings).
+std::string solution_config_json(const HeldSolution& held)
+{
+    if (!held.street && !held.river)
+    {
+        throw std::invalid_argument("solution has no solver");
+    }
+    const Job& job = held.job;
+    const bool street = held.street != nullptr;
+    std::string payload = "{\"kind\":";
+    payload += street ? "\"street\"" : "\"river\"";
+    payload += ",\"board\":[";
+    for (std::size_t index = 0; index < job.board.size(); ++index)
+    {
+        if (index > 0)
+        {
+            payload += ',';
+        }
+        append_escaped(payload, poker::holdem::format_card(job.board[index]));
+    }
+    payload += "],\"pot\":";
+    payload += poker::format_chips(job.pot);
+    payload += ",\"stack\":";
+    payload += poker::format_chips(job.stack);
+    payload += ",\"oop_range\":";
+    append_escaped(payload, job.oop.to_combo_list());
+    payload += ",\"ip_range\":";
+    append_escaped(payload, job.ip.to_combo_list());
+    payload += ",\"max_raises\":";
+    payload += std::to_string(job.max_raises);
+    payload += ",\"allow_all_in\":";
+    payload += job.allow_all_in ? "true" : "false";
+    append_size_array_json(payload, "oop_bets", job.oop_bets);
+    append_size_array_json(payload, "ip_bets", job.ip_bets);
+    if (street)
+    {
+        payload += ",\"allow_three_bet\":";
+        payload += job.allow_three_bet ? "true" : "false";
+        payload += ",\"geometric\":";
+        payload += job.geometric ? "true" : "false";
+        payload += ",\"pot_cap\":";
+        payload += format_number(job.pot_cap);
+        payload += ",\"all_in_threshold\":";
+        payload += format_number(job.all_in_threshold);
+        payload += ",\"memory_mib\":";
+        payload += std::to_string(job.memory_mib);
+        payload += ",\"threads\":";
+        payload += std::to_string(job.threads);
+        append_size_array_json(payload, "oop_flop_bets", job.oop_flop_bets);
+        append_size_array_json(payload, "ip_flop_bets", job.ip_flop_bets);
+        append_size_array_json(payload, "oop_turn_bets", job.oop_turn_bets);
+        append_size_array_json(payload, "ip_turn_bets", job.ip_turn_bets);
+        append_size_array_json(payload, "oop_river_bets", job.oop_river_bets);
+        append_size_array_json(payload, "ip_river_bets", job.ip_river_bets);
+        append_size_array_json(payload, "oop_donk", job.oop_donk);
+        payload += ',';
+        append_tree_edits_json(payload, job.tree_edits);
+    }
+    payload += ",\"algorithm\":";
+    append_escaped(payload, poker::solver::algorithm_name(job.algorithm));
+    payload += ",\"frozen\":";
+    payload += job.frozen ? "true" : "false";
+    payload += ",\"samples\":";
+    payload += std::to_string(job.samples);
+    payload += ",\"accuracy\":";
+    payload += format_number(job.accuracy);
+    payload += ",\"time_limit\":";
+    if (job.time_limit < 0.0)
+    {
+        payload += "null";
+    }
+    else
+    {
+        payload += format_number(job.time_limit);
+    }
+    payload += ",\"iterations\":";
+    payload += std::to_string(job.iterations);
+    payload += ",\"rake_rate\":";
+    payload += format_number(job.rake_rate);
+    payload += ",\"rake_cap\":";
+    payload += format_number(job.rake_cap);
+    payload += ",\"icm_stacks\":[";
+    for (std::size_t i = 0; i < job.icm_stacks.size(); ++i)
+    {
+        if (i > 0)
+        {
+            payload += ',';
+        }
+        payload += format_number(job.icm_stacks[i]);
+    }
+    payload += "],\"icm_payouts\":[";
+    for (std::size_t i = 0; i < job.icm_payouts.size(); ++i)
+    {
+        if (i > 0)
+        {
+            payload += ',';
+        }
+        payload += format_number(job.icm_payouts[i]);
+    }
+    payload += "],";
+    poker::explorer::append_incentive_config_json(payload, job.incentives);
+    if (street)
+    {
+        payload += ",\"text\":";
+        append_escaped(payload, poker::streets::format_street_config(held.street->config()));
+    }
+    else
+    {
+        payload += ",\"text\":";
+        append_escaped(payload, poker::river::format_river_config(held.river->config()));
+    }
+    payload += '}';
+    return payload;
+}
+
 std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
 {
     // Build outside install_completed: draft_for reads g_session.generation(),
@@ -4694,6 +4826,11 @@ void handle_client(socket_t client)
             if (tail == "locks")
             {
                 send_response(client, 200, "application/json", json_locks(held->locks));
+                return;
+            }
+            if (tail == "config")
+            {
+                send_response(client, 200, "application/json", solution_config_json(*held));
                 return;
             }
             if (tail == "strategy-edits")

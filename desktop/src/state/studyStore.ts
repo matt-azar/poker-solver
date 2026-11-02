@@ -63,7 +63,7 @@ import {
   applySetupTransaction,
   bumpRevision,
   compareNoteIsValid,
-  draftPartialFromStatus,
+  draftFromOpenedSolution,
   initialRevision,
   resolveBaselineSolutionId,
   shouldClearCompareNote,
@@ -2080,34 +2080,81 @@ pathTrail,
       return;
     }
     invalidateAllAnalysisRequests();
+    // Drop cross-solution Build undo / nav before the load completes.
+    setupHistoryPast.length = 0;
+    rangeHistory.past.length = 0;
+    rangeHistory.future.length = 0;
     set({
       phase: "loading",
       message: `Opening ${target}…`,
       currentNode: null,
+      pathTrail: [],
+      navHistory: [],
+      navHistoryIndex: -1,
+      canNavBack: false,
+      canNavForward: false,
       ...emptyAnalysisState(),
       compareNote: null,
       strategyEditScope: null,
       strategyEditDraft: defaultLockDraft(0),
       strategyEditDraftBaseline: null,
       strategyEditDrawerOpen: false,
+      setupMeta: null,
+      canUndoSetup: false,
+      canUndoRange: false,
+      canRedoRange: false,
+      selectedCell: null,
     });
     try {
       await engineClient.open(target);
       continuationPending = true;
       get().startPolling();
       await get().refresh();
-      // Sync Build draft from status so Solve uses the opened spot, not a prior draft.
-      // Limitation: status omits ranges / bet sizes / tree_edits — those stay as-is.
+      // Replace Build draft wholesale from solution config + status — never merge
+      // into the previous draft (avoids 22s over an AA solution, stale time limits).
       const status = get().status;
-      const fromStatus = status ? draftPartialFromStatus(status) : {};
+      const solutionId = get().solutionId;
+      let config: Record<string, unknown> | null = null;
+      if (solutionId) {
+        try {
+          config = await engineClient.getSolutionConfig(solutionId);
+        } catch {
+          config = null;
+        }
+      }
+      const opened = draftFromOpenedSolution({
+        solutionPath: target,
+        status,
+        config,
+      });
+      const weights = {
+        oop: parseRangeText(opened.draft.oopRange),
+        ip: parseRangeText(opened.draft.ipRange),
+      };
+      const warningSuffix =
+        opened.warnings.length > 0 ? ` ${opened.warnings.join(" ")}` : "";
+      const syncNote = opened.configComplete
+        ? "Build draft replaced from solution config."
+        : "Build draft replaced from status; ranges/bet sizes cleared.";
       set({
-        draft: {
-          ...get().draft,
-          ...fromStatus,
-          solutionPath: target,
-        },
+        draft: opened.draft,
+        weights,
         draftRevision: bumpRevision(get().draftRevision),
-        message: `Opened ${target}. Build draft synced from solution status (ranges/bet sizes not in status).`,
+        pathTrail: [],
+        navHistory: [],
+        navHistoryIndex: -1,
+        canNavBack: false,
+        canNavForward: false,
+        compareNote: null,
+        strategyEditScope: null,
+        strategyEditDraft: defaultLockDraft(0),
+        strategyEditDraftBaseline: null,
+        strategyEditDrawerOpen: false,
+        setupMeta: null,
+        canUndoSetup: false,
+        canUndoRange: false,
+        canRedoRange: false,
+        message: `Opened ${target}. ${syncNote}${warningSuffix}`,
       });
     } catch (error) {
       set({

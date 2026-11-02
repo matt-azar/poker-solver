@@ -4,7 +4,7 @@
  */
 
 import type { ComparePayload } from "../locks";
-import type { NodePayload, SpotDraft, StatusPayload } from "../types";
+import { DEFAULT_SPOT, type NodePayload, type SpotDraft, type StatusPayload } from "../types";
 
 export type AnalysisKind = "values" | "runouts" | "equity" | "categories";
 
@@ -181,8 +181,12 @@ function asFiniteNumber(value: unknown): number | undefined {
 /**
  * Map opened /api/status fields onto SpotDraft.
  *
- * Limitation: status does not currently expose oop/ip ranges, bet-size lists,
- * or tree_edits — those stay unchanged until the engine returns them.
+ * Status omits ranges / bet sizes / tree_edits. Callers that Open a solution
+ * must replace the draft wholesale (see draftFromOpenedSolution) rather than
+ * merging this partial into a prior Build draft.
+ *
+ * Explicit null / unset engine sentinels clear the matching Build field so a
+ * previous time limit or accuracy cannot leak across solutions.
  */
 export function draftPartialFromStatus(status: StatusPayload): Partial<SpotDraft> {
   const partial: Partial<SpotDraft> = {};
@@ -223,14 +227,16 @@ export function draftPartialFromStatus(status: StatusPayload): Partial<SpotDraft
   if (samples !== undefined && samples > 0) {
     partial.samples = Math.trunc(samples);
   }
-  const accuracy = asFiniteNumber(status.accuracy);
-  if (accuracy !== undefined) {
+  if ("accuracy" in status) {
+    const accuracy = asFiniteNumber(status.accuracy);
     // Engine uses -1 for "unset"; keep Build blank in that case.
-    partial.accuracy = accuracy < 0 ? "" : String(accuracy);
+    partial.accuracy =
+      accuracy === undefined || accuracy < 0 ? "" : String(accuracy);
   }
-  const timeLimit = asFiniteNumber(status.time_limit);
-  if (timeLimit !== undefined) {
-    partial.timeLimit = timeLimit < 0 ? "" : String(timeLimit);
+  if ("time_limit" in status) {
+    const timeLimit = asFiniteNumber(status.time_limit);
+    partial.timeLimit =
+      timeLimit === undefined || timeLimit < 0 ? "" : String(timeLimit);
   }
   const rakeRate = asFiniteNumber(status.rake_rate);
   if (rakeRate !== undefined) {
@@ -264,4 +270,230 @@ export function draftPartialFromStatus(status: StatusPayload): Partial<SpotDraft
     }
   }
   return partial;
+}
+
+function joinConfigSizes(values: unknown): string {
+  if (!Array.isArray(values)) {
+    return "";
+  }
+  return values.map((value) => String(value)).join(", ");
+}
+
+/**
+ * Blank Build draft used when opening a solution so prior ranges/bets/edits
+ * cannot survive as a hybrid over the newly loaded spot.
+ */
+export function openDraftBase(solutionPath = ""): SpotDraft {
+  return {
+    ...DEFAULT_SPOT,
+    oopRange: "",
+    ipRange: "",
+    oopBets: "",
+    ipBets: "",
+    oopFlop: "",
+    ipFlop: "",
+    oopTurn: "",
+    ipTurn: "",
+    oopRiver: "",
+    ipRiver: "",
+    oopDonk: "",
+    donkFlop: false,
+    donkTurn: false,
+    donkRiver: false,
+    potCap: 0,
+    noThreeBet: false,
+    geometric: false,
+    allInThreshold: 0,
+    accuracy: "",
+    timeLimit: "",
+    useIcm: false,
+    icmStacks: "",
+    icmPayouts: "",
+    incentives: "",
+    edgeTags: "",
+    treeEdits: [],
+    solutionPath,
+  };
+}
+
+/**
+ * Map GET /api/solutions/{id}/config (or POST /api/config) JSON onto SpotDraft.
+ * Present empty bet arrays become empty strings (check-only), not defaults.
+ */
+export function draftPartialFromSolutionConfig(
+  config: Record<string, unknown>,
+): Partial<SpotDraft> {
+  const partial: Partial<SpotDraft> = {};
+  if (Array.isArray(config.board) || typeof config.board === "string") {
+    const boardText = joinBoard(config.board as StatusPayload["board"]);
+    if (boardText !== undefined) {
+      partial.boardText = boardText;
+    }
+  }
+  const pot = asFiniteNumber(config.pot);
+  if (pot !== undefined) {
+    partial.pot = pot;
+  }
+  const stack = asFiniteNumber(config.stack);
+  if (stack !== undefined) {
+    partial.stack = stack;
+  }
+  if (typeof config.oop_range === "string") {
+    partial.oopRange = config.oop_range;
+  }
+  if (typeof config.ip_range === "string") {
+    partial.ipRange = config.ip_range;
+  }
+  if ("oop_bets" in config) {
+    partial.oopBets = joinConfigSizes(config.oop_bets);
+  }
+  if ("ip_bets" in config) {
+    partial.ipBets = joinConfigSizes(config.ip_bets);
+  }
+  if ("oop_flop_bets" in config) {
+    partial.oopFlop = joinConfigSizes(config.oop_flop_bets);
+  }
+  if ("ip_flop_bets" in config) {
+    partial.ipFlop = joinConfigSizes(config.ip_flop_bets);
+  }
+  if ("oop_turn_bets" in config) {
+    partial.oopTurn = joinConfigSizes(config.oop_turn_bets);
+  }
+  if ("ip_turn_bets" in config) {
+    partial.ipTurn = joinConfigSizes(config.ip_turn_bets);
+  }
+  if ("oop_river_bets" in config) {
+    partial.oopRiver = joinConfigSizes(config.oop_river_bets);
+  }
+  if ("ip_river_bets" in config) {
+    partial.ipRiver = joinConfigSizes(config.ip_river_bets);
+  }
+  if ("oop_donk" in config) {
+    partial.oopDonk = joinConfigSizes(config.oop_donk);
+  }
+  const maxRaises = asFiniteNumber(config.max_raises);
+  if (maxRaises !== undefined) {
+    partial.maxRaises = Math.trunc(maxRaises);
+  }
+  if ("allow_all_in" in config) {
+    partial.allowAllIn = Boolean(config.allow_all_in);
+  }
+  if ("allow_three_bet" in config) {
+    partial.noThreeBet = config.allow_three_bet === false;
+  }
+  if ("geometric" in config) {
+    partial.geometric = Boolean(config.geometric);
+  }
+  const potCap = asFiniteNumber(config.pot_cap);
+  if (potCap !== undefined) {
+    partial.potCap = potCap;
+  }
+  const allInThreshold = asFiniteNumber(config.all_in_threshold);
+  if (allInThreshold !== undefined) {
+    partial.allInThreshold = allInThreshold;
+  }
+  const memoryMib = asFiniteNumber(config.memory_mib);
+  if (memoryMib !== undefined) {
+    partial.memoryMib = Math.trunc(memoryMib);
+  }
+  const threads = asFiniteNumber(config.threads);
+  if (threads !== undefined && threads > 0) {
+    partial.threads = Math.trunc(threads);
+  }
+  if (typeof config.algorithm === "string" && config.algorithm.trim()) {
+    partial.algorithm = config.algorithm.trim();
+  }
+  if ("frozen" in config) {
+    partial.frozen = Boolean(config.frozen);
+  }
+  const samples = asFiniteNumber(config.samples);
+  if (samples !== undefined && samples > 0) {
+    partial.samples = Math.trunc(samples);
+  }
+  if ("accuracy" in config) {
+    const accuracy = asFiniteNumber(config.accuracy);
+    partial.accuracy =
+      accuracy === undefined || accuracy < 0 ? "" : String(accuracy);
+  }
+  if ("time_limit" in config) {
+    const timeLimit = asFiniteNumber(config.time_limit);
+    partial.timeLimit =
+      timeLimit === undefined || timeLimit < 0 ? "" : String(timeLimit);
+  }
+  const iterations = asFiniteNumber(config.iterations);
+  if (iterations !== undefined && iterations > 0) {
+    partial.iterations = Math.trunc(iterations);
+  }
+  const rakeRate = asFiniteNumber(config.rake_rate);
+  if (rakeRate !== undefined) {
+    partial.rakeRate = rakeRate;
+  }
+  const rakeCap = asFiniteNumber(config.rake_cap);
+  if (rakeCap !== undefined) {
+    partial.rakeCap = rakeCap;
+  }
+  if (Array.isArray(config.icm_stacks)) {
+    const stacks = config.icm_stacks
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value));
+    if (stacks.length >= 2) {
+      partial.useIcm = true;
+      partial.icmStacks = stacks.join(", ");
+      partial.icmPayouts = Array.isArray(config.icm_payouts)
+        ? config.icm_payouts
+            .map((value) => Number(value))
+            .filter((value) => Number.isFinite(value))
+            .join(", ")
+        : "";
+    } else {
+      partial.useIcm = false;
+      partial.icmStacks = "";
+      partial.icmPayouts = "";
+    }
+  }
+  if (Array.isArray(config.tree_edits)) {
+    partial.treeEdits = config.tree_edits.map((line) => String(line)).filter(Boolean);
+  }
+  return partial;
+}
+
+export interface OpenedSolutionDraftResult {
+  draft: SpotDraft;
+  /** True when solution config supplied ranges and/or bet sizes. */
+  configComplete: boolean;
+  warnings: string[];
+}
+
+/**
+ * Wholesale Build draft for Open: start from a cleared base, apply solution
+ * config when available, then status. Never merges into a prior draft.
+ */
+export function draftFromOpenedSolution(args: {
+  solutionPath: string;
+  status?: StatusPayload | null;
+  config?: Record<string, unknown> | null;
+}): OpenedSolutionDraftResult {
+  const warnings: string[] = [];
+  let draft = openDraftBase(args.solutionPath);
+  const config = args.config && typeof args.config === "object" ? args.config : null;
+  const configComplete = Boolean(
+    config &&
+      (typeof config.oop_range === "string" ||
+        typeof config.ip_range === "string" ||
+        "oop_bets" in config ||
+        "ip_bets" in config ||
+        "oop_flop_bets" in config),
+  );
+  if (config) {
+    draft = { ...draft, ...draftPartialFromSolutionConfig(config) };
+  } else {
+    warnings.push(
+      "Solution config unavailable; ranges and bet sizes were cleared rather than kept from the previous draft.",
+    );
+  }
+  if (args.status) {
+    draft = { ...draft, ...draftPartialFromStatus(args.status) };
+  }
+  draft = { ...draft, solutionPath: args.solutionPath };
+  return { draft, configComplete, warnings };
 }
