@@ -65,9 +65,12 @@ export {
   EMPTY_SETUP_META,
   applySetupTransaction,
   metaFromSetupResult,
+  undoSetupTransactionGuarded,
   type ApplySetupTransactionResult,
   type SetupStudyMeta,
   type SetupTransactionSnapshot,
+  type SetupUndoEntry,
+  type UndoSetupTransactionResult,
 } from "./setupTransaction";
 
 export {

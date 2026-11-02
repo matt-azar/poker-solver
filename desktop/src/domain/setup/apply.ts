@@ -389,6 +389,24 @@ export function mergeSetupPatch(
   // For edit mode, unspecified fields stay on the live base (not copied into the patch).
   // Conflicted fields stay unresolved so the UI can ask — never silently default them.
   if (mode === "create") {
+    // Explicit clears so a create patch is a replacement, not a shallow merge onto
+    // a prior study (board / ranges / output path must not leak from the live draft).
+    if (draftPatch.boardText === undefined) {
+      draftPatch.boardText = "";
+      provenance.boardText = provenance.boardText ?? "default";
+    }
+    if (draftPatch.oopRange === undefined) {
+      draftPatch.oopRange = "";
+      provenance.oopRange = provenance.oopRange ?? "default";
+    }
+    if (draftPatch.ipRange === undefined) {
+      draftPatch.ipRange = "";
+      provenance.ipRange = provenance.ipRange ?? "default";
+    }
+    if (draftPatch.solutionPath === undefined) {
+      draftPatch.solutionPath = "";
+      provenance.solutionPath = provenance.solutionPath ?? "default";
+    }
     if (draftPatch.pot === undefined && !conflictedFields.has("pot")) {
       draftPatch.pot = DEFAULT_SPOT.pot;
       provenance.pot = provenance.pot ?? "default";
@@ -402,6 +420,11 @@ export function mergeSetupPatch(
         draftPatch[key] = DEFAULT_SPOT[key];
         provenance[key] = provenance[key] ?? "default";
       }
+    }
+  } else if (mode === "duplicate") {
+    if (draftPatch.solutionPath === undefined) {
+      draftPatch.solutionPath = "";
+      provenance.solutionPath = provenance.solutionPath ?? "default";
     }
   }
 
@@ -482,6 +505,7 @@ export function mergeSetupPatch(
 
   return {
     ok,
+    mode,
     draftPatch,
     pot: draftPatch.pot,
     stack: draftPatch.stack,

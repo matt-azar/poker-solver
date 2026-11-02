@@ -145,6 +145,11 @@ export interface SetupMissing {
 
 export interface SetupDraftResult {
   ok: boolean;
+  /**
+   * create = replace from blank base; edit = patch; duplicate = new identity
+   * with copied fields. Application must honor the same base used for validation.
+   */
+  mode?: SetupMode;
   draftPatch: Partial<SpotDraft> & { oopRange?: string; ipRange?: string };
   pot?: number;
   stack?: number;

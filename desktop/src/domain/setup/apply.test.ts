@@ -60,10 +60,46 @@ describe("mergeSetupPatch", () => {
         requestRevision: 1,
       },
     );
+    expect(result.mode).toBe("create");
     expect(result.missing.some((item) => item.field === "board")).toBe(true);
     expect(result.canSolve).toBe(false);
     expect(result.draftPatch.pot).toBeCloseTo(5.5, 10);
     expect(result.draftPatch.stack).toBeCloseTo(97.5, 10);
+    // Create patches explicitly clear board so apply cannot keep a prior river board.
+    expect(result.draftPatch.boardText).toBe("");
+    expect(result.draftPatch.solutionPath).toBe("");
+  });
+
+  it("create without board does not leave a prior boardText in the committed draft patch", () => {
+    const prior = dirtyPriorStudy();
+    // Validation base is blank (as the resolver does), not the live prior study.
+    const base = createBlankSetupDraft("create", prior);
+    const result = mergeSetupPatch(base, {
+      mode: "create",
+      explicitFields: {
+        oopRange: "QQ+",
+        ipRange: "JJ+",
+      },
+      derived: { potBb: 5.5, stackBb: 97.5 },
+      requestRevision: 0,
+    });
+    expect(result.draftPatch.boardText).toBe("");
+    expect(prior.boardText).not.toBe("");
+    expect(result.draftPatch.boardText).not.toBe(prior.boardText);
+  });
+
+  it("edit preserves unrelated fields by omitting them from the patch", () => {
+    const prior = dirtyPriorStudy();
+    const result = mergeSetupPatch(prior, {
+      mode: "edit",
+      explicitFields: { pot: 5.5 },
+      requestRevision: 3,
+    });
+    expect(result.mode).toBe("edit");
+    expect(result.draftPatch.pot).toBe(5.5);
+    expect(result.draftPatch.boardText).toBeUndefined();
+    expect(result.draftPatch.stack).toBeUndefined();
+    expect(result.draftPatch.oopRange).toBeUndefined();
   });
 
   it("does not set stack from a 100NL rake/stakes label alone", () => {
