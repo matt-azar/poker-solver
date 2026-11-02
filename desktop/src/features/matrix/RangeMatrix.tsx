@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { mapActionColors } from "../../domain/actionColors";
 import {
+  type AggregatedHandCell,
   formatRangeInclusion,
   frequencyOf,
   groupEv,
