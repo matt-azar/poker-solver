@@ -8,6 +8,7 @@
 #include "solver/node_lock.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
+#include "solver/table_scalar.hpp"
 #include "solver/trainer.hpp"
 
 #include <cmath>
@@ -129,7 +130,7 @@ void expect_batch_reference_parity()
         CHECK(found != ref_by_key.end());
         if (found != ref_by_key.end())
         {
-            CHECK_NEAR(entry.probability, found->second, 1e-8);
+            CHECK_NEAR(entry.probability, found->second, 1e-5);
         }
         double batch_regret = 0.0;
         CHECK(batch.regret_value(entry.infoset, entry.action, batch_regret));
@@ -137,10 +138,11 @@ void expect_batch_reference_parity()
         CHECK(regret_found != ref_regret.end());
         if (regret_found != ref_regret.end())
         {
-            CHECK_NEAR(batch_regret, regret_found->second, 1e-8);
+            const double scale = 1.0 + std::abs(regret_found->second);
+            CHECK(std::abs(batch_regret - regret_found->second) <= 1e-4 * scale);
         }
     }
-    CHECK_NEAR(batch.nash_gap(), reference.evaluate().nash_gap, 1e-8);
+    CHECK_NEAR(batch.nash_gap(), reference.evaluate().nash_gap, 1e-4);
 }
 
 void expect_continuation_and_cold_prediction_on_load()

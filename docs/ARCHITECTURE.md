@@ -44,7 +44,7 @@ On the street/river path, player 0 is out of position. Chance deals ordered hand
 
 ## Solver storage
 
-Regrets and strategy sums are two `std::vector<double>` blocks with an offset table from information set to first action. The action-count scratch limit is 8 per information set.
+`StreetBatchSolver` stores regret, strategy-sum, and one shared sigma workspace as `TableScalar` (`float`) tables, with an offset table from information set to first action. The sigma workspace holds the frozen strategy during a training pass and the normalized average during evaluation; those two views are mutually exclusive, so they share one full-size buffer. Counterfactual values, NashConv, and other sensitive reductions stay double. `CfrTrainer` (Kuhn/Leduc and reference enumerators) and legacy `RiverBatchSolver` keep `double` tables. The action-count scratch limit is 8 per information set. See `include/solver/table_scalar.hpp`.
 
 Node locks (`poker::solver::NodeLock` / `LockSet` in `node_lock.hpp`) are an immutable constraint layer keyed by infoset or public-node id. A `FullNode` lock applies one validated action-probability row to every combo; `SelectedCombos` applies that row only to listed combo indices. An empty probability row means unlocked and is distinct from locking an action at probability zero. When `SolveConfig::locks` is set, `CfrTrainer`, `StreetBatchSolver`, and `RiverBatchSolver` call `apply_lock_to_strategy` after regret matching. StreetBatch and RiverBatch key locks by public-node index. Explorer locking is street-first.
 

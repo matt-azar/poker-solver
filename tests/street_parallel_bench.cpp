@@ -1,6 +1,7 @@
 #include "poker/card.hpp"
 #include "poker/range.hpp"
 #include "solver/street_batch.hpp"
+#include "solver/table_scalar.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -43,7 +44,7 @@ double median_of(double a, double b, double c)
     return values[1];
 }
 
-double relative_delta(const std::vector<double>& left, std::span<const double> right)
+double relative_delta(const std::vector<double>& left, std::span<const poker::solver::TableScalar> right)
 {
     require(left.size() == right.size(), "table length changed");
     double worst = 0.0;
@@ -467,8 +468,8 @@ void match_snapshot(
     int done,
     double pot,
     const Snapshot& shot,
-    std::span<const double> regret,
-    std::span<const double> sum,
+    std::span<const poker::solver::TableScalar> regret,
+    std::span<const poker::solver::TableScalar> sum,
     const std::vector<Snapshot>& reference,
     const char* label)
 {

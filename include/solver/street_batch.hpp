@@ -3,6 +3,7 @@
 #include "game/street_game.hpp"
 #include "poker/hand_categories.hpp"
 #include "solver/budget_resource.hpp"
+#include "solver/table_scalar.hpp"
 #include "solver/trainer.hpp"
 #include "solver/training_state.hpp"
 
@@ -37,7 +38,9 @@ struct StreetMemoryComponent
 // estimated_peak_bytes is a labeled plan, not the measured allocation.
 // reserved_bytes is unused reservation credit. The rank cache is allocated
 // before training, so that credit is zero after construction.
-// regret_strategy_sum_bytes is only the regret array plus the strategy-sum array.
+// regret_strategy_sum_bytes is only the regret array plus the strategy-sum array
+// (TableScalar storage). sigma_workspace_bytes is the shared frozen-strategy /
+// normalized-average cache (one full-size table, not two).
 // Distinctions:
 //   estimated_peak_bytes — plan recorded mid-construction (payload + headers +
 //     map nodes). Available after a plan-only dry-run.
@@ -50,6 +53,8 @@ struct StreetMemoryReport
     std::uint64_t peak_allocated_bytes = 0;
     std::uint64_t reserved_bytes = 0;
     std::uint64_t regret_strategy_sum_bytes = 0;
+    std::uint64_t sigma_workspace_bytes = 0;
+    int table_scalar_bytes = static_cast<int>(kTableScalarBytes);
     std::uint64_t estimated_peak_bytes = 0;
     std::uint64_t expanded_terminals = 0;
     std::uint64_t expanded_decisions = 0;
@@ -426,8 +431,8 @@ public:
         const std::string& node_id,
         int hand,
         std::span<const double> probability);
-    std::span<const double> regret_table() const;
-    std::span<const double> strategy_sum_table() const;
+    std::span<const TableScalar> regret_table() const;
+    std::span<const TableScalar> strategy_sum_table() const;
     int thread_count() const;
     void enable_walk_profile(bool enabled);
     StreetWalkProfile walk_profile() const;

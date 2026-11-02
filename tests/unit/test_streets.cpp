@@ -10,6 +10,7 @@
 #include "poker/range.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
+#include "solver/table_scalar.hpp"
 #include "solver/tree_edit.hpp"
 #include "solver/trainer.hpp"
 
@@ -234,12 +235,12 @@ void expect_street_matches_river(
         {
             worst = gap;
         }
-        if (gap > 1e-8)
+        if (gap > 1e-5)
         {
             std::cerr << "five-card street strategy " << key << " river " << found->second
                       << " street " << entry.probability << "\n";
         }
-        CHECK(gap <= 1e-8);
+        CHECK(gap <= 1e-5);
     }
     std::cout << "REPORT street_five_card_river_match\n";
     std::cout << "  iterations " << iterations << "\n";
@@ -251,10 +252,10 @@ void expect_street_matches_river(
         return;
     }
     const poker::solver::SolveStats stats = trainer.evaluate();
-    CHECK_NEAR(batch.expected_utility(), stats.p1_expected_utility, 1e-8);
-    CHECK_NEAR(batch.nash_gap(), stats.nash_gap, 1e-6);
-    CHECK_NEAR(batch.p1_best_response_utility(), stats.p1_best_response_utility, 1e-6);
-    CHECK_NEAR(batch.p2_best_response_utility(), stats.p2_best_response_utility, 1e-6);
+    CHECK_NEAR(batch.expected_utility(), stats.p1_expected_utility, 1e-5);
+    CHECK_NEAR(batch.nash_gap(), stats.nash_gap, 1e-4);
+    CHECK_NEAR(batch.p1_best_response_utility(), stats.p1_best_response_utility, 1e-4);
+    CHECK_NEAR(batch.p2_best_response_utility(), stats.p2_best_response_utility, 1e-4);
 }
 
 void expect_street_batch(
@@ -313,12 +314,12 @@ void expect_street_batch(
         {
             worst = gap;
         }
-        if (gap > 1e-8)
+        if (gap > 1e-5)
         {
             std::cerr << "strategy " << key << " reference " << found->second
                       << " batch " << entry.probability << "\n";
         }
-        CHECK(gap <= 1e-8);
+        CHECK(gap <= 1e-5);
     }
     std::cout << "REPORT street_batch_match\n";
     std::cout << "  iterations " << iterations << "\n";
@@ -333,10 +334,10 @@ void expect_street_batch(
         return;
     }
     const poker::solver::SolveStats stats = trainer.evaluate();
-    CHECK_NEAR(batch.expected_utility(), stats.p1_expected_utility, 1e-8);
-    CHECK_NEAR(batch.nash_gap(), stats.nash_gap, 1e-6);
-    CHECK_NEAR(batch.p1_best_response_utility(), stats.p1_best_response_utility, 1e-6);
-    CHECK_NEAR(batch.p2_best_response_utility(), stats.p2_best_response_utility, 1e-6);
+    CHECK_NEAR(batch.expected_utility(), stats.p1_expected_utility, 1e-5);
+    CHECK_NEAR(batch.nash_gap(), stats.nash_gap, 1e-4);
+    CHECK_NEAR(batch.p1_best_response_utility(), stats.p1_best_response_utility, 1e-4);
+    CHECK_NEAR(batch.p2_best_response_utility(), stats.p2_best_response_utility, 1e-4);
 }
 
 std::string combo_name(const char* a, const char* b)
@@ -437,8 +438,8 @@ void check_bluff_profile(
     CHECK(std::abs(value - 25.0) <= 0.01);
     CHECK(gap <= 0.1);
     CHECK(gap >= -1e-9);
-    CHECK_NEAR(value, ev, 1e-8);
-    CHECK_NEAR(gap, nash, 1e-8);
+    CHECK_NEAR(value, ev, 1e-5);
+    CHECK_NEAR(gap, nash, 1e-5);
 }
 
 void expect_strategy_parity(
@@ -460,13 +461,13 @@ void expect_strategy_parity(
             std::cerr << "missing frozen strategy " << entry.infoset << " " << entry.action << "\n";
             continue;
         }
-        if (std::abs(found->second - entry.probability) > 1e-8)
+        if (std::abs(found->second - entry.probability) > 1e-5)
         {
             std::cerr << "strategy " << entry.infoset << " " << entry.action
                       << " reference " << found->second
                       << " frozen " << entry.probability << "\n";
         }
-        CHECK_NEAR(found->second, entry.probability, 1e-8);
+        CHECK_NEAR(found->second, entry.probability, 1e-5);
     }
 }
 
@@ -721,6 +722,17 @@ void expect_memory_budget()
     CHECK(report.reserved_bytes == 0);
     CHECK(report.allocated_bytes <= report.peak_allocated_bytes);
     CHECK(report.peak_allocated_bytes <= report.memory_budget_bytes);
+    CHECK(report.table_scalar_bytes == static_cast<int>(poker::solver::kTableScalarBytes));
+    CHECK(report.sigma_workspace_bytes == report.regret_strategy_sum_bytes / 2);
+    CHECK(
+        report.regret_strategy_sum_bytes + report.sigma_workspace_bytes
+        == static_cast<std::uint64_t>(solver.regret_entries())
+            * poker::solver::kPersistentTableBytesPerEntry);
+    CHECK(component_bytes(report, "regret") > 0);
+    CHECK(component_bytes(report, "strategy_sum") > 0);
+    CHECK(component_bytes(report, "sigma") > 0);
+    CHECK(component_bytes(report, "average") == 0);
+    CHECK(component_bytes(report, "frozen") == 0);
     CHECK(component_bytes(report, "rank_cache") > 100000);
     CHECK(component_bytes(report, "scratch") > 0);
     CHECK(component_bytes(report, "deals") > 0);
@@ -1727,10 +1739,10 @@ void check_raw_tables(
     const poker::solver::StreetBatchSolver& left,
     const poker::solver::StreetBatchSolver& right)
 {
-    const std::span<const double> left_regret = left.regret_table();
-    const std::span<const double> right_regret = right.regret_table();
-    const std::span<const double> left_sum = left.strategy_sum_table();
-    const std::span<const double> right_sum = right.strategy_sum_table();
+    const std::span<const poker::solver::TableScalar> left_regret = left.regret_table();
+    const std::span<const poker::solver::TableScalar> right_regret = right.regret_table();
+    const std::span<const poker::solver::TableScalar> left_sum = left.strategy_sum_table();
+    const std::span<const poker::solver::TableScalar> right_sum = right.strategy_sum_table();
     CHECK(left_regret.size() == right_regret.size());
     CHECK(left_sum.size() == right_sum.size());
     double worst_regret = 0.0;
@@ -1740,11 +1752,14 @@ void check_raw_tables(
     for (std::size_t index = 0; index < regret_n; ++index)
     {
         worst_regret = std::max(
-            worst_regret, std::abs(left_regret[index] - right_regret[index]));
+            worst_regret,
+            std::abs(static_cast<double>(left_regret[index]) - static_cast<double>(right_regret[index])));
     }
     for (std::size_t index = 0; index < sum_n; ++index)
     {
-        worst_sum = std::max(worst_sum, std::abs(left_sum[index] - right_sum[index]));
+        worst_sum = std::max(
+            worst_sum,
+            std::abs(static_cast<double>(left_sum[index]) - static_cast<double>(right_sum[index])));
     }
     if (worst_regret != 0.0 || worst_sum != 0.0)
     {
@@ -1811,15 +1826,17 @@ void run_street_workspace_tests()
 }
 
 double table_delta(
-    std::span<const double> left,
-    std::span<const double> right)
+    std::span<const poker::solver::TableScalar> left,
+    std::span<const poker::solver::TableScalar> right)
 {
     double worst = 0.0;
     const std::size_t count = std::min(left.size(), right.size());
     for (std::size_t index = 0; index < count; ++index)
     {
-        const double scale = 1.0 + std::max(std::abs(left[index]), std::abs(right[index]));
-        worst = std::max(worst, std::abs(left[index] - right[index]) / scale);
+        const double left_value = static_cast<double>(left[index]);
+        const double right_value = static_cast<double>(right[index]);
+        const double scale = 1.0 + std::max(std::abs(left_value), std::abs(right_value));
+        worst = std::max(worst, std::abs(left_value - right_value) / scale);
     }
     return worst;
 }
@@ -1968,7 +1985,7 @@ void run_street_parallel_tests()
         const std::vector<double> oop_regret(
             four.regret_table().begin(), four.regret_table().end());
         four.run_single_frozen_pass_for_test(1);
-        const std::span<const double> after = four.regret_table();
+        const std::span<const poker::solver::TableScalar> after = four.regret_table();
         // IP's pass floors only IP. OOP entries that were already nonnegative stay.
         // Compare the full table with a one-thread pair of passes instead.
         one.run_single_frozen_pass_for_test(1);
@@ -2467,7 +2484,7 @@ void run_street_inspect_tests()
                 {
                     sum += probability;
                 }
-                CHECK_NEAR(sum, 1.0, 1e-12);
+                CHECK_NEAR(sum, 1.0, 1e-6);
                 const std::string who = view.player == 0 ? "OOP " : "IP ";
                 const std::string infoset = who + hand.combo + " | " + view.place + " | " + view.line;
                 const auto found = by_infoset.find(infoset);
@@ -2670,7 +2687,7 @@ void run_street_inspect_tests()
         {
             sum += probability;
         }
-        CHECK_NEAR(sum, 1.0, 1e-12);
+        CHECK_NEAR(sum, 1.0, 1e-6);
     }
     CHECK(saw_blocked);
 }

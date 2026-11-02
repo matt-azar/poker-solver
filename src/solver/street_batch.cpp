@@ -13,6 +13,7 @@
 #include "solver/icm.hpp"
 #include "solver/incentives.hpp"
 #include "solver/regret_matching.hpp"
+#include "solver/table_scalar.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -1091,9 +1092,12 @@ struct StreetBatchSolver::Engine
     std::pmr::vector<ParentLink> parent_link;
     std::pmr::vector<Slot> slots;
     std::pmr::vector<int> decision_ids;
-    std::pmr::vector<double> regret;
-    std::pmr::vector<double> strategy_sum;
-    mutable std::pmr::vector<double> average;
+    std::pmr::vector<TableScalar> regret;
+    std::pmr::vector<TableScalar> strategy_sum;
+    // Shared workspace: frozen strategy during a training pass; normalized
+    // sigma during evaluation / browse. Training sets average_ready false
+    // before overwriting; ensure_average rebuilds from strategy_sum.
+    mutable std::pmr::vector<TableScalar> sigma;
     mutable std::pmr::vector<int> response;
     std::pmr::vector<char> combo_blocked;
     std::pmr::vector<int> combo_low;
@@ -1148,11 +1152,10 @@ struct StreetBatchSolver::Engine
     mutable WorkerContext workspace;
     std::pmr::vector<std::uint64_t> mask[2];
     std::pmr::vector<Support> support[2];
-    std::pmr::vector<double> frozen_sigma;
     // PCFR+: last instantaneous CF regret per action slot (prediction m). Empty
     // until the first PCFR+ train allocates it. Cold-starts at zeros; PSOL reload
     // does not restore this table (prediction resumes cold).
-    std::pmr::vector<double> prediction_;
+    std::pmr::vector<TableScalar> prediction_;
     bool pcfr_collect_ = false;
     mutable bool average_ready = false;
     mutable bool ranks_ready_ = false;
@@ -1248,7 +1251,7 @@ struct StreetBatchSolver::Engine
         , decision_ids(heap_)
         , regret(heap_)
         , strategy_sum(heap_)
-        , average(heap_)
+        , sigma(heap_)
         , response(heap_)
         , combo_blocked(heap_)
         , combo_low(heap_)
@@ -1264,7 +1267,6 @@ struct StreetBatchSolver::Engine
         , workspace(heap_)
         , mask{std::pmr::vector<std::uint64_t>(heap_), std::pmr::vector<std::uint64_t>(heap_)}
         , support{std::pmr::vector<Support>(heap_), std::pmr::vector<Support>(heap_)}
-        , frozen_sigma(heap_)
         , prediction_(heap_)
         , result0_(heap_)
         , result1_(heap_)
@@ -1655,9 +1657,9 @@ struct StreetBatchSolver::Engine
         add(checked_mul(counted_deals_, sizeof(Deal), "plan"));
         add(checked_mul(slot_index_cells(), sizeof(int), "plan"));
         add(checked_mul(planned_slots_, sizeof(Slot), "plan"));
+        // regret + strategy_sum + shared sigma workspace (float storage).
         const std::uint64_t table = checked_mul(
-            static_cast<std::uint64_t>(planned_cursor_), sizeof(double), "plan");
-        add(table);
+            static_cast<std::uint64_t>(planned_cursor_), sizeof(TableScalar), "plan");
         add(table);
         add(table);
         add(table);
@@ -1791,13 +1793,11 @@ struct StreetBatchSolver::Engine
         }
         const auto entries = static_cast<std::size_t>(cursor_);
         budget_->set_stage("regret");
-        regret.assign(entries, 0.0);
+        regret.assign(entries, TableScalar{0});
         budget_->set_stage("strategy_sum");
-        strategy_sum.assign(entries, 0.0);
-        budget_->set_stage("average");
-        average.assign(entries, 0.0);
-        budget_->set_stage("frozen");
-        frozen_sigma.assign(entries, 0.0);
+        strategy_sum.assign(entries, TableScalar{0});
+        budget_->set_stage("sigma");
+        sigma.assign(entries, TableScalar{0});
     }
 
     int card_key(const Node& node, int hand, int turn, int river) const
@@ -2212,11 +2212,11 @@ struct StreetBatchSolver::Engine
         const double reach = node.player == 0 ? pi0 : pi1;
         const int index = slot_index(node, hand, turn, river, reach);
         const int base = slots[static_cast<std::size_t>(index)].base;
-        const double* sigma = frozen_sigma.data() + base;
+        const TableScalar* row = sigma.data() + base;
         const bool update = updating < 0 || updating == node.player;
         if (update)
         {
-            accumulate_average(strategy_sum.data() + base, sigma, node.n_actions, weight_iter * reach);
+            accumulate_average(strategy_sum.data() + base, row, node.n_actions, weight_iter * reach);
         }
         PlayerPayoff action_utility[8];
         PlayerPayoff node_utility;
@@ -2225,17 +2225,17 @@ struct StreetBatchSolver::Engine
             if (node.player == 0)
             {
                 action_utility[action] = cfr_deal_payoff(
-                    node.child[action], pi0 * sigma[action], pi1, chance, deal,
+                    node.child[action], pi0 * row[action], pi1, chance, deal,
                     turn, river, updating, weight_iter);
             }
             else
             {
                 action_utility[action] = cfr_deal_payoff(
-                    node.child[action], pi0, pi1 * sigma[action], chance, deal,
+                    node.child[action], pi0, pi1 * row[action], chance, deal,
                     turn, river, updating, weight_iter);
             }
-            node_utility.utility[0] += sigma[action] * action_utility[action].utility[0];
-            node_utility.utility[1] += sigma[action] * action_utility[action].utility[1];
+            node_utility.utility[0] += row[action] * action_utility[action].utility[0];
+            node_utility.utility[1] += row[action] * action_utility[action].utility[1];
         }
         if (update)
         {
@@ -2360,7 +2360,7 @@ struct StreetBatchSolver::Engine
             std::chrono::steady_clock::now() - started).count();
     }
 
-    // True when this call rebuilt the average from the stored sums.
+    // True when this call rebuilt the sigma from the stored sums.
     // Rebuilding does not change the profile epoch. Training and edits do.
     bool ensure_average() const
     {
@@ -2373,7 +2373,7 @@ struct StreetBatchSolver::Engine
         {
             normalize_average(
                 strategy_sum.data() + slot.base,
-                average.data() + slot.base,
+                sigma.data() + slot.base,
                 slot.n_actions);
         }
         average_ready = true;
@@ -2385,7 +2385,7 @@ struct StreetBatchSolver::Engine
         return node.slot_of[static_cast<std::size_t>(card_key(node, hand, turn, river))];
     }
 
-    // One public-tree pass. responding < 0 plays the average strategy.
+    // One public-tree pass. responding < 0 plays the sigma strategy.
     // A best-responding player picks, per hand, the action with the higher
     // utility and keeps the lowest index on a tie. The other player mixes.
     void response_walk(
@@ -2487,7 +2487,7 @@ struct StreetBatchSolver::Engine
                     else
                     {
                         const int index = slot_index(node, h0, turn, river, pi0[h0]);
-                        const double played = average[static_cast<std::size_t>(
+                        const double played = sigma[static_cast<std::size_t>(
                             slots[static_cast<std::size_t>(index)].base + action)];
                         child.pi0[static_cast<std::size_t>(h0)] = pi0[h0] * played;
                     }
@@ -2511,7 +2511,7 @@ struct StreetBatchSolver::Engine
                     else
                     {
                         const int index = slot_index(node, h1, turn, river, pi1[h1]);
-                        const double played = average[static_cast<std::size_t>(
+                        const double played = sigma[static_cast<std::size_t>(
                             slots[static_cast<std::size_t>(index)].base + action)];
                         child.pi1[static_cast<std::size_t>(h1)] = pi1[h1] * played;
                     }
@@ -2555,7 +2555,7 @@ struct StreetBatchSolver::Engine
                 double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
-                    const double played = average[static_cast<std::size_t>(
+                    const double played = sigma[static_cast<std::size_t>(
                         slots[static_cast<std::size_t>(index)].base + action)];
                     mix += played * here.aev0[static_cast<std::size_t>(action * n0 + h0)];
                 }
@@ -2604,7 +2604,7 @@ struct StreetBatchSolver::Engine
                 double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
-                    const double played = average[static_cast<std::size_t>(
+                    const double played = sigma[static_cast<std::size_t>(
                         slots[static_cast<std::size_t>(index)].base + action)];
                     mix += played * here.aev1[static_cast<std::size_t>(action * n1 + h1)];
                 }
@@ -4135,21 +4135,21 @@ struct StreetBatchSolver::Engine
                     const std::size_t at = static_cast<std::size_t>(slot.base + action);
                     predicted[action] = regret[at] + prediction_[at];
                 }
-                regret_matching(predicted, frozen_sigma.data() + slot.base, slot.n_actions);
+                regret_matching(predicted, sigma.data() + slot.base, slot.n_actions);
             }
             else
             {
                 regret_matching(
                     regret.data() + slot.base,
-                    frozen_sigma.data() + slot.base,
+                    sigma.data() + slot.base,
                     slot.n_actions);
             }
             if (locks_ != nullptr)
             {
                 const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
                 apply_lock_to_strategy(
-                    std::span<double>(
-                        frozen_sigma.data() + slot.base,
+                    std::span<TableScalar>(
+                        sigma.data() + slot.base,
                         static_cast<std::size_t>(slot.n_actions)),
                     lock,
                     static_cast<std::size_t>(slot.hand));
@@ -4168,7 +4168,7 @@ struct StreetBatchSolver::Engine
             }
             for (int action = 0; action < slot.n_actions; ++action)
             {
-                double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
                 if (cumulative < 0.0)
                 {
                     cumulative = 0.0;
@@ -4177,7 +4177,7 @@ struct StreetBatchSolver::Engine
         }
     }
 
-    // Floor one player's regrets, then rebuild frozen_sigma for every slot.
+    // Floor one player's regrets, then rebuild sigma for every slot.
     // Same values as floor_player then freeze_sigma; one slot scan instead of two.
     // Under PCFR+, matching uses R+m (prediction_) after the floor.
     void apply_floor_and_freeze_range(std::size_t begin, std::size_t end, int player)
@@ -4192,7 +4192,7 @@ struct StreetBatchSolver::Engine
             {
                 for (int action = 0; action < slot.n_actions; ++action)
                 {
-                    double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                    TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
                     if (cumulative < 0.0)
                     {
                         cumulative = 0.0;
@@ -4206,21 +4206,21 @@ struct StreetBatchSolver::Engine
                     const std::size_t at = static_cast<std::size_t>(slot.base + action);
                     predicted[action] = regret[at] + prediction_[at];
                 }
-                regret_matching(predicted, frozen_sigma.data() + slot.base, slot.n_actions);
+                regret_matching(predicted, sigma.data() + slot.base, slot.n_actions);
             }
             else
             {
                 regret_matching(
                     regret.data() + slot.base,
-                    frozen_sigma.data() + slot.base,
+                    sigma.data() + slot.base,
                     slot.n_actions);
             }
             if (locks_ != nullptr)
             {
                 const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
                 apply_lock_to_strategy(
-                    std::span<double>(
-                        frozen_sigma.data() + slot.base,
+                    std::span<TableScalar>(
+                        sigma.data() + slot.base,
                         static_cast<std::size_t>(slot.n_actions)),
                     lock,
                     static_cast<std::size_t>(slot.hand));
@@ -4282,9 +4282,9 @@ struct StreetBatchSolver::Engine
             }
             for (int action = 0; action < slot.n_actions; ++action)
             {
-                double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
-                cumulative = dcfr_discount_post_pass(
-                    cumulative, slot_positive_discount_, slot_negative_discount_);
+                TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                cumulative = static_cast<TableScalar>(dcfr_discount_post_pass(
+                    cumulative, slot_positive_discount_, slot_negative_discount_));
             }
         }
     }
@@ -4298,21 +4298,21 @@ struct StreetBatchSolver::Engine
             {
                 for (int action = 0; action < slot.n_actions; ++action)
                 {
-                    double& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
-                    cumulative = dcfr_discount_post_pass(
-                        cumulative, slot_positive_discount_, slot_negative_discount_);
+                    TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                    cumulative = static_cast<TableScalar>(dcfr_discount_post_pass(
+                        cumulative, slot_positive_discount_, slot_negative_discount_));
                 }
             }
             regret_matching(
                 regret.data() + slot.base,
-                frozen_sigma.data() + slot.base,
+                sigma.data() + slot.base,
                 slot.n_actions);
             if (locks_ != nullptr)
             {
                 const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
                 apply_lock_to_strategy(
-                    std::span<double>(
-                        frozen_sigma.data() + slot.base,
+                    std::span<TableScalar>(
+                        sigma.data() + slot.base,
                         static_cast<std::size_t>(slot.n_actions)),
                     lock,
                     static_cast<std::size_t>(slot.hand));
@@ -4582,7 +4582,7 @@ struct StreetBatchSolver::Engine
                         continue;
                     }
                     child.pi0[static_cast<std::size_t>(h0)] =
-                        pi0[h0] * frozen_sigma[static_cast<std::size_t>(base + action)];
+                        pi0[h0] * sigma[static_cast<std::size_t>(base + action)];
                 }
                 std::copy(pi1, pi1 + n1, child.pi1.begin());
             }
@@ -4598,7 +4598,7 @@ struct StreetBatchSolver::Engine
                         continue;
                     }
                     child.pi1[static_cast<std::size_t>(h1)] =
-                        pi1[h1] * frozen_sigma[static_cast<std::size_t>(base + action)];
+                        pi1[h1] * sigma[static_cast<std::size_t>(base + action)];
                 }
             }
             if (profile_)
@@ -4674,17 +4674,17 @@ struct StreetBatchSolver::Engine
                     continue;
                 }
                 const int base = here.slot_base[static_cast<std::size_t>(h0)];
-                const double* sigma = frozen_sigma.data() + base;
+                const TableScalar* row = sigma.data() + base;
                 double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
-                    mix += sigma[action] * here.aev0[static_cast<std::size_t>(action * n0 + h0)];
+                    mix += row[action] * here.aev0[static_cast<std::size_t>(action * n0 + h0)];
                 }
                 here.ev0[static_cast<std::size_t>(h0)] = mix;
                 if (updating < 0 || updating == 0)
                 {
                     accumulate_average(
-                        strategy_sum.data() + base, sigma, node.n_actions, weight_iter * pi0[h0]);
+                        strategy_sum.data() + base, row, node.n_actions, weight_iter * pi0[h0]);
                     for (int action = 0; action < node.n_actions; ++action)
                     {
                         const std::size_t at = static_cast<std::size_t>(base + action);
@@ -4726,17 +4726,17 @@ struct StreetBatchSolver::Engine
                     continue;
                 }
                 const int base = here.slot_base[static_cast<std::size_t>(h1)];
-                const double* sigma = frozen_sigma.data() + base;
+                const TableScalar* row = sigma.data() + base;
                 double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
-                    mix += sigma[action] * here.aev1[static_cast<std::size_t>(action * n1 + h1)];
+                    mix += row[action] * here.aev1[static_cast<std::size_t>(action * n1 + h1)];
                 }
                 here.ev1[static_cast<std::size_t>(h1)] = mix;
                 if (updating < 0 || updating == 1)
                 {
                     accumulate_average(
-                        strategy_sum.data() + base, sigma, node.n_actions, weight_iter * pi1[h1]);
+                        strategy_sum.data() + base, row, node.n_actions, weight_iter * pi1[h1]);
                     for (int action = 0; action < node.n_actions; ++action)
                     {
                         // Own-utility regret: ev1 holds player-1 modeled utility.
@@ -4765,7 +4765,7 @@ struct StreetBatchSolver::Engine
     // When locks_ is set, locked rows replace RM for matching public nodes.
     // Lock infoset_id is the public-node index (slot.node). SelectedCombos
     // uses the acting player's hand index (slot.hand). Slots are independent:
-    // each writes only its own frozen_sigma / regret span, so threads > 1
+    // each writes only its own sigma / regret span, so threads > 1
     // partition the slot vector with the same worker pool as chance splits.
     void freeze_sigma()
     {
@@ -4900,7 +4900,7 @@ struct StreetBatchSolver::Engine
             else if (algorithm == Algorithm::Dcfr)
             {
                 // DCFR(1.5,0,2): freeze, update OOP, discount(OOP)+freeze, update IP,
-                // discount(IP). Both passes share t; average weight is t².
+                // discount(IP). Both passes share t; sigma weight is t².
                 const DcfrFactors factors = dcfr_factors(trained, dcfr_params_);
                 slot_positive_discount_ = factors.positive_discount;
                 slot_negative_discount_ = factors.negative_discount;
@@ -4917,7 +4917,7 @@ struct StreetBatchSolver::Engine
             else if (algorithm == Algorithm::PcfrPlus)
             {
                 // PCFR+: RM on R+m, accumulate instantaneous into prediction_,
-                // commit+floor updating player; linear average weight t.
+                // commit+floor updating player; linear sigma weight t.
                 const double weight_iter = static_cast<double>(trained);
                 freeze_sigma();
                 pcfr_zero_prediction(0);
@@ -5008,8 +5008,10 @@ struct StreetBatchSolver::Engine
         report.allocated_bytes = budget_->current();
         report.peak_allocated_bytes = budget_->peak();
         report.reserved_bytes = budget_->reserved();
-        report.regret_strategy_sum_bytes = regret.size() * sizeof(double)
-            + strategy_sum.size() * sizeof(double);
+        report.regret_strategy_sum_bytes = regret.size() * sizeof(TableScalar)
+            + strategy_sum.size() * sizeof(TableScalar);
+        report.sigma_workspace_bytes = sigma.size() * sizeof(TableScalar);
+        report.table_scalar_bytes = static_cast<int>(sizeof(TableScalar));
         report.estimated_peak_bytes = estimated_peak_bytes_;
         report.expanded_terminals = expanded_terminals;
         report.expanded_decisions = expanded_decisions;
@@ -5635,7 +5637,7 @@ struct StreetBatchSolver::Engine
                     {
                         throw std::logic_error("supported hand has no information set");
                     }
-                    acting[static_cast<std::size_t>(hand)] *= average[static_cast<std::size_t>(
+                    acting[static_cast<std::size_t>(hand)] *= sigma[static_cast<std::size_t>(
                         slots[static_cast<std::size_t>(slot)].base + action)];
                 }
                 const std::string label(
@@ -5804,7 +5806,7 @@ struct StreetBatchSolver::Engine
                 for (int action = 0; action < stored.n_actions; ++action)
                 {
                     row.strategy[static_cast<std::size_t>(action)] =
-                        average[static_cast<std::size_t>(stored.base + action)];
+                        sigma[static_cast<std::size_t>(stored.base + action)];
                 }
             }
             view.hands[static_cast<std::size_t>(hand)] = std::move(row);
@@ -5824,12 +5826,12 @@ struct StreetBatchSolver::Engine
         const Node& node = nodes[static_cast<std::size_t>(node_index)];
         if (node.chance || node.terminal)
         {
-            throw std::invalid_argument("average applies to a decision node");
+            throw std::invalid_argument("sigma applies to a decision node");
         }
         const int hands = node.player == 0 ? n0 : n1;
         if (hand < 0 || hand >= hands || static_cast<int>(probability.size()) != node.n_actions)
         {
-            throw std::invalid_argument("average hand or action count");
+            throw std::invalid_argument("sigma hand or action count");
         }
         if (!validate_strategy_probs(probability, node.n_actions))
         {
@@ -5847,7 +5849,8 @@ struct StreetBatchSolver::Engine
         const Slot& stored = slots[static_cast<std::size_t>(slot)];
         for (int action = 0; action < stored.n_actions; ++action)
         {
-            average[static_cast<std::size_t>(stored.base + action)] = probability[static_cast<std::size_t>(action)];
+            sigma[static_cast<std::size_t>(stored.base + action)] = static_cast<TableScalar>(
+                probability[static_cast<std::size_t>(action)]);
         }
         average_ready = true;
     }
@@ -5871,7 +5874,7 @@ struct StreetBatchSolver::Engine
     }
 
     // Average-policy values. force is only the selected decision: that action is
-    // taken with probability 1, and every later decision mixes the average.
+    // taken with probability 1, and every later decision mixes the sigma.
     // Hero values are not multiplied by hero reach. Opponent reach is, so an
     // opponent's mixed value is the sum of the already-scaled action values.
     void average_value_walk(
@@ -5980,7 +5983,7 @@ struct StreetBatchSolver::Engine
                     else
                     {
                         const int index = slot_index(node, h0, turn, river, pi0[h0]);
-                        const double played = average[static_cast<std::size_t>(
+                        const double played = sigma[static_cast<std::size_t>(
                             slots[static_cast<std::size_t>(index)].base + action)];
                         child.pi0[static_cast<std::size_t>(h0)] = pi0[h0] * played;
                     }
@@ -6004,7 +6007,7 @@ struct StreetBatchSolver::Engine
                     else
                     {
                         const int index = slot_index(node, h1, turn, river, pi1[h1]);
-                        const double played = average[static_cast<std::size_t>(
+                        const double played = sigma[static_cast<std::size_t>(
                             slots[static_cast<std::size_t>(index)].base + action)];
                         child.pi1[static_cast<std::size_t>(h1)] = pi1[h1] * played;
                     }
@@ -6037,7 +6040,7 @@ struct StreetBatchSolver::Engine
                 double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
-                    const double played = average[static_cast<std::size_t>(
+                    const double played = sigma[static_cast<std::size_t>(
                         slots[static_cast<std::size_t>(index)].base + action)];
                     mix += played * here.aev0[static_cast<std::size_t>(action * n0 + h0)];
                 }
@@ -6066,7 +6069,7 @@ struct StreetBatchSolver::Engine
                 double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
-                    const double played = average[static_cast<std::size_t>(
+                    const double played = sigma[static_cast<std::size_t>(
                         slots[static_cast<std::size_t>(index)].base + action)];
                     mix += played * here.aev1[static_cast<std::size_t>(action * n1 + h1)];
                 }
@@ -6157,7 +6160,7 @@ struct StreetBatchSolver::Engine
                     {
                         throw std::logic_error("supported hand has no information set");
                     }
-                    acting[static_cast<std::size_t>(hand)] *= average[static_cast<std::size_t>(
+                    acting[static_cast<std::size_t>(hand)] *= sigma[static_cast<std::size_t>(
                         slots[static_cast<std::size_t>(slot)].base + action)];
                 }
             }
@@ -6329,7 +6332,7 @@ struct StreetBatchSolver::Engine
                 const double denom = prior * joint_scale * open;
                 const double conditional = stored_raw / denom;
                 page.action_ev[static_cast<std::size_t>(hand * node.n_actions + action)] = conditional;
-                const double played = average[static_cast<std::size_t>(stored.base + action)];
+                const double played = sigma[static_cast<std::size_t>(stored.base + action)];
                 mixed += played * conditional;
             }
             page.ev_defined[static_cast<std::size_t>(hand)] = 1;
@@ -7104,8 +7107,8 @@ int StreetBatchSolver::regret_entries() const
 
 std::size_t StreetBatchSolver::memory_bytes_estimate() const
 {
-    return engine_->regret.size() * sizeof(double)
-        + engine_->strategy_sum.size() * sizeof(double);
+    return engine_->regret.size() * sizeof(TableScalar)
+        + engine_->strategy_sum.size() * sizeof(TableScalar);
 }
 
 StreetMemoryReport StreetBatchSolver::memory_report() const
@@ -7128,14 +7131,14 @@ bool StreetBatchSolver::regret_value(const std::string& infoset, const std::stri
     return engine_->read_labeled_regret(infoset, action, value);
 }
 
-std::span<const double> StreetBatchSolver::regret_table() const
+std::span<const TableScalar> StreetBatchSolver::regret_table() const
 {
-    return std::span<const double>(engine_->regret.data(), engine_->regret.size());
+    return std::span<const TableScalar>(engine_->regret.data(), engine_->regret.size());
 }
 
-std::span<const double> StreetBatchSolver::strategy_sum_table() const
+std::span<const TableScalar> StreetBatchSolver::strategy_sum_table() const
 {
-    return std::span<const double>(engine_->strategy_sum.data(), engine_->strategy_sum.size());
+    return std::span<const TableScalar>(engine_->strategy_sum.data(), engine_->strategy_sum.size());
 }
 
 int StreetBatchSolver::thread_count() const
@@ -7489,7 +7492,7 @@ std::vector<StreetStrategyEntry> StreetBatchSolver::average_strategy_entries() c
             StreetStrategyEntry entry;
             entry.infoset = engine_->slot_label(slot);
             entry.action.assign(node.action_labels[action].data(), node.action_labels[action].size());
-            entry.probability = engine_->average[static_cast<std::size_t>(slot.base + action)];
+            entry.probability = engine_->sigma[static_cast<std::size_t>(slot.base + action)];
             entries.push_back(std::move(entry));
         }
     }
