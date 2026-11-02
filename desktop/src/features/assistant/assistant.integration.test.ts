@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   createAssistantSession,
@@ -17,10 +19,14 @@ import {
 import { parseRangeText } from "../../domain/range";
 import { DEFAULT_SPOT } from "../../domain/types";
 
+const here = dirname(fileURLToPath(import.meta.url));
 const fixture25 = parseRangeProfile(
   JSON.parse(
     readFileSync(
-      "/workspace/configs/range-profiles/fixture-co-bb-srp-100bb-2.5x.json",
+      join(
+        here,
+        "../../../../configs/range-profiles/fixture-co-bb-srp-100bb-2.5x.json",
+      ),
       "utf8",
     ),
   ),
@@ -28,7 +34,10 @@ const fixture25 = parseRangeProfile(
 const fixture25Nl = parseRangeProfile(
   JSON.parse(
     readFileSync(
-      "/workspace/configs/range-profiles/fixture-co-bb-srp-100bb-2.5x-100nl.json",
+      join(
+        here,
+        "../../../../configs/range-profiles/fixture-co-bb-srp-100bb-2.5x-100nl.json",
+      ),
       "utf8",
     ),
   ),

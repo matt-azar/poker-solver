@@ -1,10 +1,12 @@
 name: CI
 
 # push only on main + pull_request avoids duplicate runs on the same PR head.
+# workflow_dispatch re-runs both path gates (C++ and desktop) on demand.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -14,16 +16,19 @@ env:
   CMAKE_BUILD_PARALLEL_LEVEL: 4
 
 jobs:
-  # Path gate: skip the C++ matrix for docs/UI-only changes while still
-  # reporting a terminal `ci` check (see aggregate job below).
+  # Path gate: skip the C++ matrix for docs/UI-only changes and skip the
+  # desktop suite when desktop/** is untouched, while still reporting a
+  # terminal `ci` check (see aggregate job below).
   changes:
     runs-on: ubuntu-latest
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      code: ${{ steps.gate.outputs.code }}
+      desktop: ${{ steps.gate.outputs.desktop }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
+        if: github.event_name != 'workflow_dispatch'
         with:
           filters: |
             code:
@@ -35,6 +40,21 @@ jobs:
               - 'python/**'
               - 'tools/**'
               - '.github/workflows/ci.yml'
+            desktop:
+              - 'desktop/**'
+              - 'configs/range-profiles/**'
+              - '.github/workflows/ci.yml'
+      # workflow_dispatch has no useful changed-files base; force both gates on.
+      - id: gate
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "desktop=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=${{ steps.filter.outputs.code }}" >> "$GITHUB_OUTPUT"
+            echo "desktop=${{ steps.filter.outputs.desktop }}" >> "$GITHUB_OUTPUT"
+          fi
 
   windows:
     needs: changes
@@ -128,10 +148,36 @@ jobs:
       - name: CTest
         run: ctest --test-dir build-san --output-on-failure
 
-  # Single status for branch protection: green on docs/UI-only skips and when
-  # the code matrix (plus sanitizer when scheduled) succeeds.
+  # Desktop (Tauri UI) unit suite — independent of the C++ matrix so
+  # desktop-only PRs can go green without a full solver rebuild.
+  desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  # Single status for branch protection: green on docs-only skips and when
+  # the gated matrices (C++ and/or desktop) that ran succeed.
   ci:
-    needs: [changes, windows, linux, linux-sanitizer]
+    needs: [changes, windows, linux, linux-sanitizer, desktop]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -139,16 +185,25 @@ jobs:
         run: |
           set -euo pipefail
           echo "code=${{ needs.changes.outputs.code }}"
+          echo "desktop=${{ needs.changes.outputs.desktop }}"
           echo "windows=${{ needs.windows.result }}"
           echo "linux=${{ needs.linux.result }}"
           echo "sanitizer=${{ needs.linux-sanitizer.result }}"
-          if [[ "${{ needs.changes.outputs.code }}" != "true" ]]; then
-            echo "Docs/UI-only change; C++ matrix skipped"
+          echo "desktop_job=${{ needs.desktop.result }}"
+          code="${{ needs.changes.outputs.code }}"
+          desk="${{ needs.changes.outputs.desktop }}"
+          if [[ "$code" != "true" && "$desk" != "true" ]]; then
+            echo "Docs/UI-only change; C++ and desktop matrices skipped"
             exit 0
           fi
-          [[ "${{ needs.windows.result }}" == "success" ]]
-          [[ "${{ needs.linux.result }}" == "success" ]]
-          case "${{ needs.linux-sanitizer.result }}" in
-            success|skipped) ;;
-            *) exit 1 ;;
-          esac
+          if [[ "$code" == "true" ]]; then
+            [[ "${{ needs.windows.result }}" == "success" ]]
+            [[ "${{ needs.linux.result }}" == "success" ]]
+            case "${{ needs.linux-sanitizer.result }}" in
+              success|skipped) ;;
+              *) exit 1 ;;
+            esac
+          fi
+          if [[ "$desk" == "true" ]]; then
+            [[ "${{ needs.desktop.result }}" == "success" ]]
+          fi

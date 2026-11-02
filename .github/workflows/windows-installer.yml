@@ -98,6 +98,9 @@ jobs:
         working-directory: desktop
         run: npm ci
 
+      # Unit suite lives in CI's path-gated `desktop` job (ci.yml), not here —
+      # this workflow already pays for CMake + Tauri NSIS and keeps the
+      # installer path focused on packaging.
       - name: Build desktop UI
         working-directory: desktop
         run: npm run build
