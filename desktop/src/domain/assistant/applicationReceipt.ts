@@ -218,3 +218,52 @@ export function chatContentFromReceipt(receipt: ApplicationReceipt): string {
   }
   return `${body}\n\n${renderReceiptReviewCard(receipt)}`;
 }
+
+/** True when the resolved result carries at least one Build patch field. */
+export function setupResultHasApplyablePatch(result: SetupDraftResult): boolean {
+  return Object.keys(result.draftPatch ?? {}).length > 0;
+}
+
+/**
+ * Broad setups (new study, duplicate, range replacement, many fields) should
+ * show an explicit Apply control. Narrow scalar edits auto-commit.
+ */
+export function setupResultIsBroad(result: SetupDraftResult): boolean {
+  if (result.mode === "create" || result.mode === "duplicate") {
+    return true;
+  }
+  const patch = result.draftPatch ?? {};
+  if (patch.oopRange !== undefined || patch.ipRange !== undefined) {
+    return true;
+  }
+  return Object.keys(patch).length > 3;
+}
+
+/** Compact pending-proposal body shown before the player clicks Apply. */
+export function renderPendingSetupReview(result: SetupDraftResult): string {
+  const patch = result.draftPatch ?? {};
+  const keys = Object.keys(patch);
+  const lines: string[] = [`Review · ${result.mode} · rev ${result.requestRevision}`];
+  if (keys.length === 0) {
+    lines.push("• (no Build fields in this proposal)");
+  } else {
+    for (const key of keys) {
+      lines.push(
+        `• ${fieldLabel(key)}: ${formatScalar(patch[key as keyof typeof patch])}`,
+      );
+    }
+  }
+  for (const miss of result.missing) {
+    lines.push(`Missing ${miss.field}: ${miss.message}`);
+  }
+  for (const conflict of result.conflicts) {
+    lines.push(`Conflict ${conflict.field}: ${conflict.message}`);
+  }
+  lines.push(
+    result.canSolve
+      ? "Ready to solve after Apply."
+      : "Not yet solvable after Apply — fill remaining Build fields.",
+  );
+  lines.push("Click Apply to write these onto Build (Undo available afterward).");
+  return lines.join("\n");
+}

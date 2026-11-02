@@ -30,8 +30,11 @@ export type AssistantSetupApplyFn = (
 export function commitAssistantSetup(
   result: SetupDraftResult,
   applySetupDraft: AssistantSetupApplyFn,
+  options?: { force?: boolean },
 ): AssistantSetupApplyOutcome {
-  const outcome = applySetupDraft(result);
+  const outcome = options?.force
+    ? applySetupDraft(result, { force: true })
+    : applySetupDraft(result);
   if (!outcome.ok) {
     return outcome;
   }

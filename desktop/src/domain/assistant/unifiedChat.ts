@@ -101,21 +101,29 @@ export function looksLikeSetupRequest(text: string): boolean {
   );
 }
 
-function summarizeProposal(proposal: InterpretProposal): string {
+/**
+ * Human summary of a model proposal BEFORE local commit.
+ * Must not claim Build was updated — StudyAssistantWindow / receipts own that.
+ */
+export function summarizeProposal(proposal: InterpretProposal): string {
   if (proposal.kind === "clarify") {
     return proposal.questions.join(" ");
   }
   if (proposal.kind === "unsupported" || proposal.kind === "unrelated") {
     return proposal.message;
   }
-  const bits = [`Proposed ${proposal.kind.replace(/_/g, " ")}`];
+  const bits = [`Prepared ${proposal.kind.replace(/_/g, " ")}`];
   if (proposal.selectedProfileId) bits.push(`profile ${proposal.selectedProfileId}`);
   if (proposal.board) bits.push(`board ${proposal.board}`);
   if (proposal.stackBb != null) bits.push(`${proposal.stackBb}bb`);
   if (proposal.stakesLabel) bits.push(proposal.stakesLabel);
+  if (proposal.fieldEdits) {
+    const keys = Object.keys(proposal.fieldEdits);
+    if (keys.length > 0) bits.push(`fields ${keys.join(", ")}`);
+  }
   if (proposal.generatedRanges) bits.push("with model-generated ranges");
   if (proposal.interpolateFromIds) bits.push("with stack interpolation");
-  bits.push("Those fields are written onto the spot. Solve stays separate.");
+  bits.push("Solve stays separate until you run it.");
   return bits.join(" · ");
 }
 
@@ -307,7 +315,11 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
               },
             },
           ],
-          tool_choice: "auto",
+          // Setup-shaped requests must emit the setup tool — plain-text
+          // "I proposed a change" answers leave Build untouched with no Apply UI.
+          tool_choice: looksLikeSetupRequest(text)
+            ? { type: "function", function: { name: SETUP_TOOL } }
+            : "auto",
         }),
         signal: request.signal,
       });
