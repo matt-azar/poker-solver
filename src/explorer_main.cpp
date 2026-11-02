@@ -400,16 +400,12 @@ Job parse_job(const std::string& text)
     {
         job.ip_bets = {0.5, 1.0};
     }
+    // Present empty raise arrays stay empty (separate from bets). Absent keys
+    // still copy that player's bet list when raise multiples are also empty.
+    const bool oop_raises_present = find_key(text, "oop_raises") != std::string::npos;
+    const bool ip_raises_present = find_key(text, "ip_raises") != std::string::npos;
     job.oop_raises = optional_sizes(text, "oop_raises");
     job.ip_raises = optional_sizes(text, "ip_raises");
-    if (job.oop_raises.empty())
-    {
-        job.oop_raises = job.oop_bets;
-    }
-    if (job.ip_raises.empty())
-    {
-        job.ip_raises = job.ip_bets;
-    }
     job.oop_flop_bets = optional_sizes(text, "oop_flop_bets");
     job.oop_turn_bets = optional_sizes(text, "oop_turn_bets");
     job.oop_river_bets = optional_sizes(text, "oop_river_bets");
@@ -419,6 +415,14 @@ Job parse_job(const std::string& text)
     job.oop_donk = optional_sizes(text, "oop_donk");
     job.oop_raise_multiples = optional_sizes(text, "oop_raise_multiples");
     job.ip_raise_multiples = optional_sizes(text, "ip_raise_multiples");
+    if (!oop_raises_present && job.oop_raises.empty() && job.oop_raise_multiples.empty())
+    {
+        job.oop_raises = job.oop_bets;
+    }
+    if (!ip_raises_present && job.ip_raises.empty() && job.ip_raise_multiples.empty())
+    {
+        job.ip_raises = job.ip_bets;
+    }
     job.pot_cap = read_number(text, "pot_cap", 0);
     job.allow_three_bet = read_number(text, "allow_three_bet", 1) != 0.0;
     job.allow_all_in = read_number(text, "allow_all_in", 1) != 0.0;

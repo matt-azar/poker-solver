@@ -41,6 +41,8 @@ export interface PreflopAction {
 export interface StudySetupTreePreset {
   oopBets?: string;
   ipBets?: string;
+  oopRaises?: string;
+  ipRaises?: string;
   oopFlop?: string;
   ipFlop?: string;
   oopTurn?: string;

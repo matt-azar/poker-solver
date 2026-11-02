@@ -14,6 +14,10 @@ export interface ParsedSizeToken {
   geometric: boolean;
   /** Multiplier on the geometric size (`3e` → 3). */
   geometricMultiple: number;
+  /** True when the token was a raise multiple (`2x` / `2.5x`). */
+  raiseMultiple: boolean;
+  /** Facing-bet multiple (`2x` → 2). */
+  raiseMultipleValue: number;
 }
 
 /** Streets remaining for geometric sizing from a public board length. */
@@ -48,6 +52,7 @@ export function geometricPotFraction(
  * - `150` → 1.5
  * - `0.5` → 0.5 (explicit fraction)
  * - `e` / `2e` / `3e` → geometric (multiple)
+ * - `2x` / `2.5x` → raise multiple of the bet being faced
  * - `20c` → fixed chips as negative engine size
  */
 export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
@@ -62,7 +67,28 @@ export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
     if (!Number.isFinite(multiple) || multiple <= 0) {
       return null;
     }
-    return { fraction: 0, geometric: true, geometricMultiple: multiple };
+    return {
+      fraction: 0,
+      geometric: true,
+      geometricMultiple: multiple,
+      raiseMultiple: false,
+      raiseMultipleValue: 0,
+    };
+  }
+
+  const raiseX = raw.match(/^(\d+(?:\.\d+)?)x$/);
+  if (raiseX) {
+    const multiple = Number(raiseX[1]);
+    if (!Number.isFinite(multiple) || multiple <= 0) {
+      return null;
+    }
+    return {
+      fraction: 0,
+      geometric: false,
+      geometricMultiple: 1,
+      raiseMultiple: true,
+      raiseMultipleValue: multiple,
+    };
   }
 
   if (raw.endsWith("%")) {
@@ -70,7 +96,13 @@ export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
     if (!Number.isFinite(pct)) {
       return null;
     }
-    return { fraction: pct / 100, geometric: false, geometricMultiple: 1 };
+    return {
+      fraction: pct / 100,
+      geometric: false,
+      geometricMultiple: 1,
+      raiseMultiple: false,
+      raiseMultipleValue: 0,
+    };
   }
 
   if (raw.endsWith("c")) {
@@ -78,7 +110,13 @@ export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
     if (!Number.isFinite(chips)) {
       return null;
     }
-    return { fraction: -Math.abs(chips), geometric: false, geometricMultiple: 1 };
+    return {
+      fraction: -Math.abs(chips),
+      geometric: false,
+      geometricMultiple: 1,
+      raiseMultiple: false,
+      raiseMultipleValue: 0,
+    };
   }
 
   const value = Number(raw);
@@ -87,9 +125,21 @@ export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
   }
   // Explicit fraction in (0, 1]: keep. Integers and values > 1: Pio percent.
   if (value > 1 || Number.isInteger(value)) {
-    return { fraction: value / 100, geometric: false, geometricMultiple: 1 };
+    return {
+      fraction: value / 100,
+      geometric: false,
+      geometricMultiple: 1,
+      raiseMultiple: false,
+      raiseMultipleValue: 0,
+    };
   }
-  return { fraction: value, geometric: false, geometricMultiple: 1 };
+  return {
+    fraction: value,
+    geometric: false,
+    geometricMultiple: 1,
+    raiseMultiple: false,
+    raiseMultipleValue: 0,
+  };
 }
 
 export function parseSizeToken(token: string): number | null {
@@ -109,6 +159,7 @@ export interface ResolveSizeOptions {
 /**
  * Resolve a comma/space size list to engine pot fractions, expanding `e`/`Ne`
  * when the geometric checkbox is off, then optionally merging near sizes.
+ * Raise multiples (`2x`) are ignored here — use {@link resolveRaiseSizeList}.
  */
 export function resolveSizeList(
   text: string,
@@ -121,7 +172,7 @@ export function resolveSizeList(
 
   for (const part of parts) {
     const parsed = parseSizeTokenDetailed(part);
-    if (!parsed) {
+    if (!parsed || parsed.raiseMultiple) {
       continue;
     }
     if (parsed.geometric) {
@@ -136,6 +187,56 @@ export function resolveSizeList(
   }
 
   return mergeSizeFractions(out, options.pot, options.mergeThresholdPct ?? 0);
+}
+
+export interface ResolvedRaiseSizes {
+  /** Pot-fraction / fixed-chip raise sizes for the engine. */
+  fractions: number[];
+  /** Facing-bet multiples (`2x` → 2) for `*_raise_multiples`. */
+  multiples: number[];
+}
+
+/**
+ * Resolve a raise-size field: pot % (`50`, `100`) and facing multiples (`2x`).
+ * Blank text → empty fractions and multiples (no copy from bet sizes).
+ */
+export function resolveRaiseSizeList(
+  text: string,
+  options: ResolveSizeOptions,
+): ResolvedRaiseSizes {
+  const parts = text.split(/[,]+/).map((part) => part.trim()).filter(Boolean);
+  const streets = streetsRemaining(options.boardLen);
+  const geo = geometricPotFraction(options.pot, options.stack, streets);
+  const fractions: number[] = [];
+  const multiples: number[] = [];
+
+  for (const part of parts) {
+    const parsed = parseSizeTokenDetailed(part);
+    if (!parsed) {
+      continue;
+    }
+    if (parsed.raiseMultiple) {
+      multiples.push(parsed.raiseMultipleValue);
+      continue;
+    }
+    if (parsed.geometric) {
+      if (options.geometricFlag) {
+        continue;
+      }
+      fractions.push(geo * parsed.geometricMultiple);
+      continue;
+    }
+    fractions.push(parsed.fraction);
+  }
+
+  return {
+    fractions: mergeSizeFractions(
+      fractions,
+      options.pot,
+      options.mergeThresholdPct ?? 0,
+    ),
+    multiples: [...multiples].sort((a, b) => a - b),
+  };
 }
 
 /** Merge fractions whose rounded chip amounts fall within threshold % of each other. */

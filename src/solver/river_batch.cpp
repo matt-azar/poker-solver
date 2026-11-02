@@ -130,7 +130,12 @@ Legal legal_actions(const river::RiverConfig& config, const BetState& state)
     };
     const auto consider = [&](int add)
     {
-        if (config.max_raises <= state.num_raises || add < 1)
+        // Opening bets ignore max_raises; only facing raises are capped.
+        if (facing && config.max_raises <= state.num_raises)
+        {
+            return;
+        }
+        if (add < 1)
         {
             return;
         }
@@ -232,7 +237,11 @@ BetState apply_action(const river::RiverConfig& config, const BetState& state, c
     next.pending_check = false;
     next.last_raise = raise_by;
     next.committed = next.contrib[player];
-    next.num_raises += 1;
+    // Opening bets do not consume max_raises; only facing raises count.
+    if (to_call > 0)
+    {
+        next.num_raises += 1;
+    }
     next.acting = 1 - player;
     (void)config;
     return next;

@@ -11,6 +11,8 @@ export interface StudySetupPreferences {
   defaultTreeBets?: {
     oopBets?: string;
     ipBets?: string;
+    oopRaises?: string;
+    ipRaises?: string;
     oopFlop?: string;
     ipFlop?: string;
     oopTurn?: string;
@@ -63,6 +65,8 @@ export function normalizeStudySetupPreferences(
     for (const key of [
       "oopBets",
       "ipBets",
+      "oopRaises",
+      "ipRaises",
       "oopFlop",
       "ipFlop",
       "oopTurn",

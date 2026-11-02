@@ -26,6 +26,8 @@ export { assertRevision, isStaleProposal };
 const TREE_KEYS = [
   "oopBets",
   "ipBets",
+  "oopRaises",
+  "ipRaises",
   "oopFlop",
   "ipFlop",
   "oopTurn",

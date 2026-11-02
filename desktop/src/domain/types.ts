@@ -35,6 +35,10 @@ export interface SolveJobRequest {
   stack: number;
   oop_bets: number[];
   ip_bets: number[];
+  oop_raises?: number[];
+  ip_raises?: number[];
+  oop_raise_multiples?: number[];
+  ip_raise_multiples?: number[];
   oop_flop_bets?: number[];
   ip_flop_bets?: number[];
   oop_turn_bets?: number[];
@@ -259,6 +263,9 @@ export interface SpotDraft {
   stack: number;
   oopBets: string;
   ipBets: string;
+  /** Raise pot-% / Nx list (separate from bets). Blank = no raises. */
+  oopRaises: string;
+  ipRaises: string;
   oopFlop: string;
   ipFlop: string;
   oopTurn: string;
@@ -323,14 +330,18 @@ export const DEFAULT_SPOT: SpotDraft = {
   ipRange: "KK",
   pot: 100,
   stack: 200,
-  oopBets: "50, 100",
-  ipBets: "50, 100",
-  oopFlop: "50, 100",
-  ipFlop: "50, 100",
-  oopTurn: "50, 100",
-  ipTurn: "50, 100",
-  oopRiver: "50, 100",
-  ipRiver: "50, 100",
+  // Blank size fields mean no bets/raises (engine empty arrays). Geometric /
+  // all-in toggles can still inject sizes when enabled.
+  oopBets: "",
+  ipBets: "",
+  oopRaises: "",
+  ipRaises: "",
+  oopFlop: "",
+  ipFlop: "",
+  oopTurn: "",
+  ipTurn: "",
+  oopRiver: "",
+  ipRiver: "",
   oopDonk: "",
   donkFlop: false,
   donkTurn: false,
@@ -343,7 +354,8 @@ export const DEFAULT_SPOT: SpotDraft = {
   allowAllIn: true,
   frozen: true,
   accuracy: "",
-  maxRaises: 2,
+  // Facing raises only — opening street bets do not consume this cap.
+  maxRaises: 1,
   iterations: 200,
   memoryMib: FAST.memoryMib,
   threads: FAST.threads,

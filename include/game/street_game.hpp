@@ -73,8 +73,10 @@ struct StreetConfig
     // down to the cap. Zero leaves no-limit sizing. One is pot-limit.
     double pot_cap = 0.0;
     bool allow_all_in = true;
-    // False removes the re-raise after a bet and a raise.
+    // False removes the re-raise after a bet and a raise (3-bet).
     bool allow_three_bet = true;
+    // Cap on facing raises per street. Opening bets do not count.
+    // 0 = bets allowed, raises forbidden. Check-only uses empty bet lists.
     int max_raises = 1;
     int first_to_act = 0;
     // Solver-owned heap for StreetBatchSolver, in mebibytes. Zero is rejected.
@@ -574,19 +576,14 @@ private:
 
     const std::vector<double>& listed_raises(int player, int kind) const
     {
+        // Raise lists stay separate from bet lists. Empty means no pot-fraction
+        // raises (raise multiples / geometric / all-in may still apply).
         const std::vector<double>& specific = player == 0
             ? (kind == 0 ? config_.oop_flop_raises : kind == 1 ? config_.oop_turn_raises : config_.oop_river_raises)
             : (kind == 0 ? config_.ip_flop_raises : kind == 1 ? config_.ip_turn_raises : config_.ip_river_raises);
         if (!specific.empty())
         {
             return specific;
-        }
-        const std::vector<double>& street_bets = player == 0
-            ? (kind == 0 ? config_.oop_flop_bets : kind == 1 ? config_.oop_turn_bets : config_.oop_river_bets)
-            : (kind == 0 ? config_.ip_flop_bets : kind == 1 ? config_.ip_turn_bets : config_.ip_river_bets);
-        if (!street_bets.empty())
-        {
-            return street_bets;
         }
         return player == 0 ? config_.oop_raise_sizes : config_.ip_raise_sizes;
     }
@@ -862,11 +859,12 @@ private:
         {
             throw std::logic_error("street stack accounting failed");
         }
-        if (config_.max_raises <= state.num_raises)
+        // Opening bets do not count as raises; caps apply only when facing.
+        if (facing && config_.max_raises <= state.num_raises)
         {
             return false;
         }
-        if (!config_.allow_three_bet && state.num_raises >= 2)
+        if (facing && !config_.allow_three_bet && state.num_raises >= 1)
         {
             return false;
         }
@@ -1064,11 +1062,15 @@ private:
         };
         const auto consider = [&](int add)
         {
-            if (config_.max_raises <= state.num_raises || add < 1)
+            if (facing && config_.max_raises <= state.num_raises)
             {
                 return;
             }
-            if (!config_.allow_three_bet && state.num_raises >= 2)
+            if (add < 1)
+            {
+                return;
+            }
+            if (facing && !config_.allow_three_bet && state.num_raises >= 1)
             {
                 return;
             }
@@ -1259,7 +1261,11 @@ private:
         next.pending_check = false;
         next.last_raise = raise_by;
         next.committed = next.contrib[player];
-        next.num_raises += 1;
+        // Opening bets do not consume max_raises; only facing raises count.
+        if (to_call > 0)
+        {
+            next.num_raises += 1;
+        }
         next.street_aggressor = player;
         next.acting = 1 - player;
         return next;

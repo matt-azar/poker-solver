@@ -300,14 +300,17 @@ export function BuildWorkspace() {
 
           <h3 className="build-subhead">Betting tree</h3>
           <p className="field-hint">
-            Sizes are % of pot (75 = 75%). Use e / 2e / 3e for geometric when Geometric is off.
+            Blank = no bets (unless Geometric or All-in is on). Bet sizes are % of
+            pot (75 = 75%). Raises are separate: pot % and/or multiples of the bet
+            faced (2x, 2.5x). Max raises counts facing raises only — not the first
+            bet on a street.
           </p>
           <div className="build-inline">
             <label>
               Flop OOP
               <input
                 value={draft.oopFlop}
-                placeholder="50, 100"
+                placeholder="e.g. 50, 100"
                 onChange={(event) => updateDraft({ oopFlop: event.target.value })}
               />
             </label>
@@ -315,7 +318,7 @@ export function BuildWorkspace() {
               Flop IP
               <input
                 value={draft.ipFlop}
-                placeholder="50, 100"
+                placeholder="e.g. 50, 100"
                 onChange={(event) => updateDraft({ ipFlop: event.target.value })}
               />
             </label>
@@ -333,7 +336,7 @@ export function BuildWorkspace() {
               Turn OOP
               <input
                 value={draft.oopTurn}
-                placeholder="33, 75, e"
+                placeholder="e.g. 33, 75, e"
                 onChange={(event) => updateDraft({ oopTurn: event.target.value })}
               />
             </label>
@@ -341,7 +344,7 @@ export function BuildWorkspace() {
               Turn IP
               <input
                 value={draft.ipTurn}
-                placeholder="33, 75, e"
+                placeholder="e.g. 33, 75, e"
                 onChange={(event) => updateDraft({ ipTurn: event.target.value })}
               />
             </label>
@@ -359,7 +362,7 @@ export function BuildWorkspace() {
               River OOP
               <input
                 value={draft.oopRiver}
-                placeholder="50, 100"
+                placeholder="e.g. 50, 100"
                 onChange={(event) => updateDraft({ oopRiver: event.target.value })}
               />
             </label>
@@ -367,7 +370,7 @@ export function BuildWorkspace() {
               River IP
               <input
                 value={draft.ipRiver}
-                placeholder="50, 100"
+                placeholder="e.g. 50, 100"
                 onChange={(event) => updateDraft({ ipRiver: event.target.value })}
               />
             </label>
@@ -378,6 +381,24 @@ export function BuildWorkspace() {
                 onChange={(event) => updateDraft({ donkRiver: event.target.checked })}
               />
               Donk
+            </label>
+          </div>
+          <div className="build-inline">
+            <label>
+              Raises OOP
+              <input
+                value={draft.oopRaises}
+                placeholder="e.g. 50, 2.5x"
+                onChange={(event) => updateDraft({ oopRaises: event.target.value })}
+              />
+            </label>
+            <label>
+              Raises IP
+              <input
+                value={draft.ipRaises}
+                placeholder="e.g. 50, 2x"
+                onChange={(event) => updateDraft({ ipRaises: event.target.value })}
+              />
             </label>
           </div>
           <div className="build-inline">
