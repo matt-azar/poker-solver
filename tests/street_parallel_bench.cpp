@@ -50,8 +50,12 @@ double relative_delta(const std::vector<double>& left, std::span<const poker::so
     double worst = 0.0;
     for (std::size_t index = 0; index < left.size(); ++index)
     {
-        const double scale = 1.0 + std::max(std::abs(left[index]), std::abs(right[index]));
-        worst = std::max(worst, std::abs(left[index] - right[index]) / scale);
+        const double scale = 1.0 + std::max(
+            std::abs(left[index]),
+            std::abs(static_cast<double>(right[index])));
+        worst = std::max(
+            worst,
+            std::abs(left[index] - static_cast<double>(right[index])) / scale);
     }
     return worst;
 }

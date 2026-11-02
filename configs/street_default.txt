@@ -15,5 +15,6 @@ rake-rate 0
 rake-cap 0
 memory-mib 1024
 threads 1
+table-i16 0
 oop-bets 1
 oop-raises 1
