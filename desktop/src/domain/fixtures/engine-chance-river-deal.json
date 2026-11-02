@@ -1,0 +1,113 @@
+{
+  "solution_id": "s1",
+  "job_id": "j1",
+  "kind": "chance",
+  "node_id": "n:root/c",
+  "line": "Check/Check",
+  "place": "deal",
+  "player": null,
+  "folded": null,
+  "reach_defined": true,
+  "joint": 1.0,
+  "pot": 100,
+  "contrib": [
+    0,
+    0
+  ],
+  "stacks": [
+    200,
+    200
+  ],
+  "stack": 200,
+  "to_call": 0,
+  "parent_id": "n:root",
+  "board": [
+    "Ah",
+    "Kd",
+    "7c",
+    "4s"
+  ],
+  "actions": [],
+  "children": [],
+  "combos": [
+    "AsAd",
+    "AsAc"
+  ],
+  "reach": [
+    1.0,
+    1.0
+  ],
+  "marginal": [
+    0.5,
+    0.5
+  ],
+  "opponent_combos": [
+    "2h2c"
+  ],
+  "opponent_reach": [
+    1.0
+  ],
+  "opponent_marginal": [
+    1.0
+  ],
+  "cards": [
+    {
+      "card": "As",
+      "child_id": "n:root/c/As",
+      "weight": 0.0208333333333
+    },
+    {
+      "card": "Ad",
+      "child_id": "n:root/c/Ad",
+      "weight": 0.0208333333333
+    },
+    {
+      "card": "Ac",
+      "child_id": "n:root/c/Ac",
+      "weight": 0.0208333333333
+    },
+    {
+      "card": "Ks",
+      "child_id": "n:root/c/Ks",
+      "weight": 0.0208333333333
+    },
+    {
+      "card": "Kh",
+      "child_id": "n:root/c/Kh",
+      "weight": 0.0208333333333
+    },
+    {
+      "card": "Qs",
+      "child_id": "n:root/c/Qs",
+      "weight": 0.0208333333333
+    },
+    {
+      "card": "Tc",
+      "child_id": "n:root/c/Tc",
+      "weight": 0.0208333333333
+    },
+    {
+      "card": "7d",
+      "child_id": "n:root/c/7d",
+      "weight": 0.0208333333333
+    },
+    {
+      "card": "4c",
+      "child_id": "n:root/c/4c",
+      "weight": 0.0208333333333
+    },
+    {
+      "card": "2h",
+      "child_id": "n:root/c/2h",
+      "weight": 0.0208333333333
+    },
+    {
+      "card": "2c",
+      "child_id": "n:root/c/2c",
+      "weight": 0.0208333333333
+    }
+  ],
+  "engine_allocated": 1000,
+  "engine_peak": 2000,
+  "process_rss": 3000
+}

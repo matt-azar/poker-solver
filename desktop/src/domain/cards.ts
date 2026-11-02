@@ -1,4 +1,4 @@
-import type { NodeCardChild, NodePayload } from "./types";
+import type { NodePayload } from "./types";
 
 export const CARD_RANKS = [
   "A",
@@ -167,8 +167,41 @@ export function deckCoords(index: number): { rank: CardRank; suit: CardSuit; row
   };
 }
 
-function isCardChild(child: unknown): child is NodeCardChild {
-  return typeof child === "object" && child !== null && "card" in child;
+/**
+ * Raw chance-card row from explorer `json_inspection`.
+ * Production engine uses `cards: [{ card, child_id, weight }]`.
+ * Older UI fixtures used `children: [{ card, node_id, weight? }]`.
+ */
+export interface RawChanceCard {
+  card?: string;
+  child_id?: string;
+  node_id?: string;
+  weight?: number | null;
+}
+
+function isChanceCardEntry(value: unknown): value is RawChanceCard {
+  return typeof value === "object" && value !== null && "card" in value;
+}
+
+/** Child public-node id: engine `child_id`, or legacy `node_id`. */
+export function chanceCardChildId(entry: RawChanceCard): string | null {
+  const id = entry.child_id ?? entry.node_id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+/**
+ * Prefer engine `cards[]`; fall back to object entries in `children`
+ * (legacy / hand-built fixtures). Decision-node `children` are strings and
+ * are ignored.
+ */
+export function chanceCardEntries(node: NodePayload): RawChanceCard[] {
+  const fromCards = Array.isArray(node.cards)
+    ? (node.cards as unknown[]).filter(isChanceCardEntry)
+    : [];
+  if (fromCards.length > 0) {
+    return fromCards;
+  }
+  return (node.children ?? []).filter(isChanceCardEntry);
 }
 
 /** Legal next cards from a deal (next-card) node for the rank×suit picker. */
@@ -178,21 +211,26 @@ export function chanceCardOptions(node: NodePayload | null | undefined): ChanceC
   }
   const blockers = boardBlockers(node.board);
   const byCard = new Map<string, ChanceCardOption>();
-  for (const child of node.children ?? []) {
-    if (!isCardChild(child) || !child.card || !child.node_id) {
+  for (const entry of chanceCardEntries(node)) {
+    const nodeId = chanceCardChildId(entry);
+    if (!entry.card || !nodeId) {
       continue;
     }
-    const parsed = parseCardCode(child.card);
+    const parsed = parseCardCode(entry.card);
     if (!parsed) {
       continue;
     }
     const code = `${parsed.rank}${parsed.suit}`;
+    const weight =
+      typeof entry.weight === "number" && Number.isFinite(entry.weight)
+        ? entry.weight
+        : null;
     byCard.set(code, {
       card: code,
       rank: parsed.rank,
       suit: parsed.suit,
-      nodeId: child.node_id,
-      weight: child.weight ?? null,
+      nodeId,
+      weight,
       blocked: blockers.has(code),
     });
   }
