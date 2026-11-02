@@ -74,12 +74,13 @@ import {
   shouldClearCompareNote,
   strategyEditScopeFromNode,
   strategyEditScopesEqual,
+  undoSetupTransactionGuarded,
   validateSetupForSolve,
   type AnalysisIdentity,
   type AnalysisKind,
   type SetupDraftResult,
   type SetupStudyMeta,
-  type SetupTransactionSnapshot,
+  type SetupUndoEntry,
   type StrategyEditScope,
 } from "../domain/setup";
 import { getRangeProfileCatalogue } from "../domain/profiles";
@@ -90,7 +91,12 @@ import { useThemeStore } from "./themeStore";
 import { useLayoutStore } from "./layoutStore";
 
 const SETUP_HISTORY_LIMIT = 30;
-const setupHistoryPast: SetupTransactionSnapshot[] = [];
+const setupHistoryPast: SetupUndoEntry[] = [];
+
+/** Test helper: drop assistant setup undo stack without touching draft state. */
+export function resetSetupHistoryForTests() {
+  setupHistoryPast.length = 0;
+}
 
 export type WorkspaceId = "study" | "build" | "compare" | "library";
 
@@ -425,7 +431,19 @@ interface StudyState {
     result: SetupDraftResult,
     options?: { force?: boolean },
   ) => { ok: true } | { ok: false; reason: string; message: string };
-  undoSetupTransaction: () => void;
+  /**
+   * Guarded inverse of the last assistant/setup apply. Restores only fields
+   * still matching the post-apply values; later manual edits are preserved.
+   */
+  undoSetupTransaction: () => {
+    ok: false;
+    reason: "empty";
+  } | {
+    ok: true;
+    message: string;
+    restoredKeys: string[];
+    conflictKeys: string[];
+  };
   clearSetupMeta: () => void;
   getSetupCatalogue: () => ReturnType<typeof getRangeProfileCatalogue>;
 
@@ -891,7 +909,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!applied.ok) {
       return { ok: false, reason: applied.reason, message: applied.message };
     }
-    setupHistoryPast.push(applied.undoSnapshot);
+    setupHistoryPast.push(applied.undoEntry);
     while (setupHistoryPast.length > SETUP_HISTORY_LIMIT) {
       setupHistoryPast.shift();
     }
@@ -910,18 +928,32 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     return { ok: true };
   },
   undoSetupTransaction() {
-    const previous = setupHistoryPast.pop();
-    if (!previous) {
-      return;
+    const entry = setupHistoryPast.pop();
+    if (!entry) {
+      return { ok: false, reason: "empty" };
     }
-    set({
-      draft: previous.draft,
-      weights: previous.weights,
-      setupMeta: previous.meta,
-      draftRevision: bumpRevision(get().draftRevision),
-      canUndoSetup: setupHistoryPast.length > 0,
-      message: "Reverted assistant setup",
+    const state = get();
+    const undone = undoSetupTransactionGuarded({
+      currentDraft: state.draft,
+      currentWeights: state.weights,
+      currentMeta: state.setupMeta,
+      draftRevision: state.draftRevision,
+      entry,
     });
+    set({
+      draft: undone.draft,
+      weights: undone.weights,
+      setupMeta: undone.meta,
+      draftRevision: undone.draftRevision,
+      canUndoSetup: setupHistoryPast.length > 0,
+      message: undone.message,
+    });
+    return {
+      ok: true,
+      message: undone.message,
+      restoredKeys: undone.restoredKeys.map(String),
+      conflictKeys: undone.conflictKeys.map(String),
+    };
   },
   clearSetupMeta() {
     set({ setupMeta: null });
@@ -2260,7 +2292,7 @@ pathTrail,
       set({ message: "Set a solution path before opening." });
       return;
     }
-const prior = snapshotPublishedStudy(get());
+    const prior = snapshotPublishedStudy(get());
     invalidateLifecycleRequests();
     pendingReloadNodeId = null; // opened checkpoint lands at root
     // Drop cross-solution Build undo / nav before the load completes.
@@ -2283,7 +2315,7 @@ const prior = snapshotPublishedStudy(get());
       strategyEditDraft: defaultLockDraft(0),
       strategyEditDraftBaseline: null,
       strategyEditDrawerOpen: false,
-setupMeta: null,
+      setupMeta: null,
       canUndoSetup: false,
       canUndoRange: false,
       canRedoRange: false,

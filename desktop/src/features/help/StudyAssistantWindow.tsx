@@ -404,11 +404,12 @@ export function StudyAssistantWindow() {
               className="toolbar-btn"
               disabled={busy}
               onClick={() => {
-                undoSetupTransaction();
-                setMessages((prev) => [
-                  ...prev,
-                  { role: "assistant", content: "Reverted the last assistant change." },
-                ]);
+                const outcome = undoSetupTransaction();
+                const content =
+                  outcome.ok && outcome.message
+                    ? outcome.message
+                    : "Reverted the last assistant change.";
+                setMessages((prev) => [...prev, { role: "assistant", content }]);
               }}
             >
               Undo
