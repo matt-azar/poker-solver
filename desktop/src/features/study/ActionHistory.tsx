@@ -26,14 +26,17 @@ import {
   formatActionTooltip,
   formatFrequencyPct,
 } from "../../domain/betSizes";
+import { dealStreetFromBoard } from "../../domain/cards";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/path-nav.css";
 import "../../styles/actions.css";
 import { ActionBlock } from "../matrix/ActionBlock";
+import { CardPicker } from "../tree/CardPicker";
 
 function suitOf(card: string): string {
-  return card.slice(1, 2)?.toLowerCase() || "";
+  const suit = card.trim().slice(1, 2)?.toLowerCase() || "";
+  return "shdc".includes(suit) ? suit : "";
 }
 
 function stepsFromTrailOrCrumbs(
@@ -196,6 +199,9 @@ export function ActionHistory() {
     [currentNode?.actions],
   );
   const dealNode = currentNode?.kind === "chance";
+  const dealingStreet = dealNode
+    ? dealStreetFromBoard(currentNode?.board)
+    : null;
   const terminal = currentNode?.kind === "terminal";
   const statusLabel = nodeStatusLabel(currentNode);
   const terminalKind = terminal
@@ -250,7 +256,16 @@ export function ActionHistory() {
     <section
       className="path-nav action-history"
       data-empty={currentNode ? "false" : "true"}
-      style={currentNode ? { height: layout.historyHeight } : undefined}
+      data-dealing={dealNode ? "true" : "false"}
+      style={
+        currentNode
+          ? {
+              height: dealNode
+                ? Math.max(layout.historyHeight, 220)
+                : layout.historyHeight,
+            }
+          : undefined
+      }
     >
       <div className="path-nav__row path-nav__line">
         <div className="path-nav__controls" role="group" aria-label="Path history">
@@ -332,6 +347,9 @@ export function ActionHistory() {
                             className="path-nav__step"
                             data-current={isCurrent ? "true" : "false"}
                             data-kind={step.kind}
+                            data-suit={
+                              step.kind === "card" ? suitOf(step.label) || undefined : undefined
+                            }
                             disabled={!clickable}
                             title={
                               step.nodeId
@@ -396,66 +414,57 @@ export function ActionHistory() {
         ) : null}
       </div>
 
-      <div className="path-nav__row path-nav__next">
-        <span className="path-nav__label">{dealNode ? "Cards" : "Next"}</span>
-        <div className="path-nav__choices" role="group" aria-label="Next actions">
-          {!currentNode ? (
-            <span className="empty-hint">—</span>
-          ) : terminal ? (
-            <span className="muted">
-              {isTerminalFold(currentNode) ? "Fold terminal" : "Showdown terminal"}
-            </span>
-          ) : choices.length === 0 ? (
-            <span className="muted">No branches</span>
-          ) : (
-            choices.map((choice, index) => {
-              // Card / chance strip: keep compact history-choice buttons.
-              if (choice.kind !== "action") {
+      {dealNode ? (
+        <div className="path-nav__row path-nav__card-picker">
+          <CardPicker
+            open
+            variant="inline"
+            street={dealingStreet}
+            onClose={() => undefined}
+          />
+        </div>
+      ) : (
+        <div className="path-nav__row path-nav__next">
+          <span className="path-nav__label">Next</span>
+          <div className="path-nav__choices" role="group" aria-label="Next actions">
+            {!currentNode ? (
+              <span className="empty-hint">—</span>
+            ) : terminal ? (
+              <span className="muted">
+                {isTerminalFold(currentNode) ? "Fold terminal" : "Showdown terminal"}
+              </span>
+            ) : choices.length === 0 ? (
+              <span className="muted">No branches</span>
+            ) : (
+              choices.map((choice, index) => {
+                const display = formatActionDisplay(choice.label, pot, betSizeDisplay);
+                const freqText =
+                  formatFrequencyPct(choice.frequency) ??
+                  formatChoiceFrequency(choice.frequency);
                 return (
-                  <button
+                  <ActionBlock
                     key={choice.key}
-                    type="button"
-                    className="path-nav-choice history-choice"
-                    data-kind={choice.kind}
+                    variant="follow"
+                    primary={display.primary}
+                    secondary={display.secondary}
+                    frequency={choice.frequency}
+                    frequencyText={freqText}
+                    color={colors.byIndex[index]}
                     disabled={!choice.nodeId}
-                    title={choice.nodeId ? choice.nodeId : choice.label}
+                    title={`${formatActionTooltip(choice.label, pot, betSizeDisplay)} · follow`}
+                    aria-label={`Follow ${display.primary}${freqText ? `, ${freqText}` : ""}`}
                     onClick={() => {
                       if (choice.nodeId) {
                         void followAction(choice.nodeId);
                       }
                     }}
-                  >
-                    <span className="path-nav-choice__label">{choice.label}</span>
-                  </button>
+                  />
                 );
-              }
-              const display = formatActionDisplay(choice.label, pot, betSizeDisplay);
-              const freqText =
-                formatFrequencyPct(choice.frequency) ??
-                formatChoiceFrequency(choice.frequency);
-              return (
-                <ActionBlock
-                  key={choice.key}
-                  variant="follow"
-                  primary={display.primary}
-                  secondary={display.secondary}
-                  frequency={choice.frequency}
-                  frequencyText={freqText}
-                  color={colors.byIndex[index]}
-                  disabled={!choice.nodeId}
-                  title={`${formatActionTooltip(choice.label, pot, betSizeDisplay)} · follow`}
-                  aria-label={`Follow ${display.primary}${freqText ? `, ${freqText}` : ""}`}
-                  onClick={() => {
-                    if (choice.nodeId) {
-                      void followAction(choice.nodeId);
-                    }
-                  }}
-                />
-              );
-            })
-          )}
+              })
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div
         className="resize-handle"

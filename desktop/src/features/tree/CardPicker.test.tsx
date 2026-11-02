@@ -31,6 +31,8 @@ describe("CardPicker", () => {
   it("renders a suits×ranks grid from engine cards[] with faded blockers", () => {
     render(<CardPicker open street="river" onClose={() => undefined} />);
     expect(screen.getByRole("dialog", { name: /river card picker/i })).toBeTruthy();
+    expect(screen.getByText("Change river")).toBeTruthy();
+    expect(screen.queryByLabelText(/four-color suits/i)).toBeNull();
     expect(screen.getAllByText("♠").length).toBeGreaterThan(0);
     expect(screen.getAllByText("♥").length).toBeGreaterThan(0);
     const as = screen.getByRole("gridcell", { name: /^As$/ });
@@ -71,5 +73,14 @@ describe("CardPicker", () => {
     expect(
       screen.getByRole("gridcell", { name: /^2h$/ }).getAttribute("data-focused"),
     ).toBe("true");
+  });
+
+  it("renders inline without a dialog chrome when embedded in the Cards row", () => {
+    render(
+      <CardPicker open variant="inline" street="river" onClose={() => undefined} />,
+    );
+    expect(screen.getByRole("region", { name: /river card picker/i })).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("Change river")).toBeTruthy();
   });
 });

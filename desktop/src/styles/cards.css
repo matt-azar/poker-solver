@@ -19,6 +19,11 @@
   vertical-align: middle;
 }
 
+.playing-card[data-layout="inline"] {
+  flex-direction: row;
+  gap: 2px;
+}
+
 .playing-card[data-suit="h"] {
   --playing-card-suit: var(--suit-heart);
 }
@@ -47,6 +52,13 @@
   min-height: 42px;
   padding: 3px 5px;
   font-size: 12px;
+}
+
+.playing-card[data-size="md"][data-layout="inline"] {
+  min-width: 36px;
+  min-height: 32px;
+  padding: 4px 6px;
+  font-size: 13px;
 }
 
 .playing-card__rank {
@@ -79,6 +91,8 @@
 .playing-card[data-focused="true"] {
   outline: 2px solid var(--selection-outline);
   outline-offset: 1px;
+  border-color: var(--selection-outline);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--selection-outline) 35%, transparent);
 }
 
 .playing-card[data-interactive="true"]:not(:disabled):not([aria-disabled="true"]) {
@@ -100,9 +114,29 @@ button.playing-card {
 
 .board-cards {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  align-items: flex-end;
+  gap: 10px;
   flex-wrap: wrap;
+}
+
+.board-cards__group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.board-cards__group-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.board-cards__group[data-active="true"] .board-cards__group-label {
+  color: var(--text);
 }
 
 .board-cards__flop {
@@ -115,29 +149,15 @@ button.playing-card {
   display: flex;
   align-items: center;
   gap: 3px;
-  padding-left: 6px;
-  margin-left: 2px;
-  border-left: 1px solid var(--border);
 }
 
-.board-cards__street[data-active="true"] {
-  border-left-color: var(--selection-outline);
+.board-cards__street[data-active="true"] .playing-card {
+  outline: 2px solid var(--selection-outline);
+  outline-offset: 1px;
+  border-color: var(--selection-outline);
 }
 
-.board-cards__street-label {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  min-width: 1.6em;
-}
-
-.board-cards__street[data-active="true"] .board-cards__street-label {
-  color: var(--text);
-  font-weight: 700;
-}
-
-/* Next-card picker dialog */
+/* Next-card picker */
 
 .card-picker-overlay {
   position: fixed;
@@ -160,80 +180,50 @@ button.playing-card {
   padding: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
-.card-picker__hint {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
+.card-picker[data-variant="inline"] {
+  width: 100%;
+  max-height: none;
+  box-shadow: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 4px 0 2px;
 }
 
-.card-picker__street {
-  display: inline-flex;
+.card-picker__head {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.card-picker__street-pill {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--selection-outline);
-  background: color-mix(in srgb, var(--selection-outline) 16%, transparent);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 10px;
+.card-picker__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.card-picker__close {
+  margin-left: auto;
 }
 
 .card-picker-grid {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
-.card-picker-header,
 .card-picker-suit-row {
   display: grid;
-  grid-template-columns: 22px repeat(13, minmax(0, 1fr));
-  gap: 2px;
-  align-items: center;
-}
-
-.card-picker-corner {
-  min-height: 1px;
-}
-
-.card-picker-rank,
-.card-picker-suit-label {
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  color: var(--muted);
-  font-family: var(--font-mono);
-}
-
-.card-picker-suit-label {
-  font-size: 13px;
-  line-height: 1;
-}
-
-.card-picker-suit-label[data-suit="h"] {
-  color: var(--suit-heart);
-}
-
-.card-picker-suit-label[data-suit="d"] {
-  color: var(--suit-diamond);
-}
-
-.card-picker-suit-label[data-suit="c"] {
-  color: var(--suit-club);
-}
-
-.card-picker-suit-label[data-suit="s"] {
-  color: var(--suit-spade);
+  grid-template-columns: repeat(13, minmax(0, 1fr));
+  gap: 4px;
+  align-items: stretch;
 }
 
 /* Reset legacy layout.css .card-picker-cell chrome — face lives on PlayingCard. */
@@ -274,8 +264,12 @@ button.playing-card {
 
   .playing-card[data-size="md"] {
     min-width: 0;
-    min-height: 34px;
-    font-size: 10px;
-    padding: 2px 1px;
+    min-height: 30px;
+    font-size: 11px;
+    padding: 2px 2px;
+  }
+
+  .card-picker-suit-row {
+    gap: 2px;
   }
 }

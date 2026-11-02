@@ -102,73 +102,83 @@ export function ContextStrip() {
         <span className="context-strip__label">Board</span>
         <div className="context-strip__board board-cards" role="group" aria-label="Board cards">
           {groups.flop.length ? (
-            <div className="board-cards__flop" role="group" aria-label="Flop">
-              {groups.flop.map((card, index) => (
-                <PlayingCard key={`flop-${card}-${index}`} card={card} size="sm" />
-              ))}
+            <div className="board-cards__group" role="group" aria-label="Flop">
+              <span className="board-cards__group-label">Flop</span>
+              <div className="board-cards__flop">
+                {groups.flop.map((card, index) => (
+                  <PlayingCard
+                    key={`flop-${card}-${index}`}
+                    card={card}
+                    size="sm"
+                    layout="inline"
+                  />
+                ))}
+              </div>
             </div>
           ) : (
             <span className="context-strip__value">—</span>
           )}
           {showTurnSlot ? (
             <div
-              className="board-cards__street"
+              className="board-cards__group"
               data-active={activeStreet === "turn" ? "true" : "false"}
               role="group"
               aria-label="Turn"
             >
-              <span className="board-cards__street-label">T</span>
-              <PlayingCard
-                card={groups.turn}
-                emptyLabel="T"
-                size="sm"
-                interactive
-                selected={activeStreet === "turn" && pickerOpen}
-                title={
-                  groups.turn
-                    ? "Change turn card"
-                    : dealNode
-                      ? "Deal turn card"
-                      : "Turn"
-                }
-                onClick={() => openPickerFor("turn")}
-              />
+              <span className="board-cards__group-label">Turn</span>
+              <div
+                className="board-cards__street"
+                data-active={activeStreet === "turn" ? "true" : "false"}
+              >
+                <PlayingCard
+                  card={groups.turn}
+                  emptyLabel="T"
+                  size="sm"
+                  layout="inline"
+                  interactive
+                  selected={activeStreet === "turn" && pickerOpen}
+                  title={
+                    groups.turn
+                      ? "Change turn card"
+                      : dealNode
+                        ? "Deal turn card"
+                        : "Turn"
+                  }
+                  onClick={() => openPickerFor("turn")}
+                />
+              </div>
             </div>
           ) : null}
           {showRiverSlot ? (
             <div
-              className="board-cards__street"
+              className="board-cards__group"
               data-active={activeStreet === "river" ? "true" : "false"}
               role="group"
               aria-label="River"
             >
-              <span className="board-cards__street-label">R</span>
-              <PlayingCard
-                card={groups.river}
-                emptyLabel="R"
-                size="sm"
-                interactive
-                selected={activeStreet === "river" && pickerOpen}
-                title={
-                  groups.river
-                    ? "Change river card"
-                    : dealNode
-                      ? "Deal river card"
-                      : "River"
-                }
-                onClick={() => openPickerFor("river")}
-              />
+              <span className="board-cards__group-label">River</span>
+              <div
+                className="board-cards__street"
+                data-active={activeStreet === "river" ? "true" : "false"}
+              >
+                <PlayingCard
+                  card={groups.river}
+                  emptyLabel="R"
+                  size="sm"
+                  layout="inline"
+                  interactive
+                  selected={activeStreet === "river" && pickerOpen}
+                  title={
+                    groups.river
+                      ? "Change river card"
+                      : dealNode
+                        ? "Deal river card"
+                        : "River"
+                  }
+                  onClick={() => openPickerFor("river")}
+                />
+              </div>
             </div>
-          ) : null}
-          {dealNode && dealing ? (
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => openPickerFor(dealing)}
-              aria-label={`Open ${dealing} card picker`}
-            >
-              Next…
-            </button>
           ) : null}
         </div>
       </div>

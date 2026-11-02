@@ -3,6 +3,8 @@ import { parseCardCode, suitSymbol } from "../../domain/cards";
 import "../../styles/cards.css";
 
 export type PlayingCardSize = "sm" | "md";
+/** `stack` = rank over suit; `inline` = rank beside suit (picker proposal). */
+export type PlayingCardLayout = "stack" | "inline";
 
 export interface PlayingCardProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
@@ -11,6 +13,7 @@ export interface PlayingCardProps
   /** Empty-slot label when `card` is absent (e.g. "T" / "R"). */
   emptyLabel?: string;
   size?: PlayingCardSize;
+  layout?: PlayingCardLayout;
   selected?: boolean;
   focused?: boolean;
   faded?: boolean;
@@ -27,6 +30,7 @@ export function PlayingCard({
   card,
   emptyLabel = "·",
   size = "sm",
+  layout = "stack",
   selected = false,
   focused = false,
   faded = false,
@@ -64,16 +68,21 @@ export function PlayingCard({
     </>
   );
 
+  const dataAttrs = {
+    "data-suit": suit || undefined,
+    "data-size": size,
+    "data-layout": layout,
+    "data-empty": empty ? "true" : "false",
+    "data-selected": selected ? "true" : "false",
+    "data-focused": focused ? "true" : "false",
+    "data-faded": faded ? "true" : "false",
+  } as const;
+
   if (!interactive) {
     return (
       <span
         className={classes}
-        data-suit={suit || undefined}
-        data-size={size}
-        data-empty={empty ? "true" : "false"}
-        data-selected={selected ? "true" : "false"}
-        data-focused={focused ? "true" : "false"}
-        data-faded={faded ? "true" : "false"}
+        {...dataAttrs}
         data-interactive="false"
         aria-label={label}
         {...(rest as object)}
@@ -87,12 +96,7 @@ export function PlayingCard({
     <button
       type={type}
       className={classes}
-      data-suit={suit || undefined}
-      data-size={size}
-      data-empty={empty ? "true" : "false"}
-      data-selected={selected ? "true" : "false"}
-      data-focused={focused ? "true" : "false"}
-      data-faded={faded ? "true" : "false"}
+      {...dataAttrs}
       data-interactive="true"
       disabled={disabled}
       aria-label={label}
