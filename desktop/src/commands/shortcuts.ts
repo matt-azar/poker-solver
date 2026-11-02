@@ -36,12 +36,14 @@ export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
   if (event.metaKey || event.ctrlKey || event.altKey) {
     return null;
   }
-  if (isTypingTarget(event.target)) {
-    return null;
-  }
-  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  // Normalize case so "Escape" / "ESCAPE" / "escape" all match.
+  const key = event.key.toLowerCase();
+  // Escape must work even while focus is in a field (close dialogs/drawers).
   if (key === "escape") {
     return "escape";
+  }
+  if (isTypingTarget(event.target)) {
+    return null;
   }
   if (key === "?" || (event.shiftKey && key === "/")) {
     return "help";
