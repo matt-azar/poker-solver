@@ -8,7 +8,8 @@ import {
   isExcludedMatrixCell,
   isPartialRangeDisplay,
   nextGeneration,
-RANGE_INCLUSION_MEASURE,
+  opponentSolutionNode,
+  RANGE_INCLUSION_MEASURE,
   rangeDisplayWeight,
   rangeInclusionOf,
   shouldApply,
@@ -78,6 +79,45 @@ describe("browse strategy grouping", () => {
     expect(rangeInclusionOf(aa)).toBeCloseTo(1, 12);
     expect(formatRangeInclusion(rangeInclusionOf(aa)!)).toBe("100");
     expect(RANGE_INCLUSION_MEASURE).toBe("inclusion weight");
+  });
+
+  it("opponentSolutionNode reuses opponent_reach for inclusion (not posterior)", () => {
+    // Acting AA at 100% reach; opponent KK with reach=1 but marginal=1/3.
+    // Old opponent pane showed KK33 via marginalSum/range_combos; must be 100.
+    const node = {
+      node_id: "decision",
+      player: 0,
+      reach_defined: true,
+      actions: ["Check"],
+      combos: ["AhAd"],
+      reach: [1],
+      marginal: [1],
+      strategy: [[1]],
+      opponent_player: 1,
+      opponent_combos: ["KhKd", "KsKc", "KsKh"],
+      opponent_reach: [1, 1, 1],
+      opponent_marginal: [1 / 3, 1 / 3, 1 / 3],
+    };
+    const view = opponentSolutionNode(node);
+    expect(view).not.toBeNull();
+    expect(view!.player).toBe(1);
+    expect(view!.reach).toEqual([1, 1, 1]);
+    expect(view!.marginal).toEqual([1 / 3, 1 / 3, 1 / 3]);
+    const kk = cellOf(view!, "KK");
+    expect(kk.marginalSum / kk.range_combos).toBeCloseTo(1 / 3, 12);
+    expect(rangeInclusionOf(kk)).toBeCloseTo(1, 12);
+    expect(formatRangeInclusion(rangeInclusionOf(kk)!)).toBe("100");
+  });
+
+  it("opponentSolutionNode returns null without solution opponent_reach", () => {
+    expect(
+      opponentSolutionNode({
+        node_id: "x",
+        opponent_player: 1,
+        opponent_combos: ["AhAd"],
+      }),
+    ).toBeNull();
+    expect(opponentSolutionNode(null)).toBeNull();
   });
 
   it("keeps zero-mass EV undefined", () => {

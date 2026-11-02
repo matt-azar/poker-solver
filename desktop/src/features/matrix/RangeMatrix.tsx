@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { mapActionColors } from "../../domain/actionColors";
 import {
   type AggregatedHandCell,
@@ -25,6 +25,30 @@ import "../../styles/matrix-density.css";
 
 function cellKey(row: number, col: number): string {
   return `${row}:${col}`;
+}
+
+/** Fit a square matrix into the wrap's measured box (shared with opponent pane). */
+export function useMeasuredSquareSide(
+  wrapRef: RefObject<HTMLElement | null>,
+): number {
+  const [side, setSide] = useState(0);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) {
+      return;
+    }
+    const measure = () => {
+      const next = Math.max(0, Math.floor(Math.min(el.clientWidth, el.clientHeight)));
+      setSide((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [wrapRef]);
+
+  return side;
 }
 
 function rangeFill(weight: number): string {
@@ -80,22 +104,7 @@ export function RangeMatrix() {
   const setHoverCell = useStudyStore((s) => s.setHoverCell);
   const actionFilter = useStudyStore((s) => s.actionFilter);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [side, setSide] = useState(0);
-
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) {
-      return;
-    }
-    const measure = () => {
-      const next = Math.max(0, Math.floor(Math.min(el.clientWidth, el.clientHeight)));
-      setSide((prev) => (prev === next ? prev : next));
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+  const side = useMeasuredSquareSide(wrapRef);
 
   const cells = useMemo(
     () => (currentNode ? groupHands(currentNode) : []),
