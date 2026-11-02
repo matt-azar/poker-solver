@@ -4,6 +4,7 @@
 #include "poker/card.hpp"
 #include "poker/range.hpp"
 #include "solver/street_batch.hpp"
+#include "solver/table_scalar.hpp"
 
 #include <cmath>
 #include <string>

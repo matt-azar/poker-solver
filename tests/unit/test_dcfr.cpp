@@ -9,6 +9,7 @@
 #include "solver/node_lock.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
+#include "solver/table_scalar.hpp"
 #include "solver/trainer.hpp"
 
 #include <cmath>
@@ -293,7 +294,7 @@ void expect_labeled_parity(
         CHECK(found != ref_by_key.end());
         if (found != ref_by_key.end())
         {
-            CHECK_NEAR(entry.probability, found->second, 1e-8);
+            CHECK_NEAR(entry.probability, found->second, 1e-5);
         }
         double batch_regret = 0.0;
         CHECK(batch.regret_value(entry.infoset, entry.action, batch_regret));
@@ -306,7 +307,9 @@ void expect_labeled_parity(
         if (exact_regret_match)
         {
             // Five-card (no future chance) uses identical regret units.
-            CHECK_NEAR(batch_regret, regret_found->second, 1e-8);
+            // StreetBatch stores regrets as float; CfrTrainer keeps double.
+            const double scale = 1.0 + std::abs(regret_found->second);
+            CHECK(std::abs(batch_regret - regret_found->second) <= 1e-4 * scale);
         }
         else if (std::abs(regret_found->second) > 1e-9)
         {
@@ -359,10 +362,10 @@ void expect_labeled_parity(
     }
 
     const poker::solver::SolveStats stats = reference.evaluate();
-    CHECK_NEAR(batch.expected_utility(), stats.p1_expected_utility, 1e-8);
-    CHECK_NEAR(batch.nash_gap(), stats.nash_gap, 1e-6);
-    CHECK_NEAR(batch.p1_best_response_utility(), stats.p1_best_response_utility, 1e-6);
-    CHECK_NEAR(batch.p2_best_response_utility(), stats.p2_best_response_utility, 1e-6);
+    CHECK_NEAR(batch.expected_utility(), stats.p1_expected_utility, 1e-5);
+    CHECK_NEAR(batch.nash_gap(), stats.nash_gap, 1e-4);
+    CHECK_NEAR(batch.p1_best_response_utility(), stats.p1_best_response_utility, 1e-4);
+    CHECK_NEAR(batch.p2_best_response_utility(), stats.p2_best_response_utility, 1e-4);
 }
 
 void expect_batch_reference_parity()
@@ -393,7 +396,7 @@ void expect_zero_own_reach_and_blockers()
     const StreetGame game(config);
     CfrTrainer<StreetGame> reference(game, Algorithm::Dcfr);
     reference.run_iterations(2);
-    CHECK_NEAR(batch.nash_gap(), reference.evaluate().nash_gap, 1e-6);
+    CHECK_NEAR(batch.nash_gap(), reference.evaluate().nash_gap, 1e-4);
     CHECK(std::isfinite(batch.expected_utility()));
 }
 

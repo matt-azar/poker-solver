@@ -6,6 +6,7 @@
 #include "poker/range.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
+#include "solver/table_scalar.hpp"
 
 #include <atomic>
 #include <cmath>
@@ -113,8 +114,8 @@ void set_named_average(
 
 struct TableSnapshot
 {
-    std::vector<double> regret;
-    std::vector<double> strategy_sum;
+    std::vector<poker::solver::TableScalar> regret;
+    std::vector<poker::solver::TableScalar> strategy_sum;
     std::vector<std::pair<std::string, double>> average;
     int iterations = 0;
     double evaluation_seconds = 0.0;
@@ -150,12 +151,14 @@ void expect_unchanged(const StreetBatchSolver& solver, const TableSnapshot& befo
     CHECK(regret.size() == before.regret.size());
     CHECK(strategy.size() == before.strategy_sum.size());
     CHECK(std::memcmp(
-              regret.data(), before.regret.data(), before.regret.size() * sizeof(double))
+              regret.data(),
+              before.regret.data(),
+              before.regret.size() * sizeof(poker::solver::TableScalar))
         == 0);
     CHECK(std::memcmp(
               strategy.data(),
               before.strategy_sum.data(),
-              before.strategy_sum.size() * sizeof(double))
+              before.strategy_sum.size() * sizeof(poker::solver::TableScalar))
         == 0);
     const TableSnapshot after = snapshot_of(solver);
     CHECK(after.average == before.average);

@@ -257,6 +257,8 @@ void print_memory(const poker::solver::StreetMemoryReport& memory, bool include_
     std::cout << "reserved_bytes: " << memory.reserved_bytes << "\n";
     std::cout << "estimated_peak_bytes: " << memory.estimated_peak_bytes << "\n";
     std::cout << "regret_strategy_sum_bytes: " << memory.regret_strategy_sum_bytes << "\n";
+    std::cout << "sigma_workspace_bytes: " << memory.sigma_workspace_bytes << "\n";
+    std::cout << "table_scalar_bytes: " << memory.table_scalar_bytes << "\n";
     std::cout << "process_peak_working_set_bytes: "
               << memory.process_peak_working_set_bytes << "\n";
 }

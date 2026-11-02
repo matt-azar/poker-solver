@@ -115,7 +115,7 @@ Run this workstream alongside product development, but land changes separately. 
 
 Evaluate algorithm alternatives such as discounted or predictive regret methods, and document the exact update and averaging semantics. Pio 3.10 documents a newer algorithm and different memory and performance modes [S4]. Choose a method by measured time to a common quality target.
 
-Investigate exact suit isomorphisms, compact slot indexing, memory layout, SIMD, task granularity, best-response parallelism and reduced-precision storage. Exact symmetry reduction must respect board, weighted ranges, locks and incentives; arbitrary suit-asymmetric inputs can destroy a symmetry. Approximate bucketing is its own labeled mode. Exact postflop cards remain the default.
+Investigate exact suit isomorphisms, compact slot indexing, memory layout, SIMD, task granularity, and best-response parallelism. Reduced-precision StreetBatch storage (`float` tables + shared sigma workspace, 12 B/entry) has landed; optional 16-bit block compression remains open. Exact symmetry reduction must respect board, weighted ranges, locks and incentives; arbitrary suit-asymmetric inputs can destroy a symmetry. Approximate bucketing is its own labeled mode. Exact postflop cards remain the default.
 
 Address stored-index limits with checked wider/segmented representations when required. Keep the small enumerator as an oracle. Scale one batch solver, and publish a hardware profile for each supported tree size, including which trees fit in 1 GiB.
 

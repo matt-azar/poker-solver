@@ -79,6 +79,10 @@ void solve_case(
     std::cout << "reserved_bytes: " << report.reserved_bytes << "\n";
     std::cout << "estimated_peak_bytes: " << report.estimated_peak_bytes << "\n";
     std::cout << "regret_strategy_sum_bytes: " << report.regret_strategy_sum_bytes << "\n";
+    std::cout << "sigma_workspace_bytes: " << report.sigma_workspace_bytes << "\n";
+    std::cout << "table_scalar_bytes: " << report.table_scalar_bytes << "\n";
+    std::cout << "persistent_table_bytes_per_entry: "
+              << poker::solver::kPersistentTableBytesPerEntry << "\n";
     std::cout << "process_peak_working_set_bytes: "
               << report.process_peak_working_set_bytes << "\n";
     for (const poker::solver::StreetMemoryComponent& component : report.components)
