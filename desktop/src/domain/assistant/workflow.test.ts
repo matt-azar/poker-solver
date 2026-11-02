@@ -80,6 +80,44 @@ describe("createAssistantSession", () => {
     expect(run.requestRevision).toBe(10);
   });
 
+  it("honors a pre-captured requestRevision instead of re-reading after async work", async () => {
+    const session = createAssistantSession();
+    const baseDraft = createBlankSetupDraft("create");
+    baseDraft.pot = 100;
+    let liveDraft = { ...baseDraft };
+    let revision = 0;
+
+    // Simulate the unified bridging path: network already returned, then the
+    // player bumped the draft before session.run starts.
+    revision = 1;
+    liveDraft = { ...liveDraft, pot: 999 };
+
+    const bridging: AssistantProvider = {
+      async interpret(): Promise<InterpretProposal> {
+        return {
+          kind: "update_study",
+          intent: { mode: "edit" },
+          fieldEdits: { pot: 55 },
+        };
+      },
+    };
+
+    const run = await session.run("Set pot to 55", {
+      provider: bridging,
+      catalogue,
+      getDraft: () => liveDraft,
+      getRevision: () => revision,
+      preferences: prefs,
+      requestRevision: 0,
+      baseDraft,
+    });
+
+    expect(run.status).toBe("stale");
+    expect(run.requestRevision).toBe(0);
+    // Live draft must remain the manual edit; session never applies.
+    expect(liveDraft.pot).toBe(999);
+  });
+
   it("cancels via AbortSignal", async () => {
     const session = createAssistantSession();
     const controller = new AbortController();

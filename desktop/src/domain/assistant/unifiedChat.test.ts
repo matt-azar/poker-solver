@@ -9,8 +9,13 @@ import {
   looksLikeSetupRequest,
 } from "./unifiedChat";
 import { createRangeProfileCatalogue } from "../profiles";
-import { emptyStudySetupPreferences } from "../setup";
+import { parseRangeText, snapshotWeights } from "../range";
+import {
+  applySetupTransaction,
+  emptyStudySetupPreferences,
+} from "../setup";
 import type { SpotDraft } from "../types";
+import { commitAssistantSetup } from "../../features/help/commitAssistantSetup";
 
 function emptyDraft(): SpotDraft {
   return {
@@ -180,5 +185,115 @@ describe("OpenAiUnifiedChatClient", () => {
       messages: Array<{ role: string; content: string }>;
     };
     expect(body.messages[0]?.content).toContain("unified Study assistant");
+  });
+
+  it("keeps the send-time revision when the draft changes during a delayed provider response", async () => {
+    let release!: (value: Response) => void;
+    const held = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    let fetchStarted!: () => void;
+    const fetchStartedPromise = new Promise<void>((resolve) => {
+      fetchStarted = resolve;
+    });
+    const fetchImpl = vi.fn(async () => {
+      fetchStarted();
+      return held;
+    });
+
+    let draft: SpotDraft = { ...emptyDraft(), pot: 100 };
+    let revision = 0;
+
+    const client = createOpenAiUnifiedChatClient({
+      getCredential: async () => "sk-test",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const catalogue = createRangeProfileCatalogue();
+
+    const turnPromise = client.turn(
+      {
+        text: "Set pot to 55",
+        setupSummary: "board=(none) pot=100 stack=97.5 rev=0",
+        availableProfiles: [],
+        draftRevision: 0,
+      },
+      {
+        catalogue,
+        getDraft: () => draft,
+        getRevision: () => revision,
+        preferences: emptyStudySetupPreferences(),
+      },
+    );
+
+    // Wait until the provider fetch is in flight, then mutate the draft.
+    await fetchStartedPromise;
+    draft = { ...draft, pot: 999 };
+    revision = 1;
+
+    release(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    function: {
+                      name: "emit_study_setup_proposal",
+                      arguments: JSON.stringify({
+                        kind: "update_study",
+                        intent: { mode: "edit" },
+                        fieldEdits: { pot: 55 },
+                      }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const outcome = await turnPromise;
+    expect(outcome.kind).toBe("setup");
+    if (outcome.kind !== "setup" || !outcome.run) {
+      throw new Error("expected setup outcome with run");
+    }
+
+    // Must preserve the original send-time revision — not the mid-flight bump.
+    expect(outcome.run.requestRevision).toBe(0);
+    expect(outcome.run.status).toBe("stale");
+
+    // Mounted commit path: reject stale and leave the manual pot alone.
+    if (outcome.run.result) {
+      expect(outcome.run.result.requestRevision).toBe(0);
+      const applied = commitAssistantSetup(outcome.run.result, (result) => {
+        const tx = applySetupTransaction({
+          currentDraft: draft,
+          currentWeights: snapshotWeights({
+            oop: parseRangeText(draft.oopRange),
+            ip: parseRangeText(draft.ipRange),
+          }),
+          currentMeta: null,
+          draftRevision: revision,
+          result,
+        });
+        if (!tx.ok) {
+          return { ok: false, reason: tx.reason, message: tx.message };
+        }
+        draft = tx.draft;
+        revision = tx.draftRevision;
+        return { ok: true };
+      });
+      expect(applied.ok).toBe(false);
+      if (!applied.ok) {
+        expect(applied.reason).toBe("stale");
+      }
+    }
+
+    expect(draft.pot).toBe(999);
+    expect(revision).toBe(1);
   });
 });
