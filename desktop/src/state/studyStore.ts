@@ -431,7 +431,9 @@ interface StudyState {
   applySetupDraft: (
     result: SetupDraftResult,
     options?: { force?: boolean },
-  ) => { ok: true } | { ok: false; reason: string; message: string };
+  ) =>
+    | { ok: true; undoEntry: SetupUndoEntry }
+    | { ok: false; reason: string; message: string };
   /**
    * Guarded inverse of the last assistant/setup apply. Restores only fields
    * still matching the post-apply values; later manual edits are preserved.
@@ -926,7 +928,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       canRedoRange: rangeHistory.canRedo(),
       message: applied.meta.summary[0] ?? "Setup applied",
     });
-    return { ok: true };
+    return { ok: true, undoEntry: applied.undoEntry };
   },
   undoSetupTransaction() {
     const entry = setupHistoryPast.pop();

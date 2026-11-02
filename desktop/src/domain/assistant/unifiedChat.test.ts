@@ -8,6 +8,10 @@ import {
   createOpenAiUnifiedChatClient,
   looksLikeSetupRequest,
 } from "./unifiedChat";
+import {
+  buildAssistantContextSnapshot,
+  summarizeContextSnapshot,
+} from "./contextSnapshot";
 import { createRangeProfileCatalogue } from "../profiles";
 import { parseRangeText, snapshotWeights } from "../range";
 import {
@@ -80,6 +84,7 @@ describe("context packs", () => {
     expect(unified).toContain("unified Study assistant");
     expect(unified).toContain("answer_user");
     expect(unified).toContain("emit_study_setup_proposal");
+    expect(unified).toContain("contextSnapshot");
     expect(buildUnifiedAssistantSystemPrompt()).toContain("Call exactly one tool");
   });
 });
@@ -135,7 +140,7 @@ describe("FakeUnifiedChatClient", () => {
 });
 
 describe("OpenAiUnifiedChatClient", () => {
-  it("maps answer_user tool calls to answers", async () => {
+  it("maps answer_user tool calls to answers and forwards contextSnapshot", async () => {
     const fetchImpl = vi.fn(async () => {
       return new Response(
         JSON.stringify({
@@ -163,12 +168,17 @@ describe("OpenAiUnifiedChatClient", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     const catalogue = createRangeProfileCatalogue();
+    const contextSnapshot = buildAssistantContextSnapshot({
+      draft: emptyDraft(),
+      draftRevision: 1,
+    });
     const outcome = await client.turn(
       {
         text: "How do I solve?",
-        setupSummary: "test",
+        setupSummary: summarizeContextSnapshot(contextSnapshot),
         availableProfiles: [],
         draftRevision: 1,
+        contextSnapshot,
       },
       {
         catalogue,
@@ -185,6 +195,12 @@ describe("OpenAiUnifiedChatClient", () => {
       messages: Array<{ role: string; content: string }>;
     };
     expect(body.messages[0]?.content).toContain("unified Study assistant");
+    const userPayload = JSON.parse(body.messages[body.messages.length - 1]?.content ?? "{}") as {
+      contextSnapshot?: { version?: number };
+      analysisTools?: { deferred?: string[] };
+    };
+    expect(userPayload.contextSnapshot?.version).toBe(1);
+    expect(userPayload.analysisTools?.deferred).toContain("compare_runouts");
   });
 
   it("keeps the send-time revision when the draft changes during a delayed provider response", async () => {
@@ -285,7 +301,7 @@ describe("OpenAiUnifiedChatClient", () => {
         }
         draft = tx.draft;
         revision = tx.draftRevision;
-        return { ok: true };
+        return { ok: true, undoEntry: tx.undoEntry };
       });
       expect(applied.ok).toBe(false);
       if (!applied.ok) {

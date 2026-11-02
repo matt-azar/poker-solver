@@ -5,7 +5,13 @@ import {
   type UnifiedChatClient,
   type UnifiedChatOutcome,
 } from "../../domain/assistant/unifiedChat";
-import { catalogueProfileMetas } from "../../domain/assistant";
+import {
+  buildAssistantContextSnapshot,
+  catalogueProfileMetas,
+  chatContentFromReceipt,
+  formatContextIndicator,
+  summarizeContextSnapshot,
+} from "../../domain/assistant";
 import { AssistantProviderError } from "../../domain/assistant/provider";
 import {
   emptyStudySetupPreferences,
@@ -57,11 +63,38 @@ export function StudyAssistantWindow() {
   const draft = useStudyStore((s) => s.draft);
   const draftRevision = useStudyStore((s) => s.draftRevision);
   const setupMeta = useStudyStore((s) => s.setupMeta);
+  const solutionId = useStudyStore((s) => s.solutionId);
+  const status = useStudyStore((s) => s.status);
+  const phase = useStudyStore((s) => s.phase);
+  const currentNode = useStudyStore((s) => s.currentNode);
+  const nodeValues = useStudyStore((s) => s.nodeValues);
+  const selectedCell = useStudyStore((s) => s.selectedCell);
+  const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
   const applySetupDraft = useStudyStore((s) => s.applySetupDraft);
   const undoSetupTransaction = useStudyStore((s) => s.undoSetupTransaction);
   const canUndoSetup = useStudyStore((s) => s.canUndoSetup);
   const getSetupCatalogue = useStudyStore((s) => s.getSetupCatalogue);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
+
+  const rangeSourceLabel =
+    setupMeta?.summary
+      ?.find((line) => /Range-source environment:/i.test(line))
+      ?.match(/Range-source environment:\s*([^(]+)/i)?.[1]
+      ?.trim() ?? null;
+
+  const contextSnapshot = buildAssistantContextSnapshot({
+    draft,
+    draftRevision,
+    rangeSourceLabel,
+    solutionId,
+    status,
+    phase,
+    currentNode,
+    nodeValues,
+    selectedCell,
+    evDisplayBasis,
+  });
+  const contextIndicator = formatContextIndicator(contextSnapshot);
 
   const [providerMode, setProviderMode] = useState<ProviderMode>("fake");
   const [messages, setMessages] = useState<ChatLine[]>([]);
@@ -152,28 +185,17 @@ export function StudyAssistantWindow() {
     try {
       const catalogue = getSetupCatalogue();
       const client = makeClient();
+      // Freeze snapshot for this request (same revision as draftRevision).
+      const requestSnapshot = contextSnapshot;
       const outcome = await client.turn(
         {
           text: question,
           history,
-          setupSummary: [
-            `board=${draft.boardText || "(none)"}`,
-            `pot=${draft.pot}`,
-            `stack=${draft.stack}`,
-            `solveRake=rate:${draft.rakeRate}/cap:${draft.rakeCap}`,
-            `rangeSource=${
-              setupMeta?.summary
-                ?.find((line) => /Range-source environment:/i.test(line))
-                ?.match(/Range-source environment:\s*([^(]+)/i)?.[1]
-                ?.trim() ?? "n/a"
-            }`,
-            `oop=${draft.oopRange.slice(0, 48)}`,
-            `ip=${draft.ipRange.slice(0, 48)}`,
-            `rev=${draftRevision}`,
-          ].join(" "),
+          setupSummary: summarizeContextSnapshot(requestSnapshot),
           preferencesSummary: "prefs from holdem-study-setup-prefs",
           availableProfiles: catalogueProfileMetas(catalogue),
           draftRevision,
+          contextSnapshot: requestSnapshot,
           signal: controller.signal,
         },
         {
@@ -201,9 +223,10 @@ export function StudyAssistantWindow() {
           const applied = commitAssistantSetup(outcome.run.result, applySetupDraft);
           if (applied.ok) {
             setWorkspace("build");
+            // Chat text comes from the application receipt, not the model proposal.
             line = {
               ...line,
-              content: `${line.content}\n\nUpdated the spot.`,
+              content: chatContentFromReceipt(applied.receipt),
             };
           } else if (applied.reason !== "empty") {
             setError(applied.message);
@@ -318,6 +341,13 @@ export function StudyAssistantWindow() {
               : credPresent
                 ? "OpenAI ready"
                 : "Not connected"}
+          </span>
+          <span
+            className="help-chat-window__context"
+            title={contextSnapshot.absences.join("\n") || contextIndicator}
+            data-testid="assistant-context-indicator"
+          >
+            {contextIndicator}
           </span>
         </div>
         <div className="help-chat-window__title-actions">
