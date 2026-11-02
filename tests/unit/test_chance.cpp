@@ -1,5 +1,6 @@
 #include "harness.hpp"
 
+#include "game/chips.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
 #include "solver/street_batch.hpp"
@@ -49,8 +50,8 @@ StreetConfig check_config(const std::vector<int>& board, const char* oop, const 
 {
     StreetConfig config;
     config.board = board;
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse(oop);
     config.ip = Range::parse(ip);
     config.allow_all_in = false;
@@ -235,8 +236,8 @@ void test_incompatible_positive_reaches()
 {
     StreetConfig config;
     config.board = {card_id("2h"), card_id("3d"), card_id("4c")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse("AcAd,9c9d");
     config.ip = Range::parse("AcKh,9h9s");
     config.oop_bet_sizes = {0.5};
@@ -272,13 +273,14 @@ void test_incompatible_positive_reaches()
     const StreetInspection ip_node = solver.inspect_node(root.actions[static_cast<std::size_t>(bet)].child_id);
     CHECK(ip_node.player == 1);
     CHECK(ip_node.reach_defined);
-    // OOP bet 50% into pot 100 → pot 150, IP faces 50 to call.
-    CHECK(ip_node.pot == config.pot + 50);
-    CHECK(ip_node.contrib[0] == 50);
+    // OOP bet 50% into pot 100.0 chips (1000 tenths) → add 50.0 chips.
+    const poker::Chip half_pot = poker::chip_units(50);
+    CHECK(ip_node.pot == config.pot + half_pot);
+    CHECK(ip_node.contrib[0] == half_pot);
     CHECK(ip_node.contrib[1] == 0);
-    CHECK(ip_node.stacks[0] == config.stack - 50);
+    CHECK(ip_node.stacks[0] == config.stack - half_pot);
     CHECK(ip_node.stacks[1] == config.stack);
-    CHECK(ip_node.to_call == 50);
+    CHECK(ip_node.to_call == half_pot);
     CHECK(ip_node.parent_id == root.node_id);
     CHECK(ip_node.opponent_player == 0);
     CHECK(!ip_node.opponent_hands.empty());

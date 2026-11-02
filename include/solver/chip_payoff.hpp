@@ -1,5 +1,6 @@
 #pragma once
 
+#include "game/chips.hpp"
 #include "solver/payoff.hpp"
 #include "solver/rake.hpp"
 
@@ -10,14 +11,16 @@ namespace poker::solver
 
 // Heads-up chip terminal payoffs matching docs/RIVER.md and docs/STREETS.md.
 //
-// initial_pot is dead money contributed equally before this tree. contrib[i] is
-// player i's investment on the streets in this tree. folded is -1 at showdown,
-// otherwise the player who folded. showdown is >0 when player 0 wins, <0 when
-// player 0 loses, and 0 on a tie; it is ignored on a fold.
+// initial_pot and contrib[i] are tenths of a chip (see game/chips.hpp). Utilities
+// are returned in chip units so EV magnitudes match the prior whole-chip rule
+// (pot 100.0 chips → check-down ±50). folded is -1 at showdown, otherwise the
+// player who folded. showdown is >0 when player 0 wins, <0 when player 0 loses,
+// and 0 on a tie; it is ignored on a fold.
 //
 // Under the zero-rake chip rule, utility[1] == -utility[0]. With positive rake,
-// the house takes collect(pot, rake) from the pot; the winner's root-centered
-// utility is reduced by that amount (split evenly on a tie). See docs/RAKE.md.
+// the house takes collect(pot, rake) from the pot in whole chips; the winner's
+// root-centered utility is reduced by that amount (split evenly on a tie).
+// See docs/RAKE.md.
 struct ChipPayoff
 {
     static PlayerPayoff terminal(
@@ -42,18 +45,21 @@ struct ChipPayoff
         }
         rake.validate();
 
-        const double half_pot = static_cast<double>(initial_pot) * 0.5;
+        const double pot = tenths_to_chips(initial_pot);
+        const double c0 = tenths_to_chips(contrib0);
+        const double c1 = tenths_to_chips(contrib1);
+        const double half_pot = pot * 0.5;
         PlayerPayoff payoff;
         bool player0_wins = false;
         bool player1_wins = false;
         if (folded == 0)
         {
-            payoff.utility[0] = -(half_pot + static_cast<double>(contrib0));
+            payoff.utility[0] = -(half_pot + c0);
             player1_wins = true;
         }
         else if (folded == 1)
         {
-            payoff.utility[0] = half_pot + static_cast<double>(contrib1);
+            payoff.utility[0] = half_pot + c1;
             player0_wins = true;
         }
         else
@@ -64,12 +70,12 @@ struct ChipPayoff
             }
             if (showdown > 0)
             {
-                payoff.utility[0] = half_pot + static_cast<double>(contrib1);
+                payoff.utility[0] = half_pot + c1;
                 player0_wins = true;
             }
             else if (showdown < 0)
             {
-                payoff.utility[0] = -(half_pot + static_cast<double>(contrib0));
+                payoff.utility[0] = -(half_pot + c0);
                 player1_wins = true;
             }
             else
@@ -79,9 +85,8 @@ struct ChipPayoff
         }
         payoff.utility[1] = -payoff.utility[0];
 
-        const double pot_chips =
-            static_cast<double>(initial_pot) + static_cast<double>(contrib0)
-            + static_cast<double>(contrib1);
+        // Rake floors in whole chips on the chip-unit pot (not tenths).
+        const double pot_chips = pot + c0 + c1;
         const double taken = collect(pot_chips, rake);
         if (taken == 0.0)
         {

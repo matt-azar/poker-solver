@@ -28,8 +28,8 @@ void run_strategy_report_tests()
 {
     poker::solver::StrategyReport report;
     report.board = "Ah Kd 7c 4s";
-    report.pot = 100;
-    report.stack = 200;
+    report.pot = 1000;
+    report.stack = 2000;
     report.algorithm = "cfr_plus";
     report.iterations = 40;
     report.has_nash_gap = true;

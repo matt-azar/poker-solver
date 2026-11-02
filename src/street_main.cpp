@@ -1,3 +1,4 @@
+#include "game/chips.hpp"
 #include "game/street_config_text.hpp"
 #include "game/street_game.hpp"
 #include "poker/card.hpp"
@@ -184,7 +185,7 @@ poker::solver::StrategyReport make_base_report(
 {
     poker::solver::StrategyReport report;
     report.board = board_text(config.board);
-    report.pot = config.pot;
+    report.pot = config.pot;   // tenths; strategy-report formats as chips
     report.stack = config.stack;
     report.algorithm = poker::solver::algorithm_name(algorithm);
     report.iterations = stats.iterations;
@@ -271,7 +272,7 @@ void print_checkpoint(int iterations, const poker::solver::SolveStats& stats, vo
     const poker::solver::StreetMemoryReport memory = context->solver->memory_report();
     std::cout << "phase: checkpoint\n";
     std::cout << "iterations: " << iterations << "\n";
-    std::cout << "pot: " << context->pot << "\n";
+    std::cout << "pot: " << poker::format_chips(context->pot) << "\n";
     print_memory(memory, true);
     std::cout << "player0_expected_utility: " << stats.p1_expected_utility << "\n";
     std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
@@ -280,7 +281,7 @@ void print_checkpoint(int iterations, const poker::solver::SolveStats& stats, vo
     if (context->pot != 0)
     {
         std::cout << "nash_gap_fraction_of_pot: "
-                  << stats.nash_gap / static_cast<double>(context->pot) << "\n";
+                  << stats.nash_gap / poker::tenths_to_chips(context->pot) << "\n";
     }
     std::cout.flush();
 }
@@ -293,8 +294,8 @@ int main(int argc, char** argv)
     {
         poker::streets::StreetConfig config;
         config.board = parse_board("Kh,Kd,7c,4s");
-        config.pot = 100;
-        config.stack = 100;
+        config.pot = poker::chip_units(100);
+        config.stack = poker::chip_units(100);
         config.oop = poker::holdem::Range::parse("AhAd");
         config.ip = poker::holdem::Range::parse("2c3d");
         config.oop_bet_sizes = {1.0};
@@ -336,11 +337,11 @@ int main(int argc, char** argv)
             }
             else if (arg == "--pot")
             {
-                config.pot = std::atoi(need("--pot"));
+                config.pot = poker::parse_chips(need("--pot"));
             }
             else if (arg == "--stack")
             {
-                config.stack = std::atoi(need("--stack"));
+                config.stack = poker::parse_chips(need("--stack"));
             }
             else if (arg == "--oop-range")
             {
@@ -658,8 +659,8 @@ int main(int argc, char** argv)
             const char* game_name = config.board.size() == 3 ? "flop" : "turn";
             std::cout << "game: " << game_name << "\n";
             std::cout << "board: " << board_text(config.board) << "\n";
-            std::cout << "pot: " << config.pot << "\n";
-            std::cout << "stack: " << config.stack << "\n";
+            std::cout << "pot: " << poker::format_chips(config.pot) << "\n";
+            std::cout << "stack: " << poker::format_chips(config.stack) << "\n";
             print_memory_plan(poker::solver::plan_street_memory(config));
             std::cout.flush();
             return 0;
@@ -677,7 +678,7 @@ int main(int argc, char** argv)
         solve_config.max_iterations = iterations;
         if (accuracy >= 0.0)
         {
-            solve_config.nash_gap_threshold = accuracy * static_cast<double>(config.pot);
+            solve_config.nash_gap_threshold = accuracy * poker::tenths_to_chips(config.pot);
             // CLI default cadence stays 20; --eval-every overrides. Library default is 1.
             solve_config.eval_every = have_eval_every ? eval_every : 20;
         }
@@ -694,8 +695,8 @@ int main(int argc, char** argv)
         std::cout << "game: " << game_name << "\n";
         std::cout << "board: " << board_text(config.board) << "\n";
         std::cout << "algorithm: " << poker::solver::algorithm_name(algorithm) << "\n";
-        std::cout << "pot: " << config.pot << "\n";
-        std::cout << "stack: " << config.stack << "\n";
+        std::cout << "pot: " << poker::format_chips(config.pot) << "\n";
+        std::cout << "stack: " << poker::format_chips(config.stack) << "\n";
         std::cout.flush();
 
         poker::solver::SolveStats stats;
@@ -808,7 +809,7 @@ int main(int argc, char** argv)
         std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
         std::cout << "nash_gap: " << stats.nash_gap << "\n";
         std::cout << "nash_gap_fraction_of_pot: "
-                  << stats.nash_gap / static_cast<double>(config.pot) << "\n";
+                  << stats.nash_gap / poker::tenths_to_chips(config.pot) << "\n";
         if (!stats.nash_gap_history.empty())
         {
             std::cout << "nash_gap_history:";

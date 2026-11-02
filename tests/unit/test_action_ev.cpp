@@ -476,8 +476,8 @@ StreetConfig bluff_config(const char* air_weight, const char* ip_weight)
 {
     StreetConfig config;
     config.board = {card_id("Kh"), card_id("Kd"), card_id("7c"), card_id("4s")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse(std::string("KcKs:1,2c3d:") + air_weight);
     config.ip = Range::parse(std::string("AhAd:") + ip_weight);
     config.oop_turn_bets = {1.0};
@@ -621,8 +621,8 @@ void test_zero_reach_is_separate_from_ev()
 {
     StreetConfig config;
     config.board = {card_id("Kh"), card_id("Kd"), card_id("7c"), card_id("4s")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse("AhAd");
     config.ip = Range::parse("2c3d");
     config.oop_turn_bets = {1.0};
@@ -694,8 +694,8 @@ void test_weighted_blockers_ties_and_flop()
 {
     StreetConfig weighted;
     weighted.board = {card_id("Kh"), card_id("Kd"), card_id("7c"), card_id("4s")};
-    weighted.pot = 100;
-    weighted.stack = 80;
+    weighted.pot = 1000;
+    weighted.stack = 800;
     weighted.oop = Range::parse("AhAd:1,2c3d:3");
     weighted.ip = Range::parse("AdKc:2,7h8d:0.5");
     weighted.oop_turn_bets = {0.5};
@@ -729,8 +729,8 @@ void test_weighted_blockers_ties_and_flop()
 
     StreetConfig tied;
     tied.board = {card_id("Ah"), card_id("Kd"), card_id("Qc"), card_id("Js")};
-    tied.pot = 100;
-    tied.stack = 50;
+    tied.pot = 1000;
+    tied.stack = 500;
     tied.oop = Range::parse("2c3d:1.5");
     tied.ip = Range::parse("2h3h:0.25");
     tied.oop_turn_bets = {1.0};
@@ -748,8 +748,8 @@ void test_weighted_blockers_ties_and_flop()
 
     StreetConfig flop;
     flop.board = {card_id("Ah"), card_id("Kd"), card_id("7c")};
-    flop.pot = 100;
-    flop.stack = 100;
+    flop.pot = 1000;
+    flop.stack = 1000;
     flop.oop = Range::parse("QcQd:2,JsJd:0.5");
     flop.ip = Range::parse("QcTc:1,2c3d:4");
     flop.allow_all_in = false;
@@ -996,8 +996,8 @@ StreetConfig checkdown_config(const char* oop, const char* ip, int board_cards)
     {
         config.board.push_back(card_id("4s"));
     }
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse(oop);
     config.ip = Range::parse(ip);
     config.allow_all_in = false;
@@ -1249,8 +1249,8 @@ RiverConfig river_bluff_config(const char* air_weight, const char* ip_weight)
     RiverConfig config;
     config.board = {
         card_id("Kh"), card_id("Kd"), card_id("7c"), card_id("4s"), card_id("2h")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse(std::string("KcKs:1,2c3d:") + air_weight);
     config.ip = Range::parse(std::string("AhAd:") + ip_weight);
     config.oop_bet_sizes = {1.0};

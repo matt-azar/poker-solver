@@ -1,5 +1,6 @@
 #include "harness.hpp"
 
+#include "game/chips.hpp"
 #include "game/river_config_text.hpp"
 #include "game/river_game.hpp"
 #include "game/street_config_text.hpp"
@@ -168,8 +169,8 @@ StreetConfig check_only(const std::vector<int>& board, const char* oop, const ch
 {
     StreetConfig config;
     config.board = board;
-    config.pot = 100;
-    config.stack = 200;
+    config.pot = 1000;
+    config.stack = 2000;
     config.oop = Range::parse(oop);
     config.ip = Range::parse(ip);
     config.max_raises = 0;
@@ -475,8 +476,8 @@ void expect_turn_bluff_equilibrium()
 {
     StreetConfig config;
     config.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse("KcKs,2c3d");
     config.ip = Range::parse("AhAd");
     config.oop_turn_bets = {1.0};
@@ -575,8 +576,8 @@ void expect_zero_own_reach()
 {
     StreetConfig config;
     config.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse("AhAd");
     config.ip = Range::parse("2c3d");
     config.oop_turn_bets = {1.0};
@@ -617,8 +618,8 @@ void expect_average_without_opponent_reach()
 {
     StreetConfig config;
     config.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
-    config.pot = 100;
-    config.stack = 200;
+    config.pot = 1000;
+    config.stack = 2000;
     config.oop = Range::parse("AhAd");
     config.ip = Range::parse("2c3d");
     config.oop_turn_bets = {0.5};
@@ -840,8 +841,8 @@ void run_street_tests()
 
     StreetConfig sized;
     sized.board = turn_board;
-    sized.pot = 100;
-    sized.stack = 200;
+    sized.pot = 1000;
+    sized.stack = 2000;
     sized.oop = Range::parse("QcQd");
     sized.ip = Range::parse("JcJd");
     sized.oop_bet_sizes = {0.5};
@@ -864,8 +865,8 @@ void run_street_tests()
 
     StreetConfig shove;
     shove.board = lock_board;
-    shove.pot = 100;
-    shove.stack = 100;
+    shove.pot = 1000;
+    shove.stack = 1000;
     shove.oop = Range::parse("AhAd");
     shove.ip = Range::parse("2c3d");
     shove.oop_bet_sizes = {1.0};
@@ -920,8 +921,8 @@ void run_street_tests()
 
     StreetConfig geo;
     geo.board = turn_board;
-    geo.pot = 100;
-    geo.stack = 300;
+    geo.pot = 1000;
+    geo.stack = 3000;
     geo.oop = Range::parse("QcQd");
     geo.ip = Range::parse("JcJd");
     geo.geometric = true;
@@ -929,17 +930,21 @@ void run_street_tests()
     geo.max_raises = 1;
     const StreetGame geo_game(geo);
     const StreetGame::State geo_open = geo_game.child_chance(geo_game.root(), 0);
-    const int geo_chips = static_cast<int>(std::llround(
-        poker::streets::geometric_pot_fraction(100, 300, 2) * 100.0));
-    const std::string geo_label = "Bet " + std::to_string(geo_chips);
+    const double geo_frac = poker::streets::geometric_pot_fraction(1000, 3000, 2);
+    const int geo_tenths = static_cast<int>(std::llround(geo_frac * 1000.0));
+    const std::string geo_label = "Bet " + poker::format_chips(geo_tenths);
     CHECK(find_action(geo_game, geo_open, geo_label.c_str()) >= 0);
     StreetGame::State geo_called = geo_game.child_action(
         geo_open, find_action(geo_game, geo_open, geo_label.c_str()));
     geo_called = geo_game.child_action(geo_called, find_action(geo_game, geo_called, "Call"));
     CHECK(geo_game.is_chance(geo_called));
     const StreetGame::State geo_river = geo_game.child_chance(geo_called, 0);
-    const int river_stack = 300 - geo_chips;
-    CHECK(find_action(geo_game, geo_river, ("Bet " + std::to_string(river_stack) + " all-in").c_str()) >= 0);
+    const int river_tenths = 3000 - geo_tenths;
+    CHECK(find_action(
+              geo_game,
+              geo_river,
+              ("Bet " + poker::format_chips(river_tenths) + " all-in").c_str())
+        >= 0);
     const int geo_river_index = river_outcome(geo_game, geo_called, card("9c"));
     const StreetGame::State geo_other = geo_game.child_chance(geo_called, geo_river_index);
     CHECK(geo_game.action_count(geo_game.infoset(geo_river))
@@ -947,8 +952,8 @@ void run_street_tests()
 
     StreetConfig by_street;
     by_street.board = turn_board;
-    by_street.pot = 100;
-    by_street.stack = 400;
+    by_street.pot = 1000;
+    by_street.stack = 4000;
     by_street.oop = Range::parse("QcQd");
     by_street.ip = Range::parse("JcJd");
     by_street.oop_turn_bets = {0.5};
@@ -966,8 +971,8 @@ void run_street_tests()
 
     StreetConfig threshold;
     threshold.board = turn_board;
-    threshold.pot = 100;
-    threshold.stack = 200;
+    threshold.pot = 1000;
+    threshold.stack = 2000;
     threshold.oop = Range::parse("QcQd");
     threshold.ip = Range::parse("JcJd");
     threshold.oop_bet_sizes = {0.5};
@@ -987,8 +992,8 @@ void run_street_tests()
 
     StreetConfig shared_bets;
     shared_bets.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
-    shared_bets.pot = 100;
-    shared_bets.stack = 100;
+    shared_bets.pot = 1000;
+    shared_bets.stack = 1000;
     shared_bets.oop = Range::parse("AcAd,5c5d");
     shared_bets.ip = Range::parse("2c3d");
     shared_bets.oop_bet_sizes = {1.0};
@@ -1003,13 +1008,13 @@ void run_street_tests()
     per_street.oop_turn_bets = {0.5};
     per_street.oop_river_bets = {1.0};
     per_street.ip_bet_sizes = {};
-    per_street.stack = 400;
+    per_street.stack = 4000;
     expect_street_batch(per_street, poker::solver::Algorithm::VanillaCfr, 3, false);
 
     StreetConfig geo_match;
     geo_match.board = turn_board;
-    geo_match.pot = 100;
-    geo_match.stack = 300;
+    geo_match.pot = 1000;
+    geo_match.stack = 3000;
     geo_match.oop = Range::parse("QcQd");
     geo_match.ip = Range::parse("JcJd");
     geo_match.geometric = true;
@@ -1045,8 +1050,8 @@ void run_street_tests()
         {
             polar.board[static_cast<std::size_t>(i)] = river_board[static_cast<std::size_t>(i)];
         }
-        polar.pot = 100;
-        polar.stack = 100;
+        polar.pot = 1000;
+        polar.stack = 1000;
         polar.oop = Range::parse("AcAd,5c5d");
         polar.ip = Range::parse("KsKc");
         polar.oop_bet_sizes = {1.0};
@@ -1061,8 +1066,8 @@ void run_street_tests()
         {
             full.board[static_cast<std::size_t>(i)] = river_board[static_cast<std::size_t>(i)];
         }
-        full.pot = 100;
-        full.stack = 200;
+        full.pot = 1000;
+        full.stack = 2000;
         full.oop = Range::parse("AA");
         full.ip = Range::parse("KK");
         full.oop_bet_sizes = {0.5, 1.0};
@@ -1081,8 +1086,8 @@ void run_street_tests()
             const std::vector<int> explorer_board = {
                 card("Kh"), card("Kd"), card("7c"), card("4s"), card("2h")};
             StreetConfig explorer = check_only(explorer_board, "AhAd", "2c3d");
-            explorer.pot = 100;
-            explorer.stack = 100;
+            explorer.pot = 1000;
+            explorer.stack = 1000;
             explorer.memory_mib = 128;
             poker::solver::StreetBatchSolver street(explorer);
             street.run_iterations(3, poker::solver::Algorithm::CfrPlus);
@@ -1096,8 +1101,8 @@ void run_street_tests()
                 river_pin.board[static_cast<std::size_t>(i)] =
                     explorer_board[static_cast<std::size_t>(i)];
             }
-            river_pin.pot = 100;
-            river_pin.stack = 100;
+            river_pin.pot = 1000;
+            river_pin.stack = 1000;
             river_pin.oop = Range::parse("AhAd");
             river_pin.ip = Range::parse("2c3d");
             river_pin.max_raises = 0;
@@ -1163,8 +1168,8 @@ void run_street_tests()
 
     StreetConfig frozen_lock;
     frozen_lock.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
-    frozen_lock.pot = 100;
-    frozen_lock.stack = 100;
+    frozen_lock.pot = 1000;
+    frozen_lock.stack = 1000;
     frozen_lock.oop = Range::parse("AhAd");
     frozen_lock.ip = Range::parse("2c3d");
     frozen_lock.oop_bet_sizes = {1.0};
@@ -1204,8 +1209,8 @@ void run_tree_rule_tests(const std::vector<int>& turn_board)
     {
         StreetConfig fixed_chips;
         fixed_chips.board = turn_board;
-        fixed_chips.pot = 100;
-        fixed_chips.stack = 300;
+        fixed_chips.pot = 1000;
+        fixed_chips.stack = 3000;
         fixed_chips.oop = Range::parse("QcQd");
         fixed_chips.ip = Range::parse("JcJd");
         fixed_chips.oop_bet_sizes = {-20.0};
@@ -1224,8 +1229,8 @@ void run_tree_rule_tests(const std::vector<int>& turn_board)
     {
         StreetConfig multiple;
         multiple.board = turn_board;
-        multiple.pot = 100;
-        multiple.stack = 800;
+        multiple.pot = 1000;
+        multiple.stack = 8000;
         multiple.oop = Range::parse("QcQd");
         multiple.ip = Range::parse("JcJd");
         multiple.oop_bet_sizes = {0.5};
@@ -1242,8 +1247,8 @@ void run_tree_rule_tests(const std::vector<int>& turn_board)
     {
         StreetConfig capped;
         capped.board = turn_board;
-        capped.pot = 100;
-        capped.stack = 500;
+        capped.pot = 1000;
+        capped.stack = 5000;
         capped.oop = Range::parse("QcQd");
         capped.ip = Range::parse("JcJd");
         capped.oop_bet_sizes = {2.0};
@@ -1261,8 +1266,8 @@ void run_tree_rule_tests(const std::vector<int>& turn_board)
     {
         StreetConfig no_three_bet;
         no_three_bet.board = turn_board;
-        no_three_bet.pot = 100;
-        no_three_bet.stack = 800;
+        no_three_bet.pot = 1000;
+        no_three_bet.stack = 8000;
         no_three_bet.oop = Range::parse("QcQd");
         no_three_bet.ip = Range::parse("JcJd");
         no_three_bet.oop_bet_sizes = {0.5};
@@ -1286,8 +1291,8 @@ void run_tree_rule_tests(const std::vector<int>& turn_board)
     {
         StreetConfig donk;
         donk.board = {card("Ah"), card("Kd"), card("7c")};
-        donk.pot = 100;
-        donk.stack = 500;
+        donk.pot = 1000;
+        donk.stack = 5000;
         donk.oop = Range::parse("QcQd");
         donk.ip = Range::parse("JcJd");
         donk.oop_bet_sizes = {1.0};
@@ -1407,8 +1412,8 @@ void expect_canonical_street_config()
 {
     StreetConfig config;
     config.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-    config.pot = 100;
-    config.stack = 300;
+    config.pot = 1000;
+    config.stack = 3000;
     config.oop = Range::parse("QcQd:2");
     config.ip = Range::parse("JcJd");
     config.oop_bet_sizes = {0.5, -20.0};
@@ -1542,8 +1547,8 @@ void expect_canonical_street_config()
         "oop-raises 1\n";
     StreetConfig cli_default;
     cli_default.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
-    cli_default.pot = 100;
-    cli_default.stack = 100;
+    cli_default.pot = 1000;
+    cli_default.stack = 1000;
     cli_default.oop = Range::parse("AhAd");
     cli_default.ip = Range::parse("2c3d");
     cli_default.oop_bet_sizes = {1.0};
@@ -1557,8 +1562,8 @@ void expect_canonical_street_config()
 
     StreetConfig merged;
     merged.board = config.board;
-    merged.pot = 100;
-    merged.stack = 300;
+    merged.pot = 1000;
+    merged.stack = 3000;
     merged.oop = Range::parse("QcQd");
     merged.ip = Range::parse("JcJd");
     merged.oop_bet_sizes = {0.5, -50.0};
@@ -1571,8 +1576,8 @@ void expect_canonical_street_config()
 
     StreetConfig minimum;
     minimum.board = config.board;
-    minimum.pot = 100;
-    minimum.stack = 500;
+    minimum.pot = 1000;
+    minimum.stack = 5000;
     minimum.oop = Range::parse("QcQd");
     minimum.ip = Range::parse("JcJd");
     minimum.oop_bet_sizes = {0.5};
@@ -1586,7 +1591,7 @@ void expect_canonical_street_config()
     CHECK(minimum_game.action_count(minimum_game.infoset(faced)) == 3);
 
     StreetConfig short_stack = minimum;
-    short_stack.stack = 80;
+    short_stack.stack = 800;
     short_stack.oop_bet_sizes = {-50.0};
     short_stack.ip_raise_sizes = {0.1};
     short_stack.allow_all_in = true;
@@ -1608,8 +1613,8 @@ void expect_allocation_audit()
     const std::vector<int> flop = {card("Ah"), card("Kd"), card("7c")};
     StreetConfig branching;
     branching.board = flop;
-    branching.pot = 100;
-    branching.stack = 10000;
+    branching.pot = 1000;
+    branching.stack = 100000;
     branching.oop = Range::parse("QcQd");
     branching.ip = Range::parse("JcJd");
     branching.oop_bet_sizes = {0.25, 0.5, 1.0};
@@ -1653,7 +1658,7 @@ void expect_allocation_audit()
 
     const std::vector<int> turn = {card("Ah"), card("Kd"), card("7c"), card("4s")};
     StreetConfig betting = check_only(turn, "QcQd", "JcJd");
-    betting.stack = 400;
+    betting.stack = 4000;
     betting.oop_bet_sizes = {0.5, 1.0};
     betting.ip_bet_sizes = {0.5, 1.0};
     betting.oop_raise_sizes = {0.5, 1.0};
@@ -1722,8 +1727,8 @@ void run_street_workspace_tests()
 {
     const std::vector<int> turn = {card("Ah"), card("Kd"), card("7c"), card("4s")};
     StreetConfig betting = check_only(turn, "AcAd:1,5c5d:3", "KsKc,JhJs");
-    betting.stack = 100;
-    betting.pot = 100;
+    betting.stack = 1000;
+    betting.pot = 1000;
     betting.oop_bet_sizes = {0.5};
     betting.ip_bet_sizes = {0.5};
     betting.oop_raise_sizes = {0.5};
@@ -1757,7 +1762,7 @@ void run_street_workspace_tests()
 
     const std::vector<int> flop = {card("Ah"), card("Kd"), card("7c")};
     StreetConfig flop_betting = check_only(flop, "QcQd", "JcJd");
-    flop_betting.stack = 100;
+    flop_betting.stack = 1000;
     flop_betting.oop_bet_sizes = {0.5};
     flop_betting.ip_bet_sizes = {0.5};
     flop_betting.oop_raise_sizes = {0.5};
@@ -1820,8 +1825,8 @@ void check_thread_match(
 StreetConfig betting_config(const std::vector<int>& board, const char* oop, const char* ip, int threads)
 {
     StreetConfig config = check_only(board, oop, ip);
-    config.stack = 100;
-    config.pot = 100;
+    config.stack = 1000;
+    config.pot = 1000;
     config.oop_bet_sizes = {0.5};
     config.ip_bet_sizes = {0.5};
     config.oop_raise_sizes = {0.5};
@@ -2294,8 +2299,8 @@ void run_street_showdown_tests()
 
     StreetConfig config;
     config.board = {card("Ah"), card("Kd"), card("7c")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse("AcAd:1,KsKc:3,QcQd:2,5c5d:0.5");
     config.ip = Range::parse("AcAd:0.5,QhQs:4,JhTh:1,2c3d:2");
     config.allow_all_in = false;
@@ -2324,8 +2329,8 @@ void run_street_showdown_tests()
 
     StreetConfig tied;
     tied.board = {card("Ah"), card("Ad"), card("Ac")};
-    tied.pot = 100;
-    tied.stack = 100;
+    tied.pot = 1000;
+    tied.stack = 1000;
     tied.oop = Range::parse("2c3d:1.5,5c6d:0.25");
     tied.ip = Range::parse("7c8d:3,9cTc:1");
     tied.allow_all_in = false;
@@ -2357,8 +2362,8 @@ void run_street_inspect_tests()
 {
     StreetConfig config;
     config.board = {card("Ah"), card("Kd"), card("7c")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse("AcAd:1,9c9d:2,QcQd:0.5");
     config.ip = Range::parse("AcAd:0.5,QhQs:3,JhTh:1");
     config.oop_bet_sizes = {0.5};
@@ -2610,8 +2615,8 @@ void run_street_inspect_tests()
 
     StreetConfig tied;
     tied.board = {card("Ah"), card("Ad"), card("Ac")};
-    tied.pot = 80;
-    tied.stack = 80;
+    tied.pot = 800;
+    tied.stack = 800;
     tied.oop = Range::parse("2c3d:1.5,5c6d:0.25");
     tied.ip = Range::parse("7c8d:3,9cTc:1");
     tied.allow_all_in = false;

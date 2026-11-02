@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "game/chips.hpp"
 
 namespace
 {
@@ -33,8 +34,8 @@ void solve_case(
 {
     poker::streets::StreetConfig config;
     config.board = board;
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = poker::holdem::Range::parse("random");
     config.ip = poker::holdem::Range::parse("random");
     config.oop_bet_sizes = {1.0};
@@ -85,7 +86,7 @@ void solve_case(
         std::cout << "memory_component " << component.name << " " << component.bytes << "\n";
     }
 
-    const double tolerance = 1e-8 * static_cast<double>(config.pot);
+    const double tolerance = 1e-8 * poker::tenths_to_chips(config.pot);
     require(std::isfinite(stats.p1_expected_utility), std::string(name) + " value is not finite");
     require(std::abs(stats.p1_expected_utility) <= tolerance, std::string(name) + " value is not centered");
     require(std::isfinite(stats.nash_gap), std::string(name) + " NashConv is not finite");

@@ -17,7 +17,9 @@ export function StudyWorkspace() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
   const strategyEditDrawerOpen = useStudyStore((s) => s.strategyEditDrawerOpen);
-  const showNav = leftNav && Boolean(currentNode);
+  // Path chrome (ActionHistory) is the primary navigator. The left panel is
+  // optional diagnostics only — no competing child/ID list.
+  const showDiagnostics = leftNav && Boolean(currentNode);
 
   return (
     <div className="study-workspace">
@@ -25,10 +27,10 @@ export function StudyWorkspace() {
       <ActionHistory />
       <div
         className="study-main"
-        data-nav={showNav ? "true" : "false"}
+        data-nav={showDiagnostics ? "true" : "false"}
         style={{ ["--inspector-w" as string]: `${inspectorWidth}px` }}
       >
-        {showNav ? <NodeNavigator /> : null}
+        {showDiagnostics ? <NodeNavigator /> : null}
         <section
           className="matrix-pane"
           data-dual={dualRange ? "true" : "false"}

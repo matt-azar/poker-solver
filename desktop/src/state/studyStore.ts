@@ -17,6 +17,15 @@ import {
   type WeightSnapshot,
 } from "../domain/range";
 import {
+  advancePathTrail,
+  pushNavHistory,
+  replaceTrailAlternative,
+  rootPathStep,
+  type NavHistoryEntry,
+  type PathAlternative,
+  type PathStep,
+} from "../domain/actionHistory";
+import {
   nextGeneration,
   shouldApply,
   solutionNeedsReload,
@@ -412,6 +421,25 @@ interface StudyState {
   solutionId: string | null;
   baselineSolutionId: string | null;
   currentNode: NodePayload | null;
+  /**
+   * Client-validated betting-path trail (node ids + ownership + alternatives).
+   * Used when engine `parent_id` is unavailable — see actionHistory.ts note.
+   */
+  pathTrail: PathStep[];
+  /** Browser-style back/forward stack of node + trail snapshots. */
+  navHistory: NavHistoryEntry[];
+  navHistoryIndex: number;
+  canNavBack: boolean;
+  canNavForward: boolean;
+  goNavBack: () => Promise<void>;
+  goNavForward: () => Promise<void>;
+  /** Jump to an ancestor already present on the trail. */
+  jumpTrailIndex: (index: number) => Promise<void>;
+  /** Take a recorded alternative at a prior trail step. */
+  takeTrailAlternative: (
+    stepIndex: number,
+    alternative: PathAlternative,
+  ) => Promise<void>;
   nodeValues: ActionValuesPayload | null;
   runouts: unknown | null;
   equity: unknown | null;
@@ -489,7 +517,10 @@ interface StudyState {
   resolveLocked: () => Promise<void>;
   pause: () => Promise<void>;
   stop: () => Promise<void>;
-  navigateTo: (nodeId: string) => Promise<void>;
+  navigateTo: (
+    nodeId: string,
+    opts?: { history?: "push" | "replace" | "none" },
+  ) => Promise<void>;
   followAction: (nodeId: string) => Promise<void>;
   /**
    * Open-path gate for turn/river card changes from the board strip.
@@ -822,6 +853,75 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   solutionId: null,
   baselineSolutionId: null,
   currentNode: null,
+  pathTrail: [],
+  navHistory: [],
+  navHistoryIndex: -1,
+  canNavBack: false,
+  canNavForward: false,
+  async goNavBack() {
+    const index = get().navHistoryIndex;
+    if (index <= 0) {
+      return;
+    }
+    const entry = get().navHistory[index - 1];
+    if (!entry) {
+      return;
+    }
+    set({
+      navHistoryIndex: index - 1,
+      canNavBack: index - 1 > 0,
+      canNavForward: true,
+      pathTrail: entry.trail.map((step) => ({ ...step })),
+    });
+    await get().navigateTo(entry.nodeId, { history: "none" });
+  },
+  async goNavForward() {
+    const { navHistory, navHistoryIndex } = get();
+    if (navHistoryIndex < 0 || navHistoryIndex >= navHistory.length - 1) {
+      return;
+    }
+    const nextIndex = navHistoryIndex + 1;
+    const entry = navHistory[nextIndex];
+    if (!entry) {
+      return;
+    }
+    set({
+      navHistoryIndex: nextIndex,
+      canNavBack: true,
+      canNavForward: nextIndex < navHistory.length - 1,
+      pathTrail: entry.trail.map((step) => ({ ...step })),
+    });
+    await get().navigateTo(entry.nodeId, { history: "none" });
+  },
+  async jumpTrailIndex(index: number) {
+    const trail = get().pathTrail;
+    const step = trail[index];
+    if (!step?.nodeId) {
+      return;
+    }
+    const nextTrail = trail.slice(0, index + 1).map((item) => ({ ...item }));
+    set({ pathTrail: nextTrail });
+    await get().navigateTo(step.nodeId, { history: "push" });
+  },
+  async takeTrailAlternative(stepIndex: number, alternative: PathAlternative) {
+    if (!alternative.nodeId) {
+      return;
+    }
+    const pot = Number(
+      get().currentNode?.pot ?? get().status?.pot ?? get().draft.pot ?? 0,
+    );
+    const nextTrail = replaceTrailAlternative(
+      get().pathTrail,
+      stepIndex,
+      alternative,
+      pot,
+    );
+    if (!nextTrail) {
+      return;
+    }
+    set({ pathTrail: nextTrail });
+    await get().navigateTo(alternative.nodeId, { history: "push" });
+  },
   nodeValues: null,
   runouts: null,
   equity: null,
@@ -1360,6 +1460,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       phase: "solving",
       message: "Solving…",
       currentNode: null,
+      pathTrail: [],
+      navHistory: [],
+      navHistoryIndex: -1,
+      canNavBack: false,
+      canNavForward: false,
       nodeValues: null,
       runouts: null,
       equity: null,
@@ -1464,12 +1569,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
   },
 
-  async navigateTo(nodeId: string) {
+  async navigateTo(nodeId: string, opts?: { history?: "push" | "replace" | "none" }) {
     const solutionId = get().solutionId || get().status?.solution_id;
     if (!solutionId) {
       return;
     }
+    const historyMode = opts?.history ?? "push";
     const token = ++nodeToken;
+    const previous = get().currentNode;
     set({
       solutionId,
       nodeValues: null,
@@ -1483,6 +1590,41 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (typeof node.status_generation === "number" && node.status_generation < seenGeneration) {
         return;
       }
+      const rootId = get().status?.root_node_id || rootNodeId(undefined);
+      const pot = Number(node.pot ?? get().status?.pot ?? get().draft.pot ?? 0);
+      let pathTrail = get().pathTrail;
+      if (historyMode !== "none") {
+        pathTrail = advancePathTrail(pathTrail, previous, node, pot, rootId);
+        if (!pathTrail.length || pathTrail[0]?.nodeId !== rootId) {
+          pathTrail = [
+            rootPathStep(rootId, node.board, String(node.place ?? "")),
+            ...pathTrail.filter((step) => step.kind !== "root"),
+          ];
+        }
+        // Landing on root resets the trail.
+        if (node.node_id === rootId) {
+          pathTrail = [rootPathStep(rootId, node.board, String(node.place ?? ""))];
+        }
+      }
+
+      let navHistory = get().navHistory;
+      let navHistoryIndex = get().navHistoryIndex;
+      if (historyMode === "push" || historyMode === "replace") {
+        const entry = {
+          nodeId: node.node_id,
+          trail: pathTrail.map((step) => ({ ...step })),
+        };
+        if (historyMode === "replace" && navHistoryIndex >= 0 && navHistory[navHistoryIndex]) {
+          const copy = navHistory.slice();
+          copy[navHistoryIndex] = entry;
+          navHistory = copy;
+        } else {
+          const pushed = pushNavHistory(navHistory, navHistoryIndex, entry);
+          navHistory = pushed.entries;
+          navHistoryIndex = pushed.index;
+        }
+      }
+
       set({
         currentNode: node,
         solutionId: node.solution_id ?? solutionId,
@@ -1490,6 +1632,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         actionFilter: null,
         lockDraft: defaultLockDraft(node.actions?.length ?? 0),
         lockDraftBaseline: defaultLockDraft(node.actions?.length ?? 0),
+        pathTrail,
+        navHistory,
+        navHistoryIndex,
+        canNavBack: navHistoryIndex > 0,
+        canNavForward: navHistoryIndex >= 0 && navHistoryIndex < navHistory.length - 1,
       });
       void get().refreshLocks();
     } catch (error) {
@@ -1503,7 +1650,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   async followAction(nodeId: string) {
-    await get().navigateTo(nodeId);
+    await get().navigateTo(nodeId, { history: "push" });
   },
 
   prepareBoardCardChange(street: DealStreet) {

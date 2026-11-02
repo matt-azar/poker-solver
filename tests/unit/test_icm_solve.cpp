@@ -75,8 +75,8 @@ void run_icm_solve_tests()
     {
         StreetConfig cfg;
         cfg.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-        cfg.pot = 100;
-        cfg.stack = 200;
+        cfg.pot = 1000;
+        cfg.stack = 2000;
         cfg.oop = Range::parse("AcAd");
         cfg.ip = Range::parse("KsKc");
         cfg.oop_bet_sizes = {1.0};
@@ -87,7 +87,7 @@ void run_icm_solve_tests()
         state = game.child_action(state, find_street_action(game, state, "Bet 100"));
         state = game.child_action(state, find_street_action(game, state, "Fold"));
         const PlayerPayoff paid = game.terminal_payoff(state);
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 100, 0, 1, 0);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 1000, 0, 1, 0);
         CHECK(paid.utility[0] == chips.utility[0]);
         CHECK(paid.utility[1] == chips.utility[1]);
         CHECK_NEAR(paid.utility[0], 50.0, 1e-12);
@@ -99,8 +99,8 @@ void run_icm_solve_tests()
     {
         StreetConfig cfg;
         cfg.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-        cfg.pot = 100;
-        cfg.stack = 200;
+        cfg.pot = 1000;
+        cfg.stack = 2000;
         cfg.oop = Range::parse("AcAd");
         cfg.ip = Range::parse("KsKc");
         cfg.oop_bet_sizes = {1.0};
@@ -121,8 +121,8 @@ void run_icm_solve_tests()
     {
         StreetConfig street;
         street.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-        street.pot = 100;
-        street.stack = 200;
+        street.pot = 1000;
+        street.stack = 2000;
         street.oop = Range::parse("AcAd");
         street.ip = Range::parse("KsKc");
         const std::string plain = poker::streets::format_street_config(street);
@@ -145,8 +145,8 @@ void run_icm_solve_tests()
     {
         RiverConfig river;
         set_board(river);
-        river.pot = 100;
-        river.stack = 200;
+        river.pot = 1000;
+        river.stack = 2000;
         river.oop = Range::parse("AcAd");
         river.ip = Range::parse("KsKc");
         river.icm = hu_wta(1000.0, 1000.0, 100.0);
@@ -166,8 +166,8 @@ void run_icm_solve_tests()
         {
             StreetConfig bad;
             bad.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-            bad.pot = 100;
-            bad.stack = 100;
+            bad.pot = 1000;
+            bad.stack = 1000;
             bad.oop = Range::parse("AcAd");
             bad.ip = Range::parse("KsKc");
             // Worst loss is pot/2 + stack = 150; stacks of 40 are too small.
@@ -187,8 +187,8 @@ void run_icm_solve_tests()
         {
             RiverConfig bad;
             set_board(bad);
-            bad.pot = 100;
-            bad.stack = 100;
+            bad.pot = 1000;
+            bad.stack = 1000;
             bad.oop = Range::parse("AcAd");
             bad.ip = Range::parse("KsKc");
             bad.icm.stacks = {1000.0}; // need at least two seats
@@ -208,8 +208,8 @@ void run_icm_solve_tests()
         {
             RiverConfig bad;
             set_board(bad);
-            bad.pot = 100;
-            bad.stack = 100;
+            bad.pot = 1000;
+            bad.stack = 1000;
             bad.oop = Range::parse("AcAd");
             bad.ip = Range::parse("KsKc");
             bad.icm.stacks = {1000.0, 1000.0};
@@ -228,8 +228,8 @@ void run_icm_solve_tests()
     {
         RiverConfig zero;
         set_board(zero);
-        zero.pot = 100;
-        zero.stack = 100;
+        zero.pot = 1000;
+        zero.stack = 1000;
         zero.oop = Range::parse("AcAd");
         zero.ip = Range::parse("KsKc");
         zero.allow_all_in = false;
@@ -248,8 +248,8 @@ void run_icm_solve_tests()
     {
         RiverConfig icm_cfg;
         set_board(icm_cfg);
-        icm_cfg.pot = 100;
-        icm_cfg.stack = 100;
+        icm_cfg.pot = 1000;
+        icm_cfg.stack = 1000;
         icm_cfg.oop = Range::parse("AcAd");
         icm_cfg.ip = Range::parse("KsKc");
         icm_cfg.allow_all_in = false;
@@ -276,8 +276,8 @@ void run_icm_solve_tests()
         StreetConfig icm_cfg;
         icm_cfg.board = {
             card("Ah"), card("Kd"), card("7c"), card("4s"), card("2h")};
-        icm_cfg.pot = 100;
-        icm_cfg.stack = 100;
+        icm_cfg.pot = 1000;
+        icm_cfg.stack = 1000;
         icm_cfg.oop = Range::parse("AcAd");
         icm_cfg.ip = Range::parse("KsKc");
         icm_cfg.allow_all_in = false;

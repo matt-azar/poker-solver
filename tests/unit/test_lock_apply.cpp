@@ -48,8 +48,8 @@ StreetConfig tiny_turn_lock_config(const char* oop, const char* ip)
 {
     StreetConfig config;
     config.board = {card_id("Kh"), card_id("Kd"), card_id("7c"), card_id("4s")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse(oop);
     config.ip = Range::parse(ip);
     config.oop_turn_bets = {1.0};
@@ -89,8 +89,8 @@ RiverConfig tiny_river_lock_config(const char* oop, const char* ip)
 {
     RiverConfig config;
     set_river_board(config);
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse(oop);
     config.ip = Range::parse(ip);
     config.oop_bet_sizes = {1.0};

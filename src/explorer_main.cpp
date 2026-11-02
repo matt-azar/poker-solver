@@ -7,6 +7,7 @@
 #include "explorer/templates.hpp"
 #include "explorer/value_worker.hpp"
 #include "solver/incentives.hpp"
+#include "game/chips.hpp"
 #include "game/river_config_text.hpp"
 #include "game/river_game.hpp"
 #include "game/street_config_text.hpp"
@@ -292,8 +293,9 @@ std::vector<std::string> read_string_array(const std::string& text, const char* 
 struct Job
 {
     std::vector<int> board;
-    int pot = 100;
-    int stack = 200;
+    // pot / stack stored in tenths of a chip; JSON emits chip floats.
+    int pot = poker::chip_units(100);
+    int stack = poker::chip_units(200);
     poker::holdem::Range oop{};
     poker::holdem::Range ip{};
     std::vector<double> oop_bets{};
@@ -382,8 +384,8 @@ Job parse_job(const std::string& text)
     {
         job.board.push_back(poker::holdem::parse_card(card));
     }
-    job.pot = static_cast<int>(read_number(text, "pot", 100));
-    job.stack = static_cast<int>(read_number(text, "stack", 200));
+    job.pot = poker::chips_to_tenths(read_number(text, "pot", 100));
+    job.stack = poker::chips_to_tenths(read_number(text, "stack", 200));
     job.oop = poker::holdem::Range::parse(read_string(text, "oop_range", "AA"));
     job.ip = poker::holdem::Range::parse(read_string(text, "ip_range", "KK"));
     const bool oop_bets_present = find_key(text, "oop_bets") != std::string::npos;
@@ -686,9 +688,9 @@ std::string build_status(const StatusDraft& draft)
     out += ",\"status_generation\":";
     out += std::to_string(draft.generation);
     out += ",\"pot\":";
-    out += std::to_string(job.pot);
+    out += poker::format_chips(job.pot);
     out += ",\"stack\":";
-    out += std::to_string(job.stack);
+    out += poker::format_chips(job.stack);
     out += ",\"spot\":";
     append_escaped(out, spot_name(job));
     out += ",\"plays\":";
@@ -2283,7 +2285,8 @@ void solve_job(std::uint64_t job_id, Job job)
             progress.running = true;
             progress.time_limit_reached = time_limit_reached;
             g_session.set_progress(job_id, build_status(progress));
-            if (job.accuracy >= 0.0 && gap <= job.accuracy * static_cast<double>(job.pot))
+            if (job.accuracy >= 0.0
+                && gap <= job.accuracy * poker::tenths_to_chips(job.pot))
             {
                 break;
             }
@@ -2695,7 +2698,8 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
             progress.root_id = held->root_id;
             progress.time_limit_reached = time_limit_reached;
             g_session.set_progress(job_id, build_status(progress));
-            if (held->job.accuracy >= 0.0 && gap <= held->job.accuracy * static_cast<double>(held->job.pot))
+            if (held->job.accuracy >= 0.0
+                && gap <= held->job.accuracy * poker::tenths_to_chips(held->job.pot))
             {
                 break;
             }
@@ -2916,7 +2920,8 @@ void resolve_locked_job(
             progress.baseline_solution_id = held->baseline_solution_id;
             progress.time_limit_reached = time_limit_reached;
             g_session.set_progress(job_id, build_status(progress));
-            if (held->job.accuracy >= 0.0 && gap <= held->job.accuracy * static_cast<double>(held->job.pot))
+            if (held->job.accuracy >= 0.0
+                && gap <= held->job.accuracy * poker::tenths_to_chips(held->job.pot))
             {
                 break;
             }
@@ -4476,9 +4481,9 @@ void handle_client(socket_t client)
                     append_escaped(payload, poker::holdem::format_card(job.board[index]));
                 }
                 payload += "],\"pot\":";
-                payload += std::to_string(job.pot);
+                payload += poker::format_chips(job.pot);
                 payload += ",\"stack\":";
-                payload += std::to_string(job.stack);
+                payload += poker::format_chips(job.stack);
                 payload += ",\"oop_range\":";
                 append_escaped(payload, job.oop.to_combo_list());
                 payload += ",\"ip_range\":";
@@ -4541,9 +4546,9 @@ void handle_client(socket_t client)
                     append_escaped(payload, poker::holdem::format_card(job.board[index]));
                 }
                 payload += "],\"pot\":";
-                payload += std::to_string(job.pot);
+                payload += poker::format_chips(job.pot);
                 payload += ",\"stack\":";
-                payload += std::to_string(job.stack);
+                payload += poker::format_chips(job.stack);
                 payload += ",\"oop_range\":";
                 append_escaped(payload, job.oop.to_combo_list());
                 payload += ",\"ip_range\":";

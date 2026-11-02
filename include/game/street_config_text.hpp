@@ -1,5 +1,6 @@
 #pragma once
 
+#include "game/chips.hpp"
 #include "game/street_game.hpp"
 #include "solver/tree_edit.hpp"
 
@@ -128,8 +129,8 @@ inline std::string format_street_config(const StreetConfig& config)
     std::string out;
     out += "street-config 1\n";
     append_line(out, "board", format_board(config.board));
-    append_ints(out, "pot", config.pot);
-    append_ints(out, "stack", config.stack);
+    append_line(out, "pot", format_chips(config.pot));
+    append_line(out, "stack", format_chips(config.stack));
     append_line(out, "oop-range", config.oop.to_combo_list());
     append_line(out, "ip-range", config.ip.to_combo_list());
     append_ints(out, "first-to-act", config.first_to_act);
@@ -483,11 +484,11 @@ inline StreetConfig parse_street_config(std::string_view text)
         }
         else if (key == "pot")
         {
-            config.pot = parse_int(value);
+            config.pot = parse_chips(value);
         }
         else if (key == "stack")
         {
-            config.stack = parse_int(value);
+            config.stack = parse_chips(value);
         }
         else if (key == "oop-range")
         {

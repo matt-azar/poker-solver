@@ -1,5 +1,6 @@
 #pragma once
 
+#include "game/chips.hpp"
 #include "solver/payoff.hpp"
 
 #include <cmath>
@@ -142,7 +143,8 @@ inline std::string incentive_compact_token(
     {
         return facing ? "call" : "c";
     }
-    std::string text = facing ? "r" + std::to_string(street_total) : "b" + std::to_string(add);
+    std::string text =
+        facing ? "r" + format_chips(street_total) : "b" + format_chips(add);
     if (all_in)
     {
         text += "ai";
@@ -217,11 +219,11 @@ inline std::string incentive_chip_label(
     }
     else if (!facing)
     {
-        text = "Bet " + std::to_string(add);
+        text = "Bet " + format_chips(add);
     }
     else
     {
-        text = "Raise to " + std::to_string(street_total);
+        text = "Raise to " + format_chips(street_total);
     }
     if (all_in && code != 0)
     {

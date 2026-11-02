@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { mapActionColors } from "../../domain/actionColors";
-import { frequencyOf, groupEv, groupHands, strategyMix } from "../../domain/browse";
+import {
+  frequencyOf,
+  groupEv,
+  groupHands,
+  hasWithinHandActionMixing,
+  isExcludedMatrixCell,
+  isPartialRangeDisplay,
+  rangeDisplayWeight,
+  strategyMix,
+} from "../../domain/browse";
 import {
   RANKS,
   type ActionValuesPayload,
@@ -11,6 +20,7 @@ import {
   type NodePayload,
 } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
+import "../../styles/matrix-density.css";
 
 function cellKey(row: number, col: number): string {
   return `${row}:${col}`;
@@ -51,6 +61,10 @@ function maxAbsEv(
     }
   }
   return max || 1;
+}
+
+function usesRangeWeightFill(mode: MatrixMode): boolean {
+  return mode === "range" || mode === "action-range" || mode === "equity";
 }
 
 export function RangeMatrix() {
@@ -108,7 +122,7 @@ export function RangeMatrix() {
   return (
     <div className="range-matrix-wrap" ref={wrapRef}>
       <div
-        className="range-matrix"
+        className="range-matrix matrix-density"
         role="grid"
         aria-label="Hand range matrix"
         style={side > 0 ? { width: side, height: side } : undefined}
@@ -195,7 +209,8 @@ function MatrixRow({
             : row < col
               ? `${RANKS[row]}${RANKS[col]}s`
               : `${RANKS[col]}${RANKS[row]}o`);
-        const empty = !cell || !cell.defined || cell.marginalSum <= 0;
+        const excluded = isExcludedMatrixCell(cell);
+        const empty = excluded;
         const selected = selectedCell?.row === row && selectedCell?.col === col;
         const hovered = hoverCell?.row === row && hoverCell?.col === col;
 
@@ -204,6 +219,9 @@ function MatrixRow({
         let solid: string | null = null;
         let dimmed = false;
         let filtered = false;
+        let partialInclusion = false;
+        let actionMixing = false;
+        let measure: string | undefined;
 
         if (!empty && cell) {
           const showStrategy =
@@ -216,15 +234,16 @@ function MatrixRow({
                 weight,
               }));
             }
+            actionMixing = hasWithinHandActionMixing(cell);
           }
 
           if (matrixMode === "range") {
-            const weight =
-              cell.range_combos > 0
-                ? Math.min(1, cell.marginalSum / Math.max(1, cell.range_combos))
-                : 0;
+            const weight = rangeDisplayWeight(cell) ?? 0;
             solid = rangeFill(weight);
             sub = `${(weight * 100).toFixed(0)}`;
+            // Honest measure: still average posterior mass, not inclusion.
+            measure = "range-weight";
+            partialInclusion = isPartialRangeDisplay(cell);
           } else if (matrixMode === "ev") {
             const ev = groupEv(currentNode, nodeValues, cell, evDisplayBasis);
             if (ev) {
@@ -239,6 +258,7 @@ function MatrixRow({
             if (freq != null) {
               solid = rangeFill(freq);
               sub = `${(freq * 100).toFixed(0)}`;
+              partialInclusion = freq > 1e-6 && freq < 1 - 1e-6;
             }
           } else if (matrixMode === "strategy-ev") {
             const ev = groupEv(currentNode, nodeValues, cell, evDisplayBasis);
@@ -260,6 +280,11 @@ function MatrixRow({
           }
         }
 
+        // Partial-inclusion chrome is only for solid weight fills, never mix bars.
+        if (actionMixing || !usesRangeWeightFill(matrixMode)) {
+          partialInclusion = false;
+        }
+
         return (
           <button
             key={`${row}-${col}`}
@@ -267,10 +292,14 @@ function MatrixRow({
             className="matrix-cell"
             role="gridcell"
             data-empty={empty}
+            data-excluded={excluded}
             data-selected={selected}
             data-hover={hovered}
             data-dimmed={dimmed}
             data-filtered={filtered}
+            data-partial-inclusion={partialInclusion}
+            data-action-mixing={actionMixing}
+            data-measure={measure}
             style={solid ? { background: solid } : undefined}
             onMouseEnter={() => setHoverCell({ row, col, text })}
             onClick={() => setSelectedCell({ row, col, text })}
