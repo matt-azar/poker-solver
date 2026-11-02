@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyPaintAtPreservingExact,
   applyPaintPreservingExact,
   canonicalizeCombo,
   combosForClass,
+  createExactRangeHistory,
   exactCellSummary,
+  exactPairFromTexts,
+  exactPairsEqual,
   paintClass,
   parseExactComboToken,
   parseExactRange,
   parseRangeText,
   serializeExactRange,
+  textsFromExactPair,
   weightsFromExact,
 } from "./range";
 
@@ -103,11 +108,31 @@ describe("paintClass preserves untouched exact combos", () => {
     expect(result.grid[2]![2]).toBeCloseTo(0.5, 12); // QQ
   });
 
+  it("applyPaintAtPreservingExact paints by matrix coordinates", () => {
+    const result = applyPaintAtPreservingExact("AsAd:0.5,KK", 2, 2, 1);
+    expect(result.text).toBe("AsAd:0.5,KK,QQ");
+    expect(result.range.get("AsAd")).toBeCloseTo(0.5, 12);
+  });
+
   it("clearing a class does not drop unrelated exact combos", () => {
     const painted = paintClass(parseExactRange("AsAd:0.5,KK,QQ").range, "QQ", 0);
     expect(painted.get("AsAd")).toBeCloseTo(0.5, 12);
     expect(combosForClass("QQ")!.every((combo) => !painted.has(combo))).toBe(true);
     expect(serializeExactRange(painted)).toBe("AsAd:0.5,KK");
+  });
+});
+
+describe("exact range history snapshots", () => {
+  it("undo restores ExactRange pairs, not aggregate grids", () => {
+    const history = createExactRangeHistory();
+    const before = exactPairFromTexts("AsAd:0.5,KK", "AA");
+    const after = exactPairFromTexts("AsAd:0.5,KK,QQ", "AA");
+    expect(history.push(before)).toBe(true);
+    const restored = history.undo(after);
+    expect(restored).not.toBeNull();
+    expect(exactPairsEqual(restored!, before)).toBe(true);
+    expect(textsFromExactPair(restored!).oop).toBe("AsAd:0.5,KK");
+    expect(restored!.oop.get("AsAd")).toBeCloseTo(0.5, 12);
   });
 });
 
