@@ -140,6 +140,11 @@ function trimWeight(weight: number): string {
   return String(Math.round(weight * 1000) / 1000);
 }
 
+/**
+ * Serialize a 169-grid to class tokens only.
+ * Loses suit-specific weights — prefer {@link serializeExactRange} when an
+ * ExactRange is available (studyStore paint wiring follow-up).
+ */
 export function rangeText(grid: WeightGrid): string {
   const parts: string[] = [];
   for (let row = 0; row < 13; row++) {
@@ -155,6 +160,538 @@ export function rangeText(grid: WeightGrid): string {
   return parts.join(",");
 }
 
+/** Canonical suit-specific combo → nonnegative weight (e.g. AsAd → 0.5). */
+export type ExactRange = Map<string, number>;
+
+export type RangeTokenError = {
+  token: string;
+  message: string;
+};
+
+export type ExactRangeParse = {
+  range: ExactRange;
+  errors: RangeTokenError[];
+};
+
+export type ExactCellSummary = {
+  /** Mean weight across all combos in the 169-cell (absent = 0). */
+  average: number;
+  /** True when the class has more than one distinct weight (including zeros vs positive). */
+  mixed: boolean;
+  min: number;
+  max: number;
+  comboCount: number;
+};
+
+const SUITS = ["c", "d", "h", "s"] as const;
+const SUIT_ORDER = "cdhs";
+
+export function emptyExactRange(): ExactRange {
+  return new Map();
+}
+
+export function cloneExactRange(range: ExactRange): ExactRange {
+  return new Map(range);
+}
+
+/** Engine-style combo key: higher rank first; pairs use higher suit first. */
+export function canonicalizeCombo(cardA: string, cardB: string): string {
+  const a = parseCard(cardA);
+  const b = parseCard(cardB);
+  if (!a || !b) {
+    throw new Error("bad card");
+  }
+  if (a === b) {
+    throw new Error("a combo cannot repeat a card");
+  }
+  const rankA = ORDER.indexOf(a[0]);
+  const rankB = ORDER.indexOf(b[0]);
+  const suitA = SUIT_ORDER.indexOf(a[1]);
+  const suitB = SUIT_ORDER.indexOf(b[1]);
+  let first = a;
+  let second = b;
+  if (rankA > rankB || (rankA === rankB && suitA < suitB)) {
+    first = b;
+    second = a;
+  }
+  return first + second;
+}
+
+function readCardPrefix(
+  text: string,
+  start: number,
+): { card: string; next: number } | null {
+  let index = start;
+  while (index < text.length && /\s/.test(text[index]!)) {
+    index += 1;
+  }
+  if (index >= text.length) {
+    return null;
+  }
+  let rank = text[index]!.toUpperCase();
+  let consumed = 1;
+  if (text.toLowerCase().startsWith("10", index)) {
+    rank = "T";
+    consumed = 2;
+  }
+  const suitIndex = index + consumed;
+  if (suitIndex >= text.length) {
+    return null;
+  }
+  const suit = text[suitIndex]!.toLowerCase();
+  if (!ORDER.includes(rank) || !SUIT_ORDER.includes(suit)) {
+    return null;
+  }
+  return { card: rank + suit, next: suitIndex + 1 };
+}
+
+/** Parse a suit-specific token like AsAd / As Ad into a canonical combo key. */
+export function parseExactComboToken(token: string): string | null {
+  const first = readCardPrefix(token, 0);
+  if (!first) {
+    return null;
+  }
+  const second = readCardPrefix(token, first.next);
+  if (!second) {
+    return null;
+  }
+  let index = second.next;
+  while (index < token.length && /\s/.test(token[index]!)) {
+    index += 1;
+  }
+  if (index !== token.length) {
+    return null;
+  }
+  try {
+    return canonicalizeCombo(first.card, second.card);
+  } catch {
+    return null;
+  }
+}
+
+export function combosForCell(row: number, column: number): string[] {
+  const high = RANKS[Math.min(row, column)]!;
+  const low = RANKS[Math.max(row, column)]!;
+  const out: string[] = [];
+  if (row === column) {
+    for (let i = 0; i < SUITS.length; i++) {
+      for (let j = i + 1; j < SUITS.length; j++) {
+        out.push(canonicalizeCombo(high + SUITS[j]!, high + SUITS[i]!));
+      }
+    }
+    return out;
+  }
+  const suited = row < column;
+  for (const left of SUITS) {
+    for (const right of SUITS) {
+      if (suited ? left !== right : left === right) {
+        continue;
+      }
+      out.push(canonicalizeCombo(high + left, low + right));
+    }
+  }
+  return out;
+}
+
+export function combosForClass(className: string): string[] | null {
+  const coords = classCoords(className);
+  if (!coords) {
+    return null;
+  }
+  return combosForCell(coords.row, coords.column);
+}
+
+function classCoords(className: string): { row: number; column: number } | null {
+  const token = className.trim();
+  if (token.length === 2 && token[0] === token[1]) {
+    const index = ORDER.indexOf(token[0]!.toUpperCase());
+    if (index < 0) {
+      return null;
+    }
+    return { row: index, column: index };
+  }
+  if (token.length === 3 && (token[2] === "s" || token[2] === "o")) {
+    const high = ORDER.indexOf(token[0]!.toUpperCase());
+    const low = ORDER.indexOf(token[1]!.toUpperCase());
+    if (high < 0 || low < 0 || high === low) {
+      return null;
+    }
+    if (token[2] === "s") {
+      return { row: Math.min(high, low), column: Math.max(high, low) };
+    }
+    return { row: Math.max(high, low), column: Math.min(high, low) };
+  }
+  return null;
+}
+
+function setCellCombos(
+  range: ExactRange,
+  row: number,
+  column: number,
+  weight: number,
+) {
+  for (const combo of combosForCell(row, column)) {
+    if (weight <= 0) {
+      range.delete(combo);
+    } else {
+      range.set(combo, weight);
+    }
+  }
+}
+
+function setPairExact(range: ExactRange, rank: string, weight: number) {
+  const index = rankAt(rank);
+  setCellCombos(range, index, index, weight);
+}
+
+function setSuitedExact(
+  range: ExactRange,
+  high: string,
+  low: string,
+  weight: number,
+) {
+  const left = rankAt(high);
+  const right = rankAt(low);
+  setCellCombos(range, Math.min(left, right), Math.max(left, right), weight);
+}
+
+function setOffsuitExact(
+  range: ExactRange,
+  high: string,
+  low: string,
+  weight: number,
+) {
+  const left = rankAt(high);
+  const right = rankAt(low);
+  setCellCombos(range, Math.max(left, right), Math.min(left, right), weight);
+}
+
+function isRankChar(character: string | undefined): boolean {
+  return !!character && ORDER.includes(character.toUpperCase());
+}
+
+function applyShapeExact(
+  range: ExactRange,
+  token: string,
+  weight: number,
+): boolean {
+  if (token.length === 2 && token[0] === token[1]) {
+    if (!isRankChar(token[0])) {
+      return false;
+    }
+    setPairExact(range, token[0]!, weight);
+    return true;
+  }
+  if (token.length === 2) {
+    if (!isRankChar(token[0]) || !isRankChar(token[1])) {
+      return false;
+    }
+    setSuitedExact(range, token[0]!, token[1]!, weight);
+    setOffsuitExact(range, token[0]!, token[1]!, weight);
+    return true;
+  }
+  if (token.length === 3 && token[2] === "s") {
+    if (!isRankChar(token[0]) || !isRankChar(token[1])) {
+      return false;
+    }
+    setSuitedExact(range, token[0]!, token[1]!, weight);
+    return true;
+  }
+  if (token.length === 3 && token[2] === "o") {
+    if (!isRankChar(token[0]) || !isRankChar(token[1])) {
+      return false;
+    }
+    setOffsuitExact(range, token[0]!, token[1]!, weight);
+    return true;
+  }
+  return false;
+}
+
+function applyPlusExact(
+  range: ExactRange,
+  token: string,
+  weight: number,
+): boolean {
+  if (token.length === 2 && token[0] === token[1]) {
+    const start = rankAt(token[0]!);
+    for (let index = start; index >= 0; index--) {
+      setCellCombos(range, index, index, weight);
+    }
+    return true;
+  }
+  if (token.length < 2) {
+    return false;
+  }
+  const shape = token.length === 3 ? token[2] : "";
+  const high = rankAt(token[0]!);
+  const low = rankAt(token[1]!);
+  const begin = Math.max(high, low);
+  const end = Math.min(high, low);
+  for (let kicker = begin; kicker > end; kicker--) {
+    if (kicker === high) {
+      continue;
+    }
+    if (shape !== "o") {
+      setCellCombos(range, Math.min(high, kicker), Math.max(high, kicker), weight);
+    }
+    if (shape !== "s") {
+      setCellCombos(range, Math.max(high, kicker), Math.min(high, kicker), weight);
+    }
+  }
+  return true;
+}
+
+function applySpanExact(
+  range: ExactRange,
+  left: string,
+  right: string,
+  weight: number,
+): boolean {
+  if (
+    left.length === 2 &&
+    left[0] === left[1] &&
+    right.length === 2 &&
+    right[0] === right[1]
+  ) {
+    const start = rankAt(left[0]!);
+    const end = rankAt(right[0]!);
+    for (let index = Math.min(start, end); index <= Math.max(start, end); index++) {
+      setCellCombos(range, index, index, weight);
+    }
+    return true;
+  }
+  const shape = left.length === 3 ? left[2] : "";
+  const high = rankAt(left[0]!);
+  const from = rankAt(left[1]!);
+  const to = rankAt(right[1] || right[0]!);
+  for (let kicker = Math.min(from, to); kicker <= Math.max(from, to); kicker++) {
+    if (kicker === high) {
+      continue;
+    }
+    if (shape !== "o") {
+      setCellCombos(range, Math.min(high, kicker), Math.max(high, kicker), weight);
+    }
+    if (shape !== "s") {
+      setCellCombos(range, Math.max(high, kicker), Math.min(high, kicker), weight);
+    }
+  }
+  return true;
+}
+
+function applyExactToken(
+  range: ExactRange,
+  rawToken: string,
+): RangeTokenError | null {
+  let weight = 1;
+  let token = rawToken.trim();
+  const colon = token.indexOf(":");
+  if (colon >= 0) {
+    weight = Number(token.slice(colon + 1));
+    token = token.slice(0, colon).trim();
+  }
+  if (!token) {
+    return { token: rawToken, message: "empty range token" };
+  }
+  if (Number.isNaN(weight) || weight < 0 || !Number.isFinite(weight)) {
+    return { token: rawToken, message: "range weight must be a nonnegative number" };
+  }
+  try {
+    if (token === "random" || token === "*") {
+      for (let row = 0; row < 13; row++) {
+        for (let column = 0; column < 13; column++) {
+          setCellCombos(range, row, column, weight);
+        }
+      }
+      return null;
+    }
+    const exact = parseExactComboToken(token);
+    if (exact) {
+      if (weight <= 0) {
+        range.delete(exact);
+      } else {
+        range.set(exact, weight);
+      }
+      return null;
+    }
+    const dash = token.indexOf("-");
+    if (dash > 0) {
+      if (!applySpanExact(range, token.slice(0, dash), token.slice(dash + 1), weight)) {
+        return { token: rawToken, message: `unsupported range token: ${token}` };
+      }
+      return null;
+    }
+    if (token.endsWith("+")) {
+      if (!applyPlusExact(range, token.slice(0, -1), weight)) {
+        return { token: rawToken, message: `unsupported range token: ${token}` };
+      }
+      return null;
+    }
+    if (!applyShapeExact(range, token, weight)) {
+      return { token: rawToken, message: `unsupported range token: ${token}` };
+    }
+    return null;
+  } catch (error) {
+    return {
+      token: rawToken,
+      message: error instanceof Error ? error.message : `unsupported range token: ${token}`,
+    };
+  }
+}
+
+/** Parse class tokens and suit-specific combos into the canonical ExactRange. */
+export function parseExactRange(text: string): ExactRangeParse {
+  const range = emptyExactRange();
+  const errors: RangeTokenError[] = [];
+  text
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .forEach((rawToken) => {
+      const error = applyExactToken(range, rawToken);
+      if (error) {
+        errors.push(error);
+      }
+    });
+  return { range, errors };
+}
+
+/**
+ * Paint every combo in a 169-class to `weight`, leaving all other exact combos
+ * untouched. `className` is AA / AKs / AKo (see {@link pairName}).
+ */
+export function paintClass(
+  range: ExactRange,
+  className: string,
+  weight: number,
+): ExactRange {
+  const next = cloneExactRange(range);
+  const combos = combosForClass(className);
+  if (!combos) {
+    throw new Error(`unknown hand class: ${className}`);
+  }
+  if (!(weight >= 0) || !Number.isFinite(weight)) {
+    throw new Error("paint weight must be a nonnegative number");
+  }
+  for (const combo of combos) {
+    if (weight <= 0) {
+      next.delete(combo);
+    } else {
+      next.set(combo, weight);
+    }
+  }
+  return next;
+}
+
+export function paintClassAt(
+  range: ExactRange,
+  row: number,
+  column: number,
+  weight: number,
+): ExactRange {
+  return paintClass(range, pairName(row, column), weight);
+}
+
+export function exactCellSummary(
+  range: ExactRange,
+  row: number,
+  column: number,
+): ExactCellSummary {
+  const combos = combosForCell(row, column);
+  let sum = 0;
+  let min = Number.POSITIVE_INFINITY;
+  let max = 0;
+  const distinct = new Set<number>();
+  for (const combo of combos) {
+    const weight = range.get(combo) ?? 0;
+    sum += weight;
+    min = Math.min(min, weight);
+    max = Math.max(max, weight);
+    distinct.add(weight);
+  }
+  if (!combos.length) {
+    return { average: 0, mixed: false, min: 0, max: 0, comboCount: 0 };
+  }
+  return {
+    average: sum / combos.length,
+    mixed: distinct.size > 1,
+    min: Number.isFinite(min) ? min : 0,
+    max,
+    comboCount: combos.length,
+  };
+}
+
+/** Derive the 169-cell display grid (per-class average inclusion weight). */
+export function weightsFromExact(range: ExactRange): WeightGrid {
+  const grid = blankGrid();
+  for (let row = 0; row < 13; row++) {
+    for (let column = 0; column < 13; column++) {
+      grid[row]![column] = exactCellSummary(range, row, column).average;
+    }
+  }
+  return grid;
+}
+
+function formatExactToken(combo: string, weight: number): string {
+  return weight >= 0.999 ? combo : `${combo}:${trimWeight(weight)}`;
+}
+
+function formatClassToken(name: string, weight: number): string {
+  return weight >= 0.999 ? name : `${name}:${trimWeight(weight)}`;
+}
+
+/**
+ * Serialize ExactRange. Uniform 169-classes collapse to AA/AKs/AKo tokens;
+ * mixed or partial classes keep suit-specific combo tokens so untouched
+ * exact weights survive a later paintClass round-trip.
+ */
+export function serializeExactRange(range: ExactRange): string {
+  const parts: string[] = [];
+  for (let row = 0; row < 13; row++) {
+    for (let column = 0; column < 13; column++) {
+      const combos = combosForCell(row, column);
+      const weights = combos.map((combo) => range.get(combo) ?? 0);
+      const positive = weights.filter((weight) => weight > 0);
+      if (!positive.length) {
+        continue;
+      }
+      const name = pairName(row, column);
+      const allSame =
+        weights.length > 0 && weights.every((weight) => weight === weights[0]);
+      if (allSame && weights[0]! > 0) {
+        parts.push(formatClassToken(name, weights[0]!));
+        continue;
+      }
+      const ordered = combos
+        .map((combo, index) => ({ combo, weight: weights[index]! }))
+        .filter((entry) => entry.weight > 0)
+        .sort((left, right) => left.combo.localeCompare(right.combo));
+      for (const entry of ordered) {
+        parts.push(formatExactToken(entry.combo, entry.weight));
+      }
+    }
+  }
+  return parts.join(",");
+}
+
+/**
+ * Compatibility helper for studyStore: parse → paint one class → serialize,
+ * preserving suit-specific weights outside that class.
+ */
+export function applyPaintPreservingExact(
+  rangeTextValue: string,
+  className: string,
+  weight: number,
+): { text: string; range: ExactRange; grid: WeightGrid; errors: RangeTokenError[] } {
+  const parsed = parseExactRange(rangeTextValue);
+  const range = paintClass(parsed.range, className, weight);
+  return {
+    text: serializeExactRange(range),
+    range,
+    grid: weightsFromExact(range),
+    errors: parsed.errors,
+  };
+}
+
 function rankAt(text: string): number {
   const index = ORDER.indexOf(text.toUpperCase());
   if (index < 0) {
@@ -163,147 +700,15 @@ function rankAt(text: string): number {
   return index;
 }
 
-function setPair(grid: WeightGrid, rank: string, weight: number) {
-  const index = rankAt(rank);
-  grid[index][index] = weight;
-}
-
-function setSuited(grid: WeightGrid, high: string, low: string, weight: number) {
-  const left = rankAt(high);
-  const right = rankAt(low);
-  grid[Math.min(left, right)][Math.max(left, right)] = weight;
-}
-
-function setOffsuit(grid: WeightGrid, high: string, low: string, weight: number) {
-  const left = rankAt(high);
-  const right = rankAt(low);
-  grid[Math.max(left, right)][Math.min(left, right)] = weight;
-}
-
-function applyShape(grid: WeightGrid, token: string, weight: number): boolean {
-  if (token.length === 2 && token[0] === token[1]) {
-    setPair(grid, token[0], weight);
-    return true;
-  }
-  if (token.length === 2) {
-    setSuited(grid, token[0], token[1], weight);
-    setOffsuit(grid, token[0], token[1], weight);
-    return true;
-  }
-  if (token.length === 3 && token[2] === "s") {
-    setSuited(grid, token[0], token[1], weight);
-    return true;
-  }
-  if (token.length === 3 && token[2] === "o") {
-    setOffsuit(grid, token[0], token[1], weight);
-    return true;
-  }
-  return false;
-}
-
-function applyPlus(grid: WeightGrid, token: string, weight: number): boolean {
-  if (token.length === 2 && token[0] === token[1]) {
-    const start = rankAt(token[0]);
-    for (let index = start; index >= 0; index--) {
-      grid[index][index] = weight;
-    }
-    return true;
-  }
-  if (token.length < 2) {
-    return false;
-  }
-  const shape = token.length === 3 ? token[2] : "";
-  const high = rankAt(token[0]);
-  const low = rankAt(token[1]);
-  const begin = Math.max(high, low);
-  const end = Math.min(high, low);
-  for (let kicker = begin; kicker > end; kicker--) {
-    if (kicker === high) {
-      continue;
-    }
-    if (shape !== "o") {
-      grid[Math.min(high, kicker)][Math.max(high, kicker)] = weight;
-    }
-    if (shape !== "s") {
-      grid[Math.max(high, kicker)][Math.min(high, kicker)] = weight;
-    }
-  }
-  return true;
-}
-
-function applySpan(grid: WeightGrid, left: string, right: string, weight: number): boolean {
-  if (
-    left.length === 2 &&
-    left[0] === left[1] &&
-    right.length === 2 &&
-    right[0] === right[1]
-  ) {
-    const start = rankAt(left[0]);
-    const end = rankAt(right[0]);
-    for (let index = Math.min(start, end); index <= Math.max(start, end); index++) {
-      grid[index][index] = weight;
-    }
-    return true;
-  }
-  const shape = left.length === 3 ? left[2] : "";
-  const high = rankAt(left[0]);
-  const from = rankAt(left[1]);
-  const to = rankAt(right[1] || right[0]);
-  for (let kicker = Math.min(from, to); kicker <= Math.max(from, to); kicker++) {
-    if (kicker === high) {
-      continue;
-    }
-    if (shape !== "o") {
-      grid[Math.min(high, kicker)][Math.max(high, kicker)] = weight;
-    }
-    if (shape !== "s") {
-      grid[Math.max(high, kicker)][Math.min(high, kicker)] = weight;
-    }
-  }
-  return true;
-}
-
+/**
+ * 169-grid parse for studyStore-compatible callers.
+ * Exact suit tokens are averaged into their class cell via {@link weightsFromExact}.
+ * Unsupported tokens are skipped (same silent behavior as before). Prefer
+ * {@link parseExactRange} + {@link serializeExactRange} / {@link applyPaintPreservingExact}
+ * when suit-specific fidelity must survive painting.
+ */
 export function parseRangeText(text: string): WeightGrid {
-  const grid = blankGrid();
-  text
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .forEach((rawToken) => {
-      let weight = 1;
-      let token = rawToken;
-      const colon = token.indexOf(":");
-      if (colon >= 0) {
-        weight = Number(token.slice(colon + 1));
-        token = token.slice(0, colon).trim();
-      }
-      if (!token || Number.isNaN(weight) || weight < 0) {
-        return;
-      }
-      try {
-        if (token === "random" || token === "*") {
-          for (let row = 0; row < 13; row++) {
-            for (let column = 0; column < 13; column++) {
-              grid[row][column] = weight;
-            }
-          }
-          return;
-        }
-        const dash = token.indexOf("-");
-        if (dash > 0) {
-          applySpan(grid, token.slice(0, dash), token.slice(dash + 1), weight);
-          return;
-        }
-        if (token.endsWith("+")) {
-          applyPlus(grid, token.slice(0, -1), weight);
-          return;
-        }
-        applyShape(grid, token, weight);
-      } catch {
-        return;
-      }
-    });
-  return grid;
+  return weightsFromExact(parseExactRange(text).range);
 }
 
 export function liveCombos(

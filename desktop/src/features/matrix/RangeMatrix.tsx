@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { mapActionColors } from "../../domain/actionColors";
 import {
+  type AggregatedHandCell,
+  formatRangeInclusion,
   frequencyOf,
   groupEv,
   groupHands,
   hasWithinHandActionMixing,
   isExcludedMatrixCell,
-  isPartialRangeDisplay,
-  rangeDisplayWeight,
+  RANGE_INCLUSION_MEASURE,
+  rangeInclusionOf,
   strategyMix,
 } from "../../domain/browse";
 import {
@@ -15,7 +17,6 @@ import {
   type ActionValuesPayload,
   type EvDisplayBasis,
   type FrequencyMode,
-  type HandCell,
   type MatrixMode,
   type NodePayload,
 } from "../../domain/types";
@@ -48,7 +49,7 @@ function evFill(value: number, scale: number): string {
 }
 
 function maxAbsEv(
-  cells: HandCell[],
+  cells: AggregatedHandCell[],
   node: NodePayload,
   values: ActionValuesPayload,
   basis: EvDisplayBasis,
@@ -102,7 +103,7 @@ export function RangeMatrix() {
   );
 
   const byKey = useMemo(() => {
-    const map = new Map<string, HandCell>();
+    const map = new Map<string, AggregatedHandCell>();
     for (const cell of cells) {
       map.set(cellKey(cell.row, cell.col), cell);
     }
@@ -119,12 +120,17 @@ export function RangeMatrix() {
     return maxAbsEv(cells, currentNode, nodeValues, evDisplayBasis);
   }, [cells, currentNode, nodeValues, evDisplayBasis]);
 
+  const matrixAria =
+    matrixMode === "range"
+      ? `Hand range matrix (${RANGE_INCLUSION_MEASURE})`
+      : "Hand range matrix";
+
   return (
     <div className="range-matrix-wrap" ref={wrapRef}>
       <div
         className="range-matrix matrix-density"
         role="grid"
-        aria-label="Hand range matrix"
+        aria-label={matrixAria}
         style={side > 0 ? { width: side, height: side } : undefined}
         onMouseLeave={() => setHoverCell(null)}
       >
@@ -166,7 +172,7 @@ interface Selected {
 
 interface RowProps {
   row: number;
-  byKey: Map<string, HandCell>;
+  byKey: Map<string, AggregatedHandCell>;
   colors: string[];
   matrixMode: MatrixMode;
   frequencyMode: FrequencyMode;
@@ -209,7 +215,11 @@ function MatrixRow({
             : row < col
               ? `${RANKS[row]}${RANKS[col]}s`
               : `${RANKS[col]}${RANKS[row]}o`);
-        const excluded = isExcludedMatrixCell(cell);
+const inclusion = cell ? rangeInclusionOf(cell) : null;
+        const excluded =
+          matrixMode === "range"
+            ? !cell || !cell.defined || inclusion == null || inclusion <= 0
+            : isExcludedMatrixCell(cell);
         const empty = excluded;
         const selected = selectedCell?.row === row && selectedCell?.col === col;
         const hovered = hoverCell?.row === row && hoverCell?.col === col;
@@ -219,9 +229,10 @@ function MatrixRow({
         let solid: string | null = null;
         let dimmed = false;
         let filtered = false;
-        let partialInclusion = false;
+let partialInclusion = false;
         let actionMixing = false;
         let measure: string | undefined;
+        let title = text;
 
         if (!empty && cell) {
           const showStrategy =
@@ -238,12 +249,12 @@ function MatrixRow({
           }
 
           if (matrixMode === "range") {
-            const weight = rangeDisplayWeight(cell) ?? 0;
+const weight = inclusion ?? 0;
             solid = rangeFill(weight);
-            sub = `${(weight * 100).toFixed(0)}`;
-            // Honest measure: still average posterior mass, not inclusion.
-            measure = "range-weight";
-            partialInclusion = isPartialRangeDisplay(cell);
+            sub = formatRangeInclusion(weight);
+            measure = "inclusion-weight";
+            partialInclusion = weight > 1e-6 && weight < 1 - 1e-6;
+            title = `${text} · ${RANGE_INCLUSION_MEASURE} ${formatRangeInclusion(weight)}%`;
           } else if (matrixMode === "ev") {
             const ev = groupEv(currentNode, nodeValues, cell, evDisplayBasis);
             if (ev) {
@@ -297,13 +308,13 @@ function MatrixRow({
             data-hover={hovered}
             data-dimmed={dimmed}
             data-filtered={filtered}
-            data-partial-inclusion={partialInclusion}
+data-partial-inclusion={partialInclusion}
             data-action-mixing={actionMixing}
             data-measure={measure}
             style={solid ? { background: solid } : undefined}
             onMouseEnter={() => setHoverCell({ row, col, text })}
             onClick={() => setSelectedCell({ row, col, text })}
-            title={text}
+            title={title}
           >
             {segments.length > 0 ? (
               <div className="matrix-cell__segments">
