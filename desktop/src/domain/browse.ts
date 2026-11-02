@@ -189,6 +189,54 @@ export function frequencyOf(cell: HandCell, mode: FrequencyMode): number | null 
   return cell.actionMass[Number(mode)] / cell.marginalSum;
 }
 
+/**
+ * Same ratio Range mode paints today: average posterior mass per listed combo.
+ * Not conventional range inclusion (reach); do not label it as inclusion.
+ */
+export function rangeDisplayWeight(cell: HandCell): number | null {
+  if (!cell.defined || cell.range_combos <= 0) {
+    return null;
+  }
+  if (!(cell.marginalSum > 0)) {
+    return 0;
+  }
+  return Math.min(1, cell.marginalSum / cell.range_combos);
+}
+
+/** Zero-mass / undefined hand class — matrix density treats these as excluded. */
+export function isExcludedMatrixCell(
+  cell: HandCell | null | undefined,
+): boolean {
+  return !cell || !cell.defined || !(cell.marginalSum > 0);
+}
+
+/**
+ * Visual-only flag: displayed range weight is strictly between empty and full.
+ * Does not change numerical semantics; another path owns true inclusion math.
+ */
+export function isPartialRangeDisplay(cell: HandCell): boolean {
+  const weight = rangeDisplayWeight(cell);
+  return weight != null && weight > 1e-6 && weight < 1 - 1e-6;
+}
+
+/** Visual-only: two or more actions carry meaningful posterior mass. */
+export function hasWithinHandActionMixing(cell: HandCell): boolean {
+  const mix = strategyMix(cell);
+  if (!mix) {
+    return false;
+  }
+  let positive = 0;
+  for (const weight of mix) {
+    if (weight > 1e-3) {
+      positive += 1;
+      if (positive > 1) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** Posterior-weighted. Zero-mass groups stay null even when CF values exist. */
 export function groupEv(
   node: NodePayload | null | undefined,
