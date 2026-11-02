@@ -782,6 +782,127 @@ void check_strategy_edit_workflow()
     CHECK(bad_probs.status == 400);
 }
 
+// Node inspection must emit chip units (same as status), not internal tenths.
+void check_node_inspection_chip_units()
+{
+    const std::string job =
+        "{\"board\":[\"Ah\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AcAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100,\"stack\":100,\"iterations\":1,\"samples\":1,\"max_raises\":1,\"allow_all_in\":0,"
+        "\"oop_bets\":[0.5],\"ip_bets\":[0.5],\"memory_mib\":128,\"frozen\":1}";
+    HttpResult accepted;
+    CHECK(http_exchange("POST", "/api/solve", job, accepted));
+    CHECK(accepted.status == 202);
+    HttpResult status;
+    CHECK(wait_for_completion(status));
+    CHECK(status.body.find("\"pot\":100") != std::string::npos);
+    CHECK(status.body.find("\"pot\":1000") == std::string::npos);
+    const std::string solution = json_string(status.body, "solution_id");
+    const std::string root = json_string(status.body, "root_node_id");
+    CHECK(!solution.empty());
+    CHECK(!root.empty());
+
+    HttpResult root_page;
+    CHECK(http_exchange("GET", "/api/solutions/" + solution + "/nodes/" + root, "", root_page));
+    CHECK(root_page.status == 200);
+    double pot = 0.0;
+    double to_call = 0.0;
+    double stack = 0.0;
+    CHECK(json_number(root_page.body, "pot", pot));
+    CHECK(json_number(root_page.body, "to_call", to_call));
+    CHECK(json_number(root_page.body, "stack", stack));
+    CHECK_NEAR(pot, 100.0, 1e-9);
+    CHECK_NEAR(to_call, 0.0, 1e-9);
+    CHECK_NEAR(stack, 100.0, 1e-9);
+    CHECK(root_page.body.find("\"pot\":100,\"contrib\":[0,0]") != std::string::npos);
+    CHECK(root_page.body.find("\"stacks\":[100,100]") != std::string::npos);
+    CHECK(root_page.body.find("\"pot\":1000") == std::string::npos);
+    CHECK(root_page.body.find("\"Bet 50\"") != std::string::npos);
+
+    // Walk children until facing Bet 50 → pot 150, to_call 50 in chip units.
+    bool found_facing = false;
+    std::size_t search = 0;
+    while (!found_facing)
+    {
+        const std::size_t child_key = root_page.body.find("\"children\":[", search);
+        if (child_key == std::string::npos)
+        {
+            break;
+        }
+        std::size_t cursor = child_key + std::string("\"children\":[").size();
+        while (cursor < root_page.body.size() && root_page.body[cursor] != ']')
+        {
+            while (cursor < root_page.body.size()
+                && (root_page.body[cursor] == ',' || root_page.body[cursor] == ' '
+                    || root_page.body[cursor] == '"'))
+            {
+                ++cursor;
+            }
+            if (cursor >= root_page.body.size() || root_page.body[cursor] == ']')
+            {
+                break;
+            }
+            std::string child_id;
+            while (cursor < root_page.body.size() && root_page.body[cursor] != '"')
+            {
+                child_id.push_back(root_page.body[cursor]);
+                ++cursor;
+            }
+            if (cursor < root_page.body.size() && root_page.body[cursor] == '"')
+            {
+                ++cursor;
+            }
+            if (child_id.empty())
+            {
+                continue;
+            }
+            HttpResult child_page;
+            CHECK(http_exchange(
+                "GET", "/api/solutions/" + solution + "/nodes/" + child_id, "", child_page));
+            CHECK(child_page.status == 200);
+            double child_pot = 0.0;
+            double child_to_call = 0.0;
+            CHECK(json_number(child_page.body, "pot", child_pot));
+            CHECK(json_number(child_page.body, "to_call", child_to_call));
+            if (child_to_call > 0.0)
+            {
+                CHECK_NEAR(child_pot, 150.0, 1e-9);
+                CHECK_NEAR(child_to_call, 50.0, 1e-9);
+                CHECK(child_page.body.find("\"pot\":150,\"contrib\":[50,0]") != std::string::npos);
+                CHECK(child_page.body.find("\"to_call\":50") != std::string::npos);
+                CHECK(child_page.body.find("\"to_call\":500") == std::string::npos);
+                CHECK(child_page.body.find("\"pot\":1500") == std::string::npos);
+                found_facing = true;
+                break;
+            }
+        }
+        search = cursor;
+    }
+    CHECK(found_facing);
+
+    // Fractional chip case: pot 100.1 must stay 100.1 in JSON (not 1001 tenths).
+    const std::string frac_job =
+        "{\"board\":[\"Ah\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AcAd\",\"ip_range\":\"2c3d\","
+        "\"pot\":100.1,\"stack\":100,\"iterations\":1,\"samples\":1,\"max_raises\":0,\"allow_all_in\":0,"
+        "\"oop_bets\":[],\"ip_bets\":[],\"memory_mib\":128,\"frozen\":1}";
+    HttpResult frac_accepted;
+    CHECK(http_exchange("POST", "/api/solve", frac_job, frac_accepted));
+    CHECK(frac_accepted.status == 202);
+    HttpResult frac_status;
+    CHECK(wait_for_completion(frac_status));
+    CHECK(frac_status.body.find("\"pot\":100.1") != std::string::npos);
+    const std::string frac_solution = json_string(frac_status.body, "solution_id");
+    const std::string frac_root = json_string(frac_status.body, "root_node_id");
+    HttpResult frac_root_page;
+    CHECK(http_exchange(
+        "GET", "/api/solutions/" + frac_solution + "/nodes/" + frac_root, "", frac_root_page));
+    CHECK(frac_root_page.status == 200);
+    double frac_pot = 0.0;
+    CHECK(json_number(frac_root_page.body, "pot", frac_pot));
+    CHECK_NEAR(frac_pot, 100.1, 1e-9);
+    CHECK(frac_root_page.body.find("\"pot\":100.1") != std::string::npos);
+    CHECK(frac_root_page.body.find("\"pot\":1001") == std::string::npos);
+}
+
 } // namespace
 
 void run_explorer_http_tests()
@@ -1195,6 +1316,7 @@ void run_explorer_http_tests()
     check_persistence_workflow_under_value_load();
     check_lock_resolve_compare_workflow();
     check_strategy_edit_workflow();
+    check_node_inspection_chip_units();
 
     // Mid-construction dry-run plan and visual tree-edit preview / config round-trip.
     {

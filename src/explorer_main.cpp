@@ -1545,21 +1545,22 @@ std::string json_inspection(
     out += view.reach_defined ? "true" : "false";
     out += ",\"joint\":";
     out += format_number(view.joint);
+    // StreetInspection stores tenths; public JSON matches status chip units.
     out += ",\"pot\":";
-    out += std::to_string(view.pot);
+    out += poker::format_chips(view.pot);
     out += ",\"contrib\":[";
-    out += std::to_string(view.contrib[0]);
+    out += poker::format_chips(view.contrib[0]);
     out += ',';
-    out += std::to_string(view.contrib[1]);
+    out += poker::format_chips(view.contrib[1]);
     out += "],\"stacks\":[";
-    out += std::to_string(view.stacks[0]);
+    out += poker::format_chips(view.stacks[0]);
     out += ',';
-    out += std::to_string(view.stacks[1]);
+    out += poker::format_chips(view.stacks[1]);
     out += "],\"stack\":";
-    out += std::to_string(
+    out += poker::format_chips(
         view.stacks[0] < view.stacks[1] ? view.stacks[0] : view.stacks[1]);
     out += ",\"to_call\":";
-    out += std::to_string(view.to_call);
+    out += poker::format_chips(view.to_call);
     out += ",\"parent_id\":";
     if (view.parent_id.empty())
     {

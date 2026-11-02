@@ -12,7 +12,8 @@ namespace poker
 // Fixed-point chips stored as integer tenths of a chip (scale 10).
 // Config / JSON / CLI values are written in chip units (pot 100 → 100.0 chips →
 // 1000 tenths). Tree accounting (pot, stack, contrib, add, committed, last_raise)
-// stays in tenths. Terminal utilities and reported EV convert back to chips.
+// stays in tenths. Public APIs (status, node inspection JSON, strategy reports)
+// emit chip units via format_chips / tenths_to_chips — never raw tenths.
 using Chip = int;
 
 inline constexpr int kChipScale = 10;

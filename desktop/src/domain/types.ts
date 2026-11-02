@@ -177,13 +177,13 @@ export interface NodePayload {
   node_id: string;
   kind?: string;
   player?: number | null;
-  /** Current pot at this node (initial pot + contributions). */
+  /** Current pot at this node in chip units (same contract as status.pot). */
   pot?: number | null;
-  /** Remaining stacks [OOP, IP] at this node. */
+  /** Remaining stacks [OOP, IP] in chip units. */
   stacks?: number[] | null;
-  /** Effective remaining stack (min of seats). */
+  /** Effective remaining stack (min of seats) in chip units. */
   stack?: number | null;
-  /** Street contributions [OOP, IP]. */
+  /** Street contributions [OOP, IP] in chip units. */
   contrib?: number[] | null;
   /** Chips the acting seat must put in to call; 0 when first to act / check. */
   to_call?: number | null;
