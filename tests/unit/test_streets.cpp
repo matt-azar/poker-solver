@@ -1245,6 +1245,40 @@ void run_tree_rule_tests(const std::vector<int>& turn_board)
     }
 
     {
+        // Opening bets do not consume max_raises; empty raise lists stay empty
+        // (no silent copy from street bets).
+        StreetConfig open_only;
+        open_only.board = turn_board;
+        open_only.pot = 1000;
+        open_only.stack = 8000;
+        open_only.oop = Range::parse("QcQd");
+        open_only.ip = Range::parse("JcJd");
+        open_only.oop_bet_sizes = {0.5};
+        open_only.ip_bet_sizes = {0.5};
+        open_only.oop_raise_sizes = {};
+        open_only.ip_raise_sizes = {};
+        open_only.allow_all_in = false;
+        open_only.max_raises = 0;
+        const StreetGame open_game(open_only);
+        StreetGame::State open = open_game.child_chance(open_game.root(), 0);
+        CHECK(find_action(open_game, open, "Bet 50") >= 0);
+        open = open_game.child_action(open, find_action(open_game, open, "Bet 50"));
+        CHECK(find_action(open_game, open, "Fold") >= 0);
+        CHECK(find_action(open_game, open, "Call") >= 0);
+        CHECK(open_game.action_count(open_game.infoset(open)) == 2);
+
+        StreetConfig one_raise = open_only;
+        one_raise.ip_raise_sizes = {0.5};
+        one_raise.max_raises = 1;
+        const StreetGame raise_game(one_raise);
+        StreetGame::State faced = raise_game.child_chance(raise_game.root(), 0);
+        faced = raise_game.child_action(faced, find_action(raise_game, faced, "Bet 50"));
+        CHECK(find_action(raise_game, faced, "Raise to 150") >= 0);
+        faced = raise_game.child_action(faced, find_action(raise_game, faced, "Raise to 150"));
+        CHECK(raise_game.action_count(raise_game.infoset(faced)) == 2);
+    }
+
+    {
         StreetConfig capped;
         capped.board = turn_board;
         capped.pot = 1000;

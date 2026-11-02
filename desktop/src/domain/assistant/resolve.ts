@@ -1062,6 +1062,8 @@ function buildSetupPatch(args: {
     for (const key of [
       "oopBets",
       "ipBets",
+      "oopRaises",
+      "ipRaises",
       "oopFlop",
       "ipFlop",
       "oopTurn",

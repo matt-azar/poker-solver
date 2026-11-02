@@ -436,6 +436,8 @@ function asTreeEdits(raw: unknown): StudySetupTreePreset | undefined {
   for (const key of [
     "oopBets",
     "ipBets",
+    "oopRaises",
+    "ipRaises",
     "oopFlop",
     "ipFlop",
     "oopTurn",

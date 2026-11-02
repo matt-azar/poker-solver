@@ -54,6 +54,8 @@ const FIELD_LABELS: Partial<Record<keyof SpotDraft, string>> = {
   rakeCap: "Solve rake cap",
   oopBets: "OOP bets",
   ipBets: "IP bets",
+  oopRaises: "OOP raises",
+  ipRaises: "IP raises",
   oopFlop: "OOP flop",
   ipFlop: "IP flop",
   oopTurn: "OOP turn",

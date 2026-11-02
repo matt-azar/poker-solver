@@ -30,6 +30,8 @@ function emptyDraft(): SpotDraft {
     stack: 97.5,
     oopBets: "",
     ipBets: "",
+    oopRaises: "",
+    ipRaises: "",
     oopFlop: "",
     ipFlop: "",
     oopTurn: "",

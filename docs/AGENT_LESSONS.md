@@ -141,6 +141,8 @@ Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fract
 
 - **Absent** `oop_bets` / `ip_bets` → defaults `{0.5, 1}`.
 - **Present empty array** → check-only.
+- Raise lists are separate from bets: absent `oop_raises` / `ip_raises` copies bets when multiples are also empty; present empty stays empty.
+- `max_raises` counts facing raises only (opening street bets do not consume the cap).
 
 **Don't:** “Normalize” empty arrays back to defaults (`docs/EXPLORER.md`).
 

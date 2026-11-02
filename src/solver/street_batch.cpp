@@ -102,19 +102,14 @@ const std::vector<double>& listed_bets(const streets::StreetConfig& config, int 
 
 const std::vector<double>& listed_raises(const streets::StreetConfig& config, int player, int kind)
 {
+    // Raise lists stay separate from bet lists. Empty means no pot-fraction
+    // raises (raise multiples / geometric / all-in may still apply).
     const std::vector<double>& specific = player == 0
         ? (kind == 0 ? config.oop_flop_raises : kind == 1 ? config.oop_turn_raises : config.oop_river_raises)
         : (kind == 0 ? config.ip_flop_raises : kind == 1 ? config.ip_turn_raises : config.ip_river_raises);
     if (!specific.empty())
     {
         return specific;
-    }
-    const std::vector<double>& street_bets = player == 0
-        ? (kind == 0 ? config.oop_flop_bets : kind == 1 ? config.oop_turn_bets : config.oop_river_bets)
-        : (kind == 0 ? config.ip_flop_bets : kind == 1 ? config.ip_turn_bets : config.ip_river_bets);
-    if (!street_bets.empty())
-    {
-        return street_bets;
     }
     return player == 0 ? config.oop_raise_sizes : config.ip_raise_sizes;
 }
@@ -324,11 +319,13 @@ bool resolve_add_size_amount(
     {
         throw std::logic_error("street stack accounting failed");
     }
-    if (config.max_raises <= state.num_raises)
+    // Opening bets do not count as raises; max_raises / 3-bet caps apply only
+    // when facing a bet (to_call > 0).
+    if (facing && config.max_raises <= state.num_raises)
     {
         return false;
     }
-    if (!config.allow_three_bet && state.num_raises >= 2)
+    if (facing && !config.allow_three_bet && state.num_raises >= 1)
     {
         return false;
     }
@@ -523,11 +520,16 @@ Legal legal_actions(const streets::StreetConfig& config, const BetState& state)
     };
     const auto consider = [&](int add)
     {
-        if (config.max_raises <= state.num_raises || add < 1)
+        // Opening bets ignore max_raises; only facing raises are capped.
+        if (facing && config.max_raises <= state.num_raises)
         {
             return;
         }
-        if (!config.allow_three_bet && state.num_raises >= 2)
+        if (add < 1)
+        {
+            return;
+        }
+        if (facing && !config.allow_three_bet && state.num_raises >= 1)
         {
             return;
         }
@@ -703,7 +705,12 @@ BetState apply_action(const streets::StreetConfig& config, BetState state, const
     state.pending_check = false;
     state.last_raise = raise_by;
     state.committed = state.contrib[player];
-    state.num_raises += 1;
+    // Count only true raises (facing a bet). The first aggression on a street
+    // is an opening bet and does not consume max_raises.
+    if (to_call > 0)
+    {
+        state.num_raises += 1;
+    }
     state.street_aggressor = player;
     state.acting = 1 - player;
     return state;

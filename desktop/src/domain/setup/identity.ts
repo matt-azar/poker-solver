@@ -279,6 +279,35 @@ function joinConfigSizes(values: unknown): string {
   return values.map((value) => String(value)).join(", ");
 }
 
+/** Display raise pot fractions + multiples as Build text (`50, 2x`). */
+function joinRaiseConfigSizes(fractions: unknown, multiples: unknown): string {
+  const parts: string[] = [];
+  if (Array.isArray(fractions)) {
+    for (const value of fractions) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) {
+        continue;
+      }
+      if (n < 0) {
+        parts.push(`${Math.abs(n)}c`);
+      } else if (n > 0 && n <= 1) {
+        parts.push(String(Math.round(n * 100)));
+      } else {
+        parts.push(String(n));
+      }
+    }
+  }
+  if (Array.isArray(multiples)) {
+    for (const value of multiples) {
+      const n = Number(value);
+      if (Number.isFinite(n) && n > 0) {
+        parts.push(`${n}x`);
+      }
+    }
+  }
+  return parts.join(", ");
+}
+
 /**
  * Blank Build draft used when opening a solution so prior ranges/bets/edits
  * cannot survive as a hybrid over the newly loaded spot.
@@ -290,6 +319,8 @@ export function openDraftBase(solutionPath = ""): SpotDraft {
     ipRange: "",
     oopBets: "",
     ipBets: "",
+    oopRaises: "",
+    ipRaises: "",
     oopFlop: "",
     ipFlop: "",
     oopTurn: "",
@@ -349,6 +380,18 @@ export function draftPartialFromSolutionConfig(
   }
   if ("ip_bets" in config) {
     partial.ipBets = joinConfigSizes(config.ip_bets);
+  }
+  if ("oop_raises" in config || "oop_raise_multiples" in config) {
+    partial.oopRaises = joinRaiseConfigSizes(
+      config.oop_raises,
+      config.oop_raise_multiples,
+    );
+  }
+  if ("ip_raises" in config || "ip_raise_multiples" in config) {
+    partial.ipRaises = joinRaiseConfigSizes(
+      config.ip_raises,
+      config.ip_raise_multiples,
+    );
   }
   if ("oop_flop_bets" in config) {
     partial.oopFlop = joinConfigSizes(config.oop_flop_bets);

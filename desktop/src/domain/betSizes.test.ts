@@ -7,6 +7,7 @@ import {
   mergeSizeFractions,
   parseSizeTokenDetailed,
   potTagFromLabel,
+  resolveRaiseSizeList,
   resolveSizeList,
 } from "./betSizes";
 
@@ -20,12 +21,43 @@ describe("betSizes", () => {
   });
 
   it("parses geometric e tokens", () => {
-    expect(parseSizeTokenDetailed("e")).toEqual({
+    expect(parseSizeTokenDetailed("e")).toMatchObject({
       fraction: 0,
       geometric: true,
       geometricMultiple: 1,
+      raiseMultiple: false,
     });
     expect(parseSizeTokenDetailed("3e")?.geometricMultiple).toBe(3);
+  });
+
+  it("parses raise multiples and keeps pot raises separate from bets", () => {
+    expect(parseSizeTokenDetailed("2x")).toMatchObject({
+      raiseMultiple: true,
+      raiseMultipleValue: 2,
+    });
+    expect(parseSizeTokenDetailed("2.5x")?.raiseMultipleValue).toBe(2.5);
+    expect(resolveSizeList("50, 2x", {
+      pot: 100,
+      stack: 200,
+      boardLen: 5,
+      geometricFlag: false,
+    })).toEqual([0.5]);
+    expect(
+      resolveRaiseSizeList("50, 2x, 2.5x", {
+        pot: 100,
+        stack: 200,
+        boardLen: 5,
+        geometricFlag: false,
+      }),
+    ).toEqual({ fractions: [0.5], multiples: [2, 2.5] });
+    expect(
+      resolveRaiseSizeList("", {
+        pot: 100,
+        stack: 200,
+        boardLen: 5,
+        geometricFlag: false,
+      }),
+    ).toEqual({ fractions: [], multiples: [] });
   });
 
   it("matches engine geometric_pot_fraction pins", () => {

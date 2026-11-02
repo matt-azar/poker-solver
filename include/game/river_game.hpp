@@ -487,7 +487,12 @@ private:
 
         const auto consider = [&](int add)
         {
-            if (config_.max_raises <= state.num_raises || add < 1)
+            // Opening bets ignore max_raises; only facing raises are capped.
+            if (facing && config_.max_raises <= state.num_raises)
+            {
+                return;
+            }
+            if (add < 1)
             {
                 return;
             }
@@ -639,7 +644,11 @@ private:
         next.pending_check = false;
         next.last_raise = raise_by;
         next.committed = next.contrib[player];
-        next.num_raises += 1;
+        // Opening bets do not consume max_raises; only facing raises count.
+        if (to_call > 0)
+        {
+            next.num_raises += 1;
+        }
         next.acting = 1 - player;
         return next;
     }

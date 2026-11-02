@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { resolveSizeList } from "../domain/betSizes";
+import { resolveRaiseSizeList, resolveSizeList } from "../domain/betSizes";
 import {
   prepareBoardCardChange as evaluateBoardCardChange,
   type BoardCardChangeResult,
@@ -132,6 +132,35 @@ function joinSizes(values: unknown): string {
   return values.map((value) => String(value)).join(", ");
 }
 
+/** Rebuild a Build raise field from pot fractions + facing multiples. */
+function joinRaiseDraft(fractions: unknown, multiples: unknown): string {
+  const parts: string[] = [];
+  if (Array.isArray(fractions)) {
+    for (const value of fractions) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) {
+        continue;
+      }
+      if (n < 0) {
+        parts.push(`${Math.abs(n)}c`);
+      } else if (n > 0 && n <= 1) {
+        parts.push(String(Math.round(n * 100)));
+      } else {
+        parts.push(String(n));
+      }
+    }
+  }
+  if (Array.isArray(multiples)) {
+    for (const value of multiples) {
+      const n = Number(value);
+      if (Number.isFinite(n) && n > 0) {
+        parts.push(`${n}x`);
+      }
+    }
+  }
+  return parts.join(", ");
+}
+
 function asNamedList(data: unknown): LibraryNamedEntry[] {
   if (!Array.isArray(data)) {
     return [];
@@ -190,6 +219,8 @@ function draftFromParsedConfig(body: Record<string, unknown>): Partial<SpotDraft
     allowAllIn: Boolean(body.allow_all_in),
     oopBets: joinSizes(body.oop_bets),
     ipBets: joinSizes(body.ip_bets),
+    oopRaises: joinRaiseDraft(body.oop_raises, body.oop_raise_multiples),
+    ipRaises: joinRaiseDraft(body.ip_raises, body.ip_raise_multiples),
   };
   if (body.kind === "street") {
     partial.oopFlop = joinSizes(body.oop_flop_bets);
@@ -274,6 +305,8 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
   const oopRiver = resolveSizeList(draft.oopRiver, sizeOpts);
   const ipRiver = resolveSizeList(draft.ipRiver, sizeOpts);
   // Shared bet lists remain for engine fallbacks when a street list is empty.
+  // Blank fields resolve to [] — always send the key so explorer does not
+  // invent b50/b100 defaults.
   const oopShared =
     oopRiver[0] != null
       ? oopRiver
@@ -290,6 +323,8 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
         : ipFlop[0] != null
           ? ipFlop
           : resolveSizeList(draft.ipBets, sizeOpts);
+  const oopRaises = resolveRaiseSizeList(draft.oopRaises, sizeOpts);
+  const ipRaises = resolveRaiseSizeList(draft.ipRaises, sizeOpts);
   const oopDonk = draft.donkFlop
     ? oopFlop
     : draft.donkTurn
@@ -312,6 +347,11 @@ function buildJob(draft: SpotDraft): SolveJobRequest {
     stack: draft.stack,
     oop_bets: oopShared,
     ip_bets: ipShared,
+    // Always present (even []) so raises stay separate from bets.
+    oop_raises: oopRaises.fractions,
+    ip_raises: ipRaises.fractions,
+    oop_raise_multiples: oopRaises.multiples,
+    ip_raise_multiples: ipRaises.multiples,
     oop_flop_bets: oopFlop,
     ip_flop_bets: ipFlop,
     oop_turn_bets: oopTurn,
