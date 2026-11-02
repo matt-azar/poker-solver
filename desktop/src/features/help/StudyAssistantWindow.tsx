@@ -169,23 +169,30 @@ export function StudyAssistantWindow() {
         },
       );
       let line = outcomeToLine(outcome);
-      if (
-        outcome.kind === "setup" &&
-        outcome.run?.result &&
-        outcome.run.status !== "cancelled" &&
-        outcome.run.status !== "error"
-      ) {
-        // Never remint requestRevision or force-apply after stale — that would
-        // overwrite edits made while the assistant request was in flight.
-        const applied = commitAssistantSetup(outcome.run.result, applySetupDraft);
-        if (applied.ok) {
-          setWorkspace("build");
-          line = {
-            ...line,
-            content: `${line.content}\n\nUpdated the spot.`,
-          };
-        } else if (applied.reason !== "empty") {
-          setError(applied.message);
+      if (outcome.kind === "setup" && outcome.run) {
+        if (outcome.run.status === "stale") {
+          // draftRevision was captured at send-time; do not remint or force-apply.
+          setError(
+            outcome.run.message ??
+              "Setup changed while the assistant ran — regenerate the proposal",
+          );
+        } else if (
+          outcome.run.result &&
+          outcome.run.status !== "cancelled" &&
+          outcome.run.status !== "error"
+        ) {
+          // Never remint requestRevision or force-apply after stale — that would
+          // overwrite edits made while the assistant request was in flight.
+          const applied = commitAssistantSetup(outcome.run.result, applySetupDraft);
+          if (applied.ok) {
+            setWorkspace("build");
+            line = {
+              ...line,
+              content: `${line.content}\n\nUpdated the spot.`,
+            };
+          } else if (applied.reason !== "empty") {
+            setError(applied.message);
+          }
         }
       }
       setMessages((prev) => [...prev, line]);

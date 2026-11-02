@@ -41,6 +41,19 @@ export interface AssistantRunContext {
   preferencesSummary?: string;
   capabilities?: string[];
   availableProfiles?: ProfileMeta[];
+  /**
+   * Revision frozen at the start of the user turn — before credential lookup,
+   * provider fetch, or other async work. When set (e.g. by the unified OpenAI
+   * client after the network already returned), the session stamps the proposal
+   * with this value instead of re-reading getRevision() and relabeling a stale
+   * proposal with a newer revision. Live stale checks still use getRevision().
+   */
+  requestRevision?: number;
+  /**
+   * Draft snapshot frozen with `requestRevision`. When set, resolve uses this
+   * base instead of re-reading getDraft() after async work completed.
+   */
+  baseDraft?: SpotDraft;
 }
 
 export interface AssistantSession {
@@ -100,7 +113,10 @@ export function createAssistantSession(): AssistantSession {
         }
       }
 
-      const requestRevision = ctx.getRevision();
+      // Prefer a caller-frozen revision (unified client after network) so a
+      // delayed response cannot be stamped with a newer mid-flight revision.
+      const requestRevision = ctx.requestRevision ?? ctx.getRevision();
+      const resolveBaseDraft = (): SpotDraft => ctx.baseDraft ?? ctx.getDraft();
 
       const finish = (result: AssistantRunResult): AssistantRunResult => {
         if (inFlight?.runId === runId) {
@@ -167,7 +183,7 @@ export function createAssistantSession(): AssistantSession {
         if (proposal.kind === "clarify") {
           const result = resolveAssistantProposal({
             proposal,
-            baseDraft: ctx.getDraft(),
+            baseDraft: resolveBaseDraft(),
             catalogue: ctx.catalogue,
             preferences: ctx.preferences,
             draftRevision: requestRevision,
@@ -188,7 +204,7 @@ export function createAssistantSession(): AssistantSession {
             proposal,
             result: resolveAssistantProposal({
               proposal,
-              baseDraft: ctx.getDraft(),
+              baseDraft: resolveBaseDraft(),
               catalogue: ctx.catalogue,
               preferences: ctx.preferences,
               draftRevision: requestRevision,
@@ -205,7 +221,7 @@ export function createAssistantSession(): AssistantSession {
             proposal,
             result: resolveAssistantProposal({
               proposal,
-              baseDraft: ctx.getDraft(),
+              baseDraft: resolveBaseDraft(),
               catalogue: ctx.catalogue,
               preferences: ctx.preferences,
               draftRevision: requestRevision,
@@ -218,7 +234,7 @@ export function createAssistantSession(): AssistantSession {
 
         const result = resolveAssistantProposal({
           proposal,
-          baseDraft: ctx.getDraft(),
+          baseDraft: resolveBaseDraft(),
           catalogue: ctx.catalogue,
           preferences: ctx.preferences,
           draftRevision: requestRevision,

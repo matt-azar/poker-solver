@@ -134,6 +134,10 @@ export class FakeUnifiedChatClient implements UnifiedChatClient {
       };
     }
 
+    // Freeze freshness before any async help/setup work.
+    const requestRevision = request.draftRevision;
+    const baseDraft = deps.getDraft();
+
     if (!looksLikeSetupRequest(text)) {
       const help = createFakeHelpChatClient();
       const reply = await help.ask({ question: text, history: request.history });
@@ -151,6 +155,8 @@ export class FakeUnifiedChatClient implements UnifiedChatClient {
       preferencesSummary: request.preferencesSummary,
       availableProfiles: request.availableProfiles,
       capabilities: request.capabilities,
+      requestRevision,
+      baseDraft,
     });
 
     if (run.status === "error") {
@@ -209,6 +215,12 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
       );
     }
 
+    // Capture freshness / identity BEFORE credential lookup or provider fetch.
+    // session.run() after the network must stamp with these values — never
+    // re-read getRevision() and relabel a stale proposal with a newer revision.
+    const requestRevision = request.draftRevision;
+    const baseDraft = deps.getDraft();
+
     const credential = await this.getCredential();
     if (!credential) {
       throw new AssistantProviderError(
@@ -222,7 +234,7 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
       text: text.slice(0, ASSISTANT_MAX_TEXT_LENGTH),
       setupSummary: request.setupSummary,
       preferencesSummary: request.preferencesSummary,
-      draftRevision: request.draftRevision,
+      draftRevision: requestRevision,
       availableProfiles: request.availableProfiles,
       capabilities: request.capabilities,
     });
@@ -324,6 +336,7 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
     if (tool.name === SETUP_TOOL) {
       const proposal = parseInterpretProposal(tool.args);
       // Re-resolve through the session so catalogue / generate / interpolate stay app-side.
+      // Pass pre-captured revision/draft so bridging does not stamp after the network.
       const bridgingProvider: AssistantProvider = {
         interpret: async (_req: InterpretRequest) => proposal,
       };
@@ -338,6 +351,8 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
         preferencesSummary: request.preferencesSummary,
         availableProfiles: request.availableProfiles,
         capabilities: request.capabilities,
+        requestRevision,
+        baseDraft,
       });
       if (run.status === "error") {
         throw run.error ?? new AssistantProviderError("invalid_response", run.message ?? "Failed");
