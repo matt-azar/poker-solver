@@ -47,6 +47,15 @@ const fixture3x = parseRangeProfileDocument(
     "utf8",
   ),
 );
+const fixture3bp = parseRangeProfileDocument(
+  readFileSync(
+    join(
+      here,
+      "../../../../configs/range-profiles/fixture-btn-bb-3bp-100bb-100nl.json",
+    ),
+    "utf8",
+  ),
+);
 
 describe("resolveAssistantProposal", () => {
   const catalogue = createRangeProfileCatalogue([
@@ -286,6 +295,114 @@ describe("resolveAssistantProposal", () => {
     expect(result.draftPatch.oopRange).toBeUndefined();
     expect(result.conflicts).toHaveLength(0);
   });
+
+  it("compound update_study applies generatedRanges + pot + river bet + iterations atomically", () => {
+    const base: SpotDraft = {
+      ...DEFAULT_SPOT,
+      boardText: "As 7d 2c",
+      oopRange: "AA",
+      ipRange: "KK",
+      pot: 5.5,
+      stack: 97.5,
+      oopRiver: "50, 100",
+      iterations: 200,
+    };
+    const result = resolveAssistantProposal({
+      proposal: {
+        kind: "update_study",
+        intent: {
+          mode: "edit",
+          treePreset: { oopRiver: "75" },
+        },
+        treeEdits: { oopRiver: "75" },
+        generatedRanges: {
+          oop: "QQ+,AKs",
+          ip: "JJ+,AQs+,AKo",
+          note: "synthetic compound-edit test ranges — not GTO",
+        },
+        fieldEdits: { pot: 123, iterations: 777 },
+      },
+      baseDraft: base,
+      catalogue,
+      preferences: prefs,
+      draftRevision: 11,
+    });
+    expect(result.draftPatch.oopRange).toBe("QQ+,AKs");
+    expect(result.draftPatch.ipRange).toBe("JJ+,AQs+,AKo");
+    expect(result.provenance.oopRange).toBe("model_generated");
+    expect(result.draftPatch.pot).toBe(123);
+    expect(result.draftPatch.iterations).toBe(777);
+    expect(result.draftPatch.oopRiver).toBe("75");
+    // Must not reset to default SRP derivation.
+    expect(result.draftPatch.stack).toBeUndefined();
+    expect(result.stack).toBeUndefined();
+    expect(result.conflicts).toHaveLength(0);
+  });
+
+  it("edit-mode ranges-only preserves pot, stack, board, bets, and solver settings", () => {
+    const base: SpotDraft = {
+      ...DEFAULT_SPOT,
+      boardText: "Kh 9c 2d",
+      oopRange: "AA,KK",
+      ipRange: "QQ,JJ",
+      pot: 42,
+      stack: 88,
+      oopRiver: "33, 75",
+      ipFlop: "0.33, 0.75",
+      iterations: 333,
+      accuracy: "0.25",
+    };
+    const result = resolveAssistantProposal({
+      proposal: {
+        kind: "update_study",
+        intent: { mode: "edit" },
+        generatedRanges: {
+          oop: "TT+,AQs+",
+          ip: "99+,AJs+,AQo+",
+          note: "synthetic ranges-only edit — not GTO",
+        },
+      },
+      baseDraft: base,
+      catalogue,
+      preferences: prefs,
+      draftRevision: 12,
+    });
+    expect(result.draftPatch.oopRange).toBe("TT+,AQs+");
+    expect(result.draftPatch.ipRange).toBe("99+,AJs+,AQo+");
+    expect(result.draftPatch.pot).toBeUndefined();
+    expect(result.draftPatch.stack).toBeUndefined();
+    expect(result.draftPatch.boardText).toBeUndefined();
+    expect(result.draftPatch.oopRiver).toBeUndefined();
+    expect(result.draftPatch.ipFlop).toBeUndefined();
+    expect(result.draftPatch.iterations).toBeUndefined();
+    expect(result.draftPatch.accuracy).toBeUndefined();
+    expect(base.pot).toBe(42);
+    expect(base.stack).toBe(88);
+    expect(base.iterations).toBe(333);
+  });
+
+  it("surfaces intent.unsupported with an explicit explanation", () => {
+    const result = resolveAssistantProposal({
+      proposal: {
+        kind: "update_study",
+        intent: {
+          mode: "edit",
+          unsupported: ["multiway ICM payout table"],
+        },
+        fieldEdits: { pot: 60 },
+      },
+      baseDraft: { ...DEFAULT_SPOT, pot: 100 },
+      catalogue,
+      preferences: prefs,
+      draftRevision: 13,
+    });
+    expect(result.draftPatch.pot).toBe(60);
+    expect(result.ok).toBe(false);
+    expect(result.missing.some((m) => m.reason === "unsupported")).toBe(true);
+    expect(
+      result.summary.some((line) => /multiway ICM payout table/i.test(line)),
+    ).toBe(true);
+  });
 });
 
 describe("prepareStudyFromProfile", () => {
@@ -301,6 +418,20 @@ describe("prepareStudyFromProfile", () => {
     expect(result.stack).toBeCloseTo(97.5, 10);
     expect(result.canSolve).toBe(false);
     expect(result.requestRevision).toBe(7);
+    expect(result.summary.some((line) => /synthetic/i.test(line))).toBe(true);
+  });
+
+  it("3BP fixture derives pot 20.5bb and remaining stack 90bb (not SRP 5.5/97.5)", () => {
+    const result = prepareStudyFromProfile(
+      fixture3bp,
+      emptyStudySetupPreferences(),
+      10,
+    );
+    expect(result.draftPatch.oopRange).toBe(fixture3bp.ranges.oop);
+    expect(result.draftPatch.ipRange).toBe(fixture3bp.ranges.ip);
+    expect(result.pot).toBeCloseTo(20.5, 10);
+    expect(result.stack).toBeCloseTo(90, 10);
+    expect(result.pot).not.toBeCloseTo(5.5, 10);
     expect(result.summary.some((line) => /synthetic/i.test(line))).toBe(true);
   });
 
