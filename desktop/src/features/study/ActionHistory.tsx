@@ -21,10 +21,16 @@ import {
   type PathStep,
   type PathStreetGroup,
 } from "../../domain/actionHistory";
-import { formatActionDisplay } from "../../domain/betSizes";
+import {
+  formatActionDisplay,
+  formatActionTooltip,
+  formatFrequencyPct,
+} from "../../domain/betSizes";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/path-nav.css";
+import "../../styles/actions.css";
+import { ActionBlock } from "../matrix/ActionBlock";
 
 function suitOf(card: string): string {
   return card.slice(1, 2)?.toLowerCase() || "";
@@ -403,51 +409,48 @@ export function ActionHistory() {
             <span className="muted">No branches</span>
           ) : (
             choices.map((choice, index) => {
-              const freq = formatChoiceFrequency(choice.frequency);
-              const color =
-                choice.kind === "action" ? colors.byIndex[index] : undefined;
-              const display =
-                choice.kind === "action"
-                  ? formatActionDisplay(
-                      choice.label,
-                      pot,
-                      betSizeDisplay === "chips" ? "chips" : "pot",
-                    )
-                  : { primary: choice.label, secondary: null as string | null };
-              const secondary =
-                choice.kind === "action" && betSizeDisplay === "both"
-                  ? formatActionDisplay(choice.label, pot, "both").secondary
-                  : display.secondary;
+              // Card / chance strip: keep compact history-choice buttons.
+              if (choice.kind !== "action") {
+                return (
+                  <button
+                    key={choice.key}
+                    type="button"
+                    className="path-nav-choice history-choice"
+                    data-kind={choice.kind}
+                    disabled={!choice.nodeId}
+                    title={choice.nodeId ? choice.nodeId : choice.label}
+                    onClick={() => {
+                      if (choice.nodeId) {
+                        void followAction(choice.nodeId);
+                      }
+                    }}
+                  >
+                    <span className="path-nav-choice__label">{choice.label}</span>
+                  </button>
+                );
+              }
+              const display = formatActionDisplay(choice.label, pot, betSizeDisplay);
+              const freqText =
+                formatFrequencyPct(choice.frequency) ??
+                formatChoiceFrequency(choice.frequency);
               return (
-                <button
+                <ActionBlock
                   key={choice.key}
-                  type="button"
-                  className="path-nav-choice history-choice"
-                  data-kind={choice.kind}
+                  variant="follow"
+                  primary={display.primary}
+                  secondary={display.secondary}
+                  frequency={choice.frequency}
+                  frequencyText={freqText}
+                  color={colors.byIndex[index]}
                   disabled={!choice.nodeId}
-                  style={
-                    color
-                      ? { ["--choice-swatch" as string]: color }
-                      : undefined
-                  }
-                  title={choice.nodeId ? choice.nodeId : choice.label}
+                  title={`${formatActionTooltip(choice.label, pot, betSizeDisplay)} · follow`}
+                  aria-label={`Follow ${display.primary}${freqText ? `, ${freqText}` : ""}`}
                   onClick={() => {
                     if (choice.nodeId) {
                       void followAction(choice.nodeId);
                     }
                   }}
-                >
-                  {choice.kind === "action" ? (
-                    <span className="path-nav-choice__swatch" aria-hidden />
-                  ) : null}
-                  <span className="path-nav-choice__label">{display.primary}</span>
-                  {secondary ? (
-                    <span className="path-nav-choice__chips tabular">{secondary}</span>
-                  ) : null}
-                  {freq ? (
-                    <span className="path-nav-choice__freq tabular">{freq}</span>
-                  ) : null}
-                </button>
+                />
               );
             })
           )}

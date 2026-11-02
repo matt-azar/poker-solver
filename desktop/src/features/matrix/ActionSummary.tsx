@@ -1,17 +1,49 @@
 import { useMemo } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
 import { mapActionColors } from "../../domain/actionColors";
-import { formatActionDisplay } from "../../domain/betSizes";
+import {
+  formatActionDisplay,
+  formatActionTooltip,
+  formatFrequencyPct,
+} from "../../domain/betSizes";
 import { groupHands } from "../../domain/browse";
 import type { MatrixMode } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
+import { ActionBlock } from "./ActionBlock";
+import "../../styles/actions.css";
 
 const MODES: Array<{ id: MatrixMode; label: string }> = [
   { id: "strategy", label: "Strategy" },
   { id: "range", label: "Range" },
   { id: "ev", label: "EV" },
 ];
+
+function childIdAt(
+  children: unknown[] | undefined,
+  index: number,
+): string | null {
+  if (!children) {
+    return null;
+  }
+  const child = children[index];
+  if (!child) {
+    return null;
+  }
+  if (typeof child === "string") {
+    return child;
+  }
+  if (
+    typeof child === "object" &&
+    child !== null &&
+    "node_id" in child &&
+    typeof (child as { node_id?: unknown }).node_id === "string" &&
+    (child as { node_id: string }).node_id
+  ) {
+    return (child as { node_id: string }).node_id;
+  }
+  return null;
+}
 
 export function ActionSummary() {
   const currentNode = useStudyStore((s) => s.currentNode);
@@ -59,27 +91,22 @@ export function ActionSummary() {
     return totals.map((t) => t / mass);
   }, [currentNode, actions]);
 
-  const followTarget = useMemo(() => {
-    if (actionFilter == null || !currentNode?.children) {
-      return null;
-    }
-    const children = currentNode.children;
-    const child = children[actionFilter];
-    if (!child) {
-      return null;
-    }
-    if (typeof child === "string") {
-      return child;
-    }
-    if ("node_id" in child && child.node_id) {
-      return child.node_id;
-    }
-    return null;
-  }, [actionFilter, currentNode]);
-
   const evReady = Boolean(nodeValues && !nodeValues.pending);
   const strategyActive =
     matrixMode === "strategy" || matrixMode === "strategy-ev";
+
+  const legend = useMemo(
+    () =>
+      colors.legend.map((entry) => {
+        const display = formatActionDisplay(entry.label, pot, "pot");
+        return {
+          key: entry.label,
+          label: display.primary,
+          color: entry.color,
+        };
+      }),
+    [colors.legend, pot],
+  );
 
   return (
     <div className="action-summary">
@@ -105,41 +132,52 @@ export function ActionSummary() {
       </div>
       {(actions ?? []).map((label, index) => {
         const display = formatActionDisplay(label, pot, betSizeDisplay);
+        const freqText = formatFrequencyPct(freqs[index]);
+        const childId = childIdAt(currentNode?.children, index);
+        const filtered = actionFilter === index;
         return (
-          <button
+          <ActionBlock
             key={`${label}-${index}`}
-            type="button"
-            className="action-chip"
-            data-active={actionFilter === index}
-            title={`${label} · filter highlight`}
-            onClick={() => setActionFilter(actionFilter === index ? null : index)}
-          >
-            <span className="action-swatch" style={{ background: colors.byIndex[index] }} />
-            <span className="action-chip__size">
-              <span className="action-chip__primary">{display.primary}</span>
-              {display.secondary ? (
-                <span className="action-chip__chips tabular">{display.secondary}</span>
-              ) : null}
-            </span>
-            <span className="action-chip__freq tabular">
-              {(freqs[index] * 100).toFixed(1)}%
-            </span>
-          </button>
+            variant="filter"
+            primary={display.primary}
+            secondary={display.secondary}
+            frequency={freqs[index] ?? 0}
+            frequencyText={freqText}
+            color={colors.byIndex[index]}
+            active={filtered}
+            title={`${formatActionTooltip(label, pot, betSizeDisplay)} · click to filter`}
+            aria-label={`Filter ${display.primary}${freqText ? `, ${freqText}` : ""}`}
+            onClick={() => setActionFilter(filtered ? null : index)}
+            onFollow={() => {
+              if (childId) {
+                void followAction(childId);
+              }
+            }}
+            followDisabled={!childId}
+            followLabel="Open"
+          />
         );
       })}
       {!actions?.length ? <span className="muted">No actions at this node</span> : null}
-      <button
-        type="button"
-        className="toolbar-btn follow-btn"
-        disabled={!followTarget}
-        onClick={() => {
-          if (followTarget) {
-            void followAction(followTarget);
-          }
-        }}
-      >
-        Follow action
-      </button>
+      {legend.length > 0 ? (
+        <div className="action-summary__legend" aria-label="Action color legend">
+          {legend.map((entry) => (
+            <span key={entry.key} className="action-summary__legend-item">
+              <span
+                className="action-summary__legend-swatch"
+                style={{ background: entry.color }}
+                aria-hidden
+              />
+              {entry.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {(actions?.length ?? 0) > 0 ? (
+        <p className="action-summary__hint">
+          Block filters the matrix · Open follows that action
+        </p>
+      ) : null}
     </div>
   );
 }

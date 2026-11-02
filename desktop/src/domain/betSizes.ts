@@ -201,6 +201,25 @@ export function formatChips1(chips: number): string {
   return chips.toFixed(1);
 }
 
+/** Absolute chip amount with an explicit unit suffix (never a frequency). */
+export function formatChipsWithUnit(chips: number): string {
+  return `${formatChips1(chips)} chips`;
+}
+
+/**
+ * Strategy frequency as a percent string (`31.9%`).
+ * Kept separate from pot tags like `b50` so size never reads as frequency.
+ */
+export function formatFrequencyPct(
+  frequency: number | null | undefined,
+  digits = 1,
+): string | null {
+  if (frequency == null || !Number.isFinite(frequency)) {
+    return null;
+  }
+  return `${(Math.max(0, frequency) * 100).toFixed(digits)}%`;
+}
+
 export function chipsFromLabel(label: string): number | null {
   const match = label.trim().match(/^(?:Bet|Raise|Donk|Call)\s+(-?\d+(?:\.\d+)?)/i);
   if (!match) {
@@ -210,37 +229,78 @@ export function chipsFromLabel(label: string): number | null {
   return Number.isFinite(chips) ? chips : null;
 }
 
+export interface ActionDisplayParts {
+  /** Compact pot tag (`b50`) or passive label (`Check`). Never a bare percent. */
+  primary: string;
+  /** Optional chips with units (`50.0 chips`), or null. */
+  secondary: string | null;
+  /** Engine/raw label for tooltips and a11y. */
+  raw: string;
+  /** Compact pot tag when applicable (`b50`), else null. */
+  potTag: string | null;
+}
+
 /**
- * Display label for Study action chips.
- * Default `both`: `b75 · 75.0` with frequency rendered separately.
+ * Display label for Study action blocks.
+ *
+ * Hard policy: a 50% pot bet stays primary `b50` (not `Bet 50%`). Frequency is
+ * rendered separately via `formatFrequencyPct`. Absolute chips are optional
+ * secondary/tooltip text with an explicit `chips` unit.
  */
 export function formatActionDisplay(
   label: string,
   pot: number,
   mode: BetSizeDisplayMode = "both",
-): { primary: string; secondary: string | null } {
+): ActionDisplayParts {
   const trimmed = label.trim();
+  const potTag = potTagFromLabel(trimmed, pot);
   if (/^(check|fold|call)$/i.test(trimmed) || /^call\b/i.test(trimmed)) {
-    return { primary: trimmed, secondary: null };
+    return { primary: trimmed, secondary: null, raw: trimmed, potTag: null };
   }
   if (/all[\s-]*in/i.test(trimmed)) {
-    return { primary: trimmed, secondary: null };
+    return { primary: trimmed, secondary: null, raw: trimmed, potTag };
   }
   const chips = chipsFromLabel(trimmed);
-  const tag = potTagFromLabel(trimmed, pot);
   if (chips == null) {
-    return { primary: trimmed, secondary: null };
+    return { primary: trimmed, secondary: null, raw: trimmed, potTag };
   }
-  const chipText = formatChips1(chips);
+  const chipText = formatChipsWithUnit(chips);
   if (mode === "chips") {
-    return { primary: chipText, secondary: null };
+    return { primary: chipText, secondary: null, raw: trimmed, potTag };
   }
   if (mode === "pot") {
-    return { primary: tag ?? trimmed, secondary: null };
+    return {
+      primary: potTag ?? trimmed,
+      secondary: null,
+      raw: trimmed,
+      potTag,
+    };
   }
-  // both
-  if (tag) {
-    return { primary: tag, secondary: chipText };
+  // both — pot tag primary, chips secondary with units
+  if (potTag) {
+    return { primary: potTag, secondary: chipText, raw: trimmed, potTag };
   }
-  return { primary: trimmed, secondary: chipText };
+  return { primary: trimmed, secondary: chipText, raw: trimmed, potTag: null };
+}
+
+/** Tooltip / title text: primary, optional chips, raw engine label. */
+export function formatActionTooltip(
+  label: string,
+  pot: number,
+  mode: BetSizeDisplayMode = "both",
+): string {
+  const display = formatActionDisplay(label, pot, mode);
+  const parts = [display.primary];
+  if (display.secondary) {
+    parts.push(display.secondary);
+  } else if (display.potTag && mode === "pot") {
+    const chips = chipsFromLabel(display.raw);
+    if (chips != null) {
+      parts.push(formatChipsWithUnit(chips));
+    }
+  }
+  if (display.raw !== display.primary) {
+    parts.push(display.raw);
+  }
+  return parts.join(" · ");
 }
