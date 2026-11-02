@@ -40,6 +40,7 @@ void print_usage(const char* argv0)
               << " [--edge-tag [PLAYER,]ACTION,TAG[,TAG...]] (repeatable)"
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus|dcfr|pcfr_plus]"
+              << " [--dcfr-alpha A] [--dcfr-beta B] [--dcfr-gamma G]"
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
               << " [--memory-mib N] [--threads N]"
               << " [--plan-memory] [--reference] [--frozen] [--report file | -]\n";
@@ -311,6 +312,7 @@ int main(int argc, char** argv)
         std::string report_path;
         bool plan_memory = false;
         poker::solver::Algorithm algorithm = poker::solver::Algorithm::CfrPlus;
+        poker::solver::DcfrParams dcfr_params{};
 
         for (int i = 1; i < argc; ++i)
         {
@@ -633,6 +635,18 @@ int main(int argc, char** argv)
                     throw std::invalid_argument("unknown algorithm");
                 }
             }
+            else if (arg == "--dcfr-alpha")
+            {
+                dcfr_params.alpha = std::atof(need("--dcfr-alpha"));
+            }
+            else if (arg == "--dcfr-beta")
+            {
+                dcfr_params.beta = std::atof(need("--dcfr-beta"));
+            }
+            else if (arg == "--dcfr-gamma")
+            {
+                dcfr_params.gamma = std::atof(need("--dcfr-gamma"));
+            }
             else if (arg == "--help" || arg == "-h")
             {
                 print_usage(argv[0]);
@@ -681,6 +695,11 @@ int main(int argc, char** argv)
         {
             throw std::invalid_argument("pcfr_plus requires the frozen street pass (--frozen)");
         }
+        if (algorithm != poker::solver::Algorithm::Dcfr
+            && (dcfr_params.alpha != 1.5 || dcfr_params.beta != 0.0 || dcfr_params.gamma != 2.0))
+        {
+            throw std::invalid_argument("dcfr-alpha/beta/gamma require --algorithm dcfr");
+        }
 
         poker::solver::SolveConfig solve_config;
         solve_config.max_iterations = iterations;
@@ -695,6 +714,7 @@ int main(int argc, char** argv)
             solve_config.eval_every = eval_every;
         }
         solve_config.max_wall_seconds = time_limit;
+        solve_config.dcfr = dcfr_params;
         prepare_report_format();
         const char* game_name = config.board.size() == 3
             ? "flop"
@@ -703,6 +723,12 @@ int main(int argc, char** argv)
         std::cout << "game: " << game_name << "\n";
         std::cout << "board: " << board_text(config.board) << "\n";
         std::cout << "algorithm: " << poker::solver::algorithm_name(algorithm) << "\n";
+        if (algorithm == poker::solver::Algorithm::Dcfr)
+        {
+            std::cout << "dcfr_alpha: " << dcfr_params.alpha << "\n";
+            std::cout << "dcfr_beta: " << dcfr_params.beta << "\n";
+            std::cout << "dcfr_gamma: " << dcfr_params.gamma << "\n";
+        }
         std::cout << "pot: " << poker::format_chips(config.pot) << "\n";
         std::cout << "stack: " << poker::format_chips(config.stack) << "\n";
         std::cout.flush();

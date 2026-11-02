@@ -1223,6 +1223,7 @@ struct StreetBatchSolver::Engine
     int trained = 0;
     bool algorithm_bound_ = false;
     Algorithm bound_algorithm_ = Algorithm::CfrPlus;
+    DcfrParams dcfr_params_{};
     double joint_scale = 0.0;
     std::uint64_t board_mask = 0;
     // Non-owning; set for the duration of solve()/solve_frozen() from SolveConfig::locks.
@@ -4893,7 +4894,7 @@ struct StreetBatchSolver::Engine
             {
                 // DCFR(1.5,0,2): freeze, update OOP, discount(OOP)+freeze, update IP,
                 // discount(IP). Both passes share t; average weight is t².
-                const DcfrFactors factors = dcfr_factors(trained);
+                const DcfrFactors factors = dcfr_factors(trained, dcfr_params_);
                 slot_positive_discount_ = factors.positive_discount;
                 slot_negative_discount_ = factors.negative_discount;
                 freeze_sigma();
@@ -6883,6 +6884,10 @@ SolveStats StreetBatchSolver::solve_frozen(
     engine_->check_usable();
     const LockSet* const previous_locks = engine_->locks_;
     engine_->locks_ = config.locks;
+    if (algorithm == Algorithm::Dcfr)
+    {
+        engine_->dcfr_params_ = config.dcfr;
+    }
     const auto start = std::chrono::steady_clock::now();
     engine_->reset();
     int completed = 0;
@@ -7389,6 +7394,16 @@ void StreetBatchSolver::install_training_tables(const TrainingTables& tables)
     // Tables alone do not carry the algorithm. Callers that reopen a solution
     // must bind_training_algorithm from the checkpoint/job tag before continue.
     engine_->algorithm_bound_ = false;
+}
+
+void StreetBatchSolver::set_dcfr_params(DcfrParams params)
+{
+    engine_->dcfr_params_ = params;
+}
+
+DcfrParams StreetBatchSolver::dcfr_params() const
+{
+    return engine_->dcfr_params_;
 }
 
 void StreetBatchSolver::bind_training_algorithm(Algorithm algorithm)

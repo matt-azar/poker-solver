@@ -56,6 +56,10 @@ struct SolveConfig
     // Non-owning. Null keeps today's unlocked regret-matching behavior bit-identical.
     // When set, locked rows replace the current strategy after RM for matching infosets.
     const LockSet* locks = nullptr;
+    // Used when algorithm is DCFR. Defaults are the fixed product triple (1.5,0,2).
+    // Not stored in PSOL; reload / continue after checkpoint uses solver defaults
+    // unless the caller sets them again.
+    DcfrParams dcfr{};
 };
 
 struct SolveStats
@@ -547,7 +551,7 @@ public:
             }
             else if (algorithm_ == Algorithm::Dcfr)
             {
-                const DcfrFactors factors = dcfr_factors(iterations_completed_);
+                const DcfrFactors factors = dcfr_factors(iterations_completed_, dcfr_params_);
                 dcfr_positive_ = factors.positive_discount;
                 dcfr_negative_ = factors.negative_discount;
                 run_pass(0, factors.average_weight);
@@ -577,6 +581,10 @@ public:
     {
         const LockSet* const previous_locks = locks_;
         locks_ = config.locks;
+        if (algorithm_ == Algorithm::Dcfr)
+        {
+            dcfr_params_ = config.dcfr;
+        }
         const auto start = std::chrono::steady_clock::now();
         int completed = 0;
         SolveStats stats;
@@ -689,6 +697,16 @@ public:
     Algorithm algorithm() const
     {
         return algorithm_;
+    }
+
+    void set_dcfr_params(DcfrParams params)
+    {
+        dcfr_params_ = params;
+    }
+
+    DcfrParams dcfr_params() const
+    {
+        return dcfr_params_;
     }
 
     // One frozen pass. updating_player < 0 updates both players and does not floor.
@@ -930,6 +948,7 @@ private:
     int iterations_completed_ = 0;
     double dcfr_positive_ = 1.0;
     double dcfr_negative_ = 0.5;
+    DcfrParams dcfr_params_{};
     // Non-owning; set for the duration of solve() from SolveConfig::locks.
     const LockSet* locks_ = nullptr;
 };

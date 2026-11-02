@@ -402,6 +402,10 @@ public:
     void bind_training_algorithm(Algorithm algorithm);
     Algorithm training_algorithm() const;
     bool has_training_algorithm() const;
+    // DCFR(α,β,γ). Defaults (1.5,0,2). Applied on the next frozen DCFR train.
+    // Not persisted in PSOL.
+    void set_dcfr_params(DcfrParams params);
+    DcfrParams dcfr_params() const;
     std::uint64_t profile_epoch() const;
     // The next successful evaluation throws before its page can replace the cache.
     void arm_value_cache_failure_for_test();
