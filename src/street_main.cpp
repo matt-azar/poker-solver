@@ -42,7 +42,7 @@ void print_usage(const char* argv0)
               << " [--iterations N] [--algorithm vanilla|cfr_plus|dcfr|pcfr_plus]"
               << " [--dcfr-alpha A] [--dcfr-beta B] [--dcfr-gamma G]"
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
-              << " [--memory-mib N] [--threads N]"
+              << " [--memory-mib N] [--threads N] [--table-i16]"
               << " [--plan-memory] [--reference] [--frozen] [--report file | -]\n";
 }
 
@@ -612,6 +612,10 @@ int main(int argc, char** argv)
                         "threads must be a positive integer from 1 through 64");
                 }
                 config.threads = static_cast<int>(value);
+            }
+            else if (arg == "--table-i16")
+            {
+                config.table_i16 = true;
             }
             else if (arg == "--algorithm")
             {

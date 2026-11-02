@@ -16,6 +16,7 @@ endfunction()
 add_library(poker_solver_core STATIC
     src/game/kuhn.cpp
     src/solver/regret_matching.cpp
+    src/solver/compressed_tables.cpp
     src/solver/cfr.cpp
     src/solver/best_response.cpp
     src/solver/river_batch.cpp
@@ -99,6 +100,7 @@ add_executable(poker_solver_tests
     tests/unit/test_strategy_edit.cpp
     tests/unit/test_tree_edit.cpp
     tests/unit/test_hand_history.cpp
+    tests/unit/test_table_i16.cpp
 )
 target_include_directories(poker_solver_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"

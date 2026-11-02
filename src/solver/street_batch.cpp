@@ -12,6 +12,7 @@
 #include "solver/dcfr.hpp"
 #include "solver/icm.hpp"
 #include "solver/incentives.hpp"
+#include "solver/compressed_tables.hpp"
 #include "solver/regret_matching.hpp"
 #include "solver/table_scalar.hpp"
 
@@ -1092,11 +1093,22 @@ struct StreetBatchSolver::Engine
     std::pmr::vector<ParentLink> parent_link;
     std::pmr::vector<Slot> slots;
     std::pmr::vector<int> decision_ids;
+    // Default path: float TableScalar regret / strategy_sum.
+    // table_i16 path: CompressedI16Table storage + float pass_delta_ for the
+    // updating pass (signed CF regret accumulates here before CFR+ floor).
+    bool table_i16_ = false;
     std::pmr::vector<TableScalar> regret;
     std::pmr::vector<TableScalar> strategy_sum;
+    CompressedI16Table regret_i16_;
+    CompressedI16Table strategy_sum_i16_;
+    std::pmr::vector<TableScalar> pass_delta_;
+    // Materialized float views for regret_table() / strategy_sum_table() when i16.
+    mutable std::pmr::vector<TableScalar> regret_view_;
+    mutable std::pmr::vector<TableScalar> strategy_sum_view_;
     // Shared workspace: frozen strategy during a training pass; normalized
     // sigma during evaluation / browse. Training sets average_ready false
     // before overwriting; ensure_average rebuilds from strategy_sum.
+    // Stays float even when table_i16 is on (strategies are already in [0,1]).
     mutable std::pmr::vector<TableScalar> sigma;
     mutable std::pmr::vector<int> response;
     std::pmr::vector<char> combo_blocked;
@@ -1249,8 +1261,14 @@ struct StreetBatchSolver::Engine
         , parent_link(heap_)
         , slots(heap_)
         , decision_ids(heap_)
+        , table_i16_(config.table_i16)
         , regret(heap_)
         , strategy_sum(heap_)
+        , regret_i16_(heap_)
+        , strategy_sum_i16_(heap_)
+        , pass_delta_(heap_)
+        , regret_view_(heap_)
+        , strategy_sum_view_(heap_)
         , sigma(heap_)
         , response(heap_)
         , combo_blocked(heap_)
@@ -1657,12 +1675,32 @@ struct StreetBatchSolver::Engine
         add(checked_mul(counted_deals_, sizeof(Deal), "plan"));
         add(checked_mul(slot_index_cells(), sizeof(int), "plan"));
         add(checked_mul(planned_slots_, sizeof(Slot), "plan"));
-        // regret + strategy_sum + shared sigma workspace (float storage).
-        const std::uint64_t table = checked_mul(
-            static_cast<std::uint64_t>(planned_cursor_), sizeof(TableScalar), "plan");
-        add(table);
-        add(table);
-        add(table);
+        // regret + strategy_sum + shared sigma workspace.
+        // Default: three float TableScalar tables.
+        // table_i16: int16 payloads + per-slot scales for regret/strategy_sum,
+        // float sigma, and a float pass-delta workspace for CFR+ updates.
+        const std::uint64_t entries = static_cast<std::uint64_t>(planned_cursor_);
+        if (table_i16_)
+        {
+            const std::uint64_t i16_payload =
+                checked_mul(entries, sizeof(std::int16_t), "plan");
+            const std::uint64_t scales = checked_mul(
+                i16_block_count(entries), sizeof(float), "plan");
+            add(i16_payload);
+            add(scales);
+            add(i16_payload);
+            add(scales);
+            add(checked_mul(entries, sizeof(TableScalar), "plan")); // pass_delta
+            add(checked_mul(entries, sizeof(TableScalar), "plan")); // sigma
+        }
+        else
+        {
+            const std::uint64_t table =
+                checked_mul(entries, sizeof(TableScalar), "plan");
+            add(table);
+            add(table);
+            add(table);
+        }
         // ev/pi/aev doubles plus per-depth acting slot bases (wide ints).
         const std::uint64_t scratch_level = checked_add(
             checked_add(
@@ -1792,12 +1830,128 @@ struct StreetBatchSolver::Engine
             throw std::logic_error("street regret cursor did not match the memory plan");
         }
         const auto entries = static_cast<std::size_t>(cursor_);
-        budget_->set_stage("regret");
-        regret.assign(entries, TableScalar{0});
-        budget_->set_stage("strategy_sum");
-        strategy_sum.assign(entries, TableScalar{0});
+        if (table_i16_)
+        {
+            budget_->set_stage("regret");
+            regret_i16_.assign_zero(entries);
+            budget_->set_stage("strategy_sum");
+            strategy_sum_i16_.assign_zero(entries);
+            budget_->set_stage("table_i16_workspace");
+            pass_delta_.assign(entries, TableScalar{0});
+        }
+        else
+        {
+            budget_->set_stage("regret");
+            regret.assign(entries, TableScalar{0});
+            budget_->set_stage("strategy_sum");
+            strategy_sum.assign(entries, TableScalar{0});
+        }
         budget_->set_stage("sigma");
         sigma.assign(entries, TableScalar{0});
+    }
+
+    std::size_t table_entries() const
+    {
+        return table_i16_ ? regret_i16_.entry_count() : regret.size();
+    }
+
+    // Add instantaneous CF regret. Under table_i16 the signed delta lands in
+    // pass_delta_ and is merged (then floored) after the walk.
+    void add_regret_delta(std::size_t at, double delta)
+    {
+        if (table_i16_)
+        {
+            pass_delta_[at] = static_cast<TableScalar>(
+                static_cast<double>(pass_delta_[at]) + delta);
+        }
+        else
+        {
+            regret[at] = static_cast<TableScalar>(static_cast<double>(regret[at]) + delta);
+        }
+    }
+
+    void add_strategy_sum(int /*slot_index*/, int base, int n_actions, const TableScalar* row, double weight)
+    {
+        if (!table_i16_)
+        {
+            accumulate_average(strategy_sum.data() + base, row, n_actions, weight);
+            return;
+        }
+        float tmp[8];
+        strategy_sum_i16_.expand_range(
+            base, n_actions, std::span<float>(tmp, static_cast<std::size_t>(n_actions)));
+        accumulate_average(tmp, row, n_actions, weight);
+        strategy_sum_i16_.write_range(
+            base, n_actions, std::span<const float>(tmp, static_cast<std::size_t>(n_actions)));
+    }
+
+    // Merge pass_delta into a float row, optionally CFR+ floor, then requantize.
+    void commit_regret_slot(int /*slot_index*/, int base, int n_actions, bool floor_negatives)
+    {
+        double tmp[8];
+        regret_i16_.expand_range(
+            base, n_actions, std::span<double>(tmp, static_cast<std::size_t>(n_actions)));
+        for (int action = 0; action < n_actions; ++action)
+        {
+            const std::size_t at = static_cast<std::size_t>(base + action);
+            tmp[action] += static_cast<double>(pass_delta_[at]);
+            pass_delta_[at] = 0.0f;
+            if (floor_negatives && tmp[action] < 0.0)
+            {
+                tmp[action] = 0.0;
+            }
+        }
+        regret_i16_.write_range(
+            base, n_actions, std::span<const double>(tmp, static_cast<std::size_t>(n_actions)));
+    }
+
+    void materialize_regret_view() const
+    {
+        const std::size_t entries = table_entries();
+        regret_view_.assign(entries, TableScalar{0});
+        if (!table_i16_)
+        {
+            std::copy(regret.begin(), regret.end(), regret_view_.begin());
+            return;
+        }
+        for (const Slot& slot : slots)
+        {
+            float tmp[8];
+            regret_i16_.expand_range(
+                slot.base,
+                slot.n_actions,
+                std::span<float>(tmp, static_cast<std::size_t>(slot.n_actions)));
+            for (int action = 0; action < slot.n_actions; ++action)
+            {
+                // Include uncommitted pass deltas so labeled reads see the live total.
+                const std::size_t at = static_cast<std::size_t>(slot.base + action);
+                regret_view_[at] = static_cast<TableScalar>(
+                    static_cast<double>(tmp[action]) + static_cast<double>(pass_delta_[at]));
+            }
+        }
+    }
+
+    void materialize_strategy_sum_view() const
+    {
+        const std::size_t entries = table_entries();
+        strategy_sum_view_.assign(entries, TableScalar{0});
+        if (!table_i16_)
+        {
+            std::copy(strategy_sum.begin(), strategy_sum.end(), strategy_sum_view_.begin());
+            return;
+        }
+        for (const Slot& slot : slots)
+        {
+            float tmp[8];
+            strategy_sum_i16_.expand_range(
+                slot.base,
+                slot.n_actions,
+                std::span<float>(tmp, static_cast<std::size_t>(slot.n_actions)));
+            for (int action = 0; action < slot.n_actions; ++action)
+            {
+                strategy_sum_view_[static_cast<std::size_t>(slot.base + action)] = tmp[action];
+            }
+        }
     }
 
     int card_key(const Node& node, int hand, int turn, int river) const
@@ -2211,12 +2365,13 @@ struct StreetBatchSolver::Engine
         const int hand = node.player == 0 ? deal.h0 : deal.h1;
         const double reach = node.player == 0 ? pi0 : pi1;
         const int index = slot_index(node, hand, turn, river, reach);
-        const int base = slots[static_cast<std::size_t>(index)].base;
+        const Slot& stored = slots[static_cast<std::size_t>(index)];
+        const int base = stored.base;
         const TableScalar* row = sigma.data() + base;
         const bool update = updating < 0 || updating == node.player;
         if (update)
         {
-            accumulate_average(strategy_sum.data() + base, row, node.n_actions, weight_iter * reach);
+            add_strategy_sum(index, base, node.n_actions, row, weight_iter * reach);
         }
         PlayerPayoff action_utility[8];
         PlayerPayoff node_utility;
@@ -2244,7 +2399,8 @@ struct StreetBatchSolver::Engine
             {
                 const double instant = action_utility[action].utility[node.player]
                     - node_utility.utility[node.player];
-                regret[static_cast<std::size_t>(base + action)] += opponent_reach * instant;
+                add_regret_delta(
+                    static_cast<std::size_t>(base + action), opponent_reach * instant);
             }
         }
         return node_utility;
@@ -2259,8 +2415,17 @@ struct StreetBatchSolver::Engine
 
     void reset()
     {
-        std::fill(regret.begin(), regret.end(), 0.0);
-        std::fill(strategy_sum.begin(), strategy_sum.end(), 0.0);
+        if (table_i16_)
+        {
+            regret_i16_.zero_all();
+            strategy_sum_i16_.zero_all();
+            std::fill(pass_delta_.begin(), pass_delta_.end(), TableScalar{0});
+        }
+        else
+        {
+            std::fill(regret.begin(), regret.end(), 0.0);
+            std::fill(strategy_sum.begin(), strategy_sum.end(), 0.0);
+        }
         if (!prediction_.empty())
         {
             std::fill(prediction_.begin(), prediction_.end(), 0.0);
@@ -2274,12 +2439,12 @@ struct StreetBatchSolver::Engine
 
     void ensure_pcfr_prediction_table()
     {
-        if (prediction_.size() == regret.size())
+        if (prediction_.size() == table_entries())
         {
             return;
         }
         budget_->set_stage("pcfr_prediction");
-        prediction_.assign(regret.size(), 0.0);
+        prediction_.assign(table_entries(), 0.0);
     }
 
     // Reject algorithm switches on trained state before any table mutation.
@@ -2338,6 +2503,7 @@ struct StreetBatchSolver::Engine
                 {
                     cfr_deal(0, 1.0, 1.0, deal.probability, deal, -1, -1, -1, 1.0);
                 }
+                commit_pass_deltas_no_floor();
             }
             else
             {
@@ -2369,12 +2535,28 @@ struct StreetBatchSolver::Engine
         {
             return false;
         }
-        for (const Slot& slot : slots)
+        if (table_i16_)
         {
-            normalize_average(
-                strategy_sum.data() + slot.base,
-                sigma.data() + slot.base,
-                slot.n_actions);
+            float tmp[8];
+            for (std::size_t index = 0; index < slots.size(); ++index)
+            {
+                const Slot& slot = slots[index];
+                strategy_sum_i16_.expand_range(slot.base, slot.n_actions, std::span<float>(tmp, static_cast<std::size_t>(slot.n_actions)));
+                normalize_average(
+                    tmp,
+                    sigma.data() + slot.base,
+                    slot.n_actions);
+            }
+        }
+        else
+        {
+            for (const Slot& slot : slots)
+            {
+                normalize_average(
+                    strategy_sum.data() + slot.base,
+                    sigma.data() + slot.base,
+                    slot.n_actions);
+            }
         }
         average_ready = true;
         return true;
@@ -2780,9 +2962,10 @@ struct StreetBatchSolver::Engine
                 here.slot_base[static_cast<std::size_t>(hand)] = -1;
                 continue;
             }
-            const int index = slot_index(node, hand, turn, river, pi[hand]);
+            // Store slot index (not base) so table_i16 strategy-sum updates can
+            // address the per-infoset scale without a reverse lookup.
             here.slot_base[static_cast<std::size_t>(hand)] =
-                slots[static_cast<std::size_t>(index)].base;
+                slot_index(node, hand, turn, river, pi[hand]);
         }
     }
 
@@ -4123,19 +4306,42 @@ struct StreetBatchSolver::Engine
     void apply_freeze_range(std::size_t begin, std::size_t end)
     {
         const bool predictive =
-            bound_algorithm_ == Algorithm::PcfrPlus && prediction_.size() == regret.size();
+            bound_algorithm_ == Algorithm::PcfrPlus && prediction_.size() == table_entries();
         double predicted[8];
+        float expanded[8];
         for (std::size_t index = begin; index < end; ++index)
         {
             const Slot& slot = slots[index];
+            if (table_i16_)
+            {
+                regret_i16_.expand_range(slot.base, slot.n_actions, std::span<float>(expanded, static_cast<std::size_t>(slot.n_actions)));
+                // Include uncommitted pass deltas from the in-progress pass.
+                for (int action = 0; action < slot.n_actions; ++action)
+                {
+                    expanded[action] = static_cast<float>(
+                        static_cast<double>(expanded[action])
+                        + static_cast<double>(
+                            pass_delta_[static_cast<std::size_t>(slot.base + action)]));
+                }
+            }
             if (predictive)
             {
                 for (int action = 0; action < slot.n_actions; ++action)
                 {
                     const std::size_t at = static_cast<std::size_t>(slot.base + action);
-                    predicted[action] = regret[at] + prediction_[at];
+                    const double regret_value = table_i16_
+                        ? static_cast<double>(expanded[action])
+                        : static_cast<double>(regret[at]);
+                    predicted[action] = regret_value + prediction_[at];
                 }
                 regret_matching(predicted, sigma.data() + slot.base, slot.n_actions);
+            }
+            else if (table_i16_)
+            {
+                regret_matching(
+                    expanded,
+                    sigma.data() + slot.base,
+                    slot.n_actions);
             }
             else
             {
@@ -4166,6 +4372,13 @@ struct StreetBatchSolver::Engine
             {
                 continue;
             }
+            if (table_i16_)
+            {
+                // Quantize only after signed pass deltas are applied, then floor.
+                commit_regret_slot(
+                    static_cast<int>(index), slot.base, slot.n_actions, true);
+                continue;
+            }
             for (int action = 0; action < slot.n_actions; ++action)
             {
                 TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
@@ -4183,30 +4396,54 @@ struct StreetBatchSolver::Engine
     void apply_floor_and_freeze_range(std::size_t begin, std::size_t end, int player)
     {
         const bool predictive =
-            bound_algorithm_ == Algorithm::PcfrPlus && prediction_.size() == regret.size();
+            bound_algorithm_ == Algorithm::PcfrPlus && prediction_.size() == table_entries();
         double predicted[8];
+        float expanded[8];
         for (std::size_t index = begin; index < end; ++index)
         {
             const Slot& slot = slots[index];
             if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player == player)
             {
-                for (int action = 0; action < slot.n_actions; ++action)
+                if (table_i16_)
                 {
-                    TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
-                    if (cumulative < 0.0)
+                    commit_regret_slot(
+                        static_cast<int>(index), slot.base, slot.n_actions, true);
+                }
+                else
+                {
+                    for (int action = 0; action < slot.n_actions; ++action)
                     {
-                        cumulative = 0.0;
+                        TableScalar& cumulative =
+                            regret[static_cast<std::size_t>(slot.base + action)];
+                        if (cumulative < 0.0)
+                        {
+                            cumulative = 0.0;
+                        }
                     }
                 }
+            }
+            if (table_i16_)
+            {
+                regret_i16_.expand_range(slot.base, slot.n_actions, std::span<float>(expanded, static_cast<std::size_t>(slot.n_actions)));
             }
             if (predictive)
             {
                 for (int action = 0; action < slot.n_actions; ++action)
                 {
                     const std::size_t at = static_cast<std::size_t>(slot.base + action);
-                    predicted[action] = regret[at] + prediction_[at];
+                    const double regret_value = table_i16_
+                        ? static_cast<double>(expanded[action])
+                        : static_cast<double>(regret[at]);
+                    predicted[action] = regret_value + prediction_[at];
                 }
                 regret_matching(predicted, sigma.data() + slot.base, slot.n_actions);
+            }
+            else if (table_i16_)
+            {
+                regret_matching(
+                    expanded,
+                    sigma.data() + slot.base,
+                    slot.n_actions);
             }
             else
             {
@@ -4231,6 +4468,7 @@ struct StreetBatchSolver::Engine
     // PCFR+: after a walk that wrote instantaneous CF regret into prediction_,
     // add those increments into regret, floor the updating player, and keep
     // prediction_ as m for the next match. Opponent prediction rows are untouched.
+    // Prediction stays float; only the cumulative regret table is i16-compressible.
     void apply_pcfr_commit_range(std::size_t begin, std::size_t end, int player)
     {
         for (std::size_t index = begin; index < end; ++index)
@@ -4238,6 +4476,22 @@ struct StreetBatchSolver::Engine
             const Slot& slot = slots[index];
             if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player != player)
             {
+                continue;
+            }
+            if (table_i16_)
+            {
+                double tmp[8];
+                regret_i16_.expand_range(slot.base, slot.n_actions, std::span<double>(tmp, static_cast<std::size_t>(slot.n_actions)));
+                for (int action = 0; action < slot.n_actions; ++action)
+                {
+                    const std::size_t at = static_cast<std::size_t>(slot.base + action);
+                    tmp[action] += static_cast<double>(prediction_[at]);
+                    if (tmp[action] < 0.0)
+                    {
+                        tmp[action] = 0.0;
+                    }
+                }
+                regret_i16_.write_range(slot.base, slot.n_actions, std::span<const double>(tmp, static_cast<std::size_t>(slot.n_actions)));
                 continue;
             }
             for (int action = 0; action < slot.n_actions; ++action)
@@ -4269,8 +4523,9 @@ struct StreetBatchSolver::Engine
     }
 
     // DCFR: discount every action entry of the updating player after the pass,
-    // including entries whose increment this pass was zero. Regret already holds
-    // the post-pass value; do not add the increment again.
+    // including entries whose increment this pass was zero. Under float storage
+    // regret already holds the post-pass value. Under table_i16, merge
+    // pass_delta_ first, then discount, then requantize (no CFR+ floor).
     void apply_discount_range(std::size_t begin, std::size_t end, int player)
     {
         for (std::size_t index = begin; index < end; ++index)
@@ -4278,6 +4533,21 @@ struct StreetBatchSolver::Engine
             const Slot& slot = slots[index];
             if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player != player)
             {
+                continue;
+            }
+            if (table_i16_)
+            {
+                double tmp[8];
+                regret_i16_.expand_range(slot.base, slot.n_actions, std::span<double>(tmp, static_cast<std::size_t>(slot.n_actions)));
+                for (int action = 0; action < slot.n_actions; ++action)
+                {
+                    const std::size_t at = static_cast<std::size_t>(slot.base + action);
+                    tmp[action] += static_cast<double>(pass_delta_[at]);
+                    pass_delta_[at] = 0.0f;
+                    tmp[action] = dcfr_discount_post_pass(
+                        tmp[action], slot_positive_discount_, slot_negative_discount_);
+                }
+                regret_i16_.write_range(slot.base, slot.n_actions, std::span<const double>(tmp, static_cast<std::size_t>(slot.n_actions)));
                 continue;
             }
             for (int action = 0; action < slot.n_actions; ++action)
@@ -4291,22 +4561,52 @@ struct StreetBatchSolver::Engine
 
     void apply_discount_and_freeze_range(std::size_t begin, std::size_t end, int player)
     {
+        float expanded[8];
         for (std::size_t index = begin; index < end; ++index)
         {
             const Slot& slot = slots[index];
             if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player == player)
             {
-                for (int action = 0; action < slot.n_actions; ++action)
+                if (table_i16_)
                 {
-                    TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
-                    cumulative = static_cast<TableScalar>(dcfr_discount_post_pass(
-                        cumulative, slot_positive_discount_, slot_negative_discount_));
+                    double tmp[8];
+                    regret_i16_.expand_range(slot.base, slot.n_actions, std::span<double>(tmp, static_cast<std::size_t>(slot.n_actions)));
+                    for (int action = 0; action < slot.n_actions; ++action)
+                    {
+                        const std::size_t at = static_cast<std::size_t>(slot.base + action);
+                        tmp[action] += static_cast<double>(pass_delta_[at]);
+                        pass_delta_[at] = 0.0f;
+                        tmp[action] = dcfr_discount_post_pass(
+                            tmp[action], slot_positive_discount_, slot_negative_discount_);
+                    }
+                    regret_i16_.write_range(slot.base, slot.n_actions, std::span<const double>(tmp, static_cast<std::size_t>(slot.n_actions)));
+                }
+                else
+                {
+                    for (int action = 0; action < slot.n_actions; ++action)
+                    {
+                        TableScalar& cumulative =
+                            regret[static_cast<std::size_t>(slot.base + action)];
+                        cumulative = static_cast<TableScalar>(dcfr_discount_post_pass(
+                            cumulative, slot_positive_discount_, slot_negative_discount_));
+                    }
                 }
             }
-            regret_matching(
-                regret.data() + slot.base,
-                sigma.data() + slot.base,
-                slot.n_actions);
+            if (table_i16_)
+            {
+                regret_i16_.expand_range(slot.base, slot.n_actions, std::span<float>(expanded, static_cast<std::size_t>(slot.n_actions)));
+                regret_matching(
+                    expanded,
+                    sigma.data() + slot.base,
+                    slot.n_actions);
+            }
+            else
+            {
+                regret_matching(
+                    regret.data() + slot.base,
+                    sigma.data() + slot.base,
+                    slot.n_actions);
+            }
             if (locks_ != nullptr)
             {
                 const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
@@ -4575,12 +4875,13 @@ struct StreetBatchSolver::Engine
             {
                 for (int h0 = 0; h0 < n0; ++h0)
                 {
-                    const int base = here.slot_base[static_cast<std::size_t>(h0)];
-                    if (base < 0)
+                    const int slot_i = here.slot_base[static_cast<std::size_t>(h0)];
+                    if (slot_i < 0)
                     {
                         child.pi0[static_cast<std::size_t>(h0)] = 0.0;
                         continue;
                     }
+                    const int base = slots[static_cast<std::size_t>(slot_i)].base;
                     child.pi0[static_cast<std::size_t>(h0)] =
                         pi0[h0] * sigma[static_cast<std::size_t>(base + action)];
                 }
@@ -4591,12 +4892,13 @@ struct StreetBatchSolver::Engine
                 std::copy(pi0, pi0 + n0, child.pi0.begin());
                 for (int h1 = 0; h1 < n1; ++h1)
                 {
-                    const int base = here.slot_base[static_cast<std::size_t>(h1)];
-                    if (base < 0)
+                    const int slot_i = here.slot_base[static_cast<std::size_t>(h1)];
+                    if (slot_i < 0)
                     {
                         child.pi1[static_cast<std::size_t>(h1)] = 0.0;
                         continue;
                     }
+                    const int base = slots[static_cast<std::size_t>(slot_i)].base;
                     child.pi1[static_cast<std::size_t>(h1)] =
                         pi1[h1] * sigma[static_cast<std::size_t>(base + action)];
                 }
@@ -4673,7 +4975,8 @@ struct StreetBatchSolver::Engine
                     here.ev0[static_cast<std::size_t>(h0)] = 0.0;
                     continue;
                 }
-                const int base = here.slot_base[static_cast<std::size_t>(h0)];
+                const int slot_i = here.slot_base[static_cast<std::size_t>(h0)];
+                const int base = slots[static_cast<std::size_t>(slot_i)].base;
                 const TableScalar* row = sigma.data() + base;
                 double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
@@ -4683,8 +4986,8 @@ struct StreetBatchSolver::Engine
                 here.ev0[static_cast<std::size_t>(h0)] = mix;
                 if (updating < 0 || updating == 0)
                 {
-                    accumulate_average(
-                        strategy_sum.data() + base, row, node.n_actions, weight_iter * pi0[h0]);
+                    add_strategy_sum(
+                        slot_i, base, node.n_actions, row, weight_iter * pi0[h0]);
                     for (int action = 0; action < node.n_actions; ++action)
                     {
                         const std::size_t at = static_cast<std::size_t>(base + action);
@@ -4696,7 +4999,7 @@ struct StreetBatchSolver::Engine
                         }
                         else
                         {
-                            regret[at] += instant;
+                            add_regret_delta(at, instant);
                         }
                     }
                 }
@@ -4725,7 +5028,8 @@ struct StreetBatchSolver::Engine
                     here.ev1[static_cast<std::size_t>(h1)] = 0.0;
                     continue;
                 }
-                const int base = here.slot_base[static_cast<std::size_t>(h1)];
+                const int slot_i = here.slot_base[static_cast<std::size_t>(h1)];
+                const int base = slots[static_cast<std::size_t>(slot_i)].base;
                 const TableScalar* row = sigma.data() + base;
                 double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
@@ -4735,8 +5039,8 @@ struct StreetBatchSolver::Engine
                 here.ev1[static_cast<std::size_t>(h1)] = mix;
                 if (updating < 0 || updating == 1)
                 {
-                    accumulate_average(
-                        strategy_sum.data() + base, row, node.n_actions, weight_iter * pi1[h1]);
+                    add_strategy_sum(
+                        slot_i, base, node.n_actions, row, weight_iter * pi1[h1]);
                     for (int action = 0; action < node.n_actions; ++action)
                     {
                         // Own-utility regret: ev1 holds player-1 modeled utility.
@@ -4749,7 +5053,7 @@ struct StreetBatchSolver::Engine
                         }
                         else
                         {
-                            regret[at] += instant;
+                            add_regret_delta(at, instant);
                         }
                     }
                 }
@@ -4854,6 +5158,23 @@ struct StreetBatchSolver::Engine
         }
     }
 
+    // Vanilla CFR leaves regrets signed and has no floor pass. Under table_i16,
+    // merge pass_delta_ into compressed regret without flooring so the next
+    // freeze reads quantized cumulatives instead of an ever-growing delta buffer.
+    void commit_pass_deltas_no_floor()
+    {
+        if (!table_i16_)
+        {
+            return;
+        }
+        for (std::size_t index = 0; index < slots.size(); ++index)
+        {
+            const Slot& slot = slots[index];
+            commit_regret_slot(
+                static_cast<int>(index), slot.base, slot.n_actions, false);
+        }
+    }
+
     void frozen_pass(int updating, double weight_iter, Algorithm algorithm)
     {
         freeze_sigma();
@@ -4867,6 +5188,10 @@ struct StreetBatchSolver::Engine
         else if (algorithm == Algorithm::Dcfr)
         {
             discount_player(updating, slot_positive_discount_, slot_negative_discount_);
+        }
+        else if (algorithm == Algorithm::VanillaCfr)
+        {
+            commit_pass_deltas_no_floor();
         }
     }
 
@@ -4958,8 +5283,9 @@ struct StreetBatchSolver::Engine
 
     bool assign_labeled_regret(const std::string& infoset, const std::string& action, double value)
     {
-        for (const Slot& slot : slots)
+        for (std::size_t slot_index = 0; slot_index < slots.size(); ++slot_index)
         {
+            const Slot& slot = slots[slot_index];
             if (slot_label(slot) != infoset)
             {
                 continue;
@@ -4971,7 +5297,20 @@ struct StreetBatchSolver::Engine
                 {
                     continue;
                 }
-                regret[static_cast<std::size_t>(slot.base + index)] = value;
+                if (table_i16_)
+                {
+                    double tmp[8];
+                    regret_i16_.expand_range(slot.base, slot.n_actions, std::span<double>(tmp, static_cast<std::size_t>(slot.n_actions)));
+                    tmp[index] = value;
+                    // Drop any pending delta on this entry; the assignment is absolute.
+                    pass_delta_[static_cast<std::size_t>(slot.base + index)] = 0.0f;
+                    regret_i16_.write_range(slot.base, slot.n_actions, std::span<const double>(tmp, static_cast<std::size_t>(slot.n_actions)));
+                }
+                else
+                {
+                    regret[static_cast<std::size_t>(slot.base + index)] =
+                        static_cast<TableScalar>(value);
+                }
                 average_ready = false;
                 return true;
             }
@@ -4981,8 +5320,9 @@ struct StreetBatchSolver::Engine
 
     bool read_labeled_regret(const std::string& infoset, const std::string& action, double& value) const
     {
-        for (const Slot& slot : slots)
+        for (std::size_t slot_index = 0; slot_index < slots.size(); ++slot_index)
         {
+            const Slot& slot = slots[slot_index];
             if (slot_label(slot) != infoset)
             {
                 continue;
@@ -4994,7 +5334,17 @@ struct StreetBatchSolver::Engine
                 {
                     continue;
                 }
-                value = regret[static_cast<std::size_t>(slot.base + index)];
+                if (table_i16_)
+                {
+                    double tmp[8];
+                    regret_i16_.expand_range(slot.base, slot.n_actions, std::span<double>(tmp, static_cast<std::size_t>(slot.n_actions)));
+                    const std::size_t at = static_cast<std::size_t>(slot.base + index);
+                    value = tmp[index] + static_cast<double>(pass_delta_[at]);
+                }
+                else
+                {
+                    value = regret[static_cast<std::size_t>(slot.base + index)];
+                }
                 return true;
             }
         }
@@ -5008,8 +5358,20 @@ struct StreetBatchSolver::Engine
         report.allocated_bytes = budget_->current();
         report.peak_allocated_bytes = budget_->peak();
         report.reserved_bytes = budget_->reserved();
-        report.regret_strategy_sum_bytes = regret.size() * sizeof(TableScalar)
-            + strategy_sum.size() * sizeof(TableScalar);
+        report.table_i16 = table_i16_;
+        if (table_i16_)
+        {
+            report.regret_strategy_sum_bytes =
+                regret_i16_.storage_bytes() + strategy_sum_i16_.storage_bytes();
+            report.table_i16_workspace_bytes =
+                pass_delta_.size() * sizeof(TableScalar);
+        }
+        else
+        {
+            report.regret_strategy_sum_bytes = regret.size() * sizeof(TableScalar)
+                + strategy_sum.size() * sizeof(TableScalar);
+            report.table_i16_workspace_bytes = 0;
+        }
         report.sigma_workspace_bytes = sigma.size() * sizeof(TableScalar);
         report.table_scalar_bytes = static_cast<int>(sizeof(TableScalar));
         report.estimated_peak_bytes = estimated_peak_bytes_;
@@ -6529,20 +6891,46 @@ struct StreetBatchSolver::Engine
         {
             tables.slot_actions.push_back(static_cast<std::uint16_t>(slot.n_actions));
         }
-        tables.regret.assign(regret.begin(), regret.end());
-        tables.strategy_sum.assign(strategy_sum.begin(), strategy_sum.end());
+        // PSOL / TrainingTables stay double on the wire regardless of table_i16.
+        const std::size_t entries = table_entries();
+        tables.regret.assign(entries, 0.0);
+        tables.strategy_sum.assign(entries, 0.0);
+        if (table_i16_)
+        {
+            for (std::size_t index = 0; index < slots.size(); ++index)
+            {
+                const Slot& slot = slots[index];
+                double regret_row[8];
+                double sum_row[8];
+                regret_i16_.expand_range(slot.base, slot.n_actions, std::span<double>(regret_row, static_cast<std::size_t>(slot.n_actions)));
+                strategy_sum_i16_.expand_range(slot.base, slot.n_actions, std::span<double>(sum_row, static_cast<std::size_t>(slot.n_actions)));
+                for (int action = 0; action < slot.n_actions; ++action)
+                {
+                    const std::size_t at = static_cast<std::size_t>(slot.base + action);
+                    tables.regret[at] =
+                        regret_row[action] + static_cast<double>(pass_delta_[at]);
+                    tables.strategy_sum[at] = sum_row[action];
+                }
+            }
+        }
+        else
+        {
+            tables.regret.assign(regret.begin(), regret.end());
+            tables.strategy_sum.assign(strategy_sum.begin(), strategy_sum.end());
+        }
         return tables;
     }
 
     void install_tables(const TrainingTables& tables)
     {
         check_usable();
+        const std::size_t entries = table_entries();
         if (tables.iterations < 0
             || !same_combos(tables.oop_combos, combos[0])
             || !same_combos(tables.ip_combos, combos[1])
             || tables.slot_actions.size() != slots.size()
-            || tables.regret.size() != regret.size()
-            || tables.strategy_sum.size() != strategy_sum.size())
+            || tables.regret.size() != entries
+            || tables.strategy_sum.size() != entries)
         {
             throw std::invalid_argument("training tables do not match this tree");
         }
@@ -6553,8 +6941,23 @@ struct StreetBatchSolver::Engine
                 throw std::invalid_argument("training tables do not match this tree");
             }
         }
-        std::copy(tables.regret.begin(), tables.regret.end(), regret.begin());
-        std::copy(tables.strategy_sum.begin(), tables.strategy_sum.end(), strategy_sum.begin());
+        if (table_i16_)
+        {
+            std::fill(pass_delta_.begin(), pass_delta_.end(), TableScalar{0});
+            for (std::size_t index = 0; index < slots.size(); ++index)
+            {
+                const Slot& slot = slots[index];
+                regret_i16_.write_range(slot.base, slot.n_actions, std::span<const double>( tables.regret.data() + slot.base,
+                        static_cast<std::size_t>(slot.n_actions)));
+                strategy_sum_i16_.write_range(slot.base, slot.n_actions, std::span<const double>( tables.strategy_sum.data() + slot.base,
+                        static_cast<std::size_t>(slot.n_actions)));
+            }
+        }
+        else
+        {
+            std::copy(tables.regret.begin(), tables.regret.end(), regret.begin());
+            std::copy(tables.strategy_sum.begin(), tables.strategy_sum.end(), strategy_sum.begin());
+        }
         trained = tables.iterations;
         average_ready = false;
     }
@@ -7102,11 +7505,16 @@ std::uint64_t StreetBatchSolver::terminal_count() const
 
 int StreetBatchSolver::regret_entries() const
 {
-    return static_cast<int>(engine_->regret.size());
+    return static_cast<int>(engine_->table_entries());
 }
 
 std::size_t StreetBatchSolver::memory_bytes_estimate() const
 {
+    if (engine_->table_i16_)
+    {
+        return static_cast<std::size_t>(
+            engine_->regret_i16_.storage_bytes() + engine_->strategy_sum_i16_.storage_bytes());
+    }
     return engine_->regret.size() * sizeof(TableScalar)
         + engine_->strategy_sum.size() * sizeof(TableScalar);
 }
@@ -7133,11 +7541,23 @@ bool StreetBatchSolver::regret_value(const std::string& infoset, const std::stri
 
 std::span<const TableScalar> StreetBatchSolver::regret_table() const
 {
+    if (engine_->table_i16_)
+    {
+        engine_->materialize_regret_view();
+        return std::span<const TableScalar>(
+            engine_->regret_view_.data(), engine_->regret_view_.size());
+    }
     return std::span<const TableScalar>(engine_->regret.data(), engine_->regret.size());
 }
 
 std::span<const TableScalar> StreetBatchSolver::strategy_sum_table() const
 {
+    if (engine_->table_i16_)
+    {
+        engine_->materialize_strategy_sum_view();
+        return std::span<const TableScalar>(
+            engine_->strategy_sum_view_.data(), engine_->strategy_sum_view_.size());
+    }
     return std::span<const TableScalar>(engine_->strategy_sum.data(), engine_->strategy_sum.size());
 }
 

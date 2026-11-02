@@ -5,10 +5,13 @@
 namespace poker::solver
 {
 
-// Persistent StreetBatchSolver table storage. Regret, strategy-sum, the shared
+// Default StreetBatchSolver table storage width. Regret, strategy-sum, the shared
 // sigma workspace (frozen strategy during a pass / normalized average during
-// evaluation), and the optional PCFR+ prediction table use this width.
-// Counterfactual values, NashConv, and other sensitive reductions stay double.
+// evaluation), and the optional PCFR+ prediction table use this width when
+// StreetConfig::table_i16 is false. With table_i16, regret/strategy-sum use
+// int16 + per-block scales (see compressed_tables.hpp); sigma and PCFR+
+// prediction stay float. Counterfactual values, NashConv, and other sensitive
+// reductions stay double.
 using TableScalar = float;
 
 inline constexpr std::size_t kTableScalarBytes = sizeof(TableScalar);

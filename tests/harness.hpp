@@ -61,3 +61,4 @@ void run_lock_apply_tests();
 void run_strategy_edit_tests();
 void run_tree_edit_tests();
 void run_hand_history_tests();
+void run_table_i16_tests();
