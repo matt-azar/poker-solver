@@ -62,10 +62,20 @@ import {
 import {
   applySetupTransaction,
   bumpRevision,
+  compareNoteIsValid,
+  draftPartialFromStatus,
   initialRevision,
+  resolveBaselineSolutionId,
+  shouldClearCompareNote,
+  strategyEditScopeFromNode,
+  strategyEditScopesEqual,
+  validateSetupForSolve,
+  type AnalysisIdentity,
+  type AnalysisKind,
   type SetupDraftResult,
   type SetupStudyMeta,
   type SetupTransactionSnapshot,
+  type StrategyEditScope,
 } from "../domain/setup";
 import { getRangeProfileCatalogue } from "../domain/profiles";
 import { EngineError, engineClient } from "../engine/client";
@@ -444,7 +454,11 @@ interface StudyState {
   runouts: unknown | null;
   equity: unknown | null;
   categories: unknown | null;
+  /** Client-side solve gate errors (empty when valid / after a successful launch). */
+  solveValidationErrors: string[];
   compareNote: ComparePayload | null;
+  /** Scope the open strategy-edit draft is bound to; null when draft is idle. */
+  strategyEditScope: StrategyEditScope | null;
 
   selectedCell: SelectedCell | null;
   hoverCell: SelectedCell | null;
@@ -566,55 +580,121 @@ type PaintStroke = {
 let paintStroke: PaintStroke | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let nodeToken = 0;
-let valueToken = 0;
 let seenGeneration = -1;
 let continuationPending = false;
-let valuePollTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Independent tokens so equity polling does not cancel runouts (and vice versa). */
+const analysisTokens: Record<AnalysisKind, number> = {
+  values: 0,
+  runouts: 0,
+  equity: 0,
+  categories: 0,
+};
+const analysisPollTimers: Partial<Record<AnalysisKind, ReturnType<typeof setInterval>>> = {};
+const analysisRequestIdentity: Partial<Record<AnalysisKind, AnalysisIdentity>> = {};
 
 function strokeWeightForCell(current: number, slider: number): number {
   return slider <= 0 || Math.abs(current - slider) < 0.001 ? 0 : slider;
 }
 
-function clearValuePoll() {
-  if (valuePollTimer) {
-    clearInterval(valuePollTimer);
-    valuePollTimer = null;
+function clearAnalysisPoll(kind: AnalysisKind) {
+  const timer = analysisPollTimers[kind];
+  if (timer) {
+    clearInterval(timer);
+    delete analysisPollTimers[kind];
   }
+}
+
+function clearAllAnalysisPolls() {
+  (Object.keys(analysisTokens) as AnalysisKind[]).forEach((kind) => {
+    clearAnalysisPoll(kind);
+  });
+}
+
+function bumpAnalysisToken(kind: AnalysisKind): number {
+  analysisTokens[kind] += 1;
+  clearAnalysisPoll(kind);
+  delete analysisRequestIdentity[kind];
+  return analysisTokens[kind];
+}
+
+function invalidateAllAnalysisRequests() {
+  (Object.keys(analysisTokens) as AnalysisKind[]).forEach((kind) => {
+    bumpAnalysisToken(kind);
+  });
+}
+
+function beginAnalysisRequest(
+  kind: AnalysisKind,
+  solutionId: string,
+  nodeId: string,
+  revision: number,
+): { token: number; identity: AnalysisIdentity } {
+  const token = bumpAnalysisToken(kind);
+  const identity: AnalysisIdentity = { solutionId, nodeId, revision, kind };
+  analysisRequestIdentity[kind] = identity;
+  return { token, identity };
+}
+
+function analysisRequestIsCurrent(kind: AnalysisKind, token: number): boolean {
+  return token === analysisTokens[kind];
 }
 
 /** Poll async analysis endpoints that may return `{ pending: true }` / HTTP 202. */
 async function pollAnalysis<T extends { pending?: boolean }>(
+  kind: AnalysisKind,
   token: number,
   fetchOnce: () => Promise<T>,
   onReady: (body: T) => void,
   onError: (message: string) => void,
 ): Promise<void> {
-  clearValuePoll();
   const tick = async () => {
     try {
       const body = await fetchOnce();
-      if (token !== valueToken) {
+      if (!analysisRequestIsCurrent(kind, token)) {
         return;
       }
       if (body && body.pending) {
-        if (!valuePollTimer) {
-          valuePollTimer = setInterval(() => {
+        if (!analysisPollTimers[kind]) {
+          analysisPollTimers[kind] = setInterval(() => {
             void tick();
           }, 250);
         }
         return;
       }
-      clearValuePoll();
+      clearAnalysisPoll(kind);
       onReady(body);
     } catch (error) {
-      if (token !== valueToken) {
+      if (!analysisRequestIsCurrent(kind, token)) {
         return;
       }
-      clearValuePoll();
+      clearAnalysisPoll(kind);
       onError(error instanceof EngineError ? error.message : "Analysis request failed");
     }
   };
   await tick();
+}
+
+function emptyAnalysisState() {
+  return {
+    nodeValues: null as ActionValuesPayload | null,
+    runouts: null as unknown | null,
+    equity: null as unknown | null,
+    categories: null as unknown | null,
+  };
+}
+
+function analysisRevision(
+  node: NodePayload | null | undefined,
+  status: StatusPayload | null | undefined,
+): number {
+  if (typeof node?.status_generation === "number") {
+    return node.status_generation;
+  }
+  if (typeof status?.status_generation === "number") {
+    return status.status_generation;
+  }
+  return 0;
 }
 
 function syncThemeProxy(set: (partial: Partial<StudyState>) => void) {
@@ -926,7 +1006,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   runouts: null,
   equity: null,
   categories: null,
+  solveValidationErrors: [],
   compareNote: null,
+  strategyEditScope: null,
 
   selectedCell: null,
   hoverCell: null,
@@ -1168,13 +1250,24 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       set({ strategyEditDrawerOpen: false });
       return;
     }
-    const actions = get().currentNode?.actions?.length ?? 0;
+    const node = get().currentNode;
+    const solutionId = get().solutionId;
+    if (!node || !solutionId) {
+      set({ message: "Strategy edits require a published decision node." });
+      return;
+    }
+    const scope = strategyEditScopeFromNode(solutionId, node);
     const existing = get().strategyEditDraft;
+    const actions = node.actions?.length ?? 0;
+    const scopeMatches = strategyEditScopesEqual(get().strategyEditScope, scope);
     const draft =
-      existing.probs.length === actions ? existing : defaultLockDraft(actions);
+      scopeMatches && existing.probs.length === actions
+        ? existing
+        : defaultLockDraft(actions);
     set({
       strategyEditDrawerOpen: true,
       lockDrawerOpen: false,
+      strategyEditScope: scope,
       strategyEditDraft: draft,
       strategyEditDraftBaseline: structuredClone(draft),
     });
@@ -1199,7 +1292,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
   selectCombosForStrategyEdit(combos) {
     const node = get().currentNode;
-    if (!node?.combos) {
+    const solutionId = get().solutionId;
+    if (!node?.combos || !solutionId) {
       return;
     }
     const handIndices = combos
@@ -1209,9 +1303,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const actions = node.actions?.length ?? 0;
     const probs = seedProbsFromStrategy(node.strategy ?? null, unique, actions);
     const draft: StrategyEditDraft = { kind: "selected", handIndices: unique, probs };
+    const scope = strategyEditScopeFromNode(solutionId, node);
     set({
       strategyEditDraft: draft,
       strategyEditDraftBaseline: structuredClone(draft),
+      strategyEditScope: scope,
       strategyEditDrawerOpen: true,
       lockDrawerOpen: false,
     });
@@ -1255,6 +1351,17 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const node = get().currentNode;
     if (!solutionId || !node || node.kind !== "decision") {
       set({ message: "Strategy edits require a published decision node." });
+      return;
+    }
+    const liveScope = strategyEditScopeFromNode(solutionId, node);
+    if (!strategyEditScopesEqual(get().strategyEditScope, liveScope)) {
+      set({
+        message: "Strategy edit draft is out of date for this node — re-open the editor.",
+        strategyEditScope: null,
+        strategyEditDraft: defaultLockDraft(node.actions?.length ?? 0),
+        strategyEditDraftBaseline: null,
+        strategyEditDrawerOpen: false,
+      });
       return;
     }
     const draft = get().strategyEditDraft;
@@ -1396,7 +1503,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       clearInterval(pollTimer);
       pollTimer = null;
     }
-    clearValuePoll();
+    clearAllAnalysisPolls();
   },
 
   async refresh() {
@@ -1407,11 +1514,24 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         seenGeneration = generation;
       }
       const reload = solutionNeedsReload(status, get().solutionId, continuationPending);
+      const baselineSolutionId = resolveBaselineSolutionId(
+        status.baseline_solution_id,
+        get().baselineSolutionId,
+      );
+      const nextSolutionId = reload && status.solution_id
+        ? status.solution_id
+        : get().solutionId;
+      const clearCompare = shouldClearCompareNote(
+        get().compareNote,
+        baselineSolutionId,
+        nextSolutionId ?? status.solution_id,
+      );
       set({
         status,
         connection: "connected",
         phase: phaseFromStatus(status, get().phase),
-        baselineSolutionId: status.baseline_solution_id ?? get().baselineSolutionId,
+        baselineSolutionId,
+        ...(clearCompare ? { compareNote: null } : {}),
       });
       if (reload && status.solution_id) {
         continuationPending = false;
@@ -1456,19 +1576,32 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   async solve() {
+    const validation = validateSetupForSolve(get().draft);
+    if (!validation.ok) {
+      // Client-side validation must not wipe a previous valid study.
+      set({
+        solveValidationErrors: validation.errors,
+        message: `Cannot solve: ${validation.errors.join("; ")}`,
+      });
+      return;
+    }
+    invalidateAllAnalysisRequests();
     set({
       phase: "solving",
       message: "Solving…",
+      solveValidationErrors: [],
       currentNode: null,
-      pathTrail: [],
+pathTrail: [],
       navHistory: [],
       navHistoryIndex: -1,
       canNavBack: false,
       canNavForward: false,
-      nodeValues: null,
-      runouts: null,
-      equity: null,
-      categories: null,
+      ...emptyAnalysisState(),
+      compareNote: null,
+      strategyEditScope: null,
+      strategyEditDraft: defaultLockDraft(0),
+      strategyEditDraftBaseline: null,
+      strategyEditDrawerOpen: false,
       selectedCell: null,
     });
     try {
@@ -1490,7 +1623,17 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId) {
       return;
     }
-    set({ phase: "solving", message: "Continuing…", currentNode: null, nodeValues: null });
+    invalidateAllAnalysisRequests();
+    set({
+      phase: "solving",
+      message: "Continuing…",
+      currentNode: null,
+      ...emptyAnalysisState(),
+      strategyEditScope: null,
+      strategyEditDraft: defaultLockDraft(0),
+      strategyEditDraftBaseline: null,
+      strategyEditDrawerOpen: false,
+    });
     try {
       const body: { iterations: number; time_limit?: number } = {
         iterations: get().draft.iterations,
@@ -1515,13 +1658,18 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId) {
       return;
     }
+    invalidateAllAnalysisRequests();
     set({
       phase: "solving",
       message: get().warmStart
         ? "Resolving with locks (warm-start)…"
         : "Resolving with locks (reset)…",
       currentNode: null,
-      nodeValues: null,
+      ...emptyAnalysisState(),
+      strategyEditScope: null,
+      strategyEditDraft: defaultLockDraft(0),
+      strategyEditDraftBaseline: null,
+      strategyEditDrawerOpen: false,
     });
     try {
       const body: {
@@ -1576,10 +1724,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const historyMode = opts?.history ?? "push";
     const token = ++nodeToken;
-    const previous = get().currentNode;
+const previous = get().currentNode;
+    // Drop every analysis result and in-flight poll so panels never show another node.
+    invalidateAllAnalysisRequests();
+    const priorScope = get().strategyEditScope;
     set({
       solutionId,
-      nodeValues: null,
+      ...emptyAnalysisState(),
+      selectedCell: null,
       phase: get().status?.running ? get().phase : get().phase,
     });
     try {
@@ -1590,7 +1742,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (typeof node.status_generation === "number" && node.status_generation < seenGeneration) {
         return;
       }
-      const rootId = get().status?.root_node_id || rootNodeId(undefined);
+const rootId = get().status?.root_node_id || rootNodeId(undefined);
       const pot = Number(node.pot ?? get().status?.pot ?? get().draft.pot ?? 0);
       let pathTrail = get().pathTrail;
       if (historyMode !== "none") {
@@ -1625,18 +1777,39 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         }
       }
 
+      const nextSolutionId = node.solution_id ?? solutionId;
+      const nextScope = strategyEditScopeFromNode(nextSolutionId, node);
+      // Only reset when identity changes — never silently rebind hand indices.
+      const strategyScopeChanged =
+        priorScope != null && !strategyEditScopesEqual(priorScope, nextScope);
       set({
         currentNode: node,
-        solutionId: node.solution_id ?? solutionId,
+        solutionId: nextSolutionId,
         frequencyMode: "aggression",
         actionFilter: null,
         lockDraft: defaultLockDraft(node.actions?.length ?? 0),
         lockDraftBaseline: defaultLockDraft(node.actions?.length ?? 0),
-        pathTrail,
+pathTrail,
         navHistory,
         navHistoryIndex,
         canNavBack: navHistoryIndex > 0,
         canNavForward: navHistoryIndex >= 0 && navHistoryIndex < navHistory.length - 1,
+        ...(strategyScopeChanged
+          ? {
+              strategyEditScope: null,
+              strategyEditDraft: defaultLockDraft(node.actions?.length ?? 0),
+              strategyEditDraftBaseline: null,
+              strategyEditDrawerOpen: false,
+            }
+          : priorScope == null
+            ? {
+                // Keep draft empty/unscoped until the drawer opens on this node.
+                strategyEditScope: null,
+              }
+            : {
+                // Same identity (e.g. re-publish after apply): keep draft bound.
+                strategyEditScope: nextScope,
+              }),
       });
       void get().refreshLocks();
     } catch (error) {
@@ -1667,12 +1840,38 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
-    const token = ++valueToken;
-    set({ phase: "analysis_pending", message: "Calculating action EVs…" });
+    const revision = analysisRevision(node, get().status);
+    const { token, identity } = beginAnalysisRequest(
+      "values",
+      solutionId,
+      node.node_id,
+      revision,
+    );
+    set({
+      phase: "analysis_pending",
+      message: "Calculating action EVs…",
+      nodeValues: { pending: true, node_id: node.node_id, solution_id: solutionId },
+    });
     await pollAnalysis(
+      "values",
       token,
       () => engineClient.getValues(solutionId, node.node_id),
       (values) => {
+        if (!analysisRequestIsCurrent("values", token)) {
+          return;
+        }
+        const live = get().currentNode;
+        const liveSolution = get().solutionId;
+        if (
+          !live ||
+          live.node_id !== identity.nodeId ||
+          liveSolution !== identity.solutionId
+        ) {
+          return;
+        }
+        if (values.node_id && values.node_id !== identity.nodeId) {
+          return;
+        }
         set({
           nodeValues: values,
           phase: phaseFromStatus(get().status, "complete"),
@@ -1681,9 +1880,13 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         });
       },
       (message) => {
+        if (!analysisRequestIsCurrent("values", token)) {
+          return;
+        }
         set({
           phase: phaseFromStatus(get().status, "complete"),
           message,
+          nodeValues: null,
         });
       },
     );
@@ -1695,20 +1898,50 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
-    const token = ++valueToken;
+    const revision = analysisRevision(node, get().status);
+    const { token, identity } = beginAnalysisRequest(
+      "runouts",
+      solutionId,
+      node.node_id,
+      revision,
+    );
     set({
       message: "Loading runouts…",
       analysisTab: "runouts",
-      runouts: { pending: true },
+      runouts: { pending: true, node_id: node.node_id, solution_id: solutionId },
     });
     await pollAnalysis(
+      "runouts",
       token,
       () =>
-        engineClient.getRunouts(solutionId, node.node_id) as Promise<{ pending?: boolean }>,
+        engineClient.getRunouts(solutionId, node.node_id) as Promise<{
+          pending?: boolean;
+          node_id?: string;
+          solution_id?: string;
+        }>,
       (runouts) => {
+        if (!analysisRequestIsCurrent("runouts", token)) {
+          return;
+        }
+        const live = get().currentNode;
+        if (
+          !live ||
+          live.node_id !== identity.nodeId ||
+          get().solutionId !== identity.solutionId
+        ) {
+          return;
+        }
+        if (runouts.node_id && runouts.node_id !== identity.nodeId) {
+          return;
+        }
         set({ runouts, message: "Runouts ready." });
       },
-      (message) => set({ message, runouts: null }),
+      (message) => {
+        if (!analysisRequestIsCurrent("runouts", token)) {
+          return;
+        }
+        set({ message, runouts: null });
+      },
     );
   },
 
@@ -1718,20 +1951,50 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
-    const token = ++valueToken;
+    const revision = analysisRevision(node, get().status);
+    const { token, identity } = beginAnalysisRequest(
+      "equity",
+      solutionId,
+      node.node_id,
+      revision,
+    );
     set({
       message: "Loading equity…",
       analysisTab: "equity",
-      equity: { pending: true },
+      equity: { pending: true, node_id: node.node_id, solution_id: solutionId },
     });
     await pollAnalysis(
+      "equity",
       token,
       () =>
-        engineClient.getEquity(solutionId, node.node_id) as Promise<{ pending?: boolean }>,
+        engineClient.getEquity(solutionId, node.node_id) as Promise<{
+          pending?: boolean;
+          node_id?: string;
+          solution_id?: string;
+        }>,
       (equity) => {
+        if (!analysisRequestIsCurrent("equity", token)) {
+          return;
+        }
+        const live = get().currentNode;
+        if (
+          !live ||
+          live.node_id !== identity.nodeId ||
+          get().solutionId !== identity.solutionId
+        ) {
+          return;
+        }
+        if (equity.node_id && equity.node_id !== identity.nodeId) {
+          return;
+        }
         set({ equity, message: "Equity ready." });
       },
-      (message) => set({ message }),
+      (message) => {
+        if (!analysisRequestIsCurrent("equity", token)) {
+          return;
+        }
+        set({ message, equity: null });
+      },
     );
   },
 
@@ -1741,20 +2004,50 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
-    const token = ++valueToken;
+    const revision = analysisRevision(node, get().status);
+    const { token, identity } = beginAnalysisRequest(
+      "categories",
+      solutionId,
+      node.node_id,
+      revision,
+    );
     set({
       message: "Loading categories…",
       analysisTab: "categories",
-      categories: { pending: true },
+      categories: { pending: true, node_id: node.node_id, solution_id: solutionId },
     });
     await pollAnalysis(
+      "categories",
       token,
       () =>
-        engineClient.getCategories(solutionId, node.node_id) as Promise<{ pending?: boolean }>,
+        engineClient.getCategories(solutionId, node.node_id) as Promise<{
+          pending?: boolean;
+          node_id?: string;
+          solution_id?: string;
+        }>,
       (categories) => {
+        if (!analysisRequestIsCurrent("categories", token)) {
+          return;
+        }
+        const live = get().currentNode;
+        if (
+          !live ||
+          live.node_id !== identity.nodeId ||
+          get().solutionId !== identity.solutionId
+        ) {
+          return;
+        }
+        if (categories.node_id && categories.node_id !== identity.nodeId) {
+          return;
+        }
         set({ categories, message: "Categories ready." });
       },
-      (message) => set({ message }),
+      (message) => {
+        if (!analysisRequestIsCurrent("categories", token)) {
+          return;
+        }
+        set({ message, categories: null });
+      },
     );
   },
 
@@ -1786,13 +2079,36 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       set({ message: "Set a solution path before opening." });
       return;
     }
-    set({ phase: "loading", message: `Opening ${target}…`, currentNode: null });
+    invalidateAllAnalysisRequests();
+    set({
+      phase: "loading",
+      message: `Opening ${target}…`,
+      currentNode: null,
+      ...emptyAnalysisState(),
+      compareNote: null,
+      strategyEditScope: null,
+      strategyEditDraft: defaultLockDraft(0),
+      strategyEditDraftBaseline: null,
+      strategyEditDrawerOpen: false,
+    });
     try {
       await engineClient.open(target);
       continuationPending = true;
       get().startPolling();
       await get().refresh();
-      set({ draft: { ...get().draft, solutionPath: target } });
+      // Sync Build draft from status so Solve uses the opened spot, not a prior draft.
+      // Limitation: status omits ranges / bet sizes / tree_edits — those stay as-is.
+      const status = get().status;
+      const fromStatus = status ? draftPartialFromStatus(status) : {};
+      set({
+        draft: {
+          ...get().draft,
+          ...fromStatus,
+          solutionPath: target,
+        },
+        draftRevision: bumpRevision(get().draftRevision),
+        message: `Opened ${target}. Build draft synced from solution status (ranges/bet sizes not in status).`,
+      });
     } catch (error) {
       set({
         phase: "failed",
@@ -1807,6 +2123,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const targetNode = nodeId || get().currentNode?.node_id;
     if (!baseline || !scenario || !targetNode) {
       set({
+        compareNote: null,
         message:
           "Compare needs a baseline (after resolve-locked), the scenario solution, and a decision node.",
       });
@@ -1818,6 +2135,16 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         scenario,
         targetNode,
       )) as ComparePayload;
+      if (
+        !compareNoteIsValid(compareNote, baseline, scenario, targetNode)
+      ) {
+        set({
+          compareNote: null,
+          message:
+            "Compare response identity did not match the requested baseline/scenario/node.",
+        });
+        return;
+      }
       set({
         compareNote,
         workspace: "compare",

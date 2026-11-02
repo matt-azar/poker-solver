@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { compareNoteIsValid } from "../../domain/setup";
 import { useStudyStore } from "../../state/studyStore";
 import { CompareHeader } from "./CompareHeader";
 import {
@@ -21,14 +22,19 @@ export function CompareWorkspace() {
   const [sort, setSort] = useState<HandSort>("delta");
   const [busy, setBusy] = useState(false);
 
-  const nodeId = currentNode?.node_id ?? compareNote?.node_id ?? null;
+  // Prefer the live Study node; never fall back to a stale compare root across solutions.
+  const nodeId = currentNode?.node_id ?? null;
   const canCompare = Boolean(baselineSolutionId && solutionId && nodeId);
   const missingBaseline = !baselineSolutionId;
-  const noteMatchesNode =
-    Boolean(compareNote) && (!nodeId || compareNote?.node_id === nodeId);
+  const noteValid = compareNoteIsValid(
+    compareNote,
+    baselineSolutionId,
+    solutionId,
+    nodeId,
+  );
 
   useEffect(() => {
-    if (!canCompare || noteMatchesNode) {
+    if (!canCompare || noteValid) {
       return;
     }
     let cancelled = false;
@@ -41,7 +47,7 @@ export function CompareWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [canCompare, loadCompare, nodeId, noteMatchesNode]);
+  }, [canCompare, loadCompare, nodeId, noteValid]);
 
   async function onRefresh() {
     setBusy(true);
@@ -103,15 +109,9 @@ export function CompareWorkspace() {
           <h2>No decision node</h2>
           <p>Select a decision node in Study, then refresh.</p>
         </div>
-      ) : compareNote ? (
+      ) : noteValid && compareNote ? (
         <>
           <CompareHeader note={compareNote} />
-          {currentNode?.node_id && compareNote.node_id !== currentNode.node_id ? (
-            <p className="compare-store-message" role="status">
-              Showing compare for {compareNote.node_id}; Study is on {currentNode.node_id}. Refresh
-              compare to reload for the current node.
-            </p>
-          ) : null}
           {message && /compare|arity|disagree|baseline|scenario/i.test(message) ? (
             <p className="compare-store-message" role="status">
               {message}

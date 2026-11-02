@@ -66,3 +66,20 @@ export {
   type SetupStudyMeta,
   type SetupTransactionSnapshot,
 } from "./setupTransaction";
+
+export {
+  actionsSignature,
+  analysisIdentitiesEqual,
+  analysisIdentityKey,
+  analysisPayloadMatchesNode,
+  combosSignature,
+  compareNoteIsValid,
+  draftPartialFromStatus,
+  resolveBaselineSolutionId,
+  shouldClearCompareNote,
+  strategyEditScopeFromNode,
+  strategyEditScopesEqual,
+  type AnalysisIdentity,
+  type AnalysisKind,
+  type StrategyEditScope,
+} from "./identity";
