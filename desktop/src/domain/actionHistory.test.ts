@@ -1,27 +1,40 @@
 import { describe, expect, it } from "vitest";
 import {
   actionSizePotBasis,
+  advancePathTrail,
+  canNavBack,
+  canNavForward,
+  compactActionLabel,
+  edgeStepFromNode,
   formatChoiceFrequency,
+  groupPathByStreet,
+  isTerminalFold,
   lineCrumbs,
   nextChoicesFromNode,
   nodeEffectiveStack,
   nodePot,
+  nodeStatusLabel,
+  pathCrumbsFromTrail,
+  pushNavHistory,
+  replaceTrailAlternative,
+  rootPathStep,
   splitActionLine,
+  streetFromPlace,
 } from "./actionHistory";
 import type { NodePayload } from "./types";
 
 describe("actionHistory helpers", () => {
-  it("splits engine line paths into crumbs", () => {
+  it("splits engine line paths into crumbs with compact labels", () => {
     expect(splitActionLine("open")).toEqual([]);
     expect(splitActionLine("Check/Bet 50/Call")).toEqual([
       "Check",
       "Bet 50",
       "Call",
     ]);
-    expect(lineCrumbs("Check/Bet 50", "root-1")).toEqual([
-      { label: "Root", nodeId: "root-1" },
-      { label: "Check" },
-      { label: "Bet 50" },
+    expect(lineCrumbs("Check/Bet 50", "root-1", 100)).toEqual([
+      { label: "Root", nodeId: "root-1", kind: "root" },
+      { label: "Check", rawLabel: "Check", kind: "action" },
+      { label: "b50", rawLabel: "Bet 50", kind: "action" },
     ]);
   });
 
@@ -39,6 +52,13 @@ describe("actionHistory helpers", () => {
     expect(actionSizePotBasis({ node_id: "root", pot: 100, to_call: 0 }, 100)).toBe(
       100,
     );
+  });
+
+  it("keeps b50 compact and does not expand to Bet 50%", () => {
+    expect(compactActionLabel("Bet 50", 100)).toBe("b50");
+    expect(compactActionLabel("Bet 50", 100)).not.toMatch(/Bet 50%/i);
+    expect(compactActionLabel("Check", 100)).toBe("Check");
+    expect(compactActionLabel("As", 100)).toBe("As");
   });
 
   it("pairs actions with child ids and strategy frequencies", () => {
@@ -81,5 +101,204 @@ describe("actionHistory helpers", () => {
     const choices = nextChoicesFromNode(node);
     expect(choices.map((choice) => choice.label)).toEqual(["As", "2h"]);
     expect(choices[0]?.nodeId).toBe("n1");
+  });
+
+  it("labels fold terminals distinctly from showdown", () => {
+    expect(
+      nodeStatusLabel({
+        node_id: "t-fold",
+        kind: "terminal",
+        folded: 0,
+        line: "Bet 50/Fold",
+      }),
+    ).toBe("OOP folded");
+    expect(
+      nodeStatusLabel({
+        node_id: "t-fold-ip",
+        kind: "terminal",
+        folded: 1,
+        line: "Check/Bet 50/Fold",
+      }),
+    ).toBe("IP folded");
+    expect(
+      nodeStatusLabel({
+        node_id: "t-sd",
+        kind: "terminal",
+        folded: null,
+        line: "Check/Check",
+      }),
+    ).toBe("Showdown");
+    expect(
+      isTerminalFold({
+        node_id: "t-fold-line",
+        kind: "terminal",
+        line: "Bet 50/Fold",
+      }),
+    ).toBe(true);
+    expect(
+      isTerminalFold({
+        node_id: "t-sd",
+        kind: "terminal",
+        line: "Check/Call",
+      }),
+    ).toBe(false);
+  });
+
+  it("maps place strings to streets", () => {
+    expect(streetFromPlace("flop", 3)).toBe("flop");
+    expect(streetFromPlace("deal turn", 3)).toBe("turn");
+    expect(streetFromPlace("turn As", 4)).toBe("turn");
+    expect(streetFromPlace("turn As river Kd", 5)).toBe("river");
+    expect(streetFromPlace("deal river", 4)).toBe("river");
+  });
+
+  it("builds trail edges with actor ownership and alternatives", () => {
+    const from: NodePayload = {
+      node_id: "root",
+      kind: "decision",
+      player: 0,
+      place: "flop",
+      board: ["Ah", "Kd", "7c"],
+      pot: 100,
+      actions: ["Check", "Bet 50"],
+      children: ["n-check", "n-bet"],
+    };
+    const edge = edgeStepFromNode(from, "n-bet", 100);
+    expect(edge).toMatchObject({
+      nodeId: "n-bet",
+      label: "b50",
+      rawLabel: "Bet 50",
+      actor: "OOP",
+      street: "flop",
+      kind: "action",
+    });
+    expect(edge?.alternatives).toEqual([
+      { label: "Check", nodeId: "n-check", kind: "action" },
+    ]);
+  });
+
+  it("advances and truncates the client path trail", () => {
+    const root = rootPathStep("root", ["Ah", "Kd", "7c"], "flop");
+    const from: NodePayload = {
+      node_id: "root",
+      kind: "decision",
+      player: 0,
+      place: "flop",
+      board: ["Ah", "Kd", "7c"],
+      pot: 100,
+      actions: ["Check", "Bet 50"],
+      children: ["n-check", "n-bet"],
+    };
+    const arrived: NodePayload = {
+      node_id: "n-bet",
+      kind: "decision",
+      player: 1,
+      place: "flop",
+      board: ["Ah", "Kd", "7c"],
+      line: "Bet 50",
+    };
+    const trail = advancePathTrail([root], from, arrived, 100, "root");
+    expect(trail.map((step) => step.nodeId)).toEqual(["root", "n-bet"]);
+    expect(trail[1]?.label).toBe("b50");
+
+    const back = advancePathTrail(trail, arrived, { ...from, node_id: "root" }, 100, "root");
+    expect(back.map((step) => step.nodeId)).toEqual(["root"]);
+  });
+
+  it("groups path steps by street with board cards", () => {
+    const steps = [
+      rootPathStep("root", ["Ah", "Kd", "7c", "2s"], "flop"),
+      {
+        nodeId: "n1",
+        label: "x",
+        rawLabel: "Check",
+        kind: "action" as const,
+        street: "flop" as const,
+        actor: "OOP",
+      },
+      {
+        nodeId: "n2",
+        label: "2s",
+        rawLabel: "2s",
+        kind: "card" as const,
+        street: "turn" as const,
+        actor: null,
+        card: "2s",
+      },
+    ];
+    const groups = groupPathByStreet(steps, ["Ah", "Kd", "7c", "2s"]);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.street).toBe("flop");
+    expect(groups[0]?.boardCards).toEqual(["Ah", "Kd", "7c"]);
+    expect(groups[1]?.street).toBe("turn");
+    expect(groups[1]?.boardCards).toEqual(["2s"]);
+  });
+
+  it("prefers trail crumbs with node ids over line-only crumbs", () => {
+    const trail = [
+      rootPathStep("root"),
+      {
+        nodeId: "n-check",
+        label: "Check",
+        rawLabel: "Check",
+        kind: "action" as const,
+        street: "flop" as const,
+        actor: "OOP",
+      },
+    ];
+    const crumbs = pathCrumbsFromTrail(
+      trail,
+      "Check/Bet 50",
+      "root",
+      "n-check",
+      100,
+    );
+    expect(crumbs).toHaveLength(2);
+    expect(crumbs[1]?.nodeId).toBe("n-check");
+  });
+
+  it("replaces a prior action alternative and drops descendants", () => {
+    const trail = [
+      rootPathStep("root"),
+      {
+        nodeId: "n-bet",
+        label: "b50",
+        rawLabel: "Bet 50",
+        kind: "action" as const,
+        street: "flop" as const,
+        actor: "OOP",
+        alternatives: [{ label: "Check", nodeId: "n-check", kind: "action" as const }],
+      },
+      {
+        nodeId: "n-call",
+        label: "Call",
+        rawLabel: "Call",
+        kind: "action" as const,
+        street: "flop" as const,
+        actor: "IP",
+      },
+    ];
+    const next = replaceTrailAlternative(
+      trail,
+      1,
+      { label: "Check", nodeId: "n-check", kind: "action" },
+      100,
+    );
+    expect(next?.map((step) => step.nodeId)).toEqual(["root", "n-check"]);
+    expect(next?.[1]?.label).toBe("Check");
+  });
+
+  it("pushes browser-style nav history with back/forward bounds", () => {
+    const first = pushNavHistory([], -1, { nodeId: "a", trail: [] });
+    expect(first.index).toBe(0);
+    const second = pushNavHistory(first.entries, first.index, {
+      nodeId: "b",
+      trail: [],
+    });
+    expect(second.index).toBe(1);
+    expect(canNavBack(second.index)).toBe(true);
+    expect(canNavForward(second.entries, second.index)).toBe(false);
+    const backIndex = second.index - 1;
+    expect(canNavForward(second.entries, backIndex)).toBe(true);
   });
 });
