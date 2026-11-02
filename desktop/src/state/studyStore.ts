@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import { resolveSizeList } from "../domain/betSizes";
 import {
+  prepareBoardCardChange as evaluateBoardCardChange,
+  type BoardCardChangeResult,
+  type DealStreet,
+} from "../domain/cards";
+import {
   boardCards,
   blankGrid,
   createRangeHistory,
@@ -486,6 +491,15 @@ interface StudyState {
   stop: () => Promise<void>;
   navigateTo: (nodeId: string) => Promise<void>;
   followAction: (nodeId: string) => Promise<void>;
+  /**
+   * Open-path gate for turn/river card changes from the board strip.
+   *
+   * TODO(ui-card-board): Line-preserving sibling-card navigation needs ancestor
+   * chance lookup (parent/path APIs or a client path cache). Until that lands,
+   * this only succeeds when `currentNode` is already the matching deal node,
+   * and otherwise explains why the comparison would be unsafe.
+   */
+  prepareBoardCardChange: (street: DealStreet) => BoardCardChangeResult;
   calculateEv: () => Promise<void>;
   loadRunouts: () => Promise<void>;
   loadEquity: () => Promise<void>;
@@ -1490,6 +1504,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
 
   async followAction(nodeId: string) {
     await get().navigateTo(nodeId);
+  },
+
+  prepareBoardCardChange(street: DealStreet) {
+    const result = evaluateBoardCardChange(get().currentNode, street);
+    if (!result.ok) {
+      set({ message: result.reason });
+    }
+    return result;
   },
 
   async calculateEv() {

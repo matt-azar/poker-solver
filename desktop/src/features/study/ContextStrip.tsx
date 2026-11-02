@@ -3,23 +3,28 @@ import {
   nodeEffectiveStack,
   nodePot,
 } from "../../domain/actionHistory";
-import { boardBlockers } from "../../domain/cards";
+import {
+  boardGroups,
+  dealStreetFromBoard,
+  normalizeBoardCards,
+  type DealStreet,
+} from "../../domain/cards";
 import { engineActivityMessage, phaseLabel } from "../../domain/solveActivity";
 import { useStudyStore } from "../../state/studyStore";
+import { PlayingCard } from "../cards/PlayingCard";
 import { CardPicker } from "../tree/CardPicker";
 import { SolveControls } from "./SolveControls";
+import "../../styles/cards.css";
 
 function boardList(
   board: string[] | string | null | undefined,
   draftBoard: string,
 ): string[] {
-  if (Array.isArray(board) && board.length) {
-    return board.map(String);
+  const fromNode = normalizeBoardCards(board);
+  if (fromNode.length) {
+    return fromNode;
   }
-  if (typeof board === "string" && board.trim()) {
-    return board.trim().split(/\s+/);
-  }
-  return draftBoard.trim() ? draftBoard.trim().split(/\s+/) : [];
+  return normalizeBoardCards(draftBoard);
 }
 
 function toActLabel(
@@ -45,7 +50,9 @@ export function ContextStrip() {
   const phase = useStudyStore((s) => s.phase);
   const message = useStudyStore((s) => s.message);
   const solutionId = useStudyStore((s) => s.solutionId);
+  const prepareBoardCardChange = useStudyStore((s) => s.prepareBoardCardChange);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerStreet, setPickerStreet] = useState<DealStreet | null>(null);
   const activity = engineActivityMessage(phase, status, message);
   const live =
     phase === "solving" ||
@@ -54,13 +61,14 @@ export function ContextStrip() {
     phase === "stop_requested";
 
   const cards = boardList(currentNode?.board ?? status?.board, draft.boardText);
-  const blockers = boardBlockers(cards);
+  const groups = boardGroups(cards);
   const rootPot = Number(status?.pot ?? draft.pot);
   const rootStack = Number(status?.stack ?? draft.stack);
   const pot = nodePot(currentNode, rootPot);
   const stack = nodeEffectiveStack(currentNode, rootStack);
   const spr = pot > 0 ? (stack / pot).toFixed(2) : "—";
   const dealNode = currentNode?.kind === "chance";
+  const dealing = dealNode ? dealStreetFromBoard(currentNode?.board) : null;
   const toAct = dealNode
     ? "Deal"
     : toActLabel(currentNode?.to_act, currentNode?.player ?? null);
@@ -70,45 +78,101 @@ export function ContextStrip() {
     (Number(currentNode.pot) !== rootPot ||
       nodeEffectiveStack(currentNode, rootStack) !== rootStack);
 
+  const showTurnSlot = Boolean(groups.turn || dealing === "turn" || groups.river);
+  const showRiverSlot = Boolean(groups.river || dealing === "river");
+  const activeStreet = pickerOpen ? pickerStreet ?? dealing : dealing;
+
+  const openPickerFor = (street: DealStreet) => {
+    const result = prepareBoardCardChange(street);
+    if (!result.ok) {
+      return;
+    }
+    setPickerStreet(street);
+    setPickerOpen(true);
+  };
+
+  const closePicker = () => {
+    setPickerOpen(false);
+    setPickerStreet(null);
+  };
+
   return (
     <div className="context-strip">
       <div className="context-strip__group">
         <span className="context-strip__label">Board</span>
-        <div className="context-strip__board" role="group" aria-label="Board cards">
-          {cards.length ? (
-            cards.map((card, index) => (
-              <button
-                key={`${card}-${index}`}
-                type="button"
-                className="board-card"
-                data-suit={card.slice(1, 2)?.toLowerCase()}
-                data-blocker={blockers.has(card) ? "true" : "false"}
-                title={dealNode ? "Open next-card picker" : card}
-                onClick={() => {
-                  if (dealNode) {
-                    setPickerOpen(true);
-                  }
-                }}
-              >
-                {card}
-              </button>
-            ))
+        <div className="context-strip__board board-cards" role="group" aria-label="Board cards">
+          {groups.flop.length ? (
+            <div className="board-cards__flop" role="group" aria-label="Flop">
+              {groups.flop.map((card, index) => (
+                <PlayingCard key={`flop-${card}-${index}`} card={card} size="sm" />
+              ))}
+            </div>
           ) : (
             <span className="context-strip__value">—</span>
           )}
-          {dealNode ? (
+          {showTurnSlot ? (
+            <div
+              className="board-cards__street"
+              data-active={activeStreet === "turn" ? "true" : "false"}
+              role="group"
+              aria-label="Turn"
+            >
+              <span className="board-cards__street-label">T</span>
+              <PlayingCard
+                card={groups.turn}
+                emptyLabel="T"
+                size="sm"
+                interactive
+                selected={activeStreet === "turn" && pickerOpen}
+                title={
+                  groups.turn
+                    ? "Change turn card"
+                    : dealNode
+                      ? "Deal turn card"
+                      : "Turn"
+                }
+                onClick={() => openPickerFor("turn")}
+              />
+            </div>
+          ) : null}
+          {showRiverSlot ? (
+            <div
+              className="board-cards__street"
+              data-active={activeStreet === "river" ? "true" : "false"}
+              role="group"
+              aria-label="River"
+            >
+              <span className="board-cards__street-label">R</span>
+              <PlayingCard
+                card={groups.river}
+                emptyLabel="R"
+                size="sm"
+                interactive
+                selected={activeStreet === "river" && pickerOpen}
+                title={
+                  groups.river
+                    ? "Change river card"
+                    : dealNode
+                      ? "Deal river card"
+                      : "River"
+                }
+                onClick={() => openPickerFor("river")}
+              />
+            </div>
+          ) : null}
+          {dealNode && dealing ? (
             <button
               type="button"
               className="toolbar-btn"
-              onClick={() => setPickerOpen(true)}
-              aria-label="Open next-card picker"
+              onClick={() => openPickerFor(dealing)}
+              aria-label={`Open ${dealing} card picker`}
             >
               Next…
             </button>
           ) : null}
         </div>
       </div>
-      <CardPicker open={pickerOpen} onClose={() => setPickerOpen(false)} />
+      <CardPicker open={pickerOpen} street={pickerStreet} onClose={closePicker} />
       <div className="context-strip__sep" />
       <div className="context-strip__group">
         <span className="context-strip__label">Pot</span>

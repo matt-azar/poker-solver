@@ -1,0 +1,281 @@
+/* Shared playing-card + next-card picker styles (imported from card components).
+   Keep board/picker visuals here — do not extend layout.css for this slice. */
+
+.playing-card {
+  --playing-card-suit: var(--text);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
+  color: var(--playing-card-suit);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  line-height: 1.05;
+  user-select: none;
+  vertical-align: middle;
+}
+
+.playing-card[data-suit="h"] {
+  --playing-card-suit: var(--suit-heart);
+}
+
+.playing-card[data-suit="d"] {
+  --playing-card-suit: var(--suit-diamond);
+}
+
+.playing-card[data-suit="c"] {
+  --playing-card-suit: var(--suit-club);
+}
+
+.playing-card[data-suit="s"] {
+  --playing-card-suit: var(--suit-spade);
+}
+
+.playing-card[data-size="sm"] {
+  min-width: 28px;
+  min-height: 36px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+.playing-card[data-size="md"] {
+  min-width: 34px;
+  min-height: 42px;
+  padding: 3px 5px;
+  font-size: 12px;
+}
+
+.playing-card__rank {
+  letter-spacing: 0.02em;
+}
+
+.playing-card__suit {
+  font-size: 0.95em;
+  line-height: 1;
+}
+
+.playing-card[data-empty="true"] {
+  color: var(--muted);
+  border-style: dashed;
+  background: transparent;
+  font-weight: 600;
+}
+
+.playing-card[data-empty="true"] .playing-card__suit {
+  opacity: 0.55;
+}
+
+.playing-card[data-faded="true"],
+.playing-card:disabled,
+.playing-card[aria-disabled="true"] {
+  opacity: 0.35;
+}
+
+.playing-card[data-selected="true"],
+.playing-card[data-focused="true"] {
+  outline: 2px solid var(--selection-outline);
+  outline-offset: 1px;
+}
+
+.playing-card[data-interactive="true"]:not(:disabled):not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+.playing-card[data-interactive="true"]:not(:disabled):not([aria-disabled="true"]):hover,
+.playing-card[data-interactive="true"]:not(:disabled):not([aria-disabled="true"]):focus-visible {
+  outline: 2px solid var(--selection-outline);
+  outline-offset: 1px;
+}
+
+button.playing-card {
+  appearance: none;
+  margin: 0;
+}
+
+/* Compact board in the study context strip */
+
+.board-cards {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.board-cards__flop {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.board-cards__street {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding-left: 6px;
+  margin-left: 2px;
+  border-left: 1px solid var(--border);
+}
+
+.board-cards__street[data-active="true"] {
+  border-left-color: var(--selection-outline);
+}
+
+.board-cards__street-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  min-width: 1.6em;
+}
+
+.board-cards__street[data-active="true"] .board-cards__street-label {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* Next-card picker dialog */
+
+.card-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, #000 45%, transparent);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+  padding: var(--space-3);
+}
+
+.card-picker {
+  width: min(720px, 100%);
+  max-height: min(720px, 92vh);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.card-picker__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.card-picker__street {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.card-picker__street-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--selection-outline);
+  background: color-mix(in srgb, var(--selection-outline) 16%, transparent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.card-picker-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.card-picker-header,
+.card-picker-suit-row {
+  display: grid;
+  grid-template-columns: 22px repeat(13, minmax(0, 1fr));
+  gap: 2px;
+  align-items: center;
+}
+
+.card-picker-corner {
+  min-height: 1px;
+}
+
+.card-picker-rank,
+.card-picker-suit-label {
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.card-picker-suit-label {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.card-picker-suit-label[data-suit="h"] {
+  color: var(--suit-heart);
+}
+
+.card-picker-suit-label[data-suit="d"] {
+  color: var(--suit-diamond);
+}
+
+.card-picker-suit-label[data-suit="c"] {
+  color: var(--suit-club);
+}
+
+.card-picker-suit-label[data-suit="s"] {
+  color: var(--suit-spade);
+}
+
+/* Reset legacy layout.css .card-picker-cell chrome — face lives on PlayingCard. */
+.card-picker-cell {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+.card-picker-cell .playing-card {
+  width: 100%;
+  min-width: 0;
+}
+
+.card-picker-cell[data-focused="true"] {
+  outline: none;
+}
+
+.card-picker-cell[data-blocked="true"],
+.card-picker-cell[data-missing="true"] {
+  opacity: 1; /* fading is on the PlayingCard face */
+}
+
+@media (max-width: 720px) {
+  .card-picker {
+    width: 100%;
+  }
+
+  .playing-card[data-size="md"] {
+    min-width: 0;
+    min-height: 34px;
+    font-size: 10px;
+    padding: 2px 1px;
+  }
+}
