@@ -1,9 +1,14 @@
 import { useMemo, useState } from "react";
+import { parseCardCode } from "../../domain/cards";
 import type { RunoutCardModel, RunoutsModel } from "../../engine/runouts";
 import { useStudyStore } from "../../state/studyStore";
 
 type SuitFilter = "all" | "s" | "h" | "d" | "c";
 type SortKey = "card" | "probability" | "oopEv" | "ipEv";
+
+function suitOf(card: string): string | undefined {
+  return parseCardCode(card)?.suit;
+}
 
 function formatOptional(value: number | null | undefined, defined: boolean, digits: number): string {
   if (!defined || value == null || !Number.isFinite(value)) {
@@ -125,7 +130,9 @@ export function RunoutTable() {
                 data-child-id={row.childId || undefined}
                 onClick={() => row.childId && void followAction(row.childId)}
               >
-                <td>{row.card}</td>
+                <td className="runout-card" data-suit={suitOf(row.card)}>
+                  {row.card}
+                </td>
                 <td className="tabular">
                   {formatOptional(row.probability, row.probabilityDefined, 4)}
                 </td>

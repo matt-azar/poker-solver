@@ -12,7 +12,9 @@
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --danger: #a33b32;
   --ok: #2f7a52;
-  /* Four-color deck: hearts red, diamonds blue, clubs green, spades dark. */
+  /* Four-color deck: hearts red, diamonds blue, clubs green, spades dark.
+     Every suit-tinted surface (board, path, picker, PlayingCard) must use
+     these tokens — never group hearts+diamonds as one "red". */
   --suit-heart: #a33b32;
   --suit-diamond: #1f5fbf;
   --suit-club: #2f7a52;
