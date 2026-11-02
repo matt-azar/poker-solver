@@ -55,6 +55,10 @@ struct StreetMemoryReport
     std::uint64_t regret_strategy_sum_bytes = 0;
     std::uint64_t sigma_workspace_bytes = 0;
     int table_scalar_bytes = static_cast<int>(kTableScalarBytes);
+    // True when StreetConfig::table_i16 stored regret/strategy-sum as int16.
+    bool table_i16 = false;
+    // Float pass-delta / expand workspace charged when table_i16 is on (0 off).
+    std::uint64_t table_i16_workspace_bytes = 0;
     std::uint64_t estimated_peak_bytes = 0;
     std::uint64_t expanded_terminals = 0;
     std::uint64_t expanded_decisions = 0;

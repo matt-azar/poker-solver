@@ -1529,6 +1529,7 @@ bool same_config(const StreetConfig& left, const StreetConfig& right)
         && left.first_to_act == right.first_to_act
         && left.memory_mib == right.memory_mib
         && left.threads == right.threads
+        && left.table_i16 == right.table_i16
         && left.suit_iso == right.suit_iso
         && poker::solver::format_tree_edits(left.tree_edits)
             == poker::solver::format_tree_edits(right.tree_edits);
@@ -1589,6 +1590,7 @@ void expect_canonical_street_config()
         "rake-cap 0\n"
         "memory-mib 1024\n"
         "threads 1\n"
+        "table-i16 0\n"
         "suit-iso 0\n"
         "oop-bets 0.5 20c\n"
         "oop-turn-bets 0.25\n"
@@ -1688,6 +1690,7 @@ void expect_canonical_street_config()
         "rake-cap 0\n"
         "memory-mib 1024\n"
         "threads 1\n"
+        "table-i16 0\n"
         "suit-iso 0\n"
         "oop-bets 1\n"
         "oop-raises 1\n";
