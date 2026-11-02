@@ -116,8 +116,23 @@ export function solutionNeedsReload(
   return status.solution_id !== solutionId || continuationPending === true;
 }
 
-export function groupHands(node: NodePayload): HandCell[] {
-  const cells = new Map<string, HandCell>();
+/**
+ * Hand cell with engine reach aggregated for Range-mode inclusion display.
+ * Strategy / EV helpers keep using posterior {@link HandCell.marginalSum}.
+ */
+export type AggregatedHandCell = HandCell & {
+  /** Sum of pre-posterior reach across combos present in this 169-cell. */
+  reachSum: number;
+};
+
+function nodeReach(node: NodePayload): number[] | null {
+  const reach = node.reach;
+  return Array.isArray(reach) ? (reach as number[]) : null;
+}
+
+export function groupHands(node: NodePayload): AggregatedHandCell[] {
+  const cells = new Map<string, AggregatedHandCell>();
+  const reach = nodeReach(node);
   (node.combos || []).forEach((combo, index) => {
     const high = RANKS.indexOf(combo[0] as (typeof RANKS)[number]);
     const low = RANKS.indexOf(combo[2] as (typeof RANKS)[number]);
@@ -146,6 +161,7 @@ export function groupHands(node: NodePayload): HandCell[] {
         hands: [],
         range_combos: 0,
         marginalSum: 0,
+        reachSum: 0,
         actionMass: (node.actions || []).map(() => 0),
         aggressionMass: 0,
         defined: !!node.reach_defined,
@@ -154,6 +170,7 @@ export function groupHands(node: NodePayload): HandCell[] {
     const cell = cells.get(key)!;
     const strategy = node.strategy ? node.strategy[index] : null;
     const marginal = node.reach_defined ? Number(node.marginal?.[index] ?? 0) : 0;
+    const handReach = node.reach_defined ? Number(reach?.[index] ?? 0) : 0;
     const actions = strategy
       ? (node.actions || []).map((action, actionIndex) => ({
           action,
@@ -166,6 +183,7 @@ export function groupHands(node: NodePayload): HandCell[] {
       return;
     }
     cell.marginalSum += marginal;
+    cell.reachSum += handReach;
     if (!strategy) {
       return;
     }
@@ -177,6 +195,29 @@ export function groupHands(node: NodePayload): HandCell[] {
     });
   });
   return [...cells.values()];
+}
+
+/** Human-readable name for Range-mode cell numbers (not average posterior). */
+export const RANGE_INCLUSION_MEASURE = "inclusion weight";
+
+/**
+ * Conventional range inclusion for a 169-cell: mean engine reach across the
+ * combos listed for that class. Uses reach, not normalized posterior marginal.
+ */
+export function rangeInclusionOf(cell: AggregatedHandCell | HandCell): number | null {
+  const reachSum =
+    "reachSum" in cell && typeof cell.reachSum === "number" ? cell.reachSum : null;
+  if (!cell.defined || cell.range_combos <= 0 || reachSum == null) {
+    return null;
+  }
+  if (!(reachSum > 0)) {
+    return 0;
+  }
+  return Math.min(1, reachSum / cell.range_combos);
+}
+
+export function formatRangeInclusion(weight: number): string {
+  return `${(weight * 100).toFixed(0)}`;
 }
 
 export function frequencyOf(cell: HandCell, mode: FrequencyMode): number | null {

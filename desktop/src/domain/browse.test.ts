@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatRangeInclusion,
   frequencyOf,
   groupEv,
   groupHands,
@@ -7,7 +8,9 @@ import {
   isExcludedMatrixCell,
   isPartialRangeDisplay,
   nextGeneration,
+RANGE_INCLUSION_MEASURE,
   rangeDisplayWeight,
+  rangeInclusionOf,
   shouldApply,
   solutionNeedsReload,
   strategyMix,
@@ -27,6 +30,7 @@ describe("browse strategy grouping", () => {
       reach_defined: true,
       actions: ["Check", "Bet 50", "Bet 100"],
       combos: ["AhAd"],
+      reach: [1],
       marginal: [1],
       strategy: [[0.2, 0.3, 0.5]],
       node_id: "p00.t-1.r-1",
@@ -40,6 +44,7 @@ describe("browse strategy grouping", () => {
       reach_defined: true,
       actions: ["Check", "Bet 50", "Bet 100"],
       combos: ["AhAd", "AsAc"],
+      reach: [0.25, 0.75],
       marginal: [0.25, 0.75],
       strategy: [
         [0.2, 0.3, 0.5],
@@ -54,11 +59,33 @@ describe("browse strategy grouping", () => {
     expect(frequencyOf(weightedCell, "aggression")).toBeCloseTo(0.95, 12);
   });
 
+  it("Range mode inclusion uses reach, not average posterior marginal", () => {
+    // AA-only: three combos each reach=1, posterior marginal=1/3.
+    // Old UI showed 33 (mean posterior); inclusion weight must be 100.
+    const node = {
+      reach_defined: true,
+      actions: ["Check"],
+      combos: ["AhAd", "AsAc", "AsAh"],
+      reach: [1, 1, 1],
+      marginal: [1 / 3, 1 / 3, 1 / 3],
+      strategy: [[1], [1], [1]],
+      node_id: "aa-only",
+    };
+    const aa = cellOf(node, "AA");
+    expect(aa.marginalSum).toBeCloseTo(1, 12);
+    expect(aa.reachSum).toBeCloseTo(3, 12);
+    expect(aa.marginalSum / aa.range_combos).toBeCloseTo(1 / 3, 12);
+    expect(rangeInclusionOf(aa)).toBeCloseTo(1, 12);
+    expect(formatRangeInclusion(rangeInclusionOf(aa)!)).toBe("100");
+    expect(RANGE_INCLUSION_MEASURE).toBe("inclusion weight");
+  });
+
   it("keeps zero-mass EV undefined", () => {
     const node = {
       reach_defined: true,
       actions: ["Check", "Bet 50"],
       combos: ["AhAd", "KhKd"],
+      reach: [1, 0],
       marginal: [1, 0],
       strategy: [
         [0.5, 0.5],
@@ -87,6 +114,7 @@ describe("browse strategy grouping", () => {
       reach_defined: true,
       actions: ["Fold", "Call"],
       combos: ["AhAd"],
+      reach: [1],
       marginal: [1],
       strategy: [[0.5, 0.5]],
       node_id: "facing",
