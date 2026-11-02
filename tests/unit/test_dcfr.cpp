@@ -462,11 +462,13 @@ void expect_algorithm_tags_and_rejection()
     CHECK(poker::solver::algorithm_tag(Algorithm::LinearCfr) == 2);
     CHECK(poker::solver::algorithm_tag(Algorithm::Dcfr) == 3);
     CHECK(poker::solver::algorithm_from_tag(3) == Algorithm::Dcfr);
+    CHECK(poker::solver::algorithm_tag(Algorithm::PcfrPlus) == 4);
+    CHECK(poker::solver::algorithm_from_tag(4) == Algorithm::PcfrPlus);
 
     bool unknown = false;
     try
     {
-        (void)poker::solver::algorithm_from_tag(4);
+        (void)poker::solver::algorithm_from_tag(5);
     }
     catch (const std::invalid_argument&)
     {
@@ -476,7 +478,7 @@ void expect_algorithm_tags_and_rejection()
 
     poker::explorer::CheckpointDocument document;
     document.kind = 1;
-    document.algorithm = 4;
+    document.algorithm = 5;
     document.frozen = true;
     document.samples = 1;
     document.config_text = "street-config 1\n";

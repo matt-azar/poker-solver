@@ -29,7 +29,11 @@ enum class Algorithm
     LinearCfr,
     // Fixed DCFR(1.5, 0, 2): alternating passes, signed regrets with
     // pass-level discounting, quadratic own-reach average weights.
-    Dcfr
+    Dcfr,
+    // Predictive CFR+ (PRM+): alternating frozen passes; regret matching on
+    // R+m with m = last instantaneous CF regret; CFR+ floor after the pass;
+    // linear (t) own-reach average. Cold-starts m=0.
+    PcfrPlus
 };
 
 struct SolveConfig
@@ -103,6 +107,10 @@ inline const char* algorithm_name(Algorithm algorithm)
     {
         return "dcfr";
     }
+    if (algorithm == Algorithm::PcfrPlus)
+    {
+        return "pcfr_plus";
+    }
     return "vanilla_cfr";
 }
 
@@ -111,7 +119,8 @@ inline constexpr std::uint8_t kAlgorithmTagVanilla = 0;
 inline constexpr std::uint8_t kAlgorithmTagCfrPlus = 1;
 inline constexpr std::uint8_t kAlgorithmTagLinear = 2;
 inline constexpr std::uint8_t kAlgorithmTagDcfr = 3;
-inline constexpr std::uint8_t kAlgorithmTagMax = kAlgorithmTagDcfr;
+inline constexpr std::uint8_t kAlgorithmTagPcfrPlus = 4;
+inline constexpr std::uint8_t kAlgorithmTagMax = kAlgorithmTagPcfrPlus;
 
 inline std::uint8_t algorithm_tag(Algorithm algorithm)
 {
@@ -130,6 +139,10 @@ inline std::uint8_t algorithm_tag(Algorithm algorithm)
     if (algorithm == Algorithm::Dcfr)
     {
         return kAlgorithmTagDcfr;
+    }
+    if (algorithm == Algorithm::PcfrPlus)
+    {
+        return kAlgorithmTagPcfrPlus;
     }
     throw std::invalid_argument("algorithm has no checkpoint tag");
 }
@@ -151,6 +164,10 @@ inline Algorithm algorithm_from_tag(std::uint8_t tag)
     if (tag == kAlgorithmTagDcfr)
     {
         return Algorithm::Dcfr;
+    }
+    if (tag == kAlgorithmTagPcfrPlus)
+    {
+        return Algorithm::PcfrPlus;
     }
     throw std::invalid_argument("checkpoint algorithm is unknown");
 }
@@ -515,6 +532,7 @@ public:
         strategy_sum_.assign(static_cast<std::size_t>(entries), 0.0);
         pass_sigma_.assign(static_cast<std::size_t>(entries), 0.0);
         pass_delta_.assign(static_cast<std::size_t>(entries), 0.0);
+        last_r_.assign(static_cast<std::size_t>(entries), 0.0);
     }
 
     void run_iterations(int count)
@@ -538,6 +556,13 @@ public:
                 dcfr_negative_ = factors.negative_discount;
                 run_pass(0, factors.average_weight);
                 run_pass(1, factors.average_weight);
+            }
+            else if (algorithm_ == Algorithm::PcfrPlus)
+            {
+                // PCFR+: same alternating schedule and t-average as CFR+; RM on R+m.
+                const double weight = static_cast<double>(iterations_completed_);
+                run_pass(0, weight);
+                run_pass(1, weight);
             }
             else
             {
@@ -817,18 +842,34 @@ private:
     // set do not see regrets written earlier in this pass.
     // When locks_ is set, locked action rows replace RM output for matching
     // infosets. Kuhn and other non-combo trainers pass combo_index 0.
+    // PCFR+: match on cumulative regret plus the previous pass's instantaneous
+    // CF regret (last_r_), then apply locks.
     void begin_pass()
     {
         std::fill(pass_delta_.begin(), pass_delta_.end(), 0.0);
         const int infosets = game_.infoset_count();
+        const bool predictive = algorithm_ == Algorithm::PcfrPlus;
         for (int infoset = 0; infoset < infosets; ++infoset)
         {
             const int count = game_.action_count(infoset);
             const int base = offset_[static_cast<std::size_t>(infoset)];
-            regret_matching(
-                regret_.data() + base,
-                pass_sigma_.data() + base,
-                count);
+            if (predictive)
+            {
+                double predicted[kMaxActionsPerInfoset];
+                for (int action = 0; action < count; ++action)
+                {
+                    const std::size_t index = static_cast<std::size_t>(base + action);
+                    predicted[action] = regret_[index] + last_r_[index];
+                }
+                regret_matching(predicted, pass_sigma_.data() + base, count);
+            }
+            else
+            {
+                regret_matching(
+                    regret_.data() + base,
+                    pass_sigma_.data() + base,
+                    count);
+            }
             if (locks_ != nullptr)
             {
                 const NodeLock* lock = locks_->find(static_cast<std::size_t>(infoset));
@@ -842,9 +883,10 @@ private:
 
     // Add this player's summed regret, then finalize that player once.
     // Vanilla and linear pass updating_player < 0 and keep signed regrets.
-    // CFR+ floors the updating player. DCFR discounts the updating player
-    // with the iteration's fixed (positive, negative) factors. The other
-    // player's table is left unchanged.
+    // CFR+ / PCFR+ floors the updating player. DCFR discounts the updating
+    // player with the iteration's fixed (positive, negative) factors. PCFR+
+    // also stores the pass instantaneous vector as the next prediction.
+    // The other player's table is left unchanged.
     void end_pass(int updating_player)
     {
         const int infosets = game_.infoset_count();
@@ -852,8 +894,13 @@ private:
         {
             const int actor = game_.acting_player(infoset);
             const bool active = updating_player < 0 || actor == updating_player;
-            const bool floor_this = algorithm_ == Algorithm::CfrPlus && active && updating_player >= 0;
+            const bool floor_this =
+                (algorithm_ == Algorithm::CfrPlus || algorithm_ == Algorithm::PcfrPlus)
+                && active
+                && updating_player >= 0;
             const bool discount_this = algorithm_ == Algorithm::Dcfr && active && updating_player >= 0;
+            const bool store_prediction =
+                algorithm_ == Algorithm::PcfrPlus && active && updating_player >= 0;
             const int count = game_.action_count(infoset);
             const int base = offset_[static_cast<std::size_t>(infoset)];
             for (int action = 0; action < count; ++action)
@@ -881,6 +928,10 @@ private:
                 {
                     regret_[index] = 0.0;
                 }
+                if (store_prediction)
+                {
+                    last_r_[index] = pass_delta_[index];
+                }
             }
         }
     }
@@ -892,6 +943,8 @@ private:
     std::vector<double> strategy_sum_;
     std::vector<double> pass_sigma_;
     std::vector<double> pass_delta_;
+    // PCFR+ prediction: previous instantaneous CF regret (zeros until first pass).
+    std::vector<double> last_r_;
     int iterations_completed_ = 0;
     double dcfr_positive_ = 1.0;
     double dcfr_negative_ = 0.5;

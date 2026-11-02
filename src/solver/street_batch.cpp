@@ -1142,6 +1142,11 @@ struct StreetBatchSolver::Engine
     std::pmr::vector<std::uint64_t> mask[2];
     std::pmr::vector<Support> support[2];
     std::pmr::vector<double> frozen_sigma;
+    // PCFR+: last instantaneous CF regret per action slot (prediction m). Empty
+    // until the first PCFR+ train allocates it. Cold-starts at zeros; PSOL reload
+    // does not restore this table (prediction resumes cold).
+    std::pmr::vector<double> prediction_;
+    bool pcfr_collect_ = false;
     mutable bool average_ready = false;
     mutable bool ranks_ready_ = false;
     mutable bool support_ready_ = false;
@@ -1190,6 +1195,8 @@ struct StreetBatchSolver::Engine
         FloorAndFreeze = 2,
         Discount = 3,
         DiscountAndFreeze = 4,
+        PcfrCommit = 5,
+        PcfrZeroPrediction = 6,
     };
     PoolJob pool_job_ = PoolJob::Chance;
     SlotPass slot_pass_ = SlotPass::Freeze;
@@ -1251,6 +1258,7 @@ struct StreetBatchSolver::Engine
         , mask{std::pmr::vector<std::uint64_t>(heap_), std::pmr::vector<std::uint64_t>(heap_)}
         , support{std::pmr::vector<Support>(heap_), std::pmr::vector<Support>(heap_)}
         , frozen_sigma(heap_)
+        , prediction_(heap_)
         , result0_(heap_)
         , result1_(heap_)
         , plan_only_(plan_only)
@@ -2246,10 +2254,25 @@ struct StreetBatchSolver::Engine
     {
         std::fill(regret.begin(), regret.end(), 0.0);
         std::fill(strategy_sum.begin(), strategy_sum.end(), 0.0);
+        if (!prediction_.empty())
+        {
+            std::fill(prediction_.begin(), prediction_.end(), 0.0);
+        }
         average_ready = false;
         trained = 0;
         algorithm_bound_ = false;
         bound_algorithm_ = Algorithm::CfrPlus;
+        pcfr_collect_ = false;
+    }
+
+    void ensure_pcfr_prediction_table()
+    {
+        if (prediction_.size() == regret.size())
+        {
+            return;
+        }
+        budget_->set_stage("pcfr_prediction");
+        prediction_.assign(regret.size(), 0.0);
     }
 
     // Reject algorithm switches on trained state before any table mutation.
@@ -2286,6 +2309,10 @@ struct StreetBatchSolver::Engine
         if (algorithm == Algorithm::Dcfr)
         {
             throw std::invalid_argument("DCFR requires the frozen street pass");
+        }
+        if (algorithm == Algorithm::PcfrPlus)
+        {
+            throw std::invalid_argument("PCFR+ requires the frozen street pass");
         }
         if (algorithm != Algorithm::VanillaCfr && algorithm != Algorithm::CfrPlus)
         {
@@ -4088,13 +4115,28 @@ struct StreetBatchSolver::Engine
 
     void apply_freeze_range(std::size_t begin, std::size_t end)
     {
+        const bool predictive =
+            bound_algorithm_ == Algorithm::PcfrPlus && prediction_.size() == regret.size();
+        double predicted[8];
         for (std::size_t index = begin; index < end; ++index)
         {
             const Slot& slot = slots[index];
-            regret_matching(
-                regret.data() + slot.base,
-                frozen_sigma.data() + slot.base,
-                slot.n_actions);
+            if (predictive)
+            {
+                for (int action = 0; action < slot.n_actions; ++action)
+                {
+                    const std::size_t at = static_cast<std::size_t>(slot.base + action);
+                    predicted[action] = regret[at] + prediction_[at];
+                }
+                regret_matching(predicted, frozen_sigma.data() + slot.base, slot.n_actions);
+            }
+            else
+            {
+                regret_matching(
+                    regret.data() + slot.base,
+                    frozen_sigma.data() + slot.base,
+                    slot.n_actions);
+            }
             if (locks_ != nullptr)
             {
                 const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
@@ -4130,8 +4172,12 @@ struct StreetBatchSolver::Engine
 
     // Floor one player's regrets, then rebuild frozen_sigma for every slot.
     // Same values as floor_player then freeze_sigma; one slot scan instead of two.
+    // Under PCFR+, matching uses R+m (prediction_) after the floor.
     void apply_floor_and_freeze_range(std::size_t begin, std::size_t end, int player)
     {
+        const bool predictive =
+            bound_algorithm_ == Algorithm::PcfrPlus && prediction_.size() == regret.size();
+        double predicted[8];
         for (std::size_t index = begin; index < end; ++index)
         {
             const Slot& slot = slots[index];
@@ -4146,10 +4192,22 @@ struct StreetBatchSolver::Engine
                     }
                 }
             }
-            regret_matching(
-                regret.data() + slot.base,
-                frozen_sigma.data() + slot.base,
-                slot.n_actions);
+            if (predictive)
+            {
+                for (int action = 0; action < slot.n_actions; ++action)
+                {
+                    const std::size_t at = static_cast<std::size_t>(slot.base + action);
+                    predicted[action] = regret[at] + prediction_[at];
+                }
+                regret_matching(predicted, frozen_sigma.data() + slot.base, slot.n_actions);
+            }
+            else
+            {
+                regret_matching(
+                    regret.data() + slot.base,
+                    frozen_sigma.data() + slot.base,
+                    slot.n_actions);
+            }
             if (locks_ != nullptr)
             {
                 const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
@@ -4159,6 +4217,46 @@ struct StreetBatchSolver::Engine
                         static_cast<std::size_t>(slot.n_actions)),
                     lock,
                     static_cast<std::size_t>(slot.hand));
+            }
+        }
+    }
+
+    // PCFR+: after a walk that wrote instantaneous CF regret into prediction_,
+    // add those increments into regret, floor the updating player, and keep
+    // prediction_ as m for the next match. Opponent prediction rows are untouched.
+    void apply_pcfr_commit_range(std::size_t begin, std::size_t end, int player)
+    {
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[index];
+            if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player != player)
+            {
+                continue;
+            }
+            for (int action = 0; action < slot.n_actions; ++action)
+            {
+                const std::size_t at = static_cast<std::size_t>(slot.base + action);
+                regret[at] += prediction_[at];
+                if (regret[at] < 0.0)
+                {
+                    regret[at] = 0.0;
+                }
+            }
+        }
+    }
+
+    void apply_pcfr_zero_prediction_range(std::size_t begin, std::size_t end, int player)
+    {
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[index];
+            if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player != player)
+            {
+                continue;
+            }
+            for (int action = 0; action < slot.n_actions; ++action)
+            {
+                prediction_[static_cast<std::size_t>(slot.base + action)] = 0.0;
             }
         }
     }
@@ -4235,6 +4333,12 @@ struct StreetBatchSolver::Engine
             break;
         case SlotPass::DiscountAndFreeze:
             apply_discount_and_freeze_range(first, last, slot_floor_player_);
+            break;
+        case SlotPass::PcfrCommit:
+            apply_pcfr_commit_range(first, last, slot_floor_player_);
+            break;
+        case SlotPass::PcfrZeroPrediction:
+            apply_pcfr_zero_prediction_range(first, last, slot_floor_player_);
             break;
         }
     }
@@ -4576,8 +4680,17 @@ struct StreetBatchSolver::Engine
                         strategy_sum.data() + base, sigma, node.n_actions, weight_iter * pi0[h0]);
                     for (int action = 0; action < node.n_actions; ++action)
                     {
-                        regret[static_cast<std::size_t>(base + action)] +=
+                        const std::size_t at = static_cast<std::size_t>(base + action);
+                        const double instant =
                             here.aev0[static_cast<std::size_t>(action * n0 + h0)] - mix;
+                        if (pcfr_collect_)
+                        {
+                            prediction_[at] += instant;
+                        }
+                        else
+                        {
+                            regret[at] += instant;
+                        }
                     }
                 }
             }
@@ -4620,8 +4733,17 @@ struct StreetBatchSolver::Engine
                     for (int action = 0; action < node.n_actions; ++action)
                     {
                         // Own-utility regret: ev1 holds player-1 modeled utility.
-                        regret[static_cast<std::size_t>(base + action)] +=
+                        const std::size_t at = static_cast<std::size_t>(base + action);
+                        const double instant =
                             here.aev1[static_cast<std::size_t>(action * n1 + h1)] - mix;
+                        if (pcfr_collect_)
+                        {
+                            prediction_[at] += instant;
+                        }
+                        else
+                        {
+                            regret[at] += instant;
+                        }
                     }
                 }
             }
@@ -4670,6 +4792,24 @@ struct StreetBatchSolver::Engine
             ? std::chrono::steady_clock::now()
             : std::chrono::steady_clock::time_point{};
         run_slot_pass(SlotPass::FloorAndFreeze, player);
+        if (profile_)
+        {
+            freeze_seconds_ += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+        }
+    }
+
+    void pcfr_zero_prediction(int player)
+    {
+        run_slot_pass(SlotPass::PcfrZeroPrediction, player);
+    }
+
+    void pcfr_commit(int player)
+    {
+        const auto started = profile_
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        run_slot_pass(SlotPass::PcfrCommit, player);
         if (profile_)
         {
             freeze_seconds_ += std::chrono::duration<double>(
@@ -4728,12 +4868,17 @@ struct StreetBatchSolver::Engine
         check_usable();
         if (algorithm != Algorithm::VanillaCfr
             && algorithm != Algorithm::CfrPlus
-            && algorithm != Algorithm::Dcfr)
+            && algorithm != Algorithm::Dcfr
+            && algorithm != Algorithm::PcfrPlus)
         {
             throw std::invalid_argument(
-                "the frozen street pass implements vanilla CFR, CFR+, and DCFR");
+                "the frozen street pass implements vanilla CFR, CFR+, DCFR, and PCFR+");
         }
         bind_training_algorithm(algorithm);
+        if (algorithm == Algorithm::PcfrPlus)
+        {
+            ensure_pcfr_prediction_table();
+        }
         average_ready = false;
         ensure_ranks();
         ensure_support_masks();
@@ -4761,6 +4906,28 @@ struct StreetBatchSolver::Engine
                 std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
                 frozen_walk(workspace, 0, -1, -1, 0, 1, factors.average_weight, false);
                 discount_player(1, factors.positive_discount, factors.negative_discount);
+            }
+            else if (algorithm == Algorithm::PcfrPlus)
+            {
+                // PCFR+: RM on R+m, accumulate instantaneous into prediction_,
+                // commit+floor updating player; linear average weight t.
+                const double weight_iter = static_cast<double>(trained);
+                freeze_sigma();
+                pcfr_zero_prediction(0);
+                pcfr_collect_ = true;
+                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
+                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
+                frozen_walk(workspace, 0, -1, -1, 0, 0, weight_iter, false);
+                pcfr_collect_ = false;
+                pcfr_commit(0);
+                freeze_sigma();
+                pcfr_zero_prediction(1);
+                pcfr_collect_ = true;
+                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
+                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
+                frozen_walk(workspace, 0, -1, -1, 0, 1, weight_iter, false);
+                pcfr_collect_ = false;
+                pcfr_commit(1);
             }
             else
             {
