@@ -8,6 +8,8 @@
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
+#include "poker/suit_iso.hpp"
+#include "solver/node_lock.hpp"
 #include "solver/river_batch.hpp"
 #include "solver/street_batch.hpp"
 #include "solver/table_scalar.hpp"
@@ -782,6 +784,100 @@ void expect_memory_budget()
     expect_street_batch(blocked, poker::solver::Algorithm::VanillaCfr, 1, false);
 }
 
+void expect_suit_iso()
+{
+    using poker::holdem::suit_iso_group;
+    using poker::holdem::board_suit_stabilizer;
+
+    // Rainbow starting board: each suit appears once → stabilizer is identity.
+    const std::vector<int> rainbow = {card("Ah"), card("Kd"), card("7c"), card("4s")};
+    CHECK(board_suit_stabilizer(rainbow).size() == 1);
+
+    // Monotone hearts + one club: diamonds and spades are free to swap.
+    const std::vector<int> monotone = {card("Ah"), card("Kh"), card("Qh"), card("2c")};
+    CHECK(board_suit_stabilizer(monotone).size() == 2);
+
+    const Range pairs = Range::parse("33,44,55,66,77");
+    CHECK(suit_iso_group(monotone, pairs, pairs).size() == 2);
+
+    // Suit-asymmetric range destroys the free swap.
+    const Range skewed = Range::parse("3d3h");
+    CHECK(suit_iso_group(monotone, skewed, pairs).size() == 1);
+
+    StreetConfig baseline = check_only(monotone, "33,44,55,66,77", "33,44,55,66,77");
+    baseline.memory_mib = 64;
+    StreetConfig iso_cfg = baseline;
+    iso_cfg.suit_iso = true;
+    StreetConfig skewed_cfg = check_only(monotone, "3d3h", "33,44,55,66,77");
+    skewed_cfg.memory_mib = 64;
+    skewed_cfg.suit_iso = true;
+
+    poker::solver::StreetBatchSolver off(baseline);
+    poker::solver::StreetBatchSolver on(iso_cfg);
+    poker::solver::StreetBatchSolver skewed_on(skewed_cfg);
+
+    CHECK(!off.suit_iso_requested());
+    CHECK(!off.suit_iso_active());
+    CHECK(off.suit_iso_group_size() == 1);
+
+    CHECK(on.suit_iso_requested());
+    CHECK(on.suit_iso_active());
+    CHECK(on.suit_iso_group_size() == 2);
+    CHECK(on.infoset_count() < off.infoset_count());
+    CHECK(on.memory_report().peak_allocated_bytes < off.memory_report().peak_allocated_bytes);
+
+    CHECK(skewed_on.suit_iso_requested());
+    CHECK(!skewed_on.suit_iso_active());
+    CHECK(skewed_on.suit_iso_group_size() == 1);
+
+    StreetConfig skewed_off = skewed_cfg;
+    skewed_off.suit_iso = false;
+    poker::solver::StreetBatchSolver skewed_baseline(skewed_off);
+    CHECK(skewed_on.infoset_count() == skewed_baseline.infoset_count());
+
+    // Symmetric iso on/off: EV matches within float table tolerance after a few passes.
+    off.run_frozen_iterations(8, poker::solver::Algorithm::CfrPlus);
+    on.run_frozen_iterations(8, poker::solver::Algorithm::CfrPlus);
+    CHECK_NEAR(off.expected_utility(), on.expected_utility(), 1e-3);
+    CHECK_NEAR(off.nash_gap(), on.nash_gap(), 1e-3);
+
+    // Rainbow + suit-iso: no sharing, same slot count as baseline.
+    StreetConfig rainbow_off = check_only(rainbow, "33,44,55", "33,44,55");
+    rainbow_off.memory_mib = 64;
+    StreetConfig rainbow_on = rainbow_off;
+    rainbow_on.suit_iso = true;
+    poker::solver::StreetBatchSolver rainbow_a(rainbow_off);
+    poker::solver::StreetBatchSolver rainbow_b(rainbow_on);
+    CHECK(rainbow_b.suit_iso_requested());
+    CHECK(!rainbow_b.suit_iso_active());
+    CHECK(rainbow_a.infoset_count() == rainbow_b.infoset_count());
+    rainbow_a.run_frozen_iterations(4, poker::solver::Algorithm::CfrPlus);
+    rainbow_b.run_frozen_iterations(4, poker::solver::Algorithm::CfrPlus);
+    CHECK_NEAR(rainbow_a.expected_utility(), rainbow_b.expected_utility(), 1e-4);
+
+    // Asymmetric ranges with iso requested still match their non-iso twin.
+    skewed_baseline.run_frozen_iterations(4, poker::solver::Algorithm::CfrPlus);
+    skewed_on.run_frozen_iterations(4, poker::solver::Algorithm::CfrPlus);
+    CHECK_NEAR(skewed_baseline.expected_utility(), skewed_on.expected_utility(), 1e-4);
+
+    // Fail closed: locks rejected while sharing is active.
+    poker::solver::LockSet locks;
+    poker::solver::NodeLock lock;
+    lock.infoset_id = 0;
+    lock.kind = poker::solver::LockKind::FullNode;
+    locks.upsert(std::move(lock));
+    CHECK(throws_invalid([&] {
+        on.run_frozen_iterations(1, poker::solver::Algorithm::CfrPlus, &locks);
+    }));
+
+    std::cout << "REPORT street_suit_iso\n";
+    std::cout << "  monotone_infosets_off " << off.infoset_count() << "\n";
+    std::cout << "  monotone_infosets_on " << on.infoset_count() << "\n";
+    std::cout << "  monotone_peak_bytes_off " << off.memory_report().peak_allocated_bytes << "\n";
+    std::cout << "  monotone_peak_bytes_on " << on.memory_report().peak_allocated_bytes << "\n";
+    std::cout << "  group_size " << on.suit_iso_group_size() << "\n";
+}
+
 void run_street_tests()
 {
     StreetConfig blocked;
@@ -1214,6 +1310,7 @@ void run_street_tests()
     expect_zero_own_reach();
     expect_average_without_opponent_reach();
     expect_turn_bluff_equilibrium();
+    expect_suit_iso();
 }
 
 void run_tree_rule_tests(const std::vector<int>& turn_board)
@@ -1432,6 +1529,7 @@ bool same_config(const StreetConfig& left, const StreetConfig& right)
         && left.first_to_act == right.first_to_act
         && left.memory_mib == right.memory_mib
         && left.threads == right.threads
+        && left.suit_iso == right.suit_iso
         && poker::solver::format_tree_edits(left.tree_edits)
             == poker::solver::format_tree_edits(right.tree_edits);
 }
@@ -1491,6 +1589,7 @@ void expect_canonical_street_config()
         "rake-cap 0\n"
         "memory-mib 1024\n"
         "threads 1\n"
+        "suit-iso 0\n"
         "oop-bets 0.5 20c\n"
         "oop-turn-bets 0.25\n"
         "oop-donk 40c\n"
@@ -1589,6 +1688,7 @@ void expect_canonical_street_config()
         "rake-cap 0\n"
         "memory-mib 1024\n"
         "threads 1\n"
+        "suit-iso 0\n"
         "oop-bets 1\n"
         "oop-raises 1\n";
     StreetConfig cli_default;

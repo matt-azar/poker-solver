@@ -24,6 +24,8 @@ An opening fraction `f` bets `round(f * pot)` tenths of a chip (pot stored at sc
 
 A turn tree adds one chance node after turn betting: the river, uniform over remaining cards. A flop tree adds two. A five-card tree adds none. Range weights enter only through the root hand distribution. `StreetBatchSolver` solves all three board lengths on one public tree and pins five-card results against `RiverGame`. The chip rule is the river rule with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
 
+Exact suit isomorphism (opt-in) identifies information sets that differ only by a suit permutation fixing the starting board set and both players' combo weights. Strategies and cumulative regrets are stored once per orbit; concrete chance outcomes still carry their ordinary \(1/|remaining|\) weights onto the shared row. When no non-identity permutation survives the board×range filter, the solve is identical to the non-iso indexing. See [STREETS.md](STREETS.md).
+
 Checked cases:
 
 - `Kh Kd 7c 4s`, aces against `2c3d`: check-down +50; CFR+ at 400 iterations reached 50.0016209123 with Nash gap 0.00187032418952.

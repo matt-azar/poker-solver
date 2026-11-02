@@ -361,6 +361,14 @@ public:
 
     std::uint64_t infoset_count() const;
     std::uint64_t deal_count() const;
+    // StreetConfig::suit_iso request bit (may still be inactive when the
+    // stabilizer is trivial or ranges break every non-identity symmetry).
+    bool suit_iso_requested() const;
+    // True when construction found a non-trivial board×range suit group and
+    // is sharing regret/strategy rows across isomorphic runouts/hands.
+    bool suit_iso_active() const;
+    // Size of the exact suit group in use (1 = identity only).
+    int suit_iso_group_size() const;
     int public_decisions() const;
     int public_terminals() const;
     // Expanded histories. These are not stored nodes.
