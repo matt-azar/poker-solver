@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
+import { blankGrid } from "../../domain/range";
+import { DEFAULT_SPOT } from "../../domain/types";
 import type { SetupDraftResult } from "../../domain/setup";
+import type { SetupUndoEntry } from "../../domain/setup";
 import { commitAssistantSetup } from "./commitAssistantSetup";
 
 function proposal(revision: number): SetupDraftResult {
   return {
     ok: true,
+    mode: "edit",
     draftPatch: { pot: 5.5 },
     pot: 5.5,
     provenance: {},
@@ -16,14 +20,52 @@ function proposal(revision: number): SetupDraftResult {
   };
 }
 
+function undoEntry(revision: number): SetupUndoEntry {
+  return {
+    operationId: `setup-${revision + 1}-1`,
+    mode: "edit",
+    changedKeys: ["pot"],
+    beforeDraft: { pot: 100 },
+    afterDraft: { pot: 5.5 },
+    rangesChanged: false,
+    beforeWeights: null,
+    afterWeights: null,
+    beforeMeta: null,
+    afterMeta: {
+      profile: null,
+      rangeSnapshot: null,
+      profileDataRevision: null,
+      provenance: {},
+      summary: ["test"],
+      conflicts: [],
+      missing: [],
+      canSolve: false,
+    },
+    baseRevision: revision,
+    resultRevision: revision + 1,
+    fullBefore: {
+      draft: { ...DEFAULT_SPOT, pot: 100 },
+      weights: { oop: blankGrid(), ip: blankGrid() },
+      meta: null,
+      draftRevision: revision,
+    },
+  };
+}
+
 describe("commitAssistantSetup", () => {
-  it("applies once with the original proposal and without force", () => {
+  it("applies once and returns a receipt from the undo entry", () => {
     const result = proposal(2);
-    const applySetupDraft = vi.fn(() => ({ ok: true as const }));
+    const entry = undoEntry(2);
+    const applySetupDraft = vi.fn(() => ({ ok: true as const, undoEntry: entry }));
 
     const outcome = commitAssistantSetup(result, applySetupDraft);
 
-    expect(outcome).toEqual({ ok: true });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.receipt.operationId).toBe(entry.operationId);
+    expect(outcome.receipt.changedFields).toEqual([
+      { field: "pot", before: 100, after: 5.5 },
+    ]);
     expect(applySetupDraft).toHaveBeenCalledTimes(1);
     expect(applySetupDraft).toHaveBeenCalledWith(result);
     expect(applySetupDraft.mock.calls[0][1]?.force).toBeUndefined();

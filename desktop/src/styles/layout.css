@@ -3500,6 +3500,19 @@
   color: var(--danger);
 }
 
+.help-chat-window__context {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .seat-tree__list {
   list-style: none;
   margin: 0;

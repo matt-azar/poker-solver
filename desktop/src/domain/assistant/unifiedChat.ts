@@ -2,6 +2,10 @@ import type { StudySetupPreferences } from "../setup";
 import type { SpotDraft } from "../types";
 import type { RangeProfileCatalogue } from "../profiles";
 import { buildUnifiedAssistantSystemPrompt } from "./contextPacks";
+import {
+  SELECTED_HAND_ANALYSIS_TOOL_SCHEMA,
+  type AssistantContextSnapshot,
+} from "./contextSnapshot";
 import { createFakeHelpChatClient } from "../help/helpChat";
 import {
   ASSISTANT_MAX_TEXT_LENGTH,
@@ -36,6 +40,8 @@ export interface UnifiedChatRequest {
   availableProfiles: ProfileMeta[];
   capabilities?: string[];
   draftRevision: number;
+  /** Versioned Build / Study context; preferred over ad-hoc setupSummary alone. */
+  contextSnapshot?: AssistantContextSnapshot;
   signal?: AbortSignal;
 }
 
@@ -237,6 +243,13 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
       draftRevision: requestRevision,
       availableProfiles: request.availableProfiles,
       capabilities: request.capabilities,
+      contextSnapshot: request.contextSnapshot ?? null,
+      analysisTools: {
+        available: [SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.name],
+        note:
+          "Selected-hand strategy/EV is embedded in contextSnapshot when already loaded. Runout/compare tools are not available.",
+        deferred: [...SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.deferredTools],
+      },
     });
 
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
