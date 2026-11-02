@@ -1,5 +1,6 @@
 #include "harness.hpp"
 
+#include "game/chips.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
 #include "solver/street_batch.hpp"
@@ -272,13 +273,14 @@ void test_incompatible_positive_reaches()
     const StreetInspection ip_node = solver.inspect_node(root.actions[static_cast<std::size_t>(bet)].child_id);
     CHECK(ip_node.player == 1);
     CHECK(ip_node.reach_defined);
-    // OOP bet 50% into pot 100 → pot 150, IP faces 50 to call.
-    CHECK(ip_node.pot == config.pot + 50);
-    CHECK(ip_node.contrib[0] == 50);
+    // OOP bet 50% into pot 100.0 chips (1000 tenths) → add 50.0 chips.
+    const poker::Chip half_pot = poker::chip_units(50);
+    CHECK(ip_node.pot == config.pot + half_pot);
+    CHECK(ip_node.contrib[0] == half_pot);
     CHECK(ip_node.contrib[1] == 0);
-    CHECK(ip_node.stacks[0] == config.stack - 50);
+    CHECK(ip_node.stacks[0] == config.stack - half_pot);
     CHECK(ip_node.stacks[1] == config.stack);
-    CHECK(ip_node.to_call == 50);
+    CHECK(ip_node.to_call == half_pot);
     CHECK(ip_node.parent_id == root.node_id);
     CHECK(ip_node.opponent_player == 0);
     CHECK(!ip_node.opponent_hands.empty());
