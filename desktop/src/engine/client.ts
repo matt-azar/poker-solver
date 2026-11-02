@@ -8,6 +8,7 @@ import type {
 } from "../domain/types";
 import { presentUserText } from "../domain/userText";
 import { isTauriRuntime } from "../platform";
+import { normalizeRunoutsPayload, type RunoutsModel } from "./runouts";
 
 function defaultEngineBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_ENGINE_URL;
@@ -193,7 +194,11 @@ export class EngineClient {
     return data as ActionValuesPayload;
   }
 
-  async getRunouts(solutionId: string, nodeId: string, signal?: AbortSignal): Promise<unknown> {
+  async getRunouts(
+    solutionId: string,
+    nodeId: string,
+    signal?: AbortSignal,
+  ): Promise<RunoutsModel> {
     const { response, data } = await this.request(
       "GET",
       `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/runouts`,
@@ -201,7 +206,7 @@ export class EngineClient {
       { signal },
     );
     this.ensureOk(response, data, true);
-    return data;
+    return normalizeRunoutsPayload(data);
   }
 
   async getEquity(solutionId: string, nodeId?: string, signal?: AbortSignal): Promise<unknown> {
