@@ -34,7 +34,11 @@ export function CompareWorkspace() {
   );
 
   useEffect(() => {
+    // When the note is already valid (or compare is unavailable), clear busy.
+    // Otherwise a successful load flips noteValid→true, the effect cleanup sets
+    // cancelled=true, and finally skips setBusy(false) — Refresh stays stuck.
     if (!canCompare || noteValid) {
+      setBusy(false);
       return;
     }
     let cancelled = false;

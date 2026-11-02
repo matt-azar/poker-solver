@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  openSolutionFile,
+  saveSolutionFileAs,
+} from "../../commands/solutionFiles";
 import { matchShortcut, SHORTCUTS } from "../../commands/shortcuts";
 import { solveControlFlags } from "../../domain/solveControls";
 import type { ThemePreference } from "../../domain/types";
-import { getPlatform } from "../../platform/browser";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { WORKSPACES, WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -36,7 +39,6 @@ export function MenuBar({
   const saveSolution = useStudyStore((s) => s.saveSolution);
   const openSolution = useStudyStore((s) => s.openSolution);
   const updateDraft = useStudyStore((s) => s.updateDraft);
-  const draftPath = useStudyStore((s) => s.draft.solutionPath);
   const toggleTheme = useStudyStore((s) => s.toggleTheme);
   const themePreference = useStudyStore((s) => s.themePreference);
   const setThemePreference = useStudyStore((s) => s.setThemePreference);
@@ -149,25 +151,23 @@ export function MenuBar({
             {
               label: "Open solution…",
               onClick: () => {
-                void (async () => {
-                  const path = await getPlatform().pickOpenPath();
-                  if (path) {
-                    updateDraft({ solutionPath: path });
-                    await openSolution(path);
-                  }
-                })();
+                void openSolutionFile({
+                  getSolutionPath: () => useStudyStore.getState().draft.solutionPath,
+                  updateDraft,
+                  openSolution,
+                  saveSolution,
+                });
               },
             },
             {
               label: "Save solution…",
               onClick: () => {
-                void (async () => {
-                  const path = await getPlatform().pickSavePath(draftPath);
-                  if (path) {
-                    updateDraft({ solutionPath: path });
-                    await saveSolution();
-                  }
-                })();
+                void saveSolutionFileAs({
+                  getSolutionPath: () => useStudyStore.getState().draft.solutionPath,
+                  updateDraft,
+                  openSolution,
+                  saveSolution,
+                });
               },
             },
             { sep: true },

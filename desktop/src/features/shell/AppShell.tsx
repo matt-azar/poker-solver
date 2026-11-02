@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
+import { applyDocumentTheme, useThemeStore } from "../../state/themeStore";
 import { useHelpChatStore } from "../../state/helpChatStore";
 import { ensureEngine } from "../../platform/engine";
 import { BuildWorkspace } from "../build/BuildWorkspace";
@@ -15,8 +16,8 @@ import { StatusBar } from "./StatusBar";
 export function AppShell() {
   const workspace = useStudyStore((s) => s.workspace);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
-  const theme = useStudyStore((s) => s.theme);
-  const setThemePreference = useStudyStore((s) => s.setThemePreference);
+  // themeStore is the single display + preference authority (R15).
+  const theme = useThemeStore((s) => s.theme);
   const setEvDisplayBasis = useStudyStore((s) => s.setEvDisplayBasis);
   const settings = useSettingsStore((s) => s.settings);
   const message = useStudyStore((s) => s.message);
@@ -30,21 +31,14 @@ export function AppShell() {
   const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document.body.dataset.theme = theme;
-    document.body.classList.remove("theme-light", "theme-dark");
-    document.body.classList.add(`theme-${theme}`);
+    applyDocumentTheme(theme);
   }, [theme]);
 
+  // Sync non-theme settings into the study store only — do not push
+  // settings.themePreference into themeStore (that wiped Theme-button choices).
   useEffect(() => {
-    setThemePreference(settings.themePreference);
     setEvDisplayBasis(settings.evDisplayBasis);
-  }, [
-    settings.themePreference,
-    settings.evDisplayBasis,
-    setThemePreference,
-    setEvDisplayBasis,
-  ]);
+  }, [settings.evDisplayBasis, setEvDisplayBasis]);
 
   useEffect(() => {
     // If boot already failed ensure_engine, keep that message until Reconnect.
