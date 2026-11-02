@@ -1543,6 +1543,30 @@ std::string json_inspection(
     out += view.reach_defined ? "true" : "false";
     out += ",\"joint\":";
     out += format_number(view.joint);
+    out += ",\"pot\":";
+    out += std::to_string(view.pot);
+    out += ",\"contrib\":[";
+    out += std::to_string(view.contrib[0]);
+    out += ',';
+    out += std::to_string(view.contrib[1]);
+    out += "],\"stacks\":[";
+    out += std::to_string(view.stacks[0]);
+    out += ',';
+    out += std::to_string(view.stacks[1]);
+    out += "],\"stack\":";
+    out += std::to_string(
+        view.stacks[0] < view.stacks[1] ? view.stacks[0] : view.stacks[1]);
+    out += ",\"to_call\":";
+    out += std::to_string(view.to_call);
+    out += ",\"parent_id\":";
+    if (view.parent_id.empty())
+    {
+        out += "null";
+    }
+    else
+    {
+        append_escaped(out, view.parent_id);
+    }
     out += ",\"board\":[";
     for (std::size_t i = 0; i < view.board.size(); ++i)
     {
@@ -1638,7 +1662,45 @@ std::string json_inspection(
         }
         out += ']';
     }
-    out += "],\"cards\":[";
+    out += "],\"opponent_player\":";
+    out += view.opponent_player < 0 ? "null" : std::to_string(view.opponent_player);
+    out += ",\"opponent_combos\":[";
+    for (std::size_t i = 0; i < view.opponent_hands.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        append_escaped(out, view.opponent_hands[i].combo);
+    }
+    out += "],\"opponent_reach\":[";
+    for (std::size_t i = 0; i < view.opponent_hands.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out += ',';
+        }
+        out += format_number(view.opponent_hands[i].reach);
+    }
+    out += "],\"opponent_marginal\":";
+    if (!view.reach_defined || view.opponent_hands.empty())
+    {
+        out += "null";
+    }
+    else
+    {
+        out += '[';
+        for (std::size_t i = 0; i < view.opponent_hands.size(); ++i)
+        {
+            if (i > 0)
+            {
+                out += ',';
+            }
+            out += format_number(view.opponent_hands[i].marginal);
+        }
+        out += ']';
+    }
+    out += ",\"cards\":[";
     for (std::size_t i = 0; i < view.cards.size(); ++i)
     {
         if (i > 0)

@@ -5267,6 +5267,122 @@ struct StreetBatchSolver::Engine
         }
     }
 
+    // Replay public betting along the parent chain with the same legal/edits
+    // path used while building the tree. State at the target node is before that
+    // node's action (or chance deal).
+    BetState betting_state_along(const std::vector<int>& chain) const
+    {
+        BetState state;
+        state.pot = config.pot;
+        state.acting = config.first_to_act;
+        state.street = 0;
+        for (std::size_t step = 0; step + 1 < chain.size(); ++step)
+        {
+            const int current = chain[step];
+            const int next = chain[step + 1];
+            const Node& node = nodes[static_cast<std::size_t>(current)];
+            const ParentLink& edge = parent_link[static_cast<std::size_t>(next)];
+            if (edge.parent != current)
+            {
+                throw std::logic_error("node parent chain broke");
+            }
+            if (node.chance || edge.from_chance)
+            {
+                state.chance = false;
+                state.deal_which = 0;
+                state.acting = config.first_to_act;
+                state.pending_check = false;
+                state.last_raise = 0;
+                state.num_raises = 0;
+                state.committed = state.contrib[0];
+                continue;
+            }
+            Legal legal = legal_actions(config, state);
+            apply_tree_edits(legal, config, state, std::string_view(node.path.data(), node.path.size()), heap_);
+            if (edge.action < 0 || edge.action >= legal.count)
+            {
+                throw std::logic_error("parent action out of legal set");
+            }
+            state = apply_action(config, state, legal, edge.action);
+        }
+        return state;
+    }
+
+    void fill_inspection_betting(
+        StreetInspection& view,
+        const BetState& state,
+        int node_index,
+        int turn,
+        int river) const
+    {
+        view.pot = state.pot;
+        view.contrib[0] = state.contrib[0];
+        view.contrib[1] = state.contrib[1];
+        view.stacks[0] = config.stack - state.contrib[0];
+        view.stacks[1] = config.stack - state.contrib[1];
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (!node.terminal && !node.chance && state.acting >= 0)
+        {
+            view.to_call = state.committed - state.contrib[state.acting];
+            if (view.to_call < 0)
+            {
+                view.to_call = 0;
+            }
+        }
+        else
+        {
+            view.to_call = 0;
+        }
+        const ParentLink& link = parent_link[static_cast<std::size_t>(node_index)];
+        if (link.parent >= 0)
+        {
+            int parent_turn = turn;
+            int parent_river = river;
+            if (link.from_chance)
+            {
+                const Node& parent = nodes[static_cast<std::size_t>(link.parent)];
+                if (parent.deal_which == 1)
+                {
+                    parent_turn = -1;
+                }
+                else
+                {
+                    parent_river = -1;
+                }
+            }
+            view.parent_id = node_id(link.parent, parent_turn, parent_river);
+        }
+    }
+
+    void fill_opponent_hands(
+        StreetInspection& view,
+        int opponent,
+        const std::vector<double>& reach,
+        const std::vector<double>& other,
+        int seen_turn,
+        int seen_river) const
+    {
+        view.opponent_player = opponent;
+        double hand_joint = 0.0;
+        std::vector<double> marginal;
+        marginals_of(reach, opponent, other, 1 - opponent, hand_joint, marginal);
+        const int hands = opponent == 0 ? n0 : n1;
+        view.opponent_hands.resize(static_cast<std::size_t>(hands));
+        for (int hand = 0; hand < hands; ++hand)
+        {
+            StreetInspectHand row;
+            const int combo = combos[opponent][static_cast<std::size_t>(hand)];
+            row.combo = holdem::Range::combo_text(combo);
+            row.structural = hand_supported(opponent, hand, seen_turn, seen_river);
+            row.reach = row.structural ? reach[static_cast<std::size_t>(hand)] : 0.0;
+            if (view.reach_defined)
+            {
+                row.marginal = marginal[static_cast<std::size_t>(hand)];
+            }
+            view.opponent_hands[static_cast<std::size_t>(hand)] = std::move(row);
+        }
+    }
+
     StreetInspection inspect_node(const std::string& text) const
     {
         ensure_average();
@@ -5363,6 +5479,7 @@ struct StreetBatchSolver::Engine
             throw std::invalid_argument("unknown node");
         }
 
+        const BetState betting = betting_state_along(chain);
         const Node& node = nodes[static_cast<std::size_t>(node_index)];
         StreetInspection view;
         view.node_id = text;
@@ -5379,6 +5496,7 @@ struct StreetBatchSolver::Engine
         {
             view.board.push_back(holdem::format_card(seen_river));
         }
+        fill_inspection_betting(view, betting, node_index, seen_turn, seen_river);
         const double joint = joint_mass_of(q0, q1);
         view.joint = joint;
         view.reach_defined = joint > 0.0;
@@ -5514,6 +5632,8 @@ struct StreetBatchSolver::Engine
             }
             view.hands[static_cast<std::size_t>(hand)] = std::move(row);
         }
+        fill_opponent_hands(
+            view, 1 - node.player, other, reach, seen_turn, seen_river);
         return view;
     }
 

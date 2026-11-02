@@ -167,6 +167,16 @@ struct StreetInspection
     int folded = -1;
     bool reach_defined = false;
     double joint = 0.0;
+    // Public betting state at this node (initial pot + street contributions).
+    int pot = 0;
+    int contrib[2] = {};
+    int stacks[2] = {};
+    int to_call = 0;
+    // Empty when this node is the public-tree root.
+    std::string parent_id;
+    // Non-acting seat at a decision; unused on chance/terminal.
+    int opponent_player = -1;
+    std::vector<StreetInspectHand> opponent_hands;
     std::vector<StreetInspectAction> actions;
     std::vector<StreetInspectHand> hands;
     std::vector<StreetInspectCard> cards;

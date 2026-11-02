@@ -177,16 +177,33 @@ export interface NodePayload {
   node_id: string;
   kind?: string;
   player?: number | null;
+  /** Current pot at this node (initial pot + contributions). */
   pot?: number | null;
+  /** Remaining stacks [OOP, IP] at this node. */
+  stacks?: number[] | null;
+  /** Effective remaining stack (min of seats). */
+  stack?: number | null;
+  /** Street contributions [OOP, IP]. */
+  contrib?: number[] | null;
+  /** Chips the acting seat must put in to call; 0 when first to act / check. */
+  to_call?: number | null;
+  /** Parent public-node id; null at the root. */
+  parent_id?: string | null;
   to_act?: string | null;
   line?: string | null;
   board?: string[] | string | null;
   actions?: string[];
   children?: Array<NodeActionChild | NodeCardChild | string>;
   combos?: string[];
+  reach?: number[];
   marginal?: number[];
   strategy?: number[][] | null;
   reach_defined?: boolean;
+  /** Non-acting seat at a decision (0 OOP / 1 IP). */
+  opponent_player?: number | null;
+  opponent_combos?: string[];
+  opponent_reach?: number[];
+  opponent_marginal?: number[] | null;
   locked_hands?: number[] | boolean[] | null;
   [key: string]: unknown;
 }

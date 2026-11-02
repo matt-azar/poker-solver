@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { actionSizePotBasis } from "../../domain/actionHistory";
 import { mapActionColors } from "../../domain/actionColors";
 import { formatActionDisplay } from "../../domain/betSizes";
 import { groupHands } from "../../domain/browse";
@@ -25,7 +26,10 @@ export function ActionSummary() {
   const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
 
   const actions = currentNode?.actions;
-  const pot = Number(currentNode?.pot ?? status?.pot ?? draft.pot ?? 0);
+  const pot = actionSizePotBasis(
+    currentNode,
+    Number(status?.pot ?? draft.pot ?? 0),
+  );
 
   const colors = useMemo(
     () => mapActionColors(actions ?? []),
