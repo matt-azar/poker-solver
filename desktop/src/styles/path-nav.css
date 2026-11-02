@@ -15,6 +15,11 @@
   padding: 4px 0 6px;
 }
 
+.path-nav[data-dealing="true"] {
+  max-height: 48%;
+  min-height: 200px;
+}
+
 .path-nav[data-empty="true"] {
   height: auto;
   min-height: 0;
@@ -23,6 +28,7 @@
 }
 
 .path-nav[data-empty="true"] .path-nav__next,
+.path-nav[data-empty="true"] .path-nav__card-picker,
 .path-nav[data-empty="true"] .resize-handle {
   display: none;
 }
@@ -33,6 +39,12 @@
   gap: 8px;
   padding: 3px 10px;
   min-width: 0;
+}
+
+.path-nav__card-picker {
+  align-items: stretch;
+  padding-top: 2px;
+  padding-bottom: 4px;
 }
 
 .path-nav__line {

@@ -17,7 +17,6 @@ import {
   fullDeckGrid,
   isLegalDeckCell,
   isMissingDeckCell,
-  suitSymbol,
   type DealStreet,
   type DeckCell,
 } from "../../domain/cards";
@@ -30,6 +29,11 @@ export interface CardPickerProps {
   onClose: () => void;
   /** Street whose next card is being chosen (defaults from current chance board). */
   street?: DealStreet | null;
+  /**
+   * `overlay` — modal dialog (board slot click).
+   * `inline` — embedded in the Study path “Cards” row (no dimmed backdrop).
+   */
+  variant?: "overlay" | "inline";
 }
 
 function rankKeyToRank(key: string): string | null {
@@ -51,10 +55,16 @@ function suitKeyToSuit(key: string): string | null {
   return null;
 }
 
-export function CardPicker({ open, onClose, street = null }: CardPickerProps) {
+export function CardPicker({
+  open,
+  onClose,
+  street = null,
+  variant = "overlay",
+}: CardPickerProps) {
   const currentNode = useStudyStore((s) => s.currentNode);
   const followAction = useStudyStore((s) => s.followAction);
   const [focusIndex, setFocusIndex] = useState(0);
+  const [selectedCard, setSelectedCard] = useState<string | null>(null);
 
   const options = useMemo(() => chanceCardOptions(currentNode), [currentNode]);
   const grid = useMemo(
@@ -63,9 +73,12 @@ export function CardPicker({ open, onClose, street = null }: CardPickerProps) {
   );
   const activeStreet =
     street ?? dealStreetFromBoard(currentNode?.board) ?? ("turn" as DealStreet);
+  const title =
+    activeStreet === "river" ? "Change river" : "Change turn";
 
   useEffect(() => {
     if (!open) {
+      setSelectedCard(null);
       return;
     }
     const firstLegal = grid.findIndex((cell) => isLegalDeckCell(cell));
@@ -77,6 +90,7 @@ export function CardPicker({ open, onClose, street = null }: CardPickerProps) {
       if (!isLegalDeckCell(cell)) {
         return;
       }
+      setSelectedCard(cell.card);
       void followAction(cell.nodeId);
       onClose();
     },
@@ -99,7 +113,6 @@ export function CardPicker({ open, onClose, street = null }: CardPickerProps) {
       } else if (event.key === "ArrowUp") {
         next = ((row + rows - 1) % rows) * cols + col;
       } else if (event.key === "[" || event.key === "]") {
-        // Pio-like suit cycle within the focused rank.
         const delta = event.key === "]" ? 1 : -1;
         const nextSuit = cycleSuit(suit, delta);
         const idx = deckCellIndex(rank, nextSuit);
@@ -107,7 +120,6 @@ export function CardPicker({ open, onClose, street = null }: CardPickerProps) {
           next = idx;
         }
       } else if (event.key === "," || event.key === ".") {
-        // Pio-like rank cycle within the focused suit.
         const delta = event.key === "." ? 1 : -1;
         const nextRank = cycleRank(rank, delta);
         const idx = deckCellIndex(nextRank, suit);
@@ -154,107 +166,93 @@ export function CardPicker({ open, onClose, street = null }: CardPickerProps) {
 
   const chanceReady = currentNode?.kind === "chance" && options.length > 0;
 
-  return (
-    <div className="card-picker-overlay" role="presentation" onClick={onClose}>
-      <div
-        className="card-picker"
-        role="dialog"
-        aria-label={`${activeStreet} card picker`}
-        tabIndex={-1}
-        onClick={(event) => event.stopPropagation()}
-        onKeyDown={onKeyDown}
-        ref={(node) => node?.focus()}
-      >
-        <div className="panel-title-row">
-          <h2 className="panel-title">
-            {activeStreet === "river" ? "River card" : "Turn card"}
-          </h2>
-          <button type="button" className="toolbar-btn" onClick={onClose}>
+  const panel = (
+    <div
+      className="card-picker"
+      data-variant={variant}
+      role={variant === "overlay" ? "dialog" : "region"}
+      aria-label={`${activeStreet} card picker`}
+      tabIndex={-1}
+      onClick={variant === "overlay" ? (event) => event.stopPropagation() : undefined}
+      onKeyDown={onKeyDown}
+      ref={(node) => {
+        if (variant === "overlay") {
+          node?.focus();
+        }
+      }}
+    >
+      <div className="card-picker__head">
+        <h2 className="card-picker__title">{title}</h2>
+        {variant === "overlay" ? (
+          <button type="button" className="toolbar-btn card-picker__close" onClick={onClose}>
             Close
           </button>
-        </div>
-        <div className="card-picker__street" aria-live="polite">
-          <span className="card-picker__street-pill">{activeStreet}</span>
-          <span className="muted">Changing this street’s next card</span>
-        </div>
-        {!chanceReady ? (
-          <p className="empty-hint">No next cards at this node.</p>
-        ) : (
-          <>
-            <p className="card-picker__hint">
-              Arrows move · rank/suit keys jump · [ ] cycle suit · , . cycle rank ·
-              Enter selects · Esc closes. Unavailable cards stay in place, faded.
-            </p>
-            <div
-              className="card-picker-grid"
-              role="grid"
-              aria-label="Suit and rank"
-            >
-              <div className="card-picker-header" role="row">
-                <div className="card-picker-corner" />
-                {CARD_RANKS.map((rank) => (
-                  <div key={rank} className="card-picker-rank muted">
-                    {rank}
-                  </div>
-                ))}
-              </div>
-              {CARD_SUITS.map((suit, rowIndex) => (
-                <div
-                  key={suit}
-                  className="card-picker-suit-row"
-                  role="row"
-                  data-suit={suit}
-                >
-                  <div
-                    className="card-picker-suit-label"
-                    data-suit={suit}
-                    aria-label={suit}
-                  >
-                    {suitSymbol(suit)}
-                  </div>
-                  {CARD_RANKS.map((_, colIndex) => {
-                    const index = rowIndex * CARD_RANKS.length + colIndex;
-                    const cell = grid[index]!;
-                    const legal = isLegalDeckCell(cell);
-                    const focused = index === focusIndex;
-                    return (
-                      <button
-                        key={cell.card}
-                        type="button"
-                        role="gridcell"
-                        className="card-picker-cell"
-                        data-suit={suit}
-                        data-blocked={cell.blocked ? "true" : "false"}
-                        data-missing={isMissingDeckCell(cell) ? "true" : "false"}
-                        data-focused={focused ? "true" : "false"}
-                        disabled={!legal}
-                        aria-label={`${cell.card}${
-                          cell.blocked
-                            ? " board blocker"
-                            : isMissingDeckCell(cell)
-                              ? " unavailable"
-                              : ""
-                        }`}
-                        onClick={() => selectCell(cell)}
-                        onFocus={() => setFocusIndex(index)}
-                      >
-                        <PlayingCard
-                          card={cell.card}
-                          size="md"
-                          faded={!legal}
-                          focused={focused}
-                          selected={focused}
-                          aria-hidden
-                        />
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+        ) : null}
       </div>
+      {!chanceReady ? (
+        <p className="empty-hint">No next cards at this node.</p>
+      ) : (
+        <div className="card-picker-grid" role="grid" aria-label="Suit and rank">
+          {CARD_SUITS.map((suit, rowIndex) => (
+            <div
+              key={suit}
+              className="card-picker-suit-row"
+              role="row"
+              data-suit={suit}
+            >
+              {CARD_RANKS.map((_, colIndex) => {
+                const index = rowIndex * CARD_RANKS.length + colIndex;
+                const cell = grid[index]!;
+                const legal = isLegalDeckCell(cell);
+                const focused = index === focusIndex;
+                const selected = selectedCard === cell.card || focused;
+                return (
+                  <button
+                    key={cell.card}
+                    type="button"
+                    role="gridcell"
+                    className="card-picker-cell"
+                    data-suit={suit}
+                    data-blocked={cell.blocked ? "true" : "false"}
+                    data-missing={isMissingDeckCell(cell) ? "true" : "false"}
+                    data-focused={focused ? "true" : "false"}
+                    disabled={!legal}
+                    aria-label={`${cell.card}${
+                      cell.blocked
+                        ? " board blocker"
+                        : isMissingDeckCell(cell)
+                          ? " unavailable"
+                          : ""
+                    }`}
+                    onClick={() => selectCell(cell)}
+                    onFocus={() => setFocusIndex(index)}
+                  >
+                    <PlayingCard
+                      card={cell.card}
+                      size="md"
+                      layout="inline"
+                      faded={!legal}
+                      focused={focused}
+                      selected={selected}
+                      aria-hidden
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  if (variant === "inline") {
+    return panel;
+  }
+
+  return (
+    <div className="card-picker-overlay" role="presentation" onClick={onClose}>
+      {panel}
     </div>
   );
 }
