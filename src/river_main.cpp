@@ -1,3 +1,4 @@
+#include "game/chips.hpp"
 #include "game/river_config_text.hpp"
 #include "game/street_game.hpp"
 #include "poker/card.hpp"
@@ -258,8 +259,8 @@ Options defaults()
 {
     Options options;
     options.config.board = parse_board("Ah,Kd,7c,4s,2h");
-    options.config.pot = 100;
-    options.config.stack = 200;
+    options.config.pot = poker::chip_units(100);
+    options.config.stack = poker::chip_units(200);
     options.config.oop = poker::holdem::Range::parse("AA");
     options.config.ip = poker::holdem::Range::parse("KK");
     options.config.oop_bet_sizes = {0.5, 1.0};
@@ -278,11 +279,11 @@ void apply_config_text(const std::string& text, Options& options)
     double number = 0.0;
     if (read_number(text, "pot", number))
     {
-        options.config.pot = static_cast<int>(number);
+        options.config.pot = poker::chips_to_tenths(number);
     }
     if (read_number(text, "effective_stack", number) || read_number(text, "stack", number))
     {
-        options.config.stack = static_cast<int>(number);
+        options.config.stack = poker::chips_to_tenths(number);
     }
     if (read_string(text, "oop_range", value))
     {
@@ -480,11 +481,11 @@ int main(int argc, char** argv)
             }
             else if (arg == "--pot")
             {
-                options.config.pot = std::atoi(need("--pot"));
+                options.config.pot = poker::parse_chips(need("--pot"));
             }
             else if (arg == "--stack")
             {
-                options.config.stack = std::atoi(need("--stack"));
+                options.config.stack = poker::parse_chips(need("--stack"));
             }
             else if (arg == "--oop-range")
             {
@@ -736,8 +737,8 @@ int main(int argc, char** argv)
         std::cout << "algorithm: " << poker::solver::algorithm_name(options.algorithm) << "\n";
         std::cout << "traversal: " << (options.reference ? "reference_enumerator" : "public_tree") << "\n";
         std::cout << "engine: " << (options.reference ? "StreetGame" : "StreetBatchSolver") << "\n";
-        std::cout << "pot: " << street.pot << "\n";
-        std::cout << "stack: " << street.stack << "\n";
+        std::cout << "pot: " << poker::format_chips(street.pot) << "\n";
+        std::cout << "stack: " << poker::format_chips(street.stack) << "\n";
 
         if (options.reference)
         {

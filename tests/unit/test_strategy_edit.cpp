@@ -34,8 +34,8 @@ StreetConfig tiny_turn()
 {
     StreetConfig config;
     config.board = {card("Kh"), card("Kd"), card("7c"), card("4s")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse("2c3d,2h3h");
     config.ip = Range::parse("AhAd");
     config.allow_all_in = false;

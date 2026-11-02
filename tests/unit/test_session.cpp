@@ -378,8 +378,8 @@ void test_node_identifiers_do_not_alias()
         poker::holdem::parse_card("7c"),
         poker::holdem::parse_card("4s")
     };
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = poker::holdem::Range::parse("AhAd");
     config.ip = poker::holdem::Range::parse("2c3d");
     config.oop_bet_sizes = {};

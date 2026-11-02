@@ -1,5 +1,6 @@
 #pragma once
 
+#include "game/chips.hpp"
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
@@ -29,16 +30,16 @@ namespace poker::river
 // so a showdown win is worth pot/2 plus the opponent's river investment. Uncalled
 // chips are not profit: a fold refunds them through that same formula.
 //
-// An opening size f bets round(f * pot) chips. A raise size f raises by
-// round(f * pot_after_the_call) chips, where pot_after_the_call is the pot once
-// the facing bet has been called. Ties in rounding go away from zero. A listed
-// size larger than the stack is an all-in when all-ins are allowed, and is
-// omitted otherwise. Equal chip amounts are one action.
+// An opening size f bets round(f * pot) tenths (0.1-chip units). A raise size f
+// raises by round(f * pot_after_the_call) tenths, where pot_after_the_call is
+// the pot once the facing bet has been called. Ties in rounding go away from
+// zero. A listed size larger than the stack is an all-in when all-ins are
+// allowed, and is omitted otherwise. Equal amounts are one action.
 //
-// The minimum opening bet is 1 chip. Later raises must increase the commitment
+// The minimum opening bet is 0.1 chip. Later raises must increase the commitment
 // by at least the previous full bet or raise. Heads-up equal stacks cannot raise
 // an opponent who is already all-in. Both players start this street with the
-// same stack behind.
+// same stack behind. pot / stack / contrib are tenths; utilities report chips.
 
 inline constexpr int kMaxRiverActions = 8;
 inline constexpr int kMaxHistory = 12;
@@ -46,8 +47,9 @@ inline constexpr int kMaxHistory = 12;
 struct RiverConfig
 {
     std::array<int, 5> board{};
-    int pot = 100;
-    int stack = 200;
+    // pot / stack are tenths of a chip (chip_units(100) == 100.0 chips).
+    int pot = chip_units(100);
+    int stack = chip_units(200);
     holdem::Range oop{};
     holdem::Range ip{};
     std::vector<double> oop_bet_sizes{};
@@ -297,11 +299,7 @@ private:
 
     static int round_chips(double fraction, int basis)
     {
-        if (basis < 0)
-        {
-            throw std::logic_error("negative sizing basis");
-        }
-        return static_cast<int>(std::llround(fraction * static_cast<double>(basis)));
+        return poker::round_chips(fraction, basis);
     }
 
     void validate_config() const
@@ -575,11 +573,11 @@ private:
         }
         else if (!facing)
         {
-            text = "Bet " + std::to_string(add);
+            text = "Bet " + format_chips(add);
         }
         else
         {
-            text = "Raise to " + std::to_string(street_total);
+            text = "Raise to " + format_chips(street_total);
         }
         if (all_in && code != 0)
         {

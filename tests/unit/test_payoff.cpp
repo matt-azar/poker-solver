@@ -151,8 +151,8 @@ StreetConfig turn_check_only(const char* oop, const char* ip)
 {
     StreetConfig config;
     config.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-    config.pot = 100;
-    config.stack = 200;
+    config.pot = 1000;
+    config.stack = 2000;
     config.oop = Range::parse(oop);
     config.ip = Range::parse(ip);
     config.max_raises = 0;
@@ -185,8 +185,8 @@ void run_payoff_tests()
     // Fold / called-win fixtures reuse the sized river tree from RIVER.md tests.
     RiverConfig sized;
     set_board(sized);
-    sized.pot = 100;
-    sized.stack = 1000;
+    sized.pot = 1000;
+    sized.stack = 10000;
     sized.oop = Range::parse("AcAd");
     sized.ip = Range::parse("KsKc");
     sized.oop_bet_sizes = {1.0};
@@ -204,7 +204,7 @@ void run_payoff_tests()
     CHECK_NEAR(sized_game.p1_utility(ip_folds), 50.0, 1e-9);
     check_matches_river(sized_game, ip_folds);
     {
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 100, 0, 1, 0);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 1000, 0, 1, 0);
         CHECK_NEAR(chips.utility[0], 50.0, 1e-12);
         CHECK_NEAR(chips.utility[1], -50.0, 1e-12);
     }
@@ -214,7 +214,7 @@ void run_payoff_tests()
     CHECK_NEAR(sized_game.p1_utility(called_win), 150.0, 1e-9);
     check_matches_river(sized_game, called_win);
     {
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 100, 100, -1, 1);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 1000, 1000, -1, 1);
         CHECK_NEAR(chips.utility[0], 150.0, 1e-12);
         CHECK_NEAR(chips.utility[1], -150.0, 1e-12);
     }
@@ -226,7 +226,7 @@ void run_payoff_tests()
     CHECK_NEAR(sized_game.p1_utility(oop_folds), -150.0, 1e-9);
     check_matches_river(sized_game, oop_folds);
     {
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 100, 400, 0, 0);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 1000, 4000, 0, 0);
         CHECK_NEAR(chips.utility[0], -150.0, 1e-12);
         CHECK_NEAR(chips.utility[1], 150.0, 1e-12);
     }
@@ -234,8 +234,8 @@ void run_payoff_tests()
     // Showdown loss: fives versus kings check down.
     RiverConfig lose;
     set_board(lose);
-    lose.pot = 100;
-    lose.stack = 100;
+    lose.pot = 1000;
+    lose.stack = 1000;
     lose.oop = Range::parse("5c5d");
     lose.ip = Range::parse("KsKc");
     lose.allow_all_in = false;
@@ -252,7 +252,7 @@ void run_payoff_tests()
     CHECK_NEAR(lose_game.p1_utility(lose_state), -50.0, 1e-9);
     check_matches_river(lose_game, lose_state);
     {
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 0, 0, -1, -1);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 0, 0, -1, -1);
         CHECK_NEAR(chips.utility[0], -50.0, 1e-12);
         CHECK_NEAR(chips.utility[1], 50.0, 1e-12);
     }
@@ -260,8 +260,8 @@ void run_payoff_tests()
     // Showdown tie: both players hold AK on Ah Kd 7c 4s 2h.
     RiverConfig tie;
     set_board(tie);
-    tie.pot = 100;
-    tie.stack = 100;
+    tie.pot = 1000;
+    tie.stack = 1000;
     tie.oop = Range::parse("AcKc");
     tie.ip = Range::parse("AdKs");
     tie.allow_all_in = false;
@@ -278,7 +278,7 @@ void run_payoff_tests()
     CHECK_NEAR(tie_game.p1_utility(tie_state), 0.0, 1e-9);
     check_matches_river(tie_game, tie_state);
     {
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 0, 0, -1, 0);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 0, 0, -1, 0);
         CHECK_NEAR(chips.utility[0], 0.0, 1e-12);
         CHECK_NEAR(chips.utility[1], 0.0, 1e-12);
     }
@@ -286,7 +286,7 @@ void run_payoff_tests()
     bool unequal_threw = false;
     try
     {
-        (void)ChipPayoff::terminal(100, 50, 100, -1, 1);
+        (void)ChipPayoff::terminal(1000, 500, 1000, -1, 1);
     }
     catch (const std::logic_error&)
     {
@@ -300,8 +300,8 @@ void run_payoff_tests()
     {
         StreetConfig fold_cfg;
         fold_cfg.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-        fold_cfg.pot = 100;
-        fold_cfg.stack = 200;
+        fold_cfg.pot = 1000;
+        fold_cfg.stack = 2000;
         fold_cfg.oop = Range::parse("AcAd");
         fold_cfg.ip = Range::parse("KsKc");
         fold_cfg.oop_bet_sizes = {1.0};
@@ -316,9 +316,9 @@ void run_payoff_tests()
             fold_state, find_street_action(fold_game, fold_state, "Fold"));
         CHECK(fold_game.is_terminal(fold_state));
         CHECK_NEAR(fold_game.p1_utility(fold_state), 50.0, 1e-9);
-        check_matches_street(fold_game, fold_state, 100);
+        check_matches_street(fold_game, fold_state, 1000);
         {
-            const PlayerPayoff chips = ChipPayoff::terminal(100, 100, 0, 1, 0);
+            const PlayerPayoff chips = ChipPayoff::terminal(1000, 1000, 0, 1, 0);
             CHECK_NEAR(chips.utility[0], 50.0, 1e-12);
             CHECK_NEAR(chips.utility[1], -50.0, 1e-12);
         }
@@ -330,9 +330,9 @@ void run_payoff_tests()
         const StreetGame::State win_state =
             check_down_to_river(win_game, 0, card("2h"));
         CHECK_NEAR(win_game.p1_utility(win_state), 50.0, 1e-9);
-        check_matches_street(win_game, win_state, 100);
+        check_matches_street(win_game, win_state, 1000);
         {
-            const PlayerPayoff chips = ChipPayoff::terminal(100, 0, 0, -1, 1);
+            const PlayerPayoff chips = ChipPayoff::terminal(1000, 0, 0, -1, 1);
             CHECK_NEAR(chips.utility[0], 50.0, 1e-12);
             CHECK_NEAR(chips.utility[1], -50.0, 1e-12);
         }
@@ -344,9 +344,9 @@ void run_payoff_tests()
         const StreetGame::State lose_state =
             check_down_to_river(lose_game, 0, card("2h"));
         CHECK_NEAR(lose_game.p1_utility(lose_state), -50.0, 1e-9);
-        check_matches_street(lose_game, lose_state, 100);
+        check_matches_street(lose_game, lose_state, 1000);
         {
-            const PlayerPayoff chips = ChipPayoff::terminal(100, 0, 0, -1, -1);
+            const PlayerPayoff chips = ChipPayoff::terminal(1000, 0, 0, -1, -1);
             CHECK_NEAR(chips.utility[0], -50.0, 1e-12);
             CHECK_NEAR(chips.utility[1], 50.0, 1e-12);
         }
@@ -358,9 +358,9 @@ void run_payoff_tests()
         const StreetGame::State tie_state =
             check_down_to_river(street_tie, 0, card("2h"));
         CHECK_NEAR(street_tie.p1_utility(tie_state), 0.0, 1e-9);
-        check_matches_street(street_tie, tie_state, 100);
+        check_matches_street(street_tie, tie_state, 1000);
         {
-            const PlayerPayoff chips = ChipPayoff::terminal(100, 0, 0, -1, 0);
+            const PlayerPayoff chips = ChipPayoff::terminal(1000, 0, 0, -1, 0);
             CHECK_NEAR(chips.utility[0], 0.0, 1e-12);
             CHECK_NEAR(chips.utility[1], 0.0, 1e-12);
         }

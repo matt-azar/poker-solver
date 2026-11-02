@@ -188,7 +188,7 @@ void run_rake_tests()
     bool terminal_rejects = false;
     try
     {
-        (void)ChipPayoff::terminal(100, 0, 0, -1, 1, RakeConfig{2.0, 0.0});
+        (void)ChipPayoff::terminal(1000, 0, 0, -1, 1, RakeConfig{2.0, 0.0});
     }
     catch (const std::invalid_argument&)
     {
@@ -197,16 +197,16 @@ void run_rake_tests()
     CHECK(terminal_rejects);
 
     // Zero-rake regression pin: same numbers as today's ChipPayoff::terminal.
-    check_zero_sum_match(100, 100, 0, 1, 0, 50.0);   // IP folds
-    check_zero_sum_match(100, 100, 100, -1, 1, 150.0); // called win
-    check_zero_sum_match(100, 100, 400, 0, 0, -150.0); // OOP folds
-    check_zero_sum_match(100, 0, 0, -1, -1, -50.0);    // showdown lose
-    check_zero_sum_match(100, 0, 0, -1, 0, 0.0);       // showdown tie
+    check_zero_sum_match(1000, 1000, 0, 1, 0, 50.0);   // IP folds
+    check_zero_sum_match(1000, 1000, 1000, -1, 1, 150.0); // called win
+    check_zero_sum_match(1000, 1000, 4000, 0, 0, -150.0); // OOP folds
+    check_zero_sum_match(1000, 0, 0, -1, -1, -50.0);    // showdown lose
+    check_zero_sum_match(1000, 0, 0, -1, 0, 0.0);       // showdown tie
 
     // Fold win with 5% rake on pot 200: rake = 10. Winner absorbs the rake.
     {
         const RakeConfig rake{0.05, 0.0};
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 100, 0, 1, 0, rake);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 1000, 0, 1, 0, rake);
         CHECK_NEAR(chips.utility[0], 40.0, 1e-12);  // 50 - 10
         CHECK_NEAR(chips.utility[1], -50.0, 1e-12);
         CHECK_NEAR(chips.utility[0] + chips.utility[1], -10.0, 1e-12);
@@ -215,7 +215,7 @@ void run_rake_tests()
     // Same fold with cap 5: rake = min(10, 5) = 5.
     {
         const RakeConfig rake{0.05, 5.0};
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 100, 0, 1, 0, rake);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 1000, 0, 1, 0, rake);
         CHECK_NEAR(chips.utility[0], 45.0, 1e-12);
         CHECK_NEAR(chips.utility[1], -50.0, 1e-12);
         CHECK_NEAR(chips.utility[0] + chips.utility[1], -5.0, 1e-12);
@@ -224,7 +224,7 @@ void run_rake_tests()
     // Showdown win: pot 300, rate 5% → rake 15; u0 = 150 - 15.
     {
         const RakeConfig rake{0.05, 0.0};
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 100, 100, -1, 1, rake);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 1000, 1000, -1, 1, rake);
         CHECK_NEAR(chips.utility[0], 135.0, 1e-12);
         CHECK_NEAR(chips.utility[1], -150.0, 1e-12);
         CHECK_NEAR(chips.utility[0] + chips.utility[1], -15.0, 1e-12);
@@ -233,7 +233,7 @@ void run_rake_tests()
     // Showdown lose: pot 100, rate 5% → rake 5; winner (p1) absorbs rake.
     {
         const RakeConfig rake{0.05, 0.0};
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 0, 0, -1, -1, rake);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 0, 0, -1, -1, rake);
         CHECK_NEAR(chips.utility[0], -50.0, 1e-12);
         CHECK_NEAR(chips.utility[1], 45.0, 1e-12);
         CHECK_NEAR(chips.utility[0] + chips.utility[1], -5.0, 1e-12);
@@ -242,7 +242,7 @@ void run_rake_tests()
     // Showdown tie: each loses half the rake.
     {
         const RakeConfig rake{0.05, 0.0};
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 0, 0, -1, 0, rake);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 0, 0, -1, 0, rake);
         CHECK_NEAR(chips.utility[0], -2.5, 1e-12);
         CHECK_NEAR(chips.utility[1], -2.5, 1e-12);
         CHECK_NEAR(chips.utility[0] + chips.utility[1], -5.0, 1e-12);
@@ -251,7 +251,7 @@ void run_rake_tests()
     // OOP folds into rake: pot 100+100+400 = 600, 5% → 30; p1 wins.
     {
         const RakeConfig rake{0.05, 0.0};
-        const PlayerPayoff chips = ChipPayoff::terminal(100, 100, 400, 0, 0, rake);
+        const PlayerPayoff chips = ChipPayoff::terminal(1000, 1000, 4000, 0, 0, rake);
         CHECK_NEAR(chips.utility[0], -150.0, 1e-12);
         CHECK_NEAR(chips.utility[1], 120.0, 1e-12); // 150 - 30
         CHECK_NEAR(chips.utility[0] + chips.utility[1], -30.0, 1e-12);
@@ -261,8 +261,8 @@ void run_rake_tests()
     {
         StreetConfig street;
         street.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-        street.pot = 100;
-        street.stack = 200;
+        street.pot = 1000;
+        street.stack = 2000;
         street.oop = Range::parse("AcAd");
         street.ip = Range::parse("KsKc");
         street.rake = RakeConfig{0.05, 5.0};
@@ -277,8 +277,8 @@ void run_rake_tests()
     {
         RiverConfig river;
         set_board(river);
-        river.pot = 100;
-        river.stack = 200;
+        river.pot = 1000;
+        river.stack = 2000;
         river.oop = Range::parse("AcAd");
         river.ip = Range::parse("KsKc");
         river.rake = RakeConfig{0.05, 0.0};
@@ -295,8 +295,8 @@ void run_rake_tests()
     {
         StreetConfig bad;
         bad.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-        bad.pot = 100;
-        bad.stack = 100;
+        bad.pot = 1000;
+        bad.stack = 1000;
         bad.oop = Range::parse("AcAd");
         bad.ip = Range::parse("KsKc");
         bad.rake = RakeConfig{1.5, 0.0};
@@ -314,8 +314,8 @@ void run_rake_tests()
     {
         RiverConfig bad;
         set_board(bad);
-        bad.pot = 100;
-        bad.stack = 100;
+        bad.pot = 1000;
+        bad.stack = 1000;
         bad.oop = Range::parse("AcAd");
         bad.ip = Range::parse("KsKc");
         bad.rake = RakeConfig{0.05, -2.0};
@@ -333,8 +333,8 @@ void run_rake_tests()
         const RakeConfig rake{0.05, 0.0};
         RiverConfig sized;
         set_board(sized);
-        sized.pot = 100;
-        sized.stack = 1000;
+        sized.pot = 1000;
+        sized.stack = 10000;
         sized.oop = Range::parse("AcAd");
         sized.ip = Range::parse("KsKc");
         sized.oop_bet_sizes = {1.0};
@@ -353,8 +353,8 @@ void run_rake_tests()
         check_game_payoff(
             game.terminal_payoff(ip_folds),
             40.0,
-            100,
-            100,
+            1000,
+            1000,
             0,
             1,
             0,
@@ -366,9 +366,9 @@ void run_rake_tests()
         check_game_payoff(
             game.terminal_payoff(called),
             135.0,
-            100,
-            100,
-            100,
+            1000,
+            1000,
+            1000,
             -1,
             1,
             rake);
@@ -381,9 +381,9 @@ void run_rake_tests()
         check_game_payoff(
             game.terminal_payoff(oop_folds),
             -150.0,
-            100,
-            100,
-            400,
+            1000,
+            1000,
+            4000,
             0,
             0,
             rake);
@@ -394,8 +394,8 @@ void run_rake_tests()
         const RakeConfig rake{0.05, 0.0};
         RiverConfig lose;
         set_board(lose);
-        lose.pot = 100;
-        lose.stack = 100;
+        lose.pot = 1000;
+        lose.stack = 1000;
         lose.oop = Range::parse("5c5d");
         lose.ip = Range::parse("KsKc");
         lose.allow_all_in = false;
@@ -413,7 +413,7 @@ void run_rake_tests()
         check_game_payoff(
             lose_game.terminal_payoff(lose_state),
             -50.0,
-            100,
+            1000,
             0,
             0,
             -1,
@@ -424,8 +424,8 @@ void run_rake_tests()
         const RakeConfig rake{0.05, 0.0};
         RiverConfig tie;
         set_board(tie);
-        tie.pot = 100;
-        tie.stack = 100;
+        tie.pot = 1000;
+        tie.stack = 1000;
         tie.oop = Range::parse("AcKc");
         tie.ip = Range::parse("AdKs");
         tie.allow_all_in = false;
@@ -443,7 +443,7 @@ void run_rake_tests()
         check_game_payoff(
             tie_game.terminal_payoff(tie_state),
             -2.5,
-            100,
+            1000,
             0,
             0,
             -1,
@@ -456,8 +456,8 @@ void run_rake_tests()
         const RakeConfig rake{0.05, 0.0};
         StreetConfig fold_cfg;
         fold_cfg.board = {card("Ah"), card("Kd"), card("7c"), card("4s")};
-        fold_cfg.pot = 100;
-        fold_cfg.stack = 200;
+        fold_cfg.pot = 1000;
+        fold_cfg.stack = 2000;
         fold_cfg.oop = Range::parse("AcAd");
         fold_cfg.ip = Range::parse("KsKc");
         fold_cfg.oop_bet_sizes = {1.0};
@@ -474,8 +474,8 @@ void run_rake_tests()
         check_game_payoff(
             fold_game.terminal_payoff(fold_state),
             40.0,
-            100,
-            100,
+            1000,
+            1000,
             0,
             1,
             0,
@@ -486,8 +486,8 @@ void run_rake_tests()
     {
         RiverConfig zero;
         set_board(zero);
-        zero.pot = 100;
-        zero.stack = 100;
+        zero.pot = 1000;
+        zero.stack = 1000;
         zero.oop = Range::parse("AcAd");
         zero.ip = Range::parse("KsKc");
         zero.allow_all_in = false;
@@ -506,8 +506,8 @@ void run_rake_tests()
     {
         RiverConfig raked;
         set_board(raked);
-        raked.pot = 100;
-        raked.stack = 100;
+        raked.pot = 1000;
+        raked.stack = 1000;
         raked.oop = Range::parse("AcAd");
         raked.ip = Range::parse("KsKc");
         raked.allow_all_in = false;
@@ -527,8 +527,8 @@ void run_rake_tests()
         StreetConfig raked;
         raked.board = {
             card("Ah"), card("Kd"), card("7c"), card("4s"), card("2h")};
-        raked.pot = 100;
-        raked.stack = 100;
+        raked.pot = 1000;
+        raked.stack = 1000;
         raked.oop = Range::parse("AcAd");
         raked.ip = Range::parse("KsKc");
         raked.allow_all_in = false;
@@ -548,8 +548,8 @@ void run_rake_tests()
         StreetConfig tied;
         tied.board = {
             card("Ah"), card("Kd"), card("7c"), card("4s"), card("2h")};
-        tied.pot = 100;
-        tied.stack = 100;
+        tied.pot = 1000;
+        tied.stack = 1000;
         tied.oop = Range::parse("AcKc");
         tied.ip = Range::parse("AdKs");
         tied.allow_all_in = false;

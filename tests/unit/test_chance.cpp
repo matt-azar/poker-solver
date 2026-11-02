@@ -49,8 +49,8 @@ StreetConfig check_config(const std::vector<int>& board, const char* oop, const 
 {
     StreetConfig config;
     config.board = board;
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse(oop);
     config.ip = Range::parse(ip);
     config.allow_all_in = false;
@@ -235,8 +235,8 @@ void test_incompatible_positive_reaches()
 {
     StreetConfig config;
     config.board = {card_id("2h"), card_id("3d"), card_id("4c")};
-    config.pot = 100;
-    config.stack = 100;
+    config.pot = 1000;
+    config.stack = 1000;
     config.oop = Range::parse("AcAd,9c9d");
     config.ip = Range::parse("AcKh,9h9s");
     config.oop_bet_sizes = {0.5};

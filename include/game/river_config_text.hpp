@@ -32,8 +32,8 @@ inline std::string format_river_config(const RiverConfig& config)
     std::string out;
     out += "river-config 1\n";
     streets::append_line(out, "board", format_river_board(config.board));
-    streets::append_ints(out, "pot", config.pot);
-    streets::append_ints(out, "stack", config.stack);
+    streets::append_line(out, "pot", poker::format_chips(config.pot));
+    streets::append_line(out, "stack", poker::format_chips(config.stack));
     streets::append_line(out, "oop-range", config.oop.to_combo_list());
     streets::append_line(out, "ip-range", config.ip.to_combo_list());
     streets::append_ints(out, "first-to-act", config.first_to_act);
@@ -188,11 +188,11 @@ inline RiverConfig parse_river_config(std::string_view text)
         }
         else if (key == "pot")
         {
-            config.pot = streets::parse_int(value);
+            config.pot = poker::parse_chips(value);
         }
         else if (key == "stack")
         {
-            config.stack = streets::parse_int(value);
+            config.stack = poker::parse_chips(value);
         }
         else if (key == "oop-range")
         {

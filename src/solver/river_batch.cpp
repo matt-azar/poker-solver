@@ -1,5 +1,6 @@
 #include "solver/river_batch.hpp"
 
+#include "game/chips.hpp"
 #include "poker/card.hpp"
 #include "poker/hand_eval.hpp"
 #include "poker/range.hpp"
@@ -48,7 +49,7 @@ struct Legal
 
 int round_chips(double fraction, int basis)
 {
-    return static_cast<int>(std::llround(fraction * static_cast<double>(basis)));
+    return poker::round_chips(fraction, basis);
 }
 
 std::string chip_label(int code, int add, int street_total, bool all_in, bool facing)
@@ -68,11 +69,11 @@ std::string chip_label(int code, int add, int street_total, bool all_in, bool fa
     }
     else if (!facing)
     {
-        text = "Bet " + std::to_string(add);
+        text = "Bet " + format_chips(add);
     }
     else
     {
-        text = "Raise to " + std::to_string(street_total);
+        text = "Raise to " + format_chips(street_total);
     }
     if (all_in && code != 0)
     {

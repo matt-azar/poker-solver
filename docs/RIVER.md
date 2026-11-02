@@ -24,13 +24,13 @@ Optional pot rake (`RiverConfig::rake`, CLI `--rake-rate` / `--rake-cap`, and `r
 
 ## Sizes
 
-Fractions are of the pot, rounded to the nearest chip, with ties away from zero.
+Fractions are of the pot, rounded to the nearest tenth of a chip, with ties away from zero. Internally pot/stack/contrib are tenths (`include/game/chips.hpp`); config text and CLI still write chip units (`pot 100` = 100.0 chips). Utilities report chips.
 
-- An opening size `f` bets `round(f * pot)` chips.
-- A raise size `f` raises by `round(f * pot_after_the_call)` chips. `pot_after_the_call` is the pot once the facing bet has been called. The raiser also puts in the call.
+- An opening size `f` bets `round(f * pot)` tenths (0.1-chip units).
+- A raise size `f` raises by `round(f * pot_after_the_call)` tenths. `pot_after_the_call` is the pot once the facing bet has been called. The raiser also puts in the call.
 - A listed size bigger than the remaining stack becomes an all-in when all-ins are allowed, and is dropped otherwise.
-- Equal chip amounts are one action.
-- The minimum opening bet is 1 chip. A later raise must increase the commitment by at least the previous full bet or raise.
+- Equal amounts are one action.
+- The minimum opening bet is 0.1 chip. A later raise must increase the commitment by at least the previous full bet or raise.
 - With equal stacks, a player cannot raise an opponent who is already all-in.
 - The opening bet counts toward `max_raises`. At the cap, the facing player can fold or call only.
 - If raise sizes are omitted on the command line or in JSON, they copy that player's bet sizes.

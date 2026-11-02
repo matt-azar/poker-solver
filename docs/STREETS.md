@@ -30,7 +30,9 @@ One street left, that fraction is all-in. PioSOLVER's geometric size is this spl
 
 An all-in threshold is a fraction of the starting stack. A size that would commit more than that fraction is replaced by all-in, when all-ins are allowed. Zero leaves every listed size unchanged.
 
-Two listed sizes that round to the same chip amount are one action. A raise increment smaller than the previous raise is omitted. The first bet of a street only has to add at least one chip. An all-in shorter than the minimum raise is kept when all-ins are allowed, and omitted when they are not.
+Two listed sizes that round to the same tenth-of-a-chip amount are one action. A raise increment smaller than the previous raise is omitted. The first bet of a street only has to add at least 0.1 chip. An all-in shorter than the minimum raise is kept when all-ins are allowed, and omitted when they are not.
+
+Pot, stack, and contributions are stored as integer tenths of a chip (`include/game/chips.hpp`). Config / JSON / CLI values stay in chip units (`pot 100` → 100.0 chips → 1000 tenths). `round(f * pot)` with a tenths pot already yields tenths (for example pot 5.0 and `b75` → 3.8 chips). Terminal utilities and reported EV convert back to chips. Rake still floors in whole chips.
 
 ## Canonical configuration
 

@@ -1,5 +1,6 @@
 #include "solver/street_batch.hpp"
 
+#include "game/chips.hpp"
 #include "game/street_config_text.hpp"
 #include "solver/strategy_edit.hpp"
 #include "solver/tree_edit.hpp"
@@ -126,14 +127,14 @@ const std::vector<double>& size_list(const streets::StreetConfig& config, int pl
 
 int round_chips(double fraction, int basis)
 {
-    return static_cast<int>(std::llround(fraction * static_cast<double>(basis)));
+    return poker::round_chips(fraction, basis);
 }
 
 int chips_from_spec(double spec, int basis)
 {
     if (spec < 0.0)
     {
-        return static_cast<int>(std::llround(-spec));
+        return absolute_chips_to_tenths(-spec);
     }
     return round_chips(spec, basis);
 }
@@ -154,9 +155,9 @@ std::pmr::string chip_label(
     std::pmr::memory_resource* heap)
 {
     std::pmr::string text(heap);
-    const auto append_number = [&](int value)
+    const auto append_number = [&](int tenths)
     {
-        const std::string digits = std::to_string(value);
+        const std::string digits = format_chips(tenths);
         text.append(digits.data(), digits.size());
     };
     if (code == 0)
@@ -199,7 +200,8 @@ std::string compact_action_token(int code, int add, int street_total, bool all_i
     {
         return facing ? "call" : "c";
     }
-    std::string token = facing ? "r" + std::to_string(street_total) : "b" + std::to_string(add);
+    std::string token =
+        facing ? "r" + format_chips(street_total) : "b" + format_chips(add);
     if (all_in)
     {
         token += "ai";

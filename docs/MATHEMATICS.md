@@ -20,7 +20,7 @@ The river tree uses that joint distribution as its only chance node. Player 0 is
 
 Player 0's terminal utility is `pot / 2` plus the opponent's river investment when player 0 wins or the opponent folds, and the negation of `pot / 2` plus player 0's own river investment when player 0 loses or folds. A split pot is worth 0 once the river investments match. `ChipPayoff` returns both players' utilities under this rule; chip EV stays zero-sum so player 1 is the negation of player 0. Optional pot rake subtracts the house take from the winner (or half each on a tie); see [RAKE.md](RAKE.md). Optional ICM wraps those chip terminals; see [ICM.md](ICM.md).
 
-An opening fraction `f` bets `round(f * pot)` chips. A raise fraction `f` increases the bet by `round(f * pot_after_the_call)`. The minimum later raise equals the previous full bet or raise. Details and a solved toy are in [RIVER.md](RIVER.md).
+An opening fraction `f` bets `round(f * pot)` tenths of a chip (pot stored at scale 10). A raise fraction `f` increases the bet by `round(f * pot_after_the_call)`. The minimum later raise equals the previous full bet or raise; the minimum opening add is 0.1 chip. Reported utilities stay in chips. Details and a solved toy are in [RIVER.md](RIVER.md).
 
 A turn tree adds one chance node after turn betting: the river, uniform over remaining cards. A flop tree adds two. A five-card tree adds none. Range weights enter only through the root hand distribution. `StreetBatchSolver` solves all three board lengths on one public tree and pins five-card results against `RiverGame`. The chip rule is the river rule with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
 
