@@ -5,7 +5,7 @@ import type { ThemePreference } from "../../domain/types";
 import { getPlatform } from "../../platform/browser";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
-import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import { WORKSPACES, WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 interface Props {
   workspace: WorkspaceId;
@@ -16,7 +16,7 @@ interface Props {
   onAssistantToggle: () => void;
 }
 
-type MenuId = "file" | "solve" | "tree" | "view" | "settings" | null;
+type MenuId = "file" | "solve" | "tree" | "view" | "workspace" | "settings" | null;
 
 export function MenuBar({
   workspace,
@@ -56,6 +56,7 @@ export function MenuBar({
   const setHoverCell = useStudyStore((s) => s.setHoverCell);
   const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
   const strategyEditDrawerOpen = useStudyStore((s) => s.strategyEditDrawerOpen);
+  const settingsOpen = useSettingsStore((s) => s.settingsOpen);
   const setSettingsOpen = useSettingsStore((s) => s.setSettingsOpen);
   const updateSettings = useSettingsStore((s) => s.updateSettings);
 
@@ -66,7 +67,9 @@ export function MenuBar({
         return;
       }
       if (action === "escape") {
-        if (lockDrawerOpen) {
+        if (settingsOpen) {
+          setSettingsOpen(false);
+        } else if (lockDrawerOpen) {
           setLockDrawerOpen(false);
         } else if (strategyEditDrawerOpen) {
           setStrategyEditDrawerOpen(false);
@@ -111,6 +114,8 @@ export function MenuBar({
     continueSolve,
     helpOpen,
     onHelpOpen,
+    settingsOpen,
+    setSettingsOpen,
     lockDrawerOpen,
     setLockDrawerOpen,
     strategyEditDrawerOpen,
@@ -254,6 +259,17 @@ export function MenuBar({
             },
             { label: "Reset layout", onClick: () => resetLayout() },
           ]}
+        />
+        <Menu
+          id="workspace"
+          label="Workspace"
+          open={openMenu}
+          setOpen={setOpenMenu}
+          items={WORKSPACES.map((entry) => ({
+            label: entry.label,
+            onClick: () => onWorkspace(entry.id),
+            disabled: workspace === entry.id,
+          }))}
         />
         <Menu
           id="settings"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { BetSizeDisplayMode } from "../../domain/betSizes";
 import {
   fastSolveDefaults,
@@ -7,6 +7,21 @@ import {
 import type { ThemePreference } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function listFocusable(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (node) => !node.hasAttribute("disabled") && node.getAttribute("aria-hidden") !== "true",
+  );
+}
 
 export function SettingsDialog() {
   const open = useSettingsStore((s) => s.settingsOpen);
@@ -21,6 +36,8 @@ export function SettingsDialog() {
   const updateDraft = useStudyStore((s) => s.updateDraft);
   const machineDefaults = useMemo(() => fastSolveDefaults(), []);
   const hardwareHint = formatHardwareHint(machineDefaults);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -37,6 +54,61 @@ export function SettingsDialog() {
     setThemePreference,
   ]);
 
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    restoreFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    if (!dialog) {
+      return;
+    }
+
+    const focusables = listFocusable(dialog);
+    (focusables[0] ?? dialog).focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+      const nodes = listFocusable(dialog);
+      if (nodes.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || !dialog.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialog.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      const restore = restoreFocusRef.current;
+      if (restore && typeof restore.focus === "function" && document.contains(restore)) {
+        restore.focus();
+      }
+      restoreFocusRef.current = null;
+    };
+  }, [open, setOpen]);
+
   if (!open) {
     return null;
   }
@@ -48,9 +120,12 @@ export function SettingsDialog() {
       onClick={() => setOpen(false)}
     >
       <div
+        ref={dialogRef}
         className="settings-dialog"
         role="dialog"
+        aria-modal="true"
         aria-label="Settings"
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="panel-title-row">
