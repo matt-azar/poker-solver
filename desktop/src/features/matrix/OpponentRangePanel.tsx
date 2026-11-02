@@ -1,8 +1,17 @@
-import { useMemo } from "react";
-import { groupHands } from "../../domain/browse";
-import { pairName } from "../../domain/range";
-import { RANKS, type NodePayload } from "../../domain/types";
+import { useMemo, useRef } from "react";
+import {
+  type AggregatedHandCell,
+  formatRangeInclusion,
+  groupHands,
+  opponentSolutionNode,
+  RANGE_INCLUSION_MEASURE,
+  rangeInclusionOf,
+} from "../../domain/browse";
+import { RANKS } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
+import "../../styles/matrix-density.css";
+import "../../styles/opponent-range.css";
+import { useMeasuredSquareSide } from "./RangeMatrix";
 
 function rangeFill(weight: number): string {
   const t = Math.max(0, Math.min(1, weight));
@@ -10,6 +19,10 @@ function rangeFill(weight: number): string {
   const g = Math.round(92 + (148 - 92) * t);
   const b = Math.round(52 + (102 - 52) * t);
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+function cellKey(row: number, col: number): string {
+  return `${row}:${col}`;
 }
 
 function seatLabel(player: number | null | undefined): string {
@@ -22,42 +35,30 @@ function seatLabel(player: number | null | undefined): string {
   return "Opponent";
 }
 
-/** Immutable solution snapshot for the non-acting seat (not Build draft weights). */
-function opponentView(node: NodePayload | null): NodePayload | null {
-  if (!node || node.opponent_player == null) {
-    return null;
+function handClassLabel(row: number, col: number): string {
+  if (row === col) {
+    return `${RANKS[row]}${RANKS[col]}`;
   }
-  const combos = node.opponent_combos;
-  if (!combos?.length) {
-    return null;
-  }
-  const marginal =
-    node.opponent_marginal ??
-    node.opponent_reach ??
-    combos.map(() => 0);
-  return {
-    node_id: node.node_id,
-    kind: node.kind,
-    player: node.opponent_player,
-    reach_defined: node.reach_defined,
-    combos,
-    marginal,
-    actions: [],
-  };
+  return row < col
+    ? `${RANKS[row]}${RANKS[col]}s`
+    : `${RANKS[col]}${RANKS[row]}o`;
 }
 
+/** Immutable solution snapshot for the non-acting seat (not Build draft weights). */
 export function OpponentRangePanel() {
   const currentNode = useStudyStore((s) => s.currentNode);
-  const view = useMemo(() => opponentView(currentNode), [currentNode]);
+  const view = useMemo(() => opponentSolutionNode(currentNode), [currentNode]);
   const cells = useMemo(() => (view ? groupHands(view) : []), [view]);
   const byKey = useMemo(() => {
-    const map = new Map<string, (typeof cells)[number]>();
+    const map = new Map<string, AggregatedHandCell>();
     for (const cell of cells) {
-      map.set(`${cell.row}:${cell.col}`, cell);
+      map.set(cellKey(cell.row, cell.col), cell);
     }
     return map;
   }, [cells]);
   const seat = seatLabel(view?.player ?? currentNode?.opponent_player);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const side = useMeasuredSquareSide(wrapRef);
 
   return (
     <section className="matrix-pane opponent-range-pane" aria-label={`${seat} range`}>
@@ -67,8 +68,13 @@ export function OpponentRangePanel() {
       {!view ? (
         <p className="empty-hint">Opponent reach appears on decision nodes.</p>
       ) : (
-        <div className="range-matrix-wrap">
-          <div className="range-matrix" role="grid" aria-label={`${seat} solution range`}>
+        <div className="range-matrix-wrap" ref={wrapRef}>
+          <div
+            className="range-matrix matrix-density"
+            role="grid"
+            aria-label={`${seat} solution range (${RANGE_INCLUSION_MEASURE})`}
+            style={side > 0 ? { width: side, height: side } : undefined}
+          >
             <div className="matrix-corner" />
             {RANKS.map((rank) => (
               <div key={`c-${rank}`} className="matrix-axis">
@@ -78,33 +84,38 @@ export function OpponentRangePanel() {
             {RANKS.map((rowRank, row) => (
               <div key={`r-${rowRank}`} className="matrix-row-fragment" style={{ display: "contents" }}>
                 <div className="matrix-axis">{rowRank}</div>
-                {RANKS.map((colRank, col) => {
-                  const cell = byKey.get(`${row}:${col}`);
-                  const label = cell?.text ?? pairName(row, col);
-                  const empty = !cell || !cell.defined || cell.marginalSum <= 0;
-                  const weight =
-                    !empty && cell && cell.range_combos > 0
-                      ? Math.min(1, cell.marginalSum / Math.max(1, cell.range_combos))
-                      : 0;
+                {RANKS.map((_, col) => {
+                  const cell = byKey.get(cellKey(row, col));
+                  const text = cell?.text ?? handClassLabel(row, col);
+                  const inclusion = cell ? rangeInclusionOf(cell) : null;
+                  const empty =
+                    !cell || !cell.defined || inclusion == null || inclusion <= 0;
+                  const weight = !empty ? (inclusion ?? 0) : 0;
+                  const partialInclusion =
+                    !empty && weight > 1e-6 && weight < 1 - 1e-6;
+                  const sub = !empty ? formatRangeInclusion(weight) : "";
                   return (
                     <div
-                      key={`${rowRank}-${colRank}`}
+                      key={`${row}-${col}`}
                       className="matrix-cell"
                       role="gridcell"
                       data-empty={empty}
+                      data-excluded={empty}
+                      data-partial-inclusion={partialInclusion}
+                      data-measure={!empty ? "inclusion-weight" : undefined}
                       style={!empty ? { background: rangeFill(weight) } : undefined}
                       title={
                         empty
-                          ? label
-                          : `${label}: ${(weight * 100).toFixed(0)}%`
+                          ? text
+                          : `${text} · ${RANGE_INCLUSION_MEASURE} ${sub}%`
                       }
                     >
-                      <span className="matrix-cell__label">{label}</span>
-                      {!empty ? (
-                        <span className="matrix-cell__sub">
-                          {(weight * 100).toFixed(0)}
-                        </span>
-                      ) : null}
+                      <span className="matrix-cell__label">
+                        <span className="matrix-cell__hand">{text}</span>
+                        {sub ? (
+                          <span className="matrix-cell__sub">{sub}</span>
+                        ) : null}
+                      </span>
                     </div>
                   );
                 })}

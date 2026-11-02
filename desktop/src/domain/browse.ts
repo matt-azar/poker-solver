@@ -201,6 +201,42 @@ export function groupHands(node: NodePayload): AggregatedHandCell[] {
 export const RANGE_INCLUSION_MEASURE = "inclusion weight";
 
 /**
+ * Immutable non-acting seat snapshot for dual-range Study view.
+ * Maps solution `opponent_*` fields onto the acting-seat NodePayload shape so
+ * {@link groupHands} / {@link rangeInclusionOf} reuse the same inclusion math.
+ * Never reads Build draft weights.
+ */
+export function opponentSolutionNode(
+  node: NodePayload | null | undefined,
+): NodePayload | null {
+  if (!node || node.opponent_player == null) {
+    return null;
+  }
+  const combos = node.opponent_combos;
+  if (!combos?.length) {
+    return null;
+  }
+  const reach = Array.isArray(node.opponent_reach) ? node.opponent_reach : null;
+  if (!reach || reach.length !== combos.length) {
+    return null;
+  }
+  const marginal = Array.isArray(node.opponent_marginal)
+    ? node.opponent_marginal
+    : undefined;
+  return {
+    node_id: node.node_id,
+    kind: node.kind,
+    player: node.opponent_player,
+    // Opponent inclusion is defined whenever solution opponent_reach is present.
+    reach_defined: true,
+    combos,
+    reach,
+    marginal,
+    actions: [],
+  };
+}
+
+/**
  * Conventional range inclusion for a 169-cell: mean engine reach across the
  * combos listed for that class. Uses reach, not normalized posterior marginal.
  */
