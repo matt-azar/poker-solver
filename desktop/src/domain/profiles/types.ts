@@ -10,7 +10,16 @@ export interface PreflopAction {
   /** Seat / position label, e.g. "CO", "BB", "SB". */
   position: string;
   kind: PreflopActionKind;
-  /** Size in big blinds when applicable (open/raise/call amount into pot). */
+  /**
+   * Size in big blinds when applicable.
+   * Catalogue convention (bundled fixtures):
+   * - open / raise: total committed ("to" amount).
+   * - call: chips **added** this action (not total committed). Example: BTN
+   *   already open-committed 2.5 and faces a 10bb 3-bet → call `sizeBb: 7.5`.
+   * Setup derivation converts these via `profileActionsToSetupActions` and
+   * tags call sizes as `sizeMeaning: "add"`. Do not treat call sizeBb as a
+   * total-committed target without conversion.
+   */
   sizeBb?: number;
 }
 

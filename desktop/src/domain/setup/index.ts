@@ -2,6 +2,7 @@ export type {
   PotType,
   PreflopAction,
   PreflopActionKind,
+  PreflopSizeMeaning,
   SetupConflict,
   SetupDraftFields,
   SetupDraftResult,
@@ -20,8 +21,10 @@ export {
   DEFAULT_STARTING_STACK_BB,
   assignSrpSeats,
   derivePostflopPotAndStacks,
+  inferSizeMeaning,
   parseStakesLabelStackBb,
   potTypeFromActions,
+  profileActionsToSetupActions,
   resolveStartingStackBb,
   seatsForCoVsBbSrp,
   stakesLabelImpliesStack,
@@ -62,9 +65,12 @@ export {
   EMPTY_SETUP_META,
   applySetupTransaction,
   metaFromSetupResult,
+  undoSetupTransactionGuarded,
   type ApplySetupTransactionResult,
   type SetupStudyMeta,
   type SetupTransactionSnapshot,
+  type SetupUndoEntry,
+  type UndoSetupTransactionResult,
 } from "./setupTransaction";
 
 export {

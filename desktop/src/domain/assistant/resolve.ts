@@ -4,9 +4,12 @@ import {
   createBlankSetupDraft,
   derivePostflopPotAndStacks,
   mergeSetupPatch,
+  profileActionsToSetupActions,
   resolveStartingStackBb,
   seatsForCoVsBbSrp,
+  type PreflopAction,
   type SetupDraftResult,
+  type SetupFieldProvenance,
   type SetupPatch,
   type SetupProfileRef,
   type StudySetupIntent,
@@ -44,10 +47,32 @@ export interface ResolveAssistantProposalArgs {
   mode?: StudySetupIntent["mode"];
 }
 
+/** Range fields + provenance supplied to the canonical planner (never bypasses it). */
+interface RangeSource {
+  oopRange: string;
+  ipRange: string;
+  provenanceKind: Extract<
+    SetupFieldProvenance,
+    | "model_generated"
+    | "interpolated"
+    | "seat_action_composed"
+    | "selected_profile"
+  >;
+  profileRef: SetupProfileRef;
+  summaryExtra: string[];
+  /** When present, derive uses this profile's blinds/antes/actions. */
+  profile?: RangeProfile;
+  /** Setup-shaped preflop history for pot/stack derivation. */
+  setupActions?: PreflopAction[];
+}
+
 /**
  * Resolve a model/fake proposal into a SetupDraftResult using the catalogue
  * and shared merge/derive helpers. Guarded generatedRanges / interpolation are
  * validated here and labelled in provenance — never treated as equilibrium.
+ *
+ * All prepare / update / duplicate kinds enter one planner (`buildSetupPatch` →
+ * `mergeSetupPatch`). Range sourcing only supplies range fields + provenance.
  */
 export function resolveAssistantProposal(
   args: ResolveAssistantProposalArgs,
@@ -166,6 +191,9 @@ export function resolveAssistantProposal(
     });
   }
 
+  let rangeSource: RangeSource | undefined;
+  let profile: RangeProfile | undefined;
+
   // --- Seat×action composition (preferred grain over synthetic pair packs) ---
   if (
     mode === "create" &&
@@ -192,12 +220,7 @@ export function resolveAssistantProposal(
         stackBb: intent.stackBb,
       });
       if (composed.oopRange && composed.ipRange) {
-        return finalizeGeneratedOrInterpolated({
-          args,
-          mode,
-          intent,
-          draftRevision,
-          preferences,
+        rangeSource = {
           oopRange: composed.oopRange,
           ipRange: composed.ipRange,
           provenanceKind: "seat_action_composed",
@@ -214,13 +237,14 @@ export function resolveAssistantProposal(
               ? "Preferred seat×action pack over synthetic paired fixture"
               : "",
           ].filter(Boolean),
-        });
+          setupActions: intent.preflopActions,
+        };
       }
     }
   }
 
   // --- Guarded generation (highest explicit range authority from the model) ---
-  if (proposal.generatedRanges) {
+  if (!rangeSource && proposal.generatedRanges) {
     const validated = validateGeneratedRanges(proposal.generatedRanges);
     if (!validated.ok) {
       return incompleteResult({
@@ -235,12 +259,7 @@ export function resolveAssistantProposal(
         ],
       });
     }
-    return finalizeGeneratedOrInterpolated({
-      args,
-      mode,
-      intent,
-      draftRevision,
-      preferences,
+    rangeSource = {
       oopRange: validated.oop,
       ipRange: validated.ip,
       provenanceKind: "model_generated",
@@ -254,11 +273,16 @@ export function resolveAssistantProposal(
         `Model-generated ranges (not equilibrium) · OOP≈${validated.oopCombos.toFixed(1)} · IP≈${validated.ipCombos.toFixed(1)} combos`,
         validated.note ?? "Review weights before solving — not a verified GTO pack",
       ],
-    });
+      setupActions: intent.preflopActions,
+    };
   }
 
   // --- Combo-weight interpolation from two reference profiles ---
-  if (proposal.interpolateFromIds && proposal.interpolateFromIds.length === 2) {
+  if (
+    !rangeSource &&
+    proposal.interpolateFromIds &&
+    proposal.interpolateFromIds.length === 2
+  ) {
     const [idA, idB] = proposal.interpolateFromIds;
     const lowRef = args.catalogue.getProfile(idA);
     const highRef = args.catalogue.getProfile(idB);
@@ -277,19 +301,16 @@ export function resolveAssistantProposal(
         ],
       });
     }
-    const targetStack = intent.stackBb ?? preferences.defaultStackBb ?? DEFAULT_STARTING_STACK_BB;
+    const targetStack =
+      intent.stackBb ?? preferences.defaultStackBb ?? DEFAULT_STARTING_STACK_BB;
     try {
       const blended = interpolateProfilesByStack({
         low: lowRef,
         high: highRef,
         targetStackBb: targetStack,
       });
-      return finalizeGeneratedOrInterpolated({
-        args,
-        mode,
-        intent: { ...intent, stackBb: targetStack },
-        draftRevision,
-        preferences,
+      intent.stackBb = targetStack;
+      rangeSource = {
         oopRange: blended.oopRange,
         ipRange: blended.ipRange,
         provenanceKind: "interpolated",
@@ -304,7 +325,12 @@ export function resolveAssistantProposal(
           ...blended.notes,
           "Interpolated weights are not an equilibrium solve — review before trusting",
         ],
-      });
+        // Prefer the lower bracket's action history when both share the line.
+        profile: lowRef,
+        setupActions:
+          intent.preflopActions ??
+          profileActionsToSetupActions(lowRef.preflopActions),
+      };
     } catch (err) {
       return incompleteResult({
         draftRevision,
@@ -324,13 +350,13 @@ export function resolveAssistantProposal(
 
   // Duplicate / update without a profile selection: apply field edits only.
   const needsProfile =
-    mode === "create" ||
-    Boolean(proposal.selectedProfileId) ||
-    Boolean(intent.profileQuery) ||
-    Boolean(intent.oopPosition && intent.ipPosition);
+    !rangeSource &&
+    (mode === "create" ||
+      Boolean(proposal.selectedProfileId) ||
+      Boolean(intent.profileQuery) ||
+      Boolean(intent.oopPosition && intent.ipPosition));
 
-  let profile: RangeProfile | undefined;
-  if (needsProfile || proposal.selectedProfileId) {
+  if (needsProfile || (!rangeSource && proposal.selectedProfileId)) {
     const matched = resolveProfile({
       selectedProfileId: proposal.selectedProfileId,
       intent,
@@ -345,33 +371,25 @@ export function resolveAssistantProposal(
         draftRevision,
       });
       if (auto) {
-        return finalizeGeneratedOrInterpolated({
-          args,
-          mode,
-          intent,
+        rangeSource = auto;
+      } else {
+        return incompleteResult({
           draftRevision,
-          preferences,
-          oopRange: auto.oopRange,
-          ipRange: auto.ipRange,
-          provenanceKind: "interpolated",
-          profileRef: auto.profileRef,
-          summaryExtra: auto.summaryExtra,
+          summary: matched.summary,
+          missing: matched.missing,
+          conflicts: matched.conflicts,
         });
       }
-      return incompleteResult({
-        draftRevision,
-        summary: matched.summary,
-        missing: matched.missing,
-        conflicts: matched.conflicts,
-      });
+    } else {
+      profile = matched.profile;
     }
-    profile = matched.profile;
   }
 
   const patch = buildSetupPatch({
     mode,
     intent,
     profile,
+    rangeSource,
     proposal,
     baseDraft: args.baseDraft,
     preferences,
@@ -386,6 +404,22 @@ export function resolveAssistantProposal(
         : args.baseDraft;
 
   const result = mergeSetupPatch(base, patch, preferences);
+  if (rangeSource) {
+    result.summary.push(...rangeSource.summaryExtra);
+    result.profile = rangeSource.profileRef;
+  }
+  if (intent.unsupported && intent.unsupported.length > 0) {
+    for (const item of intent.unsupported) {
+      result.summary.push(`Unsupported field/request: ${item}`);
+      result.missing.push({
+        field: "unsupported",
+        message: item,
+        reason: "unsupported",
+      });
+    }
+    result.ok = false;
+    result.canSolve = false;
+  }
   if (mode === "create") {
     const stackWasSilent =
       proposal.stackBb === undefined && proposal.intent.stackBb === undefined;
@@ -401,7 +435,10 @@ export function resolveAssistantProposal(
         "Assumed cEV (chip EV / no rake) because no rake structure was specified",
       );
     }
-    if (profile?.provenance.classification === "synthetic_fixture") {
+    const classification =
+      profile?.provenance.classification ??
+      rangeSource?.profileRef.classification;
+    if (classification === "synthetic_fixture") {
       result.summary.push(
         "Catalogue row is a synthetic fixture — import a reliable pack for study-quality ranges",
       );
@@ -410,81 +447,16 @@ export function resolveAssistantProposal(
   return result;
 }
 
-function finalizeGeneratedOrInterpolated(args: {
-  args: ResolveAssistantProposalArgs;
-  mode: StudySetupIntent["mode"];
-  intent: StudySetupIntent;
-  draftRevision: number;
-  preferences: StudySetupPreferences;
-  oopRange: string;
-  ipRange: string;
-  provenanceKind: "model_generated" | "interpolated" | "seat_action_composed";
-  profileRef: SetupProfileRef;
-  summaryExtra: string[];
-}): SetupDraftResult {
-  const { mode, intent, draftRevision, preferences } = args;
-  const openSizeBb = intent.openSizeBb ?? preferences.defaultOpenSizeBb ?? 2.5;
-  const startingStackBb =
-    intent.stackBb ?? preferences.defaultStackBb ?? DEFAULT_STARTING_STACK_BB;
-  const oop = intent.oopPosition ?? "BB";
-  const ip = intent.ipPosition ?? "CO";
-  const derived = derivePostflopPotAndStacks({
-    startingStackBb,
-    openSizeBb,
-    openerSeat: ip,
-    callerSeat: oop,
-  });
-
-  const patch: SetupPatch = {
-    mode,
-    requestRevision: draftRevision,
-    profile: args.profileRef,
-    profileId: args.profileRef.id,
-    profileRevision: args.profileRef.revision,
-    // Top-level ranges keep model_generated / interpolated provenance tags.
-    oopRange: args.oopRange,
-    ipRange: args.ipRange,
-    explicitFields: {
-      openSizeBb,
-      boardText: intent.board,
-      stakesLabel: intent.stakesLabel,
-    },
-    derived: {
-      potBb: derived.potBb,
-      stackBb: derived.stackBb,
-    },
-    provenance: {
-      oopRange: args.provenanceKind,
-      ipRange: args.provenanceKind,
-      pot: "derived",
-      stack: "derived",
-    },
-  };
-
-  const base =
-    mode === "create"
-      ? createBlankSetupDraft("create", args.args.baseDraft)
-      : mode === "duplicate"
-        ? createBlankSetupDraft("duplicate", args.args.baseDraft)
-        : args.args.baseDraft;
-
-  const result = mergeSetupPatch(base, patch, preferences);
-  result.summary.push(...args.summaryExtra);
-  result.profile = args.profileRef;
-  return result;
-}
-
 function tryAutoStackInterpolation(args: {
   intent: StudySetupIntent;
   catalogue: CatalogueLike;
   draftRevision: number;
-}): {
-  oopRange: string;
-  ipRange: string;
-  profileRef: SetupProfileRef;
-  summaryExtra: string[];
-} | null {
-  if (!args.intent.oopPosition || !args.intent.ipPosition || args.intent.stackBb === undefined) {
+}): RangeSource | null {
+  if (
+    !args.intent.oopPosition ||
+    !args.intent.ipPosition ||
+    args.intent.stackBb === undefined
+  ) {
     return null;
   }
   const bracket = pickStackBracket(args.catalogue.listProfiles(), {
@@ -504,6 +476,7 @@ function tryAutoStackInterpolation(args: {
   return {
     oopRange: blended.oopRange,
     ipRange: blended.ipRange,
+    provenanceKind: "interpolated",
     profileRef: {
       id: `interp:${blended.lowId}+${blended.highId}@${args.intent.stackBb}`,
       revision: args.draftRevision,
@@ -515,6 +488,10 @@ function tryAutoStackInterpolation(args: {
       ...blended.notes,
       "Interpolated weights are not an equilibrium solve — review before trusting",
     ],
+    profile: bracket.low,
+    setupActions:
+      args.intent.preflopActions ??
+      profileActionsToSetupActions(bracket.low.preflopActions),
   };
 }
 
@@ -532,6 +509,7 @@ export function prepareStudyFromProfile(
   const ip = profile.positions.ip || seats.ip;
   const openSizeBb =
     openSizeFromActions(profile.preflopActions) ?? prefs.defaultOpenSizeBb ?? 2.5;
+  const setupActions = profileActionsToSetupActions(profile.preflopActions);
   const derived = derivePostflopPotAndStacks({
     startingStackBb: profile.startingStackBb,
     openSizeBb,
@@ -539,6 +517,7 @@ export function prepareStudyFromProfile(
     openerSeat: ip,
     callerSeat: oop,
     anteBb: profile.antes,
+    actions: setupActions,
   });
 
   const patch: SetupPatch = {
@@ -564,17 +543,27 @@ export function prepareStudyFromProfile(
       ipRange: profile.ranges.ip,
       openSizeBb,
     },
-    derived: {
-      potBb: derived.potBb,
-      stackBb: derived.stackBb,
-    },
-    explicitFields: board
-      ? { boardText: board }
-      : undefined,
+    derived: derived.incompleteReason
+      ? undefined
+      : {
+          potBb: derived.potBb,
+          stackBb: derived.stackBb,
+        },
+    explicitFields: board ? { boardText: board } : undefined,
   };
 
   const base = createBlankSetupDraft("create");
   const result = mergeSetupPatch(base, patch, prefs);
+  if (derived.incompleteReason) {
+    result.summary.push(derived.incompleteReason);
+    result.missing.push({
+      field: "preflopActions",
+      message: derived.incompleteReason,
+      reason: "needs_clarification",
+    });
+    result.ok = false;
+    result.canSolve = false;
+  }
   // Ensure synthetic provenance is visible in the summary for fixtures.
   if (
     profile.provenance.classification === "synthetic_fixture" &&
@@ -817,10 +806,75 @@ function intentToQuery(intent: StudySetupIntent): RangeProfileQuery {
   return query;
 }
 
+function resolveDeriveActions(args: {
+  intent: StudySetupIntent;
+  profile?: RangeProfile;
+  rangeSource?: RangeSource;
+}): PreflopAction[] | undefined {
+  if (args.intent.preflopActions && args.intent.preflopActions.length > 0) {
+    return args.intent.preflopActions;
+  }
+  if (args.rangeSource?.setupActions && args.rangeSource.setupActions.length > 0) {
+    return args.rangeSource.setupActions;
+  }
+  if (args.profile?.preflopActions && args.profile.preflopActions.length > 0) {
+    return profileActionsToSetupActions(args.profile.preflopActions);
+  }
+  return undefined;
+}
+
+/**
+ * Whether this proposal should recompute pot/stack from preflop history.
+ * Edit-mode range-only updates must leave pot/stack/bets/solver settings alone.
+ */
+function shouldDerivePotStack(args: {
+  mode: StudySetupIntent["mode"];
+  intent: StudySetupIntent;
+  profile?: RangeProfile;
+  rangeSource?: RangeSource;
+  proposal: Extract<
+    InterpretProposal,
+    { kind: "prepare_study" | "update_study" | "duplicate_study" }
+  >;
+}): boolean {
+  const { mode, intent, profile, rangeSource, proposal } = args;
+  // Explicit pot/stack field edits win; do not also derive over them.
+  if (
+    proposal.fieldEdits?.pot !== undefined ||
+    proposal.fieldEdits?.stack !== undefined
+  ) {
+    return false;
+  }
+  if (mode === "edit") {
+    // Only re-derive on edit when the player supplied preflop history or open size
+    // (or selected a profile that carries history). Pure range swaps preserve pot/stack.
+    const hasHistory =
+      (intent.preflopActions && intent.preflopActions.length > 0) ||
+      (rangeSource?.setupActions && rangeSource.setupActions.length > 0) ||
+      Boolean(profile);
+    const hasOpen = intent.openSizeBb !== undefined;
+    return Boolean(hasHistory || hasOpen);
+  }
+  if (mode === "duplicate") {
+    return Boolean(profile) || Boolean(intent.preflopActions?.length);
+  }
+  // create
+  if (profile || (intent.preflopActions && intent.preflopActions.length > 0)) {
+    return true;
+  }
+  // Default SRP derivation only when pot type is SRP (or unspecified with open size).
+  // Never invent SRP numbers for an explicit 3BP/4BP without sizes/history.
+  if (intent.potType === "3BP" || intent.potType === "4BP") {
+    return false;
+  }
+  return intent.openSizeBb !== undefined || intent.potType === "SRP";
+}
+
 function buildSetupPatch(args: {
   mode: StudySetupIntent["mode"];
   intent: StudySetupIntent;
   profile?: RangeProfile;
+  rangeSource?: RangeSource;
   proposal: Extract<
     InterpretProposal,
     { kind: "prepare_study" | "update_study" | "duplicate_study" }
@@ -829,10 +883,11 @@ function buildSetupPatch(args: {
   preferences: StudySetupPreferences;
   draftRevision: number;
 }): SetupPatch {
-  const { mode, intent, profile, draftRevision } = args;
+  const { mode, intent, profile, rangeSource, draftRevision } = args;
   const patch: SetupPatch = {
     mode,
     requestRevision: draftRevision,
+    provenance: {},
   };
 
   const explicit: NonNullable<SetupPatch["explicitFields"]> = {};
@@ -868,7 +923,7 @@ function buildSetupPatch(args: {
   // remaining stack after preflop (from derived). Only write stackBb into the
   // draft patch for duplicate/edit overrides or create-without-profile.
   if (intent.stackBb !== undefined) {
-    if (mode === "duplicate" || mode === "edit" || (mode === "create" && !profile)) {
+    if (mode === "duplicate" || mode === "edit" || (mode === "create" && !profile && !rangeSource)) {
       explicit.stackBb = intent.stackBb;
     }
   }
@@ -885,6 +940,20 @@ function buildSetupPatch(args: {
 
   if (Object.keys(explicit).length > 0) {
     patch.explicitFields = explicit;
+  }
+
+  // Range sourcing supplies ranges + provenance into the same planner.
+  if (rangeSource) {
+    patch.profile = rangeSource.profileRef;
+    patch.profileId = rangeSource.profileRef.id;
+    patch.profileRevision = rangeSource.profileRef.revision;
+    patch.oopRange = rangeSource.oopRange;
+    patch.ipRange = rangeSource.ipRange;
+    patch.provenance = {
+      ...(patch.provenance ?? {}),
+      oopRange: rangeSource.provenanceKind,
+      ipRange: rangeSource.provenanceKind,
+    };
   }
 
   if (profile) {
@@ -925,35 +994,61 @@ function buildSetupPatch(args: {
       patch.profileFields.stackBb = profile.startingStackBb;
       if (profile.startingStackBb !== intent.stackBb) {
         // Conflict surfaces via mergeSetupPatch; do not silently re-derive.
-      } else if (openSizeBb !== undefined) {
-        const derived = derivePostflopPotAndStacks({
+      } else if (
+        openSizeBb !== undefined &&
+        shouldDerivePotStack(args)
+      ) {
+        applyDerived(patch, {
           startingStackBb,
           openSizeBb,
           blinds: profile.blinds,
           openerSeat: seats.ip,
           callerSeat: seats.oop,
           anteBb: profile.antes,
+          actions: resolveDeriveActions(args),
         });
-        patch.derived = {
-          potBb: derived.potBb,
-          stackBb: derived.stackBb,
-        };
       }
-    } else if (openSizeBb !== undefined) {
-      const derived = derivePostflopPotAndStacks({
+    } else if (openSizeBb !== undefined && shouldDerivePotStack(args)) {
+      applyDerived(patch, {
         startingStackBb,
         openSizeBb,
         blinds: profile.blinds,
         openerSeat: seats.ip,
         callerSeat: seats.oop,
         anteBb: profile.antes,
+        actions: resolveDeriveActions(args),
       });
-      patch.derived = {
-        potBb: derived.potBb,
-        stackBb: derived.stackBb,
-      };
     }
-
+  } else if (shouldDerivePotStack(args)) {
+    const openSizeBb =
+      intent.openSizeBb ?? args.preferences.defaultOpenSizeBb ?? 2.5;
+    const startingStackBb =
+      intent.stackBb ??
+      args.preferences.defaultStackBb ??
+      DEFAULT_STARTING_STACK_BB;
+    const oop = intent.oopPosition ?? "BB";
+    const ip = intent.ipPosition ?? "CO";
+    const actions = resolveDeriveActions(args);
+    applyDerived(patch, {
+      startingStackBb,
+      openSizeBb,
+      openerSeat: ip,
+      callerSeat: oop,
+      actions,
+      blinds: rangeSource?.profile?.blinds,
+      anteBb: rangeSource?.profile?.antes,
+    });
+  } else if (
+    mode === "create" &&
+    (intent.potType === "3BP" || intent.potType === "4BP") &&
+    !(resolveDeriveActions(args)?.length)
+  ) {
+    // Ask rather than invent an SRP pot when multi-bet sizes are unknown.
+    patch.provenance = {
+      ...(patch.provenance ?? {}),
+      pot: "unresolved",
+      stack: "unresolved",
+    };
   } else if (intent.stackBb !== undefined && mode === "duplicate") {
     // Stack-only duplicate without reloading a profile.
     patch.explicitFields = {
@@ -964,6 +1059,30 @@ function buildSetupPatch(args: {
   }
 
   return patch;
+}
+
+function applyDerived(
+  patch: SetupPatch,
+  input: Parameters<typeof derivePostflopPotAndStacks>[0],
+): void {
+  const derived = derivePostflopPotAndStacks(input);
+  if (derived.incompleteReason) {
+    patch.provenance = {
+      ...(patch.provenance ?? {}),
+      pot: "unresolved",
+      stack: "unresolved",
+    };
+    return;
+  }
+  patch.derived = {
+    potBb: derived.potBb,
+    stackBb: derived.stackBb,
+  };
+  patch.provenance = {
+    ...(patch.provenance ?? {}),
+    pot: "derived",
+    stack: "derived",
+  };
 }
 
 function incompleteResult(args: {
