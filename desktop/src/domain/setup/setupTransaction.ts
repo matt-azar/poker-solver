@@ -159,7 +159,7 @@ function pickDraftFields(
 ): Partial<SpotDraft> {
   const out: Partial<SpotDraft> = {};
   for (const key of keys) {
-    (out as Record<string, unknown>)[key] = draft[key];
+    (out as unknown as Record<string, unknown>)[key] = draft[key];
   }
   return out;
 }
@@ -319,7 +319,7 @@ export function undoSetupTransactionGuarded(
     const afterValue = entry.afterDraft[key];
     const beforeValue = entry.beforeDraft[key];
     if (draftValuesEqual(args.currentDraft[key], afterValue)) {
-      (nextDraft as Record<string, unknown>)[key] = beforeValue;
+      (nextDraft as unknown as Record<string, unknown>)[key] = beforeValue;
       restoredKeys.push(key);
     } else {
       conflictKeys.push(key);
