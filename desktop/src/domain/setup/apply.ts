@@ -1,4 +1,10 @@
-import { boardCards, parseCard } from "../range";
+import {
+  boardCards,
+  comboCount,
+  parseCard,
+  parseExactRange,
+  weightsFromExact,
+} from "../range";
 import { DEFAULT_SPOT, type SpotDraft } from "../types";
 import type { StudySetupPreferences } from "./preferences";
 import {
@@ -458,14 +464,17 @@ export function mergeSetupPatch(
     ([, tag]) => tag === "unresolved",
   );
 
+  const rangeOk =
+    validateRangeTextForSolve("OOP", mergedOop, mergedBoard).length === 0 &&
+    validateRangeTextForSolve("IP", mergedIp, mergedBoard).length === 0;
+
   const canSolve =
     !hasConflicts &&
     !hasBlockingMissing &&
     !requiredUnresolved &&
     boardLen >= 3 &&
     boardLen <= 5 &&
-    mergedOop.trim().length > 0 &&
-    mergedIp.trim().length > 0 &&
+    rangeOk &&
     mergedPot > 0 &&
     mergedStack > 0;
 
@@ -496,6 +505,42 @@ export function mergeSetupPatch(
 /**
  * Soft client checks mirroring what Build needs before launching a solve.
  * Engine remains authoritative; this only blocks obviously incomplete drafts.
+ * Range text must parse without token errors and retain live weight vs the board
+ * so an illegal range never clears a previously published study.
+ */
+export function validateRangeTextForSolve(
+  label: "OOP" | "IP",
+  text: string,
+  boardText: string,
+): string[] {
+  const errors: string[] = [];
+  const trimmed = text.trim();
+  if (!trimmed) {
+    errors.push(`${label} range is empty`);
+    return errors;
+  }
+  const parsed = parseExactRange(trimmed);
+  for (const tokenError of parsed.errors) {
+    errors.push(
+      `${label} range token "${tokenError.token}": ${tokenError.message}`,
+    );
+  }
+  if (parsed.errors.length > 0) {
+    return errors;
+  }
+  const grid = weightsFromExact(parsed.range);
+  const combos = comboCount(grid, boardText);
+  if (!(combos > 0)) {
+    errors.push(
+      `${label} range has no live combos on the board (empty or fully blocked)`,
+    );
+  }
+  return errors;
+}
+
+/**
+ * Soft client checks mirroring what Build needs before launching a solve.
+ * Engine remains authoritative; this only blocks obviously incomplete drafts.
  */
 export function validateSetupForSolve(draft: SpotDraft): SetupValidationResult {
   const errors: string[] = [];
@@ -515,12 +560,12 @@ export function validateSetupForSolve(draft: SpotDraft): SetupValidationResult {
     }
     seen.add(card);
   }
-  if (!draft.oopRange.trim()) {
-    errors.push("OOP range is empty");
-  }
-  if (!draft.ipRange.trim()) {
-    errors.push("IP range is empty");
-  }
+  errors.push(
+    ...validateRangeTextForSolve("OOP", draft.oopRange, draft.boardText),
+  );
+  errors.push(
+    ...validateRangeTextForSolve("IP", draft.ipRange, draft.boardText),
+  );
   if (!(draft.pot > 0)) {
     errors.push("Pot must be greater than 0");
   }
