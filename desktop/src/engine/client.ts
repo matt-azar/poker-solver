@@ -241,6 +241,16 @@ export class EngineClient {
     return data;
   }
 
+  /** Spot config for a loaded solution (ranges, bets, tree edits, optional settings). */
+  async getSolutionConfig(solutionId: string): Promise<Record<string, unknown>> {
+    const { response, data } = await this.request(
+      "GET",
+      `/api/solutions/${solutionId}/config`,
+    );
+    this.ensureOk(response, data);
+    return data as Record<string, unknown>;
+  }
+
   async recentSolutions(): Promise<unknown> {
     const { response, data } = await this.request("GET", "/api/recent-solutions");
     this.ensureOk(response, data);

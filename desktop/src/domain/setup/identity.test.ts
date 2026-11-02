@@ -6,7 +6,10 @@ import {
   analysisIdentityKey,
   analysisPayloadMatchesNode,
   compareNoteIsValid,
+  draftFromOpenedSolution,
+  draftPartialFromSolutionConfig,
   draftPartialFromStatus,
+  openDraftBase,
   resolveBaselineSolutionId,
   shouldClearCompareNote,
   strategyEditScopeFromNode,
@@ -143,7 +146,104 @@ describe("draftPartialFromStatus", () => {
     expect(partial.iterations).toBe(40);
     expect(partial.maxRaises).toBe(1);
     expect(partial.accuracy).toBe("");
+    expect(partial.timeLimit).toBe("");
     expect(partial.oopRange).toBeUndefined();
     expect(partial.ipRange).toBeUndefined();
+  });
+
+  it("clears timeLimit when status time_limit is null", () => {
+    const partial = draftPartialFromStatus({
+      time_limit: null,
+    } as StatusPayload);
+    expect(partial.timeLimit).toBe("");
+  });
+});
+
+describe("openDraftBase / draftFromOpenedSolution", () => {
+  it("starts with empty ranges and bets so prior Build paint cannot leak", () => {
+    const base = openDraftBase("/tmp/aa.psol");
+    expect(base.oopRange).toBe("");
+    expect(base.ipRange).toBe("");
+    expect(base.oopBets).toBe("");
+    expect(base.ipBets).toBe("");
+    expect(base.oopFlop).toBe("");
+    expect(base.treeEdits).toEqual([]);
+    expect(base.timeLimit).toBe("");
+    expect(base.solutionPath).toBe("/tmp/aa.psol");
+  });
+
+  it("replaces draft wholesale from config so 22s do not survive over AA", () => {
+    const opened = draftFromOpenedSolution({
+      solutionPath: "/tmp/aa.psol",
+      status: {
+        board: ["Ah", "Kd", "7c", "4s", "2h"],
+        pot: 100,
+        stack: 200,
+        time_limit: null,
+        accuracy: -1,
+        iterations_requested: 200,
+      } as StatusPayload,
+      config: {
+        kind: "street",
+        board: ["Ah", "Kd", "7c", "4s", "2h"],
+        pot: 100,
+        stack: 200,
+        oop_range: "AA",
+        ip_range: "KK",
+        oop_bets: [0.5, 1],
+        ip_bets: [0.5],
+        oop_flop_bets: [0.5],
+        ip_flop_bets: [],
+        oop_turn_bets: [],
+        ip_turn_bets: [],
+        oop_river_bets: [1],
+        ip_river_bets: [1],
+        tree_edits: ["force - c"],
+        time_limit: null,
+      },
+    });
+    expect(opened.configComplete).toBe(true);
+    expect(opened.warnings).toEqual([]);
+    expect(opened.draft.oopRange).toBe("AA");
+    expect(opened.draft.ipRange).toBe("KK");
+    expect(opened.draft.oopBets).toBe("0.5, 1");
+    expect(opened.draft.ipFlop).toBe("");
+    expect(opened.draft.treeEdits).toEqual(["force - c"]);
+    expect(opened.draft.timeLimit).toBe("");
+    expect(opened.draft.solutionPath).toBe("/tmp/aa.psol");
+  });
+
+  it("clears ranges/bets when config is missing instead of merging a stale draft", () => {
+    const opened = draftFromOpenedSolution({
+      solutionPath: "/tmp/other.psol",
+      status: {
+        board: ["Kh", "Kd", "7c"],
+        pot: 50,
+        stack: 100,
+        time_limit: null,
+      } as StatusPayload,
+      config: null,
+    });
+    expect(opened.configComplete).toBe(false);
+    expect(opened.warnings.length).toBeGreaterThan(0);
+    expect(opened.draft.oopRange).toBe("");
+    expect(opened.draft.ipRange).toBe("");
+    expect(opened.draft.oopBets).toBe("");
+    expect(opened.draft.boardText).toBe("Kh Kd 7c");
+    expect(opened.draft.pot).toBe(50);
+    expect(opened.draft.timeLimit).toBe("");
+  });
+
+  it("maps empty bet arrays to empty draft fields (check-only)", () => {
+    const partial = draftPartialFromSolutionConfig({
+      oop_bets: [],
+      ip_bets: [],
+      oop_flop_bets: [],
+      ip_flop_bets: [],
+    });
+    expect(partial.oopBets).toBe("");
+    expect(partial.ipBets).toBe("");
+    expect(partial.oopFlop).toBe("");
+    expect(partial.ipFlop).toBe("");
   });
 });

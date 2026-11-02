@@ -552,6 +552,17 @@ void check_persistence_workflow_under_value_load()
     CHECK(status_after_open.status == 200);
     CHECK(json_string(status_after_open.body, "solution_id") == sid2);
 
+    // Opened solutions expose spot config so Study can replace the Build draft.
+    HttpResult opened_config;
+    CHECK(http_exchange("GET", "/api/solutions/" + sid2 + "/config", "", opened_config));
+    CHECK(opened_config.status == 200);
+    CHECK(opened_config.body.find("\"kind\":\"street\"") != std::string::npos);
+    CHECK(opened_config.body.find("\"oop_range\"") != std::string::npos);
+    CHECK(opened_config.body.find("\"ip_range\"") != std::string::npos);
+    CHECK(opened_config.body.find("\"oop_bets\"") != std::string::npos);
+    // Canonical combo_text order (AdAc), not the solve request spelling (AcAd).
+    CHECK(opened_config.body.find("AdAc") != std::string::npos);
+
     const std::string values2 = "/api/solutions/" + sid2 + "/nodes/" + root + "/values";
     HttpResult pending_before_continue;
     CHECK(http_exchange("GET", values2, "", pending_before_continue));
