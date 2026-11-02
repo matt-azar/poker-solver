@@ -10,7 +10,6 @@ import { AssistantProviderError } from "../../domain/assistant/provider";
 import {
   emptyStudySetupPreferences,
   loadStudySetupPreferences,
-  type SetupDraftResult,
   type StudySetupPreferences,
 } from "../../domain/setup";
 import {
@@ -27,6 +26,7 @@ import {
   useHelpChatStore,
 } from "../../state/helpChatStore";
 import { useStudyStore } from "../../state/studyStore";
+import { commitAssistantSetup } from "./commitAssistantSetup";
 
 type ProviderMode = "fake" | "openai";
 
@@ -175,7 +175,9 @@ export function StudyAssistantWindow() {
         outcome.run.status !== "cancelled" &&
         outcome.run.status !== "error"
       ) {
-        const applied = commitSetup(outcome.run.result);
+        // Never remint requestRevision or force-apply after stale — that would
+        // overwrite edits made while the assistant request was in flight.
+        const applied = commitAssistantSetup(outcome.run.result, applySetupDraft);
         if (applied.ok) {
           setWorkspace("build");
           line = {
@@ -198,21 +200,6 @@ export function StudyAssistantWindow() {
     } finally {
       setBusy(false);
     }
-  }
-
-  function commitSetup(result: SetupDraftResult) {
-    const write = (requestRevision: number) =>
-      applySetupDraft(
-        requestRevision === result.requestRevision
-          ? result
-          : { ...result, requestRevision },
-        { force: true },
-      );
-    const first = write(result.requestRevision);
-    if (first.ok || first.reason !== "stale") {
-      return first;
-    }
-    return write(useStudyStore.getState().draftRevision);
   }
 
   function onTitlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
