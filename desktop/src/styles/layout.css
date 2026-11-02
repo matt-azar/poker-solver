@@ -379,27 +379,36 @@
   line-height: 1.2;
 }
 
+/* Four-color deck text (hearts/diamonds/clubs/spades — never red/black pairs). */
 .board-card[data-suit="h"],
 .card-picker-cell[data-suit="h"],
-.toolbar-btn[data-suit="h"] {
+.toolbar-btn[data-suit="h"],
+.history-choice[data-suit="h"],
+.runout-card[data-suit="h"] {
   color: var(--suit-heart);
 }
 
 .board-card[data-suit="d"],
 .card-picker-cell[data-suit="d"],
-.toolbar-btn[data-suit="d"] {
+.toolbar-btn[data-suit="d"],
+.history-choice[data-suit="d"],
+.runout-card[data-suit="d"] {
   color: var(--suit-diamond);
 }
 
 .board-card[data-suit="c"],
 .card-picker-cell[data-suit="c"],
-.toolbar-btn[data-suit="c"] {
+.toolbar-btn[data-suit="c"],
+.history-choice[data-suit="c"],
+.runout-card[data-suit="c"] {
   color: var(--suit-club);
 }
 
 .board-card[data-suit="s"],
 .card-picker-cell[data-suit="s"],
-.toolbar-btn[data-suit="s"] {
+.toolbar-btn[data-suit="s"],
+.history-choice[data-suit="s"],
+.runout-card[data-suit="s"] {
   color: var(--suit-spade);
 }
 

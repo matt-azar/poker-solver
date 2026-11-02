@@ -33,7 +33,8 @@ import "../../styles/actions.css";
 import { ActionBlock } from "../matrix/ActionBlock";
 
 function suitOf(card: string): string {
-  return card.slice(1, 2)?.toLowerCase() || "";
+  const suit = card.trim().slice(1, 2)?.toLowerCase() || "";
+  return "shdc".includes(suit) ? suit : "";
 }
 
 function stepsFromTrailOrCrumbs(
@@ -332,6 +333,9 @@ export function ActionHistory() {
                             className="path-nav__step"
                             data-current={isCurrent ? "true" : "false"}
                             data-kind={step.kind}
+                            data-suit={
+                              step.kind === "card" ? suitOf(step.label) || undefined : undefined
+                            }
                             disabled={!clickable}
                             title={
                               step.nodeId
@@ -411,12 +415,14 @@ export function ActionHistory() {
             choices.map((choice, index) => {
               // Card / chance strip: keep compact history-choice buttons.
               if (choice.kind !== "action") {
+                const cardSuit = suitOf(choice.label);
                 return (
                   <button
                     key={choice.key}
                     type="button"
                     className="path-nav-choice history-choice"
                     data-kind={choice.kind}
+                    data-suit={cardSuit || undefined}
                     disabled={!choice.nodeId}
                     title={choice.nodeId ? choice.nodeId : choice.label}
                     onClick={() => {

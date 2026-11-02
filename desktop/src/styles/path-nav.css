@@ -127,14 +127,29 @@
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
 }
 
+/* Four-color deck: same --suit-* tokens as board / PlayingCard / picker. */
 .path-nav__card[data-suit="h"],
-.path-nav__card[data-suit="d"] {
-  color: color-mix(in srgb, var(--danger) 80%, var(--text));
+.path-nav__step[data-suit="h"],
+.path-nav-choice[data-suit="h"] {
+  color: var(--suit-heart);
+}
+
+.path-nav__card[data-suit="d"],
+.path-nav__step[data-suit="d"],
+.path-nav-choice[data-suit="d"] {
+  color: var(--suit-diamond);
+}
+
+.path-nav__card[data-suit="c"],
+.path-nav__step[data-suit="c"],
+.path-nav-choice[data-suit="c"] {
+  color: var(--suit-club);
 }
 
 .path-nav__card[data-suit="s"],
-.path-nav__card[data-suit="c"] {
-  color: var(--text);
+.path-nav__step[data-suit="s"],
+.path-nav-choice[data-suit="s"] {
+  color: var(--suit-spade);
 }
 
 .path-nav__steps {

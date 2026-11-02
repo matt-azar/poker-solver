@@ -85,6 +85,15 @@ describe("ActionHistory path chrome", () => {
     expect(screen.getByLabelText("Forward")).toHaveProperty("disabled", true);
   });
 
+  it("tags path board cards with four-color suit attributes", () => {
+    // Ah / Kd / 7c — diamond must be data-suit=d (blue via --suit-diamond), not
+    // lumped with hearts as a two-color "red" path style.
+    render(<ActionHistory />);
+    expect(screen.getByText("Ah").getAttribute("data-suit")).toBe("h");
+    expect(screen.getByText("Kd").getAttribute("data-suit")).toBe("d");
+    expect(screen.getByText("7c").getAttribute("data-suit")).toBe("c");
+  });
+
   it("distinguishes fold terminals from showdown", () => {
     useStudyStore.setState({
       currentNode: {
