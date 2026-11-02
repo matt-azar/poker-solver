@@ -176,11 +176,24 @@ export function ComboInspector() {
             <button
               type="button"
               className="toolbar-btn primary"
+              disabled={lockDraft.handIndices.length === 0}
+              onClick={() => {
+                const combos = lockDraft.handIndices
+                  .map((index) => currentNode.combos?.[index])
+                  .filter((combo): combo is string => typeof combo === "string");
+                selectCombosForLock(combos);
+              }}
+            >
+              Lock selection
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
               onClick={() =>
                 selectCombosForLock(cell.hands.map((hand) => hand.combo))
               }
             >
-              Lock selection
+              Lock entire hand class
             </button>
             <button
               type="button"
