@@ -1,6 +1,10 @@
 import { parseRangeText, snapshotWeights, type WeightSnapshot } from "../range";
 import { DEFAULT_SPOT, type SpotDraft } from "../types";
 import { createBlankSetupDraft } from "./apply";
+import {
+  validateProposedDraftLimits,
+  type LimitedSetupField,
+} from "./fieldLimits";
 import { bumpRevision, isStaleProposal } from "./revision";
 import type {
   SetupDraftResult,
@@ -190,6 +194,16 @@ export function applySetupTransaction(
     };
   }
 
+  // Invalid proposed fields (negative pot, fractional iterations, …) must not
+  // commit even when the result was labelled incomplete-only elsewhere.
+  if (!result.ok && result.conflicts.some((c) => /must be|cannot be negative|whole number/i.test(c.message))) {
+    return {
+      ok: false,
+      reason: "blocked",
+      message: result.conflicts.map((c) => c.message).join("; ") || "Invalid proposed fields",
+    };
+  }
+
   const patch = result.draftPatch;
   const mode: SetupMode = result.mode ?? "edit";
   if (!patch || Object.keys(patch).length === 0) {
@@ -228,6 +242,37 @@ export function applySetupTransaction(
     if (patch.solutionPath === undefined) {
       nextDraft.solutionPath = "";
     }
+  }
+
+  // Validate the complete proposed state under create/edit semantics before mutate.
+  const proposedKeys = Object.keys(patch).filter((key): key is LimitedSetupField =>
+    [
+      "pot",
+      "stack",
+      "iterations",
+      "threads",
+      "memoryMib",
+      "samples",
+      "maxRaises",
+      "mergeThresholdPct",
+      "potCap",
+      "rakeRate",
+      "rakeCap",
+    ].includes(key),
+  );
+  if (result.pot !== undefined && !proposedKeys.includes("pot")) {
+    proposedKeys.push("pot");
+  }
+  if (result.stack !== undefined && !proposedKeys.includes("stack")) {
+    proposedKeys.push("stack");
+  }
+  const limitConflicts = validateProposedDraftLimits(nextDraft, proposedKeys);
+  if (limitConflicts.length > 0) {
+    return {
+      ok: false,
+      reason: "blocked",
+      message: limitConflicts.map((c) => c.message).join("; "),
+    };
   }
 
   const nextWeights: WeightSnapshot = {

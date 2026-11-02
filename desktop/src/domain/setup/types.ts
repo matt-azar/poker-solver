@@ -68,8 +68,11 @@ export interface StudySetupIntent {
   /** Postflop IP position label, e.g. "CO". */
   ipPosition?: string;
   /**
-   * Rake / stakes-environment label such as "100NL".
-   * Identifies a rake structure, not a personal player profile and never stack depth.
+   * Range-source environment label such as "100NL" or "cEV".
+   * Catalogue matching / provenance for which preflop ranges were derived —
+   * independent of engine solve rake (`SpotDraft.rakeRate` / `rakeCap`).
+   * Never a personal player profile and never stack depth; never auto-copied
+   * onto numerical solve rake.
    */
   stakesLabel?: string;
   /** Preflop pot type (SRP / 3BP / 4BP). Required for create; do not invent. */

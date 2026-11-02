@@ -1,4 +1,8 @@
-import { parseRangeText, comboCount } from "../range";
+import {
+  comboCount,
+  parseExactRange,
+  weightsFromExact,
+} from "../range";
 
 /** Soft caps so model-emitted ranges stay reviewable and parseable. */
 export const GENERATED_RANGE_MAX_CHARS = 8000;
@@ -15,9 +19,21 @@ export type GeneratedRangesValidation =
   | { ok: true; oop: string; ip: string; note?: string; oopCombos: number; ipCombos: number }
   | { ok: false; error: string };
 
+function formatTokenErrors(
+  side: "oop" | "ip",
+  errors: { token: string; message: string }[],
+): string {
+  const sample = errors
+    .slice(0, 3)
+    .map((e) => `"${e.token}" (${e.message})`)
+    .join("; ");
+  return `generatedRanges.${side} has invalid token(s): ${sample}`;
+}
+
 /**
  * Guard model- or interpolation-produced weighted range strings before apply.
- * Does not claim strategic quality — only syntactic / size safety.
+ * Full-token parse — garbage tokens like THISISGARBAGE are rejected even when
+ * a neighbouring AA token would otherwise parse. Does not claim strategic quality.
  */
 export function validateGeneratedRanges(
   raw: unknown,
@@ -40,19 +56,16 @@ export function validateGeneratedRanges(
       error: `generated range text exceeds ${GENERATED_RANGE_MAX_CHARS} characters`,
     };
   }
-  let oopGrid;
-  let ipGrid;
-  try {
-    oopGrid = parseRangeText(oop);
-    ipGrid = parseRangeText(ip);
-  } catch (err) {
-    return {
-      ok: false,
-      error: `generated ranges failed to parse: ${err instanceof Error ? err.message : String(err)}`,
-    };
+  const oopParsed = parseExactRange(oop);
+  if (oopParsed.errors.length > 0) {
+    return { ok: false, error: formatTokenErrors("oop", oopParsed.errors) };
   }
-  const oopCombos = comboCount(oopGrid, "");
-  const ipCombos = comboCount(ipGrid, "");
+  const ipParsed = parseExactRange(ip);
+  if (ipParsed.errors.length > 0) {
+    return { ok: false, error: formatTokenErrors("ip", ipParsed.errors) };
+  }
+  const oopCombos = comboCount(weightsFromExact(oopParsed.range), "");
+  const ipCombos = comboCount(weightsFromExact(ipParsed.range), "");
   if (oopCombos < GENERATED_RANGE_MIN_COMBOS || ipCombos < GENERATED_RANGE_MIN_COMBOS) {
     return {
       ok: false,

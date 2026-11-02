@@ -74,6 +74,14 @@ export {
 } from "./setupTransaction";
 
 export {
+  SETUP_FIELD_LIMITS,
+  validateLimitedField,
+  validateProposedDraftLimits,
+  validateProposedFieldBag,
+  type LimitedSetupField,
+} from "./fieldLimits";
+
+export {
   actionsSignature,
   analysisIdentitiesEqual,
   analysisIdentityKey,

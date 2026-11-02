@@ -16,6 +16,10 @@ import {
   type StudySetupPreferences,
 } from "../setup";
 import {
+  validateProposedFieldBag,
+  type LimitedSetupField,
+} from "../setup/fieldLimits";
+import {
   composeSpotFromSeatActions,
   getSeatActionCatalogue,
   interpolateProfilesByStack,
@@ -332,18 +336,30 @@ export function resolveAssistantProposal(
           profileActionsToSetupActions(lowRef.preflopActions),
       };
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const incompatible = /incompatible interpolation|unsupported extrapolation/i.test(
+        message,
+      );
       return incompleteResult({
         draftRevision,
-        summary: [
-          `Interpolation failed: ${err instanceof Error ? err.message : String(err)}`,
-        ],
-        missing: [
-          {
-            field: "ranges",
-            message: "Could not interpolate reference profiles",
-            reason: "interpolation_failed",
-          },
-        ],
+        summary: [`Interpolation failed: ${message}`],
+        conflicts: incompatible
+          ? [
+              {
+                field: "interpolateFromIds",
+                message,
+              },
+            ]
+          : undefined,
+        missing: incompatible
+          ? undefined
+          : [
+              {
+                field: "ranges",
+                message: "Could not interpolate reference profiles",
+                reason: "interpolation_failed",
+              },
+            ],
       });
     }
   }
@@ -408,6 +424,29 @@ export function resolveAssistantProposal(
     result.summary.push(...rangeSource.summaryExtra);
     result.profile = rangeSource.profileRef;
   }
+
+  // A07: invalid proposed numbers are conflicts (ok:false), not incomplete canSolve.
+  const invalidFields = collectInvalidProposedFields(proposal, result);
+  if (invalidFields.length > 0) {
+    result.conflicts.push(...invalidFields);
+    result.ok = false;
+    result.canSolve = false;
+    result.draftPatch = {};
+    result.summary.push(
+      ...invalidFields.map((c) => `Invalid ${c.field}: ${c.message}`),
+    );
+    return result;
+  }
+
+  annotateRangeSourceVsSolveRake({
+    result,
+    intent,
+    profile,
+    rangeSource,
+    proposal,
+    baseDraft: args.baseDraft,
+  });
+
   if (intent.unsupported && intent.unsupported.length > 0) {
     for (const item of intent.unsupported) {
       result.summary.push(`Unsupported field/request: ${item}`);
@@ -423,16 +462,16 @@ export function resolveAssistantProposal(
   if (mode === "create") {
     const stackWasSilent =
       proposal.stackBb === undefined && proposal.intent.stackBb === undefined;
-    const rakeWasSilent =
+    const rangeSourceRakeSilent =
       !(proposal.stakesLabel ?? proposal.intent.stakesLabel)?.trim();
     if (stackWasSilent && intent.stackBb === DEFAULT_STARTING_STACK_BB) {
       result.summary.push(
         `Assumed ${DEFAULT_STARTING_STACK_BB}bb starting stacks (stack depth not specified)`,
       );
     }
-    if (rakeWasSilent && intent.stakesLabel === DEFAULT_RAKE_ENVIRONMENT) {
+    if (rangeSourceRakeSilent && intent.stakesLabel === DEFAULT_RAKE_ENVIRONMENT) {
       result.summary.push(
-        "Assumed cEV (chip EV / no rake) because no rake structure was specified",
+        "Assumed range-source environment cEV (chip EV / no rake structure) because none was specified — solve rake unchanged",
       );
     }
     const classification =
@@ -445,6 +484,106 @@ export function resolveAssistantProposal(
     }
   }
   return result;
+}
+
+function collectInvalidProposedFields(
+  proposal: Extract<
+    InterpretProposal,
+    { kind: "prepare_study" | "update_study" | "duplicate_study" }
+  >,
+  result: SetupDraftResult,
+): SetupDraftResult["conflicts"] {
+  const bag: Partial<Record<LimitedSetupField, unknown>> = {
+    ...(proposal.fieldEdits ?? {}),
+  };
+  // Also check values that landed on the patch from tree/intent merges.
+  for (const key of [
+    "pot",
+    "stack",
+    "iterations",
+    "threads",
+    "memoryMib",
+    "samples",
+    "maxRaises",
+    "mergeThresholdPct",
+    "potCap",
+    "rakeRate",
+    "rakeCap",
+  ] as const) {
+    if (bag[key] === undefined && result.draftPatch[key] !== undefined) {
+      bag[key] = result.draftPatch[key];
+    }
+  }
+  return validateProposedFieldBag(bag);
+}
+
+/**
+ * A03: range-source environment (catalogue/provenance) is independent of
+ * engine solve rake. Never copy profile.rake onto the draft; report both.
+ */
+function annotateRangeSourceVsSolveRake(args: {
+  result: SetupDraftResult;
+  intent: StudySetupIntent;
+  profile?: RangeProfile;
+  rangeSource?: RangeSource;
+  proposal: Extract<
+    InterpretProposal,
+    { kind: "prepare_study" | "update_study" | "duplicate_study" }
+  >;
+  baseDraft: SpotDraft;
+}): void {
+  const { result, intent, profile, rangeSource, proposal, baseDraft } = args;
+  const rangeSourceLabel =
+    intent.stakesLabel ??
+    profile?.labels?.stakes ??
+    rangeSource?.profile?.labels?.stakes;
+  if (rangeSourceLabel) {
+    result.provenance.rangeSourceEnvironment =
+      result.provenance.stakesLabel ??
+      (intent.stakesLabel ? "explicit_request" : "selected_profile");
+    result.summary.push(
+      `Range-source environment: ${rangeSourceLabel} (catalogue matching / provenance only — does not change solve rake)`,
+    );
+  }
+
+  const edits = proposal.fieldEdits;
+  const solveRakeEdited =
+    edits?.rakeRate !== undefined || edits?.rakeCap !== undefined;
+  const nextRate =
+    result.draftPatch.rakeRate !== undefined
+      ? result.draftPatch.rakeRate
+      : baseDraft.rakeRate;
+  const nextCap =
+    result.draftPatch.rakeCap !== undefined
+      ? result.draftPatch.rakeCap
+      : baseDraft.rakeCap;
+
+  if (solveRakeEdited) {
+    result.provenance.rakeRate =
+      result.provenance.rakeRate ?? "explicit_request";
+    result.provenance.rakeCap =
+      result.provenance.rakeCap ?? "explicit_request";
+    const cleared = nextRate === 0 && nextCap === 0;
+    result.summary.push(
+      cleared
+        ? `Solve rake cleared (engine rate=0, cap=0) — ranges unchanged unless also requested`
+        : `Solve rake set to rate=${nextRate}, cap=${nextCap} (engine; independent of range-source environment)`,
+    );
+  } else if (rangeSource || profile || rangeSourceLabel) {
+    // Pin current engine rake onto the patch for create blanks so loading
+    // ranges cannot wipe a raked sim via DEFAULT_SPOT zeros.
+    if (result.draftPatch.rakeRate === undefined) {
+      result.draftPatch.rakeRate = baseDraft.rakeRate;
+      result.provenance.rakeRate = "default";
+    }
+    if (result.draftPatch.rakeCap === undefined) {
+      result.draftPatch.rakeCap = baseDraft.rakeCap;
+      result.provenance.rakeCap = "default";
+    }
+    result.summary.push(
+      `Solve rake unchanged: rate=${baseDraft.rakeRate}, cap=${baseDraft.rakeCap} (engine; independent of range-source)`,
+    );
+  }
 }
 
 function tryAutoStackInterpolation(args: {
@@ -497,12 +636,15 @@ function tryAutoStackInterpolation(args: {
 
 /**
  * Direct (non-NL) Stage A+B path: prepare a study from an explicit profile.
+ * Profile rake/stakes labels are range-source provenance only — never copied
+ * onto engine solve rake. Pass `currentDraft` so an existing solve rake is preserved.
  */
 export function prepareStudyFromProfile(
   profile: RangeProfile,
   prefs: StudySetupPreferences,
   revision: number,
   board?: string,
+  currentDraft?: SpotDraft,
 ): SetupDraftResult {
   const seats = seatsForCoVsBbSrp();
   const oop = profile.positions.oop || seats.oop;
@@ -520,6 +662,7 @@ export function prepareStudyFromProfile(
     actions: setupActions,
   });
 
+  const live = currentDraft;
   const patch: SetupPatch = {
     mode: "create",
     requestRevision: revision,
@@ -538,6 +681,7 @@ export function prepareStudyFromProfile(
       classification: profile.provenance.classification,
     },
     // Ranges + open size from profile; remaining stack comes from derived (not startingStackBb).
+    // Deliberately omit profile.rake — range-source ≠ solve rake (A03).
     profileFields: {
       oopRange: profile.ranges.oop,
       ipRange: profile.ranges.ip,
@@ -550,10 +694,32 @@ export function prepareStudyFromProfile(
           stackBb: derived.stackBb,
         },
     explicitFields: board ? { boardText: board } : undefined,
+    // Preserve engine solve rake from the live sim (never copy profile.rake).
+    ...(live
+      ? {
+          rakeRate: live.rakeRate,
+          rakeCap: live.rakeCap,
+          provenance: { rakeRate: "default" as const, rakeCap: "default" as const },
+        }
+      : {}),
   };
 
-  const base = createBlankSetupDraft("create");
+  const base = live
+    ? createBlankSetupDraft("create", live)
+    : createBlankSetupDraft("create");
   const result = mergeSetupPatch(base, patch, prefs);
+  const stakes = profile.labels?.stakes;
+  if (stakes) {
+    result.provenance.rangeSourceEnvironment = "selected_profile";
+    result.summary.push(
+      `Range-source environment: ${stakes} (catalogue matching / provenance only — does not change solve rake)`,
+    );
+  }
+  const rate = result.draftPatch.rakeRate ?? live?.rakeRate ?? 0;
+  const cap = result.draftPatch.rakeCap ?? live?.rakeCap ?? 0;
+  result.summary.push(
+    `Solve rake unchanged: rate=${rate}, cap=${cap} (engine; profile rake was not applied)`,
+  );
   if (derived.incompleteReason) {
     result.summary.push(derived.incompleteReason);
     result.missing.push({

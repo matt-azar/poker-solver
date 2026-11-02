@@ -111,6 +111,31 @@ describe("applySetupTransaction", () => {
     expect(forced.ok).toBe(true);
   });
 
+  it("A07: rejects negative pot / fractional iterations without mutating draft", () => {
+    const current = { ...DEFAULT_SPOT, pot: 100, iterations: 200 };
+    const weights = snapshotWeights({
+      oop: parseRangeText(current.oopRange),
+      ip: parseRangeText(current.ipRange),
+    });
+    const applied = applySetupTransaction({
+      currentDraft: current,
+      currentWeights: weights,
+      currentMeta: null,
+      draftRevision: 0,
+      result: result({
+        ok: true,
+        canSolve: false,
+        draftPatch: { pot: -5, iterations: 12.5 },
+      }),
+    });
+    expect(applied.ok).toBe(false);
+    if (applied.ok) {
+      return;
+    }
+    expect(applied.reason).toBe("blocked");
+    expect(applied.message).toMatch(/Pot|Iterations/i);
+  });
+
   it("create mode does not keep prior boardText or solutionPath from the live draft", () => {
     const live = {
       ...DEFAULT_SPOT,

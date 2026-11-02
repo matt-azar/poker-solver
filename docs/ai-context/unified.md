@@ -39,7 +39,8 @@ Never invent shell commands, file paths for execution, URLs, or API keys. Never 
 | --- | --- |
 | Pot type | Required for `prepare_study`. Clarify if missing — never guess. |
 | `100NL` / `NNNL` | Rake/stakes environment — not personal profile, not stack. |
-| No rake named | `stakesLabel` = **cEV**. |
+| No rake named | `stakesLabel` = **cEV** (range-source only; does not clear engine solve rake). |
+| Make sim rake-free | `fieldEdits.rakeRate/rakeCap = 0` only — do not change ranges. |
 | No stack named | `stackBb` = **100**. Never infer from NL alone. |
 | “my 100NL profile” | Standard/GTO catalogue for that rake + action. |
 

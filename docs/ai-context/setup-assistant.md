@@ -15,9 +15,10 @@ For the full unified role, see `unified.md`. The floating Study assistant (menu 
 | --- | --- |
 | Pot type (`SRP` / `3BP` / `4BP`) | **Required** for `prepare_study`. If missing → `clarify`. Never guess. |
 | `100NL` / `NNNL` | Rake structure / stakes environment — **not** personal profile, **not** stack depth. |
-| No rake named | Set `stakesLabel` to **cEV**. |
+| No rake named | Set `stakesLabel` to **cEV** (range-source environment only). |
 | No stack named | Set `stackBb` to **100**. Never infer 100bb from an NL label alone. |
 | “my 100NL profile” | Standard/GTO catalogue for that rake + stated action. |
+| Range-source vs solve rake | `stakesLabel` / 100NL / cEV select catalogue ranges only. **Never** copy onto `fieldEdits.rakeRate` / `rakeCap`. Loading ranges preserves current engine solve rake. “Make the sim rake-free” → `fieldEdits: { rakeRate: 0, rakeCap: 0 }` only. |
 
 ## Proposal kinds
 
@@ -51,8 +52,8 @@ Surface conflicts — never silent override. Solve is not started by the assista
 
 ## Direct field edits
 
-When the player names a Build field (pot, stack, iterations, accuracy, time limit, threads, memory, algorithm, samples, donk, merge threshold) without asking for a new study, emit `update_study` with `fieldEdits` containing only those keys. Do not invent pot type, ranges, or stakes.
+When the player names a Build field (pot, stack, iterations, accuracy, time limit, threads, memory, algorithm, samples, donk, merge threshold, solve rake) without asking for a new study, emit `update_study` with `fieldEdits` containing only those keys. Do not invent pot type, ranges, or stakes. Do not set solve rake from a 100NL/cEV range request.
 
-`fieldEdits` keys: `pot`, `stack`, `iterations`, `accuracy`, `timeLimit`, `threads`, `memoryMib`, `algorithm` (`cfr_plus` | `cfr` | `dcfr`), `samples`, `maxRaises`, `mergeThresholdPct`, `potCap`, `geometric`, `noThreeBet`, `allowAllIn`, `donkFlop`, `donkTurn`, `donkRiver`, `incentives`, `edgeTags`.
+`fieldEdits` keys: `pot`, `stack`, `iterations`, `accuracy`, `timeLimit`, `threads`, `memoryMib`, `algorithm` (`cfr_plus` | `cfr` | `dcfr`), `samples`, `maxRaises`, `mergeThresholdPct`, `potCap`, `rakeRate`, `rakeCap`, `geometric`, `noThreeBet`, `allowAllIn`, `donkFlop`, `donkTurn`, `donkRiver`, `incentives`, `edgeTags`. Reject negative pot/stack/memory, zero threads, and fractional iterations.
 
 Street sizes stay on `treeEdits` / `intent.treePreset`: `oopFlop`, `ipFlop`, `oopTurn`, `ipTurn`, `oopRiver`, `ipRiver`.

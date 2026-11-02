@@ -23,6 +23,17 @@ describe("validateGeneratedRanges", () => {
     const result = validateGeneratedRanges({ oop: "not-a-hand", ip: "zzz" });
     expect(result.ok).toBe(false);
   });
+
+  it("rejects AA,THISISGARBAGE — does not silently keep AA", () => {
+    const result = validateGeneratedRanges({
+      oop: "AA,THISISGARBAGE",
+      ip: "KK",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/THISISGARBAGE/i);
+    }
+  });
 });
 
 describe("resolveAssistantProposal generated + interpolated", () => {

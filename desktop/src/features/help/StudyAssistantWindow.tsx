@@ -56,6 +56,7 @@ export function StudyAssistantWindow() {
 
   const draft = useStudyStore((s) => s.draft);
   const draftRevision = useStudyStore((s) => s.draftRevision);
+  const setupMeta = useStudyStore((s) => s.setupMeta);
   const applySetupDraft = useStudyStore((s) => s.applySetupDraft);
   const undoSetupTransaction = useStudyStore((s) => s.undoSetupTransaction);
   const canUndoSetup = useStudyStore((s) => s.canUndoSetup);
@@ -155,7 +156,21 @@ export function StudyAssistantWindow() {
         {
           text: question,
           history,
-          setupSummary: `board=${draft.boardText || "(none)"} pot=${draft.pot} stack=${draft.stack} oop=${draft.oopRange.slice(0, 48)} ip=${draft.ipRange.slice(0, 48)} rev=${draftRevision}`,
+          setupSummary: [
+            `board=${draft.boardText || "(none)"}`,
+            `pot=${draft.pot}`,
+            `stack=${draft.stack}`,
+            `solveRake=rate:${draft.rakeRate}/cap:${draft.rakeCap}`,
+            `rangeSource=${
+              setupMeta?.summary
+                ?.find((line) => /Range-source environment:/i.test(line))
+                ?.match(/Range-source environment:\s*([^(]+)/i)?.[1]
+                ?.trim() ?? "n/a"
+            }`,
+            `oop=${draft.oopRange.slice(0, 48)}`,
+            `ip=${draft.ipRange.slice(0, 48)}`,
+            `rev=${draftRevision}`,
+          ].join(" "),
           preferencesSummary: "prefs from holdem-study-setup-prefs",
           availableProfiles: catalogueProfileMetas(catalogue),
           draftRevision,

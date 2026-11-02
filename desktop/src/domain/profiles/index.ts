@@ -44,6 +44,8 @@ export {
 } from "./nearest";
 
 export {
+  assertCompatibleInterpolationRefs,
+  blendExactRanges,
   blendRangeTexts,
   blendWeightGrids,
   interpolateProfilesByStack,
