@@ -165,6 +165,36 @@ describe("validateSetupForSolve", () => {
     expect(result.errors.some((line) => /OOP range/i.test(line))).toBe(true);
   });
 
+  it("rejects illegal range tokens before submit", () => {
+    const draft: SpotDraft = {
+      ...DEFAULT_SPOT,
+      boardText: "Ah Kd 7c",
+      oopRange: "AA,ZZ,AKx",
+      ipRange: "QQ+",
+      pot: 5.5,
+      stack: 97.5,
+    };
+    const result = validateSetupForSolve(draft);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((line) => /OOP range token/i.test(line))).toBe(true);
+  });
+
+  it("rejects ranges with no live combos on the board", () => {
+    const draft: SpotDraft = {
+      ...DEFAULT_SPOT,
+      boardText: "As Ah Ad",
+      oopRange: "AsAh",
+      ipRange: "KK",
+      pot: 5.5,
+      stack: 97.5,
+    };
+    const result = validateSetupForSolve(draft);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((line) => /OOP range has no live combos/i.test(line))).toBe(
+      true,
+    );
+  });
+
   it("accepts a complete flop draft", () => {
     const draft: SpotDraft = {
       ...DEFAULT_SPOT,

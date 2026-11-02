@@ -30,8 +30,9 @@ import {
   type PathStep,
 } from "../domain/actionHistory";
 import {
-  nextGeneration,
+  acceptStatusGeneration,
   shouldApply,
+  shouldApplyStatus,
   solutionNeedsReload,
 } from "../domain/browse";
 import {
@@ -599,8 +600,14 @@ export function resetRangeEditHistoryForTests() {
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let nodeToken = 0;
+let statusToken = 0;
 let seenGeneration = -1;
 let continuationPending = false;
+/**
+ * Where the next successful solution reload should land.
+ * `null` = root (new solve / open). `undefined` = no preference (use current/root).
+ */
+let pendingReloadNodeId: string | null | undefined = undefined;
 
 /** Independent tokens so equity polling does not cancel runouts (and vice versa). */
 const analysisTokens: Record<AnalysisKind, number> = {
@@ -611,6 +618,30 @@ const analysisTokens: Record<AnalysisKind, number> = {
 };
 const analysisPollTimers: Partial<Record<AnalysisKind, ReturnType<typeof setInterval>>> = {};
 const analysisRequestIdentity: Partial<Record<AnalysisKind, AnalysisIdentity>> = {};
+
+type PublishedStudySnapshot = {
+  solutionId: string | null;
+  baselineSolutionId: string | null;
+  currentNode: NodePayload | null;
+  pathTrail: PathStep[];
+  navHistory: NavHistoryEntry[];
+  navHistoryIndex: number;
+  canNavBack: boolean;
+  canNavForward: boolean;
+  nodeValues: ActionValuesPayload | null;
+  runouts: unknown | null;
+  equity: unknown | null;
+  categories: unknown | null;
+  compareNote: ComparePayload | null;
+  strategyEditScope: StrategyEditScope | null;
+  strategyEditDraft: StrategyEditDraft;
+  strategyEditDraftBaseline: StrategyEditDraft | null;
+  strategyEditDrawerOpen: boolean;
+  selectedCell: SelectedCell | null;
+  phase: SolvePhase;
+  message: string;
+  status: StatusPayload | null;
+};
 
 function strokeWeightForCell(current: number, slider: number): number {
   return slider <= 0 || Math.abs(current - slider) < 0.001 ? 0 : slider;
@@ -641,6 +672,76 @@ function invalidateAllAnalysisRequests() {
   (Object.keys(analysisTokens) as AnalysisKind[]).forEach((kind) => {
     bumpAnalysisToken(kind);
   });
+}
+
+/** Invalidate in-flight node fetches so a delayed s1 payload cannot paint during s2. */
+function bumpNodeToken(): number {
+  nodeToken += 1;
+  return nodeToken;
+}
+
+function bumpStatusToken(): number {
+  statusToken += 1;
+  return statusToken;
+}
+
+function invalidateLifecycleRequests() {
+  bumpNodeToken();
+  bumpStatusToken();
+  invalidateAllAnalysisRequests();
+}
+
+function snapshotPublishedStudy(state: {
+  solutionId: string | null;
+  baselineSolutionId: string | null;
+  currentNode: NodePayload | null;
+  pathTrail: PathStep[];
+  navHistory: NavHistoryEntry[];
+  navHistoryIndex: number;
+  canNavBack: boolean;
+  canNavForward: boolean;
+  nodeValues: ActionValuesPayload | null;
+  runouts: unknown | null;
+  equity: unknown | null;
+  categories: unknown | null;
+  compareNote: ComparePayload | null;
+  strategyEditScope: StrategyEditScope | null;
+  strategyEditDraft: StrategyEditDraft;
+  strategyEditDraftBaseline: StrategyEditDraft | null;
+  strategyEditDrawerOpen: boolean;
+  selectedCell: SelectedCell | null;
+  phase: SolvePhase;
+  message: string;
+  status: StatusPayload | null;
+}): PublishedStudySnapshot {
+  return {
+    solutionId: state.solutionId,
+    baselineSolutionId: state.baselineSolutionId,
+    currentNode: state.currentNode,
+    pathTrail: state.pathTrail.map((step) => ({ ...step })),
+    navHistory: state.navHistory.map((entry) => ({
+      nodeId: entry.nodeId,
+      trail: entry.trail.map((step) => ({ ...step })),
+    })),
+    navHistoryIndex: state.navHistoryIndex,
+    canNavBack: state.canNavBack,
+    canNavForward: state.canNavForward,
+    nodeValues: state.nodeValues,
+    runouts: state.runouts,
+    equity: state.equity,
+    categories: state.categories,
+    compareNote: state.compareNote,
+    strategyEditScope: state.strategyEditScope,
+    strategyEditDraft: structuredClone(state.strategyEditDraft),
+    strategyEditDraftBaseline: state.strategyEditDraftBaseline
+      ? structuredClone(state.strategyEditDraftBaseline)
+      : null,
+    strategyEditDrawerOpen: state.strategyEditDrawerOpen,
+    selectedCell: state.selectedCell,
+    phase: state.phase,
+    message: state.message,
+    status: state.status,
+  };
 }
 
 function beginAnalysisRequest(
@@ -1539,12 +1640,22 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   async refresh() {
+    const token = ++statusToken;
     try {
       const status = await engineClient.status();
-      const generation = nextGeneration(status, seenGeneration);
-      if (generation !== null) {
-        seenGeneration = generation;
+      // Drop overlapping / older in-flight polls before touching study state.
+      if (!shouldApplyStatus(token, statusToken)) {
+        return;
       }
+      const decision = acceptStatusGeneration(status, seenGeneration, {
+        // Token already proves this is the latest response; a lower generation
+        // means the explorer process restarted and re-baselined the counter.
+        allowRestart: true,
+      });
+      if (!decision.apply) {
+        return;
+      }
+      seenGeneration = decision.generation;
       const reload = solutionNeedsReload(status, get().solutionId, continuationPending);
       const baselineSolutionId = resolveBaselineSolutionId(
         status.baseline_solution_id,
@@ -1567,6 +1678,13 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       });
       if (reload && status.solution_id) {
         continuationPending = false;
+        const reloadTarget =
+          pendingReloadNodeId === undefined
+            ? get().currentNode?.node_id || rootNodeId(status.root_node_id)
+            : pendingReloadNodeId === null
+              ? rootNodeId(status.root_node_id)
+              : pendingReloadNodeId;
+        pendingReloadNodeId = undefined;
         set({
           solutionId: status.solution_id,
           message: status.paused
@@ -1575,9 +1693,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               ? "Stopped — keeping completed iterations."
               : "Solve complete.",
         });
-        await get().navigateTo(
-          get().currentNode?.node_id || rootNodeId(status.root_node_id),
-        );
+        await get().navigateTo(reloadTarget, { history: "replace" });
       } else if (status.running) {
         const requested = status.iterations_requested;
         const iterLabel =
@@ -1591,6 +1707,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         });
       }
     } catch (error) {
+      if (!shouldApplyStatus(token, statusToken)) {
+        return;
+      }
       const detail =
         error instanceof Error ? error.message : "Engine unreachable";
       let shellHint = "";
@@ -1617,13 +1736,17 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       });
       return;
     }
-    invalidateAllAnalysisRequests();
+    const prior = snapshotPublishedStudy(get());
+    invalidateLifecycleRequests();
+    pendingReloadNodeId = null; // new solve always lands at root
     set({
       phase: "solving",
       message: "Solving…",
       solveValidationErrors: [],
+      // Drop published identity so a delayed s1 node cannot rebind during s2.
+      solutionId: null,
       currentNode: null,
-pathTrail: [],
+      pathTrail: [],
       navHistory: [],
       navHistoryIndex: -1,
       canNavBack: false,
@@ -1642,10 +1765,13 @@ pathTrail: [],
       get().startPolling();
       await get().refresh();
     } catch (error) {
+      pendingReloadNodeId = undefined;
       set({
+        ...prior,
         phase: "failed",
         message:
           error instanceof Error ? presentUserText(error.message) : "Solve failed",
+        solveValidationErrors: [],
       });
     }
   },
@@ -1655,7 +1781,10 @@ pathTrail: [],
     if (!solutionId) {
       return;
     }
-    invalidateAllAnalysisRequests();
+    const prior = snapshotPublishedStudy(get());
+    const resumeNodeId = get().currentNode?.node_id ?? null;
+    invalidateLifecycleRequests();
+    pendingReloadNodeId = resumeNodeId;
     set({
       phase: "solving",
       message: "Continuing…",
@@ -1678,7 +1807,9 @@ pathTrail: [],
       get().startPolling();
       await get().refresh();
     } catch (error) {
+      pendingReloadNodeId = undefined;
       set({
+        ...prior,
         phase: "failed",
         message: error instanceof EngineError ? error.message : "Continue failed",
       });
@@ -1690,7 +1821,10 @@ pathTrail: [],
     if (!solutionId) {
       return;
     }
-    invalidateAllAnalysisRequests();
+    const prior = snapshotPublishedStudy(get());
+    const resumeNodeId = get().currentNode?.node_id ?? null;
+    invalidateLifecycleRequests();
+    pendingReloadNodeId = resumeNodeId;
     set({
       phase: "solving",
       message: get().warmStart
@@ -1720,7 +1854,9 @@ pathTrail: [],
       get().startPolling();
       await get().refresh();
     } catch (error) {
+      pendingReloadNodeId = undefined;
       set({
+        ...prior,
         phase: "failed",
         message: error instanceof EngineError ? error.message : "Resolve locked failed",
       });
@@ -1750,13 +1886,15 @@ pathTrail: [],
   },
 
   async navigateTo(nodeId: string, opts?: { history?: "push" | "replace" | "none" }) {
-    const solutionId = get().solutionId || get().status?.solution_id;
+    // Bind to the live published solution only — do not fall back to a stale
+    // status.solution_id while Solve/Open has cleared lifecycle identity.
+    const solutionId = get().solutionId;
     if (!solutionId) {
       return;
     }
     const historyMode = opts?.history ?? "push";
-    const token = ++nodeToken;
-const previous = get().currentNode;
+    const token = bumpNodeToken();
+    const previous = get().currentNode;
     // Drop every analysis result and in-flight poll so panels never show another node.
     invalidateAllAnalysisRequests();
     const priorScope = get().strategyEditScope;
@@ -1768,7 +1906,8 @@ const previous = get().currentNode;
     });
     try {
       const node = await engineClient.getNode(solutionId, nodeId);
-      if (!shouldApply(token, nodeToken, node.solution_id ?? solutionId, get().solutionId || solutionId)) {
+      // Compare against the live store solutionId only (no request fallback).
+      if (!shouldApply(token, nodeToken, node.solution_id ?? solutionId, get().solutionId)) {
         return;
       }
       if (typeof node.status_generation === "number" && node.status_generation < seenGeneration) {
@@ -2121,7 +2260,9 @@ pathTrail,
       set({ message: "Set a solution path before opening." });
       return;
     }
-    invalidateAllAnalysisRequests();
+const prior = snapshotPublishedStudy(get());
+    invalidateLifecycleRequests();
+    pendingReloadNodeId = null; // opened checkpoint lands at root
     // Drop cross-solution Build undo / nav before the load completes.
     setupHistoryPast.length = 0;
     rangeHistory.past.length = 0;
@@ -2129,6 +2270,7 @@ pathTrail,
     set({
       phase: "loading",
       message: `Opening ${target}…`,
+      solutionId: null,
       currentNode: null,
       pathTrail: [],
       navHistory: [],
@@ -2141,7 +2283,7 @@ pathTrail,
       strategyEditDraft: defaultLockDraft(0),
       strategyEditDraftBaseline: null,
       strategyEditDrawerOpen: false,
-      setupMeta: null,
+setupMeta: null,
       canUndoSetup: false,
       canUndoRange: false,
       canRedoRange: false,
@@ -2199,7 +2341,10 @@ pathTrail,
         message: `Opened ${target}. ${syncNote}${warningSuffix}`,
       });
     } catch (error) {
+      // Missing/invalid checkpoint must leave the last valid study usable.
+      pendingReloadNodeId = undefined;
       set({
+        ...prior,
         phase: "failed",
         message: error instanceof EngineError ? error.message : "Open failed",
       });

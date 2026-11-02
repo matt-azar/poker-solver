@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  acceptStatusGeneration,
   formatRangeInclusion,
   frequencyOf,
   groupEv,
@@ -8,11 +9,12 @@ import {
   isExcludedMatrixCell,
   isPartialRangeDisplay,
   nextGeneration,
-  opponentSolutionNode,
+opponentSolutionNode,
   RANGE_INCLUSION_MEASURE,
   rangeDisplayWeight,
   rangeInclusionOf,
   shouldApply,
+  shouldApplyStatus,
   solutionNeedsReload,
   strategyMix,
 } from "./browse";
@@ -213,8 +215,28 @@ describe("browse strategy grouping", () => {
   it("gates stale fetches and generations", () => {
     expect(shouldApply(3, 3, "s1", "s1")).toBe(true);
     expect(shouldApply(2, 3, "s1", "s1")).toBe(false);
+    expect(shouldApply(3, 3, "s1", null)).toBe(false);
+    expect(shouldApply(3, 3, null, "s1")).toBe(false);
     expect(nextGeneration({ status_generation: 4 }, 4)).toBe(4);
     expect(nextGeneration({ status_generation: 3 }, 4)).toBeNull();
+    expect(acceptStatusGeneration({ status_generation: 4 }, 4)).toEqual({
+      apply: true,
+      generation: 4,
+      restarted: false,
+    });
+    expect(acceptStatusGeneration({ status_generation: 3 }, 4)).toEqual({
+      apply: false,
+      reason: "stale",
+    });
+    expect(
+      acceptStatusGeneration({ status_generation: 0 }, 9, { allowRestart: true }),
+    ).toEqual({ apply: true, generation: 0, restarted: true });
+    expect(acceptStatusGeneration({}, 1)).toEqual({
+      apply: false,
+      reason: "missing",
+    });
+    expect(shouldApplyStatus(2, 2)).toBe(true);
+    expect(shouldApplyStatus(1, 2)).toBe(false);
     expect(solutionNeedsReload({ running: false, solution_id: "s2" }, "s1", false)).toBe(true);
     expect(solutionNeedsReload({ running: false, solution_id: "s1" }, "s1", true)).toBe(true);
     expect(solutionNeedsReload({ running: true, solution_id: "s2" }, "s1", false)).toBe(false);

@@ -92,9 +92,23 @@ export function shouldApply(
   solution: string | null | undefined,
   solutionId: string | null | undefined,
 ): boolean {
-  return token === nodeToken && solution === solutionId;
+  return (
+    token === nodeToken &&
+    solution != null &&
+    solutionId != null &&
+    solution === solutionId
+  );
 }
 
+/**
+ * Monotonic status-generation gate.
+ * Returns null when the body is missing a generation or is strictly older than
+ * `seen` (stale / out-of-order). Callers must not mutate study state on null.
+ *
+ * Engine restarts reset the counter; use {@link acceptStatusGeneration} after a
+ * request-token check so a lower generation on the latest in-flight response
+ * can re-baseline instead of being stuck rejecting forever.
+ */
 export function nextGeneration(
   body: { status_generation?: number },
   seen: number,
@@ -103,6 +117,43 @@ export function nextGeneration(
     return null;
   }
   return body.status_generation;
+}
+
+export type StatusGenerationDecision =
+  | { apply: true; generation: number; restarted: boolean }
+  | { apply: false; reason: "missing" | "stale" };
+
+/**
+ * Decide whether a status body may update store state.
+ *
+ * `allowRestart` should be true only for the latest status request token: a
+ * lower generation on that response means the explorer process restarted, not
+ * an overlapping stale poll (those are dropped by the token).
+ */
+export function acceptStatusGeneration(
+  body: { status_generation?: number },
+  seen: number,
+  options?: { allowRestart?: boolean },
+): StatusGenerationDecision {
+  if (typeof body.status_generation !== "number") {
+    return { apply: false, reason: "missing" };
+  }
+  const generation = body.status_generation;
+  if (generation >= seen) {
+    return { apply: true, generation, restarted: false };
+  }
+  if (options?.allowRestart) {
+    return { apply: true, generation, restarted: true };
+  }
+  return { apply: false, reason: "stale" };
+}
+
+/** True when a status poll token still matches the latest issued request. */
+export function shouldApplyStatus(
+  token: number,
+  statusToken: number,
+): boolean {
+  return token === statusToken;
 }
 
 export function solutionNeedsReload(
