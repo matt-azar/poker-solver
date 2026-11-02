@@ -18,15 +18,17 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
-const { useStudyStore } = await import("./studyStore");
+const { resetRangeEditHistoryForTests, useStudyStore } = await import("./studyStore");
 
 describe("range paint strokes", () => {
   beforeEach(() => {
-    useStudyStore.getState().endPaintStroke();
+    resetRangeEditHistoryForTests();
     useStudyStore.setState({
       weights: { oop: blankGrid(), ip: blankGrid() },
       draft: { ...DEFAULT_SPOT, oopRange: "", ipRange: "" },
       paintWeight: 1,
+      canUndoRange: false,
+      canRedoRange: false,
     });
   });
 

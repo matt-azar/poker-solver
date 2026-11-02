@@ -692,6 +692,111 @@ export function applyPaintPreservingExact(
   };
 }
 
+export function applyPaintAtPreservingExact(
+  rangeTextValue: string,
+  row: number,
+  column: number,
+  weight: number,
+): { text: string; range: ExactRange; grid: WeightGrid; errors: RangeTokenError[] } {
+  return applyPaintPreservingExact(rangeTextValue, pairName(row, column), weight);
+}
+
+/** Both-seat ExactRange snapshot for paint/set/clear/undo history. */
+export type ExactPairSnapshot = { oop: ExactRange; ip: ExactRange };
+
+export function exactPairFromTexts(oopText: string, ipText: string): ExactPairSnapshot {
+  return {
+    oop: parseExactRange(oopText).range,
+    ip: parseExactRange(ipText).range,
+  };
+}
+
+export function cloneExactPair(store: ExactPairSnapshot): ExactPairSnapshot {
+  return {
+    oop: cloneExactRange(store.oop),
+    ip: cloneExactRange(store.ip),
+  };
+}
+
+function exactRangesEqual(left: ExactRange, right: ExactRange): boolean {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const [combo, weight] of left) {
+    if (right.get(combo) !== weight) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function exactPairsEqual(left: ExactPairSnapshot, right: ExactPairSnapshot): boolean {
+  return exactRangesEqual(left.oop, right.oop) && exactRangesEqual(left.ip, right.ip);
+}
+
+export function weightsFromExactPair(store: ExactPairSnapshot): WeightSnapshot {
+  return {
+    oop: weightsFromExact(store.oop),
+    ip: weightsFromExact(store.ip),
+  };
+}
+
+export function textsFromExactPair(store: ExactPairSnapshot): { oop: string; ip: string } {
+  return {
+    oop: serializeExactRange(store.oop),
+    ip: serializeExactRange(store.ip),
+  };
+}
+
+/** Undo/redo stack keyed by ExactRange pairs (not aggregate 169-grids). */
+export function createExactRangeHistory(limit = RANGE_HISTORY_LIMIT) {
+  const past: ExactPairSnapshot[] = [];
+  const future: ExactPairSnapshot[] = [];
+  return {
+    past,
+    future,
+    push(before: ExactPairSnapshot) {
+      const snap = cloneExactPair(before);
+      const top = past[past.length - 1];
+      if (top && exactPairsEqual(top, snap)) {
+        return false;
+      }
+      past.push(snap);
+      while (past.length > limit) {
+        past.shift();
+      }
+      future.length = 0;
+      return true;
+    },
+    undo(current: ExactPairSnapshot) {
+      if (!past.length) {
+        return null;
+      }
+      const previous = past.pop()!;
+      future.push(cloneExactPair(current));
+      return previous;
+    },
+    redo(current: ExactPairSnapshot) {
+      if (!future.length) {
+        return null;
+      }
+      const next = future.pop()!;
+      past.push(cloneExactPair(current));
+      return next;
+    },
+    canUndo() {
+      return past.length > 0;
+    },
+    canRedo() {
+      return future.length > 0;
+    },
+    clear() {
+      past.length = 0;
+      future.length = 0;
+    },
+  };
+}
+
 function rankAt(text: string): number {
   const index = ORDER.indexOf(text.toUpperCase());
   if (index < 0) {

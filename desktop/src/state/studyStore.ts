@@ -6,14 +6,18 @@ import {
   type DealStreet,
 } from "../domain/cards";
 import {
+  applyPaintAtPreservingExact,
   boardCards,
   blankGrid,
-  createRangeHistory,
+  createExactRangeHistory,
+  exactPairFromTexts,
+  exactPairsEqual,
   parseRangeText,
   parseAbsoluteNumberList,
-  rangeText,
-  snapshotWeights,
-  snapshotsEqual,
+  textsFromExactPair,
+  weightsFromExact,
+  weightsFromExactPair,
+  type ExactPairSnapshot,
   type WeightSnapshot,
 } from "../domain/range";
 import {
@@ -571,13 +575,28 @@ function defaultLockDraft(actionCount: number): LockDraft {
   };
 }
 
-const rangeHistory = createRangeHistory();
+const rangeHistory = createExactRangeHistory();
 type PaintStroke = {
   player: "oop" | "ip";
   weight: number;
-  before: WeightSnapshot;
+  before: ExactPairSnapshot;
 };
 let paintStroke: PaintStroke | null = null;
+
+function rangeKey(player: "oop" | "ip"): "oopRange" | "ipRange" {
+  return player === "oop" ? "oopRange" : "ipRange";
+}
+
+function exactPairFromDraft(draft: { oopRange: string; ipRange: string }): ExactPairSnapshot {
+  return exactPairFromTexts(draft.oopRange, draft.ipRange);
+}
+
+/** Test helper: drop paint-stroke + exact undo stacks without touching identity state. */
+export function resetRangeEditHistoryForTests() {
+  paintStroke = null;
+  rangeHistory.clear();
+}
+
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let nodeToken = 0;
 let seenGeneration = -1;
@@ -736,15 +755,22 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     ip: parseRangeText(DEFAULT_SPOT.ipRange),
   },
   setRangeText(player, text) {
-    const before = snapshotWeights(get().weights);
-    const grid = parseRangeText(text);
-    const weights = { ...get().weights, [player]: grid };
+    const draft = get().draft;
+    const before = exactPairFromDraft(draft);
+    const nextPair = exactPairFromTexts(
+      player === "oop" ? text : draft.oopRange,
+      player === "ip" ? text : draft.ipRange,
+    );
+    const weights = {
+      ...get().weights,
+      [player]: weightsFromExact(nextPair[player]),
+    };
     rangeHistory.push(before);
     set({
       weights,
       draft: {
-        ...get().draft,
-        [player === "oop" ? "oopRange" : "ipRange"]: text,
+        ...draft,
+        [rangeKey(player)]: text,
       },
       draftRevision: bumpRevision(get().draftRevision),
       canUndoRange: rangeHistory.canUndo(),
@@ -768,8 +794,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     while (setupHistoryPast.length > SETUP_HISTORY_LIMIT) {
       setupHistoryPast.shift();
     }
-    // Keep range undo stack coherent with the new grids.
-    rangeHistory.push(snapshotWeights(state.weights));
+    // Keep range undo stack coherent with exact texts before the setup apply.
+    rangeHistory.push(exactPairFromDraft(state.draft));
     set({
       draft: applied.draft,
       weights: applied.weights,
@@ -810,18 +836,19 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (paintStroke) {
       get().endPaintStroke();
     }
-    const before = snapshotWeights(get().weights);
+    const draft = get().draft;
+    const before = exactPairFromDraft(draft);
     const nextWeight = weight === undefined ? get().paintWeight : weight;
-    const grid = get().weights[player].map((line) => line.slice());
-    const applied = grid[row][column] === nextWeight ? 0 : nextWeight;
-    grid[row][column] = applied;
-    const weights = { ...get().weights, [player]: grid };
+    const current = get().weights[player][row][column];
+    const applied = current === nextWeight ? 0 : nextWeight;
+    const key = rangeKey(player);
+    const painted = applyPaintAtPreservingExact(draft[key], row, column, applied);
     rangeHistory.push(before);
     set({
-      weights,
+      weights: { ...get().weights, [player]: painted.grid },
       draft: {
-        ...get().draft,
-        [player === "oop" ? "oopRange" : "ipRange"]: rangeText(grid),
+        ...draft,
+        [key]: painted.text,
       },
       draftRevision: bumpRevision(get().draftRevision),
       canUndoRange: rangeHistory.canUndo(),
@@ -838,7 +865,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     paintStroke = {
       player,
       weight,
-      before: snapshotWeights(get().weights),
+      before: exactPairFromDraft(get().draft),
     };
     get().continuePaintStroke(player, row, column);
   },
@@ -850,13 +877,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (get().weights[player][row][column] === weight) {
       return;
     }
-    const grid = get().weights[player].map((line) => line.slice());
-    grid[row][column] = weight;
+    const draft = get().draft;
+    const key = rangeKey(player);
+    const painted = applyPaintAtPreservingExact(draft[key], row, column, weight);
     set({
-      weights: { ...get().weights, [player]: grid },
+      weights: { ...get().weights, [player]: painted.grid },
       draft: {
-        ...get().draft,
-        [player === "oop" ? "oopRange" : "ipRange"]: rangeText(grid),
+        ...draft,
+        [key]: painted.text,
       },
       draftRevision: bumpRevision(get().draftRevision),
     });
@@ -867,7 +895,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const before = paintStroke.before;
     paintStroke = null;
-    if (!snapshotsEqual(before, snapshotWeights(get().weights))) {
+    const after = exactPairFromDraft(get().draft);
+    if (!exactPairsEqual(before, after)) {
       rangeHistory.push(before);
       set({
         canUndoRange: rangeHistory.canUndo(),
@@ -876,15 +905,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
   },
   clearRange(player) {
-    const before = snapshotWeights(get().weights);
-    const grid = blankGrid();
-    const weights = { ...get().weights, [player]: grid };
+    const draft = get().draft;
+    const before = exactPairFromDraft(draft);
     rangeHistory.push(before);
     set({
-      weights,
+      weights: { ...get().weights, [player]: blankGrid() },
       draft: {
-        ...get().draft,
-        [player === "oop" ? "oopRange" : "ipRange"]: "",
+        ...draft,
+        [rangeKey(player)]: "",
       },
       draftRevision: bumpRevision(get().draftRevision),
       canUndoRange: rangeHistory.canUndo(),
@@ -892,32 +920,34 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     });
   },
   undoRange() {
-    const previous = rangeHistory.undo(get().weights);
+    const previous = rangeHistory.undo(exactPairFromDraft(get().draft));
     if (!previous) {
       return;
     }
+    const texts = textsFromExactPair(previous);
     set({
-      weights: previous,
+      weights: weightsFromExactPair(previous),
       draft: {
         ...get().draft,
-        oopRange: rangeText(previous.oop),
-        ipRange: rangeText(previous.ip),
+        oopRange: texts.oop,
+        ipRange: texts.ip,
       },
       canUndoRange: rangeHistory.canUndo(),
       canRedoRange: rangeHistory.canRedo(),
     });
   },
   redoRange() {
-    const next = rangeHistory.redo(get().weights);
+    const next = rangeHistory.redo(exactPairFromDraft(get().draft));
     if (!next) {
       return;
     }
+    const texts = textsFromExactPair(next);
     set({
-      weights: next,
+      weights: weightsFromExactPair(next),
       draft: {
         ...get().draft,
-        oopRange: rangeText(next.oop),
-        ipRange: rangeText(next.ip),
+        oopRange: texts.oop,
+        ipRange: texts.ip,
       },
       canUndoRange: rangeHistory.canUndo(),
       canRedoRange: rangeHistory.canRedo(),
