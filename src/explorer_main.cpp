@@ -529,13 +529,19 @@ Job parse_job(const std::string& text)
     {
         job.algorithm = poker::solver::Algorithm::Dcfr;
     }
+    else if (algorithm == "pcfr_plus")
+    {
+        job.algorithm = poker::solver::Algorithm::PcfrPlus;
+    }
     else
     {
         throw std::invalid_argument("unknown algorithm");
     }
-    if (job.algorithm == poker::solver::Algorithm::Dcfr && !job.frozen)
+    if ((job.algorithm == poker::solver::Algorithm::Dcfr
+            || job.algorithm == poker::solver::Algorithm::PcfrPlus)
+        && !job.frozen)
     {
-        throw std::invalid_argument("dcfr requires the frozen combo pass");
+        throw std::invalid_argument("dcfr/pcfr_plus requires the frozen combo pass");
     }
     if (job.iterations <= 0)
     {
@@ -3292,9 +3298,12 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
         held->locks = poker::solver::parse_lock_set(document.locks_text);
     }
     const poker::solver::Algorithm loaded_algorithm = algorithm_from_code(document.algorithm);
-    if (loaded_algorithm == poker::solver::Algorithm::Dcfr && !document.frozen)
+    if ((loaded_algorithm == poker::solver::Algorithm::Dcfr
+            || loaded_algorithm == poker::solver::Algorithm::PcfrPlus)
+        && !document.frozen)
     {
-        throw std::invalid_argument("dcfr checkpoint requires the frozen combo pass");
+        throw std::invalid_argument(
+            "dcfr/pcfr_plus checkpoint requires the frozen combo pass");
     }
     if (document.kind == 1)
     {
@@ -3310,10 +3319,11 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
     }
     else if (document.kind == 2)
     {
-        if (loaded_algorithm == poker::solver::Algorithm::Dcfr)
+        if (loaded_algorithm == poker::solver::Algorithm::Dcfr
+            || loaded_algorithm == poker::solver::Algorithm::PcfrPlus)
         {
             throw std::invalid_argument(
-                "DCFR is not supported on legacy river-kind checkpoints; use a street-kind solve");
+                "DCFR/PCFR+ is not supported on legacy river-kind checkpoints; use a street-kind solve");
         }
         const poker::river::RiverConfig config = poker::river::parse_river_config(document.config_text);
         held->job = job_from_river(config);

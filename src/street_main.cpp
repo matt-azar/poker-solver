@@ -39,7 +39,7 @@ void print_usage(const char* argv0)
               << " [--incentive label|tag,PLAYER,KEY,DELTA] (repeatable)"
               << " [--edge-tag [PLAYER,]ACTION,TAG[,TAG...]] (repeatable)"
               << " [--all-in | --no-all-in] [--max-raises N]"
-              << " [--iterations N] [--algorithm vanilla|cfr_plus|dcfr]"
+              << " [--iterations N] [--algorithm vanilla|cfr_plus|dcfr|pcfr_plus]"
               << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
               << " [--memory-mib N] [--threads N]"
               << " [--plan-memory] [--reference] [--frozen] [--report file | -]\n";
@@ -624,6 +624,10 @@ int main(int argc, char** argv)
                 {
                     algorithm = poker::solver::Algorithm::Dcfr;
                 }
+                else if (name == "pcfr_plus")
+                {
+                    algorithm = poker::solver::Algorithm::PcfrPlus;
+                }
                 else
                 {
                     throw std::invalid_argument("unknown algorithm");
@@ -672,6 +676,10 @@ int main(int argc, char** argv)
         if (algorithm == poker::solver::Algorithm::Dcfr && !frozen && !reference)
         {
             throw std::invalid_argument("dcfr requires the frozen street pass (--frozen)");
+        }
+        if (algorithm == poker::solver::Algorithm::PcfrPlus && !frozen && !reference)
+        {
+            throw std::invalid_argument("pcfr_plus requires the frozen street pass (--frozen)");
         }
 
         poker::solver::SolveConfig solve_config;

@@ -28,6 +28,7 @@ void run_smoke_tests();
 void run_kuhn_tests();
 void run_cfr_tests();
 void run_dcfr_tests();
+void run_pcfr_tests();
 void run_leduc_tests();
 void run_holdem_tests();
 void run_hand_category_tests();
