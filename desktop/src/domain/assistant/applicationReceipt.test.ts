@@ -6,8 +6,11 @@ import type { SetupUndoEntry } from "../setup/setupTransaction";
 import {
   buildApplicationReceipt,
   chatContentFromReceipt,
+  renderPendingSetupReview,
   renderReceiptChatText,
   renderReceiptReviewCard,
+  setupResultHasApplyablePatch,
+  setupResultIsBroad,
 } from "./applicationReceipt";
 
 function result(partial: Partial<SetupDraftResult> = {}): SetupDraftResult {
@@ -61,6 +64,32 @@ function undoEntry(partial: Partial<SetupUndoEntry> = {}): SetupUndoEntry {
 }
 
 describe("application receipts", () => {
+  it("classifies scalar vs broad setup results for auto-apply vs Apply UI", () => {
+    const scalar: SetupDraftResult = {
+      ok: true,
+      mode: "edit",
+      draftPatch: { pot: 55 },
+      provenance: {},
+      conflicts: [],
+      missing: [],
+      summary: [],
+      canSolve: true,
+      requestRevision: 0,
+    };
+    expect(setupResultHasApplyablePatch(scalar)).toBe(true);
+    expect(setupResultIsBroad(scalar)).toBe(false);
+
+    const broad: SetupDraftResult = {
+      ...scalar,
+      mode: "create",
+      draftPatch: { pot: 5.5, stack: 97.5, oopRange: "AA", ipRange: "KK", boardText: "" },
+      missing: [{ field: "boardText", message: "Board required", reason: "missing" }],
+      canSolve: false,
+    };
+    expect(setupResultIsBroad(broad)).toBe(true);
+    expect(renderPendingSetupReview(broad)).toMatch(/Click Apply/);
+  });
+
   it("renders pot before/after chat text from the receipt", () => {
     const receipt = buildApplicationReceipt({
       undoEntry: undoEntry(),

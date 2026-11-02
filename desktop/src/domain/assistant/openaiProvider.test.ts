@@ -36,4 +36,16 @@ describe("parseInterpretProposal fieldEdits", () => {
       }),
     ).toThrow(AssistantProviderError);
   });
+
+  it("lifts top-level pot/iterations into fieldEdits", () => {
+    const proposal = parseInterpretProposal({
+      kind: "update_study",
+      intent: { mode: "edit" },
+      pot: 55,
+      iterations: 777,
+    });
+    expect(proposal.kind).toBe("update_study");
+    if (proposal.kind !== "update_study") return;
+    expect(proposal.fieldEdits).toEqual({ pot: 55, iterations: 777 });
+  });
 });

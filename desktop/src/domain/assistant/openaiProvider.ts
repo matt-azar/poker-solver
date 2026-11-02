@@ -372,7 +372,7 @@ export function parseInterpretProposal(raw: unknown): InterpretProposal {
           : intent.stakesLabel,
       generatedRanges: asGeneratedRanges(obj.generatedRanges),
       interpolateFromIds: asInterpolateIds(obj.interpolateFromIds),
-      fieldEdits: asFieldEdits(obj.fieldEdits),
+      fieldEdits: coalesceFieldEdits(obj),
     };
     rejectUnguardedRangeWeights(proposal);
     return proposal;
@@ -481,6 +481,23 @@ const FIELD_EDIT_BOOLS = [
 ] as const;
 
 const ALGORITHMS = new Set(["cfr_plus", "cfr", "dcfr"]);
+
+/**
+ * Models often put pot/stack/iterations at the proposal root instead of under
+ * fieldEdits. Lift those top-level values so resolve still gets a patch.
+ */
+function coalesceFieldEdits(obj: Record<string, unknown>): StudyFieldEdits | undefined {
+  const nested =
+    obj.fieldEdits && typeof obj.fieldEdits === "object" && !Array.isArray(obj.fieldEdits)
+      ? { ...(obj.fieldEdits as Record<string, unknown>) }
+      : {};
+  for (const key of [...FIELD_EDIT_NUMBERS, ...FIELD_EDIT_STRINGS, ...FIELD_EDIT_BOOLS, "algorithm"] as const) {
+    if (nested[key] === undefined && obj[key] !== undefined) {
+      nested[key] = obj[key];
+    }
+  }
+  return asFieldEdits(Object.keys(nested).length > 0 ? nested : undefined);
+}
 
 /**
  * Whitelist Build fields the model may write. Drops anything else.

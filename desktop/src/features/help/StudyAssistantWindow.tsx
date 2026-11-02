@@ -10,12 +10,16 @@ import {
   catalogueProfileMetas,
   chatContentFromReceipt,
   formatContextIndicator,
+  renderPendingSetupReview,
+  setupResultHasApplyablePatch,
+  setupResultIsBroad,
   summarizeContextSnapshot,
 } from "../../domain/assistant";
 import { AssistantProviderError } from "../../domain/assistant/provider";
 import {
   emptyStudySetupPreferences,
   loadStudySetupPreferences,
+  type SetupDraftResult,
   type StudySetupPreferences,
 } from "../../domain/setup";
 import {
@@ -104,6 +108,11 @@ export function StudyAssistantWindow() {
   const [credSource, setCredSource] = useState<CredentialSource>("none");
   const [credPresent, setCredPresent] = useState(false);
   const [credDraft, setCredDraft] = useState("");
+  /** Broad setups wait for an explicit Apply (scalar edits auto-commit). */
+  const [pendingSetup, setPendingSetup] = useState<{
+    runId: number;
+    result: SetupDraftResult;
+  } | null>(null);
 
   const transcriptRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -169,12 +178,28 @@ export function StudyAssistantWindow() {
     };
   }
 
+  function commitPending(result: SetupDraftResult, force = false): ChatLine | null {
+    const applied = commitAssistantSetup(result, applySetupDraft, { force });
+    if (!applied.ok) {
+      setError(applied.message);
+      return null;
+    }
+    setPendingSetup(null);
+    setWorkspace("build");
+    setError(null);
+    return {
+      role: "assistant",
+      content: chatContentFromReceipt(applied.receipt),
+    };
+  }
+
   async function send(text: string) {
     const question = text.trim();
     if (!question || busy) return;
 
     setBusy(true);
     setError(null);
+    setPendingSetup(null);
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((prev) => [...prev, { role: "user", content: question }]);
     setDraftText("");
@@ -213,23 +238,36 @@ export function StudyAssistantWindow() {
             outcome.run.message ??
               "Setup changed while the assistant ran — regenerate the proposal",
           );
-        } else if (
-          outcome.run.result &&
-          outcome.run.status !== "cancelled" &&
-          outcome.run.status !== "error"
-        ) {
-          // Never remint requestRevision or force-apply after stale — that would
-          // overwrite edits made while the assistant request was in flight.
-          const applied = commitAssistantSetup(outcome.run.result, applySetupDraft);
-          if (applied.ok) {
-            setWorkspace("build");
-            // Chat text comes from the application receipt, not the model proposal.
+        } else if (outcome.run.status === "draft" && outcome.run.result) {
+          const result = outcome.run.result;
+          if (!setupResultHasApplyablePatch(result)) {
             line = {
               ...line,
-              content: chatContentFromReceipt(applied.receipt),
+              content:
+                `${line.content}\n\nNothing was written to Build — the proposal had no field changes to apply.`,
             };
-          } else if (applied.reason !== "empty") {
-            setError(applied.message);
+          } else if (setupResultIsBroad(result)) {
+            // B02: broad / range / create setups need an obvious Apply control.
+            setPendingSetup({ runId: outcome.run.runId, result });
+            line = {
+              ...line,
+              content: `${line.content}\n\n${renderPendingSetupReview(result)}`,
+              setupRunId: outcome.run.runId,
+            };
+          } else {
+            // Narrow scalar edits: auto-commit with receipt + Undo.
+            const committed = commitPending(result);
+            if (committed) {
+              line = committed;
+            } else {
+              // Keep proposal visible with Apply when the patch is still usable.
+              setPendingSetup({ runId: outcome.run.runId, result });
+              line = {
+                ...line,
+                content: `${line.content}\n\nNot applied yet.\n\n${renderPendingSetupReview(result)}`,
+                setupRunId: outcome.run.runId,
+              };
+            }
           }
         }
       }
@@ -448,6 +486,56 @@ export function StudyAssistantWindow() {
         </div>
 
         {error ? <p className="assistant-status warn">{error}</p> : null}
+
+        {pendingSetup ? (
+          <div
+            className="assistant-compose-actions"
+            data-testid="assistant-pending-apply"
+          >
+            <button
+              type="button"
+              className="toolbar-btn primary"
+              disabled={busy}
+              onClick={() => {
+                const committed = commitPending(pendingSetup.result);
+                if (committed) {
+                  setMessages((prev) => [...prev, committed]);
+                }
+              }}
+            >
+              Apply to Build
+            </button>
+            {pendingSetup.result.conflicts.length > 0 ? (
+              <button
+                type="button"
+                className="toolbar-btn"
+                disabled={busy}
+                onClick={() => {
+                  const committed = commitPending(pendingSetup.result, true);
+                  if (committed) {
+                    setMessages((prev) => [...prev, committed]);
+                  }
+                }}
+              >
+                Apply anyway
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="toolbar-btn"
+              disabled={busy}
+              onClick={() => {
+                setPendingSetup(null);
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "assistant", content: "Discarded the pending setup proposal." },
+                ]);
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
 
         {canUndoSetup ? (
           <div className="assistant-compose-actions">
