@@ -168,6 +168,7 @@ struct StreetInspection
     bool reach_defined = false;
     double joint = 0.0;
     // Public betting state at this node (initial pot + street contributions).
+    // Stored in internal tenths; explorer JSON emits chip units via format_chips.
     int pot = 0;
     int contrib[2] = {};
     int stacks[2] = {};

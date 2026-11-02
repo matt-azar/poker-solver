@@ -261,6 +261,7 @@ void test_incompatible_positive_reaches()
     drop[0] = 1.0;
     solver.set_average_for_test(root.node_id, oop_keep, keep);
     solver.set_average_for_test(root.node_id, oop_drop, drop);
+    // C++ StreetInspection keeps tenths; explorer JSON converts via format_chips.
     CHECK(root.pot == config.pot);
     CHECK(root.contrib[0] == 0);
     CHECK(root.contrib[1] == 0);
