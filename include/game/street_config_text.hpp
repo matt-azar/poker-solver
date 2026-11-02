@@ -174,6 +174,8 @@ inline std::string format_street_config(const StreetConfig& config)
     }
     append_ints(out, "memory-mib", config.memory_mib);
     append_ints(out, "threads", config.threads);
+    append_flag(out, "table-i16", config.table_i16);
+    append_ints(out, "suit-iso", config.suit_iso ? 1 : 0);
     append_specs(out, "oop-bets", config.oop_bet_sizes);
     append_specs(out, "ip-bets", config.ip_bet_sizes);
     append_specs(out, "oop-raises", config.oop_raise_sizes);
@@ -549,6 +551,14 @@ inline StreetConfig parse_street_config(std::string_view text)
         else if (key == "threads")
         {
             config.threads = parse_int(value);
+        }
+        else if (key == "table-i16")
+        {
+            config.table_i16 = parse_flag(value);
+        }
+        else if (key == "suit-iso")
+        {
+            config.suit_iso = parse_flag(value);
         }
         else if (key == "oop-raise-multiples")
         {

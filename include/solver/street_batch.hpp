@@ -55,6 +55,10 @@ struct StreetMemoryReport
     std::uint64_t regret_strategy_sum_bytes = 0;
     std::uint64_t sigma_workspace_bytes = 0;
     int table_scalar_bytes = static_cast<int>(kTableScalarBytes);
+    // True when StreetConfig::table_i16 stored regret/strategy-sum as int16.
+    bool table_i16 = false;
+    // Float pass-delta / expand workspace charged when table_i16 is on (0 off).
+    std::uint64_t table_i16_workspace_bytes = 0;
     std::uint64_t estimated_peak_bytes = 0;
     std::uint64_t expanded_terminals = 0;
     std::uint64_t expanded_decisions = 0;
@@ -361,6 +365,14 @@ public:
 
     std::uint64_t infoset_count() const;
     std::uint64_t deal_count() const;
+    // StreetConfig::suit_iso request bit (may still be inactive when the
+    // stabilizer is trivial or ranges break every non-identity symmetry).
+    bool suit_iso_requested() const;
+    // True when construction found a non-trivial board×range suit group and
+    // is sharing regret/strategy rows across isomorphic runouts/hands.
+    bool suit_iso_active() const;
+    // Size of the exact suit group in use (1 = identity only).
+    int suit_iso_group_size() const;
     int public_decisions() const;
     int public_terminals() const;
     // Expanded histories. These are not stored nodes.

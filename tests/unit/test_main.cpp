@@ -46,6 +46,7 @@ int main()
     run_strategy_edit_tests();
     run_tree_edit_tests();
     run_hand_history_tests();
+    run_table_i16_tests();
     }
     catch (const std::exception& error)
     {

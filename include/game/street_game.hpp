@@ -83,6 +83,17 @@ struct StreetConfig
     int memory_mib = 1024;
     // Frozen-pass threads, including the caller. One keeps the serial walk.
     int threads = 1;
+    // When true, StreetBatchSolver stores regret and strategy-sum tables as
+    // int16 + per-block scales (see solver/compressed_tables.hpp). Default
+    // false keeps float TableScalar tables. PCFR+ prediction stays float.
+    // Shared sigma workspace stays float. PSOL TrainingTables stay double.
+    bool table_i16 = false;
+    // Exact suit isomorphism for StreetBatchSolver. Off by default. When on,
+    // the batch engine shares regret/strategy rows across board-stabilizer
+    // orbits that also preserve both weighted ranges. Asymmetric ranges,
+    // locks during training, or a trivial stabilizer fall back to identity
+    // (no sharing). Approximate bucketing is out of scope.
+    bool suit_iso = false;
     // Pot rake applied at terminals. Zero rate keeps the prior chip rule.
     // See docs/RAKE.md.
     poker::solver::RakeConfig rake{};
