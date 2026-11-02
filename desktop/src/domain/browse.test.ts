@@ -3,7 +3,11 @@ import {
   frequencyOf,
   groupEv,
   groupHands,
+  hasWithinHandActionMixing,
+  isExcludedMatrixCell,
+  isPartialRangeDisplay,
   nextGeneration,
+  rangeDisplayWeight,
   shouldApply,
   solutionNeedsReload,
   strategyMix,
@@ -106,6 +110,36 @@ describe("browse strategy grouping", () => {
     const global = groupEv(node, values, aa, "root_centered");
     expect(global?.action[0]).toBeCloseTo(-50, 12);
     expect(global?.mixed).toBeCloseTo(-50, 12);
+  });
+
+  it("flags excluded, partial range weight, and action mixing visually", () => {
+    const node = {
+      reach_defined: true,
+      actions: ["Check", "Bet 50"],
+      combos: ["AhAd", "AsAc", "KhKd"],
+      marginal: [0.5, 0.5, 0],
+      strategy: [
+        [0.5, 0.5],
+        [1, 0],
+        [1, 0],
+      ],
+      node_id: "n-density",
+    };
+    const aa = cellOf(node, "AA");
+    const kk = cellOf(node, "KK");
+    expect(isExcludedMatrixCell(kk)).toBe(true);
+    expect(isExcludedMatrixCell(aa)).toBe(false);
+    expect(rangeDisplayWeight(aa)).toBeCloseTo(0.5, 12);
+    expect(isPartialRangeDisplay(aa)).toBe(true);
+    expect(hasWithinHandActionMixing(aa)).toBe(true);
+    expect(hasWithinHandActionMixing(cellOf({
+      ...node,
+      combos: ["AhAd"],
+      marginal: [1],
+      strategy: [[1, 0]],
+    }, "AA"))).toBe(false);
+    expect(rangeDisplayWeight(kk)).toBe(0);
+    expect(isPartialRangeDisplay(kk)).toBe(false);
   });
 
   it("gates stale fetches and generations", () => {

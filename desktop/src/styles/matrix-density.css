@@ -1,0 +1,87 @@
+/*
+ * Matrix density (design brief §7, partial): quieter excluded hands,
+ * active strategy remains prominent, partial range weight ≠ action mixing.
+ * Loaded from RangeMatrix only — do not fold into layout.css.
+ */
+
+.range-matrix.matrix-density .matrix-axis {
+  font-weight: 500;
+  font-size: 9px;
+  color: color-mix(in srgb, var(--matrix-label) 85%, var(--panel));
+}
+
+/* Excluded / zero-weight: keep 13×13 readable, stop competing with strategy */
+.range-matrix.matrix-density .matrix-cell[data-excluded="true"],
+.range-matrix.matrix-density .matrix-cell[data-empty="true"] {
+  background: color-mix(in srgb, var(--empty-cell) 88%, var(--panel));
+}
+
+.range-matrix.matrix-density .matrix-cell[data-excluded="true"] .matrix-cell__label,
+.range-matrix.matrix-density .matrix-cell[data-empty="true"] .matrix-cell__label {
+  color: color-mix(in srgb, var(--muted) 55%, var(--empty-cell));
+  font-weight: 400;
+  font-size: clamp(8px, 2cqh, 12px);
+  text-shadow: none;
+  opacity: 0.78;
+  letter-spacing: 0;
+}
+
+.range-matrix.matrix-density .matrix-cell[data-excluded="true"] .matrix-cell__sub,
+.range-matrix.matrix-density .matrix-cell[data-empty="true"] .matrix-cell__sub {
+  display: none;
+}
+
+/* Active hands stay typographically strong */
+.range-matrix.matrix-density
+  .matrix-cell:not([data-excluded="true"]):not([data-empty="true"])
+  .matrix-cell__label {
+  font-weight: 650;
+  font-size: clamp(10px, 2.6cqh, 16px);
+  color: #fff;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.75);
+  opacity: 1;
+}
+
+.range-matrix.matrix-density
+  .matrix-cell:not([data-excluded="true"]):not([data-empty="true"])
+  .matrix-cell__sub {
+  font-weight: 500;
+  opacity: 0.92;
+}
+
+/*
+ * Partial range weight (solid fill modes): corner tick — not strategy segments.
+ * Action mixing keeps multi-color bars only; never this notch.
+ */
+.range-matrix.matrix-density .matrix-cell[data-partial-inclusion="true"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 7px 7px 0;
+  border-color: transparent
+    color-mix(in srgb, var(--text) 42%, transparent) transparent transparent;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.range-matrix.matrix-density .matrix-cell[data-action-mixing="true"]::before {
+  content: none;
+}
+
+/* Mixing stays about the segment bars; no extra chrome */
+.range-matrix.matrix-density .matrix-cell[data-action-mixing="true"] .matrix-cell__segments {
+  opacity: 1;
+}
+
+/* Selected / hover still read clearly on quiet excluded cells */
+.range-matrix.matrix-density .matrix-cell[data-excluded="true"][data-hover="true"] .matrix-cell__label,
+.range-matrix.matrix-density .matrix-cell[data-excluded="true"][data-selected="true"] .matrix-cell__label,
+.range-matrix.matrix-density .matrix-cell[data-empty="true"][data-hover="true"] .matrix-cell__label,
+.range-matrix.matrix-density .matrix-cell[data-empty="true"][data-selected="true"] .matrix-cell__label {
+  opacity: 0.95;
+  color: color-mix(in srgb, var(--muted) 80%, var(--text));
+}
