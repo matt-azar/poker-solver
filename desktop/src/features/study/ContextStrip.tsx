@@ -1,4 +1,8 @@
 import { useState } from "react";
+import {
+  nodeEffectiveStack,
+  nodePot,
+} from "../../domain/actionHistory";
 import { boardBlockers } from "../../domain/cards";
 import { engineActivityMessage, phaseLabel } from "../../domain/solveActivity";
 import { useStudyStore } from "../../state/studyStore";
@@ -51,14 +55,20 @@ export function ContextStrip() {
 
   const cards = boardList(currentNode?.board ?? status?.board, draft.boardText);
   const blockers = boardBlockers(cards);
-  const pot = Number(currentNode?.pot ?? status?.pot ?? draft.pot);
-  const stack = Number(status?.stack ?? draft.stack);
+  const rootPot = Number(status?.pot ?? draft.pot);
+  const rootStack = Number(status?.stack ?? draft.stack);
+  const pot = nodePot(currentNode, rootPot);
+  const stack = nodeEffectiveStack(currentNode, rootStack);
   const spr = pot > 0 ? (stack / pot).toFixed(2) : "—";
   const dealNode = currentNode?.kind === "chance";
   const toAct = dealNode
     ? "Deal"
     : toActLabel(currentNode?.to_act, currentNode?.player ?? null);
   const line = currentNode?.line || currentNode?.node_id || "root";
+  const showRootConfig =
+    currentNode != null &&
+    (Number(currentNode.pot) !== rootPot ||
+      nodeEffectiveStack(currentNode, rootStack) !== rootStack);
 
   return (
     <div className="context-strip">
@@ -110,6 +120,14 @@ export function ContextStrip() {
           {stack} / {spr}
         </span>
       </div>
+      {showRootConfig ? (
+        <div className="context-strip__group" title="Root job pot / starting stack">
+          <span className="context-strip__label">Root</span>
+          <span className="context-strip__value">
+            {rootPot} / {rootStack}
+          </span>
+        </div>
+      ) : null}
       <div className="context-strip__sep" />
       <div className="context-strip__group">
         <span className="context-strip__label">To act</span>

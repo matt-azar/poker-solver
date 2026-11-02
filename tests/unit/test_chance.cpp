@@ -260,9 +260,28 @@ void test_incompatible_positive_reaches()
     drop[0] = 1.0;
     solver.set_average_for_test(root.node_id, oop_keep, keep);
     solver.set_average_for_test(root.node_id, oop_drop, drop);
+    CHECK(root.pot == config.pot);
+    CHECK(root.contrib[0] == 0);
+    CHECK(root.contrib[1] == 0);
+    CHECK(root.stacks[0] == config.stack);
+    CHECK(root.stacks[1] == config.stack);
+    CHECK(root.to_call == 0);
+    CHECK(root.parent_id.empty());
+    CHECK(root.opponent_player == 1);
+    CHECK(!root.opponent_hands.empty());
     const StreetInspection ip_node = solver.inspect_node(root.actions[static_cast<std::size_t>(bet)].child_id);
     CHECK(ip_node.player == 1);
     CHECK(ip_node.reach_defined);
+    // OOP bet 50% into pot 100 → pot 150, IP faces 50 to call.
+    CHECK(ip_node.pot == config.pot + 50);
+    CHECK(ip_node.contrib[0] == 50);
+    CHECK(ip_node.contrib[1] == 0);
+    CHECK(ip_node.stacks[0] == config.stack - 50);
+    CHECK(ip_node.stacks[1] == config.stack);
+    CHECK(ip_node.to_call == 50);
+    CHECK(ip_node.parent_id == root.node_id);
+    CHECK(ip_node.opponent_player == 0);
+    CHECK(!ip_node.opponent_hands.empty());
     const int ip_keep = hand_index(ip_node, "AcKh");
     const int ip_drop = hand_index(ip_node, "9s9h");
     const int call = action_index(ip_node, "Call");

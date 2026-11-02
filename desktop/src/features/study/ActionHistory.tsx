@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { mapActionColors } from "../../domain/actionColors";
 import {
+  actionSizePotBasis,
   actorLabel,
   formatChoiceFrequency,
   lineCrumbs,
@@ -61,7 +62,10 @@ export function ActionHistory() {
     () => mapActionColors(currentNode?.actions ?? []),
     [currentNode?.actions],
   );
-  const pot = Number(currentNode?.pot ?? status?.pot ?? draft.pot ?? 0);
+  const pot = actionSizePotBasis(
+    currentNode,
+    Number(status?.pot ?? draft.pot ?? 0),
+  );
   const actor = actorLabel(currentNode?.to_act, currentNode?.player ?? null);
   const dealNode = currentNode?.kind === "chance";
   const terminal = currentNode?.kind === "terminal";

@@ -156,3 +156,45 @@ export function actorLabel(
   }
   return "—";
 }
+
+/** Current node pot, falling back to root/job/draft values. */
+export function nodePot(
+  node: NodePayload | null | undefined,
+  fallback = 0,
+): number {
+  const pot = Number(node?.pot ?? fallback);
+  return Number.isFinite(pot) ? pot : fallback;
+}
+
+/**
+ * Pot basis for bet/raise % tags: current pot, plus to_call when facing a bet
+ * (engine sizes raises against pot + call).
+ */
+export function actionSizePotBasis(
+  node: NodePayload | null | undefined,
+  fallback = 0,
+): number {
+  const pot = nodePot(node, fallback);
+  if (!(pot > 0)) {
+    return fallback;
+  }
+  const toCall = Number(node?.to_call ?? 0);
+  return toCall > 0 ? pot + toCall : pot;
+}
+
+/** Remaining effective stack at the node (min of seats). */
+export function nodeEffectiveStack(
+  node: NodePayload | null | undefined,
+  fallback = 0,
+): number {
+  const stacks = node?.stacks;
+  if (Array.isArray(stacks) && stacks.length >= 2) {
+    const left = Number(stacks[0]);
+    const right = Number(stacks[1]);
+    if (Number.isFinite(left) && Number.isFinite(right)) {
+      return Math.min(left, right);
+    }
+  }
+  const single = Number(node?.stack ?? fallback);
+  return Number.isFinite(single) ? single : fallback;
+}

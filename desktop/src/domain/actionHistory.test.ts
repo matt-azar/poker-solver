@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  actionSizePotBasis,
   formatChoiceFrequency,
   lineCrumbs,
   nextChoicesFromNode,
+  nodeEffectiveStack,
+  nodePot,
   splitActionLine,
 } from "./actionHistory";
 import type { NodePayload } from "./types";
@@ -20,6 +23,22 @@ describe("actionHistory helpers", () => {
       { label: "Check" },
       { label: "Bet 50" },
     ]);
+  });
+
+  it("prefers node pot/stacks and adds to_call for raise % basis", () => {
+    const node: NodePayload = {
+      node_id: "n-bet",
+      pot: 150,
+      to_call: 50,
+      stacks: [150, 200],
+      stack: 150,
+    };
+    expect(nodePot(node, 100)).toBe(150);
+    expect(actionSizePotBasis(node, 100)).toBe(200);
+    expect(nodeEffectiveStack(node, 200)).toBe(150);
+    expect(actionSizePotBasis({ node_id: "root", pot: 100, to_call: 0 }, 100)).toBe(
+      100,
+    );
   });
 
   it("pairs actions with child ids and strategy frequencies", () => {

@@ -1400,6 +1400,70 @@ struct RiverBatchSolver::Engine
         }
     }
 
+    BetState betting_state_at(int node_index) const
+    {
+        std::vector<int> chain;
+        for (int at = node_index; at >= 0; at = nodes[static_cast<std::size_t>(at)].parent)
+        {
+            chain.push_back(at);
+            if (chain.size() > nodes.size())
+            {
+                throw std::logic_error("node parent cycle");
+            }
+        }
+        std::reverse(chain.begin(), chain.end());
+        if (chain.empty() || chain.front() != 0)
+        {
+            throw std::invalid_argument("unknown node");
+        }
+        BetState state;
+        state.pot = config.pot;
+        state.acting = config.first_to_act;
+        for (std::size_t step = 0; step + 1 < chain.size(); ++step)
+        {
+            const int current = chain[step];
+            const int next = chain[step + 1];
+            if (nodes[static_cast<std::size_t>(next)].parent != current)
+            {
+                throw std::logic_error("node parent chain broke");
+            }
+            const int action = nodes[static_cast<std::size_t>(next)].parent_action;
+            const Legal legal = legal_actions(config, state);
+            if (action < 0 || action >= legal.count)
+            {
+                throw std::logic_error("parent action out of legal set");
+            }
+            state = apply_action(config, state, legal, action);
+        }
+        return state;
+    }
+
+    void fill_inspection_betting(StreetInspection& view, const BetState& state, int node_index) const
+    {
+        view.pot = state.pot;
+        view.contrib[0] = state.contrib[0];
+        view.contrib[1] = state.contrib[1];
+        view.stacks[0] = config.stack - state.contrib[0];
+        view.stacks[1] = config.stack - state.contrib[1];
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (!node.terminal && state.acting >= 0)
+        {
+            view.to_call = state.committed - state.contrib[state.acting];
+            if (view.to_call < 0)
+            {
+                view.to_call = 0;
+            }
+        }
+        else
+        {
+            view.to_call = 0;
+        }
+        if (node.parent >= 0)
+        {
+            view.parent_id = node_id(node.parent);
+        }
+    }
+
     StreetInspection inspect_node(const std::string& text) const
     {
         ensure_average();
@@ -1408,6 +1472,7 @@ struct RiverBatchSolver::Engine
         std::vector<double> q1;
         replay_weights(node_index, q0, q1);
         const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        const BetState betting = betting_state_at(node_index);
         StreetInspection view;
         view.node_id = text;
         view.line = node.path.empty() ? "open" : node.path;
@@ -1416,6 +1481,7 @@ struct RiverBatchSolver::Engine
             view.board.push_back(holdem::format_card(card));
         }
         view.place = "river";
+        fill_inspection_betting(view, betting, node_index);
         double hand_joint = 0.0;
         std::vector<double> marginal0;
         std::vector<double> marginal1;
@@ -1438,6 +1504,7 @@ struct RiverBatchSolver::Engine
             view.actions[static_cast<std::size_t>(action)].child_id = node_id(node.child[action]);
         }
         const int actor = node.player;
+        const int opponent = 1 - actor;
         const int hands = actor == 0 ? n0 : n1;
         const std::vector<double>& hero_q = actor == 0 ? q0 : q1;
         const std::vector<double>& hero_marginal = actor == 0 ? marginal0 : marginal1;
@@ -1459,6 +1526,20 @@ struct RiverBatchSolver::Engine
                 }
             }
             view.hands.push_back(std::move(row));
+        }
+        view.opponent_player = opponent;
+        const int opp_hands = opponent == 0 ? n0 : n1;
+        const std::vector<double>& opp_q = opponent == 0 ? q0 : q1;
+        const std::vector<double>& opp_marginal = opponent == 0 ? marginal0 : marginal1;
+        view.opponent_hands.reserve(static_cast<std::size_t>(opp_hands));
+        for (int hand = 0; hand < opp_hands; ++hand)
+        {
+            StreetInspectHand row;
+            row.combo = holdem::Range::combo_text(combos[opponent][static_cast<std::size_t>(hand)]);
+            row.structural = range_w[opponent][static_cast<std::size_t>(hand)] > 0.0;
+            row.marginal = opp_marginal[static_cast<std::size_t>(hand)];
+            row.reach = opp_q[static_cast<std::size_t>(hand)];
+            view.opponent_hands.push_back(std::move(row));
         }
         return view;
     }
