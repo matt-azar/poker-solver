@@ -1,29 +1,42 @@
 import { useMemo, useState } from "react";
+import type { RunoutCardModel, RunoutsModel } from "../../engine/runouts";
 import { useStudyStore } from "../../state/studyStore";
 
-interface RunoutRow {
-  card?: string;
-  weight?: number | null;
-  oop_ev?: number | null;
-  ip_ev?: number | null;
-  node_id?: string;
-  [key: string]: unknown;
+type SuitFilter = "all" | "s" | "h" | "d" | "c";
+type SortKey = "card" | "probability" | "oopEv" | "ipEv";
+
+function formatOptional(value: number | null | undefined, defined: boolean, digits: number): string {
+  if (!defined || value == null || !Number.isFinite(value)) {
+    return "—";
+  }
+  return value.toFixed(digits);
 }
 
-type SuitFilter = "all" | "s" | "h" | "d" | "c";
+function sortValue(row: RunoutCardModel, key: SortKey): string | number | null {
+  switch (key) {
+    case "card":
+      return row.card;
+    case "probability":
+      return row.probabilityDefined ? row.probability : null;
+    case "oopEv":
+      return row.evDefined ? row.oopEv : null;
+    case "ipEv":
+      return row.evDefined ? row.ipEv : null;
+  }
+}
 
 export function RunoutTable() {
-  const runouts = useStudyStore((s) => s.runouts) as {
-    runouts?: RunoutRow[];
-    pending?: boolean;
-  } | null;
+  const runouts = useStudyStore((s) => s.runouts) as RunoutsModel | { pending?: boolean } | null;
   const loadRunouts = useStudyStore((s) => s.loadRunouts);
   const followAction = useStudyStore((s) => s.followAction);
-  const [sortKey, setSortKey] = useState<"card" | "weight" | "oop_ev" | "ip_ev">("card");
+  const [sortKey, setSortKey] = useState<SortKey>("card");
   const [suitFilter, setSuitFilter] = useState<SuitFilter>("all");
 
+  const model = runouts && "rows" in runouts ? (runouts as RunoutsModel) : null;
+  const pending = Boolean(runouts && "pending" in runouts && runouts.pending);
+
   const rows = useMemo(() => {
-    const list = (runouts?.runouts ?? []).filter((row) => {
+    const list = (model?.rows ?? []).filter((row) => {
       if (suitFilter === "all") {
         return true;
       }
@@ -31,14 +44,25 @@ export function RunoutTable() {
       return card.length >= 2 && card[1]?.toLowerCase() === suitFilter;
     });
     return [...list].sort((left, right) => {
-      const a = left[sortKey];
-      const b = right[sortKey];
+      const a = sortValue(left, sortKey);
+      const b = sortValue(right, sortKey);
       if (typeof a === "string" && typeof b === "string") {
         return a.localeCompare(b);
       }
-      return Number(a ?? 0) - Number(b ?? 0);
+      if (a == null && b == null) {
+        return 0;
+      }
+      if (a == null) {
+        return 1;
+      }
+      if (b == null) {
+        return -1;
+      }
+      return Number(a) - Number(b);
     });
-  }, [runouts, sortKey, suitFilter]);
+  }, [model, sortKey, suitFilter]);
+
+  const unitsLabel = [model?.units, model?.utilityBasis].filter(Boolean).join(" · ");
 
   return (
     <div className="runout-table">
@@ -64,19 +88,25 @@ export function RunoutTable() {
           </button>
         </div>
       </div>
-      {runouts?.pending ? <p className="empty-hint">Loading…</p> : null}
-      {!rows.length ? (
+      {unitsLabel ? (
+        <p className="empty-hint" data-testid="runout-units">
+          EV units: {unitsLabel}
+        </p>
+      ) : null}
+      {pending ? <p className="empty-hint">Loading…</p> : null}
+      {!pending && !rows.length ? (
         <p className="empty-hint">Open a deal (next-card) node, then Refresh.</p>
-      ) : (
+      ) : null}
+      {rows.length ? (
         <table>
           <thead>
             <tr>
               {(
                 [
                   ["card", "Card"],
-                  ["weight", "P"],
-                  ["oop_ev", "OOP EV"],
-                  ["ip_ev", "IP EV"],
+                  ["probability", "P"],
+                  ["oopEv", "OOP EV"],
+                  ["ipEv", "IP EV"],
                 ] as const
               ).map(([key, label]) => (
                 <th key={key}>
@@ -90,25 +120,22 @@ export function RunoutTable() {
           <tbody>
             {rows.map((row) => (
               <tr
-                key={row.card || row.node_id}
-                className={row.node_id ? "clickable" : undefined}
-                onClick={() => row.node_id && void followAction(String(row.node_id))}
+                key={row.childId || row.card}
+                className={row.childId ? "clickable" : undefined}
+                data-child-id={row.childId || undefined}
+                onClick={() => row.childId && void followAction(row.childId)}
               >
                 <td>{row.card}</td>
                 <td className="tabular">
-                  {row.weight == null ? "—" : Number(row.weight).toFixed(4)}
+                  {formatOptional(row.probability, row.probabilityDefined, 4)}
                 </td>
-                <td className="tabular">
-                  {row.oop_ev == null ? "—" : Number(row.oop_ev).toFixed(2)}
-                </td>
-                <td className="tabular">
-                  {row.ip_ev == null ? "—" : Number(row.ip_ev).toFixed(2)}
-                </td>
+                <td className="tabular">{formatOptional(row.oopEv, row.evDefined, 2)}</td>
+                <td className="tabular">{formatOptional(row.ipEv, row.evDefined, 2)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      )}
+      ) : null}
     </div>
   );
 }
