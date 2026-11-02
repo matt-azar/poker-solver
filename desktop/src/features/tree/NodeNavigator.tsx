@@ -1,114 +1,135 @@
-import type { NodeActionChild, NodeCardChild } from "../../domain/types";
+import {
+  actorLabel,
+  boardCardList,
+  nodeStatusLabel,
+  streetFromPlace,
+} from "../../domain/actionHistory";
 import { useStudyStore } from "../../state/studyStore";
+import "../../styles/path-nav.css";
 
-function labelOf(child: NodeActionChild | NodeCardChild | string): string {
-  if (typeof child === "string") {
-    return child;
-  }
-  if ("card" in child && child.card) {
-    return child.card;
-  }
-  if ("label" in child && child.label) {
-    return child.label;
-  }
-  if ("action" in child && child.action) {
-    return child.action;
-  }
-  return "child";
-}
-
-function nodeIdOf(child: NodeActionChild | NodeCardChild | string): string | null {
-  if (typeof child === "string") {
-    return child;
-  }
-  return child.node_id ?? null;
-}
-
+/**
+ * Demoted tree diagnostics panel.
+ *
+ * Path chrome (ActionHistory) owns line navigation, Next choices, and
+ * back/forward. This panel keeps optional node metadata without a competing
+ * raw-ID child list. Node ids stay in tooltips / the diagnostics row only.
+ */
 export function NodeNavigator() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const rootId = useStudyStore((s) => s.status?.root_node_id || "p0.t-1.r-1");
+  const pathTrail = useStudyStore((s) => s.pathTrail);
   const layout = useStudyStore((s) => s.layout);
   const navigateTo = useStudyStore((s) => s.navigateTo);
-  const followAction = useStudyStore((s) => s.followAction);
   const setLayout = useStudyStore((s) => s.setLayout);
 
   if (!layout.leftNav) {
     return null;
   }
 
-  const children = currentNode?.children ?? [];
-  const playerLabel =
-    currentNode?.player == null
-      ? currentNode?.to_act || "—"
-      : currentNode.player === 0
-        ? "OOP"
-        : "IP";
+  const place =
+    typeof currentNode?.place === "string" ? currentNode.place : null;
+  const board = boardCardList(currentNode?.board);
+  const street = streetFromPlace(place, board.length);
+  const playerLabel = currentNode
+    ? currentNode.kind === "chance"
+      ? "Deal"
+      : currentNode.kind === "terminal"
+        ? nodeStatusLabel(currentNode)
+        : actorLabel(currentNode.to_act, currentNode.player ?? null)
+    : "—";
+  const parentId =
+    typeof currentNode?.parent_id === "string" ? currentNode.parent_id : null;
+  const trailDepth = pathTrail.length;
+  const hasPathChrome = Boolean(currentNode);
 
   return (
-    <nav className="node-navigator" aria-label="Line navigator">
+    <nav
+      className="node-navigator node-navigator--diagnostics"
+      aria-label="Node diagnostics"
+    >
       <div className="node-navigator__head">
-        <span>Navigator</span>
+        <span>Diagnostics</span>
         <button
           type="button"
           className="icon-btn"
-          title="Hide navigator"
+          title="Hide diagnostics"
           onClick={() => setLayout({ leftNav: false })}
         >
           ×
         </button>
       </div>
       <div className="node-navigator__list">
-        <button
-          type="button"
-          className="nav-node"
-          onClick={() => void navigateTo(rootId)}
-        >
-          <span>Root</span>
-        </button>
-        {currentNode ? (
-          <button
-            type="button"
-            className="nav-node"
-            data-active="true"
-            onClick={() => void navigateTo(currentNode.node_id)}
-          >
-            <span>{currentNode.node_id}</span>
-          </button>
+        {hasPathChrome ? (
+          <p className="node-navigator__hint">
+            Path navigation lives in the Path strip. This panel is optional
+            diagnostics — raw node ids are not listed as a second navigator.
+          </p>
         ) : (
           <p className="empty-hint">No node loaded</p>
         )}
-        <div className="node-navigator__meta">
-          <div>
-            <span className="muted">Player</span>
-            <strong>{playerLabel}</strong>
+        <div className="node-navigator__diag">
+          <div className="node-navigator__diag-row">
+            <span className="muted">Street</span>
+            <strong>{street}</strong>
           </div>
-          <div>
+          <div className="node-navigator__diag-row">
             <span className="muted">Kind</span>
             <strong>{currentNode?.kind ?? "—"}</strong>
           </div>
-        </div>
-        {children.map((child, index) => {
-          const id = nodeIdOf(child);
-          const label = labelOf(child);
-          const freq =
-            typeof child === "object" && child && "frequency" in child
-              ? child.frequency
-              : null;
-          return (
+          <div className="node-navigator__diag-row">
+            <span className="muted">Player / status</span>
+            <strong>{playerLabel}</strong>
+          </div>
+          <div className="node-navigator__diag-row">
+            <span className="muted">Trail depth</span>
+            <strong className="tabular">{trailDepth}</strong>
+          </div>
+          <div className="node-navigator__diag-row">
+            <span className="muted">Node id</span>
             <button
-              key={`${label}-${index}`}
               type="button"
-              className="nav-node"
-              disabled={!id}
-              onClick={() => id && void followAction(id)}
+              className="node-navigator__id"
+              title={currentNode?.node_id || rootId}
+              onClick={() => {
+                const id = currentNode?.node_id || rootId;
+                void navigateTo(id);
+              }}
             >
-              <span>{label}</span>
-              {freq != null ? (
-                <span className="nav-freq">{(freq * 100).toFixed(0)}%</span>
-              ) : null}
+              {currentNode?.node_id
+                ? `${currentNode.node_id.slice(0, 18)}${
+                    currentNode.node_id.length > 18 ? "…" : ""
+                  }`
+                : "—"}
             </button>
-          );
-        })}
+          </div>
+          {parentId ? (
+            <div className="node-navigator__diag-row">
+              <span className="muted">Parent id</span>
+              <button
+                type="button"
+                className="node-navigator__id"
+                title={parentId}
+                onClick={() => void navigateTo(parentId)}
+              >
+                {`${parentId.slice(0, 18)}${parentId.length > 18 ? "…" : ""}`}
+              </button>
+            </div>
+          ) : (
+            <div className="node-navigator__diag-row">
+              <span className="muted">Parent id</span>
+              <strong title="parent_id missing on this payload — client pathTrail remains authoritative for alternatives">
+                unavailable
+              </strong>
+            </div>
+          )}
+          <button
+            type="button"
+            className="toolbar-btn"
+            onClick={() => void navigateTo(rootId)}
+          >
+            Jump to Root
+          </button>
+        </div>
       </div>
     </nav>
   );
