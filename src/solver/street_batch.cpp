@@ -17,6 +17,7 @@
 #include "street_batch_helpers.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -169,15 +170,18 @@ struct StreetBatchSolver::Engine
 #undef POKER_NODE_COPY_STRINGS
 #undef POKER_NODE_MOVE_STRINGS
 
+    // Compact identity for one multi-action information set. Action count lives
+    // on the public Node. One-action decisions are implicit (probability 1) and
+    // do not allocate a Slot or regret/strategy row.
     struct Slot
     {
         int node = 0;
         int base = 0;
-        int n_actions = 0;
-        int hand = 0;
-        int turn = -1;
-        int river = -1;
+        std::uint16_t hand = 0;
+        std::int8_t turn = -1;
+        std::int8_t river = -1;
     };
+    static_assert(sizeof(Slot) == 12, "Slot packing");
 
     // Immutable showdown facts for one runout. Order is rank, then hand index,
     // over every indexed hand, including zero reach and hands blocked by the
@@ -504,8 +508,19 @@ struct StreetBatchSolver::Engine
     std::uint64_t expanded_terminals = 0;
     std::uint64_t counted_deals_ = 0;
     std::uint64_t planned_slots_ = 0;
+    // Supported (node, hand, runout) infosets with exactly one legal action.
+    // Counted for infoset_count / strategy export; no Slot or table rows.
+    std::uint64_t planned_implicit_ = 0;
     std::int64_t planned_cursor_ = 0;
     std::uint64_t estimated_peak_bytes_ = 0;
+    // Legal public cards / ordered pairs off the board. Dense slot_of indexes
+    // use these instead of full 52 / 52×52 maps that include on-board cards.
+    // mode2_of_ is allocated only on flops (card_mode 2); turn/river skip it.
+    std::array<int, 52> mode1_of_{};
+    std::pmr::vector<int> mode1_cards_;
+    std::pmr::vector<int> mode2_of_;
+    std::pmr::vector<int> mode2_turn_;
+    std::pmr::vector<int> mode2_river_;
     std::uint64_t max_rank_keys_ = 0;
     bool plan_only_ = false;
     double construction_seconds_ = 0.0;
@@ -552,10 +567,15 @@ struct StreetBatchSolver::Engine
         , prediction_(heap_)
         , result0_(heap_)
         , result1_(heap_)
+        , mode1_cards_(heap_)
+        , mode2_of_(heap_)
+        , mode2_turn_(heap_)
+        , mode2_river_(heap_)
         , plan_only_(plan_only)
     {
         const auto started = std::chrono::steady_clock::now();
         validate();
+        build_runout_index();
         budget_->set_stage("public_tree");
         BetState root;
         root.pot = config.pot;
@@ -897,27 +917,83 @@ struct StreetBatchSolver::Engine
         }
     }
 
+    void build_runout_index()
+    {
+        budget_->set_stage("runout_index");
+        mode1_of_.fill(-1);
+        mode1_cards_.clear();
+        mode2_of_.clear();
+        mode2_turn_.clear();
+        mode2_river_.clear();
+        bool on_board[52] = {};
+        for (int card : config.board)
+        {
+            on_board[card] = true;
+        }
+        for (int card = 0; card < 52; ++card)
+        {
+            if (on_board[card])
+            {
+                continue;
+            }
+            mode1_of_[static_cast<std::size_t>(card)] = static_cast<int>(mode1_cards_.size());
+            mode1_cards_.push_back(card);
+        }
+        if (config.board.size() != 3)
+        {
+            return;
+        }
+        mode2_of_.assign(static_cast<std::size_t>(52 * 52), -1);
+        for (int turn = 0; turn < 52; ++turn)
+        {
+            if (on_board[turn])
+            {
+                continue;
+            }
+            for (int river = 0; river < 52; ++river)
+            {
+                if (river == turn || on_board[river])
+                {
+                    continue;
+                }
+                const int key = turn * 52 + river;
+                mode2_of_[static_cast<std::size_t>(key)] = static_cast<int>(mode2_turn_.size());
+                mode2_turn_.push_back(turn);
+                mode2_river_.push_back(river);
+            }
+        }
+    }
+
+    std::uint64_t runout_dim(const Node& node) const
+    {
+        if (node.card_mode == 1)
+        {
+            return static_cast<std::uint64_t>(mode1_cards_.size());
+        }
+        if (node.card_mode == 2)
+        {
+            return static_cast<std::uint64_t>(mode2_turn_.size());
+        }
+        return 1;
+    }
+
+    int slot_action_count(const Slot& slot) const
+    {
+        return nodes[static_cast<std::size_t>(slot.node)].n_actions;
+    }
+
     std::uint64_t slot_index_cells() const
     {
         std::uint64_t cells = 0;
         for (const Node& node : nodes)
         {
-            if (node.terminal || node.chance)
+            if (node.terminal || node.chance || node.n_actions <= 1)
             {
                 continue;
             }
-            std::uint64_t dim = 1;
-            if (node.card_mode == 1)
-            {
-                dim = 52;
-            }
-            else if (node.card_mode == 2)
-            {
-                dim = 52ull * 52ull;
-            }
             cells = checked_add(
                 cells,
-                checked_mul(dim, static_cast<std::uint64_t>(node.hands), "slot index"),
+                checked_mul(runout_dim(node), static_cast<std::uint64_t>(node.hands), "slot index"),
                 "slot index");
         }
         return cells;
@@ -937,6 +1013,8 @@ struct StreetBatchSolver::Engine
             total = checked_add(total, header, "plan");
         };
         add(checked_mul(counted_deals_, sizeof(Deal), "plan"));
+        // mode1_cards_ / mode2_* catalogs are already live in budget_->current()
+        // (built before this plan); do not double-count them here.
         add(checked_mul(slot_index_cells(), sizeof(int), "plan"));
         add(checked_mul(planned_slots_, sizeof(Slot), "plan"));
         // regret + strategy_sum + shared sigma workspace (float storage).
@@ -1042,21 +1120,12 @@ struct StreetBatchSolver::Engine
         budget_->set_stage("slot_of");
         for (Node& node : nodes)
         {
-            if (node.terminal || node.chance)
+            if (node.terminal || node.chance || node.n_actions <= 1)
             {
                 continue;
             }
-            std::uint64_t dim = 1;
-            if (node.card_mode == 1)
-            {
-                dim = 52;
-            }
-            else if (node.card_mode == 2)
-            {
-                dim = 52ull * 52ull;
-            }
             const std::uint64_t count = checked_mul(
-                dim, static_cast<std::uint64_t>(node.hands), "slot index");
+                runout_dim(node), static_cast<std::uint64_t>(node.hands), "slot index");
             node.slot_of.assign(static_cast<std::size_t>(count), -1);
         }
     }
@@ -1091,9 +1160,19 @@ struct StreetBatchSolver::Engine
         if (node.card_mode == 1)
         {
             const int card = node.mode1_is_turn ? turn : river;
-            return card * node.hands + hand;
+            const int runout = mode1_of_[static_cast<std::size_t>(card)];
+            if (runout < 0)
+            {
+                throw std::logic_error("street slot key used an on-board card");
+            }
+            return runout * node.hands + hand;
         }
-        return (turn * 52 + river) * node.hands + hand;
+        const int runout = mode2_of_[static_cast<std::size_t>(turn * 52 + river)];
+        if (runout < 0)
+        {
+            throw std::logic_error("street slot key used an illegal runout");
+        }
+        return runout * node.hands + hand;
     }
 
     int remaining(const Deal& deal, int turn, int river, int* out) const
@@ -1165,21 +1244,29 @@ struct StreetBatchSolver::Engine
             throw std::invalid_argument(
                 "street regret table exceeded the 32-bit stored id limit");
         }
+        if (hand < 0 || hand > static_cast<int>(std::numeric_limits<std::uint16_t>::max()))
+        {
+            throw std::invalid_argument("street hand index exceeded the packed slot limit");
+        }
         const int key = card_key(node, hand, turn, river);
         Slot slot;
         slot.node = node_index;
         slot.base = static_cast<int>(cursor_);
-        slot.n_actions = node.n_actions;
-        slot.hand = hand;
-        slot.turn = turn;
-        slot.river = river;
+        slot.hand = static_cast<std::uint16_t>(hand);
+        slot.turn = static_cast<std::int8_t>(turn);
+        slot.river = static_cast<std::int8_t>(river);
         node.slot_of[static_cast<std::size_t>(key)] = static_cast<int>(slots.size());
-        slots.push_back(std::move(slot));
+        slots.push_back(slot);
         cursor_ += node.n_actions;
     }
 
     void note_planned_slot(const Node& node)
     {
+        if (node.n_actions <= 1)
+        {
+            ++planned_implicit_;
+            return;
+        }
         if (node.n_actions < 0
             || planned_cursor_ > static_cast<std::int64_t>(std::numeric_limits<int>::max()) - node.n_actions)
         {
@@ -1192,12 +1279,21 @@ struct StreetBatchSolver::Engine
 
     void consider_slot(bool commit, int node_index, int hand, int turn, int river)
     {
+        const Node& node = nodes[static_cast<std::size_t>(node_index)];
+        if (node.n_actions <= 1)
+        {
+            if (!commit)
+            {
+                note_planned_slot(node);
+            }
+            return;
+        }
         if (commit)
         {
             add_slot(node_index, hand, turn, river);
             return;
         }
-        note_planned_slot(nodes[static_cast<std::size_t>(node_index)]);
+        note_planned_slot(node);
     }
 
     // Every legal deal keeps four distinct hole cards off the board, so each
@@ -1252,6 +1348,7 @@ struct StreetBatchSolver::Engine
         if (!commit)
         {
             planned_slots_ = 0;
+            planned_implicit_ = 0;
             planned_cursor_ = 0;
             expanded_decisions = 0;
             expanded_terminals = 0;
@@ -1373,7 +1470,7 @@ struct StreetBatchSolver::Engine
         // Five-card labels match RiverGame / RiverBatchSolver (no place segment).
         if (config.board.size() != 5)
         {
-            text += place_text(node.street, slot.turn, slot.river);
+            text += place_text(node.street, static_cast<int>(slot.turn), static_cast<int>(slot.river));
             text += " | ";
         }
         if (node.path.empty())
@@ -1385,6 +1482,123 @@ struct StreetBatchSolver::Engine
             text.append(node.path.data(), node.path.size());
         }
         return text;
+    }
+
+    // Emit probability-1 rows for one-action decisions (no Slot / table storage).
+    void append_implicit_strategy_entries(std::vector<StreetStrategyEntry>& entries) const
+    {
+        if (planned_implicit_ == 0)
+        {
+            return;
+        }
+        bool on_board[52] = {};
+        for (int card : config.board)
+        {
+            on_board[card] = true;
+        }
+        // Outside the engine budget: strategy export is caller-owned.
+        std::vector<int> card_a[2];
+        std::vector<int> card_b[2];
+        std::vector<int> hand_at[2];
+        for (int player = 0; player < 2; ++player)
+        {
+            const int count = static_cast<int>(combos[player].size());
+            card_a[player].resize(static_cast<std::size_t>(count));
+            card_b[player].resize(static_cast<std::size_t>(count));
+            hand_at[player].assign(static_cast<std::size_t>(holdem::kComboCount), -1);
+            for (int hand = 0; hand < count; ++hand)
+            {
+                const int combo = combos[player][static_cast<std::size_t>(hand)];
+                holdem::Range::combo_cards(
+                    combo,
+                    card_a[player][static_cast<std::size_t>(hand)],
+                    card_b[player][static_cast<std::size_t>(hand)]);
+                hand_at[player][static_cast<std::size_t>(combo)] = hand;
+            }
+        }
+        Slot probe;
+        for (int node_index = 0; node_index < static_cast<int>(nodes.size()); ++node_index)
+        {
+            const Node& node = nodes[static_cast<std::size_t>(node_index)];
+            if (node.terminal || node.chance || node.n_actions != 1)
+            {
+                continue;
+            }
+            const int player = node.player;
+            const int opp = 1 - player;
+            for (int hand = 0; hand < node.hands; ++hand)
+            {
+                const Support& row = support[player][static_cast<std::size_t>(hand)];
+                const int c0 = card_a[player][static_cast<std::size_t>(hand)];
+                const int c1 = card_b[player][static_cast<std::size_t>(hand)];
+                const auto emit = [&](int turn, int river)
+                {
+                    probe.node = node_index;
+                    probe.hand = static_cast<std::uint16_t>(hand);
+                    probe.turn = static_cast<std::int8_t>(turn);
+                    probe.river = static_cast<std::int8_t>(river);
+                    StreetStrategyEntry entry;
+                    entry.infoset = slot_label(probe);
+                    entry.action.assign(
+                        node.action_labels[0].data(), node.action_labels[0].size());
+                    entry.probability = 1.0;
+                    entries.push_back(std::move(entry));
+                };
+                if (node.card_mode == 0)
+                {
+                    emit(-1, -1);
+                    continue;
+                }
+                if (node.card_mode == 1)
+                {
+                    for (int card = 0; card < 52; ++card)
+                    {
+                        if (on_board[card] || card == c0 || card == c1)
+                        {
+                            continue;
+                        }
+                        if (row.compatible - row.contain[card] <= 0)
+                        {
+                            continue;
+                        }
+                        if (node.mode1_is_turn)
+                        {
+                            emit(card, -1);
+                        }
+                        else
+                        {
+                            emit(-1, card);
+                        }
+                    }
+                    continue;
+                }
+                for (int turn = 0; turn < 52; ++turn)
+                {
+                    if (on_board[turn] || turn == c0 || turn == c1)
+                    {
+                        continue;
+                    }
+                    for (int river = 0; river < 52; ++river)
+                    {
+                        if (river == turn || on_board[river] || river == c0 || river == c1)
+                        {
+                            continue;
+                        }
+                        int blocked = row.contain[turn] + row.contain[river];
+                        const int pair = holdem::Range::combo_index(turn, river);
+                        if (hand_at[opp][static_cast<std::size_t>(pair)] >= 0)
+                        {
+                            --blocked;
+                        }
+                        if (row.compatible - blocked <= 0)
+                        {
+                            continue;
+                        }
+                        emit(turn, river);
+                    }
+                }
+            }
+        }
     }
 
     int slot_index(const Node& node, int hand, int turn, int river, double reach) const
@@ -1490,6 +1704,12 @@ struct StreetBatchSolver::Engine
             return value;
         }
 
+        if (node.n_actions <= 1)
+        {
+            // Implicit probability 1 — no stored row or regret.
+            return cfr_deal_payoff(
+                node.child[0], pi0, pi1, chance, deal, turn, river, updating, weight_iter);
+        }
         const int hand = node.player == 0 ? deal.h0 : deal.h1;
         const double reach = node.player == 0 ? pi0 : pi1;
         const int index = slot_index(node, hand, turn, river, reach);
@@ -1656,7 +1876,7 @@ struct StreetBatchSolver::Engine
             normalize_average(
                 strategy_sum.data() + slot.base,
                 sigma.data() + slot.base,
-                slot.n_actions);
+                slot_action_count(slot));
         }
         average_ready = true;
         return true;
@@ -1860,9 +2080,37 @@ struct StreetBatchSolver::Engine
         }
 
         ensure_board_support(ctx, turn, river);
+        Scratch& child = ctx.scratch[static_cast<std::size_t>(depth + 1)];
+        if (node.n_actions <= 1)
+        {
+            // Implicit check/call — no Slot / slot_of; reach unchanged for
+            // supported hands. Skip fill_actor_slot_bases (empty slot_of).
+            if (node.player == 0)
+            {
+                for (int h0 = 0; h0 < n0; ++h0)
+                {
+                    child.pi0[static_cast<std::size_t>(h0)] = hand_supported(0, h0, turn, river)
+                        ? pi0[h0] : 0.0;
+                }
+                std::copy(pi1, pi1 + n1, child.pi1.begin());
+            }
+            else
+            {
+                std::copy(pi0, pi0 + n0, child.pi0.begin());
+                for (int h1 = 0; h1 < n1; ++h1)
+                {
+                    child.pi1[static_cast<std::size_t>(h1)] = hand_supported(1, h1, turn, river)
+                        ? pi1[h1] : 0.0;
+                }
+            }
+            response_walk(
+                ctx, node.child[0], turn, river, depth + 1, responding, serial_chance);
+            std::copy(child.ev0.begin(), child.ev0.end(), here.ev0.begin());
+            std::copy(child.ev1.begin(), child.ev1.end(), here.ev1.begin());
+            return;
+        }
         const double* actor_pi = node.player == 0 ? pi0 : pi1;
         fill_actor_slot_bases(ctx, here, node, turn, river, actor_pi);
-        Scratch& child = ctx.scratch[static_cast<std::size_t>(depth + 1)];
         const bool choosing = node.player == responding;
         for (int action = 0; action < node.n_actions; ++action)
         {
@@ -3611,19 +3859,19 @@ struct StreetBatchSolver::Engine
             const Slot& slot = slots[index];
             if (predictive)
             {
-                for (int action = 0; action < slot.n_actions; ++action)
+                for (int action = 0; action < slot_action_count(slot); ++action)
                 {
                     const std::size_t at = static_cast<std::size_t>(slot.base + action);
                     predicted[action] = regret[at] + prediction_[at];
                 }
-                regret_matching(predicted, sigma.data() + slot.base, slot.n_actions);
+                regret_matching(predicted, sigma.data() + slot.base, slot_action_count(slot));
             }
             else
             {
                 regret_matching(
                     regret.data() + slot.base,
                     sigma.data() + slot.base,
-                    slot.n_actions);
+                    slot_action_count(slot));
             }
             if (locks_ != nullptr)
             {
@@ -3631,7 +3879,7 @@ struct StreetBatchSolver::Engine
                 apply_lock_to_strategy(
                     std::span<TableScalar>(
                         sigma.data() + slot.base,
-                        static_cast<std::size_t>(slot.n_actions)),
+                        static_cast<std::size_t>(slot_action_count(slot))),
                     lock,
                     static_cast<std::size_t>(slot.hand));
             }
@@ -3647,7 +3895,7 @@ struct StreetBatchSolver::Engine
             {
                 continue;
             }
-            for (int action = 0; action < slot.n_actions; ++action)
+            for (int action = 0; action < slot_action_count(slot); ++action)
             {
                 TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
                 if (cumulative < 0.0)
@@ -3671,7 +3919,7 @@ struct StreetBatchSolver::Engine
             const Slot& slot = slots[index];
             if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player == player)
             {
-                for (int action = 0; action < slot.n_actions; ++action)
+                for (int action = 0; action < slot_action_count(slot); ++action)
                 {
                     TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
                     if (cumulative < 0.0)
@@ -3682,19 +3930,19 @@ struct StreetBatchSolver::Engine
             }
             if (predictive)
             {
-                for (int action = 0; action < slot.n_actions; ++action)
+                for (int action = 0; action < slot_action_count(slot); ++action)
                 {
                     const std::size_t at = static_cast<std::size_t>(slot.base + action);
                     predicted[action] = regret[at] + prediction_[at];
                 }
-                regret_matching(predicted, sigma.data() + slot.base, slot.n_actions);
+                regret_matching(predicted, sigma.data() + slot.base, slot_action_count(slot));
             }
             else
             {
                 regret_matching(
                     regret.data() + slot.base,
                     sigma.data() + slot.base,
-                    slot.n_actions);
+                    slot_action_count(slot));
             }
             if (locks_ != nullptr)
             {
@@ -3702,7 +3950,7 @@ struct StreetBatchSolver::Engine
                 apply_lock_to_strategy(
                     std::span<TableScalar>(
                         sigma.data() + slot.base,
-                        static_cast<std::size_t>(slot.n_actions)),
+                        static_cast<std::size_t>(slot_action_count(slot))),
                     lock,
                     static_cast<std::size_t>(slot.hand));
             }
@@ -3721,7 +3969,7 @@ struct StreetBatchSolver::Engine
             {
                 continue;
             }
-            for (int action = 0; action < slot.n_actions; ++action)
+            for (int action = 0; action < slot_action_count(slot); ++action)
             {
                 const std::size_t at = static_cast<std::size_t>(slot.base + action);
                 regret[at] += prediction_[at];
@@ -3742,7 +3990,7 @@ struct StreetBatchSolver::Engine
             {
                 continue;
             }
-            for (int action = 0; action < slot.n_actions; ++action)
+            for (int action = 0; action < slot_action_count(slot); ++action)
             {
                 prediction_[static_cast<std::size_t>(slot.base + action)] = 0.0;
             }
@@ -3761,7 +4009,7 @@ struct StreetBatchSolver::Engine
             {
                 continue;
             }
-            for (int action = 0; action < slot.n_actions; ++action)
+            for (int action = 0; action < slot_action_count(slot); ++action)
             {
                 TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
                 cumulative = static_cast<TableScalar>(dcfr_discount_post_pass(
@@ -3777,7 +4025,7 @@ struct StreetBatchSolver::Engine
             const Slot& slot = slots[index];
             if (player >= 0 && nodes[static_cast<std::size_t>(slot.node)].player == player)
             {
-                for (int action = 0; action < slot.n_actions; ++action)
+                for (int action = 0; action < slot_action_count(slot); ++action)
                 {
                     TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
                     cumulative = static_cast<TableScalar>(dcfr_discount_post_pass(
@@ -3787,14 +4035,14 @@ struct StreetBatchSolver::Engine
             regret_matching(
                 regret.data() + slot.base,
                 sigma.data() + slot.base,
-                slot.n_actions);
+                slot_action_count(slot));
             if (locks_ != nullptr)
             {
                 const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
                 apply_lock_to_strategy(
                     std::span<TableScalar>(
                         sigma.data() + slot.base,
-                        static_cast<std::size_t>(slot.n_actions)),
+                        static_cast<std::size_t>(slot_action_count(slot))),
                     lock,
                     static_cast<std::size_t>(slot.hand));
             }
@@ -4044,9 +4292,51 @@ struct StreetBatchSolver::Engine
         }
 
         ensure_board_support(ctx, turn, river);
+        Scratch& child = ctx.scratch[static_cast<std::size_t>(depth + 1)];
+        if (node.n_actions <= 1)
+        {
+            // Implicit probability 1 — copy supported reaches and skip tables.
+            if (node.player == 0)
+            {
+                for (int h0 = 0; h0 < n0; ++h0)
+                {
+                    child.pi0[static_cast<std::size_t>(h0)] =
+                        ctx.live0[static_cast<std::size_t>(h0)] ? pi0[h0] : 0.0;
+                }
+                std::copy(pi1, pi1 + n1, child.pi1.begin());
+            }
+            else
+            {
+                std::copy(pi0, pi0 + n0, child.pi0.begin());
+                for (int h1 = 0; h1 < n1; ++h1)
+                {
+                    child.pi1[static_cast<std::size_t>(h1)] =
+                        ctx.live1[static_cast<std::size_t>(h1)] ? pi1[h1] : 0.0;
+                }
+            }
+            frozen_walk(
+                ctx, node.child[0], turn, river, depth + 1, updating, weight_iter, serial_chance);
+            ensure_board_support(ctx, turn, river);
+            std::copy(child.ev0.begin(), child.ev0.end(), here.ev0.begin());
+            std::copy(child.ev1.begin(), child.ev1.end(), here.ev1.begin());
+            for (int h0 = 0; h0 < n0; ++h0)
+            {
+                if (!ctx.live0[static_cast<std::size_t>(h0)])
+                {
+                    here.ev0[static_cast<std::size_t>(h0)] = 0.0;
+                }
+            }
+            for (int h1 = 0; h1 < n1; ++h1)
+            {
+                if (!ctx.live1[static_cast<std::size_t>(h1)])
+                {
+                    here.ev1[static_cast<std::size_t>(h1)] = 0.0;
+                }
+            }
+            return;
+        }
         const double* actor_pi = node.player == 0 ? pi0 : pi1;
         fill_actor_slot_bases(ctx, here, node, turn, river, actor_pi);
-        Scratch& child = ctx.scratch[static_cast<std::size_t>(depth + 1)];
         for (int action = 0; action < node.n_actions; ++action)
         {
             const auto expand_started = profile_
@@ -4437,6 +4727,24 @@ struct StreetBatchSolver::Engine
             std::chrono::steady_clock::now() - started).count();
     }
 
+    bool implicit_infoset_action(const std::string& infoset, const std::string& action) const
+    {
+        if (planned_implicit_ == 0)
+        {
+            return false;
+        }
+        std::vector<StreetStrategyEntry> implicit;
+        append_implicit_strategy_entries(implicit);
+        for (const StreetStrategyEntry& entry : implicit)
+        {
+            if (entry.infoset == infoset && entry.action == action)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     bool assign_labeled_regret(const std::string& infoset, const std::string& action, double value)
     {
         for (const Slot& slot : slots)
@@ -4446,7 +4754,7 @@ struct StreetBatchSolver::Engine
                 continue;
             }
             const Node& node = nodes[static_cast<std::size_t>(slot.node)];
-            for (int index = 0; index < slot.n_actions; ++index)
+            for (int index = 0; index < slot_action_count(slot); ++index)
             {
                 if (std::string_view(node.action_labels[index]) != action)
                 {
@@ -4457,7 +4765,8 @@ struct StreetBatchSolver::Engine
                 return true;
             }
         }
-        return false;
+        // One-action infosets have no row; only the fixed zero regret is accepted.
+        return implicit_infoset_action(infoset, action) && value == 0.0;
     }
 
     bool read_labeled_regret(const std::string& infoset, const std::string& action, double& value) const
@@ -4469,7 +4778,7 @@ struct StreetBatchSolver::Engine
                 continue;
             }
             const Node& node = nodes[static_cast<std::size_t>(slot.node)];
-            for (int index = 0; index < slot.n_actions; ++index)
+            for (int index = 0; index < slot_action_count(slot); ++index)
             {
                 if (std::string_view(node.action_labels[index]) != action)
                 {
@@ -4478,6 +4787,11 @@ struct StreetBatchSolver::Engine
                 value = regret[static_cast<std::size_t>(slot.base + index)];
                 return true;
             }
+        }
+        if (implicit_infoset_action(infoset, action))
+        {
+            value = 0.0;
+            return true;
         }
         return false;
     }
@@ -5113,6 +5427,10 @@ struct StreetBatchSolver::Engine
                         acting[static_cast<std::size_t>(hand)] = 0.0;
                         continue;
                     }
+                    if (node.n_actions <= 1)
+                    {
+                        continue;
+                    }
                     const int slot = stored_slot(node, hand, seen_turn, seen_river);
                     if (slot < 0)
                     {
@@ -5277,17 +5595,24 @@ struct StreetBatchSolver::Engine
             }
             if (row.structural)
             {
-                const int slot = stored_slot(node, hand, seen_turn, seen_river);
-                if (slot < 0)
+                if (node.n_actions <= 1)
                 {
-                    throw std::logic_error("supported hand has no information set");
+                    row.strategy.assign(1, 1.0);
                 }
-                const Slot& stored = slots[static_cast<std::size_t>(slot)];
-                row.strategy.resize(static_cast<std::size_t>(stored.n_actions));
-                for (int action = 0; action < stored.n_actions; ++action)
+                else
                 {
-                    row.strategy[static_cast<std::size_t>(action)] =
-                        sigma[static_cast<std::size_t>(stored.base + action)];
+                    const int slot = stored_slot(node, hand, seen_turn, seen_river);
+                    if (slot < 0)
+                    {
+                        throw std::logic_error("supported hand has no information set");
+                    }
+                    const Slot& stored = slots[static_cast<std::size_t>(slot)];
+                    row.strategy.resize(static_cast<std::size_t>(slot_action_count(stored)));
+                    for (int action = 0; action < slot_action_count(stored); ++action)
+                    {
+                        row.strategy[static_cast<std::size_t>(action)] =
+                            sigma[static_cast<std::size_t>(stored.base + action)];
+                    }
                 }
             }
             view.hands[static_cast<std::size_t>(hand)] = std::move(row);
@@ -5322,13 +5647,22 @@ struct StreetBatchSolver::Engine
         {
             throw std::invalid_argument("hand has no information set on this node");
         }
+        if (node.n_actions <= 1)
+        {
+            if (probability.size() != 1 || !(std::abs(probability[0] - 1.0) <= 1e-12))
+            {
+                throw std::invalid_argument("one-action nodes are fixed at probability 1");
+            }
+            average_ready = true;
+            return;
+        }
         const int slot = stored_slot(node, hand, turn, river);
         if (slot < 0)
         {
             throw std::logic_error("supported hand has no information set");
         }
         const Slot& stored = slots[static_cast<std::size_t>(slot)];
-        for (int action = 0; action < stored.n_actions; ++action)
+        for (int action = 0; action < slot_action_count(stored); ++action)
         {
             sigma[static_cast<std::size_t>(stored.base + action)] = static_cast<TableScalar>(
                 probability[static_cast<std::size_t>(action)]);
@@ -5446,6 +5780,49 @@ struct StreetBatchSolver::Engine
         }
 
         Scratch& child = ctx.scratch[static_cast<std::size_t>(depth + 1)];
+        if (node.n_actions <= 1)
+        {
+            if (node.player == 0)
+            {
+                for (int h0 = 0; h0 < n0; ++h0)
+                {
+                    child.pi0[static_cast<std::size_t>(h0)] = hand_supported(0, h0, turn, river)
+                        ? pi0[h0] : 0.0;
+                }
+                std::copy(pi1, pi1 + n1, child.pi1.begin());
+            }
+            else
+            {
+                std::copy(pi0, pi0 + n0, child.pi0.begin());
+                for (int h1 = 0; h1 < n1; ++h1)
+                {
+                    child.pi1[static_cast<std::size_t>(h1)] = hand_supported(1, h1, turn, river)
+                        ? pi1[h1] : 0.0;
+                }
+            }
+            average_value_walk(ctx, node.child[0], turn, river, depth + 1, false, cancel);
+            std::copy(child.ev0.begin(), child.ev0.end(), here.ev0.begin());
+            std::copy(child.ev1.begin(), child.ev1.end(), here.ev1.begin());
+            // Force at a one-action node still records the sole child under aev.
+            if (force)
+            {
+                if (node.player == 0)
+                {
+                    std::copy(
+                        child.ev0.begin(),
+                        child.ev0.end(),
+                        here.aev0.begin());
+                }
+                else
+                {
+                    std::copy(
+                        child.ev1.begin(),
+                        child.ev1.end(),
+                        here.aev1.begin());
+                }
+            }
+            return;
+        }
         for (int action = 0; action < node.n_actions; ++action)
         {
             if (node.player == 0)
@@ -5636,6 +6013,10 @@ struct StreetBatchSolver::Engine
                         acting[static_cast<std::size_t>(hand)] = 0.0;
                         continue;
                     }
+                    if (node.n_actions <= 1)
+                    {
+                        continue;
+                    }
                     const int slot = stored_slot(node, hand, seen_turn, seen_river);
                     if (slot < 0)
                     {
@@ -5799,12 +6180,16 @@ struct StreetBatchSolver::Engine
                 }
                 continue;
             }
-            const int slot = stored_slot(node, hand, turn, river);
-            if (slot < 0)
+            int base = -1;
+            if (node.n_actions > 1)
             {
-                throw std::logic_error("supported hand has no information set");
+                const int slot = stored_slot(node, hand, turn, river);
+                if (slot < 0)
+                {
+                    throw std::logic_error("supported hand has no information set");
+                }
+                base = slots[static_cast<std::size_t>(slot)].base;
             }
-            const Slot& stored = slots[static_cast<std::size_t>(slot)];
             double mixed = 0.0;
             for (int action = 0; action < node.n_actions; ++action)
             {
@@ -5813,7 +6198,9 @@ struct StreetBatchSolver::Engine
                 const double denom = prior * joint_scale * open;
                 const double conditional = stored_raw / denom;
                 page.action_ev[static_cast<std::size_t>(hand * node.n_actions + action)] = conditional;
-                const double played = sigma[static_cast<std::size_t>(stored.base + action)];
+                const double played = base < 0
+                    ? 1.0
+                    : static_cast<double>(sigma[static_cast<std::size_t>(base + action)]);
                 mixed += played * conditional;
             }
             page.ev_defined[static_cast<std::size_t>(hand)] = 1;
@@ -6008,7 +6395,7 @@ struct StreetBatchSolver::Engine
         tables.slot_actions.reserve(slots.size());
         for (const Slot& slot : slots)
         {
-            tables.slot_actions.push_back(static_cast<std::uint16_t>(slot.n_actions));
+            tables.slot_actions.push_back(static_cast<std::uint16_t>(slot_action_count(slot)));
         }
         tables.regret.assign(regret.begin(), regret.end());
         tables.strategy_sum.assign(strategy_sum.begin(), strategy_sum.end());
@@ -6029,7 +6416,7 @@ struct StreetBatchSolver::Engine
         }
         for (std::size_t index = 0; index < slots.size(); ++index)
         {
-            if (tables.slot_actions[index] != static_cast<std::uint16_t>(slots[index].n_actions))
+            if (tables.slot_actions[index] != static_cast<std::uint16_t>(slot_action_count(slots[index])))
             {
                 throw std::invalid_argument("training tables do not match this tree");
             }
@@ -6533,11 +6920,12 @@ double StreetBatchSolver::nash_gap() const
 
 std::uint64_t StreetBatchSolver::infoset_count() const
 {
-    if (!engine_->slots.empty())
+    // Stored multi-action slots plus implicit one-action infosets.
+    if (!engine_->plan_only_)
     {
-        return static_cast<std::uint64_t>(engine_->slots.size());
+        return static_cast<std::uint64_t>(engine_->slots.size()) + engine_->planned_implicit_;
     }
-    return engine_->planned_slots_;
+    return engine_->planned_slots_ + engine_->planned_implicit_;
 }
 
 std::uint64_t StreetBatchSolver::deal_count() const
@@ -6957,11 +7345,14 @@ std::vector<StreetStrategyEntry> StreetBatchSolver::average_strategy_entries() c
 {
     engine_->ensure_average();
     std::vector<StreetStrategyEntry> entries;
-    entries.reserve(engine_->slots.size() * 2);
+    entries.reserve(
+        engine_->slots.size() * 2
+        + static_cast<std::size_t>(engine_->planned_implicit_));
     for (const Engine::Slot& slot : engine_->slots)
     {
         const Engine::Node& node = engine_->nodes[static_cast<std::size_t>(slot.node)];
-        for (int action = 0; action < slot.n_actions; ++action)
+        const int actions = engine_->slot_action_count(slot);
+        for (int action = 0; action < actions; ++action)
         {
             StreetStrategyEntry entry;
             entry.infoset = engine_->slot_label(slot);
@@ -6970,6 +7361,8 @@ std::vector<StreetStrategyEntry> StreetBatchSolver::average_strategy_entries() c
             entries.push_back(std::move(entry));
         }
     }
+    // One-action decisions: emit probability 1 without stored rows.
+    engine_->append_implicit_strategy_entries(entries);
     return entries;
 }
 
