@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NodePayload } from "../../domain/types";
 import engineChanceRiverDeal from "../../domain/fixtures/engine-chance-river-deal.json";
 
-const followAction = vi.fn(async () => undefined);
+const selectBoardCard = vi.fn(async () => undefined);
 
 /** Engine-captured chance shape: cards[{card, child_id, weight}], empty children. */
 const chanceNode = engineChanceRiverDeal as NodePayload;
@@ -12,8 +12,14 @@ const chanceNode = engineChanceRiverDeal as NodePayload;
 vi.mock("../../state/studyStore", () => ({
   useStudyStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      currentNode: chanceNode,
-      followAction,
+      currentNode: {
+        node_id: "p20.t15.r9",
+        kind: "decision",
+        board: ["Ah", "Kd", "7c", "4s", "9h"],
+      },
+      boardChangeChanceNode: chanceNode,
+      boardChangeStreet: "river",
+      selectBoardCard,
     }),
 }));
 
@@ -21,14 +27,14 @@ const { CardPicker } = await import("./CardPicker");
 
 describe("CardPicker", () => {
   beforeEach(() => {
-    followAction.mockClear();
+    selectBoardCard.mockClear();
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it("renders a suits×ranks grid from engine cards[] with faded blockers", () => {
+  it("renders a suits×ranks grid from armed chance cards[] without requiring current deal", () => {
     render(<CardPicker open street="river" onClose={() => undefined} />);
     expect(screen.getByRole("dialog", { name: /river card picker/i })).toBeTruthy();
     expect(screen.getByText("Change river")).toBeTruthy();
@@ -48,14 +54,14 @@ describe("CardPicker", () => {
     expect(screen.queryByText(/No next cards at this node/i)).toBeNull();
   });
 
-  it("selects a legal card with Enter via engine child_id and closes", async () => {
+  it("selects a legal card with Enter via selectBoardCard and closes", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     render(<CardPicker open street="river" onClose={onClose} />);
     const dialog = screen.getByRole("dialog", { name: /river card picker/i });
     dialog.focus();
     await user.keyboard("{Enter}");
-    expect(followAction).toHaveBeenCalledWith("n:root/c/As");
+    expect(selectBoardCard).toHaveBeenCalledWith("n:root/c/As");
     expect(onClose).toHaveBeenCalled();
   });
 

@@ -278,16 +278,153 @@ export function isLegalDeckCell(cell: DeckCell): cell is ChanceCardOption {
   return !isMissingDeckCell(cell) && !cell.blocked;
 }
 
+/** Minimal trail step shape for resolving a deal-chance ancestor. */
+export interface DealPathStepRef {
+  nodeId: string;
+  kind: string;
+  street: string;
+  parentId?: string | null;
+}
+
+/** Parsed `pN.tT.rR` public-node id (engine StreetBatch / explorer form). */
+export interface PublicNodeIdParts {
+  /** Public betting index N. */
+  index: number;
+  /** Encoded turn card (or -1). */
+  turn: number;
+  /** Encoded river card (or -1). */
+  river: number;
+}
+
+const PUBLIC_NODE_ID_RE = /^p(-?\d+)\.t(-?\d+)\.r(-?\d+)$/;
+
+/** Parse explorer public ids like `p12.t40.r7`. Non-matching ids return null. */
+export function parsePublicNodeId(nodeId: string): PublicNodeIdParts | null {
+  const match = PUBLIC_NODE_ID_RE.exec(nodeId.trim());
+  if (!match) {
+    return null;
+  }
+  return {
+    index: Number(match[1]),
+    turn: Number(match[2]),
+    river: Number(match[3]),
+  };
+}
+
+export function formatPublicNodeId(parts: PublicNodeIdParts): string {
+  return `p${parts.index}.t${parts.turn}.r${parts.river}`;
+}
+
 /**
- * Decide whether the current node can open a next-card picker for `street`.
+ * Keep the current node's public betting index N; take `.t`/`.r` from the
+ * selected chance child's runout. Returns null when either id is not `pN.tT.rR`.
+ */
+export function rewriteNodeIdRunout(
+  currentNodeId: string,
+  chanceChildNodeId: string,
+): string | null {
+  const current = parsePublicNodeId(currentNodeId);
+  const child = parsePublicNodeId(chanceChildNodeId);
+  if (!current || !child) {
+    return null;
+  }
+  return formatPublicNodeId({
+    index: current.index,
+    turn: child.turn,
+    river: child.river,
+  });
+}
+
+/**
+ * Target id after picking a chance card while staying on the betting line.
+ * At the deal node itself, the chance child id is already correct.
+ */
+export function linePreservingCardTargetId(
+  currentNodeId: string,
+  chanceNodeId: string,
+  chanceChildNodeId: string,
+): string {
+  if (currentNodeId === chanceNodeId) {
+    return chanceChildNodeId;
+  }
+  return rewriteNodeIdRunout(currentNodeId, chanceChildNodeId) ?? chanceChildNodeId;
+}
+
+/** True when `node` is the live chance deal for `street`. */
+export function isDealChanceForStreet(
+  node: NodePayload | null | undefined,
+  street: DealStreet,
+): boolean {
+  if (!node || node.kind !== "chance") {
+    return false;
+  }
+  return dealStreetFromBoard(node.board) === street;
+}
+
+/**
+ * Changing an earlier street once a later card is dealt is out of scope
+ * (e.g. turn swap after the river is already on the board).
+ */
+export function boardCardChangeBlockedByLaterStreet(
+  node: NodePayload | null | undefined,
+  street: DealStreet,
+): string | null {
+  if (!node) {
+    return null;
+  }
+  const len = normalizeBoardCards(node.board).length;
+  if (street === "turn" && len >= 5) {
+    return "Cannot change the turn after the river is dealt.";
+  }
+  return null;
+}
+
+/**
+ * Prefer the trail: the step before the first card deal for `street` is the
+ * chance node we navigated through. Falls back to the card step's parentId when
+ * the prior tip was not recorded.
+ */
+export function resolveDealChanceIdFromTrail(
+  trail: readonly DealPathStepRef[] | null | undefined,
+  street: DealStreet,
+): string | null {
+  if (!trail || trail.length === 0) {
+    return null;
+  }
+  const cardIdx = trail.findIndex(
+    (step) => step.kind === "card" && step.street === street,
+  );
+  if (cardIdx > 0) {
+    const prior = trail[cardIdx - 1];
+    if (prior?.nodeId) {
+      return prior.nodeId;
+    }
+  }
+  if (cardIdx >= 0) {
+    const parentId = trail[cardIdx]?.parentId;
+    if (typeof parentId === "string" && parentId.length > 0) {
+      return parentId;
+    }
+  }
+  // Still sitting on the deal node (trail tip) before a card is chosen.
+  const tip = trail[trail.length - 1];
+  if (tip && tip.street === street && tip.kind !== "card" && tip.kind !== "terminal") {
+    // Ambiguous without a payload — callers still verify via isDealChanceForStreet.
+    return tip.nodeId;
+  }
+  return null;
+}
+
+/**
+ * Decide whether a next-card picker can open for `street`.
  *
- * Full line-preserving sibling-card swaps (jump back to an ancestor chance while
- * keeping the betting line) need parent/path APIs not exposed on main yet.
- * Until then, only the live deal node for that street is accepted.
+ * Accepts the live matching deal node, or a resolved deal-chance ancestor
+ * (from `pathTrail` / `parent_id` walk) while the user stays on a deeper line.
  */
 export function prepareBoardCardChange(
   node: NodePayload | null | undefined,
   street: DealStreet,
+  chanceAncestor?: NodePayload | null,
 ): BoardCardChangeResult {
   if (!node) {
     return {
@@ -296,37 +433,44 @@ export function prepareBoardCardChange(
       reason: `No node loaded — solve a spot before changing the ${street}.`,
     };
   }
-  if (node.kind !== "chance") {
+  const later = boardCardChangeBlockedByLaterStreet(node, street);
+  if (later) {
+    return { ok: false, street, reason: later };
+  }
+
+  let deal: NodePayload | null = null;
+  if (isDealChanceForStreet(node, street)) {
+    deal = node;
+  } else if (chanceAncestor && isDealChanceForStreet(chanceAncestor, street)) {
+    deal = chanceAncestor;
+  }
+
+  if (!deal) {
+    if (chanceAncestor && chanceAncestor.kind === "chance") {
+      const dealing = dealStreetFromBoard(chanceAncestor.board);
+      if (dealing != null && dealing !== street) {
+        return {
+          ok: false,
+          street,
+          reason: `Resolved deal node is for the ${dealing}, not the ${street}.`,
+        };
+      }
+    }
     return {
       ok: false,
       street,
       reason:
-        `Cannot change the ${street} from this decision without walking back to its deal node. ` +
-        "Line-preserving sibling-card navigation is not wired yet — open the deal node first, " +
-        "or use Action history / Navigator.",
+        `Cannot resolve the ${street} deal-chance ancestor from this node. ` +
+        "Navigate through the deal once (so path history records it) or open the deal node.",
     };
   }
-  const dealing = dealStreetFromBoard(node.board);
-  if (dealing == null) {
-    return {
-      ok: false,
-      street,
-      reason: "This chance node has no next-card deal for turn or river.",
-    };
-  }
-  if (dealing !== street) {
-    return {
-      ok: false,
-      street,
-      reason: `This deal node is for the ${dealing}, not the ${street}. Navigate to the ${street} deal to change it.`,
-    };
-  }
-  if (chanceCardOptions(node).length === 0) {
+
+  if (chanceCardOptions(deal).length === 0) {
     return {
       ok: false,
       street,
       reason: "No legal next cards at this deal node.",
     };
   }
-  return { ok: true, street, chanceNodeId: node.node_id };
+  return { ok: true, street, chanceNodeId: deal.node_id };
 }

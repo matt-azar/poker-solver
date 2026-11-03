@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   boardBlockers,
+  boardCardChangeBlockedByLaterStreet,
   boardGroups,
   chanceCardChildId,
   chanceCardEntries,
@@ -11,10 +12,15 @@ import {
   deckCellIndex,
   deckCoords,
   fullDeckGrid,
+  isDealChanceForStreet,
   isLegalDeckCell,
   isMissingDeckCell,
+  linePreservingCardTargetId,
   parseCardCode,
+  parsePublicNodeId,
   prepareBoardCardChange,
+  resolveDealChanceIdFromTrail,
+  rewriteNodeIdRunout,
   suitSymbol,
 } from "./cards";
 import type { NodePayload } from "./types";
@@ -129,33 +135,100 @@ describe("card helpers", () => {
     expect(cycleSuit("c", 1)).toBe("s");
   });
 
-  it("gates board card changes to the live deal street", () => {
+  it("parses and rewrites pN.tT.rR runouts while keeping public index N", () => {
+    expect(parsePublicNodeId("p12.t40.r7")).toEqual({
+      index: 12,
+      turn: 40,
+      river: 7,
+    });
+    expect(parsePublicNodeId("n:root/c")).toBeNull();
+    expect(rewriteNodeIdRunout("p42.t15.r28", "p5.t15.r9")).toBe("p42.t15.r9");
+    expect(rewriteNodeIdRunout("p42.t15.r-1", "p5.t22.r-1")).toBe("p42.t22.r-1");
+    expect(rewriteNodeIdRunout("decision", "p5.t15.r9")).toBeNull();
+    expect(linePreservingCardTargetId("p3.t-1.r-1", "p3.t-1.r-1", "p4.t11.r-1")).toBe(
+      "p4.t11.r-1",
+    );
+    expect(linePreservingCardTargetId("p42.t15.r28", "p3.t15.r-1", "p5.t15.r9")).toBe(
+      "p42.t15.r9",
+    );
+  });
+
+  it("resolves deal-chance ids from pathTrail card steps", () => {
+    const trail = [
+      { nodeId: "p0.t-1.r-1", kind: "root", street: "flop" },
+      { nodeId: "p1.t-1.r-1", kind: "action", street: "flop" },
+      { nodeId: "p2.t-1.r-1", kind: "action", street: "flop" }, // turn deal chance
+      {
+        nodeId: "p4.t15.r-1",
+        kind: "card",
+        street: "turn",
+        parentId: "p0.t-1.r-1",
+      },
+      { nodeId: "p8.t15.r-1", kind: "action", street: "turn" },
+    ];
+    expect(resolveDealChanceIdFromTrail(trail, "turn")).toBe("p2.t-1.r-1");
+    expect(resolveDealChanceIdFromTrail(trail, "river")).toBeNull();
+    expect(
+      resolveDealChanceIdFromTrail(
+        [
+          {
+            nodeId: "p9.t15.r3",
+            kind: "card",
+            street: "river",
+            parentId: "p7.t15.r-1",
+          },
+        ],
+        "river",
+      ),
+    ).toBe("p7.t15.r-1");
+  });
+
+  it("accepts live deal nodes and resolved ancestors for board card changes", () => {
     const turnDeal: NodePayload = {
-      node_id: "deal-turn",
+      node_id: "p2.t-1.r-1",
       kind: "chance",
       board: ["Ah", "Kd", "7c"],
-      cards: [{ card: "2s", child_id: "after-2s", weight: 0.02 }],
+      cards: [{ card: "2s", child_id: "p4.t15.r-1", weight: 0.02 }],
     };
+    expect(isDealChanceForStreet(turnDeal, "turn")).toBe(true);
     expect(prepareBoardCardChange(turnDeal, "turn")).toEqual({
       ok: true,
       street: "turn",
-      chanceNodeId: "deal-turn",
+      chanceNodeId: "p2.t-1.r-1",
     });
     expect(prepareBoardCardChange(turnDeal, "river").ok).toBe(false);
 
     const decision: NodePayload = {
-      node_id: "p1",
+      node_id: "p8.t15.r-1",
       kind: "decision",
       board: ["Ah", "Kd", "7c", "2s"],
       actions: ["Check"],
-      children: [{ label: "Check", node_id: "p2" }],
+      children: [{ label: "Check", node_id: "p9.t15.r-1" }],
+      parent_id: "p4.t15.r-1",
     };
-    const blocked = prepareBoardCardChange(decision, "turn");
-    expect(blocked.ok).toBe(false);
-    if (!blocked.ok) {
-      expect(blocked.reason).toMatch(/deal node/i);
-      expect(blocked.reason).toMatch(/not wired yet/i);
+    const withoutAncestor = prepareBoardCardChange(decision, "turn");
+    expect(withoutAncestor.ok).toBe(false);
+    if (!withoutAncestor.ok) {
+      expect(withoutAncestor.reason).toMatch(/deal-chance ancestor/i);
+      expect(withoutAncestor.reason).not.toMatch(/not wired yet/i);
     }
+
+    expect(prepareBoardCardChange(decision, "turn", turnDeal)).toEqual({
+      ok: true,
+      street: "turn",
+      chanceNodeId: "p2.t-1.r-1",
+    });
+
+    const riverDecision: NodePayload = {
+      node_id: "p20.t15.r9",
+      kind: "decision",
+      board: ["Ah", "Kd", "7c", "2s", "9h"],
+      parent_id: "p18.t15.r9",
+    };
+    expect(boardCardChangeBlockedByLaterStreet(riverDecision, "turn")).toMatch(
+      /after the river/i,
+    );
+    expect(prepareBoardCardChange(riverDecision, "turn", turnDeal).ok).toBe(false);
 
     const emptyChance: NodePayload = {
       node_id: "deal-empty",

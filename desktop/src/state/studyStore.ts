@@ -1,7 +1,10 @@
 import { create } from "zustand";
 import { resolveRaiseSizeList, resolveSizeList } from "../domain/betSizes";
 import {
+  isDealChanceForStreet,
+  linePreservingCardTargetId,
   prepareBoardCardChange as evaluateBoardCardChange,
+  resolveDealChanceIdFromTrail,
   type BoardCardChangeResult,
   type DealStreet,
 } from "../domain/cards";
@@ -499,9 +502,16 @@ interface StudyState {
   currentNode: NodePayload | null;
   /**
    * Client-validated betting-path trail (node ids + ownership + alternatives).
-   * Used when engine `parent_id` is unavailable — see actionHistory.ts note.
+   * Preferred source for deal-chance ancestors; `parent_id` walk is the fallback.
    */
   pathTrail: PathStep[];
+  /**
+   * Deal-chance node whose `cards[]` feed the board CardPicker while the user
+   * stays on a deeper betting line. Null when no board-card change is armed.
+   */
+  boardChangeChanceNode: NodePayload | null;
+  /** Street armed for the open board-card picker, if any. */
+  boardChangeStreet: DealStreet | null;
   /** Browser-style back/forward stack of node + trail snapshots. */
   navHistory: NavHistoryEntry[];
   navHistoryIndex: number;
@@ -604,13 +614,19 @@ interface StudyState {
   followAction: (nodeId: string) => Promise<void>;
   /**
    * Open-path gate for turn/river card changes from the board strip.
-   *
-   * TODO(ui-card-board): Line-preserving sibling-card navigation needs ancestor
-   * chance lookup (parent/path APIs or a client path cache). Until that lands,
-   * this only succeeds when `currentNode` is already the matching deal node,
-   * and otherwise explains why the comparison would be unsafe.
+   * Resolves the matching deal-chance ancestor via `pathTrail` (preferred) or
+   * walking `parent_id`, loads its payload for the picker, and returns the gate
+   * result without navigating away from the current line.
    */
-  prepareBoardCardChange: (street: DealStreet) => BoardCardChangeResult;
+  prepareBoardCardChange: (street: DealStreet) => Promise<BoardCardChangeResult>;
+  /** Clear armed board-card picker state (chance payload + street). */
+  clearBoardCardChange: () => void;
+  /**
+   * Apply a picker selection: rewrite the current node's `.t`/`.r` from the
+   * chance child's runout (keep public index N), navigate there, and fall back
+   * to the chance child id on 400/404.
+   */
+  selectBoardCard: (chanceChildNodeId: string) => Promise<void>;
   calculateEv: () => Promise<void>;
   loadRunouts: () => Promise<void>;
   loadEquity: () => Promise<void>;
@@ -1140,6 +1156,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   baselineSolutionId: null,
   currentNode: null,
   pathTrail: [],
+  boardChangeChanceNode: null,
+  boardChangeStreet: null,
   navHistory: [],
   navHistoryIndex: -1,
   canNavBack: false,
@@ -1822,6 +1840,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       solutionId: null,
       currentNode: null,
       pathTrail: [],
+      boardChangeChanceNode: null,
+      boardChangeStreet: null,
       navHistory: [],
       navHistoryIndex: -1,
       canNavBack: false,
@@ -2082,12 +2102,126 @@ pathTrail,
     await get().navigateTo(nodeId, { history: "push" });
   },
 
-  prepareBoardCardChange(street: DealStreet) {
-    const result = evaluateBoardCardChange(get().currentNode, street);
-    if (!result.ok) {
-      set({ message: result.reason });
+  clearBoardCardChange() {
+    set({ boardChangeChanceNode: null, boardChangeStreet: null });
+  },
+
+  async prepareBoardCardChange(street: DealStreet) {
+    const current = get().currentNode;
+    const solutionId = get().solutionId;
+
+    const finish = (result: BoardCardChangeResult, chance: NodePayload | null) => {
+      if (!result.ok) {
+        set({
+          message: result.reason,
+          boardChangeChanceNode: null,
+          boardChangeStreet: null,
+        });
+        return result;
+      }
+      set({
+        boardChangeChanceNode: chance,
+        boardChangeStreet: street,
+      });
+      return result;
+    };
+
+    if (isDealChanceForStreet(current, street)) {
+      const result = evaluateBoardCardChange(current, street);
+      return finish(result, result.ok ? current : null);
     }
-    return result;
+
+    // Prefer pathTrail: step before the street's card deal is the chance node.
+    let chanceId = resolveDealChanceIdFromTrail(get().pathTrail, street);
+    let chanceNode: NodePayload | null = null;
+
+    const loadChance = async (nodeId: string): Promise<NodePayload | null> => {
+      if (!solutionId) {
+        return null;
+      }
+      try {
+        return await engineClient.getNode(solutionId, nodeId);
+      } catch {
+        return null;
+      }
+    };
+
+    if (chanceId && chanceId !== current?.node_id) {
+      chanceNode = await loadChance(chanceId);
+      if (chanceNode && isDealChanceForStreet(chanceNode, street)) {
+        const result = evaluateBoardCardChange(current, street, chanceNode);
+        return finish(result, result.ok ? chanceNode : null);
+      }
+      chanceNode = null;
+    }
+
+    // Fallback: walk parent_id toward the deal-chance ancestor.
+    if (current && solutionId) {
+      const seen = new Set<string>();
+      let cursor: NodePayload | null = current;
+      let depth = 0;
+      while (cursor && depth < 64) {
+        const parentId =
+          typeof cursor.parent_id === "string" && cursor.parent_id.length > 0
+            ? cursor.parent_id
+            : null;
+        if (!parentId || seen.has(parentId)) {
+          break;
+        }
+        seen.add(parentId);
+        const parent = await loadChance(parentId);
+        if (!parent) {
+          break;
+        }
+        if (isDealChanceForStreet(parent, street)) {
+          chanceNode = parent;
+          chanceId = parent.node_id;
+          break;
+        }
+        cursor = parent;
+        depth += 1;
+      }
+    }
+
+    const result = evaluateBoardCardChange(current, street, chanceNode);
+    return finish(result, result.ok ? chanceNode : null);
+  },
+
+  async selectBoardCard(chanceChildNodeId: string) {
+    const current = get().currentNode;
+    const chance = get().boardChangeChanceNode;
+    const solutionId = get().solutionId;
+    if (!current || !chance || !chanceChildNodeId || !solutionId) {
+      return;
+    }
+    let target = linePreservingCardTargetId(
+      current.node_id,
+      chance.node_id,
+      chanceChildNodeId,
+    );
+    // Probe rewritten id; on 400/404 fall back to the chance child (deal root of that runout).
+    if (target !== chanceChildNodeId) {
+      try {
+        await engineClient.getNode(solutionId, target);
+      } catch (error) {
+        const status = error instanceof EngineError ? error.status : 0;
+        if (status === 400 || status === 404) {
+          target = chanceChildNodeId;
+        } else {
+          set({
+            boardChangeChanceNode: null,
+            boardChangeStreet: null,
+            message:
+              error instanceof EngineError
+                ? error.message
+                : "Board card navigation failed",
+          });
+          return;
+        }
+      }
+    }
+    set({ boardChangeChanceNode: null, boardChangeStreet: null });
+    await get().navigateTo(target, { history: "push" });
   },
 
   async calculateEv() {
@@ -2348,6 +2482,8 @@ pathTrail,
       solutionId: null,
       currentNode: null,
       pathTrail: [],
+      boardChangeChanceNode: null,
+      boardChangeStreet: null,
       navHistory: [],
       navHistoryIndex: -1,
       canNavBack: false,
@@ -2400,6 +2536,8 @@ pathTrail,
         weights,
         draftRevision: bumpRevision(get().draftRevision),
         pathTrail: [],
+        boardChangeChanceNode: null,
+        boardChangeStreet: null,
         navHistory: [],
         navHistoryIndex: -1,
         canNavBack: false,
