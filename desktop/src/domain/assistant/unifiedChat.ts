@@ -95,9 +95,10 @@ export function looksLikeSetupRequest(text: string): boolean {
       lower,
     ) ||
     /\b(oop|ip)\b.*\brange\b/i.test(lower) ||
-    /\b(set|change|update|use)\b[\s\S]{0,48}\b(pot|stack|iterations|iters|accuracy|time limit|threads|memory|samples|algorithm|max raises)\b/i.test(
+    /\b(set|change|update|use|make)\b[\s\S]{0,48}\b(the\s+)?(pot|stack|iterations|iters|accuracy|time limit|threads|memory|samples|algorithm|max raises)\b/i.test(
       lower,
-    )
+    ) ||
+    /\b(pot|stack|iterations|iters)\s*(to|=|:)?\s*\d/i.test(lower)
   );
 }
 

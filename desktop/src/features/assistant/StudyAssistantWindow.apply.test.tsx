@@ -169,8 +169,35 @@ describe("StudyAssistantWindow apply UX", () => {
     expect(screen.queryByTestId("assistant-pending-apply")).toBeNull();
   });
 
-  it("shows Apply for a broad create proposal instead of claiming it was written", async () => {
+  it("auto-applies a broad create proposal with a receipt (no silent proposal)", async () => {
     turnMock.mockResolvedValue(broadCreateOutcome(0));
+    const user = userEvent.setup();
+    render(<StudyAssistantWindow />);
+    await sendPrompt(user, "Set up CO vs BB SRP");
+
+    await waitFor(() => {
+      expect(useStudyStore.getState().draft.oopRange).toBe("QQ+");
+    });
+    expect(useStudyStore.getState().draft.pot).toBe(5.5);
+    expect(screen.queryByTestId("assistant-pending-apply")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Undo$/i })).toBeTruthy();
+    expect(screen.getByText(/New study created|Review · create/i)).toBeTruthy();
+  });
+
+  it("surfaces a sticky Apply bar when auto-commit is blocked by conflicts", async () => {
+    turnMock.mockResolvedValue({
+      ...broadCreateOutcome(0),
+      run: {
+        ...broadCreateOutcome(0).run,
+        result: {
+          ...broadCreateOutcome(0).run.result,
+          ok: false,
+          conflicts: [
+            { field: "stack", message: "Explicit stack conflicts with profile" },
+          ],
+        },
+      },
+    });
     const user = userEvent.setup();
     render(<StudyAssistantWindow />);
     await sendPrompt(user, "Set up CO vs BB SRP");
@@ -178,14 +205,14 @@ describe("StudyAssistantWindow apply UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("assistant-pending-apply")).toBeTruthy();
     });
-    expect(screen.getByText(/Click Apply to write these onto Build/i)).toBeTruthy();
+    expect(screen.getByTestId("assistant-pending-apply").textContent).toMatch(
+      /Setup ready/i,
+    );
     expect(useStudyStore.getState().draft.oopRange).toBe("AA");
 
-    await user.click(screen.getByRole("button", { name: /Apply to Build/i }));
+    await user.click(screen.getByRole("button", { name: /Apply anyway/i }));
     await waitFor(() => {
       expect(useStudyStore.getState().draft.oopRange).toBe("QQ+");
     });
-    expect(useStudyStore.getState().draft.pot).toBe(5.5);
-    expect(screen.queryByTestId("assistant-pending-apply")).toBeNull();
   });
 });

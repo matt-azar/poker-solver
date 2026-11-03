@@ -19,6 +19,8 @@ Windows SmartScreen may warn because the binary is not code-signed — **More in
 
 The installer places `holdem-explorer.exe` next to the UI, unblocks both binaries, and fails if the engine is missing. On launch the shell starts that sidecar on `127.0.0.1:8765` and waits until it accepts connections before the Study UI connects. No CMake or npm required.
 
+**Release lag:** `/releases/latest` only updates when a maintainer pushes a new `v*-windows` tag. The current `v0.1.0-windows` cut is from **2026-11-01** and does **not** include Study assistant apply/receipt fixes from [#122](https://github.com/matt-azar/poker-solver/pull/122) (merged 2026-11-02) or later. To run a build that includes those fixes: download the `holdem-study-windows-installer` artifact from a green **Windows Installer** Actions run on `main`, or build locally (`cd desktop && npm run tauri:build`). Maintainers should cut `v0.1.1-windows` (or newer) when shipping assistant UX to the README download link.
+
 Maintainers: CI rebuilds the artifact on desktop changes (Actions → **Windows Installer**). Publishing a Release is intentional — push a `v*-windows` tag (see packaging notes). Packaging notes: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
 
 ## Study UI (developers)

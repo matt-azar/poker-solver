@@ -1762,6 +1762,31 @@
   gap: 6px;
 }
 
+.help-chat-window__pending-apply {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent, #3b82f6) 12%, var(--panel));
+}
+
+.help-chat-window__pending-apply-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.help-chat-window__pending-apply .assistant-compose-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
 .help-chat-window__resize {
   position: absolute;
   right: 0;
