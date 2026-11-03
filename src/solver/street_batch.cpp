@@ -1162,41 +1162,45 @@ struct StreetBatchSolver::Engine
     mutable bool support_ready_ = false;
     mutable double cache_init_seconds_ = 0.0;
     double worker_setup_seconds_ = 0.0;
-    bool failed_ = false;
+    mutable bool failed_ = false;
     bool profile_ = false;
     static constexpr int kMaxThreads = 64;
     WorkerContext* extra_contexts_[kMaxThreads] = {};
     int extra_count_ = 0;
-    std::pmr::vector<double> result0_;
-    std::pmr::vector<double> result1_;
-    int active_cards_[52] = {};
-    int active_count_ = 0;
-    int chunk_begin_[kMaxThreads] = {};
-    int chunk_end_[kMaxThreads] = {};
-    int task_node_ = 0;
-    int task_turn_ = -1;
-    int task_river_ = -1;
-    int task_depth_ = 0;
-    int task_updating_ = -1;
-    int task_deal_ = 0;
-    double task_weight_ = 1.0;
-    const double* task_pi0_ = nullptr;
-    const double* task_pi1_ = nullptr;
+    // Card-result and task fields are mutable so const BR/NashConv eval can
+    // reuse the same worker pool as train (disjoint per-card writes).
+    mutable std::pmr::vector<double> result0_;
+    mutable std::pmr::vector<double> result1_;
+    mutable int active_cards_[52] = {};
+    mutable int active_count_ = 0;
+    mutable int chunk_begin_[kMaxThreads] = {};
+    mutable int chunk_end_[kMaxThreads] = {};
+    mutable int task_node_ = 0;
+    mutable int task_turn_ = -1;
+    mutable int task_river_ = -1;
+    mutable int task_depth_ = 0;
+    mutable int task_updating_ = -1;
+    mutable int task_responding_ = -1;
+    mutable int task_deal_ = 0;
+    mutable double task_weight_ = 1.0;
+    mutable const double* task_pi0_ = nullptr;
+    mutable const double* task_pi1_ = nullptr;
     std::thread workers_[kMaxThreads];
     int worker_count_ = 0;
-    std::mutex pool_mutex_;
-    std::condition_variable work_cv_;
-    std::condition_variable done_cv_;
-    std::uint64_t epoch_ = 0;
-    int finished_ = 0;
+    mutable std::mutex pool_mutex_;
+    mutable std::condition_variable work_cv_;
+    mutable std::condition_variable done_cv_;
+    mutable std::uint64_t epoch_ = 0;
+    mutable int finished_ = 0;
     bool stop_ = false;
-    std::exception_ptr worker_error_;
+    mutable std::exception_ptr worker_error_;
     std::atomic<int> fail_tickets_{0};
     std::atomic<int> delay_us_{0};
     enum class PoolJob : unsigned char
     {
         Chance = 0,
         Slots = 1,
+        Response = 2,
     };
     enum class SlotPass : unsigned char
     {
@@ -1208,7 +1212,7 @@ struct StreetBatchSolver::Engine
         PcfrCommit = 5,
         PcfrZeroPrediction = 6,
     };
-    PoolJob pool_job_ = PoolJob::Chance;
+    mutable PoolJob pool_job_ = PoolJob::Chance;
     SlotPass slot_pass_ = SlotPass::Freeze;
     int slot_floor_player_ = -1;
     double slot_positive_discount_ = 1.0;
@@ -2388,8 +2392,111 @@ struct StreetBatchSolver::Engine
     // One public-tree pass. responding < 0 plays the sigma strategy.
     // A best-responding player picks, per hand, the action with the higher
     // utility and keeps the lowest index on a tie. The other player mixes.
+    void parallel_response_chance(
+        WorkerContext& ctx,
+        const Node& node,
+        int turn,
+        int river,
+        int depth,
+        int responding,
+        const double* pi0,
+        const double* pi1) const
+    {
+        // Same first-future-card split as train; BR writes disjoint response slots
+        // per card. Reduce child EV in card order for float-policy parity.
+        Scratch& here = ctx.scratch[static_cast<std::size_t>(depth)];
+        std::fill(here.ev0.begin(), here.ev0.end(), 0.0);
+        std::fill(here.ev1.begin(), here.ev1.end(), 0.0);
+        int denom = 52 - static_cast<int>(config.board.size()) - 4;
+        std::uint64_t dead = board_mask;
+        if (turn >= 0)
+        {
+            --denom;
+            dead |= std::uint64_t{1} << turn;
+        }
+        if (river >= 0)
+        {
+            --denom;
+            dead |= std::uint64_t{1} << river;
+        }
+        const double probability = 1.0 / static_cast<double>(denom);
+        bool active[52] = {};
+        active_count_ = 0;
+        for (int card = 0; card < 52; ++card)
+        {
+            if (((dead >> card) & 1u) != 0)
+            {
+                continue;
+            }
+            int next_turn = turn;
+            int next_river = river;
+            if (node.deal_which == 1)
+            {
+                next_turn = card;
+            }
+            else
+            {
+                next_river = card;
+            }
+            if (!card_reaches_pair(&ctx, next_turn, next_river, pi0, pi1))
+            {
+                continue;
+            }
+            active[card] = true;
+            active_cards_[active_count_++] = card;
+        }
+        const int workers = config.threads;
+        const int base = active_count_ / workers;
+        const int remainder = active_count_ % workers;
+        int cursor = 0;
+        for (int worker = 0; worker < workers; ++worker)
+        {
+            const int count = base + (worker < remainder ? 1 : 0);
+            chunk_begin_[worker] = cursor;
+            chunk_end_[worker] = cursor + count;
+            cursor += count;
+        }
+        task_node_ = node.child[0];
+        task_turn_ = turn;
+        task_river_ = river;
+        task_depth_ = depth + 1;
+        task_responding_ = responding;
+        task_pi0_ = pi0;
+        task_pi1_ = pi1;
+        task_deal_ = node.deal_which;
+        // Const NashConv/BR reuses the train worker pool (mutable task fields).
+        const_cast<Engine*>(this)->dispatch_workers(PoolJob::Response);
+        for (int card = 0; card < 52; ++card)
+        {
+            if (!active[card])
+            {
+                continue;
+            }
+            const double* child_ev0 = result0_.data()
+                + static_cast<std::size_t>(card) * static_cast<std::size_t>(n0);
+            const double* child_ev1 = result1_.data()
+                + static_cast<std::size_t>(card) * static_cast<std::size_t>(n1);
+            for (int hand = 0; hand < n0; ++hand)
+            {
+                here.ev0[static_cast<std::size_t>(hand)] +=
+                    probability * child_ev0[hand];
+            }
+            for (int hand = 0; hand < n1; ++hand)
+            {
+                here.ev1[static_cast<std::size_t>(hand)] +=
+                    probability * child_ev1[hand];
+            }
+        }
+    }
+
     void response_walk(
-        WorkerContext& ctx, int node_index, int turn, int river, int depth, int responding) const
+        WorkerContext& ctx,
+        int node_index,
+        int turn,
+        int river,
+        int depth,
+        int responding,
+        bool serial_chance) const
     {
         if (depth + 1 >= static_cast<int>(ctx.scratch.size()))
         {
@@ -2406,6 +2513,11 @@ struct StreetBatchSolver::Engine
         }
         if (node.chance)
         {
+            if (!serial_chance && config.threads > 1 && worker_count_ > 0)
+            {
+                parallel_response_chance(ctx, node, turn, river, depth, responding, pi0, pi1);
+                return;
+            }
             std::fill(here.ev0.begin(), here.ev0.end(), 0.0);
             std::fill(here.ev1.begin(), here.ev1.end(), 0.0);
             int denom = 52 - static_cast<int>(config.board.size()) - 4;
@@ -2442,17 +2554,19 @@ struct StreetBatchSolver::Engine
                 {
                     continue;
                 }
+                ensure_board_support(ctx, next_turn, next_river);
                 for (int h0 = 0; h0 < n0; ++h0)
                 {
-                    child.pi0[static_cast<std::size_t>(h0)] = hand_supported(0, h0, next_turn, next_river)
-                        ? pi0[h0] : 0.0;
+                    child.pi0[static_cast<std::size_t>(h0)] =
+                        ctx.live0[static_cast<std::size_t>(h0)] ? pi0[h0] : 0.0;
                 }
                 for (int h1 = 0; h1 < n1; ++h1)
                 {
-                    child.pi1[static_cast<std::size_t>(h1)] = hand_supported(1, h1, next_turn, next_river)
-                        ? pi1[h1] : 0.0;
+                    child.pi1[static_cast<std::size_t>(h1)] =
+                        ctx.live1[static_cast<std::size_t>(h1)] ? pi1[h1] : 0.0;
                 }
-                response_walk(ctx, node.child[0], next_turn, next_river, depth + 1, responding);
+                response_walk(
+                    ctx, node.child[0], next_turn, next_river, depth + 1, responding, true);
                 for (int h0 = 0; h0 < n0; ++h0)
                 {
                     here.ev0[static_cast<std::size_t>(h0)] +=
@@ -2467,6 +2581,9 @@ struct StreetBatchSolver::Engine
             return;
         }
 
+        ensure_board_support(ctx, turn, river);
+        const double* actor_pi = node.player == 0 ? pi0 : pi1;
+        fill_actor_slot_bases(ctx, here, node, turn, river, actor_pi);
         Scratch& child = ctx.scratch[static_cast<std::size_t>(depth + 1)];
         const bool choosing = node.player == responding;
         for (int action = 0; action < node.n_actions; ++action)
@@ -2475,7 +2592,8 @@ struct StreetBatchSolver::Engine
             {
                 for (int h0 = 0; h0 < n0; ++h0)
                 {
-                    if (!hand_supported(0, h0, turn, river))
+                    const int base = here.slot_base[static_cast<std::size_t>(h0)];
+                    if (base < 0)
                     {
                         child.pi0[static_cast<std::size_t>(h0)] = 0.0;
                         continue;
@@ -2486,10 +2604,8 @@ struct StreetBatchSolver::Engine
                     }
                     else
                     {
-                        const int index = slot_index(node, h0, turn, river, pi0[h0]);
-                        const double played = sigma[static_cast<std::size_t>(
-                            slots[static_cast<std::size_t>(index)].base + action)];
-                        child.pi0[static_cast<std::size_t>(h0)] = pi0[h0] * played;
+                        child.pi0[static_cast<std::size_t>(h0)] =
+                            pi0[h0] * sigma[static_cast<std::size_t>(base + action)];
                     }
                 }
                 std::copy(pi1, pi1 + n1, child.pi1.begin());
@@ -2499,7 +2615,8 @@ struct StreetBatchSolver::Engine
                 std::copy(pi0, pi0 + n0, child.pi0.begin());
                 for (int h1 = 0; h1 < n1; ++h1)
                 {
-                    if (!hand_supported(1, h1, turn, river))
+                    const int base = here.slot_base[static_cast<std::size_t>(h1)];
+                    if (base < 0)
                     {
                         child.pi1[static_cast<std::size_t>(h1)] = 0.0;
                         continue;
@@ -2510,14 +2627,13 @@ struct StreetBatchSolver::Engine
                     }
                     else
                     {
-                        const int index = slot_index(node, h1, turn, river, pi1[h1]);
-                        const double played = sigma[static_cast<std::size_t>(
-                            slots[static_cast<std::size_t>(index)].base + action)];
-                        child.pi1[static_cast<std::size_t>(h1)] = pi1[h1] * played;
+                        child.pi1[static_cast<std::size_t>(h1)] =
+                            pi1[h1] * sigma[static_cast<std::size_t>(base + action)];
                     }
                 }
             }
-            response_walk(ctx, node.child[action], turn, river, depth + 1, responding);
+            response_walk(
+                ctx, node.child[action], turn, river, depth + 1, responding, serial_chance);
             std::copy(
                 child.ev0.begin(), child.ev0.end(),
                 here.aev0.begin() + static_cast<std::size_t>(action * n0));
@@ -2526,9 +2642,11 @@ struct StreetBatchSolver::Engine
                 here.aev1.begin() + static_cast<std::size_t>(action * n1));
         }
 
+        // Child chance nodes overwrite the support masks; restore this board.
+        ensure_board_support(ctx, turn, river);
         for (int h0 = 0; h0 < n0; ++h0)
         {
-            if (!hand_supported(0, h0, turn, river))
+            if (!ctx.live0[static_cast<std::size_t>(h0)])
             {
                 here.ev0[static_cast<std::size_t>(h0)] = 0.0;
                 continue;
@@ -2551,13 +2669,13 @@ struct StreetBatchSolver::Engine
             }
             else if (node.player == 0)
             {
-                const int index = slot_index(node, h0, turn, river, pi0[h0]);
+                const int base = here.slot_base[static_cast<std::size_t>(h0)];
+                const TableScalar* row = sigma.data() + base;
                 double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
-                    const double played = sigma[static_cast<std::size_t>(
-                        slots[static_cast<std::size_t>(index)].base + action)];
-                    mix += played * here.aev0[static_cast<std::size_t>(action * n0 + h0)];
+                    mix += static_cast<double>(row[action])
+                        * here.aev0[static_cast<std::size_t>(action * n0 + h0)];
                 }
                 here.ev0[static_cast<std::size_t>(h0)] = mix;
             }
@@ -2577,7 +2695,7 @@ struct StreetBatchSolver::Engine
         }
         for (int h1 = 0; h1 < n1; ++h1)
         {
-            if (!hand_supported(1, h1, turn, river))
+            if (!ctx.live1[static_cast<std::size_t>(h1)])
             {
                 here.ev1[static_cast<std::size_t>(h1)] = 0.0;
                 continue;
@@ -2600,13 +2718,13 @@ struct StreetBatchSolver::Engine
             }
             else if (node.player == 1)
             {
-                const int index = slot_index(node, h1, turn, river, pi1[h1]);
+                const int base = here.slot_base[static_cast<std::size_t>(h1)];
+                const TableScalar* row = sigma.data() + base;
                 double mix = 0.0;
                 for (int action = 0; action < node.n_actions; ++action)
                 {
-                    const double played = sigma[static_cast<std::size_t>(
-                        slots[static_cast<std::size_t>(index)].base + action)];
-                    mix += played * here.aev1[static_cast<std::size_t>(action * n1 + h1)];
+                    mix += static_cast<double>(row[action])
+                        * here.aev1[static_cast<std::size_t>(action * n1 + h1)];
                 }
                 here.ev1[static_cast<std::size_t>(h1)] = mix;
             }
@@ -2635,7 +2753,7 @@ struct StreetBatchSolver::Engine
         response.assign(slots.size(), -1);
         std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
         std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
-        response_walk(workspace, 0, -1, -1, 0, responding);
+        response_walk(workspace, 0, -1, -1, 0, responding, false);
         const std::pmr::vector<double>& values = responding == 1
             ? workspace.scratch[0].ev1 : workspace.scratch[0].ev0;
         double total = 0.0;
@@ -4011,6 +4129,51 @@ struct StreetBatchSolver::Engine
         }
     }
 
+    void run_response_chunk(int worker_index, int begin, int end)
+    {
+        if (worker_index > 0 && fail_tickets_.exchange(0) > 0)
+        {
+            throw std::runtime_error("injected worker failure");
+        }
+        if (begin == end)
+        {
+            return;
+        }
+        WorkerContext& ctx = context_for(worker_index);
+        Scratch& child = ctx.scratch[static_cast<std::size_t>(task_depth_)];
+        for (int index = begin; index < end; ++index)
+        {
+            const int card = active_cards_[index];
+            int next_turn = task_turn_;
+            int next_river = task_river_;
+            if (task_deal_ == 1)
+            {
+                next_turn = card;
+            }
+            else
+            {
+                next_river = card;
+            }
+            ensure_board_support(ctx, next_turn, next_river);
+            for (int hand = 0; hand < n0; ++hand)
+            {
+                child.pi0[static_cast<std::size_t>(hand)] =
+                    ctx.live0[static_cast<std::size_t>(hand)] ? task_pi0_[hand] : 0.0;
+            }
+            for (int hand = 0; hand < n1; ++hand)
+            {
+                child.pi1[static_cast<std::size_t>(hand)] =
+                    ctx.live1[static_cast<std::size_t>(hand)] ? task_pi1_[hand] : 0.0;
+            }
+            response_walk(
+                ctx, task_node_, next_turn, next_river, task_depth_, task_responding_, true);
+            const std::size_t ev0_at = static_cast<std::size_t>(card) * static_cast<std::size_t>(n0);
+            const std::size_t ev1_at = static_cast<std::size_t>(card) * static_cast<std::size_t>(n1);
+            std::copy(child.ev0.begin(), child.ev0.end(), result0_.begin() + static_cast<std::ptrdiff_t>(ev0_at));
+            std::copy(child.ev1.begin(), child.ev1.end(), result1_.begin() + static_cast<std::ptrdiff_t>(ev1_at));
+        }
+    }
+
     void worker_main(int worker_index)
     {
         std::uint64_t seen = 0;
@@ -4037,6 +4200,10 @@ struct StreetBatchSolver::Engine
                 if (job == PoolJob::Slots)
                 {
                     run_slot_range(begin, end);
+                }
+                else if (job == PoolJob::Response)
+                {
+                    run_response_chunk(worker_index, begin, end);
                 }
                 else
                 {
@@ -4075,6 +4242,10 @@ struct StreetBatchSolver::Engine
             if (job == PoolJob::Slots)
             {
                 run_slot_range(chunk_begin_[0], chunk_end_[0]);
+            }
+            else if (job == PoolJob::Response)
+            {
+                run_response_chunk(0, chunk_begin_[0], chunk_end_[0]);
             }
             else
             {
