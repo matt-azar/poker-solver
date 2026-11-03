@@ -1,6 +1,6 @@
 /** Pure draft/job conversion helpers for the Study store (no module mutables). */
 import { resolveRaiseSizeList, resolveSizeList } from "../domain/betSizes";
-import { boardCards } from "../domain/range";
+import { boardCards, parseAbsoluteNumberList } from "../domain/range";
 import {
   type SolveJobRequest,
   type SolvePhase,

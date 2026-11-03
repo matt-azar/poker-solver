@@ -9,13 +9,11 @@ import {
 } from "../domain/cards";
 import {
   applyPaintAtPreservingExact,
-  boardCards,
   blankGrid,
   createExactRangeHistory,
   exactPairFromTexts,
   exactPairsEqual,
   parseRangeText,
-  parseAbsoluteNumberList,
   textsFromExactPair,
   weightsFromExact,
   weightsFromExactPair,
@@ -61,7 +59,6 @@ import {
   type FrequencyMode,
   type MatrixMode,
   type NodePayload,
-  type SolveJobRequest,
   type SolvePhase,
   type SpotDraft,
   type StatusPayload,
