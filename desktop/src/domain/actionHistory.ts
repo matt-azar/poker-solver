@@ -5,10 +5,12 @@ import type { NodeActionChild, NodeCardChild, NodePayload } from "./types";
 /**
  * Betting-path navigation helpers.
  *
- * `parent_id` is now exposed on inspection, but street-grouped ownership and
- * prior-action alternatives still rely on a validated client `pathTrail`
- * recorded while navigating (siblings + actor at each step). Without a trail,
- * line crumbs remain labels-only (Root / parent_id jumps still work).
+ * Engine inspection exposes `parent_id` and chance `cards[]`. Street-grouped
+ * ownership and prior-action alternatives still rely on a validated client
+ * `pathTrail` recorded while navigating (siblings + actor at each step).
+ * Board-card swaps also prefer the trail to find the deal-chance ancestor,
+ * then walk `parent_id` when the trail is incomplete. Without a trail, line
+ * crumbs remain labels-only (Root / parent_id jumps still work).
  */
 
 export type PathStreet = "flop" | "turn" | "river";

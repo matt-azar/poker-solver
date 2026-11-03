@@ -33,6 +33,7 @@ int main()
     run_street_inspect_tests();
     run_session_tests();
     run_explorer_http_tests();
+    run_explorer_workflow_tests();
     run_street_chance_tests();
     run_action_value_tests();
     run_value_worker_tests();

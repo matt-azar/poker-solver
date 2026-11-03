@@ -4,10 +4,11 @@
 Python standard library only. Processes are started with argument arrays.
 Cases run one at a time. The runner does not interpret a shell command string.
 
-NashConv is player0_best_response_utility + player1_best_response_utility.
-The quality target is NashConv/pot at most 0.001. When the solver prints
-nash_gap and pot, this runner divides them. That quotient is the runner's
-derivation, including when the street CLI also prints nash_gap_fraction_of_pot.
+NashConv is the sum of unilateral BR gains (under zero-sum chips equal to
+player0_best_response_utility + player1_best_response_utility).
+The quality target is NashConv/pot at most 0.001. Prefer the solver's printed
+nash_gap_fraction_of_pot when present; otherwise divide printed nash_gap by
+printed pot (chip units).
 """
 
 from __future__ import annotations
@@ -337,10 +338,11 @@ def as_float(value: object) -> float | None:
 
 
 def quality_from_metrics(metrics: dict) -> dict:
-    """Derive NashConv/pot from printed nash_gap and pot.
+    """Derive NashConv/pot for the quality gate.
 
-    The division is this runner's. Street output may also contain
-    nash_gap_fraction_of_pot; that printed value is stored separately.
+    Prefer the solver's printed nash_gap_fraction_of_pot (chip-normalized).
+    Otherwise divide nash_gap by pot. Pot must be in chips; tenths would
+    understate the fraction by 10x.
     """
     nash_gap = as_float(metrics.get("nash_gap"))
     pot = as_float(metrics.get("pot"))
@@ -349,19 +351,31 @@ def quality_from_metrics(metrics: dict) -> dict:
     summed = None
     if player0 is not None and player1 is not None:
         summed = player0 + player1
-    nashconv = summed if summed is not None else nash_gap
-    derived = None
-    if nash_gap is not None and pot is not None and pot != 0:
-        derived = nash_gap / pot
+    # Prefer printed nash_gap for the reported NashConv; BR0+BR1 equals gains
+    # only under zero-sum chips.
+    nashconv = nash_gap if nash_gap is not None else summed
     printed = as_float(metrics.get("nash_gap_fraction_of_pot"))
+    derived = None
+    source = None
+    if printed is not None:
+        derived = printed
+        source = "printed_nash_gap_fraction_of_pot"
+    elif nash_gap is not None and pot is not None and pot != 0:
+        derived = nash_gap / pot
+        source = "runner_derived_from_nash_gap_and_pot"
     measured = derived is not None
-    reached = bool(measured and nash_gap is not None and nash_gap <= TARGET * pot)
+    if printed is not None:
+        reached = bool(measured and printed <= TARGET)
+    else:
+        reached = bool(
+            measured and nash_gap is not None and pot is not None and nash_gap <= TARGET * pot
+        )
     return {
         "nashconv": nashconv,
         "nashconv_from_best_responses": summed,
         "nashconv_printed_nash_gap": nash_gap,
         "nashconv_over_pot": derived,
-        "nashconv_over_pot_source": "runner_derived_from_nash_gap_and_pot" if measured else None,
+        "nashconv_over_pot_source": source,
         "printed_nash_gap_fraction_of_pot": printed,
         "quality_target": TARGET,
         "quality_measured": measured,
