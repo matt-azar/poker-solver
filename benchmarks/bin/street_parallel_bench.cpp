@@ -303,12 +303,13 @@ std::vector<Snapshot> converge_case(
             solver.continue_frozen_iterations(1, poker::solver::Algorithm::CfrPlus);
             ++done;
         }
-        const double ev = solver.expected_utility();
-        const double br0 = solver.p1_best_response_utility();
-        const double br1 = solver.p2_best_response_utility();
-        const double gain0 = br0 - ev;
-        const double gain1 = br1 + ev;
-        const double nash = br0 + br1;
+        const poker::solver::EvaluationResult evaluation = solver.evaluate();
+        const double ev = evaluation.u0;
+        const double br0 = evaluation.br0;
+        const double br1 = evaluation.br1;
+        const double gain0 = evaluation.gain0;
+        const double gain1 = evaluation.gain1;
+        const double nash = evaluation.nash_gap;
         const double nash_per_pot = nash / poker::tenths_to_chips(config.pot);
         const poker::solver::StreetMemoryReport report = solver.memory_report();
         std::cout << "converge " << name << " threads " << threads

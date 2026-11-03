@@ -2022,26 +2022,58 @@ struct StreetBatchSolver::Engine
         }
     }
 
+    static double sum_scratch(const std::pmr::vector<double>& values)
+    {
+        double total = 0.0;
+        for (double value : values)
+        {
+            total += value;
+        }
+        return total;
+    }
+
+    void prepare_response_root() const
+    {
+        response.assign(slots.size(), -1);
+        std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
+        std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
+    }
+
     double utility_of_response(int responding) const
     {
         check_usable();
         ensure_ranks();
         const auto started = std::chrono::steady_clock::now();
         ensure_average();
-        response.assign(slots.size(), -1);
-        std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
-        std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
+        prepare_response_root();
         response_walk(workspace, 0, -1, -1, 0, responding, false);
         const std::pmr::vector<double>& values = responding == 1
             ? workspace.scratch[0].ev1 : workspace.scratch[0].ev0;
-        double total = 0.0;
-        for (double value : values)
-        {
-            total += value;
-        }
+        const double total = sum_scratch(values);
         evaluation_seconds_ += std::chrono::duration<double>(
             std::chrono::steady_clock::now() - started).count();
         return total;
+    }
+
+    EvaluationResult evaluate_profile() const
+    {
+        check_usable();
+        ensure_ranks();
+        const auto started = std::chrono::steady_clock::now();
+        ensure_average();
+        prepare_response_root();
+        response_walk(workspace, 0, -1, -1, 0, -1, false);
+        const double u0 = sum_scratch(workspace.scratch[0].ev0);
+        const double u1 = sum_scratch(workspace.scratch[0].ev1);
+        prepare_response_root();
+        response_walk(workspace, 0, -1, -1, 0, 0, false);
+        const double br0 = sum_scratch(workspace.scratch[0].ev0);
+        prepare_response_root();
+        response_walk(workspace, 0, -1, -1, 0, 1, false);
+        const double br1 = sum_scratch(workspace.scratch[0].ev1);
+        evaluation_seconds_ += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
+        return make_evaluation(u0, u1, br0, br1);
     }
 
     void build_reach_table()
@@ -6364,10 +6396,7 @@ SolveStats StreetBatchSolver::solve_frozen(
             && completed % config.eval_every == 0;
         if (check_gap)
         {
-            stats.p1_expected_utility = expected_utility();
-            stats.p1_best_response_utility = p1_best_response_utility();
-            stats.p2_best_response_utility = p2_best_response_utility();
-            stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            apply_evaluation(stats, evaluate());
             stats.nash_gap_history.push_back(stats.nash_gap);
             stats.nash_gap_iterations.push_back(completed);
             fresh = true;
@@ -6393,10 +6422,7 @@ SolveStats StreetBatchSolver::solve_frozen(
     }
     if (!fresh)
     {
-        stats.p1_expected_utility = expected_utility();
-        stats.p1_best_response_utility = p1_best_response_utility();
-        stats.p2_best_response_utility = p2_best_response_utility();
-        stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+        apply_evaluation(stats, evaluate());
         if (config.nash_gap_threshold >= 0.0)
         {
             stats.nash_gap_history.push_back(stats.nash_gap);
@@ -6438,10 +6464,7 @@ SolveStats StreetBatchSolver::solve(
             && completed % config.eval_every == 0;
         if (check_gap)
         {
-            stats.p1_expected_utility = expected_utility();
-            stats.p1_best_response_utility = p1_best_response_utility();
-            stats.p2_best_response_utility = p2_best_response_utility();
-            stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            apply_evaluation(stats, evaluate());
             stats.nash_gap_history.push_back(stats.nash_gap);
             stats.nash_gap_iterations.push_back(completed);
             fresh = true;
@@ -6467,10 +6490,7 @@ SolveStats StreetBatchSolver::solve(
     }
     if (!fresh)
     {
-        stats.p1_expected_utility = expected_utility();
-        stats.p1_best_response_utility = p1_best_response_utility();
-        stats.p2_best_response_utility = p2_best_response_utility();
-        stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+        apply_evaluation(stats, evaluate());
         if (config.nash_gap_threshold >= 0.0)
         {
             stats.nash_gap_history.push_back(stats.nash_gap);
@@ -6501,9 +6521,14 @@ double StreetBatchSolver::p2_best_response_utility() const
     return engine_->utility_of_response(1);
 }
 
+EvaluationResult StreetBatchSolver::evaluate() const
+{
+    return engine_->evaluate_profile();
+}
+
 double StreetBatchSolver::nash_gap() const
 {
-    return p1_best_response_utility() + p2_best_response_utility();
+    return evaluate().nash_gap;
 }
 
 std::uint64_t StreetBatchSolver::infoset_count() const

@@ -40,12 +40,12 @@ void solve_job(std::uint64_t job_id, Job job)
     {
         return job.time_limit >= 0.0 && seconds_now() >= job.time_limit;
     };
-    const auto remember = [&](double utility, double response0, double response1)
+    const auto remember = [&](const poker::solver::EvaluationResult& evaluation)
     {
-        value = utility;
-        p1 = response0;
-        p2 = response1;
-        gap = response0 + response1;
+        value = evaluation.u0;
+        p1 = evaluation.br0;
+        p2 = evaluation.br1;
+        gap = evaluation.nash_gap;
         evaluated = true;
         sample_iterations.push_back(done);
         sample_values.push_back(value);
@@ -194,7 +194,7 @@ void solve_job(std::uint64_t job_id, Job job)
                 street->continue_iterations(step, job.algorithm, nullptr);
             }
             done += step;
-            remember(street->expected_utility(), street->p1_best_response_utility(), street->p2_best_response_utility());
+            remember(street->evaluate());
             street_memory = street->memory_report();
             if (g_session.stop_requested(job_id))
             {
@@ -429,17 +429,20 @@ poker::explorer::TrainingSnapshot completed_snapshot(
     {
         if (held.street)
         {
-            snapshot.value = held.street->expected_utility();
-            snapshot.p1_best_response = held.street->p1_best_response_utility();
-            snapshot.p2_best_response = held.street->p2_best_response_utility();
+            const poker::solver::EvaluationResult evaluation = held.street->evaluate();
+            snapshot.value = evaluation.u0;
+            snapshot.p1_best_response = evaluation.br0;
+            snapshot.p2_best_response = evaluation.br1;
+            snapshot.nash_gap = evaluation.nash_gap;
         }
         else if (held.river)
         {
-            snapshot.value = held.river->expected_utility();
-            snapshot.p1_best_response = held.river->p1_best_response_utility();
-            snapshot.p2_best_response = held.river->p2_best_response_utility();
+            const poker::solver::EvaluationResult evaluation = held.river->evaluate();
+            snapshot.value = evaluation.u0;
+            snapshot.p1_best_response = evaluation.br0;
+            snapshot.p2_best_response = evaluation.br1;
+            snapshot.nash_gap = evaluation.nash_gap;
         }
-        snapshot.nash_gap = snapshot.p1_best_response + snapshot.p2_best_response;
     }
     catch (const std::exception&)
     {
@@ -592,18 +595,21 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
                 {
                     held->street->continue_iterations(step, held->job.algorithm, locks);
                 }
-                value = held->street->expected_utility();
-                p1 = held->street->p1_best_response_utility();
-                p2 = held->street->p2_best_response_utility();
+                const poker::solver::EvaluationResult evaluation = held->street->evaluate();
+                value = evaluation.u0;
+                p1 = evaluation.br0;
+                p2 = evaluation.br1;
+                gap = evaluation.nash_gap;
             }
             else
             {
                 held->river->continue_iterations(step, held->job.algorithm);
-                value = held->river->expected_utility();
-                p1 = held->river->p1_best_response_utility();
-                p2 = held->river->p2_best_response_utility();
+                const poker::solver::EvaluationResult evaluation = held->river->evaluate();
+                value = evaluation.u0;
+                p1 = evaluation.br0;
+                p2 = evaluation.br1;
+                gap = evaluation.nash_gap;
             }
-            gap = p1 + p2;
             done += step;
             held->sample_iterations.push_back(done);
             held->sample_values.push_back(value);
@@ -832,10 +838,11 @@ void resolve_locked_job(
                 held->street->continue_iterations(step, held->job.algorithm, locks);
             }
             done += step;
-            value = held->street->expected_utility();
-            p1 = held->street->p1_best_response_utility();
-            p2 = held->street->p2_best_response_utility();
-            gap = p1 + p2;
+            const poker::solver::EvaluationResult evaluation = held->street->evaluate();
+            value = evaluation.u0;
+            p1 = evaluation.br0;
+            p2 = evaluation.br1;
+            gap = evaluation.nash_gap;
             held->sample_iterations.push_back(done);
             held->sample_values.push_back(value);
             held->sample_gaps.push_back(gap);

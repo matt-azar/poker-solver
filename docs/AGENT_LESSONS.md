@@ -176,7 +176,7 @@ Do not change `LICENSE`, SPDX, or license metadata. `UNLICENSED` ≠ Unlicense. 
 
 ### NashConv vs Pio “exploitability”
 
-Here the printed Nash gap is **NashConv** = sum of both players’ unilateral BR gains (`u0(BR0) + u1(BR1)`). Pio often reports the **average** of those gains.
+Here the printed Nash gap is **NashConv** = sum of both players’ unilateral BR gains (`(u0(BR0)-u0) + (u1(BR1)-u1)`). Under zero-sum chips that equals `u0(BR0) + u1(BR1)`. Pio often reports the **average** of those gains.
 
 **Do:** Convert before comparing to Pio (often divide by 2). Accuracy stops use **NashConv / pot** (study bar often ≤ 0.001 where declared).  
 **Pointers:** `docs/ROADMAP.md` §6, `docs/MATHEMATICS.md`, `docs/HUNL.md`.

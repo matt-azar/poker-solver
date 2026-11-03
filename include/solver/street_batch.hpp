@@ -357,6 +357,8 @@ public:
     double expected_utility() const;
     double p1_best_response_utility() const;
     double p2_best_response_utility() const;
+    // On-profile utilities, both best responses, deviation gains, and NashConv.
+    EvaluationResult evaluate() const;
     double nash_gap() const;
 
     std::uint64_t infoset_count() const;
