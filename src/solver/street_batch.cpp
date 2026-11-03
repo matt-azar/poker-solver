@@ -2080,12 +2080,11 @@ struct StreetBatchSolver::Engine
         }
 
         ensure_board_support(ctx, turn, river);
-        const double* actor_pi = node.player == 0 ? pi0 : pi1;
-        fill_actor_slot_bases(ctx, here, node, turn, river, actor_pi);
         Scratch& child = ctx.scratch[static_cast<std::size_t>(depth + 1)];
         if (node.n_actions <= 1)
         {
-            // Implicit check/call — reach unchanged for supported hands.
+            // Implicit check/call — no Slot / slot_of; reach unchanged for
+            // supported hands. Skip fill_actor_slot_bases (empty slot_of).
             if (node.player == 0)
             {
                 for (int h0 = 0; h0 < n0; ++h0)
@@ -2104,11 +2103,14 @@ struct StreetBatchSolver::Engine
                         ? pi1[h1] : 0.0;
                 }
             }
-            response_walk(ctx, node.child[0], turn, river, depth + 1, responding);
+            response_walk(
+                ctx, node.child[0], turn, river, depth + 1, responding, serial_chance);
             std::copy(child.ev0.begin(), child.ev0.end(), here.ev0.begin());
             std::copy(child.ev1.begin(), child.ev1.end(), here.ev1.begin());
             return;
         }
+        const double* actor_pi = node.player == 0 ? pi0 : pi1;
+        fill_actor_slot_bases(ctx, here, node, turn, river, actor_pi);
         const bool choosing = node.player == responding;
         for (int action = 0; action < node.n_actions; ++action)
         {
