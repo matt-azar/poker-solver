@@ -18,7 +18,7 @@ namespace poker::explorer
 // 1. POKER_SOLVER_TEMPLATES when set to a non-empty path
 // 2. configs/templates relative to the current working directory
 // 3. configs/templates next to the executable, then one or two parents up
-//    (same layout search as the explorer ui/ root)
+//    (same layout search as the explorer static UI root)
 // The first existing directory wins. An empty path means none was found.
 
 struct TemplateInfo

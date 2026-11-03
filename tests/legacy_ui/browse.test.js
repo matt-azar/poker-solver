@@ -4,11 +4,11 @@ const vm = require("node:vm");
 
 const context = {console};
 vm.createContext(context);
-vm.runInContext(fs.readFileSync("ui/browse.js", "utf8"), context);
+vm.runInContext(fs.readFileSync("legacy/ui/browse.js", "utf8"), context);
 
-const appSource = fs.readFileSync("ui/app.js", "utf8");
+const appSource = fs.readFileSync("legacy/ui/app.js", "utf8");
 const historyBlock = appSource.match(/\/\* range-history \*\/([\s\S]*?)\/\* end-range-history \*\//);
-assert.ok(historyBlock, "range-history helpers must exist in ui/app.js");
+assert.ok(historyBlock, "range-history helpers must exist in legacy/ui/app.js");
 vm.runInContext(historyBlock[1], context);
 
 const {
@@ -227,7 +227,7 @@ function paintWithHistory(history, store, player, row, column, weight) {
 }
 
 {
-  const markup = fs.readFileSync("ui/index.html", "utf8");
+  const markup = fs.readFileSync("legacy/ui/index.html", "utf8");
   assert.ok(markup.includes('id="undo-range"'));
   assert.ok(markup.includes('id="redo-range"'));
 }
@@ -297,7 +297,7 @@ assert.strictEqual(solutionNeedsReload(finished, "s2", false), true);
 assert.strictEqual(solutionNeedsReload({running: true, solution_id: "s1"}, null, true), false);
 assert.strictEqual(solutionNeedsReload({running: false, solution_id: null}, null, true), false);
 
-const appSource = fs.readFileSync("ui/app.js", "utf8");
+const appSource = fs.readFileSync("legacy/ui/app.js", "utf8");
 const themeHelperBlock = appSource.match(/\/\* theme-helpers \*\/([\s\S]*?)\/\* end-theme-helpers \*\//);
 assert.ok(themeHelperBlock, "theme helpers marked in app.js");
 vm.runInContext(themeHelperBlock[1], context);
@@ -325,9 +325,9 @@ assert.strictEqual(readStoredTheme(memory), "dark");
 writeStoredTheme(memory, "light");
 assert.strictEqual(memory.getItem("explorer-theme"), "light");
 assert.ok(appSource.includes('$("theme-toggle")'), "theme toggle wired in app.js");
-assert.ok(fs.readFileSync("ui/app.css", "utf8").includes("body.theme-light"), "light theme tokens in app.css");
-assert.ok(fs.readFileSync("ui/app.css", "utf8").includes("body.theme-dark"), "dark theme tokens in app.css");
-assert.ok(fs.readFileSync("ui/index.html", "utf8").includes('class="theme-light"'), "light default on body");
+assert.ok(fs.readFileSync("legacy/ui/app.css", "utf8").includes("body.theme-light"), "light theme tokens in app.css");
+assert.ok(fs.readFileSync("legacy/ui/app.css", "utf8").includes("body.theme-dark"), "dark theme tokens in app.css");
+assert.ok(fs.readFileSync("legacy/ui/index.html", "utf8").includes('class="theme-light"'), "light default on body");
 
 const shortcutHelperBlock = appSource.match(/\/\* shortcut-helpers \*\/([\s\S]*?)\/\* end-shortcut-helpers \*\//);
 assert.ok(shortcutHelperBlock, "shortcut helpers marked in app.js");
@@ -347,7 +347,7 @@ assert.strictEqual(shortcutAction("b"), "board");
 assert.strictEqual(shortcutAction("?"), "help");
 assert.strictEqual(shortcutAction("z"), null);
 assert.ok(appSource.includes('document.addEventListener("keydown"'), "keydown wired in app.js");
-assert.ok(fs.readFileSync("ui/index.html", "utf8").includes('id="shortcuts-help"'), "shortcuts help in index.html");
+assert.ok(fs.readFileSync("legacy/ui/index.html", "utf8").includes('id="shortcuts-help"'), "shortcuts help in index.html");
 
 console.log("browse tests passed");
 }

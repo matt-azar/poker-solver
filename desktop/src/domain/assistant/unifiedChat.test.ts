@@ -19,7 +19,7 @@ import {
   emptyStudySetupPreferences,
 } from "../setup";
 import type { SpotDraft } from "../types";
-import { commitAssistantSetup } from "../../features/help/commitAssistantSetup";
+import { commitAssistantSetup } from "../../features/assistant/commitAssistantSetup";
 
 function emptyDraft(): SpotDraft {
   return {

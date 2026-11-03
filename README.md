@@ -110,13 +110,14 @@ Raise or lower the work ceiling with `--max-pair-runouts` or `POKER_EQUITY_MAX_P
 ## Layout
 
 ```text
-include/game/     Street/river trees; Kuhn/Leduc reference games
-include/solver/   CFR, CFR+, public-tree batch solvers, best response
-include/poker/    Hold'em cards, hand evaluator, 1,326-hand ranges
-src/              Implementations and CLIs
-desktop/          React Study UI + Tauri Windows shell
-ui/               Legacy explorer page (fallback)
+include/          Public C++ headers (game, solver, poker, explorer)
+src/              Engine libraries (poker/, solver/, game/, explorer/)
+src/cli/          Process entrypoints (street/river/explorer/equity/kuhn/leduc)
+desktop/          React Study UI + Tauri Windows shell (product UI)
+legacy/ui/        Legacy explorer static page (fallback + regression)
+benchmarks/       Study benchmark runner, cases, and street micro-benches
 tests/            In-repo harness + CTest
+configs/          Default configs, range libraries, templates
 docs/             Architecture, product, mathematics, roadmap
 ```
 

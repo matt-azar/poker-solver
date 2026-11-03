@@ -121,5 +121,5 @@ under active incentives** (same family of caveat as positive rake or ICM).
 ```
 
 Omit both (or send empty arrays) for the chip/ICM path. Desktop Study Build and
-legacy `ui/` expose matching text fields (`;`-separated lines with the same
+`legacy/ui/` exposes matching text fields (`;`-separated lines with the same
 spelling as street-config).

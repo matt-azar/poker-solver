@@ -119,7 +119,7 @@ Without a key the script exits 0 and reports `skipped`. Ordinary `npm test` / CI
 | Live eval runner | `desktop/scripts/run-assistant-live-eval.mjs` |
 | Credential lookup | `desktop/src/platform/credentials.ts` + Tauri `assistant_secret_*` |
 | Apply transaction + revision | `studyStore.applySetupDraft` |
-| UI | Floating `StudyAssistantWindow` (shell), Build `AssistantPanel.tsx`, `RangeCataloguePanel.tsx` |
+| UI | Floating `StudyAssistantWindow` (shell), `RangeCataloguePanel.tsx` |
 | Model context packs | `docs/ai-context/` (`unified.md`, `help.md`, `setup-assistant.md`) |
 | Unified chat router | `desktop/src/domain/assistant/unifiedChat.ts` |
 

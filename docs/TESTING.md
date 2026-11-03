@@ -20,7 +20,7 @@ Omit `--config Release` on a single-config generator. A plain `cmake --build bui
 JavaScript checks from the repository root:
 
 ```sh
-node tests/ui/browse.test.js
+node tests/legacy_ui/browse.test.js
 ```
 
 Explorer HTTP cases spawn a local `explorer` on an ephemeral port on Windows and Linux. [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) builds production targets, runs the C++ suite, and runs the JavaScript file on Windows and Linux. A second Linux job repeats the C++ suite under AddressSanitizer and UndefinedBehaviorSanitizer.
@@ -144,7 +144,7 @@ The HTTP test launches `explorer --port <ephemeral>` (or `explorer.exe` on Windo
 
 Chance weights on a weighted flop and a weighted turn match an independent pair-and-card enumeration and sum to 1 over the undealt cards. A hand that always holds a card gives that card weight 0. A joint reach of 1e-18 still defines the marginals and the card weights. Forcing OOP to keep only AdAc and IP to keep only AcKh leaves both of those reaches positive and the child joint at 0, with null card weights. Inspecting the root, an action child, and a chance node does not change the regret table or the strategy-sum table.
 
-`node tests/ui/browse.test.js` checks the group frequencies and the stale-response guard. One hand with Check 0.20, Bet 50 0.30, and Bet 100 0.50 reports total aggression 0.80. A slower JSON body that belongs to an older selection is not applied, including an error body. An older status generation is ignored. Two equally weighted suited broadway combos, one always taking action A and the other always taking action B, each with mixed EV 10, have group mixed EV 10. The same group's forced-action values are 5 and 5. A group whose marginals are zero has a null aggregate.
+`node tests/legacy_ui/browse.test.js` checks the group frequencies and the stale-response guard. One hand with Check 0.20, Bet 50 0.30, and Bet 100 0.50 reports total aggression 0.80. A slower JSON body that belongs to an older selection is not applied, including an error body. An older status generation is ignored. Two equally weighted suited broadway combos, one always taking action A and the other always taking action B, each with mixed EV 10, have group mixed EV 10. The same group's forced-action values are 5 and 5. A group whose marginals are zero has a null aggregate.
 
 The Windows suite after conditional action EV is 408,504 assertions and 0 failures. That count includes the publication tests, the action-value oracle, and the values HTTP cases. Publication builds the status string before it stores a terminal phase. A throw on the accepted path and on the cancelled path leaves the job running, and the following failure record publishes nothing. The action-value tests cover the turn bluff, an in-position sign change, scale invariance, a zero hero reach with a defined continuation, a zero opponent denominator, blockers, a tie, a flop, and a later-street decision. A chance node is rejected. Regret, strategy sum, average strategy, iteration count, and evaluation time are unchanged by a query. The HTTP case is the one-iteration frozen check-down of `AhAd` versus `2c3d` on `Kh Kd 7c 4s`. The root value is 50. A second read returns the same body. Status and export are byte-for-byte unchanged, and the export has no action values. A chance node returns 400. A five-card street solve also exposes root `/values` with node EV 50. The replaced solution returns 404.
 

@@ -81,7 +81,7 @@ jobs:
       - name: CTest
         run: ctest --test-dir build -C Release --output-on-failure
       - name: JavaScript
-        run: node tests/ui/browse.test.js
+        run: node tests/legacy_ui/browse.test.js
 
   linux:
     needs: changes
@@ -109,7 +109,7 @@ jobs:
       - name: CTest
         run: ctest --test-dir build --output-on-failure
       - name: JavaScript
-        run: node tests/ui/browse.test.js
+        run: node tests/legacy_ui/browse.test.js
 
   # Sanitizer: main + non-draft PRs only; waits for linux Release to fail fast.
   linux-sanitizer:
