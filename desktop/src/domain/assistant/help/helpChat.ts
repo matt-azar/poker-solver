@@ -1,15 +1,15 @@
 import {
   buildHelpSystemPrompt,
   loadAssistantContextPack,
-} from "../assistant/contextPacks";
+} from "../contextPacks";
 import {
   ASSISTANT_MAX_TEXT_LENGTH,
   AssistantProviderError,
-} from "../assistant/provider";
+} from "../provider";
 import {
   OPENAI_ASSISTANT_DEFAULT_MODEL,
   OPENAI_CHAT_COMPLETIONS_URL,
-} from "../assistant/openaiProvider";
+} from "../openaiProvider";
 
 export type HelpChatRole = "user" | "assistant";
 

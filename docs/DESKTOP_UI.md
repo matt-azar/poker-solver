@@ -10,8 +10,8 @@ React study client (`desktop/`) over the `explorer` HTTP API. Numerical kernels 
 | State | Zustand for study/layout/theme; query identity in the engine client |
 | Engine transport | Typed `EngineClient` over the localhost HTTP API |
 | Desktop shell | Tauri 2 + `holdem-explorer` sidecar; browser + Vite proxy still supported |
-| Static serving | Prefer `desktop/dist` when present; fall back to legacy `ui/` |
-| Legacy UI | Kept under `ui/` for regression and fallback |
+| Static serving | Prefer `desktop/dist` when present; fall back to `legacy/ui/` |
+| Legacy UI | Kept under `legacy/ui/` for regression and fallback |
 
 The explorer process boundary is the engine API. The Study client is a typed UI over that API; Tauri packages the same client with a sidecar.
 
@@ -34,7 +34,7 @@ explorer   # serves desktop/dist when present
 
 ## Capability map
 
-| Backend operation | Endpoint | Legacy UI (`ui/`) | New Study UI destination | Limitations | Tests |
+| Backend operation | Endpoint | Legacy UI (`legacy/ui/`) | New Study UI destination | Limitations | Tests |
 | --- | --- | --- | --- | --- | --- |
 | Status | `GET /api/status` | Poll 250ms | Status bar + solve strip + Graphs (`gap_series`) | Metrics null when unset; `samples` is chunk count, chart uses `gap_series` | `status.test.ts`; `test_explorer_http.cpp`, `test_session.cpp` |
 | Solve | `POST /api/solve` | Setup form | Build workspace + Solve | 409 if running; empty≠absent bets | HTTP + session |
@@ -56,7 +56,7 @@ explorer   # serves desktop/dist when present
 | Config parse | `POST /api/config` | Load config | Build | street/river text only; street echoes `tree_edits` | indirect |
 | Memory plan dry-run | `POST /api/plan-memory` | — | Build line editor | Labeled `estimated_peak_bytes`; not RSS | explorer HTTP |
 | Tree preview / line edits | `POST /api/tree-preview` | — | Build `TreeLineEditor` Force/Remove/AddSize | Canonical labels; edits into draft → solve | explorer HTTP + tree_edit |
-| Study assistant (AI) | Client-side unified chat: help answers + setup interpret → catalogue / generate / interpolate → `SpotDraft` | — | Floating **Help → Study assistant…** (all workspaces) + Build → Setup assistant + Range catalogue | Hideable/movable/resizable window; fake + OpenAI multi-tool (`answer_user` / `emit_study_setup_proposal`); context packs in `docs/ai-context/`; Tauri/localStorage credentials (prototype); pot type required; silent rake → cEV, silent stack → 100bb | `src/domain/{setup,profiles,assistant,help}`, `features/help/StudyAssistantWindow`, credentials — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md), [ai-context](ai-context/README.md) |
+| Study assistant (AI) | Client-side unified chat: help answers + setup interpret → catalogue / generate / interpolate → `SpotDraft` | — | Floating **Help → Study assistant…** (all workspaces) + Build → Setup assistant + Range catalogue | Hideable/movable/resizable window; fake + OpenAI multi-tool (`answer_user` / `emit_study_setup_proposal`); context packs in `docs/ai-context/`; Tauri/localStorage credentials (prototype); pot type required; silent rake → cEV, silent stack → 100bb | `src/domain/{setup,profiles,assistant}` (help clients under `assistant/help/`), `features/assistant/StudyAssistantWindow`, credentials — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md), [ai-context](ai-context/README.md) |
 
 ## Numerical labels (do not relabel without math)
 

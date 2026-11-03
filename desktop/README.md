@@ -29,7 +29,7 @@ Live OpenAI interpretation eval (skipped without a key; **not** part of ordinary
 HOLDEM_STUDY_OPENAI_KEY=sk-... npm run test:assistant-live
 ```
 
-After `npm run build`, `explorer` prefers `desktop/dist` over legacy `ui/` when both are present.
+After `npm run build`, `explorer` prefers `desktop/dist` over `legacy/ui/` when both are present.
 
 ## Setup assistant notes
 

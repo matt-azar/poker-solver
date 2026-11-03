@@ -8,7 +8,7 @@ NashConv is `player0_best_response_utility + player1_best_response_utility`: the
 
 The quality target is NashConv/pot at most **0.001**.
 
-`river_solver` prints `nash_gap` and `pot` and does not print the pot fraction. `tools/run_study_benchmarks.py` divides those two numbers. That quotient is the runner's derivation. `street_solver` also prints `nash_gap_fraction_of_pot`; the runner still records its own division and uses that division for the target.
+`river_solver` prints `nash_gap` and `pot` and does not print the pot fraction. `benchmarks/run_study_benchmarks.py` divides those two numbers. That quotient is the runner's derivation. `street_solver` also prints `nash_gap_fraction_of_pot`; the runner still records its own division and uses that division for the target.
 
 Clocks stay distinct:
 
@@ -102,13 +102,13 @@ On a single-config generator, omit `--config Release` and pass the directory tha
 Smoke the taxonomy:
 
 ```text
-python tools/run_study_benchmarks.py --bin-dir build/Release --cases smoke_success,smoke_invalid,smoke_timeout,smoke_resource --output-dir benchmarks/study/out/smoke --timing-label contended
+python benchmarks/run_study_benchmarks.py --bin-dir build/Release --cases smoke_success,smoke_invalid,smoke_timeout,smoke_resource --output-dir benchmarks/study/out/smoke --timing-label contended
 ```
 
 Reference cases, sequentially, with the iteration caps and walls stored in the fixtures:
 
 ```text
-python tools/run_study_benchmarks.py --bin-dir build/Release --cases reference --output-dir benchmarks/study/out/reference --timing-label quiet
+python benchmarks/run_study_benchmarks.py --bin-dir build/Release --cases reference --output-dir benchmarks/study/out/reference --timing-label quiet
 ```
 
 `--timing-label quiet` is honest only when nothing else is compiling or solving. Otherwise pass `contended` or `pending`. Contended wall times are not a performance result. NashConv from a finished deterministic run can still be read as a quality result.

@@ -70,7 +70,7 @@ A flop, turn, and river are **one** betting tree with two, one, or zero cards le
 
 **Do:** Keep `RiverGame` as the five-card oracle forever. Keep five-card StreetBatch pins against `RiverGame`.  
 **Don't:** Reintroduce `RiverBatchSolver` as the product `river_solver` path. Don't delete `RiverGame` or RiverBatch oracle tests.  
-**Pointers:** `docs/ARCHITECTURE.md`, `docs/ROADMAP.md` M6, `include/game/street_game.hpp`, `src/river_main.cpp`.
+**Pointers:** `docs/ARCHITECTURE.md`, `docs/ROADMAP.md` M6, `include/game/street_game.hpp`, `src/cli/river_main.cpp`.
 
 ### `*Game` vs `*Batch`
 
@@ -87,11 +87,11 @@ Public-tree frozen passes, engine heap budgets, and explorer sessions are street
 
 **Don't:** Wire Kuhn/Leduc into `StreetBatchSolver`, frozen threads, or explorer solve jobs.
 
-### `include/` must not depend on `ui/`
+### `include/` must not depend on UI trees
 
-Engine and session types live under `include/game`, `include/solver`, `include/explorer`, `include/poker`. HTTP and static files are `src/explorer_main.cpp` + `ui/`.
+Engine and session types live under `include/game`, `include/solver`, `include/explorer`, `include/poker`. HTTP and static files are `src/cli/explorer_main.cpp` + `src/explorer/` (serves `desktop/dist` or `legacy/ui/`).
 
-**Don't:** `#include` anything from `ui/` in `include/`.
+**Don't:** `#include` anything from `legacy/ui/` or `desktop/` in `include/`.
 
 ### Utility sign and player index
 

@@ -10,7 +10,7 @@ See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [EXPLORER.md](EXPLORER.md), 
 | --- | --- | --- |
 | 3, 4, or 5 cards | `StreetBatchSolver` | `StreetGame` + `CfrTrainer` (`--reference`) |
 
-`explorer` and `river_solver` both route five-card boards through that shared tree. `river_solver` maps river JSON/CLI flags into `StreetConfig` and solves with `StreetBatchSolver` (or `StreetGame` under `--reference`). `RiverBatchSolver` remains for internal oracle and legacy fixtures only. Nothing under `include/` includes `ui/`.
+`explorer` and `river_solver` both route five-card boards through that shared tree. `river_solver` maps river JSON/CLI flags into `StreetConfig` and solves with `StreetBatchSolver` (or `StreetGame` under `--reference`). `RiverBatchSolver` remains for internal oracle and legacy fixtures only. Nothing under `include/` includes `legacy/ui/` or `desktop/`.
 
 ## Modules
 
@@ -27,7 +27,7 @@ See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [EXPLORER.md](EXPLORER.md), 
 | `poker::solver::CfrTrainer<Game>` | Vanilla CFR, CFR+, linear CFR, DCFR for any extensive-game type |
 | `regret_matching` | Current strategy from cumulative regret; reach-weighted accumulation |
 | `compute_best_response` | Exact best response, deepest information set first |
-| `explorer` | Local Study HTTP server; serves `desktop/dist` or `ui/`; all boards use `StreetBatchSolver` |
+| `explorer` | Local Study HTTP server; serves `desktop/dist` or `legacy/ui/`; all boards use `StreetBatchSolver` |
 | `poker::kuhn`, `poker::leduc` | Small reference games for shared CFR tests |
 
 ## Extensive-game interface

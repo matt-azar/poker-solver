@@ -34,7 +34,7 @@ import {
   HELP_CHAT_MIN_HEIGHT,
   HELP_CHAT_MIN_WIDTH,
   useHelpChatStore,
-} from "../../state/helpChatStore";
+} from "../../state/assistantWindowStore";
 import { useStudyStore } from "../../state/studyStore";
 import { commitAssistantSetup } from "./commitAssistantSetup";
 

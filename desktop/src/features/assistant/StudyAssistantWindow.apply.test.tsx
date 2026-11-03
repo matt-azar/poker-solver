@@ -40,7 +40,7 @@ vi.mock("../../domain/assistant/unifiedChat", async () => {
   };
 });
 
-const { useHelpChatStore } = await import("../../state/helpChatStore");
+const { useHelpChatStore } = await import("../../state/assistantWindowStore");
 const { useStudyStore } = await import("../../state/studyStore");
 const { StudyAssistantWindow } = await import("./StudyAssistantWindow");
 const { DEFAULT_SPOT } = await import("../../domain/types");

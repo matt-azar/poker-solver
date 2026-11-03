@@ -39,23 +39,33 @@ poker_set_warnings(poker_solver_core)
 
 include(cmake/EquityTargets.cmake)
 
-add_executable(kuhn_solver src/main.cpp)
+add_executable(kuhn_solver src/cli/kuhn_main.cpp)
 target_link_libraries(kuhn_solver PRIVATE poker_solver_core)
 poker_set_warnings(kuhn_solver)
 
-add_executable(leduc_solver src/leduc_main.cpp)
+add_executable(leduc_solver src/cli/leduc_main.cpp)
 target_link_libraries(leduc_solver PRIVATE poker_solver_core)
 poker_set_warnings(leduc_solver)
 
-add_executable(river_solver src/river_main.cpp)
+add_executable(river_solver src/cli/river_main.cpp)
 target_link_libraries(river_solver PRIVATE poker_solver_core)
 poker_set_warnings(river_solver)
 
-add_executable(street_solver src/street_main.cpp)
+add_executable(street_solver src/cli/street_main.cpp)
 target_link_libraries(street_solver PRIVATE poker_solver_core)
 poker_set_warnings(street_solver)
 
-add_executable(explorer src/explorer_main.cpp)
+add_executable(explorer
+    src/cli/explorer_main.cpp
+    src/explorer/server_globals.cpp
+    src/explorer/server_json.cpp
+    src/explorer/server_jobs.cpp
+    src/explorer/server_http.cpp
+    src/explorer/server_run.cpp
+)
+target_include_directories(explorer PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/explorer"
+)
 target_link_libraries(explorer PRIVATE poker_solver_core poker_equity)
 if(WIN32)
     target_link_libraries(explorer PRIVATE ws2_32)
@@ -117,16 +127,16 @@ endif()
 add_test(NAME poker_solver_tests COMMAND poker_solver_tests)
 
 # Full-range check-down. Not part of ctest: it allocates hundreds of mebibytes.
-add_executable(street_memory_bench tests/street_memory_bench.cpp)
+add_executable(street_memory_bench benchmarks/bin/street_memory_bench.cpp)
 target_link_libraries(street_memory_bench PRIVATE poker_solver_core)
 poker_set_warnings(street_memory_bench)
 
 # Betting convergence. Not part of ctest: each case may run for ten minutes.
-add_executable(street_betting_bench tests/street_betting_bench.cpp)
+add_executable(street_betting_bench benchmarks/bin/street_betting_bench.cpp)
 target_link_libraries(street_betting_bench PRIVATE poker_solver_core)
 poker_set_warnings(street_betting_bench)
 
 # Thread scaling for the two betting trees. Not part of ctest.
-add_executable(street_parallel_bench tests/street_parallel_bench.cpp)
+add_executable(street_parallel_bench benchmarks/bin/street_parallel_bench.cpp)
 target_link_libraries(street_parallel_bench PRIVATE poker_solver_core)
 poker_set_warnings(street_parallel_bench)

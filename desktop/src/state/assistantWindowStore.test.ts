@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_HELP_CHAT_LAYOUT,
   useHelpChatStore,
-} from "./helpChatStore";
+} from "./assistantWindowStore";
 
-describe("helpChatStore", () => {
+describe("assistantWindowStore", () => {
   beforeEach(() => {
     localStorage.removeItem("holdem-study-help-chat-v1");
     useHelpChatStore.getState().resetLayout();

@@ -23,13 +23,15 @@ on:
     branches: [main]
     paths:
       - "desktop/**"
-      - "src/explorer_main.cpp"
+      - "src/cli/explorer_main.cpp"
+      - "src/explorer/**"
       - ".github/workflows/windows-installer.yml"
       - ".github/workflows/windows-installer-release.yml"
   pull_request:
     paths:
       - "desktop/**"
-      - "src/explorer_main.cpp"
+      - "src/cli/explorer_main.cpp"
+      - "src/explorer/**"
       - ".github/workflows/windows-installer.yml"
       - ".github/workflows/windows-installer-release.yml"
 

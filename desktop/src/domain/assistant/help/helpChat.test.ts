@@ -3,12 +3,12 @@ import {
   buildHelpSystemPrompt,
   buildSetupAssistantSystemPrompt,
   loadAssistantContextPack,
-} from "../assistant/contextPacks";
+} from "../contextPacks";
 import {
   createFakeHelpChatClient,
   createOpenAiHelpChatClient,
 } from "./helpChat";
-import { AssistantProviderError } from "../assistant/provider";
+import { AssistantProviderError } from "../provider";
 
 describe("ai context packs", () => {
   it("loads help and setup-assistant packs with expected anchors", () => {

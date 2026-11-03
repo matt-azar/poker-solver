@@ -6,7 +6,7 @@ import {
   SELECTED_HAND_ANALYSIS_TOOL_SCHEMA,
   type AssistantContextSnapshot,
 } from "./contextSnapshot";
-import { createFakeHelpChatClient } from "../help/helpChat";
+import { createFakeHelpChatClient } from "./help/helpChat";
 import {
   ASSISTANT_MAX_TEXT_LENGTH,
   AssistantProviderError,

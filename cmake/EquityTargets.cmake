@@ -4,7 +4,7 @@ add_library(poker_equity STATIC
 target_link_libraries(poker_equity PUBLIC poker_solver_core)
 poker_set_warnings(poker_equity)
 
-add_executable(equity_calculator src/equity_main.cpp)
+add_executable(equity_calculator src/cli/equity_main.cpp)
 target_link_libraries(equity_calculator PRIVATE poker_equity)
 poker_set_warnings(equity_calculator)
 
