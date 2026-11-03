@@ -161,26 +161,51 @@ void expect_continuation_and_cold_prediction_on_load()
         CHECK_NEAR(part.strategy_sum_table()[i], full.strategy_sum_table()[i], 1e-12);
     }
 
-    // PSOL does not persist prediction m; continue after load cold-starts m.
-    poker::explorer::CheckpointDocument document;
-    document.kind = 1;
-    document.algorithm = poker::solver::kAlgorithmTagPcfrPlus;
-    document.frozen = true;
-    document.samples = 1;
-    document.config_text = poker::streets::format_street_config(config);
-    document.tables = part.training_tables();
-    const auto path = std::filesystem::temp_directory_path() / "poker-solver-pcfr.psol";
-    poker::explorer::write_checkpoint(path.string(), document);
-    const auto loaded = poker::explorer::read_checkpoint(path.string(), 64ull * 1024ull * 1024ull);
-    CHECK(loaded.algorithm == poker::solver::kAlgorithmTagPcfrPlus);
+    // Without prediction in the document, continue after load cold-starts m.
+    poker::explorer::CheckpointDocument cold;
+    cold.kind = 1;
+    cold.algorithm = poker::solver::kAlgorithmTagPcfrPlus;
+    cold.frozen = true;
+    cold.samples = 1;
+    cold.config_text = poker::streets::format_street_config(config);
+    cold.tables = part.training_tables();
+    const auto cold_path = std::filesystem::temp_directory_path() / "poker-solver-pcfr-cold.psol";
+    poker::explorer::write_checkpoint(cold_path.string(), cold);
+    const auto cold_loaded =
+        poker::explorer::read_checkpoint(cold_path.string(), 64ull * 1024ull * 1024ull);
+    CHECK(cold_loaded.algorithm == poker::solver::kAlgorithmTagPcfrPlus);
+    CHECK(cold_loaded.prediction.empty());
 
-    StreetBatchSolver restored(config);
-    restored.install_training_tables(loaded.tables);
-    restored.bind_training_algorithm(Algorithm::PcfrPlus);
-    restored.continue_frozen_iterations(2, Algorithm::PcfrPlus);
-    CHECK(restored.completed_iterations() == 8);
-    CHECK(std::isfinite(restored.nash_gap()));
-    std::filesystem::remove(path);
+    StreetBatchSolver cold_restored(config);
+    cold_restored.install_training_tables(cold_loaded.tables);
+    cold_restored.bind_training_algorithm(Algorithm::PcfrPlus);
+    cold_restored.continue_frozen_iterations(2, Algorithm::PcfrPlus);
+    CHECK(cold_restored.completed_iterations() == 8);
+    CHECK(std::isfinite(cold_restored.nash_gap()));
+    std::filesystem::remove(cold_path);
+
+    // PSOL v3 with prediction restores exact continuation.
+    StreetBatchSolver full8(config);
+    full8.run_frozen_iterations(8, Algorithm::PcfrPlus);
+    poker::explorer::CheckpointDocument warm = cold;
+    warm.prediction.assign(part.prediction_table().begin(), part.prediction_table().end());
+    const auto warm_path = std::filesystem::temp_directory_path() / "poker-solver-pcfr-warm.psol";
+    poker::explorer::write_checkpoint(warm_path.string(), warm);
+    const auto warm_loaded =
+        poker::explorer::read_checkpoint(warm_path.string(), 64ull * 1024ull * 1024ull);
+    CHECK(!warm_loaded.prediction.empty());
+    StreetBatchSolver warm_restored(config);
+    warm_restored.install_training_tables(warm_loaded.tables);
+    warm_restored.bind_training_algorithm(Algorithm::PcfrPlus);
+    warm_restored.install_prediction_table(warm_loaded.prediction);
+    warm_restored.continue_frozen_iterations(2, Algorithm::PcfrPlus);
+    CHECK(warm_restored.completed_iterations() == 8);
+    for (std::size_t i = 0; i < full8.regret_table().size(); ++i)
+    {
+        CHECK_NEAR(warm_restored.regret_table()[i], full8.regret_table()[i], 1e-12);
+        CHECK_NEAR(warm_restored.strategy_sum_table()[i], full8.strategy_sum_table()[i], 1e-12);
+    }
+    std::filesystem::remove(warm_path);
 }
 
 void expect_rejection_matrix()

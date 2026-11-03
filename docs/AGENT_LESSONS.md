@@ -107,8 +107,8 @@ Engine and session types live under `include/game`, `include/solver`, `include/e
 - Parallelism splits the **first future public card** only (turn→rivers, flop→turns).
 - Public frozen path: vanilla CFR, CFR+, fixed DCFR(1.5,0,2), and PCFR+ (not Linear CFR).
 - CFR+: sum counterfactual regret across the frozen pass, then **floor only the updating player**; leave the opponent table alone.
-- PCFR+: same alternating schedule and CFR+ floor / linear own-reach average; match on \(R+m\) with \(m=\) last instantaneous CF regret (cold-start / PSOL reload zeros \(m\)).
-- DCFR: same alternating frozen passes; after each pass **discount** the updating player's full regret row (signed; no CFR+ floor) with `t^1.5/(t^1.5+1)` on positives and `0.5` on non-positives; average with `t^2` own-reach. Reject DCFR and PCFR+ on the non-frozen walk and on legacy `RiverBatchSolver`.
+- PCFR+: same alternating schedule and CFR+ floor / linear own-reach average; match on \(R+m\) with \(m=\) last instantaneous CF regret (cold-start zeros \(m\); PSOL v3 may restore \(m\), v1/v2 reload zeros \(m\)).
+- DCFR: same alternating frozen passes; after each pass **discount** the updating player's full regret row (signed; no CFR+ floor) with `t^α/(t^α+1)` on positives and `t^β/(t^β+1)` on non-positives; average with `t^γ` own-reach (defaults α=1.5, β=0, γ=2). PSOL v3 stores the actual params used. Reject DCFR and PCFR+ on the non-frozen walk and on legacy `RiverBatchSolver`.
 
 **Pointers:** `docs/STREETS.md` (frozen threads), `src/solver/street_batch.cpp` `train_frozen`, commits `9e0d87d`, `6a597df`, `e2ad8df`.
 

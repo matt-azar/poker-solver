@@ -161,6 +161,23 @@ void test_checkpoint_rejects_bad_files()
         std::getline(previous, text);
         CHECK(text == "keep");
     }
+    // Save preflight rejects over-budget payloads without replacing the destination.
+    bool save_limited = false;
+    try
+    {
+        poker::explorer::write_checkpoint(path.string(), document, CheckpointFault::None, 8);
+    }
+    catch (const std::invalid_argument&)
+    {
+        save_limited = true;
+    }
+    CHECK(save_limited);
+    {
+        std::ifstream previous(path, std::ios::binary);
+        std::string text;
+        std::getline(previous, text);
+        CHECK(text == "keep");
+    }
     poker::explorer::write_checkpoint(path.string(), document);
     bool limited = false;
     try
@@ -361,6 +378,105 @@ void test_checkpoint_v1_loads_empty_locks()
     std::filesystem::remove(path);
 }
 
+void test_checkpoint_scalar_stream_and_size_estimate()
+{
+    const poker::streets::StreetConfig config = turn_config();
+    StreetBatchSolver solver(config);
+    solver.continue_iterations(2, Algorithm::CfrPlus);
+    CheckpointDocument document;
+    document.kind = 1;
+    document.algorithm = 1;
+    document.samples = 1;
+    document.config_text = poker::streets::format_street_config(config);
+    solver.export_training_identity(document.tables);
+    poker::explorer::CheckpointScalarTables scalars;
+    scalars.regret = solver.regret_table();
+    scalars.strategy_sum = solver.strategy_sum_table();
+    const std::uint64_t estimated =
+        poker::explorer::estimate_checkpoint_payload_bytes(document, &scalars);
+    CHECK(estimated > 0);
+    CHECK(estimated < poker::explorer::kMaxCheckpointBytes);
+    const std::filesystem::path path = test_file("poker-solver-scalar.psol");
+    poker::explorer::write_checkpoint(
+        path.string(),
+        document,
+        CheckpointFault::None,
+        poker::explorer::kMaxCheckpointBytes,
+        &scalars);
+    const CheckpointDocument loaded =
+        poker::explorer::read_checkpoint(path.string(), poker::explorer::kMaxCheckpointBytes);
+    CHECK(same_tables(loaded.tables, solver.training_tables()));
+    std::filesystem::remove(path);
+}
+
+void test_checkpoint_dcfr_params_round_trip()
+{
+    const poker::streets::StreetConfig config = turn_config();
+    StreetBatchSolver solver(config);
+    const poker::solver::DcfrParams params{2.0, 0.5, 1.0};
+    solver.set_dcfr_params(params);
+    solver.run_frozen_iterations(2, Algorithm::Dcfr);
+    CheckpointDocument document;
+    document.kind = 1;
+    document.algorithm = poker::solver::kAlgorithmTagDcfr;
+    document.frozen = true;
+    document.samples = 1;
+    document.config_text = poker::streets::format_street_config(config);
+    document.tables = solver.training_tables();
+    document.has_dcfr_params = true;
+    document.dcfr = params;
+    const std::filesystem::path path = test_file("poker-solver-dcfr-params.psol");
+    poker::explorer::write_checkpoint(path.string(), document);
+    const CheckpointDocument loaded =
+        poker::explorer::read_checkpoint(path.string(), 64ull * 1024ull * 1024ull);
+    CHECK(loaded.has_dcfr_params);
+    CHECK_NEAR(loaded.dcfr.alpha, 2.0, 0.0);
+    CHECK_NEAR(loaded.dcfr.beta, 0.5, 0.0);
+    CHECK_NEAR(loaded.dcfr.gamma, 1.0, 0.0);
+    StreetBatchSolver restored(config);
+    restored.install_training_tables(loaded.tables);
+    restored.bind_training_algorithm(Algorithm::Dcfr);
+    restored.set_dcfr_params(loaded.dcfr);
+    CHECK_NEAR(restored.dcfr_params().alpha, 2.0, 0.0);
+    CHECK_NEAR(restored.dcfr_params().beta, 0.5, 0.0);
+    CHECK_NEAR(restored.dcfr_params().gamma, 1.0, 0.0);
+    std::filesystem::remove(path);
+}
+
+void test_checkpoint_pcfr_prediction_exact_continue()
+{
+    const poker::streets::StreetConfig config = turn_config();
+    StreetBatchSolver full(config);
+    full.run_frozen_iterations(6, Algorithm::PcfrPlus);
+
+    StreetBatchSolver part(config);
+    part.run_frozen_iterations(4, Algorithm::PcfrPlus);
+    CHECK(!part.prediction_table().empty());
+
+    CheckpointDocument document;
+    document.kind = 1;
+    document.algorithm = poker::solver::kAlgorithmTagPcfrPlus;
+    document.frozen = true;
+    document.samples = 1;
+    document.config_text = poker::streets::format_street_config(config);
+    document.tables = part.training_tables();
+    document.prediction.assign(part.prediction_table().begin(), part.prediction_table().end());
+    const std::filesystem::path path = test_file("poker-solver-pcfr-pred.psol");
+    poker::explorer::write_checkpoint(path.string(), document);
+    const CheckpointDocument loaded =
+        poker::explorer::read_checkpoint(path.string(), 64ull * 1024ull * 1024ull);
+    CHECK(loaded.prediction.size() == document.prediction.size());
+
+    StreetBatchSolver restored(config);
+    restored.install_training_tables(loaded.tables);
+    restored.bind_training_algorithm(Algorithm::PcfrPlus);
+    restored.install_prediction_table(loaded.prediction);
+    restored.continue_frozen_iterations(2, Algorithm::PcfrPlus);
+    CHECK(restored.completed_iterations() == 6);
+    CHECK(same_tables(restored.training_tables(), full.training_tables()));
+    std::filesystem::remove(path);
+}
+
 void test_runout_and_equity()
 {
     StreetBatchSolver solver(turn_config());
@@ -417,5 +533,8 @@ void run_checkpoint_tests()
     test_checkpoint_rejects_bad_files();
     test_checkpoint_locks_round_trip();
     test_checkpoint_v1_loads_empty_locks();
+    test_checkpoint_scalar_stream_and_size_estimate();
+    test_checkpoint_dcfr_params_round_trip();
+    test_checkpoint_pcfr_prediction_exact_continue();
     test_runout_and_equity();
 }

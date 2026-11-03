@@ -167,8 +167,6 @@ std::string receive_request(socket_t client)
     return request;
 }
 
-constexpr std::uint64_t kMaxCheckpointBytes = 2ull * 1024ull * 1024ull * 1024ull;
-
 std::uint8_t algorithm_code(poker::solver::Algorithm algorithm)
 {
     return poker::solver::algorithm_tag(algorithm);
@@ -259,7 +257,13 @@ poker::explorer::CheckpointDocument checkpoint_from_held(const HeldSolution& hel
     {
         document.kind = 1;
         document.config_text = poker::streets::format_street_config(held.street->config());
-        document.tables = held.street->training_tables();
+        // Identity only; Save streams float tables via CheckpointScalarTables.
+        held.street->export_training_identity(document.tables);
+        if (held.job.algorithm == poker::solver::Algorithm::Dcfr)
+        {
+            document.has_dcfr_params = true;
+            document.dcfr = held.street->dcfr_params();
+        }
     }
     else if (held.river)
     {
@@ -272,6 +276,33 @@ poker::explorer::CheckpointDocument checkpoint_from_held(const HeldSolution& hel
         throw std::invalid_argument("solution has no solver");
     }
     return document;
+}
+
+void write_held_checkpoint(const std::string& path, const HeldSolution& held)
+{
+    poker::explorer::CheckpointDocument document = checkpoint_from_held(held);
+    if (held.street)
+    {
+        poker::explorer::CheckpointScalarTables scalars;
+        scalars.regret = held.street->regret_table();
+        scalars.strategy_sum = held.street->strategy_sum_table();
+        if (held.job.algorithm == poker::solver::Algorithm::PcfrPlus)
+        {
+            scalars.prediction = held.street->prediction_table();
+        }
+        poker::explorer::write_checkpoint(
+            path,
+            document,
+            poker::explorer::CheckpointFault::None,
+            poker::explorer::kMaxCheckpointBytes,
+            &scalars);
+        return;
+    }
+    poker::explorer::write_checkpoint(
+        path,
+        document,
+        poker::explorer::CheckpointFault::None,
+        poker::explorer::kMaxCheckpointBytes);
 }
 
 std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::CheckpointDocument& document)
@@ -305,6 +336,14 @@ std::shared_ptr<HeldSolution> solution_from_checkpoint(const poker::explorer::Ch
         held->street = std::make_shared<poker::solver::StreetBatchSolver>(config);
         held->street->install_training_tables(document.tables);
         held->street->bind_training_algorithm(loaded_algorithm);
+        if (document.has_dcfr_params)
+        {
+            held->street->set_dcfr_params(document.dcfr);
+        }
+        if (!document.prediction.empty())
+        {
+            held->street->install_prediction_table(document.prediction);
+        }
         held->street->prepare_inspection();
         held->root_id = held->street->root_node_id();
         held->memory = held->street->memory_report();
@@ -1747,7 +1786,7 @@ void handle_client(socket_t client)
                 g_values->cancel_and_drain();
             }
             const poker::explorer::CheckpointDocument document =
-                poker::explorer::read_checkpoint(path, kMaxCheckpointBytes);
+                poker::explorer::read_checkpoint(path, poker::explorer::kMaxCheckpointBytes);
             const std::shared_ptr<HeldSolution> held = solution_from_checkpoint(document);
             poker::explorer::record_recent_file(path);
             send_response(client, 200, "application/json", publish_loaded(held));
@@ -1787,7 +1826,7 @@ void handle_client(socket_t client)
             }
             const std::shared_ptr<HeldSolution> held =
                 std::static_pointer_cast<HeldSolution>(lease.resource());
-            poker::explorer::write_checkpoint(path, checkpoint_from_held(*held));
+            write_held_checkpoint(path, *held);
             poker::explorer::record_recent_file(path);
             send_response(client, 200, "application/json", "{\"saved\":true}");
         }

@@ -1330,26 +1330,33 @@ std::shared_ptr<HeldSolution> clone_held_baseline(const HeldSolution& source)
     copy->sample_values = source.sample_values;
     copy->sample_gaps = source.sample_gaps;
     copy->locks = source.locks;
-    if (source.street)
+    try
     {
-        copy->street = std::make_shared<poker::solver::StreetBatchSolver>(source.street->config());
-        copy->street->install_training_tables(source.street->training_tables());
-        copy->street->bind_training_algorithm(source.job.algorithm);
-        copy->street->prepare_inspection();
-        copy->root_id = copy->street->root_node_id();
-        copy->memory = copy->street->memory_report();
-        copy->has_memory = true;
+        if (source.street)
+        {
+            // Float→float copy; no TrainingTables double intermediate.
+            copy->street = std::make_shared<poker::solver::StreetBatchSolver>(source.street->config());
+            copy->street->copy_training_state_from(*source.street);
+            copy->street->prepare_inspection();
+            copy->root_id = copy->street->root_node_id();
+            copy->memory = copy->street->memory_report();
+            copy->has_memory = true;
+        }
+        else if (source.river)
+        {
+            copy->river = std::make_shared<poker::solver::RiverBatchSolver>(source.river->config());
+            copy->river->install_training_tables(source.river->training_tables());
+            copy->river->prepare_inspection();
+            copy->root_id = copy->river->root_node_id();
+        }
+        else
+        {
+            throw std::invalid_argument("solution has no solver");
+        }
     }
-    else if (source.river)
+    catch (const std::bad_alloc&)
     {
-        copy->river = std::make_shared<poker::solver::RiverBatchSolver>(source.river->config());
-        copy->river->install_training_tables(source.river->training_tables());
-        copy->river->prepare_inspection();
-        copy->root_id = copy->river->root_node_id();
-    }
-    else
-    {
-        throw std::invalid_argument("solution has no solver");
+        throw std::runtime_error("baseline clone could not fit in memory");
     }
     return copy;
 }

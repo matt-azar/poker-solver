@@ -747,27 +747,74 @@ void resolve_locked_job(
     {
         if (g_session.baseline_solution() == 0)
         {
-            const std::shared_ptr<HeldSolution> baseline = clone_held_baseline(*held);
-            baseline->id = prior_id;
-            g_session.set_baseline(baseline, prior_id);
+            try
+            {
+                const std::shared_ptr<HeldSolution> baseline = clone_held_baseline(*held);
+                baseline->id = prior_id;
+                g_session.set_baseline(baseline, prior_id);
+            }
+            catch (const std::bad_alloc&)
+            {
+                StatusDraft draft = draft_for(
+                    held->job, job_id, held->iterations, held->runtime_seconds, true,
+                    held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+                    held->sample_iterations, held->sample_values, held->sample_gaps,
+                    held->has_memory ? &held->memory : nullptr);
+                draft.error = "baseline clone could not fit in memory";
+                draft.solution_id = prior_id;
+                draft.root_id = held->root_id;
+                g_session.abort_continuation(job_id, build_status(draft));
+                return;
+            }
+            catch (const std::runtime_error& error)
+            {
+                StatusDraft draft = draft_for(
+                    held->job, job_id, held->iterations, held->runtime_seconds, true,
+                    held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+                    held->sample_iterations, held->sample_values, held->sample_gaps,
+                    held->has_memory ? &held->memory : nullptr);
+                draft.error = error.what();
+                draft.solution_id = prior_id;
+                draft.root_id = held->root_id;
+                g_session.abort_continuation(job_id, build_status(draft));
+                return;
+            }
         }
         held->baseline_solution_id = g_session.baseline_solution();
 
         const poker::streets::StreetConfig config = held->street->config();
         // warm_start keeps regrets/strategy-sums and continues from the prior
         // iteration count under the current locks. Default remains reset-from-zero.
-        poker::solver::TrainingTables prior_tables{};
+        // Float→float copy avoids a full TrainingTables double transfer.
+        const std::shared_ptr<poker::solver::StreetBatchSolver> prior_solver = held->street;
         const int prior_iterations = held->iterations;
         const double prior_runtime = held->runtime_seconds;
-        if (warm_start)
+        std::shared_ptr<poker::solver::StreetBatchSolver> rebuilt;
+        try
         {
-            prior_tables = held->street->training_tables();
+            rebuilt = std::make_shared<poker::solver::StreetBatchSolver>(config);
+            if (warm_start)
+            {
+                rebuilt->copy_training_state_from(*prior_solver);
+            }
         }
-        held->street = std::make_shared<poker::solver::StreetBatchSolver>(config);
+        catch (const std::bad_alloc&)
+        {
+            StatusDraft draft = draft_for(
+                held->job, job_id, held->iterations, held->runtime_seconds, true,
+                held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
+                held->sample_iterations, held->sample_values, held->sample_gaps,
+                held->has_memory ? &held->memory : nullptr);
+            draft.error = "resolve-locked rebuild could not fit in memory";
+            draft.solution_id = prior_id;
+            draft.root_id = held->root_id;
+            draft.baseline_solution_id = held->baseline_solution_id;
+            g_session.abort_continuation(job_id, build_status(draft));
+            return;
+        }
+        held->street = std::move(rebuilt);
         if (warm_start)
         {
-            held->street->install_training_tables(prior_tables);
-            held->street->bind_training_algorithm(held->job.algorithm);
             held->iterations = prior_iterations;
             held->runtime_seconds = prior_runtime;
         }
