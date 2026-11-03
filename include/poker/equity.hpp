@@ -21,13 +21,16 @@ namespace poker::holdem
 // Study/explorer packaging may raise the ceiling (see kStudyExplorerMaxPairRunouts)
 // without changing this library default; that override still rejects full-range turn.
 inline constexpr std::uint64_t kFullRangeRiverPairRunouts = 1070190;
+// Measured full-range turn on `As Kd Qc Jh` (random vs random); pathological CPU case.
+inline constexpr std::uint64_t kFullRangeTurnPairRunouts = 51369120;
 inline constexpr std::uint64_t kDefaultMaxPairRunouts = 1100000;
 // Packaged Study / holdem-explorer ceiling for denser ranges (~4.5× default).
-// Still far below pathological full-range turn (~51,369,120). Not a library default.
+// Still far below pathological full-range turn. Not a library default.
 inline constexpr std::uint64_t kStudyExplorerMaxPairRunouts = 5000000;
 static_assert(kDefaultMaxPairRunouts >= kFullRangeRiverPairRunouts);
+static_assert(kDefaultMaxPairRunouts < kFullRangeTurnPairRunouts);
 static_assert(kStudyExplorerMaxPairRunouts > kDefaultMaxPairRunouts);
-static_assert(kStudyExplorerMaxPairRunouts < 51369120ull);
+static_assert(kStudyExplorerMaxPairRunouts < kFullRangeTurnPairRunouts);
 inline constexpr char kEquityModel[] = "check-down";
 inline constexpr char kEquityUnits[] = "fraction of the pot";
 

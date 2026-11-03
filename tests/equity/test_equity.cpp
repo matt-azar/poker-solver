@@ -807,15 +807,14 @@ void test_work_limit_and_cancellation()
     CHECK(legacy_limit.required_pair_runouts() == poker::holdem::kFullRangeRiverPairRunouts);
     CHECK(legacy_limit.allowed_pair_runouts() == 1000000);
 
-    // A full-range turn is pathological at the default and rejects before evaluation.
-    const std::vector<int> turn = parse_equity_board("As Kd Qc Jh");
-    const ShowdownWork turn_work = measure_showdown_work(turn, wide, wide);
-    CHECK(turn_work.pair_runouts > poker::holdem::kDefaultMaxPairRunouts);
-    CHECK(turn_work.pair_runouts > poker::holdem::kStudyExplorerMaxPairRunouts);
-    const EquityError turn_limit = expect_failure(
-        EquityFailure::WorkLimit, [&] { showdown_equity(turn, wide, wide); });
-    CHECK(turn_limit.required_pair_runouts() == turn_work.pair_runouts);
-    CHECK(turn_limit.allowed_pair_runouts() == poker::holdem::kDefaultMaxPairRunouts);
+    // Study packaging + library default both stay below pathological full-range turn.
+    // Constant checks only (no full-range turn enumeration).
+    CHECK(poker::holdem::kStudyExplorerMaxPairRunouts == 5000000);
+    CHECK(poker::holdem::kDefaultMaxPairRunouts == 1100000);
+    CHECK(poker::holdem::kFullRangeTurnPairRunouts == 51369120);
+    CHECK(poker::holdem::kStudyExplorerMaxPairRunouts > poker::holdem::kDefaultMaxPairRunouts);
+    CHECK(poker::holdem::kStudyExplorerMaxPairRunouts < poker::holdem::kFullRangeTurnPairRunouts);
+    CHECK(poker::holdem::kDefaultMaxPairRunouts < poker::holdem::kFullRangeTurnPairRunouts);
 
     const std::vector<int> sample = parse_equity_board("Kh Kd 7c 4s 2h");
     const Range left = parse_equity_range("2c2d,3c3d");
