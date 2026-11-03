@@ -66,9 +66,9 @@ Free-form strategy edits (distinct from locks — rewrite the prepared average p
 - `PUT /api/solutions/{id}/strategy-edits` with `{"node_id","kind":"full"|"selected","hand_indices","probs"}` validates nonnegative probs that sum to 1 (same tolerance as locks), applies them via `set_average_strategy`, and bumps `profile_epoch` so cached value pages drop
 - `DELETE /api/solutions/{id}/strategy-edits?node_id=...` (or omit the node) clears one node or all overlays and rebuilds the average from strategy sums; `hand_index` clears one SelectedCombos hand
 - Continue / resolve-locked discard session strategy edits (training rebuilds the average). Locks are unchanged by these routes
-- **PSOL limitation:** strategy edits are session-scoped only. PSOL v2 still persists `locks_text` only; free-form strategy overlays are not saved or restored
+- **PSOL limitation:** strategy edits are session-scoped only. Free-form strategy overlays are not saved or restored
 
-Save/Open uses PSOL payload version 2 with a trailing `locks_text` field (`format_lock_set`). Version 1 files still open with empty locks. Algorithm tags are `0` vanilla, `1` CFR+, `2` linear, `3` DCFR(1.5,0,2); unknown tags fail without mutating the previous file. A reopened solution continues with its stored algorithm.
+Save/Open uses PSOL payload version 2 with a trailing `locks_text` field (`format_lock_set`), or version 3 when continuation extras are present (DCFR α/β/γ and/or PCFR+ prediction `m`). Version 1 files still open with empty locks; version 2 opens with empty continuation extras (PCFR+ cold-starts `m`). Algorithm tags are `0` vanilla, `1` CFR+, `2` linear, `3` DCFR, `4` PCFR+; unknown tags fail without mutating the previous file. Save and Open share a 2 GiB payload ceiling: Save rejects over-budget writes before replacing the destination. A reopened solution continues with its stored algorithm and, when present, stored DCFR params / PCFR+ prediction.
 
 ## Themes
 

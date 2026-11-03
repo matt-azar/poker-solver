@@ -401,8 +401,18 @@ public:
     holdem::CategoryComposition category_composition(const std::string& node_id) const;
     const streets::StreetConfig& config() const;
     TrainingTables training_tables() const;
+    // Identity only (iterations, combos, slot actions). Leaves regret /
+    // strategy_sum empty for scalar-stream checkpoint writes.
+    void export_training_identity(TrainingTables& out) const;
+    // Fill an existing TrainingTables, reusing vector capacity when possible.
+    // Still widens TableScalar → double once (checkpoint / legacy export path).
+    void export_training_tables(TrainingTables& out) const;
     // Rebuilds nothing. The tree must already match the combo order and action counts.
     void install_training_tables(const TrainingTables& tables);
+    // Copy regret / strategy-sum / prediction / iteration / algorithm / DCFR
+    // params from a solver with the same tree layout. Float→float; no double
+    // TrainingTables intermediate. Throws std::invalid_argument on mismatch.
+    void copy_training_state_from(const StreetBatchSolver& other);
     // Bind the algorithm that produced installed tables. Required after a
     // non-zero install so continue rejects silent algorithm switches.
     // Does not mutate regrets or strategy sums.
@@ -410,9 +420,14 @@ public:
     Algorithm training_algorithm() const;
     bool has_training_algorithm() const;
     // DCFR(α,β,γ). Defaults (1.5,0,2). Applied on the next frozen DCFR train.
-    // Not persisted in PSOL.
+    // Persisted in PSOL v3 when present on Save.
     void set_dcfr_params(DcfrParams params);
     DcfrParams dcfr_params() const;
+    // PCFR+ prediction m. Empty until the first PCFR+ pass allocates it.
+    std::span<const TableScalar> prediction_table() const;
+    // Install prediction m after install_training_tables. Size must match the
+    // regret table, or be empty (cold-start). Throws on size mismatch.
+    void install_prediction_table(std::span<const double> values);
     std::uint64_t profile_epoch() const;
     // The next successful evaluation throws before its page can replace the cache.
     void arm_value_cache_failure_for_test();

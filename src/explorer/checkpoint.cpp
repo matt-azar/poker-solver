@@ -3,6 +3,7 @@
 #include "solver/trainer.hpp"
 
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -22,57 +23,17 @@ namespace
 {
 
 constexpr char kMagic[4] = {'P', 'S', 'O', 'L'};
-constexpr std::uint32_t kVersionWrite = 2;
 constexpr std::uint32_t kVersionMin = 1;
-constexpr std::uint32_t kVersionMax = 2;
+constexpr std::uint32_t kVersionMax = 3;
+constexpr std::uint32_t kVersionLocks = 2;
+constexpr std::uint32_t kVersionContinuation = 3;
 constexpr std::string_view kUtility = "root_centered_zero_sum";
+constexpr std::uint8_t kFlagDcfrParams = 1u;
+constexpr std::uint8_t kFlagPrediction = 2u;
+constexpr std::uint64_t kHeaderBytes = 32;
 
-void append_bytes(std::string& out, const void* data, std::size_t size)
+std::uint64_t fnv1a64_update(std::uint64_t hash, std::string_view bytes)
 {
-    out.append(static_cast<const char*>(data), size);
-}
-
-void append_u8(std::string& out, std::uint8_t value)
-{
-    out.push_back(static_cast<char>(value));
-}
-
-void append_u32(std::string& out, std::uint32_t value)
-{
-    const unsigned char bytes[4] = {
-        static_cast<unsigned char>(value & 0xffu),
-        static_cast<unsigned char>((value >> 8) & 0xffu),
-        static_cast<unsigned char>((value >> 16) & 0xffu),
-        static_cast<unsigned char>((value >> 24) & 0xffu)};
-    append_bytes(out, bytes, 4);
-}
-
-void append_u64(std::string& out, std::uint64_t value)
-{
-    unsigned char bytes[8];
-    for (int index = 0; index < 8; ++index)
-    {
-        bytes[index] = static_cast<unsigned char>((value >> (8 * index)) & 0xffu);
-    }
-    append_bytes(out, bytes, 8);
-}
-
-void append_i32(std::string& out, int value)
-{
-    append_u32(out, static_cast<std::uint32_t>(value));
-}
-
-void append_f64(std::string& out, double value)
-{
-    std::uint64_t bits = 0;
-    static_assert(sizeof(double) == sizeof(bits));
-    std::memcpy(&bits, &value, sizeof(bits));
-    append_u64(out, bits);
-}
-
-std::uint64_t fnv1a64(std::string_view bytes)
-{
-    std::uint64_t hash = 14695981039346656037ull;
     for (unsigned char byte : bytes)
     {
         hash ^= byte;
@@ -81,9 +42,13 @@ std::uint64_t fnv1a64(std::string_view bytes)
     return hash;
 }
 
-std::uint32_t crc32(std::string_view bytes)
+std::uint64_t fnv1a64(std::string_view bytes)
 {
-    std::uint32_t crc = 0xffffffffu;
+    return fnv1a64_update(14695981039346656037ull, bytes);
+}
+
+std::uint32_t crc32_update(std::uint32_t crc, std::string_view bytes)
+{
     for (unsigned char byte : bytes)
     {
         crc ^= byte;
@@ -97,7 +62,12 @@ std::uint32_t crc32(std::string_view bytes)
             }
         }
     }
-    return ~crc;
+    return crc;
+}
+
+std::uint32_t crc32(std::string_view bytes)
+{
+    return ~crc32_update(0xffffffffu, bytes);
 }
 
 class Reader
@@ -195,31 +165,139 @@ private:
     std::size_t at_ = 0;
 };
 
-void append_ints(std::string& out, const std::vector<int>& values)
+class StreamWriter
 {
-    if (values.size() > 0xffffffffu)
+public:
+    explicit StreamWriter(std::ofstream& output)
+        : output_(output)
     {
-        throw std::invalid_argument("checkpoint list is too long");
     }
-    append_u32(out, static_cast<std::uint32_t>(values.size()));
-    for (int value : values)
-    {
-        append_i32(out, value);
-    }
-}
 
-void append_doubles(std::string& out, const std::vector<double>& values)
-{
-    if (values.size() > 0xffffffffu)
+    std::uint64_t size() const
     {
-        throw std::invalid_argument("checkpoint list is too long");
+        return size_;
     }
-    append_u32(out, static_cast<std::uint32_t>(values.size()));
-    for (double value : values)
+
+    std::uint64_t fnv() const
     {
-        append_f64(out, value);
+        return fnv_;
     }
-}
+
+    std::uint32_t crc() const
+    {
+        return ~crc_;
+    }
+
+    void raw(const void* data, std::size_t count)
+    {
+        if (count == 0)
+        {
+            return;
+        }
+        output_.write(static_cast<const char*>(data), static_cast<std::streamsize>(count));
+        if (!output_)
+        {
+            throw std::runtime_error("checkpoint could not write a temporary file");
+        }
+        const std::string_view view(static_cast<const char*>(data), count);
+        fnv_ = fnv1a64_update(fnv_, view);
+        crc_ = crc32_update(crc_, view);
+        size_ += count;
+    }
+
+    void u8(std::uint8_t value)
+    {
+        const char byte = static_cast<char>(value);
+        raw(&byte, 1);
+    }
+
+    void u32(std::uint32_t value)
+    {
+        const unsigned char bytes[4] = {
+            static_cast<unsigned char>(value & 0xffu),
+            static_cast<unsigned char>((value >> 8) & 0xffu),
+            static_cast<unsigned char>((value >> 16) & 0xffu),
+            static_cast<unsigned char>((value >> 24) & 0xffu)};
+        raw(bytes, 4);
+    }
+
+    void u64(std::uint64_t value)
+    {
+        unsigned char bytes[8];
+        for (int index = 0; index < 8; ++index)
+        {
+            bytes[index] = static_cast<unsigned char>((value >> (8 * index)) & 0xffu);
+        }
+        raw(bytes, 8);
+    }
+
+    void i32(int value)
+    {
+        u32(static_cast<std::uint32_t>(value));
+    }
+
+    void f64(double value)
+    {
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        u64(bits);
+    }
+
+    void text(std::string_view value)
+    {
+        if (value.size() > 0xffffffffu)
+        {
+            throw std::invalid_argument("checkpoint text is too long");
+        }
+        u32(static_cast<std::uint32_t>(value.size()));
+        raw(value.data(), value.size());
+    }
+
+    void ints(const std::vector<int>& values)
+    {
+        if (values.size() > 0xffffffffu)
+        {
+            throw std::invalid_argument("checkpoint list is too long");
+        }
+        u32(static_cast<std::uint32_t>(values.size()));
+        for (int value : values)
+        {
+            i32(value);
+        }
+    }
+
+    void doubles(const std::vector<double>& values)
+    {
+        if (values.size() > 0xffffffffu)
+        {
+            throw std::invalid_argument("checkpoint list is too long");
+        }
+        u32(static_cast<std::uint32_t>(values.size()));
+        for (double value : values)
+        {
+            f64(value);
+        }
+    }
+
+    void scalar_as_doubles(std::span<const solver::TableScalar> values)
+    {
+        if (values.size() > 0xffffffffu)
+        {
+            throw std::invalid_argument("checkpoint list is too long");
+        }
+        u32(static_cast<std::uint32_t>(values.size()));
+        for (solver::TableScalar value : values)
+        {
+            f64(static_cast<double>(value));
+        }
+    }
+
+private:
+    std::ofstream& output_;
+    std::uint64_t size_ = 0;
+    std::uint64_t fnv_ = 14695981039346656037ull;
+    std::uint32_t crc_ = 0xffffffffu;
+};
 
 std::vector<int> read_ints(Reader& reader)
 {
@@ -245,7 +323,9 @@ std::vector<double> read_doubles(Reader& reader)
     return values;
 }
 
-std::string payload_of(const CheckpointDocument& document)
+void validate_document_shape(
+    const CheckpointDocument& document,
+    const CheckpointScalarTables* scalars)
 {
     if (document.kind != 1 && document.kind != 2)
     {
@@ -268,42 +348,66 @@ std::string payload_of(const CheckpointDocument& document)
     {
         throw std::invalid_argument("checkpoint action list is too long");
     }
-    std::string out;
-    append_u8(out, document.kind);
-    append_u8(out, document.algorithm);
-    append_u8(out, document.frozen ? 1 : 0);
-    append_u8(out, 0);
-    append_i32(out, document.tables.iterations);
-    append_i32(out, document.samples);
-    append_f64(out, document.accuracy);
-    append_u32(out, static_cast<std::uint32_t>(kUtility.size()));
-    out.append(kUtility);
-    append_u32(out, static_cast<std::uint32_t>(document.config_text.size()));
-    out.append(document.config_text);
-    append_ints(out, document.tables.oop_combos);
-    append_ints(out, document.tables.ip_combos);
-    append_u32(out, static_cast<std::uint32_t>(document.tables.slot_actions.size()));
-    for (std::uint16_t count : document.tables.slot_actions)
+    const std::size_t regret_count = scalars != nullptr && !scalars->regret.empty()
+        ? scalars->regret.size()
+        : document.tables.regret.size();
+    const std::size_t strategy_count = scalars != nullptr && !scalars->strategy_sum.empty()
+        ? scalars->strategy_sum.size()
+        : document.tables.strategy_sum.size();
+    if (regret_count != strategy_count)
     {
-        const unsigned char bytes[2] = {
-            static_cast<unsigned char>(count & 0xffu),
-            static_cast<unsigned char>((count >> 8) & 0xffu)};
-        append_bytes(out, bytes, 2);
+        throw std::invalid_argument("checkpoint tables do not line up");
     }
-    append_doubles(out, document.tables.regret);
-    append_doubles(out, document.tables.strategy_sum);
-    append_f64(out, document.value);
-    append_f64(out, document.p1_best_response);
-    append_f64(out, document.p2_best_response);
-    append_f64(out, document.nash_gap);
-    append_f64(out, document.runtime_seconds);
-    append_ints(out, document.sample_iterations);
-    append_doubles(out, document.sample_values);
-    append_doubles(out, document.sample_gaps);
-    // Version 2 trailing section: lock-set text (may be empty).
-    append_u32(out, static_cast<std::uint32_t>(document.locks_text.size()));
-    out.append(document.locks_text);
-    return out;
+    const bool use_scalar_prediction =
+        scalars != nullptr && !scalars->prediction.empty();
+    const std::size_t prediction_count =
+        use_scalar_prediction ? scalars->prediction.size() : document.prediction.size();
+    if (prediction_count != 0 && prediction_count != regret_count)
+    {
+        throw std::invalid_argument("checkpoint prediction size does not match tables");
+    }
+    if (document.has_dcfr_params)
+    {
+        if (!std::isfinite(document.dcfr.alpha)
+            || !std::isfinite(document.dcfr.beta)
+            || !std::isfinite(document.dcfr.gamma))
+        {
+            throw std::invalid_argument("checkpoint DCFR parameters must be finite");
+        }
+    }
+}
+
+bool wants_continuation_section(
+    const CheckpointDocument& document,
+    const CheckpointScalarTables* scalars)
+{
+    if (document.has_dcfr_params)
+    {
+        return true;
+    }
+    if (!document.prediction.empty())
+    {
+        return true;
+    }
+    return scalars != nullptr && !scalars->prediction.empty();
+}
+
+std::uint64_t list_bytes_u32_prefix(std::size_t count, std::size_t element_bytes)
+{
+    if (count > 0xffffffffu)
+    {
+        throw std::invalid_argument("checkpoint list is too long");
+    }
+    return 4ull + static_cast<std::uint64_t>(count) * static_cast<std::uint64_t>(element_bytes);
+}
+
+std::uint64_t text_bytes(std::size_t count)
+{
+    if (count > 0xffffffffu)
+    {
+        throw std::invalid_argument("checkpoint text is too long");
+    }
+    return 4ull + static_cast<std::uint64_t>(count);
 }
 
 void replace_file(const std::filesystem::path& temporary, const std::filesystem::path& destination)
@@ -326,59 +430,248 @@ void replace_file(const std::filesystem::path& temporary, const std::filesystem:
 #endif
 }
 
+void write_header_bytes(
+    std::ofstream& output,
+    std::uint32_t version,
+    std::uint64_t payload_bytes,
+    std::uint64_t fnv,
+    std::uint32_t crc)
+{
+    output.write(kMagic, 4);
+    unsigned char header[28];
+    auto put_u32 = [&](std::size_t at, std::uint32_t value)
+    {
+        header[at] = static_cast<unsigned char>(value & 0xffu);
+        header[at + 1] = static_cast<unsigned char>((value >> 8) & 0xffu);
+        header[at + 2] = static_cast<unsigned char>((value >> 16) & 0xffu);
+        header[at + 3] = static_cast<unsigned char>((value >> 24) & 0xffu);
+    };
+    auto put_u64 = [&](std::size_t at, std::uint64_t value)
+    {
+        for (int index = 0; index < 8; ++index)
+        {
+            header[at + static_cast<std::size_t>(index)] =
+                static_cast<unsigned char>((value >> (8 * index)) & 0xffu);
+        }
+    };
+    put_u32(0, version);
+    put_u64(4, payload_bytes);
+    put_u64(12, fnv);
+    put_u32(20, crc);
+    put_u32(24, 0);
+    output.write(reinterpret_cast<const char*>(header), 28);
+    if (!output)
+    {
+        throw std::runtime_error("checkpoint could not write a temporary file");
+    }
+}
+
+void stream_payload(
+    StreamWriter& writer,
+    const CheckpointDocument& document,
+    const CheckpointScalarTables* scalars)
+{
+    writer.u8(document.kind);
+    writer.u8(document.algorithm);
+    writer.u8(document.frozen ? 1 : 0);
+    writer.u8(0);
+    writer.i32(document.tables.iterations);
+    writer.i32(document.samples);
+    writer.f64(document.accuracy);
+    writer.text(kUtility);
+    writer.text(document.config_text);
+    writer.ints(document.tables.oop_combos);
+    writer.ints(document.tables.ip_combos);
+    if (document.tables.slot_actions.size() > 0xffffffffu)
+    {
+        throw std::invalid_argument("checkpoint action list is too long");
+    }
+    writer.u32(static_cast<std::uint32_t>(document.tables.slot_actions.size()));
+    for (std::uint16_t count : document.tables.slot_actions)
+    {
+        const unsigned char bytes[2] = {
+            static_cast<unsigned char>(count & 0xffu),
+            static_cast<unsigned char>((count >> 8) & 0xffu)};
+        writer.raw(bytes, 2);
+    }
+    if (scalars != nullptr && !scalars->regret.empty())
+    {
+        writer.scalar_as_doubles(scalars->regret);
+    }
+    else
+    {
+        writer.doubles(document.tables.regret);
+    }
+    if (scalars != nullptr && !scalars->strategy_sum.empty())
+    {
+        writer.scalar_as_doubles(scalars->strategy_sum);
+    }
+    else
+    {
+        writer.doubles(document.tables.strategy_sum);
+    }
+    writer.f64(document.value);
+    writer.f64(document.p1_best_response);
+    writer.f64(document.p2_best_response);
+    writer.f64(document.nash_gap);
+    writer.f64(document.runtime_seconds);
+    writer.ints(document.sample_iterations);
+    writer.doubles(document.sample_values);
+    writer.doubles(document.sample_gaps);
+    writer.text(document.locks_text);
+
+    if (!wants_continuation_section(document, scalars))
+    {
+        return;
+    }
+    std::uint8_t flags = 0;
+    if (document.has_dcfr_params)
+    {
+        flags = static_cast<std::uint8_t>(flags | kFlagDcfrParams);
+    }
+    const bool use_scalar_prediction =
+        scalars != nullptr && !scalars->prediction.empty();
+    if (use_scalar_prediction || !document.prediction.empty())
+    {
+        flags = static_cast<std::uint8_t>(flags | kFlagPrediction);
+    }
+    writer.u8(flags);
+    if ((flags & kFlagDcfrParams) != 0)
+    {
+        writer.f64(document.dcfr.alpha);
+        writer.f64(document.dcfr.beta);
+        writer.f64(document.dcfr.gamma);
+    }
+    if ((flags & kFlagPrediction) != 0)
+    {
+        if (use_scalar_prediction)
+        {
+            writer.scalar_as_doubles(scalars->prediction);
+        }
+        else
+        {
+            writer.doubles(document.prediction);
+        }
+    }
+}
+
 } // namespace
+
+std::uint64_t estimate_checkpoint_payload_bytes(
+    const CheckpointDocument& document,
+    const CheckpointScalarTables* scalars)
+{
+    validate_document_shape(document, scalars);
+    const std::size_t regret_count = scalars != nullptr && !scalars->regret.empty()
+        ? scalars->regret.size()
+        : document.tables.regret.size();
+    const std::size_t strategy_count = scalars != nullptr && !scalars->strategy_sum.empty()
+        ? scalars->strategy_sum.size()
+        : document.tables.strategy_sum.size();
+    const bool use_scalar_prediction =
+        scalars != nullptr && !scalars->prediction.empty();
+    const std::size_t prediction_count =
+        use_scalar_prediction ? scalars->prediction.size() : document.prediction.size();
+
+    std::uint64_t bytes = 0;
+    bytes += 4; // kind/algorithm/frozen/pad
+    bytes += 4; // iterations
+    bytes += 4; // samples
+    bytes += 8; // accuracy
+    bytes += text_bytes(kUtility.size());
+    bytes += text_bytes(document.config_text.size());
+    bytes += list_bytes_u32_prefix(document.tables.oop_combos.size(), 4);
+    bytes += list_bytes_u32_prefix(document.tables.ip_combos.size(), 4);
+    bytes += list_bytes_u32_prefix(document.tables.slot_actions.size(), 2);
+    bytes += list_bytes_u32_prefix(regret_count, 8);
+    bytes += list_bytes_u32_prefix(strategy_count, 8);
+    bytes += 8 * 5; // value, brs, gap, runtime
+    bytes += list_bytes_u32_prefix(document.sample_iterations.size(), 4);
+    bytes += list_bytes_u32_prefix(document.sample_values.size(), 8);
+    bytes += list_bytes_u32_prefix(document.sample_gaps.size(), 8);
+    bytes += text_bytes(document.locks_text.size());
+    if (wants_continuation_section(document, scalars))
+    {
+        bytes += 1; // flags
+        if (document.has_dcfr_params)
+        {
+            bytes += 24;
+        }
+        if (prediction_count != 0)
+        {
+            bytes += list_bytes_u32_prefix(prediction_count, 8);
+        }
+    }
+    return bytes;
+}
 
 void write_checkpoint(
     const std::string& path,
     const CheckpointDocument& document,
-    CheckpointFault fault)
+    CheckpointFault fault,
+    std::uint64_t max_payload_bytes,
+    const CheckpointScalarTables* scalars)
 {
     static_assert(std::endian::native == std::endian::little);
-    const std::string payload = payload_of(document);
-    std::string file;
-    file.append(kMagic, 4);
-    append_u32(file, kVersionWrite);
-    append_u64(file, payload.size());
-    append_u64(file, fnv1a64(payload));
-    append_u32(file, crc32(payload));
-    append_u32(file, 0);
-    file.append(payload);
+    const std::uint64_t estimated = estimate_checkpoint_payload_bytes(document, scalars);
+    if (estimated > max_payload_bytes)
+    {
+        throw std::invalid_argument("checkpoint is outside the allocation limit");
+    }
+    const std::uint32_t version = wants_continuation_section(document, scalars)
+        ? kVersionContinuation
+        : kVersionLocks;
 
     const std::filesystem::path destination(path);
     const std::filesystem::path temporary(destination.string() + ".tmp");
-    {
-        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-        if (!output)
-        {
-            throw std::runtime_error("checkpoint could not open a temporary file");
-        }
-        output.write(file.data(), static_cast<std::streamsize>(file.size()));
-        if (!output)
-        {
-            output.close();
-            std::filesystem::remove(temporary);
-            throw std::runtime_error("checkpoint could not write a temporary file");
-        }
-        output.flush();
-        if (!output)
-        {
-            output.close();
-            std::filesystem::remove(temporary);
-            throw std::runtime_error("checkpoint could not write a temporary file");
-        }
-    }
-    if (fault == CheckpointFault::BeforeReplace)
-    {
-        std::filesystem::remove(temporary);
-        throw std::runtime_error("checkpoint replace aborted");
-    }
     try
     {
+        {
+            std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+            if (!output)
+            {
+                throw std::runtime_error("checkpoint could not open a temporary file");
+            }
+            // Placeholder header; rewritten after the payload checksums are known.
+            write_header_bytes(output, version, 0, 0, 0);
+            StreamWriter writer(output);
+            stream_payload(writer, document, scalars);
+            if (writer.size() != estimated)
+            {
+                throw std::runtime_error("checkpoint payload size mismatch");
+            }
+            if (writer.size() > max_payload_bytes)
+            {
+                throw std::invalid_argument("checkpoint is outside the allocation limit");
+            }
+            output.flush();
+            if (!output)
+            {
+                throw std::runtime_error("checkpoint could not write a temporary file");
+            }
+            output.seekp(0, std::ios::beg);
+            if (!output)
+            {
+                throw std::runtime_error("checkpoint could not write a temporary file");
+            }
+            write_header_bytes(output, version, writer.size(), writer.fnv(), writer.crc());
+            output.flush();
+            if (!output)
+            {
+                throw std::runtime_error("checkpoint could not write a temporary file");
+            }
+        }
+        if (fault == CheckpointFault::BeforeReplace)
+        {
+            std::filesystem::remove(temporary);
+            throw std::runtime_error("checkpoint replace aborted");
+        }
         replace_file(temporary, destination);
     }
     catch (...)
     {
-        std::filesystem::remove(temporary);
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored);
         throw;
     }
 }
@@ -393,8 +686,7 @@ CheckpointDocument read_checkpoint(const std::string& path, std::uint64_t max_pa
     {
         throw std::invalid_argument("checkpoint could not be read");
     }
-    constexpr std::uint64_t kHeader = 32;
-    if (file_size < kHeader || file_size - kHeader > max_payload_bytes)
+    if (file_size < kHeaderBytes || file_size - kHeaderBytes > max_payload_bytes)
     {
         throw std::invalid_argument("checkpoint is outside the allocation limit");
     }
@@ -419,11 +711,11 @@ CheckpointDocument read_checkpoint(const std::string& path, std::uint64_t max_pa
     const std::uint64_t expected_fnv = header.u64();
     const std::uint32_t expected_crc = header.u32();
     (void)header.u32();
-    if (payload_bytes > max_payload_bytes || payload_bytes != file.size() - kHeader)
+    if (payload_bytes > max_payload_bytes || payload_bytes != file.size() - kHeaderBytes)
     {
         throw std::invalid_argument("checkpoint is outside the allocation limit");
     }
-    const std::string_view payload(file.data() + kHeader, static_cast<std::size_t>(payload_bytes));
+    const std::string_view payload(file.data() + kHeaderBytes, static_cast<std::size_t>(payload_bytes));
     if (fnv1a64(payload) != expected_fnv || crc32(payload) != expected_crc)
     {
         throw std::invalid_argument("checkpoint checksum does not match");
@@ -457,9 +749,28 @@ CheckpointDocument read_checkpoint(const std::string& path, std::uint64_t max_pa
     document.sample_iterations = read_ints(reader);
     document.sample_values = read_doubles(reader);
     document.sample_gaps = read_doubles(reader);
-    if (version >= 2)
+    if (version >= kVersionLocks)
     {
         document.locks_text = reader.text();
+    }
+    if (version >= kVersionContinuation)
+    {
+        const std::uint8_t flags = reader.u8();
+        if ((flags & ~static_cast<std::uint8_t>(kFlagDcfrParams | kFlagPrediction)) != 0)
+        {
+            throw std::invalid_argument("checkpoint continuation flags are unknown");
+        }
+        if ((flags & kFlagDcfrParams) != 0)
+        {
+            document.has_dcfr_params = true;
+            document.dcfr.alpha = reader.f64();
+            document.dcfr.beta = reader.f64();
+            document.dcfr.gamma = reader.f64();
+        }
+        if ((flags & kFlagPrediction) != 0)
+        {
+            document.prediction = read_doubles(reader);
+        }
     }
     if (!reader.done())
     {
@@ -480,6 +791,18 @@ CheckpointDocument read_checkpoint(const std::string& path, std::uint64_t max_pa
         || document.sample_iterations.size() != document.sample_gaps.size())
     {
         throw std::invalid_argument("checkpoint samples do not line up");
+    }
+    if (!document.prediction.empty()
+        && document.prediction.size() != document.tables.regret.size())
+    {
+        throw std::invalid_argument("checkpoint prediction size does not match tables");
+    }
+    if (document.has_dcfr_params
+        && (!std::isfinite(document.dcfr.alpha)
+            || !std::isfinite(document.dcfr.beta)
+            || !std::isfinite(document.dcfr.gamma)))
+    {
+        throw std::invalid_argument("checkpoint DCFR parameters must be finite");
     }
     return document;
 }

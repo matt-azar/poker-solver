@@ -435,8 +435,8 @@ struct StreetBatchSolver::Engine
     std::pmr::vector<std::uint64_t> mask[2];
     std::pmr::vector<Support> support[2];
     // PCFR+: last instantaneous CF regret per action slot (prediction m). Empty
-    // until the first PCFR+ train allocates it. Cold-starts at zeros; PSOL reload
-    // does not restore this table (prediction resumes cold).
+    // until the first PCFR+ train allocates it. Cold-starts at zeros; PSOL v3
+    // may restore this table for exact continuation.
     std::pmr::vector<TableScalar> prediction_;
     bool pcfr_collect_ = false;
     mutable bool average_ready = false;
@@ -6386,19 +6386,37 @@ struct StreetBatchSolver::Engine
         return true;
     }
 
-    TrainingTables export_tables() const
+    void export_table_identity(TrainingTables& tables) const
     {
-        TrainingTables tables;
         tables.iterations = trained;
         tables.oop_combos.assign(combos[0].begin(), combos[0].end());
         tables.ip_combos.assign(combos[1].begin(), combos[1].end());
-        tables.slot_actions.reserve(slots.size());
-        for (const Slot& slot : slots)
+        tables.slot_actions.resize(slots.size());
+        for (std::size_t index = 0; index < slots.size(); ++index)
         {
-            tables.slot_actions.push_back(static_cast<std::uint16_t>(slot_action_count(slot)));
+            tables.slot_actions[index] =
+                static_cast<std::uint16_t>(slot_action_count(slots[index]));
         }
-        tables.regret.assign(regret.begin(), regret.end());
-        tables.strategy_sum.assign(strategy_sum.begin(), strategy_sum.end());
+        tables.regret.clear();
+        tables.strategy_sum.clear();
+    }
+
+    void export_tables_into(TrainingTables& tables) const
+    {
+        export_table_identity(tables);
+        tables.regret.resize(regret.size());
+        tables.strategy_sum.resize(strategy_sum.size());
+        for (std::size_t index = 0; index < regret.size(); ++index)
+        {
+            tables.regret[index] = static_cast<double>(regret[index]);
+            tables.strategy_sum[index] = static_cast<double>(strategy_sum[index]);
+        }
+    }
+
+    TrainingTables export_tables() const
+    {
+        TrainingTables tables;
+        export_tables_into(tables);
         return tables;
     }
 
@@ -6425,6 +6443,85 @@ struct StreetBatchSolver::Engine
         std::copy(tables.strategy_sum.begin(), tables.strategy_sum.end(), strategy_sum.begin());
         trained = tables.iterations;
         average_ready = false;
+    }
+
+    bool same_live_combos(
+        const std::pmr::vector<int>& left,
+        const std::pmr::vector<int>& right) const
+    {
+        if (left.size() != right.size())
+        {
+            return false;
+        }
+        for (std::size_t index = 0; index < left.size(); ++index)
+        {
+            if (left[index] != right[index])
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void copy_training_state_from(const Engine& other)
+    {
+        check_usable();
+        if (regret.size() != other.regret.size()
+            || strategy_sum.size() != other.strategy_sum.size()
+            || slots.size() != other.slots.size()
+            || !same_live_combos(combos[0], other.combos[0])
+            || !same_live_combos(combos[1], other.combos[1]))
+        {
+            throw std::invalid_argument("training state does not match this tree");
+        }
+        for (std::size_t index = 0; index < slots.size(); ++index)
+        {
+            if (slot_action_count(slots[index]) != slot_action_count(other.slots[index]))
+            {
+                throw std::invalid_argument("training state does not match this tree");
+            }
+        }
+        std::copy(other.regret.begin(), other.regret.end(), regret.begin());
+        std::copy(other.strategy_sum.begin(), other.strategy_sum.end(), strategy_sum.begin());
+        if (other.prediction_.empty())
+        {
+            if (!prediction_.empty())
+            {
+                std::fill(prediction_.begin(), prediction_.end(), 0.0);
+            }
+        }
+        else
+        {
+            ensure_pcfr_prediction_table();
+            std::copy(other.prediction_.begin(), other.prediction_.end(), prediction_.begin());
+        }
+        trained = other.trained;
+        algorithm_bound_ = other.algorithm_bound_;
+        bound_algorithm_ = other.bound_algorithm_;
+        dcfr_params_ = other.dcfr_params_;
+        average_ready = false;
+    }
+
+    void install_prediction(std::span<const double> values)
+    {
+        check_usable();
+        if (values.empty())
+        {
+            if (!prediction_.empty())
+            {
+                std::fill(prediction_.begin(), prediction_.end(), 0.0);
+            }
+            return;
+        }
+        if (values.size() != regret.size())
+        {
+            throw std::invalid_argument("prediction table does not match this tree");
+        }
+        ensure_pcfr_prediction_table();
+        for (std::size_t index = 0; index < values.size(); ++index)
+        {
+            prediction_[index] = static_cast<TableScalar>(values[index]);
+        }
     }
 
     std::string weighted_range(int player, const std::vector<double>& reach) const
@@ -7259,6 +7356,16 @@ TrainingTables StreetBatchSolver::training_tables() const
     return engine_->export_tables();
 }
 
+void StreetBatchSolver::export_training_identity(TrainingTables& out) const
+{
+    engine_->export_table_identity(out);
+}
+
+void StreetBatchSolver::export_training_tables(TrainingTables& out) const
+{
+    engine_->export_tables_into(out);
+}
+
 void StreetBatchSolver::install_training_tables(const TrainingTables& tables)
 {
     note_profile_mutation();
@@ -7266,6 +7373,12 @@ void StreetBatchSolver::install_training_tables(const TrainingTables& tables)
     // Tables alone do not carry the algorithm. Callers that reopen a solution
     // must bind_training_algorithm from the checkpoint/job tag before continue.
     engine_->algorithm_bound_ = false;
+}
+
+void StreetBatchSolver::copy_training_state_from(const StreetBatchSolver& other)
+{
+    note_profile_mutation();
+    engine_->copy_training_state_from(*other.engine_);
 }
 
 void StreetBatchSolver::set_dcfr_params(DcfrParams params)
@@ -7276,6 +7389,17 @@ void StreetBatchSolver::set_dcfr_params(DcfrParams params)
 DcfrParams StreetBatchSolver::dcfr_params() const
 {
     return engine_->dcfr_params_;
+}
+
+std::span<const TableScalar> StreetBatchSolver::prediction_table() const
+{
+    return engine_->prediction_;
+}
+
+void StreetBatchSolver::install_prediction_table(std::span<const double> values)
+{
+    note_profile_mutation();
+    engine_->install_prediction(values);
 }
 
 void StreetBatchSolver::bind_training_algorithm(Algorithm algorithm)
