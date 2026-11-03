@@ -495,7 +495,9 @@ void check_happy_path_lifecycle()
     const std::string spot =
         "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],"
         "\"oop_range\":\"AhAd,AcAs\",\"ip_range\":\"2c3d,2h3h\","
-        "\"pot\":100,\"stack\":100,\"iterations\":80,\"samples\":40,\"max_raises\":0,"
+        // Keep the initial solve short so pause/save/open still fit CI time budgets;
+        // continue/resolve-locked below add a few more iters explicitly.
+        "\"pot\":100,\"stack\":100,\"iterations\":12,\"samples\":4,\"max_raises\":0,"
         "\"allow_all_in\":0,\"oop_bets\":[],\"ip_bets\":[],\"memory_mib\":128}";
     HttpResult plan;
     CHECK(http_exchange("POST", "/api/plan-memory", spot, plan));
@@ -533,7 +535,7 @@ void check_happy_path_lifecycle()
     double paused_iters = 0.0;
     CHECK(json_number(after_pause.body, "iterations", paused_iters));
     CHECK(paused_iters > 0.0);
-    CHECK(paused_iters <= 80.0);
+    CHECK(paused_iters <= 12.0);
 
     // Inspect: browse root + action EV.
     HttpResult node;
