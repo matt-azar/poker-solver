@@ -909,18 +909,32 @@ struct RiverBatchSolver::Engine
         }
     }
 
+    static double sum_values(const std::vector<double>& values)
+    {
+        double sum = 0.0;
+        for (double item : values)
+        {
+            sum += item;
+        }
+        return sum;
+    }
+
     double utility_of_average() const
     {
         ensure_average();
         std::vector<double> reach(static_cast<std::size_t>(n1), 1.0);
         std::vector<double> value(static_cast<std::size_t>(n0), 0.0);
         walk_v0(0, reach.data(), value.data(), -1);
-        double sum = 0.0;
-        for (double item : value)
-        {
-            sum += item;
-        }
-        return sum;
+        return sum_values(value);
+    }
+
+    double utility_of_average_p1() const
+    {
+        ensure_average();
+        std::vector<double> reach(static_cast<std::size_t>(n0), 1.0);
+        std::vector<double> value(static_cast<std::size_t>(n1), 0.0);
+        walk_v1(0, reach.data(), value.data(), -1);
+        return sum_values(value);
     }
 
     double utility_when_p0_responds() const
@@ -929,12 +943,7 @@ struct RiverBatchSolver::Engine
         std::vector<double> reach(static_cast<std::size_t>(n1), 1.0);
         std::vector<double> value(static_cast<std::size_t>(n0), 0.0);
         walk_v0(0, reach.data(), value.data(), 0);
-        double sum = 0.0;
-        for (double item : value)
-        {
-            sum += item;
-        }
-        return sum;
+        return sum_values(value);
     }
 
     double utility_when_p1_responds() const
@@ -943,12 +952,16 @@ struct RiverBatchSolver::Engine
         std::vector<double> reach(static_cast<std::size_t>(n0), 1.0);
         std::vector<double> value(static_cast<std::size_t>(n1), 0.0);
         walk_v1(0, reach.data(), value.data(), 1);
-        double sum = 0.0;
-        for (double item : value)
-        {
-            sum += item;
-        }
-        return sum;
+        return sum_values(value);
+    }
+
+    EvaluationResult evaluate_profile() const
+    {
+        return make_evaluation(
+            utility_of_average(),
+            utility_of_average_p1(),
+            utility_when_p0_responds(),
+            utility_when_p1_responds());
     }
 
     bool same_combos(const std::vector<int>& stored, const std::vector<int>& live) const
@@ -1993,10 +2006,7 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
                 && completed % config.eval_every == 0;
             if (check_gap)
             {
-                stats.p1_expected_utility = expected_utility();
-                stats.p1_best_response_utility = p1_best_response_utility();
-                stats.p2_best_response_utility = p2_best_response_utility();
-                stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+                apply_evaluation(stats, evaluate());
                 stats.nash_gap_history.push_back(stats.nash_gap);
                 stats.nash_gap_iterations.push_back(completed);
                 fresh = true;
@@ -2019,10 +2029,7 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
         const auto end = std::chrono::steady_clock::now();
         if (!fresh)
         {
-            stats.p1_expected_utility = expected_utility();
-            stats.p1_best_response_utility = p1_best_response_utility();
-            stats.p2_best_response_utility = p2_best_response_utility();
-            stats.nash_gap = stats.p1_best_response_utility + stats.p2_best_response_utility;
+            apply_evaluation(stats, evaluate());
             if (config.nash_gap_threshold >= 0.0)
             {
                 stats.nash_gap_history.push_back(stats.nash_gap);
@@ -2058,9 +2065,14 @@ double RiverBatchSolver::p2_best_response_utility() const
     return engine_->utility_when_p1_responds();
 }
 
+EvaluationResult RiverBatchSolver::evaluate() const
+{
+    return engine_->evaluate_profile();
+}
+
 double RiverBatchSolver::nash_gap() const
 {
-    return p1_best_response_utility() + p2_best_response_utility();
+    return evaluate().nash_gap;
 }
 
 int RiverBatchSolver::infoset_count() const

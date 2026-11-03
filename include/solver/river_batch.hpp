@@ -59,6 +59,7 @@ public:
     double expected_utility() const;
     double p1_best_response_utility() const;
     double p2_best_response_utility() const;
+    EvaluationResult evaluate() const;
     double nash_gap() const;
 
     int infoset_count() const;

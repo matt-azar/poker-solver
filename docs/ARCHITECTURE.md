@@ -54,13 +54,13 @@ CFR+ floors the updating player's cumulative regrets once after that player's pa
 
 `compute_best_response` walks every information set of the responding player from the deepest public decision back to the root. At each set it keeps the action with the larger opponent-and-chance-weighted continuation. Ties keep the lower action index.
 
-The Nash gap is NashConv:
-
-\[
-u_0(\mathrm{BR}_0,\bar\sigma_1)+u_1(\bar\sigma_0,\mathrm{BR}_1).
-\]
-
-Accuracy stopping uses NashConv / pot. This is not Pio's averaged unilateral exploitability.
+The Nash gap is NashConv, the sum of unilateral BR gains
+\((u_0(\mathrm{BR}_0)-u_0(\bar\sigma))+(u_1(\mathrm{BR}_1)-u_1(\bar\sigma))\).
+Under zero-sum chips this equals \(u_0(\mathrm{BR}_0)+u_1(\mathrm{BR}_1)\).
+`StreetBatchSolver::evaluate()`, `RiverBatchSolver::evaluate()`, and
+`evaluate_strategy` share `EvaluationResult`. Accuracy stopping uses that
+NashConv / pot for ordinary chip targets. This is not Pio's averaged
+unilateral exploitability.
 
 ## Stopping
 

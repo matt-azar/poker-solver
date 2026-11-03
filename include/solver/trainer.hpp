@@ -1,6 +1,7 @@
 #pragma once
 
 #include "solver/dcfr.hpp"
+#include "solver/evaluation.hpp"
 #include "solver/node_lock.hpp"
 #include "solver/payoff.hpp"
 #include "solver/regret_matching.hpp"
@@ -92,6 +93,23 @@ struct BestResponseResult
     // NashConv; do not claim chip Nash-gap under active incentives.
     double nash_gap = 0.0;
 };
+
+inline void apply_evaluation(SolveStats& stats, const EvaluationResult& evaluation)
+{
+    stats.p1_expected_utility = evaluation.u0;
+    stats.p1_best_response_utility = evaluation.br0;
+    stats.p2_best_response_utility = evaluation.br1;
+    stats.nash_gap = evaluation.nash_gap;
+}
+
+inline BestResponseResult best_response_from_evaluation(const EvaluationResult& evaluation)
+{
+    BestResponseResult result;
+    result.p1_utility_when_p1_responds = evaluation.br0;
+    result.p2_utility_when_p2_responds = evaluation.br1;
+    result.nash_gap = evaluation.nash_gap;
+    return result;
+}
 
 inline const char* algorithm_name(Algorithm algorithm)
 {
@@ -504,18 +522,23 @@ double p1_utility_of_best_response(const Game& game,
 }
 
 template <ExtensiveGame Game>
-BestResponseResult compute_best_response(const Game& game, const std::vector<double>& strategy)
+EvaluationResult evaluate_strategy(const Game& game, const std::vector<double>& strategy)
 {
-    BestResponseResult result;
     const std::vector<int> offset = action_offsets(game);
     const PlayerPayoff on_path = expected_payoff_from_strategy(game, game.root(), strategy, offset);
     const PlayerPayoff when_p0 = payoff_of_best_response(game, strategy, 0);
     const PlayerPayoff when_p1 = payoff_of_best_response(game, strategy, 1);
-    result.p1_utility_when_p1_responds = when_p0.utility[0];
-    result.p2_utility_when_p2_responds = when_p1.utility[1];
-    result.nash_gap = (when_p0.utility[0] - on_path.utility[0])
-        + (when_p1.utility[1] - on_path.utility[1]);
-    return result;
+    return make_evaluation(
+        on_path.utility[0],
+        on_path.utility[1],
+        when_p0.utility[0],
+        when_p1.utility[1]);
+}
+
+template <ExtensiveGame Game>
+BestResponseResult compute_best_response(const Game& game, const std::vector<double>& strategy)
+{
+    return best_response_from_evaluation(evaluate_strategy(game, strategy));
 }
 
 template <ExtensiveGame Game>
@@ -645,13 +668,7 @@ public:
     SolveStats evaluate() const
     {
         SolveStats stats;
-        const std::vector<double> strategy = average_strategy();
-        stats.p1_expected_utility = expected_p1_from_strategy(
-            game_, game_.root(), strategy, offset_);
-        const BestResponseResult response = compute_best_response(game_, strategy);
-        stats.p1_best_response_utility = response.p1_utility_when_p1_responds;
-        stats.p2_best_response_utility = response.p2_utility_when_p2_responds;
-        stats.nash_gap = response.nash_gap;
+        apply_evaluation(stats, evaluate_strategy(game_, average_strategy()));
         stats.memory_bytes_estimate = memory_bytes_estimate();
         return stats;
     }

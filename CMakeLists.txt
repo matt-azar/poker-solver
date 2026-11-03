@@ -91,6 +91,7 @@ add_executable(poker_solver_tests
     tests/unit/test_icm_solve.cpp
     tests/unit/test_incentives.cpp
     tests/unit/test_incentives_solve.cpp
+    tests/unit/test_nashconv.cpp
     tests/unit/test_streets.cpp
     tests/unit/test_budget.cpp
     tests/unit/test_session.cpp
