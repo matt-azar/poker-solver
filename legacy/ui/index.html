@@ -69,8 +69,10 @@
     <label>Pot <input id="pot" type="number" value="100"></label>
     <label>Stack <input id="stack" type="number" value="200"></label>
     <label>Max raises <input id="max-raises" type="number" value="2" min="0"></label>
-    <label>OOP bets <input id="oop-bets" value="0.5, 1"></label>
-    <label>IP bets <input id="ip-bets" value="0.5, 1"></label>
+    <label>OOP bets <input id="oop-bets" value="0.5, 1" placeholder="blank = check"></label>
+    <label>IP bets <input id="ip-bets" value="0.5, 1" placeholder="blank = check"></label>
+    <label>OOP raises <input id="oop-raises" placeholder="blank = bet sizes; - = none"></label>
+    <label>IP raises <input id="ip-raises" placeholder="blank = bet sizes; - = none"></label>
     <label>Accuracy <input id="accuracy" placeholder="fraction of the pot"></label>
     <label>Time limit <input id="time-limit" type="number" min="0" step="0.1" placeholder="seconds"></label>
     <label>Eval samples <input id="samples" type="number" value="5" min="1" max="20"></label>
@@ -83,16 +85,25 @@
     <div id="flop-row" class="wide street-row" hidden>
       <label>OOP flop <input id="oop-flop" placeholder="uses OOP bets"></label>
       <label>IP flop <input id="ip-flop" placeholder="uses IP bets"></label>
+      <label>OOP flop raises <input id="oop-flop-raises" placeholder="blank = OOP raises"></label>
+      <label>IP flop raises <input id="ip-flop-raises" placeholder="blank = IP raises"></label>
+      <label>Flop donk <input id="oop-flop-donk" placeholder="blank = no lead"></label>
     </div>
     <div id="turn-row" class="wide street-row" hidden>
       <label>OOP turn <input id="oop-turn" placeholder="uses OOP bets"></label>
       <label>IP turn <input id="ip-turn" placeholder="uses IP bets"></label>
+      <label>OOP turn raises <input id="oop-turn-raises" placeholder="blank = OOP raises"></label>
+      <label>IP turn raises <input id="ip-turn-raises" placeholder="blank = IP raises"></label>
+      <label>Turn donk <input id="oop-turn-donk" placeholder="blank = no lead"></label>
     </div>
     <div id="river-row" class="wide street-row" hidden>
       <label>OOP river <input id="oop-river" placeholder="uses OOP bets"></label>
       <label>IP river <input id="ip-river" placeholder="uses IP bets"></label>
+      <label>OOP river raises <input id="oop-river-raises" placeholder="blank = OOP raises"></label>
+      <label>IP river raises <input id="ip-river-raises" placeholder="blank = IP raises"></label>
+      <label>River donk <input id="oop-river-donk" placeholder="blank = no lead"></label>
     </div>
-    <label id="donk-label">OOP donk <input id="oop-donk" placeholder="after IP bet the previous street"></label>
+    <label id="donk-label">OOP donk <input id="oop-donk" placeholder="blank = no lead; else after IP bet"></label>
     <label>Pot cap <input id="pot-cap" type="number" value="0" min="0" step="0.5"></label>
     <label class="check"><input id="no-three-bet" type="checkbox"> No 3-bet</label>
     <label class="check"><input id="geometric" type="checkbox"> Geometric size</label>

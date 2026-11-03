@@ -30,9 +30,14 @@ void print_usage(const char* argv0)
               << " [--board Ah,Kd,7c,4s] [--pot N] [--stack N]"
               << " [--oop-range TEXT] [--ip-range TEXT]"
               << " [--oop-bets 0.5,1] [--ip-bets 0.5,1]"
-              << " [--oop-turn-bets 0.5] [--oop-river-bets 1]"
-              << " [--ip-turn-bets 0.5] [--ip-river-bets 1]"
-              << " [--oop-donk 0.5,20c] [--pot-cap 1] [--no-three-bet]"
+              << " [--oop-flop-bets 0.5] [--oop-turn-bets 0.5] [--oop-river-bets 1]"
+              << " [--ip-flop-bets 0.5] [--ip-turn-bets 0.5] [--ip-river-bets 1]"
+              << " [--oop-raises 0.5,2.5x] [--ip-raises 0.5]"
+              << " [--oop-flop-raises e] [--oop-turn-raises 2e] [--oop-river-raises a]"
+              << " [--ip-flop-raises e] [--ip-turn-raises 2e] [--ip-river-raises a]"
+              << " [--oop-donk 0.5,20c] [--oop-flop-donk -] [--oop-turn-donk 33]"
+              << " [--oop-river-donk 50] [--merge-threshold 0.1]"
+              << " [--pot-cap 1] [--no-three-bet]"
               << " [--geometric] [--all-in-threshold 0.4]"
               << " [--rake-rate RATE] [--rake-cap CHIPS]"
               << " [--icm-stacks S0,S1,...] [--icm-payouts P1,P2,...]"
@@ -98,7 +103,11 @@ std::string trim_copy(const std::string& text)
     return text.substr(begin, end - begin);
 }
 
-void parse_sizes(const std::string& text, std::vector<double>& fractions, std::vector<double>* multiples)
+void parse_sizes(
+    const std::string& text,
+    std::vector<double>& fractions,
+    std::vector<double>* multiples,
+    bool pio_tokens = false)
 {
     std::size_t start = 0;
     while (start < text.size())
@@ -108,27 +117,47 @@ void parse_sizes(const std::string& text, std::vector<double>& fractions, std::v
             start, comma == std::string::npos ? std::string::npos : comma - start));
         if (!piece.empty())
         {
-            const char last = piece[piece.size() - 1];
-            if (last == 'x' || last == 'X')
+            if (pio_tokens)
             {
-                if (multiples == nullptr)
+                double spec = 0.0;
+                std::string error;
+                if (!poker::streets::parse_size_token(piece, multiples != nullptr, spec, error))
                 {
-                    throw std::invalid_argument("a bet size cannot be a multiple; put 3x on a raise list");
+                    throw std::invalid_argument(error);
                 }
-                multiples->push_back(std::atof(piece.c_str()));
-            }
-            else if (last == 'c' || last == 'C')
-            {
-                const int chips = std::atoi(piece.c_str());
-                if (chips <= 0)
+                if (poker::streets::is_multiple_spec(spec))
                 {
-                    throw std::invalid_argument("a fixed size must be a positive chip amount");
+                    multiples->push_back(poker::streets::multiple_of(spec));
                 }
-                fractions.push_back(-static_cast<double>(chips));
+                else
+                {
+                    fractions.push_back(spec);
+                }
             }
             else
             {
-                fractions.push_back(std::atof(piece.c_str()));
+                const char last = piece[piece.size() - 1];
+                if (last == 'x' || last == 'X')
+                {
+                    if (multiples == nullptr)
+                    {
+                        throw std::invalid_argument("a bet size cannot be a multiple; put 3x on a raise list");
+                    }
+                    multiples->push_back(std::atof(piece.c_str()));
+                }
+                else if (last == 'c' || last == 'C')
+                {
+                    const int chips = std::atoi(piece.c_str());
+                    if (chips <= 0)
+                    {
+                        throw std::invalid_argument("a fixed size must be a positive chip amount");
+                    }
+                    fractions.push_back(-static_cast<double>(chips));
+                }
+                else
+                {
+                    fractions.push_back(std::atof(piece.c_str()));
+                }
             }
         }
         if (comma == std::string::npos)
@@ -136,6 +165,18 @@ void parse_sizes(const std::string& text, std::vector<double>& fractions, std::v
             break;
         }
         start = comma + 1;
+    }
+}
+
+// Per-street raise lists keep `2.5x` on that street. The shared
+// `--oop-raises` / `--ip-raises` flags still fill the global multiples vector.
+void parse_street_raises(const std::string& text, std::vector<double>& sizes)
+{
+    std::vector<double> multiples;
+    parse_sizes(text, sizes, &multiples, true);
+    for (double multiple : multiples)
+    {
+        sizes.push_back(poker::streets::multiple_spec(multiple));
     }
 }
 
@@ -358,59 +399,108 @@ int main(int argc, char** argv)
             else if (arg == "--oop-bets")
             {
                 config.oop_bet_sizes.clear();
-                parse_sizes(need("--oop-bets"), config.oop_bet_sizes, nullptr);
+                parse_sizes(need("--oop-bets"), config.oop_bet_sizes, nullptr, true);
             }
             else if (arg == "--ip-bets")
             {
                 config.ip_bet_sizes.clear();
-                parse_sizes(need("--ip-bets"), config.ip_bet_sizes, nullptr);
+                parse_sizes(need("--ip-bets"), config.ip_bet_sizes, nullptr, true);
             }
             else if (arg == "--oop-raises")
             {
                 config.oop_raise_sizes.clear();
                 config.oop_raise_multiples.clear();
-                parse_sizes(need("--oop-raises"), config.oop_raise_sizes, &config.oop_raise_multiples);
+                parse_sizes(need("--oop-raises"), config.oop_raise_sizes, &config.oop_raise_multiples, true);
             }
             else if (arg == "--ip-raises")
             {
                 config.ip_raise_sizes.clear();
                 config.ip_raise_multiples.clear();
-                parse_sizes(need("--ip-raises"), config.ip_raise_sizes, &config.ip_raise_multiples);
+                parse_sizes(need("--ip-raises"), config.ip_raise_sizes, &config.ip_raise_multiples, true);
             }
             else if (arg == "--oop-donk")
             {
                 config.oop_donk_sizes.clear();
-                parse_sizes(need("--oop-donk"), config.oop_donk_sizes, nullptr);
+                parse_sizes(need("--oop-donk"), config.oop_donk_sizes, nullptr, true);
             }
             else if (arg == "--oop-flop-bets")
             {
                 config.oop_flop_bets.clear();
-                parse_sizes(need("--oop-flop-bets"), config.oop_flop_bets, nullptr);
+                parse_sizes(need("--oop-flop-bets"), config.oop_flop_bets, nullptr, true);
             }
             else if (arg == "--oop-turn-bets")
             {
                 config.oop_turn_bets.clear();
-                parse_sizes(need("--oop-turn-bets"), config.oop_turn_bets, nullptr);
+                parse_sizes(need("--oop-turn-bets"), config.oop_turn_bets, nullptr, true);
             }
             else if (arg == "--oop-river-bets")
             {
                 config.oop_river_bets.clear();
-                parse_sizes(need("--oop-river-bets"), config.oop_river_bets, nullptr);
+                parse_sizes(need("--oop-river-bets"), config.oop_river_bets, nullptr, true);
             }
             else if (arg == "--ip-flop-bets")
             {
                 config.ip_flop_bets.clear();
-                parse_sizes(need("--ip-flop-bets"), config.ip_flop_bets, nullptr);
+                parse_sizes(need("--ip-flop-bets"), config.ip_flop_bets, nullptr, true);
             }
             else if (arg == "--ip-turn-bets")
             {
                 config.ip_turn_bets.clear();
-                parse_sizes(need("--ip-turn-bets"), config.ip_turn_bets, nullptr);
+                parse_sizes(need("--ip-turn-bets"), config.ip_turn_bets, nullptr, true);
             }
             else if (arg == "--ip-river-bets")
             {
                 config.ip_river_bets.clear();
-                parse_sizes(need("--ip-river-bets"), config.ip_river_bets, nullptr);
+                parse_sizes(need("--ip-river-bets"), config.ip_river_bets, nullptr, true);
+            }
+            else if (arg == "--oop-flop-raises")
+            {
+                config.oop_flop_raises.clear();
+                parse_street_raises(need("--oop-flop-raises"), config.oop_flop_raises);
+            }
+            else if (arg == "--oop-turn-raises")
+            {
+                config.oop_turn_raises.clear();
+                parse_street_raises(need("--oop-turn-raises"), config.oop_turn_raises);
+            }
+            else if (arg == "--oop-river-raises")
+            {
+                config.oop_river_raises.clear();
+                parse_street_raises(need("--oop-river-raises"), config.oop_river_raises);
+            }
+            else if (arg == "--ip-flop-raises")
+            {
+                config.ip_flop_raises.clear();
+                parse_street_raises(need("--ip-flop-raises"), config.ip_flop_raises);
+            }
+            else if (arg == "--ip-turn-raises")
+            {
+                config.ip_turn_raises.clear();
+                parse_street_raises(need("--ip-turn-raises"), config.ip_turn_raises);
+            }
+            else if (arg == "--ip-river-raises")
+            {
+                config.ip_river_raises.clear();
+                parse_street_raises(need("--ip-river-raises"), config.ip_river_raises);
+            }
+            else if (arg == "--oop-flop-donk")
+            {
+                config.oop_flop_donk.clear();
+                parse_sizes(need("--oop-flop-donk"), config.oop_flop_donk, nullptr, true);
+            }
+            else if (arg == "--oop-turn-donk")
+            {
+                config.oop_turn_donk.clear();
+                parse_sizes(need("--oop-turn-donk"), config.oop_turn_donk, nullptr, true);
+            }
+            else if (arg == "--oop-river-donk")
+            {
+                config.oop_river_donk.clear();
+                parse_sizes(need("--oop-river-donk"), config.oop_river_donk, nullptr, true);
+            }
+            else if (arg == "--merge-threshold")
+            {
+                config.merge_threshold = std::atof(need("--merge-threshold"));
             }
             else if (arg == "--pot-cap")
             {

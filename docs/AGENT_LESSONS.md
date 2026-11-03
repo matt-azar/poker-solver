@@ -141,8 +141,9 @@ Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fract
 
 - **Absent** `oop_bets` / `ip_bets` → defaults `{0.5, 1}`.
 - **Present empty array** → check-only.
-- Raise lists are separate from bets: absent `oop_raises` / `ip_raises` copies bets when multiples are also empty; present empty stays empty.
-- `max_raises` counts facing raises only (opening street bets do not consume the cap).
+- Raise lists are separate from bets: absent `oop_raises` / `ip_raises` copies bets when multiples are also empty; present empty stays empty. The engine does not copy bets into an empty C++ raise vector. Study copies a blank raise box into that street's raise list before sending.
+- A zero-length per-street list still falls back to the shared list. A one-element explicit-empty sentinel (`-`, stored as `-4e9`) does not. `e` / `2e` / `3e` / `a` / `Nx` stay sentinels until the decision node.
+- `max_raises` counts facing raises only (opening street bets do not consume the cap). All-in is added only when that situation already lists a size, or `--geometric` injected one.
 
 **Don't:** “Normalize” empty arrays back to defaults (`docs/EXPLORER.md`).
 
@@ -237,7 +238,7 @@ Made-hand **categories** (when present) are category mass on a **five-card** boa
 
 ### Betting semantics (street)
 
-Sizes are pot fractions unless negative / `Nc` chip form. Street-specific lists replace shared lists on that street. Empty raise list with non-empty raise-multiples does not fall back to bet sizes. Geometric = equal pot fractions over streets left (river = all-in fraction). Donk sizes only after IP aggression previous street. `--no-three-bet` removes the re-raise. All-in threshold snaps large commitments to all-in when allowed.
+Sizes are pot fractions unless negative / `Nc` chip form, or a Pio sentinel (`e`, `Ne`, `a`, `Nx`, `-`). Street-specific lists replace shared lists on that street. Empty raise list with non-empty raise-multiples does not fall back to bet sizes. Geometric = equal pot fractions over streets left at that node (river = all-in fraction). `2e` is two equal bets from the current pot and stack, not twice the root fraction. Donk sizes only after IP aggression previous street; explicit-empty donk checks. `--no-three-bet` removes the re-raise. All-in threshold snaps large commitments to all-in when allowed. Blank list + allow-all-in does not invent an all-in.
 
 **Pointers:** `docs/STREETS.md`, `StreetConfig` comments in `street_game.hpp`.
 

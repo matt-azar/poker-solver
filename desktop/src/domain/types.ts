@@ -45,7 +45,17 @@ export interface SolveJobRequest {
   ip_turn_bets?: number[];
   oop_river_bets?: number[];
   ip_river_bets?: number[];
+  oop_flop_raises?: number[];
+  ip_flop_raises?: number[];
+  oop_turn_raises?: number[];
+  ip_turn_raises?: number[];
+  oop_river_raises?: number[];
+  ip_river_raises?: number[];
   oop_donk?: number[];
+  oop_flop_donk?: number[];
+  oop_turn_donk?: number[];
+  oop_river_donk?: number[];
+  merge_threshold?: number;
   pot_cap?: number;
   allow_three_bet?: number;
   geometric?: number;
@@ -263,7 +273,7 @@ export interface SpotDraft {
   stack: number;
   oopBets: string;
   ipBets: string;
-  /** Raise pot-% / Nx list (separate from bets). Blank = no raises. */
+  /** Shared raise text kept for older drafts. Street raise fields are the ones solved. */
   oopRaises: string;
   ipRaises: string;
   oopFlop: string;
@@ -272,7 +282,18 @@ export interface SpotDraft {
   ipTurn: string;
   oopRiver: string;
   ipRiver: string;
+  /** Blank copies that street's bets. `-` removes raises. */
+  oopFlopRaises: string;
+  ipFlopRaises: string;
+  oopTurnRaises: string;
+  ipTurnRaises: string;
+  oopRiverRaises: string;
+  ipRiverRaises: string;
   oopDonk: string;
+  /** Blank donk text cannot lead on that street. */
+  oopFlopDonk: string;
+  oopTurnDonk: string;
+  oopRiverDonk: string;
   /** When true, OOP flop sizes are also used as donk sizes on that street. */
   donkFlop: boolean;
   donkTurn: boolean;
@@ -330,8 +351,7 @@ export const DEFAULT_SPOT: SpotDraft = {
   ipRange: "KK",
   pot: 100,
   stack: 200,
-  // Blank size fields mean no bets/raises (engine empty arrays). Geometric /
-  // all-in toggles can still inject sizes when enabled.
+  // Blank bet fields are forced checks. Blank raise fields copy that street's bets.
   oopBets: "",
   ipBets: "",
   oopRaises: "",
@@ -342,7 +362,16 @@ export const DEFAULT_SPOT: SpotDraft = {
   ipTurn: "",
   oopRiver: "",
   ipRiver: "",
+  oopFlopRaises: "",
+  ipFlopRaises: "",
+  oopTurnRaises: "",
+  ipTurnRaises: "",
+  oopRiverRaises: "",
+  ipRiverRaises: "",
   oopDonk: "",
+  oopFlopDonk: "",
+  oopTurnDonk: "",
+  oopRiverDonk: "",
   donkFlop: false,
   donkTurn: false,
   donkRiver: false,

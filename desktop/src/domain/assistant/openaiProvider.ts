@@ -444,7 +444,16 @@ function asTreeEdits(raw: unknown): StudySetupTreePreset | undefined {
     "ipTurn",
     "oopRiver",
     "ipRiver",
+    "oopFlopRaises",
+    "ipFlopRaises",
+    "oopTurnRaises",
+    "ipTurnRaises",
+    "oopRiverRaises",
+    "ipRiverRaises",
     "oopDonk",
+    "oopFlopDonk",
+    "oopTurnDonk",
+    "oopRiverDonk",
   ] as const) {
     if (typeof src[key] === "string") {
       out[key] = src[key];

@@ -131,8 +131,6 @@ interface SelectedCell {
   text: string;
 }
 
-/** Rebuild a Build raise field from pot fractions + facing multiples. */
-
 function asNamedList(data: unknown): LibraryNamedEntry[] {
   if (!Array.isArray(data)) {
     return [];
@@ -177,8 +175,6 @@ function asRecentList(data: unknown): LibraryRecentEntry[] {
   }
   return out;
 }
-
-/** Map POST /api/config JSON onto SpotDraft fields (mirrors legacy ui applyConfigText). */
 
 interface StudyState {
   workspace: WorkspaceId;

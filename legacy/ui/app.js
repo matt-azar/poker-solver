@@ -222,6 +222,102 @@ function sizes(text) {
   return text.split(",").map((part) => part.trim()).filter(Boolean).map(Number).filter((value) => !Number.isNaN(value));
 }
 
+const ALL_IN_SPEC = -1e9;
+const GEO_BASE = -2e9;
+const MULTIPLE_BASE = -3e9;
+const EXPLICIT_EMPTY_SPEC = -4e9;
+
+function isGeometricSpec(spec) {
+  return spec <= GEO_BASE + 0.5 && spec > MULTIPLE_BASE + 0.5;
+}
+
+function formatSpec(spec) {
+  const number = Number(spec);
+  if (!Number.isFinite(number)) {
+    return "";
+  }
+  if (number <= EXPLICIT_EMPTY_SPEC + 0.5 && number > EXPLICIT_EMPTY_SPEC - 1e6) {
+    return "-";
+  }
+  if (number < -5e8 && number > -1.5e9) {
+    return "a";
+  }
+  if (isGeometricSpec(number)) {
+    const streets = Math.round(-(number - GEO_BASE));
+    return streets <= 0 ? "e" : streets + "e";
+  }
+  if (number <= MULTIPLE_BASE + 0.5 && number > EXPLICIT_EMPTY_SPEC + 0.5) {
+    return (-(number - MULTIPLE_BASE)) + "x";
+  }
+  if (number < 0 && number > -1e8) {
+    return (-number) + "c";
+  }
+  return String(number);
+}
+
+// Engine fractions stay bare numbers (`0.5` = half pot). Pio tokens are e, 2e, a, 20c, 75%, 2.5x.
+function pioSizes(text, allowMultiple) {
+  const parts = String(text || "").split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 1) {
+    const only = parts[0].toLowerCase();
+    if (parts[0] === "-" || only === "none" || only === "x") {
+      return [EXPLICIT_EMPTY_SPEC];
+    }
+  }
+  const out = [];
+  parts.forEach((part) => {
+    const lower = part.toLowerCase();
+    if (lower === "a" || lower === "allin" || lower === "all-in") {
+      out.push(ALL_IN_SPEC);
+      return;
+    }
+    const geo = lower.match(/^(\d+)?e$/);
+    if (geo) {
+      const streets = geo[1] ? Number(geo[1]) : 0;
+      if (Number.isInteger(streets) && streets >= 0 && streets <= 100) {
+        out.push(GEO_BASE - streets);
+      }
+      return;
+    }
+    const multiple = lower.match(/^(\d+(?:\.\d+)?)x$/);
+    if (multiple) {
+      if (allowMultiple) {
+        const value = Number(multiple[1]);
+        if (Number.isFinite(value) && value > 0) {
+          out.push(MULTIPLE_BASE - value);
+        }
+      }
+      return;
+    }
+    if (lower.endsWith("%")) {
+      const percent = Number(lower.slice(0, -1));
+      if (Number.isFinite(percent)) {
+        out.push(percent / 100);
+      }
+      return;
+    }
+    if (lower.endsWith("c")) {
+      const chips = Number(lower.slice(0, -1));
+      if (Number.isFinite(chips) && chips > 0) {
+        out.push(-chips);
+      }
+      return;
+    }
+    const value = Number(part);
+    if (Number.isFinite(value) && value >= 0) {
+      out.push(value);
+    }
+  });
+  return out;
+}
+
+function withGeometric(list) {
+  if (!$("geometric").checked || !list.length || list.some(isGeometricSpec)) {
+    return list;
+  }
+  return list.concat([GEO_BASE]);
+}
+
 /* hardware-defaults — mirrors desktop fastSolveDefaults */
 const THREAD_CAP = 64;
 const MEMORY_MIN_MIB = 1024;
@@ -934,18 +1030,29 @@ $("setup").addEventListener("submit", async (event) => {
     ip_range: $("ip").value,
     pot: Number($("pot").value),
     stack: Number($("stack").value),
-    oop_bets: sizes($("oop-bets").value),
-    ip_bets: sizes($("ip-bets").value),
-    oop_flop_bets: sizes($("oop-flop").value),
-    ip_flop_bets: sizes($("ip-flop").value),
-    oop_turn_bets: sizes($("oop-turn").value),
-    ip_turn_bets: sizes($("ip-turn").value),
-    oop_river_bets: sizes($("oop-river").value),
-    ip_river_bets: sizes($("ip-river").value),
-    oop_donk: sizes($("oop-donk").value),
+    oop_bets: withGeometric(pioSizes($("oop-bets").value, false)),
+    ip_bets: withGeometric(pioSizes($("ip-bets").value, false)),
+    oop_flop_bets: withGeometric(pioSizes($("oop-flop").value, false)),
+    ip_flop_bets: withGeometric(pioSizes($("ip-flop").value, false)),
+    oop_turn_bets: withGeometric(pioSizes($("oop-turn").value, false)),
+    ip_turn_bets: withGeometric(pioSizes($("ip-turn").value, false)),
+    oop_river_bets: withGeometric(pioSizes($("oop-river").value, false)),
+    ip_river_bets: withGeometric(pioSizes($("ip-river").value, false)),
+    oop_donk: $("oop-donk").value.trim()
+      ? withGeometric(pioSizes($("oop-donk").value, false))
+      : [EXPLICIT_EMPTY_SPEC],
+    oop_flop_donk: $("oop-flop-donk").value.trim()
+      ? withGeometric(pioSizes($("oop-flop-donk").value, false))
+      : [EXPLICIT_EMPTY_SPEC],
+    oop_turn_donk: $("oop-turn-donk").value.trim()
+      ? withGeometric(pioSizes($("oop-turn-donk").value, false))
+      : [EXPLICIT_EMPTY_SPEC],
+    oop_river_donk: $("oop-river-donk").value.trim()
+      ? withGeometric(pioSizes($("oop-river-donk").value, false))
+      : [EXPLICIT_EMPTY_SPEC],
     pot_cap: Number($("pot-cap").value) || 0,
     allow_three_bet: $("no-three-bet").checked ? 0 : 1,
-    geometric: $("geometric").checked ? 1 : 0,
+    geometric: 0,
     all_in_threshold: Number($("threshold").value) || 0,
     allow_all_in: $("all-in").checked ? 1 : 0,
     frozen: $("frozen").checked ? 1 : 0,
@@ -963,6 +1070,21 @@ $("setup").addEventListener("submit", async (event) => {
     incentives: parseIncentives($("incentives").value),
     edge_tags: parseEdgeTags($("edge-tags").value)
   };
+  const assignRaises = (key, elementId) => {
+    const text = $(elementId).value.trim();
+    if (!text) {
+      return;
+    }
+    body[key] = withGeometric(pioSizes(text, true));
+  };
+  assignRaises("oop_raises", "oop-raises");
+  assignRaises("ip_raises", "ip-raises");
+  assignRaises("oop_flop_raises", "oop-flop-raises");
+  assignRaises("ip_flop_raises", "ip-flop-raises");
+  assignRaises("oop_turn_raises", "oop-turn-raises");
+  assignRaises("ip_turn_raises", "ip-turn-raises");
+  assignRaises("oop_river_raises", "oop-river-raises");
+  assignRaises("ip_river_raises", "ip-river-raises");
   const timeLimitText = $("time-limit").value.trim();
   if (timeLimitText !== "") {
     body.time_limit = Number(timeLimitText);
@@ -1775,7 +1897,7 @@ async function calculateEv() {
 }
 
 function joinSizes(values) {
-  return (values || []).map((value) => String(value)).join(", ");
+  return (values || []).map(formatSpec).filter((token) => token !== "").join(", ");
 }
 
 async function refreshRecentSolutions() {
@@ -1911,7 +2033,18 @@ async function applyConfigText(text, label) {
     $("ip-turn").value = joinSizes(body.ip_turn_bets);
     $("oop-river").value = joinSizes(body.oop_river_bets);
     $("ip-river").value = joinSizes(body.ip_river_bets);
+    $("oop-raises").value = joinSizes(body.oop_raises);
+    $("ip-raises").value = joinSizes(body.ip_raises);
+    $("oop-flop-raises").value = joinSizes(body.oop_flop_raises);
+    $("ip-flop-raises").value = joinSizes(body.ip_flop_raises);
+    $("oop-turn-raises").value = joinSizes(body.oop_turn_raises);
+    $("ip-turn-raises").value = joinSizes(body.ip_turn_raises);
+    $("oop-river-raises").value = joinSizes(body.oop_river_raises);
+    $("ip-river-raises").value = joinSizes(body.ip_river_raises);
     $("oop-donk").value = joinSizes(body.oop_donk);
+    $("oop-flop-donk").value = joinSizes(body.oop_flop_donk);
+    $("oop-turn-donk").value = joinSizes(body.oop_turn_donk);
+    $("oop-river-donk").value = joinSizes(body.oop_river_donk);
     $("pot-cap").value = body.pot_cap;
     $("no-three-bet").checked = body.allow_three_bet === false;
     $("geometric").checked = Boolean(body.geometric);

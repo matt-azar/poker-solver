@@ -1,5 +1,5 @@
 /** Pure draft/job conversion helpers for the Study store (no module mutables). */
-import { resolveRaiseSizeList, resolveSizeList } from "../domain/betSizes";
+import { encodeBettingJob, formatStoredSizes } from "../domain/betSizes";
 import { boardCards, parseAbsoluteNumberList } from "../domain/range";
 import {
   type SolveJobRequest,
@@ -9,38 +9,25 @@ import {
 } from "../domain/types";
 
 export function joinSizes(values: unknown): string {
-  if (!Array.isArray(values)) {
-    return "";
-  }
-  return values.map((value) => String(value)).join(", ");
+  return formatStoredSizes(values);
 }
 
+/** Rebuild a Build raise field from pot fractions + facing multiples. */
 export function joinRaiseDraft(fractions: unknown, multiples: unknown): string {
-  const parts: string[] = [];
-  if (Array.isArray(fractions)) {
-    for (const value of fractions) {
-      const n = Number(value);
-      if (!Number.isFinite(n)) {
-        continue;
-      }
-      if (n < 0) {
-        parts.push(`${Math.abs(n)}c`);
-      } else if (n > 0 && n <= 1) {
-        parts.push(String(Math.round(n * 100)));
-      } else {
-        parts.push(String(n));
-      }
-    }
-  }
+  const base = formatStoredSizes(fractions, { raise: true });
+  const extra: string[] = [];
   if (Array.isArray(multiples)) {
     for (const value of multiples) {
       const n = Number(value);
       if (Number.isFinite(n) && n > 0) {
-        parts.push(`${n}x`);
+        extra.push(`${n}x`);
       }
     }
   }
-  return parts.join(", ");
+  if (base === "-") {
+    return extra.length > 0 ? extra.join(", ") : "-";
+  }
+  return [base, ...extra].filter(Boolean).join(", ");
 }
 
 export function draftFromParsedConfig(body: Record<string, unknown>): Partial<SpotDraft> {
@@ -65,7 +52,37 @@ export function draftFromParsedConfig(body: Record<string, unknown>): Partial<Sp
     partial.ipTurn = joinSizes(body.ip_turn_bets);
     partial.oopRiver = joinSizes(body.oop_river_bets);
     partial.ipRiver = joinSizes(body.ip_river_bets);
+    partial.oopFlopRaises = formatStoredSizes(body.oop_flop_raises, {
+      raise: true,
+      matchBets: body.oop_flop_bets,
+    });
+    partial.ipFlopRaises = formatStoredSizes(body.ip_flop_raises, {
+      raise: true,
+      matchBets: body.ip_flop_bets,
+    });
+    partial.oopTurnRaises = formatStoredSizes(body.oop_turn_raises, {
+      raise: true,
+      matchBets: body.oop_turn_bets,
+    });
+    partial.ipTurnRaises = formatStoredSizes(body.ip_turn_raises, {
+      raise: true,
+      matchBets: body.ip_turn_bets,
+    });
+    partial.oopRiverRaises = formatStoredSizes(body.oop_river_raises, {
+      raise: true,
+      matchBets: body.oop_river_bets,
+    });
+    partial.ipRiverRaises = formatStoredSizes(body.ip_river_raises, {
+      raise: true,
+      matchBets: body.ip_river_bets,
+    });
     partial.oopDonk = joinSizes(body.oop_donk);
+    partial.oopFlopDonk = joinSizes(body.oop_flop_donk);
+    partial.oopTurnDonk = joinSizes(body.oop_turn_donk);
+    partial.oopRiverDonk = joinSizes(body.oop_river_donk);
+    if (body.merge_threshold != null) {
+      partial.mergeThresholdPct = Number(body.merge_threshold) * 100;
+    }
     partial.potCap = Number(body.pot_cap) || 0;
     partial.noThreeBet = body.allow_three_bet === false;
     partial.geometric = Boolean(body.geometric);
@@ -126,48 +143,7 @@ export function rootNodeId(statusRoot?: string | null): string {
 
 export function buildJob(draft: SpotDraft): SolveJobRequest {
   const board = boardCards(draft.boardText);
-  const boardLen = board.length;
-  const sizeOpts = {
-    pot: draft.pot,
-    stack: draft.stack,
-    boardLen,
-    geometricFlag: draft.geometric,
-    mergeThresholdPct: draft.mergeThresholdPct ?? 0,
-  };
-  const oopFlop = resolveSizeList(draft.oopFlop, sizeOpts);
-  const ipFlop = resolveSizeList(draft.ipFlop, sizeOpts);
-  const oopTurn = resolveSizeList(draft.oopTurn, sizeOpts);
-  const ipTurn = resolveSizeList(draft.ipTurn, sizeOpts);
-  const oopRiver = resolveSizeList(draft.oopRiver, sizeOpts);
-  const ipRiver = resolveSizeList(draft.ipRiver, sizeOpts);
-  // Shared bet lists remain for engine fallbacks when a street list is empty.
-  // Blank fields resolve to [] — always send the key so explorer does not
-  // invent b50/b100 defaults.
-  const oopShared =
-    oopRiver[0] != null
-      ? oopRiver
-      : oopTurn[0] != null
-        ? oopTurn
-        : oopFlop[0] != null
-          ? oopFlop
-          : resolveSizeList(draft.oopBets, sizeOpts);
-  const ipShared =
-    ipRiver[0] != null
-      ? ipRiver
-      : ipTurn[0] != null
-        ? ipTurn
-        : ipFlop[0] != null
-          ? ipFlop
-          : resolveSizeList(draft.ipBets, sizeOpts);
-  const oopRaises = resolveRaiseSizeList(draft.oopRaises, sizeOpts);
-  const ipRaises = resolveRaiseSizeList(draft.ipRaises, sizeOpts);
-  const oopDonk = draft.donkFlop
-    ? oopFlop
-    : draft.donkTurn
-      ? oopTurn
-      : draft.donkRiver
-        ? oopRiver
-        : [];
+  const sizes = encodeBettingJob(draft);
 
   const icmStacks = draft.useIcm ? parseAbsoluteNumberList(draft.icmStacks) : [];
   const icmPayouts = draft.useIcm ? parseAbsoluteNumberList(draft.icmPayouts) : [];
@@ -181,23 +157,9 @@ export function buildJob(draft: SpotDraft): SolveJobRequest {
     ip_range: draft.ipRange,
     pot: draft.pot,
     stack: draft.stack,
-    oop_bets: oopShared,
-    ip_bets: ipShared,
-    // Always present (even []) so raises stay separate from bets.
-    oop_raises: oopRaises.fractions,
-    ip_raises: ipRaises.fractions,
-    oop_raise_multiples: oopRaises.multiples,
-    ip_raise_multiples: ipRaises.multiples,
-    oop_flop_bets: oopFlop,
-    ip_flop_bets: ipFlop,
-    oop_turn_bets: oopTurn,
-    ip_turn_bets: ipTurn,
-    oop_river_bets: oopRiver,
-    ip_river_bets: ipRiver,
-    oop_donk: oopDonk,
+    ...sizes,
     pot_cap: draft.potCap || 0,
     allow_three_bet: draft.noThreeBet ? 0 : 1,
-    geometric: draft.geometric ? 1 : 0,
     all_in_threshold: draft.allInThreshold || 0,
     allow_all_in: draft.allowAllIn ? 1 : 0,
     // Desktop always uses the frozen pass (required for multi-thread / CFR+).

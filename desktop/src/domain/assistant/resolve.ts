@@ -1070,7 +1070,16 @@ function buildSetupPatch(args: {
       "ipTurn",
       "oopRiver",
       "ipRiver",
+      "oopFlopRaises",
+      "ipFlopRaises",
+      "oopTurnRaises",
+      "ipTurnRaises",
+      "oopRiverRaises",
+      "ipRiverRaises",
       "oopDonk",
+      "oopFlopDonk",
+      "oopTurnDonk",
+      "oopRiverDonk",
     ] as const) {
       if (tree[key] !== undefined) {
         explicit[key] = tree[key];

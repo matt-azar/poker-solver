@@ -300,14 +300,15 @@ export function BuildWorkspace() {
 
           <h3 className="build-subhead">Betting tree</h3>
           <p className="field-hint">
-            Blank = no bets (unless Geometric or All-in is on). Bet sizes are % of
-            pot (75 = 75%). Raises are separate: pot % and/or multiples of the bet
-            faced (2x, 2.5x). Max raises counts facing raises only — not the first
-            bet on a street.
+            Blank bet = check only. Blank raise = that street&apos;s bet sizes.
+            Type - to remove raises. Max raises 1 allows one raise and no 3-bet;
+            0 removes raises. Sizes: 75 (75% pot), 20c, e, 2e, 3e, a, 2.5x.
+            All-in is added only when a size is listed. Geometric adds one e to
+            non-empty boxes only.
           </p>
           <div className="build-inline">
             <label>
-              Flop OOP
+              Flop OOP bets
               <input
                 value={draft.oopFlop}
                 placeholder="e.g. 50, 100"
@@ -315,25 +316,41 @@ export function BuildWorkspace() {
               />
             </label>
             <label>
-              Flop IP
+              Flop IP bets
               <input
                 value={draft.ipFlop}
                 placeholder="e.g. 50, 100"
                 onChange={(event) => updateDraft({ ipFlop: event.target.value })}
               />
             </label>
-            <label className="check">
+            <label>
+              Flop OOP raises
               <input
-                type="checkbox"
-                checked={draft.donkFlop}
-                onChange={(event) => updateDraft({ donkFlop: event.target.checked })}
+                value={draft.oopFlopRaises}
+                placeholder="blank = flop bets"
+                onChange={(event) => updateDraft({ oopFlopRaises: event.target.value })}
               />
-              Donk
+            </label>
+            <label>
+              Flop IP raises
+              <input
+                value={draft.ipFlopRaises}
+                placeholder="blank = flop bets"
+                onChange={(event) => updateDraft({ ipFlopRaises: event.target.value })}
+              />
+            </label>
+            <label>
+              Flop donk
+              <input
+                value={draft.oopFlopDonk}
+                placeholder="blank = no lead"
+                onChange={(event) => updateDraft({ oopFlopDonk: event.target.value })}
+              />
             </label>
           </div>
           <div className="build-inline">
             <label>
-              Turn OOP
+              Turn OOP bets
               <input
                 value={draft.oopTurn}
                 placeholder="e.g. 33, 75, e"
@@ -341,63 +358,77 @@ export function BuildWorkspace() {
               />
             </label>
             <label>
-              Turn IP
+              Turn IP bets
               <input
                 value={draft.ipTurn}
                 placeholder="e.g. 33, 75, e"
                 onChange={(event) => updateDraft({ ipTurn: event.target.value })}
               />
             </label>
-            <label className="check">
+            <label>
+              Turn OOP raises
               <input
-                type="checkbox"
-                checked={draft.donkTurn}
-                onChange={(event) => updateDraft({ donkTurn: event.target.checked })}
+                value={draft.oopTurnRaises}
+                placeholder="blank = turn bets"
+                onChange={(event) => updateDraft({ oopTurnRaises: event.target.value })}
               />
-              Donk
+            </label>
+            <label>
+              Turn IP raises
+              <input
+                value={draft.ipTurnRaises}
+                placeholder="blank = turn bets"
+                onChange={(event) => updateDraft({ ipTurnRaises: event.target.value })}
+              />
+            </label>
+            <label>
+              Turn donk
+              <input
+                value={draft.oopTurnDonk}
+                placeholder="blank = no lead"
+                onChange={(event) => updateDraft({ oopTurnDonk: event.target.value })}
+              />
             </label>
           </div>
           <div className="build-inline">
             <label>
-              River OOP
+              River OOP bets
               <input
                 value={draft.oopRiver}
-                placeholder="e.g. 50, 100"
+                placeholder="e.g. 50, 100, a"
                 onChange={(event) => updateDraft({ oopRiver: event.target.value })}
               />
             </label>
             <label>
-              River IP
+              River IP bets
               <input
                 value={draft.ipRiver}
-                placeholder="e.g. 50, 100"
+                placeholder="e.g. 50, 100, a"
                 onChange={(event) => updateDraft({ ipRiver: event.target.value })}
               />
             </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={draft.donkRiver}
-                onChange={(event) => updateDraft({ donkRiver: event.target.checked })}
-              />
-              Donk
-            </label>
-          </div>
-          <div className="build-inline">
             <label>
-              Raises OOP
+              River OOP raises
               <input
-                value={draft.oopRaises}
-                placeholder="e.g. 50, 2.5x"
-                onChange={(event) => updateDraft({ oopRaises: event.target.value })}
+                value={draft.oopRiverRaises}
+                placeholder="blank = river bets"
+                onChange={(event) => updateDraft({ oopRiverRaises: event.target.value })}
               />
             </label>
             <label>
-              Raises IP
+              River IP raises
               <input
-                value={draft.ipRaises}
-                placeholder="e.g. 50, 2x"
-                onChange={(event) => updateDraft({ ipRaises: event.target.value })}
+                value={draft.ipRiverRaises}
+                placeholder="blank = river bets"
+                onChange={(event) => updateDraft({ ipRiverRaises: event.target.value })}
+              />
+            </label>
+            <label>
+              River donk
+              <input
+                value={draft.oopRiverDonk}
+                placeholder="blank = no lead"
+                onChange={(event) => updateDraft({ oopRiverDonk: event.target.value })}
               />
             </label>
           </div>

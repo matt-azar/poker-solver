@@ -7,6 +7,10 @@ import {
   mergeSizeFractions,
   parseSizeTokenDetailed,
   potTagFromLabel,
+  encodeBetList,
+  encodeRaiseList,
+  EXPLICIT_EMPTY_SPEC,
+  GEO_BASE,
   resolveRaiseSizeList,
   resolveSizeList,
 } from "./betSizes";
@@ -65,17 +69,14 @@ describe("betSizes", () => {
     expect(flop).toBeCloseTo((Math.pow(7, 1 / 3) - 1) / 2, 12);
   });
 
-  it("expands e when geometric flag is off", () => {
-    const geo = geometricPotFraction(100, 300, 3);
-    const sizes = resolveSizeList("33, e, 2e", {
-      pot: 100,
-      stack: 300,
-      boardLen: 3,
-      geometricFlag: false,
-    });
-    expect(sizes[0]).toBeCloseTo(0.33, 12);
-    expect(sizes.some((size) => Math.abs(size - geo) < 1e-10)).toBe(true);
-    expect(sizes.some((size) => Math.abs(size - geo * 2) < 1e-10)).toBe(true);
+  it("keeps e and 2e as node-expanded sentinels", () => {
+    expect(encodeBetList("", false)).toEqual([EXPLICIT_EMPTY_SPEC]);
+    expect(encodeBetList("33, e, 2e", false)).toEqual([0.33, GEO_BASE, GEO_BASE - 2]);
+    expect(encodeBetList("50", true)).toEqual([0.5, GEO_BASE]);
+    expect(encodeBetList("", true)).toEqual([EXPLICIT_EMPTY_SPEC]);
+    expect(encodeRaiseList("", [0.5], false)).toEqual([0.5]);
+    expect(encodeRaiseList("-", [0.5], false)).toEqual([EXPLICIT_EMPTY_SPEC]);
+    expect(encodeRaiseList("2.5x", [0.5], false)[0]).toBeCloseTo(-3e9 - 2.5, 6);
   });
 
   it("merges near chip sizes within a threshold", () => {
