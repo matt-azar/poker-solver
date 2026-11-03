@@ -18,9 +18,19 @@ namespace poker::holdem
 // A full off-board random-vs-random river is 1,070,190 pair-runouts
 // (`As Kd Qc Jh 9c`). The default admits that common study case with a little
 // headroom. A full-range turn is about 51M pair-runouts and still rejects.
+// Study/explorer packaging may raise the ceiling (see kStudyExplorerMaxPairRunouts)
+// without changing this library default; that override still rejects full-range turn.
 inline constexpr std::uint64_t kFullRangeRiverPairRunouts = 1070190;
+// Measured full-range turn on `As Kd Qc Jh` (random vs random); pathological CPU case.
+inline constexpr std::uint64_t kFullRangeTurnPairRunouts = 51369120;
 inline constexpr std::uint64_t kDefaultMaxPairRunouts = 1100000;
+// Packaged Study / holdem-explorer ceiling for denser ranges (~4.5× default).
+// Still far below pathological full-range turn. Not a library default.
+inline constexpr std::uint64_t kStudyExplorerMaxPairRunouts = 5000000;
 static_assert(kDefaultMaxPairRunouts >= kFullRangeRiverPairRunouts);
+static_assert(kDefaultMaxPairRunouts < kFullRangeTurnPairRunouts);
+static_assert(kStudyExplorerMaxPairRunouts > kDefaultMaxPairRunouts);
+static_assert(kStudyExplorerMaxPairRunouts < kFullRangeTurnPairRunouts);
 inline constexpr char kEquityModel[] = "check-down";
 inline constexpr char kEquityUnits[] = "fraction of the pot";
 
