@@ -51,6 +51,8 @@ export function ContextStrip() {
   const message = useStudyStore((s) => s.message);
   const solutionId = useStudyStore((s) => s.solutionId);
   const prepareBoardCardChange = useStudyStore((s) => s.prepareBoardCardChange);
+  const clearBoardCardChange = useStudyStore((s) => s.clearBoardCardChange);
+  const boardChangeStreet = useStudyStore((s) => s.boardChangeStreet);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerStreet, setPickerStreet] = useState<DealStreet | null>(null);
   const activity = engineActivityMessage(phase, status, message);
@@ -80,20 +82,25 @@ export function ContextStrip() {
 
   const showTurnSlot = Boolean(groups.turn || dealing === "turn" || groups.river);
   const showRiverSlot = Boolean(groups.river || dealing === "river");
-  const activeStreet = pickerOpen ? pickerStreet ?? dealing : dealing;
+  const activeStreet = pickerOpen
+    ? pickerStreet ?? boardChangeStreet ?? dealing
+    : dealing;
 
   const openPickerFor = (street: DealStreet) => {
-    const result = prepareBoardCardChange(street);
-    if (!result.ok) {
-      return;
-    }
-    setPickerStreet(street);
-    setPickerOpen(true);
+    void (async () => {
+      const result = await prepareBoardCardChange(street);
+      if (!result.ok) {
+        return;
+      }
+      setPickerStreet(street);
+      setPickerOpen(true);
+    })();
   };
 
   const closePicker = () => {
     setPickerOpen(false);
     setPickerStreet(null);
+    clearBoardCardChange();
   };
 
   return (

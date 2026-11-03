@@ -62,17 +62,24 @@ export function CardPicker({
   variant = "overlay",
 }: CardPickerProps) {
   const currentNode = useStudyStore((s) => s.currentNode);
-  const followAction = useStudyStore((s) => s.followAction);
+  const boardChangeChanceNode = useStudyStore((s) => s.boardChangeChanceNode);
+  const boardChangeStreet = useStudyStore((s) => s.boardChangeStreet);
+  const selectBoardCard = useStudyStore((s) => s.selectBoardCard);
   const [focusIndex, setFocusIndex] = useState(0);
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
 
-  const options = useMemo(() => chanceCardOptions(currentNode), [currentNode]);
+  // Prefer the armed deal-chance ancestor so options load without leaving the line.
+  const dealNode = boardChangeChanceNode ?? currentNode;
+  const options = useMemo(() => chanceCardOptions(dealNode), [dealNode]);
   const grid = useMemo(
-    () => fullDeckGrid(options, currentNode?.board),
-    [options, currentNode?.board],
+    () => fullDeckGrid(options, dealNode?.board),
+    [options, dealNode?.board],
   );
   const activeStreet =
-    street ?? dealStreetFromBoard(currentNode?.board) ?? ("turn" as DealStreet);
+    street ??
+    boardChangeStreet ??
+    dealStreetFromBoard(dealNode?.board) ??
+    ("turn" as DealStreet);
   const title =
     activeStreet === "river" ? "Change river" : "Change turn";
 
@@ -91,10 +98,10 @@ export function CardPicker({
         return;
       }
       setSelectedCard(cell.card);
-      void followAction(cell.nodeId);
+      void selectBoardCard(cell.nodeId);
       onClose();
     },
-    [followAction, onClose],
+    [selectBoardCard, onClose],
   );
 
   const onKeyDown = useCallback(
@@ -164,7 +171,7 @@ export function CardPicker({
     return null;
   }
 
-  const chanceReady = currentNode?.kind === "chance" && options.length > 0;
+  const chanceReady = dealNode?.kind === "chance" && options.length > 0;
 
   const panel = (
     <div
