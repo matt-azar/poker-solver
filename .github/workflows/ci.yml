@@ -37,7 +37,6 @@ jobs:
               - 'tests/**'
               - 'cmake/**'
               - 'CMakeLists.txt'
-              - 'python/**'
               - 'tools/**'
               - '.github/workflows/ci.yml'
             desktop:
