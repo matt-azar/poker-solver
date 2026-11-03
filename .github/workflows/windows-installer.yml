@@ -23,15 +23,21 @@ on:
     branches: [main]
     paths:
       - "desktop/**"
-      - "src/cli/explorer_main.cpp"
-      - "src/explorer/**"
+      - "src/**"
+      - "include/**"
+      - "cmake/**"
+      - "CMakeLists.txt"
+      - "configs/**"
       - ".github/workflows/windows-installer.yml"
       - ".github/workflows/windows-installer-release.yml"
   pull_request:
     paths:
       - "desktop/**"
-      - "src/cli/explorer_main.cpp"
-      - "src/explorer/**"
+      - "src/**"
+      - "include/**"
+      - "cmake/**"
+      - "CMakeLists.txt"
+      - "configs/**"
       - ".github/workflows/windows-installer.yml"
       - ".github/workflows/windows-installer-release.yml"
 

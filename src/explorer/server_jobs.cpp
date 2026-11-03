@@ -53,9 +53,9 @@ void solve_job(std::uint64_t job_id, Job job)
     };
     try
     {
-        if (g_session.stop_requested(job_id))
+        if (g_app.session.stop_requested(job_id))
         {
-            g_session.finish_cancelled(job_id, build_status(draft_for(
+            g_app.session.finish_cancelled(job_id, build_status(draft_for(
                 job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
                 sample_iterations, sample_values, sample_gaps, nullptr)));
             return;
@@ -98,11 +98,11 @@ void solve_job(std::uint64_t job_id, Job job)
                     job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
                     sample_iterations, sample_values, sample_gaps, memory_ptr);
                 draft.cancelled = true;
-                g_session.finish_cancelled(job_id, build_status(draft));
+                g_app.session.finish_cancelled(job_id, build_status(draft));
                 return;
             }
             auto kept_solution = hold_current();
-            const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+            const poker::explorer::Session::Permit kept_permit = g_app.session.prepare_kept(job_id);
             StatusDraft kept = draft_for(
                 job, job_id, done, kept_solution->runtime_seconds, true, value, p1, p2, gap,
                 kept_solution->sample_iterations, kept_solution->sample_values, kept_solution->sample_gaps,
@@ -110,26 +110,26 @@ void solve_job(std::uint64_t job_id, Job job)
             kept.cancelled = true;
             if (!kept_permit.allowed)
             {
-                g_session.finish_cancelled(job_id, build_status(kept));
+                g_app.session.finish_cancelled(job_id, build_status(kept));
                 return;
             }
             kept_solution->id = kept_permit.solution_id;
             kept.solution_id = kept_permit.solution_id;
             kept.root_id = kept_solution->root_id;
-            const bool published = g_session.commit_kept(
+            const bool published = g_app.session.commit_kept(
                 job_id, kept_solution, kept_permit.solution_id, [&](std::uint64_t generation)
                 {
                     StatusDraft draft = kept;
                     draft.generation = generation;
                     return build_status(draft);
                 });
-            if (!published && g_session.phase() == poker::explorer::Phase::Running)
+            if (!published && g_app.session.phase() == poker::explorer::Phase::Running)
             {
                 StatusDraft draft = kept;
                 draft.error = "failed to keep the solve";
                 draft.solution_id = 0;
                 draft.root_id.clear();
-                g_session.finish_failed(job_id, build_status(draft));
+                g_app.session.finish_failed(job_id, build_status(draft));
             }
         };
         const auto publish_paused = [&]()
@@ -139,7 +139,7 @@ void solve_job(std::uint64_t job_id, Job job)
                 return false;
             }
             auto kept_solution = hold_current();
-            const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+            const poker::explorer::Session::Permit kept_permit = g_app.session.prepare_kept(job_id);
             StatusDraft kept = draft_for(
                 job, job_id, done, kept_solution->runtime_seconds, true, value, p1, p2, gap,
                 kept_solution->sample_iterations, kept_solution->sample_values, kept_solution->sample_gaps,
@@ -152,31 +152,31 @@ void solve_job(std::uint64_t job_id, Job job)
             kept_solution->id = kept_permit.solution_id;
             kept.solution_id = kept_permit.solution_id;
             kept.root_id = kept_solution->root_id;
-            const bool published = g_session.commit_paused(
+            const bool published = g_app.session.commit_paused(
                 job_id, kept_solution, kept_permit.solution_id, [&](std::uint64_t generation)
                 {
                     StatusDraft draft = kept;
                     draft.generation = generation;
                     return build_status(draft);
                 });
-            if (!published && g_session.phase() == poker::explorer::Phase::Running)
+            if (!published && g_app.session.phase() == poker::explorer::Phase::Running)
             {
                 StatusDraft draft = kept;
                 draft.error = "failed to pause the solve";
                 draft.solution_id = 0;
                 draft.root_id.clear();
-                g_session.finish_failed(job_id, build_status(draft));
+                g_app.session.finish_failed(job_id, build_status(draft));
             }
-            return published || g_session.phase() != poker::explorer::Phase::Running;
+            return published || g_app.session.phase() != poker::explorer::Phase::Running;
         };
         while (done < job.iterations)
         {
-            if (g_session.stop_requested(job_id))
+            if (g_app.session.stop_requested(job_id))
             {
                 publish_stopped();
                 return;
             }
-            if (g_session.pause_requested(job_id) && done > 0)
+            if (g_app.session.pause_requested(job_id) && done > 0)
             {
                 if (publish_paused())
                 {
@@ -196,12 +196,12 @@ void solve_job(std::uint64_t job_id, Job job)
             done += step;
             remember(street->evaluate());
             street_memory = street->memory_report();
-            if (g_session.stop_requested(job_id))
+            if (g_app.session.stop_requested(job_id))
             {
                 publish_stopped();
                 return;
             }
-            if (g_session.pause_requested(job_id))
+            if (g_app.session.pause_requested(job_id))
             {
                 if (publish_paused())
                 {
@@ -213,7 +213,7 @@ void solve_job(std::uint64_t job_id, Job job)
                 sample_iterations, sample_values, sample_gaps, memory_ptr);
             progress.running = true;
             progress.time_limit_reached = time_limit_reached;
-            g_session.set_progress(job_id, build_status(progress));
+            g_app.session.set_progress(job_id, build_status(progress));
             if (job.accuracy >= 0.0
                 && gap <= job.accuracy * poker::tenths_to_chips(job.pot))
             {
@@ -225,12 +225,12 @@ void solve_job(std::uint64_t job_id, Job job)
                 break;
             }
         }
-        if (done == 0 || g_session.stop_requested(job_id))
+        if (done == 0 || g_app.session.stop_requested(job_id))
         {
             publish_stopped();
             return;
         }
-        if (g_session.pause_requested(job_id))
+        if (g_app.session.pause_requested(job_id))
         {
             if (publish_paused())
             {
@@ -256,9 +256,9 @@ void solve_job(std::uint64_t job_id, Job job)
         held->memory = held->street->memory_report();
         held->has_memory = true;
         street_memory = held->memory;
-        if (g_session.stop_requested(job_id))
+        if (g_app.session.stop_requested(job_id))
         {
-            const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+            const poker::explorer::Session::Permit kept_permit = g_app.session.prepare_kept(job_id);
             StatusDraft kept = draft_for(
                 job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
                 held->sample_iterations, held->sample_values, held->sample_gaps,
@@ -266,13 +266,13 @@ void solve_job(std::uint64_t job_id, Job job)
             kept.cancelled = true;
             if (!kept_permit.allowed)
             {
-                g_session.finish_cancelled(job_id, build_status(kept));
+                g_app.session.finish_cancelled(job_id, build_status(kept));
                 return;
             }
             held->id = kept_permit.solution_id;
             kept.solution_id = kept_permit.solution_id;
             kept.root_id = held->root_id;
-            g_session.commit_kept(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
+            g_app.session.commit_kept(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
             {
                 StatusDraft draft = kept;
                 draft.generation = generation;
@@ -280,9 +280,9 @@ void solve_job(std::uint64_t job_id, Job job)
             });
             return;
         }
-        if (g_session.pause_requested(job_id))
+        if (g_app.session.pause_requested(job_id))
         {
-            const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+            const poker::explorer::Session::Permit kept_permit = g_app.session.prepare_kept(job_id);
             StatusDraft kept = draft_for(
                 job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
                 held->sample_iterations, held->sample_values, held->sample_gaps,
@@ -293,7 +293,7 @@ void solve_job(std::uint64_t job_id, Job job)
                 held->id = kept_permit.solution_id;
                 kept.solution_id = kept_permit.solution_id;
                 kept.root_id = held->root_id;
-                g_session.commit_paused(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
+                g_app.session.commit_paused(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
                 {
                     StatusDraft draft = kept;
                     draft.generation = generation;
@@ -302,12 +302,12 @@ void solve_job(std::uint64_t job_id, Job job)
                 return;
             }
         }
-        const poker::explorer::Session::Permit permit = g_session.prepare_success(job_id);
+        const poker::explorer::Session::Permit permit = g_app.session.prepare_success(job_id);
         if (!permit.allowed)
         {
-            if (g_session.stop_requested(job_id))
+            if (g_app.session.stop_requested(job_id))
             {
-                const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+                const poker::explorer::Session::Permit kept_permit = g_app.session.prepare_kept(job_id);
                 StatusDraft kept = draft_for(
                     job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
                     held->sample_iterations, held->sample_values, held->sample_gaps,
@@ -318,7 +318,7 @@ void solve_job(std::uint64_t job_id, Job job)
                     held->id = kept_permit.solution_id;
                     kept.solution_id = kept_permit.solution_id;
                     kept.root_id = held->root_id;
-                    g_session.commit_kept(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
+                    g_app.session.commit_kept(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
                     {
                         StatusDraft draft = kept;
                         draft.generation = generation;
@@ -327,9 +327,9 @@ void solve_job(std::uint64_t job_id, Job job)
                     return;
                 }
             }
-            if (g_session.pause_requested(job_id))
+            if (g_app.session.pause_requested(job_id))
             {
-                const poker::explorer::Session::Permit kept_permit = g_session.prepare_kept(job_id);
+                const poker::explorer::Session::Permit kept_permit = g_app.session.prepare_kept(job_id);
                 StatusDraft kept = draft_for(
                     job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
                     held->sample_iterations, held->sample_values, held->sample_gaps,
@@ -340,7 +340,7 @@ void solve_job(std::uint64_t job_id, Job job)
                     held->id = kept_permit.solution_id;
                     kept.solution_id = kept_permit.solution_id;
                     kept.root_id = held->root_id;
-                    g_session.commit_paused(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
+                    g_app.session.commit_paused(job_id, held, kept_permit.solution_id, [&](std::uint64_t generation)
                     {
                         StatusDraft draft = kept;
                         draft.generation = generation;
@@ -353,7 +353,7 @@ void solve_job(std::uint64_t job_id, Job job)
                 job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
                 sample_iterations, sample_values, sample_gaps, held->has_memory ? &held->memory : nullptr);
             draft.cancelled = true;
-            g_session.finish_cancelled(job_id, build_status(draft));
+            g_app.session.finish_cancelled(job_id, build_status(draft));
             return;
         }
         held->id = permit.solution_id;
@@ -364,7 +364,7 @@ void solve_job(std::uint64_t job_id, Job job)
         success.solution_id = permit.solution_id;
         success.root_id = held->root_id;
         success.time_limit_reached = time_limit_reached;
-        const bool published = g_session.commit_success(job_id, held, permit.solution_id, [&](std::uint64_t generation, bool accepted)
+        const bool published = g_app.session.commit_success(job_id, held, permit.solution_id, [&](std::uint64_t generation, bool accepted)
         {
             StatusDraft draft = success;
             draft.generation = generation;
@@ -376,14 +376,14 @@ void solve_job(std::uint64_t job_id, Job job)
             }
             return build_status(draft);
         });
-        if (!published && g_session.phase() == poker::explorer::Phase::Running)
+        if (!published && g_app.session.phase() == poker::explorer::Phase::Running)
         {
             StatusDraft draft = success;
-            draft.generation = g_session.generation() + 1;
+            draft.generation = g_app.session.generation() + 1;
             draft.error = "failed to publish the solve";
             draft.solution_id = 0;
             draft.root_id.clear();
-            g_session.finish_failed(job_id, build_status(draft));
+            g_app.session.finish_failed(job_id, build_status(draft));
         }
     }
     catch (const std::exception& error)
@@ -392,8 +392,8 @@ void solve_job(std::uint64_t job_id, Job job)
             job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
             sample_iterations, sample_values, sample_gaps, nullptr);
         draft.error = error.what();
-        draft.cancelled = g_session.stop_requested(job_id);
-        g_session.finish_failed(job_id, build_status(draft));
+        draft.cancelled = g_app.session.stop_requested(job_id);
+        g_app.session.finish_failed(job_id, build_status(draft));
     }
 }
 
@@ -520,12 +520,12 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
 {
     // Claim returns while cancelled value queries may still hold the engine.
     // Match solve: wait for quiet off the accept thread before mutating.
-    g_session.wait_until_quiet();
+    g_app.session.wait_until_quiet();
     const std::shared_ptr<HeldSolution> held =
-        std::static_pointer_cast<HeldSolution>(g_session.training_resource(job_id));
+        std::static_pointer_cast<HeldSolution>(g_app.session.training_resource(job_id));
     if (!held || (!held->street && !held->river))
     {
-        g_session.abort_continuation(
+        g_app.session.abort_continuation(
             job_id,
             "{\"running\":false,\"cancelled\":false,\"error\":\"missing solution\",\"solution_id\":null}");
         return;
@@ -547,7 +547,7 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
         draft.error = "iteration count overflow";
         draft.solution_id = held->id;
         draft.root_id = held->root_id;
-        g_session.abort_continuation(job_id, build_status(draft));
+        g_app.session.abort_continuation(job_id, build_status(draft));
         return;
     }
     const int target = done + extra;
@@ -579,7 +579,7 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
         held->sample_gaps.reserve(held->sample_gaps.size() + chunks);
         while (done < target)
         {
-            if (g_session.stop_requested(job_id) || g_session.pause_requested(job_id))
+            if (g_app.session.stop_requested(job_id) || g_app.session.pause_requested(job_id))
             {
                 break;
             }
@@ -614,7 +614,7 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
             held->sample_iterations.push_back(done);
             held->sample_values.push_back(value);
             held->sample_gaps.push_back(gap);
-            if (g_session.stop_requested(job_id) || g_session.pause_requested(job_id))
+            if (g_app.session.stop_requested(job_id) || g_app.session.pause_requested(job_id))
             {
                 break;
             }
@@ -632,7 +632,7 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
             progress.solution_id = held->id;
             progress.root_id = held->root_id;
             progress.time_limit_reached = time_limit_reached;
-            g_session.set_progress(job_id, build_status(progress));
+            g_app.session.set_progress(job_id, build_status(progress));
             if (held->job.accuracy >= 0.0
                 && gap <= held->job.accuracy * poker::tenths_to_chips(held->job.pot))
             {
@@ -666,7 +666,7 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
             held->river->prepare_inspection();
             held->root_id = held->river->root_node_id();
         }
-        const bool pause_after = g_session.pause_requested(job_id) && !g_session.stop_requested(job_id);
+        const bool pause_after = g_app.session.pause_requested(job_id) && !g_app.session.stop_requested(job_id);
         StatusDraft success = draft_for(
             held->job, job_id, done, seconds, true, value, p1, p2, gap,
             held->sample_iterations, held->sample_values, held->sample_gaps,
@@ -676,17 +676,17 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
         success.baseline_solution_id = held->baseline_solution_id;
         success.paused = pause_after;
         success.time_limit_reached = time_limit_reached;
-        const bool published = g_session.commit_continuation(job_id, [&](std::uint64_t generation)
+        const bool published = g_app.session.commit_continuation(job_id, [&](std::uint64_t generation)
         {
             StatusDraft draft = success;
             draft.generation = generation;
             return build_status(draft);
         });
-        if (!published && g_session.phase() == poker::explorer::Phase::Running)
+        if (!published && g_app.session.phase() == poker::explorer::Phase::Running)
         {
             StatusDraft draft = success;
             draft.error = "failed to publish the continuation";
-            g_session.abort_continuation(job_id, build_status(draft));
+            g_app.session.abort_continuation(job_id, build_status(draft));
         }
     }
     catch (const std::exception& error)
@@ -704,7 +704,7 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
         draft.root_id = held->root_id;
         draft.baseline_solution_id = held->baseline_solution_id;
         draft.time_limit_reached = held->time_limit_reached;
-        g_session.abort_continuation(job_id, build_status(draft));
+        g_app.session.abort_continuation(job_id, build_status(draft));
     }
 }
 
@@ -718,12 +718,12 @@ void resolve_locked_job(
     double time_limit,
     bool warm_start)
 {
-    g_session.wait_until_quiet();
+    g_app.session.wait_until_quiet();
     const std::shared_ptr<HeldSolution> held =
-        std::static_pointer_cast<HeldSolution>(g_session.training_resource(job_id));
+        std::static_pointer_cast<HeldSolution>(g_app.session.training_resource(job_id));
     if (!held || !held->street)
     {
-        g_session.abort_continuation(
+        g_app.session.abort_continuation(
             job_id,
             "{\"running\":false,\"cancelled\":false,\"error\":\"resolve-locked requires a street solution\","
             "\"solution_id\":null}");
@@ -745,13 +745,13 @@ void resolve_locked_job(
     const std::uint64_t prior_id = held->id;
     try
     {
-        if (g_session.baseline_solution() == 0)
+        if (g_app.session.baseline_solution() == 0)
         {
             try
             {
                 const std::shared_ptr<HeldSolution> baseline = clone_held_baseline(*held);
                 baseline->id = prior_id;
-                g_session.set_baseline(baseline, prior_id);
+                g_app.session.set_baseline(baseline, prior_id);
             }
             catch (const std::bad_alloc&)
             {
@@ -763,7 +763,7 @@ void resolve_locked_job(
                 draft.error = "baseline clone could not fit in memory";
                 draft.solution_id = prior_id;
                 draft.root_id = held->root_id;
-                g_session.abort_continuation(job_id, build_status(draft));
+                g_app.session.abort_continuation(job_id, build_status(draft));
                 return;
             }
             catch (const std::runtime_error& error)
@@ -776,11 +776,11 @@ void resolve_locked_job(
                 draft.error = error.what();
                 draft.solution_id = prior_id;
                 draft.root_id = held->root_id;
-                g_session.abort_continuation(job_id, build_status(draft));
+                g_app.session.abort_continuation(job_id, build_status(draft));
                 return;
             }
         }
-        held->baseline_solution_id = g_session.baseline_solution();
+        held->baseline_solution_id = g_app.session.baseline_solution();
 
         const poker::streets::StreetConfig config = held->street->config();
         // warm_start keeps regrets/strategy-sums and continues from the prior
@@ -809,7 +809,7 @@ void resolve_locked_job(
             draft.solution_id = prior_id;
             draft.root_id = held->root_id;
             draft.baseline_solution_id = held->baseline_solution_id;
-            g_session.abort_continuation(job_id, build_status(draft));
+            g_app.session.abort_continuation(job_id, build_status(draft));
             return;
         }
         held->street = std::move(rebuilt);
@@ -844,7 +844,7 @@ void resolve_locked_job(
             draft.solution_id = prior_id;
             draft.root_id = held->root_id;
             draft.baseline_solution_id = held->baseline_solution_id;
-            g_session.abort_continuation(job_id, build_status(draft));
+            g_app.session.abort_continuation(job_id, build_status(draft));
             return;
         }
         const int target = done + iterations;
@@ -871,7 +871,7 @@ void resolve_locked_job(
         const poker::solver::LockSet* const locks = locks_arg(*held);
         while (done < target)
         {
-            if (g_session.stop_requested(job_id) || g_session.pause_requested(job_id))
+            if (g_app.session.stop_requested(job_id) || g_app.session.pause_requested(job_id))
             {
                 break;
             }
@@ -902,7 +902,7 @@ void resolve_locked_job(
             progress.root_id = held->root_id;
             progress.baseline_solution_id = held->baseline_solution_id;
             progress.time_limit_reached = time_limit_reached;
-            g_session.set_progress(job_id, build_status(progress));
+            g_app.session.set_progress(job_id, build_status(progress));
             if (held->job.accuracy >= 0.0
                 && gap <= held->job.accuracy * poker::tenths_to_chips(held->job.pot))
             {
@@ -923,7 +923,7 @@ void resolve_locked_job(
             draft.solution_id = prior_id;
             draft.root_id = held->root_id;
             draft.baseline_solution_id = held->baseline_solution_id;
-            g_session.abort_continuation(job_id, build_status(draft));
+            g_app.session.abort_continuation(job_id, build_status(draft));
             return;
         }
         // Locked re-solve rebuilds the average; drop any prior free-form overlays.
@@ -941,7 +941,7 @@ void resolve_locked_job(
         held->time_limit_reached = time_limit_reached;
         held->job_id = job_id;
 
-        const poker::explorer::Session::Permit permit = g_session.prepare_success(job_id);
+        const poker::explorer::Session::Permit permit = g_app.session.prepare_success(job_id);
         if (!permit.allowed)
         {
             StatusDraft draft = draft_for(
@@ -952,7 +952,7 @@ void resolve_locked_job(
             draft.solution_id = prior_id;
             draft.root_id = held->root_id;
             draft.baseline_solution_id = held->baseline_solution_id;
-            g_session.abort_continuation(job_id, build_status(draft));
+            g_app.session.abort_continuation(job_id, build_status(draft));
             return;
         }
         held->id = permit.solution_id;
@@ -964,7 +964,7 @@ void resolve_locked_job(
         success.root_id = held->root_id;
         success.baseline_solution_id = held->baseline_solution_id;
         success.time_limit_reached = time_limit_reached;
-        const bool published = g_session.commit_success(
+        const bool published = g_app.session.commit_success(
             job_id,
             held,
             permit.solution_id,
@@ -980,11 +980,11 @@ void resolve_locked_job(
                 }
                 return build_status(draft);
             });
-        if (!published && g_session.phase() == poker::explorer::Phase::Running)
+        if (!published && g_app.session.phase() == poker::explorer::Phase::Running)
         {
             StatusDraft draft = success;
             draft.error = "failed to publish the locked resolve";
-            g_session.abort_continuation(job_id, build_status(draft));
+            g_app.session.abort_continuation(job_id, build_status(draft));
         }
     }
     catch (const std::exception& error)
@@ -998,7 +998,7 @@ void resolve_locked_job(
         draft.solution_id = held->id;
         draft.root_id = held->root_id;
         draft.baseline_solution_id = held->baseline_solution_id;
-        g_session.abort_continuation(job_id, build_status(draft));
+        g_app.session.abort_continuation(job_id, build_status(draft));
     }
 }
 

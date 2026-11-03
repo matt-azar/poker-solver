@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { blankGrid } from "../../domain/range";
-import { DEFAULT_SPOT } from "../../domain/types";
-import type { SetupDraftResult } from "../../domain/setup";
-import type { SetupUndoEntry } from "../../domain/setup";
+import { blankGrid } from "../range";
+import { DEFAULT_SPOT } from "../types";
+import type { SetupDraftResult } from "../setup";
+import type { SetupUndoEntry } from "../setup";
 import { commitAssistantSetup } from "./commitAssistantSetup";
 
 function proposal(revision: number): SetupDraftResult {

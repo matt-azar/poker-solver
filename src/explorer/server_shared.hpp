@@ -61,13 +61,19 @@ inline void close_socket(socket_t socket) { ::close(socket); }
 namespace explorer_detail
 {
 
-extern std::thread g_worker;
-extern poker::explorer::ValueWorker* g_values;
-extern poker::explorer::Session g_session;
-extern std::string g_ui_root;
-extern std::uint64_t g_equity_max_pair_runouts;
-extern std::filesystem::path g_templates_root;
-extern std::filesystem::path g_ranges_root;
+// Owned process-wide study server state (session, workers, static roots).
+struct ExplorerAppContext
+{
+    std::thread worker;
+    poker::explorer::ValueWorker* values = nullptr;
+    poker::explorer::Session session;
+    std::string ui_root = "legacy/ui";
+    std::uint64_t equity_max_pair_runouts = poker::holdem::kDefaultMaxPairRunouts;
+    std::filesystem::path templates_root;
+    std::filesystem::path ranges_root;
+};
+
+extern ExplorerAppContext g_app;
 
 struct Job
 {

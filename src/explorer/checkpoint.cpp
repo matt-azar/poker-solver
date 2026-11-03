@@ -1,6 +1,6 @@
 #include "explorer/checkpoint.hpp"
 
-#include "solver/trainer.hpp"
+#include "solver/solve_types.hpp"
 
 #include <bit>
 #include <cmath>

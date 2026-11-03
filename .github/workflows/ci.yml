@@ -37,11 +37,14 @@ jobs:
               - 'tests/**'
               - 'cmake/**'
               - 'CMakeLists.txt'
-              - 'tools/**'
+              - 'benchmarks/**'
+              - 'legacy/ui/**'
+              - 'configs/**'
               - '.github/workflows/ci.yml'
             desktop:
               - 'desktop/**'
               - 'configs/range-profiles/**'
+              - 'docs/ai-context/**'
               - '.github/workflows/ci.yml'
       # workflow_dispatch has no useful changed-files base; force both gates on.
       - id: gate
@@ -77,7 +80,11 @@ jobs:
           cmake --build build --config Release --parallel
           --target kuhn_solver --target leduc_solver --target river_solver
           --target street_solver --target explorer --target equity_calculator
-          --target poker_solver_tests --target equity_tests
+          --target poker_solver_tests --target poker_engine_tests
+          --target poker_study_tests --target poker_http_tests
+          --target equity_tests
+          --target street_memory_bench --target street_betting_bench
+          --target street_parallel_bench
       - name: CTest
         run: ctest --test-dir build -C Release --output-on-failure
       - name: JavaScript
@@ -105,7 +112,11 @@ jobs:
           cmake --build build --parallel
           --target kuhn_solver --target leduc_solver --target river_solver
           --target street_solver --target explorer --target equity_calculator
-          --target poker_solver_tests --target equity_tests
+          --target poker_solver_tests --target poker_engine_tests
+          --target poker_study_tests --target poker_http_tests
+          --target equity_tests
+          --target street_memory_bench --target street_betting_bench
+          --target street_parallel_bench
       - name: CTest
         run: ctest --test-dir build --output-on-failure
       - name: JavaScript
@@ -143,7 +154,9 @@ jobs:
       - name: Build
         run: >
           cmake --build build-san --parallel
-          --target poker_solver_tests --target equity_tests --target equity_calculator
+          --target poker_solver_tests --target poker_engine_tests
+          --target poker_study_tests --target poker_http_tests
+          --target equity_tests --target equity_calculator
       - name: CTest
         run: ctest --test-dir build-san --output-on-failure
 
@@ -166,6 +179,16 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - name: Install
         run: npm ci
+      - name: Forbid duplicated range assets
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          for d in desktop/src/domain/profiles/fixtures desktop/src/domain/profiles/packs; do
+            if [[ -e "$d" ]]; then
+              echo "Duplicate range assets under $d — import from configs/range-profiles instead" >&2
+              exit 1
+            fi
+          done
       - name: Lint
         run: npm run lint
       - name: Test

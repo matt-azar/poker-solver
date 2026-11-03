@@ -14,6 +14,22 @@ See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [EXPLORER.md](EXPLORER.md), 
 
 ## Modules
 
+### Build libraries
+
+| Target | Role | Depends on |
+| --- | --- | --- |
+| `poker_primitives` | Cards, hand eval, categories, ranges | — |
+| `poker_solver` | CFR trainer consumers, StreetBatch/RiverBatch, Kuhn | primitives |
+| `poker_study` | Checkpoint + value worker session services | solver |
+| `poker_equity` | Check-down equity | primitives only |
+| `poker_solver_core` | INTERFACE alias → `poker_study` (legacy name) | study |
+
+Shared solve declarations (`Algorithm`, `SolveConfig`, `SolveStats`) live in `include/solver/solve_types.hpp` so batch headers need not pull the full `CfrTrainer` template.
+
+Canonical range catalogue assets live under `configs/range-profiles/`; the Study client imports them directly (no `desktop/` copies).
+
+### Runtime modules
+
 | Module | Role |
 | --- | --- |
 | `poker::holdem` | Card ids, seven-card hand values, range weights, joint hand distribution |
