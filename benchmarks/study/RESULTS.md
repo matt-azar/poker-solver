@@ -1,8 +1,37 @@
 # Study benchmark report
 
-NashConv is `player0_best_response_utility + player1_best_response_utility`, the sum of the two unilateral deviation gains. The target is NashConv/pot at most 0.001. The fraction below is `nash_gap / pot`. `wall_seconds` is cold process time. `train_seconds` is the solver's training clock, not the process wall time.
+NashConv is the sum of unilateral BR gains
+`(u0(BR0)-u0)+(u1(BR1)-u1)`. Under zero-sum chips that equals
+`player0_best_response_utility + player1_best_response_utility`. The target is
+NashConv/pot at most 0.001. Prefer the solver's printed
+`nash_gap_fraction_of_pot` when present. `wall_seconds` is cold process time.
+`train_seconds` is the solver's training clock, not the process wall time.
+Engine `allocated_bytes` / `peak_allocated_bytes` are distinct from process RSS.
 
 Raw logs stay in `benchmarks/study/out/` and are gitignored. This file is the committed record.
+
+## Main at `dec4a5e` (Linux cloud agent, 2026-11-03 America/New_York)
+
+Post-#133 NashConv gains, #134 compact indexing, #135 bounded PSOL Save/Open.
+x86_64, 4 logical processors, 16,780,574,720 bytes of RAM (~5.0–5.3 GiB available at collection). Linux 6.12.94+, glibc 2.39. g++ 13.3.0, Unix Makefiles Release. Timing label: **quiet**. CFR+ only (default).
+
+| Case | Outcome | Iterations | Player 0 EV | NashConv | NashConv/pot | Wall | Train | Eval | Threads | Engine peak |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `river_competing_weights` | success | 340 of 2000 | −21.1586 | 0.095609 | 0.000956 | 150.1 s | unavailable | unavailable | n/a | table est. 31,744 B |
+| `turn_srp_river_betting` | target not reached | 400 of 400 | −8.17014 | 0.191993 | 0.001920 | 15.61 s | 14.66 s | 0.891 s | 1 | 22,772,498 B |
+| `turn_srp_river_betting_to_target` | success | 600 of 8000 | −8.16289 | 0.098929 | 0.000989 | 23.88 s | 22.48 s | 1.350 s | 1 | 22,772,498 B |
+| `flop_srp_one_size` | target not reached | 400 of 400 | −8.0655 | 0.469449 | 0.004694 | 622.2 s | 581.8 s | 38.28 s | 4 | 1,740,870,414 B |
+
+Notes for this revision:
+
+- Street final `pot:` / `stack:` lines now print **chips** (not tenths). The study runner prefers printed `nash_gap_fraction_of_pot`, so quality classification is honest.
+- Turn infosets fell from ~940k (Oct 30 dense indexing) to **506,160**; engine peak ~22.8 MiB vs ~48.5 MiB. Wall for 400 iters is ~15.6 s vs ~35 s on the prior Linux host record.
+- Turn reaches the 0.001 target by iteration **600** (~24 s wall), earlier than the prior 720-iteration / ~60 s training record on this class of host.
+- Flop engine peak ~1.74 GiB (was ~4.27 GiB allocated on the Oct 30 finish). Wall for 400 iters at 4 threads ~622 s vs ~2255 s. NashConv/pot at the 400-iter cap is still above 0.001 (0.00469); a dedicated to-target chase remains multi-hour and is not claimed here.
+- River CLI still omits construction/train/eval clocks. Wall ~150 s to target on this host (StreetBatch five-card path); quality matches the prior EV/gap pins.
+- Tiny explorer Save/Open probe (`benchmarks/study/scripts/measure_psol_roundtrip.py`, check-only AA vs KK river, 20 CFR+ iters): idle RSS ~4.4 MiB → after solve ~5.4 MiB → after save ~5.5 MiB → after open ~5.7 MiB; PSOL file 423 bytes. This is not a large-tree RSS envelope.
+
+CFR+ remains the default. No DCFR/PCFR+ retune from this matrix.
 
 ## Machine (Linux cloud agent, 2026-10-30 America/New_York)
 
@@ -98,4 +127,4 @@ On top of `#56` / `main`, folding actor σ-mix into the frozen action loop and s
 
 ## Next measurement
 
-Flop time-to-0.001 needs a faster kernel or a dedicated longer-wall job, not a default study-runner wait. Turn target remains 720 iterations / ~60 s training on this Linux host; river stays under two seconds to target. Dense idx* walks and further aev/mix bookkeeping shuffles after `#52`–speed-7 are exhausted for the ~1.05x wall bar on these trees; remaining train is still nested showdown/chance-child work.
+Current CFR+ baseline is `dec4a5e` above. Flop time-to-0.001 still needs a dedicated longer-wall job (400 iters at 4 threads lands ~0.0047 NashConv/pot in ~10 minutes on this host). Large-solution Save/Open/compare RSS under a multi-GiB engine budget is still a gap versus the tiny PSOL probe. Desktop packaged-build acceptance remains Windows-side.

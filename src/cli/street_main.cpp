@@ -820,8 +820,10 @@ int main(int argc, char** argv)
         std::cout << "solver: " << solver_name << "\n";
         std::cout << "board: " << board_text(config.board) << "\n";
         std::cout << "algorithm: " << poker::solver::algorithm_name(algorithm) << "\n";
-        std::cout << "pot: " << config.pot << "\n";
-        std::cout << "stack: " << config.stack << "\n";
+        // Print chip amounts, matching progress lines and nash_gap_fraction_of_pot.
+        // Raw tenths here made study runners divide by 10x and mis-classify targets.
+        std::cout << "pot: " << poker::format_chips(config.pot) << "\n";
+        std::cout << "stack: " << poker::format_chips(config.stack) << "\n";
         std::cout << "deals: " << deals << "\n";
         std::cout << "infosets: " << infosets << "\n";
         if (public_decisions > 0)

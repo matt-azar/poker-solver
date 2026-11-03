@@ -4,7 +4,9 @@ Reference workloads for river, turn, and flop study. Ranges are study inputs, no
 
 ## What is measured
 
-NashConv is `player0_best_response_utility + player1_best_response_utility`: the sum of the two unilateral deviation gains. Player 0 is out of position.
+NashConv is the sum of unilateral BR gains
+`(u0(BR0)-u0)+(u1(BR1)-u1)`. Under zero-sum chips that equals
+`player0_best_response_utility + player1_best_response_utility`. Player 0 is out of position.
 
 The quality target is NashConv/pot at most **0.001**.
 
