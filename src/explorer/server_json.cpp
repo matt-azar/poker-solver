@@ -30,7 +30,7 @@ bool parse_u64(std::string_view text, std::uint64_t& value)
 poker::holdem::ShowdownEquityOptions equity_options(const std::atomic<bool>& cancel)
 {
     poker::holdem::ShowdownEquityOptions options;
-    options.max_pair_runouts = g_equity_max_pair_runouts;
+    options.max_pair_runouts = g_app.equity_max_pair_runouts;
     options.cancel_poll = [](void* context)
     {
         return static_cast<const std::atomic<bool>*>(context)->load(std::memory_order_relaxed);
@@ -1867,13 +1867,13 @@ void respond_value_query(
     std::chrono::steady_clock::time_point started,
     const std::string& kind)
 {
-    const std::uint64_t generation = g_session.generation();
+    const std::uint64_t generation = g_app.session.generation();
     poker::explorer::ValueRequest request;
     request.solution_id = solution_id;
     request.job_id = job_id;
     request.node_id = node_id;
     request.kind = kind;
-    const poker::explorer::ValueReply reply = g_values->submit(request);
+    const poker::explorer::ValueReply reply = g_app.values->submit(request);
     const int status = reply.ready ? (reply.ok ? 200 : 400) : 202;
     const std::string body = reply.ready
         ? reply.body
@@ -1923,7 +1923,7 @@ StatusDraft draft_for(
     // Only call outside Session methods that already hold mu_. install/commit
     // callbacks must build the draft first or assign generation from the
     // callback argument.
-    draft.generation = g_session.generation() + 1;
+    draft.generation = g_app.session.generation() + 1;
     return draft;
 }
 

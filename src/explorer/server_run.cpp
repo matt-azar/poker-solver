@@ -22,7 +22,7 @@ namespace explorer_detail
 int run(int argc, char** argv)
 {
     poker::explorer::ValueWorker values(
-        g_session,
+        g_app.session,
         [](const std::shared_ptr<void>& resource,
             const poker::explorer::ValueRequest& request,
             const std::atomic<bool>& cancel)
@@ -64,7 +64,7 @@ int run(int argc, char** argv)
                 }
                 page.query_seconds = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - started).count();
-                if (cancel.load() || g_session.current_solution() != request.solution_id)
+                if (cancel.load() || g_app.session.current_solution() != request.solution_id)
                 {
                     throw poker::solver::StreetValueCancelled();
                 }
@@ -72,7 +72,7 @@ int run(int argc, char** argv)
                     page,
                     request.solution_id,
                     request.job_id,
-                    g_session.generation(),
+                    g_app.session.generation(),
                     oop_distribution,
                     ip_distribution,
                     oop_hands,
@@ -90,11 +90,11 @@ int run(int argc, char** argv)
                 }
                 const poker::solver::StreetActionValues page =
                     held->river->action_values(request.node_id, &cancel);
-                if (cancel.load() || g_session.current_solution() != request.solution_id)
+                if (cancel.load() || g_app.session.current_solution() != request.solution_id)
                 {
                     throw poker::solver::StreetValueCancelled();
                 }
-                return json_action_values(page, request.solution_id, request.job_id, g_session.generation());
+                return json_action_values(page, request.solution_id, request.job_id, g_app.session.generation());
             }
             if (!held->street)
             {
@@ -103,11 +103,11 @@ int run(int argc, char** argv)
             if (request.kind == "runout")
             {
                 const poker::solver::StreetRunoutValues page = held->street->runout_values(request.node_id, &cancel);
-                if (cancel.load() || g_session.current_solution() != request.solution_id)
+                if (cancel.load() || g_app.session.current_solution() != request.solution_id)
                 {
                     throw poker::solver::StreetValueCancelled();
                 }
-                return json_runout_values(page, request.solution_id, request.job_id, g_session.generation());
+                return json_runout_values(page, request.solution_id, request.job_id, g_app.session.generation());
             }
             if (request.kind == "equity")
             {
@@ -144,7 +144,7 @@ int run(int argc, char** argv)
                 }
                 page.query_seconds = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - started).count();
-                if (cancel.load() || g_session.current_solution() != request.solution_id)
+                if (cancel.load() || g_app.session.current_solution() != request.solution_id)
                 {
                     throw poker::solver::StreetValueCancelled();
                 }
@@ -152,37 +152,37 @@ int run(int argc, char** argv)
                     page,
                     request.solution_id,
                     request.job_id,
-                    g_session.generation(),
+                    g_app.session.generation(),
                     oop_distribution,
                     ip_distribution,
                     oop_hands,
                     ip_hands);
             }
             const poker::solver::StreetActionValues page = held->street->action_values(request.node_id, &cancel);
-            if (cancel.load() || g_session.current_solution() != request.solution_id)
+            if (cancel.load() || g_app.session.current_solution() != request.solution_id)
             {
                 throw poker::solver::StreetValueCancelled();
             }
-            return json_action_values(page, request.solution_id, request.job_id, g_session.generation());
+            return json_action_values(page, request.solution_id, request.job_id, g_app.session.generation());
         },
         [](const std::string& what, const poker::explorer::ValueRequest& request)
         {
             return json_value_error(
-                what, request.solution_id, request.job_id, request.node_id, g_session.generation());
+                what, request.solution_id, request.job_id, request.node_id, g_app.session.generation());
         });
-    g_values = &values;
+    g_app.values = &values;
     struct Teardown
     {
         ~Teardown()
         {
-            if (g_values != nullptr)
+            if (g_app.values != nullptr)
             {
-                g_values->shutdown();
-                g_values = nullptr;
+                g_app.values->shutdown();
+                g_app.values = nullptr;
             }
-            if (g_worker.joinable())
+            if (g_app.worker.joinable())
             {
-                g_worker.join();
+                g_app.worker.join();
             }
         }
     } teardown;
@@ -196,7 +196,7 @@ int run(int argc, char** argv)
             std::cerr << "invalid POKER_EQUITY_MAX_PAIR_RUNOUTS\n";
             return 1;
         }
-        g_equity_max_pair_runouts = parsed;
+        g_app.equity_max_pair_runouts = parsed;
     }
     for (int i = 1; i < argc; ++i)
     {
@@ -213,12 +213,12 @@ int run(int argc, char** argv)
                 std::cerr << "invalid --max-pair-runouts\n";
                 return 1;
             }
-            g_equity_max_pair_runouts = parsed;
+            g_app.equity_max_pair_runouts = parsed;
         }
     }
     choose_ui_root();
-    g_templates_root = poker::explorer::resolve_templates_directory(executable_directory());
-    g_ranges_root = poker::explorer::resolve_ranges_directory(executable_directory());
+    g_app.templates_root = poker::explorer::resolve_templates_directory(executable_directory());
+    g_app.ranges_root = poker::explorer::resolve_ranges_directory(executable_directory());
 
 #ifdef _WIN32
     WSADATA data;
@@ -254,12 +254,12 @@ int run(int argc, char** argv)
         return 1;
     }
     std::cout << "explorer http://127.0.0.1:" << port << "\n";
-    std::cout << "ui " << g_ui_root << "\n";
+    std::cout << "ui " << g_app.ui_root << "\n";
     std::cout << "recent "
               << poker::explorer::resolve_recent_file_path().string() << "\n";
-    if (!g_templates_root.empty())
+    if (!g_app.templates_root.empty())
     {
-        std::cout << "templates " << g_templates_root.string() << "\n";
+        std::cout << "templates " << g_app.templates_root.string() << "\n";
     }
     std::cout.flush();
 

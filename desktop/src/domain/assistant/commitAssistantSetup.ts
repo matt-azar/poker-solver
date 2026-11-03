@@ -1,9 +1,9 @@
 import {
   buildApplicationReceipt,
   type ApplicationReceipt,
-} from "../../domain/assistant/applicationReceipt";
-import type { SetupDraftResult } from "../../domain/setup";
-import type { SetupUndoEntry } from "../../domain/setup";
+} from "./applicationReceipt";
+import type { SetupDraftResult } from "../setup";
+import type { SetupUndoEntry } from "../setup";
 
 export type AssistantSetupApplyOutcome =
   | { ok: true; receipt: ApplicationReceipt }

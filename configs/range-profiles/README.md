@@ -4,6 +4,13 @@ Versioned JSON profiles that pair OOP/IP weighted ranges under shared game assum
 
 This catalogue sits **alongside** the flat text presets in `configs/ranges/*.txt`. Those legacy presets remain available via `GET /api/ranges` and can be wrapped for display with unknown assumptions (`legacyPreset: true`); they are never treated as automatic exact matches.
 
+
+## Desktop bundling
+
+The Study client imports these files directly (Vite `?raw` / JSON). Do **not**
+copy fixtures or `packs/seat-action/` into `desktop/src/`. CI fails if a
+duplicate tree reappears under `desktop/src/domain/profiles/{fixtures,packs}`.
+
 ## Product naming
 
 - **Rake structure** (e.g. `100NL`, `cEV`) selects the stakes/rake environment — not a personal player profile and not stack depth.

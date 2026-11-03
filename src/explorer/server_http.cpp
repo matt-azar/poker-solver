@@ -514,7 +514,7 @@ std::string solution_config_json(const HeldSolution& held)
 
 std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
 {
-    // Build outside install_completed: draft_for reads g_session.generation(),
+    // Build outside install_completed: draft_for reads g_app.session.generation(),
     // and the install callback already holds the session mutex.
     StatusDraft base = draft_for(
         held->job, 0, held->iterations, held->runtime_seconds, true,
@@ -524,7 +524,7 @@ std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
     base.root_id = held->root_id;
     std::uint64_t solution_id = 0;
     std::string status;
-    const bool installed = g_session.install_completed(held, solution_id, [&](std::uint64_t generation, std::uint64_t id)
+    const bool installed = g_app.session.install_completed(held, solution_id, [&](std::uint64_t generation, std::uint64_t id)
     {
         held->id = id;
         StatusDraft draft = base;
@@ -563,7 +563,7 @@ void handle_client(socket_t client)
 
     if (line.rfind("GET /api/status", 0) == 0)
     {
-        send_response(client, 200, "application/json", g_session.status());
+        send_response(client, 200, "application/json", g_app.session.status());
         return;
     }
     if (line.rfind("GET /api/recent-solutions", 0) == 0)
@@ -598,7 +598,7 @@ void handle_client(socket_t client)
     if (line.rfind("GET /api/templates ", 0) == 0 || line.rfind("GET /api/templates?", 0) == 0)
     {
         const std::vector<poker::explorer::TemplateInfo> templates =
-            poker::explorer::list_templates(g_templates_root);
+            poker::explorer::list_templates(g_app.templates_root);
         std::string payload = "[";
         for (std::size_t index = 0; index < templates.size(); ++index)
         {
@@ -627,7 +627,7 @@ void handle_client(socket_t client)
             return;
         }
         const std::optional<std::string> text =
-            poker::explorer::read_template(g_templates_root, id);
+            poker::explorer::read_template(g_app.templates_root, id);
         if (!text.has_value())
         {
             send_response(client, 404, "application/json", "{\"error\":\"unknown template\"}");
@@ -644,7 +644,7 @@ void handle_client(socket_t client)
     if (line.rfind("GET /api/ranges ", 0) == 0 || line.rfind("GET /api/ranges?", 0) == 0)
     {
         const std::vector<poker::explorer::RangePresetInfo> presets =
-            poker::explorer::list_range_presets(g_ranges_root);
+            poker::explorer::list_range_presets(g_app.ranges_root);
         std::string payload = "[";
         for (std::size_t index = 0; index < presets.size(); ++index)
         {
@@ -706,7 +706,7 @@ void handle_client(socket_t client)
             return;
         }
         const std::optional<std::string> text =
-            poker::explorer::read_range_preset(g_ranges_root, id);
+            poker::explorer::read_range_preset(g_app.ranges_root, id);
         if (!text.has_value())
         {
             send_response(client, 404, "application/json", "{\"error\":\"unknown range\"}");
@@ -771,8 +771,8 @@ void handle_client(socket_t client)
                 "{\"error\":\"baseline, scenario, and node_id are required\"}");
             return;
         }
-        poker::explorer::ReaderLease baseline_lease(g_session, g_session.borrow(baseline_id));
-        poker::explorer::ReaderLease scenario_lease(g_session, g_session.borrow(scenario_id));
+        poker::explorer::ReaderLease baseline_lease(g_app.session, g_app.session.borrow(baseline_id));
+        poker::explorer::ReaderLease scenario_lease(g_app.session, g_app.session.borrow(scenario_id));
         if (!baseline_lease || !scenario_lease)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
@@ -897,7 +897,7 @@ void handle_client(socket_t client)
     }
     if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/resolve-locked ") != std::string::npos)
     {
-        if (g_session.running())
+        if (g_app.session.running())
         {
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
@@ -958,15 +958,15 @@ void handle_client(socket_t client)
             return;
         }
         const int extra = static_cast<int>(requested);
-        if (g_values != nullptr)
+        if (g_app.values != nullptr)
         {
-            g_values->cancel();
+            g_app.values->cancel();
         }
-        if (g_worker.joinable())
+        if (g_app.worker.joinable())
         {
-            g_worker.join();
+            g_app.worker.join();
         }
-        const poker::explorer::Session::Claim claim = g_session.claim_completed(id);
+        const poker::explorer::Session::Claim claim = g_app.session.claim_completed(id);
         if (!claim.allowed)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
@@ -975,10 +975,10 @@ void handle_client(socket_t client)
         try
         {
             const std::shared_ptr<HeldSolution> held =
-                std::static_pointer_cast<HeldSolution>(g_session.training_resource(claim.job_id));
+                std::static_pointer_cast<HeldSolution>(g_app.session.training_resource(claim.job_id));
             if (!held || !held->street)
             {
-                g_session.abort_continuation(
+                g_app.session.abort_continuation(
                     claim.job_id,
                     "{\"running\":false,\"cancelled\":false,\"error\":\"resolve-locked requires a street solution\","
                     "\"solution_id\":null}");
@@ -998,8 +998,8 @@ void handle_client(socket_t client)
             starting.solution_id = held->id;
             starting.root_id = held->root_id;
             starting.baseline_solution_id = held->baseline_solution_id;
-            g_session.set_progress(claim.job_id, build_status(starting));
-            g_worker = std::thread(
+            g_app.session.set_progress(claim.job_id, build_status(starting));
+            g_app.worker = std::thread(
                 [job_id = claim.job_id,
                     extra,
                     resolve_accuracy,
@@ -1018,7 +1018,7 @@ void handle_client(socket_t client)
         }
         catch (const std::exception& error)
         {
-            g_session.abort_continuation(
+            g_app.session.abort_continuation(
                 claim.job_id,
                 "{\"running\":false,\"cancelled\":false,\"error\":\"resolve-locked failed\",\"solution_id\":null}");
             std::string payload = "{\"error\":";
@@ -1046,12 +1046,12 @@ void handle_client(socket_t client)
             send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
             return;
         }
-        if (g_session.running())
+        if (g_app.session.running())
         {
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
         }
-        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        poker::explorer::ReaderLease lease(g_app.session, g_app.session.borrow(id));
         if (!lease)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
@@ -1144,7 +1144,7 @@ void handle_client(socket_t client)
             send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
             return;
         }
-        if (g_session.running())
+        if (g_app.session.running())
         {
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
@@ -1196,7 +1196,7 @@ void handle_client(socket_t client)
                 }
             }
         }
-        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        poker::explorer::ReaderLease lease(g_app.session, g_app.session.borrow(id));
         if (!lease)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
@@ -1253,13 +1253,13 @@ void handle_client(socket_t client)
             send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
             return;
         }
-        if (g_session.running())
+        if (g_app.session.running())
         {
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
         }
-        g_session.wait_until_quiet();
-        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        g_app.session.wait_until_quiet();
+        poker::explorer::ReaderLease lease(g_app.session, g_app.session.borrow(id));
         if (!lease)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
@@ -1344,7 +1344,7 @@ void handle_client(socket_t client)
             send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
             return;
         }
-        if (g_session.running())
+        if (g_app.session.running())
         {
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
@@ -1396,8 +1396,8 @@ void handle_client(socket_t client)
                 }
             }
         }
-        g_session.wait_until_quiet();
-        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        g_app.session.wait_until_quiet();
+        poker::explorer::ReaderLease lease(g_app.session, g_app.session.borrow(id));
         if (!lease)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
@@ -1448,7 +1448,7 @@ void handle_client(socket_t client)
     }
     if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/continue ") != std::string::npos)
     {
-        if (g_session.running())
+        if (g_app.session.running())
         {
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
@@ -1494,17 +1494,17 @@ void handle_client(socket_t client)
             return;
         }
         const int extra = static_cast<int>(requested);
-        if (g_values != nullptr)
+        if (g_app.values != nullptr)
         {
-            g_values->cancel();
+            g_app.values->cancel();
         }
-        if (g_worker.joinable())
+        if (g_app.worker.joinable())
         {
-            g_worker.join();
+            g_app.worker.join();
         }
         // Claim is non-blocking: cancelled value readers may still hold the
         // engine. continue_job waits for quiet before mutating.
-        const poker::explorer::Session::Claim claim = g_session.claim_completed(id);
+        const poker::explorer::Session::Claim claim = g_app.session.claim_completed(id);
         if (!claim.allowed)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
@@ -1513,10 +1513,10 @@ void handle_client(socket_t client)
         try
         {
             const std::shared_ptr<HeldSolution> held =
-                std::static_pointer_cast<HeldSolution>(g_session.training_resource(claim.job_id));
+                std::static_pointer_cast<HeldSolution>(g_app.session.training_resource(claim.job_id));
             if (!held)
             {
-                g_session.abort_continuation(
+                g_app.session.abort_continuation(
                     claim.job_id,
                     "{\"running\":false,\"cancelled\":false,\"error\":\"missing solution\",\"solution_id\":null}");
                 send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
@@ -1530,15 +1530,15 @@ void handle_client(socket_t client)
             starting.running = true;
             starting.solution_id = held->id;
             starting.root_id = held->root_id;
-            g_session.set_progress(claim.job_id, build_status(starting));
-            g_worker = std::thread(
+            g_app.session.set_progress(claim.job_id, build_status(starting));
+            g_app.worker = std::thread(
                 [job_id = claim.job_id, extra, continue_time_limit]()
                 { continue_job(job_id, extra, continue_time_limit); });
         }
         catch (const std::exception& error)
         {
             const std::shared_ptr<HeldSolution> held =
-                std::static_pointer_cast<HeldSolution>(g_session.training_resource(claim.job_id));
+                std::static_pointer_cast<HeldSolution>(g_app.session.training_resource(claim.job_id));
             if (held)
             {
                 StatusDraft failed = draft_for(
@@ -1549,11 +1549,11 @@ void handle_client(socket_t client)
                 failed.error = error.what();
                 failed.solution_id = held->id;
                 failed.root_id = held->root_id;
-                g_session.abort_continuation(claim.job_id, build_status(failed));
+                g_app.session.abort_continuation(claim.job_id, build_status(failed));
             }
             else
             {
-                g_session.abort_continuation(
+                g_app.session.abort_continuation(
                     claim.job_id,
                     "{\"running\":false,\"cancelled\":false,\"error\":\"continuation failed\",\"solution_id\":null}");
             }
@@ -1769,7 +1769,7 @@ void handle_client(socket_t client)
     }
     if (line.rfind("POST /api/open", 0) == 0)
     {
-        if (g_session.running())
+        if (g_app.session.running())
         {
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
@@ -1781,9 +1781,9 @@ void handle_client(socket_t client)
             {
                 throw std::invalid_argument("path is required");
             }
-            if (g_values != nullptr)
+            if (g_app.values != nullptr)
             {
-                g_values->cancel_and_drain();
+                g_app.values->cancel_and_drain();
             }
             const poker::explorer::CheckpointDocument document =
                 poker::explorer::read_checkpoint(path, poker::explorer::kMaxCheckpointBytes);
@@ -1811,7 +1811,7 @@ void handle_client(socket_t client)
             send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
             return;
         }
-        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        poker::explorer::ReaderLease lease(g_app.session, g_app.session.borrow(id));
         if (!lease)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
@@ -1857,7 +1857,7 @@ void handle_client(socket_t client)
             send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
             return;
         }
-        poker::explorer::ReaderLease lease(g_session, g_session.borrow(id));
+        poker::explorer::ReaderLease lease(g_app.session, g_app.session.borrow(id));
         if (!lease)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
@@ -1951,7 +1951,7 @@ void handle_client(socket_t client)
                         held->id,
                         held->job_id,
                         node_path,
-                        g_session.generation(),
+                        g_app.session.generation(),
                         query_seconds);
                     send_response(
                         client,
@@ -2055,7 +2055,7 @@ void handle_client(socket_t client)
                     held->id,
                     held->job_id,
                     "root",
-                    g_session.generation(),
+                    g_app.session.generation(),
                     query_seconds);
                 send_response(
                     client,
@@ -2083,7 +2083,7 @@ void handle_client(socket_t client)
                     held->has_memory ? &held->memory : nullptr);
                 draft.solution_id = held->id;
                 draft.root_id = held->root_id;
-                draft.generation = g_session.generation();
+                draft.generation = g_app.session.generation();
                 draft.include_strategy = true;
                 draft.entries = &entries;
                 send_response(client, 200, "application/json", build_status(draft));
@@ -2102,7 +2102,7 @@ void handle_client(socket_t client)
     }
     if (line.rfind("POST /api/stop", 0) == 0)
     {
-        std::uint64_t job_id = g_session.current_job();
+        std::uint64_t job_id = g_app.session.current_job();
         if (find_key(body, "job_id") != std::string::npos)
         {
             const std::string token = read_string(body, "job_id", "");
@@ -2112,7 +2112,7 @@ void handle_client(socket_t client)
                 return;
             }
         }
-        const poker::explorer::StopResult result = g_session.request_stop(job_id);
+        const poker::explorer::StopResult result = g_app.session.request_stop(job_id);
         std::string payload = "{\"result\":";
         if (result == poker::explorer::StopResult::Accepted)
         {
@@ -2121,7 +2121,7 @@ void handle_client(socket_t client)
         else if (result == poker::explorer::StopResult::AlreadyComplete)
         {
             payload += "\"complete\",\"solution_id\":";
-            const std::uint64_t solution = g_session.current_solution();
+            const std::uint64_t solution = g_app.session.current_solution();
             if (solution == 0)
             {
                 payload += "null";
@@ -2150,7 +2150,7 @@ void handle_client(socket_t client)
     }
     if (line.rfind("POST /api/pause", 0) == 0)
     {
-        std::uint64_t job_id = g_session.current_job();
+        std::uint64_t job_id = g_app.session.current_job();
         if (find_key(body, "job_id") != std::string::npos)
         {
             const std::string token = read_string(body, "job_id", "");
@@ -2160,7 +2160,7 @@ void handle_client(socket_t client)
                 return;
             }
         }
-        const poker::explorer::PauseResult result = g_session.request_pause(job_id);
+        const poker::explorer::PauseResult result = g_app.session.request_pause(job_id);
         std::string payload = "{\"result\":";
         if (result == poker::explorer::PauseResult::Accepted)
         {
@@ -2169,7 +2169,7 @@ void handle_client(socket_t client)
         else if (result == poker::explorer::PauseResult::AlreadyComplete)
         {
             payload += "\"complete\",\"solution_id\":";
-            const std::uint64_t solution = g_session.current_solution();
+            const std::uint64_t solution = g_app.session.current_solution();
             if (solution == 0)
             {
                 payload += "null";
@@ -2198,52 +2198,52 @@ void handle_client(socket_t client)
     }
     if (line.rfind("POST /api/solve", 0) == 0)
     {
-        if (g_session.running())
+        if (g_app.session.running())
         {
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
         }
-        if (g_values != nullptr)
+        if (g_app.values != nullptr)
         {
-            g_values->cancel();
+            g_app.values->cancel();
         }
         try
         {
             Job job = parse_job(body);
-            if (g_worker.joinable())
+            if (g_app.worker.joinable())
             {
-                g_worker.join();
+                g_app.worker.join();
             }
             std::shared_ptr<void> retiring;
             // begin() retires the prior engine without waiting; the worker
             // joins quiet before destroying it so value readers can finish.
-            const std::uint64_t job_id = g_session.begin(retiring);
+            const std::uint64_t job_id = g_app.session.begin(retiring);
             StatusDraft starting;
             starting.running = true;
             starting.job = &job;
             starting.job_id = job_id;
-            starting.generation = g_session.generation() + 1;
-            g_session.set_progress(job_id, build_status(starting));
+            starting.generation = g_app.session.generation() + 1;
+            g_app.session.set_progress(job_id, build_status(starting));
             try
             {
-                g_worker = std::thread([job, retiring = std::move(retiring), job_id]() mutable
+                g_app.worker = std::thread([job, retiring = std::move(retiring), job_id]() mutable
                 {
-                    g_session.wait_until_quiet();
+                    g_app.session.wait_until_quiet();
                     retiring.reset();
-                    g_session.notify_released();
+                    g_app.session.notify_released();
                     solve_job(job_id, std::move(job));
                 });
             }
             catch (const std::exception& error)
             {
-                g_session.wait_until_quiet();
+                g_app.session.wait_until_quiet();
                 retiring.reset();
                 StatusDraft failed;
                 failed.job = &job;
                 failed.job_id = job_id;
                 failed.error = error.what();
-                failed.generation = g_session.generation() + 1;
-                g_session.finish_failed(job_id, build_status(failed));
+                failed.generation = g_app.session.generation() + 1;
+                g_app.session.finish_failed(job_id, build_status(failed));
                 throw;
             }
             std::string accepted = "{\"running\":true,\"job_id\":";
@@ -2304,7 +2304,7 @@ void handle_client(socket_t client)
         send_response(client, 400, "text/plain", "not found");
         return;
     }
-    const std::string file = read_file(g_ui_root + path);
+    const std::string file = read_file(g_app.ui_root + path);
     if (file.empty())
     {
         send_response(client, 400, "text/plain", "missing " + path);
@@ -2370,7 +2370,7 @@ void choose_ui_root()
         std::ifstream probe(candidate + "/index.html");
         if (probe)
         {
-            g_ui_root = candidate;
+            g_app.ui_root = candidate;
             return;
         }
     }

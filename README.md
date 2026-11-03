@@ -116,9 +116,11 @@ src/cli/          Process entrypoints (street/river/explorer/equity/kuhn/leduc)
 desktop/          React Study UI + Tauri Windows shell (product UI)
 legacy/ui/        Legacy explorer static page (fallback + regression)
 benchmarks/       Study benchmark runner, cases, and street micro-benches
-tests/            In-repo harness + CTest
-configs/          Default configs, range libraries, templates
+tests/            CTest suites: engine / study / HTTP (+ equity)
+configs/          Defaults, ranges, templates; canonical range-profiles/
 docs/             Architecture, product, mathematics, roadmap
+
+CMake libraries: poker_primitives → poker_solver → poker_study; poker_equity → primitives
 ```
 
 ## Documentation

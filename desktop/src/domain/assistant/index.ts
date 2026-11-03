@@ -120,3 +120,9 @@ export {
   type OpenAiHelpChatOptions,
 } from "./help";
 
+export {
+  commitAssistantSetup,
+  type AssistantSetupApplyFn,
+  type AssistantSetupApplyOutcome,
+} from "./commitAssistantSetup";
+

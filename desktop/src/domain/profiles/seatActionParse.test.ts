@@ -10,7 +10,7 @@ import {
 import { loadBundledSeatActions } from "./bundledSeatActions";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const packDir = join(here, "packs/seat-action");
+const packDir = join(here, "../../../../configs/range-profiles/packs/seat-action");
 
 describe("parseSeatActionFilename", () => {
   it("maps open charts and BB vs CO call/3bet", () => {
@@ -79,7 +79,7 @@ describe("bundled seat-action pack", () => {
     const atom = seatActionFromTextFile(
       "BBvCOcall.txt",
       text,
-      "packs/seat-action/BBvCOcall.txt",
+      "configs/range-profiles/packs/seat-action/BBvCOcall.txt",
     );
     expect(atom.id).toContain("bb");
     expect(atom.range.startsWith("JJ")).toBe(true);

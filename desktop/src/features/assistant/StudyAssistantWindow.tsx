@@ -36,7 +36,7 @@ import {
   useHelpChatStore,
 } from "../../state/assistantWindowStore";
 import { useStudyStore } from "../../state/studyStore";
-import { commitAssistantSetup } from "./commitAssistantSetup";
+import { commitAssistantSetup } from "../../domain/assistant/commitAssistantSetup";
 
 type ProviderMode = "fake" | "openai";
 

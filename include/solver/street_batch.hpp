@@ -4,7 +4,7 @@
 #include "poker/hand_categories.hpp"
 #include "solver/budget_resource.hpp"
 #include "solver/table_scalar.hpp"
-#include "solver/trainer.hpp"
+#include "solver/solve_types.hpp"
 #include "solver/training_state.hpp"
 
 #include <atomic>

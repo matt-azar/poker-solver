@@ -3,13 +3,17 @@ import type { SeatActionRange } from "./seatActionTypes";
 
 /**
  * Eager raw imports of user-provided seat×action packs (Ranges.zip).
+ * Canonical files live under configs/range-profiles/packs/seat-action/.
  * Keep filenames stable — parser maps them to catalogue ids.
  */
-const rawModules = import.meta.glob("./packs/seat-action/*.txt", {
-  eager: true,
-  query: "?raw",
-  import: "default",
-}) as Record<string, string>;
+const rawModules = import.meta.glob(
+  "../../../../configs/range-profiles/packs/seat-action/*.txt",
+  {
+    eager: true,
+    query: "?raw",
+    import: "default",
+  },
+) as Record<string, string>;
 
 /** Load all bundled seat×action atoms from the Drive Ranges.zip pack. */
 export function loadBundledSeatActions(): SeatActionRange[] {
