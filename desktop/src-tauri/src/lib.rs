@@ -17,6 +17,11 @@ use tauri_plugin_shell::ShellExt;
 /// HTTP port the production UI uses for API calls (`http://127.0.0.1:8765`).
 const ENGINE_PORT: u16 = 8765;
 
+/// Study packaging equity work ceiling (`kStudyExplorerMaxPairRunouts` in
+/// `include/poker/equity.hpp`). Keeps the library default at 1.1M; passes
+/// `--max-pair-runouts` so denser ranges work without admitting full-range turn (~51M).
+const STUDY_EXPLORER_MAX_PAIR_RUNOUTS: u64 = 5_000_000;
+
 /// Bundle key in `tauri.conf.json` `bundle.externalBin` (build-time path under
 /// `src-tauri/`). At install time Tauri places only the **basename** next to the
 /// app (`holdem-explorer.exe`). Do not pass this string to `shell().sidecar()` —
@@ -313,14 +318,18 @@ fn spawn_once(
         state.set_status(err.clone());
         err
     })?;
-    let (_rx, child) = cmd.args(["--port", port]).spawn().map_err(|err| {
-        let msg = format!(
-            "spawn failed for `{label}` on port {ENGINE_PORT}: {err}. \
-             Check Windows Defender quarantine and that port {ENGINE_PORT} is free."
-        );
-        state.set_status(msg.clone());
-        msg
-    })?;
+    let max_pair = STUDY_EXPLORER_MAX_PAIR_RUNOUTS.to_string();
+    let (_rx, child) = cmd
+        .args(["--port", port, "--max-pair-runouts", &max_pair])
+        .spawn()
+        .map_err(|err| {
+            let msg = format!(
+                "spawn failed for `{label}` on port {ENGINE_PORT}: {err}. \
+                 Check Windows Defender quarantine and that port {ENGINE_PORT} is free."
+            );
+            state.set_status(msg.clone());
+            msg
+        })?;
     state.store_child(child);
     state.set_status(format!("starting on port {ENGINE_PORT}…"));
     Ok(())

@@ -811,6 +811,7 @@ void test_work_limit_and_cancellation()
     const std::vector<int> turn = parse_equity_board("As Kd Qc Jh");
     const ShowdownWork turn_work = measure_showdown_work(turn, wide, wide);
     CHECK(turn_work.pair_runouts > poker::holdem::kDefaultMaxPairRunouts);
+    CHECK(turn_work.pair_runouts > poker::holdem::kStudyExplorerMaxPairRunouts);
     const EquityError turn_limit = expect_failure(
         EquityFailure::WorkLimit, [&] { showdown_equity(turn, wide, wide); });
     CHECK(turn_limit.required_pair_runouts() == turn_work.pair_runouts);
