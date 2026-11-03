@@ -30,6 +30,6 @@ cmake --build build -j
 ./build/poker_solver_tests
 ```
 
-Explorer HTTP tests spawn on Linux and Windows. Prefer the weighted multi-combo persistence case in `tests/unit/test_explorer_http.cpp` when changing Continue/Open/session.
+Explorer HTTP tests spawn on Linux and Windows. Prefer the weighted multi-combo persistence case in `tests/unit/test_explorer_http.cpp` when changing Continue/Open/session. Desktop lifecycle acceptance (Build → solve → pause/inspect → save/open/continue → lock/compare) is `tests/unit/test_explorer_workflow.cpp`; Windows packaged Tauri/NSIS remains a manual release gate.
 
 Study-corpus measurements: [benchmarks/study/RESULTS.md](../benchmarks/study/RESULTS.md).

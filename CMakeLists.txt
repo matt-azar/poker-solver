@@ -96,6 +96,7 @@ add_executable(poker_solver_tests
     tests/unit/test_budget.cpp
     tests/unit/test_session.cpp
     tests/unit/test_explorer_http.cpp
+    tests/unit/test_explorer_workflow.cpp
     tests/unit/test_chance.cpp
     tests/unit/test_action_ev.cpp
     tests/unit/test_value_worker.cpp

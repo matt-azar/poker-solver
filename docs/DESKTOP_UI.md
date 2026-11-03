@@ -134,3 +134,5 @@ npm run tauri:build
 - Build: `cd desktop && npm run build`
 - Live: solve against `explorer`; Graphs read `status.gap_series`; Status bar shows EV / NashConv / mem
 - Visual targets: 1440×900 dark/light, 1920×1080 dual-range, 1280×800 compact
+- Real-engine HTTP acceptance: `tests/unit/test_explorer_workflow.cpp` inside `poker_solver_tests` (Linux + Windows). Automates Build/solve/pause/inspect/save/open/continue/lock/compare against a spawned `explorer`. Does **not** cover Tauri webview lifecycle, native Open/Save dialogs, or the NSIS packaged install — re-validate those on Windows before a Study release.
+- Next study-productivity priorities (not gated by the acceptance suite): line-preserving turn/river card changes (`prepareBoardCardChange` only accepts the live deal node today; sibling-card swaps need parent/path APIs), and raising the default check-down equity work ceiling so full-range turn equity is usable without a manual `--max-pair-runouts` bump (see [EXPLORER.md](EXPLORER.md), [EQUITY.md](EQUITY.md)).
