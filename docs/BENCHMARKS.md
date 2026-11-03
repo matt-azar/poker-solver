@@ -432,3 +432,7 @@ First checked iteration at which NashConv/pot ≤ 0.001 (eval cadence 20, so the
 Fixed-horizon controls (no accuracy stop): broader turn `turn_srp_river_betting` 30 iters — CFR+ NashConv 13.31 vs DCFR 8.62 (train ≈1.5 s each). Memory-safe flop `flop_srp_one_size` 5 iters — CFR+ NashConv 168.9 vs DCFR 201.8 (train ≈48–51 s); DCFR does not win this short flop horizon. Setup/cache times matched within noise for each pair.
 
 Limitations: Linux-only measurement on this agent; Windows Explorer coverage is not established by these runs. Runtime on tiny trees is noisy. CFR+ remains the default until broader evidence supports a separate product decision. `poker_solver_tests` on this change: 466973 assertions, 0 failures.
+
+## Practical study baseline after NashConv / compact indexing / PSOL IO (`dec4a5e`)
+
+Committed record: [benchmarks/study/RESULTS.md](../benchmarks/study/RESULTS.md) section **Main at `dec4a5e`**. CFR+ only. Quiet Linux cloud agent (4 CPUs, ~16 GiB RAM). Street pot prints are chips; runner quality uses printed `nash_gap_fraction_of_pot`. Turn to 0.001 in 600 iters / ~24 s; flop 400 iters / 4 threads in ~622 s at ~1.74 GiB engine peak (target not reached).
