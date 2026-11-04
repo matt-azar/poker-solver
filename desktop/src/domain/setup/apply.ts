@@ -1,3 +1,4 @@
+import { validateBettingLists } from "../betSizes";
 import {
   boardCards,
   comboCount,
@@ -596,5 +597,6 @@ export function validateSetupForSolve(draft: SpotDraft): SetupValidationResult {
   if (!(draft.iterations > 0)) {
     errors.push("Iterations must be greater than 0");
   }
+  errors.push(...validateBettingLists(draft));
   return { ok: errors.length === 0, errors };
 }

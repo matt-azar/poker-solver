@@ -11,9 +11,11 @@
  * raw numbers in UI code.
  *
  * Study Build blank bet = check-only; blank raise = copy that street's bets;
- * blank donk = no lead. Engine JSON still distinguishes inherit (`[]`) from
- * explicit-empty (`[-4e9]`). Import helpers below resolve inheritance into
- * editable text so rebuild keeps the same tree.
+ * blank donk = no lead (donk* checkboxes are ignored when text is blank).
+ * Size lists are comma-delimited; unrecognized tokens are errors, never skipped.
+ * Engine JSON still distinguishes inherit (`[]`) from explicit-empty (`[-4e9]`).
+ * Import helpers below resolve inheritance into editable text so rebuild keeps
+ * the same tree.
  */
 
 export type BetSizeDisplayMode = "both" | "pot" | "chips";
@@ -347,7 +349,9 @@ export function formatStreetRaiseField(
 
 /**
  * Format a donk list for Build. Empty (use normal bets) materializes the street
- * (or shared) bet sizes. Explicit-empty → blank (no lead).
+ * (or shared) bet sizes as visible text — text is the sole authority. Explicit-empty
+ * → blank (no lead). `copyBets` is always false; hidden donk checkboxes are ignored
+ * when encoding blank fields.
  */
 export function formatDonkField(
   donkValues: unknown,
@@ -365,68 +369,147 @@ export function formatDonkField(
   if (shared.length > 0 && !isExplicitEmptyList(shared)) {
     return { text: formatSpecList(shared), copyBets: false };
   }
-  // Engine empty donk → use normal bets. Materialize street bets, or mark copy.
+  // Engine empty donk → use normal bets. Materialize street bets as editable text.
   const bets = finiteSpecs(streetBets);
   if (bets.length === 0 || isExplicitEmptyList(bets)) {
     return { text: "", copyBets: false };
   }
-  return { text: formatSpecList(bets), copyBets: true };
+  return { text: formatSpecList(bets), copyBets: false };
 }
 
-function encodeTokenList(text: string, allowMultiple: boolean): number[] {
+/** One rejected size token from {@link parseSizeListStrict}. */
+export interface SizeListTokenError {
+  token: string;
+  message: string;
+}
+
+export type SizeListParseResult =
+  | { ok: true; specs: number[] }
+  | { ok: false; errors: SizeListTokenError[] };
+
+export interface ParseSizeListOptions {
+  /** When true, `2x` / `2.5x` raise multiples are accepted. */
+  allowMultiple?: boolean;
+}
+
+/**
+ * Strict comma-delimited size-list parser.
+ *
+ * Delimiter is comma only — spaces alone (`50 100`) are invalid. Unrecognized
+ * tokens are errors (never skipped). Blank text and a lone `-` / `none` / `x`
+ * yield the explicit-empty sentinel (check-only / no lead / no raises).
+ */
+export function parseSizeListStrict(
+  text: string,
+  options: ParseSizeListOptions = {},
+): SizeListParseResult {
+  const allowMultiple = Boolean(options.allowMultiple);
   const parts = text
     .split(/[,]+/)
     .map((part) => part.trim())
     .filter(Boolean);
   if (parts.length === 0) {
-    return [EXPLICIT_EMPTY_SPEC];
+    return { ok: true, specs: [EXPLICIT_EMPTY_SPEC] };
   }
   if (
     parts.length === 1 &&
-    (parts[0] === "-" || parts[0].toLowerCase() === "none" || parts[0].toLowerCase() === "x")
+    (parts[0] === "-" ||
+      parts[0].toLowerCase() === "none" ||
+      parts[0].toLowerCase() === "x")
   ) {
-    return [EXPLICIT_EMPTY_SPEC];
+    return { ok: true, specs: [EXPLICIT_EMPTY_SPEC] };
   }
-  const out: number[] = [];
+
+  const specs: number[] = [];
+  const errors: SizeListTokenError[] = [];
+
   for (const part of parts) {
     const lower = part.toLowerCase();
     if (lower === "a" || lower === "allin" || lower === "all-in") {
-      out.push(ALL_IN_SPEC);
+      specs.push(ALL_IN_SPEC);
       continue;
     }
-    const geo = lower.match(/^(\d+)?e$/);
+
+    const geo = lower.match(/^(\d+(?:\.\d+)?)?e$/);
     if (geo) {
-      const streets = geo[1] ? Number(geo[1]) : 0;
-      if (Number.isInteger(streets) && streets >= 0 && streets <= 100) {
-        out.push(GEO_BASE - streets);
+      if (geo[1] === undefined) {
+        specs.push(GEO_BASE);
+        continue;
       }
+      const streets = Number(geo[1]);
+      if (!Number.isInteger(streets) || streets <= 0 || streets > 100) {
+        errors.push({
+          token: part,
+          message: "geometric size must be e or Ne with integer N in 1–100",
+        });
+        continue;
+      }
+      specs.push(GEO_BASE - streets);
       continue;
     }
+
     const multiple = lower.match(/^(\d+(?:\.\d+)?)x$/);
     if (multiple) {
-      if (allowMultiple) {
-        const value = Number(multiple[1]);
-        if (Number.isFinite(value) && value > 0) {
-          out.push(MULTIPLE_BASE - value);
-        }
+      if (!allowMultiple) {
+        errors.push({
+          token: part,
+          message: "raise multiples (Nx) are only valid in raise fields",
+        });
+        continue;
       }
+      const value = Number(multiple[1]);
+      if (!Number.isFinite(value) || value <= 0) {
+        errors.push({
+          token: part,
+          message: "raise multiple must be a positive number",
+        });
+        continue;
+      }
+      specs.push(MULTIPLE_BASE - value);
       continue;
     }
+
     const parsed = parseSizeTokenDetailed(part);
     if (!parsed || parsed.geometric || parsed.raiseMultiple) {
+      errors.push({
+        token: part,
+        message: "unrecognized size token (use comma-separated pot %, e, a, Nc)",
+      });
       continue;
     }
-    out.push(parsed.fraction);
+    specs.push(parsed.fraction);
   }
-  if (out.length === 0) {
-    return [EXPLICIT_EMPTY_SPEC];
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
   }
-  return out;
+  if (specs.length === 0) {
+    return { ok: true, specs: [EXPLICIT_EMPTY_SPEC] };
+  }
+  return { ok: true, specs };
+}
+
+function formatSizeListErrors(errors: SizeListTokenError[]): string {
+  return errors
+    .map((entry) => `"${entry.token}": ${entry.message}`)
+    .join("; ");
+}
+
+function requireSizeList(
+  text: string,
+  options: ParseSizeListOptions,
+  label: string,
+): number[] {
+  const parsed = parseSizeListStrict(text, options);
+  if (!parsed.ok) {
+    throw new Error(`${label}: ${formatSizeListErrors(parsed.errors)}`);
+  }
+  return parsed.specs;
 }
 
 /** Blank bet text is an explicit-empty list (forced check). `e` / `a` stay sentinels. */
 export function encodeBetList(text: string): number[] {
-  return encodeTokenList(text, false);
+  return requireSizeList(text, { allowMultiple: false }, "bet sizes");
 }
 
 /**
@@ -437,7 +520,7 @@ export function encodeRaiseList(text: string, betSpecs: number[]): number[] {
   if (!text.trim()) {
     return betSpecs.slice();
   }
-  return encodeTokenList(text, true);
+  return requireSizeList(text, { allowMultiple: true }, "raise sizes");
 }
 
 export interface BettingDraftInput {
@@ -458,31 +541,102 @@ export interface BettingDraftInput {
   oopFlopDonk: string;
   oopTurnDonk: string;
   oopRiverDonk: string;
+  /** Ignored when the matching donk text is blank (blank = no lead). */
   donkFlop?: boolean;
   donkTurn?: boolean;
   donkRiver?: boolean;
   mergeThresholdPct?: number;
 }
 
+/** Shared/legacy size fields that may also appear on a full {@link SpotDraft}. */
+export interface BettingDraftFields extends BettingDraftInput {
+  oopRaises?: string;
+  ipRaises?: string;
+  oopDonk?: string;
+}
+
 function encodeSharedBets(text: string): number[] {
   if (!text.trim()) {
     return [];
   }
-  const specs = encodeTokenList(text, false);
+  const specs = requireSizeList(text, { allowMultiple: false }, "shared bets");
   return isExplicitEmptyList(specs) ? [] : specs;
 }
 
-function encodeDonk(text: string, checkbox: boolean, bets: number[]): number[] {
+/**
+ * Blank donk text is always explicit-empty (no lead), regardless of legacy
+ * donk* checkbox flags. Nonblank text is parsed strictly as a bet list.
+ */
+function encodeDonk(text: string): number[] {
   if (!text.trim()) {
-    return checkbox ? bets.slice() : [EXPLICIT_EMPTY_SPEC];
+    return [EXPLICIT_EMPTY_SPEC];
   }
-  return encodeTokenList(text, false);
+  return requireSizeList(text, { allowMultiple: false }, "donk sizes");
+}
+
+interface BettingFieldSpec {
+  key: keyof BettingDraftFields;
+  label: string;
+  kind: "bet" | "raise" | "donk" | "sharedBet" | "sharedRaise" | "sharedDonk";
+}
+
+const BETTING_FIELD_SPECS: BettingFieldSpec[] = [
+  { key: "oopBets", label: "OOP shared bets", kind: "sharedBet" },
+  { key: "ipBets", label: "IP shared bets", kind: "sharedBet" },
+  { key: "oopRaises", label: "OOP shared raises", kind: "sharedRaise" },
+  { key: "ipRaises", label: "IP shared raises", kind: "sharedRaise" },
+  { key: "oopFlop", label: "OOP flop bets", kind: "bet" },
+  { key: "ipFlop", label: "IP flop bets", kind: "bet" },
+  { key: "oopTurn", label: "OOP turn bets", kind: "bet" },
+  { key: "ipTurn", label: "IP turn bets", kind: "bet" },
+  { key: "oopRiver", label: "OOP river bets", kind: "bet" },
+  { key: "ipRiver", label: "IP river bets", kind: "bet" },
+  { key: "oopFlopRaises", label: "OOP flop raises", kind: "raise" },
+  { key: "ipFlopRaises", label: "IP flop raises", kind: "raise" },
+  { key: "oopTurnRaises", label: "OOP turn raises", kind: "raise" },
+  { key: "ipTurnRaises", label: "IP turn raises", kind: "raise" },
+  { key: "oopRiverRaises", label: "OOP river raises", kind: "raise" },
+  { key: "ipRiverRaises", label: "IP river raises", kind: "raise" },
+  { key: "oopDonk", label: "OOP shared donk", kind: "sharedDonk" },
+  { key: "oopFlopDonk", label: "OOP flop donk", kind: "donk" },
+  { key: "oopTurnDonk", label: "OOP turn donk", kind: "donk" },
+  { key: "oopRiverDonk", label: "OOP river donk", kind: "donk" },
+];
+
+/**
+ * Validate every betting-list field with {@link parseSizeListStrict}.
+ * Blank raise text (copy bets) and blank shared bets (inherit) are intentional
+ * and skip parsing. Blank donk is intentional no-lead.
+ */
+export function validateBettingLists(draft: BettingDraftFields): string[] {
+  const errors: string[] = [];
+  for (const field of BETTING_FIELD_SPECS) {
+    const raw = draft[field.key];
+    if (typeof raw !== "string") {
+      continue;
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      // Blank raise → copy street bets; blank shared bets → inherit; blank donk → no lead.
+      continue;
+    }
+    const allowMultiple =
+      field.kind === "raise" || field.kind === "sharedRaise";
+    const parsed = parseSizeListStrict(raw, { allowMultiple });
+    if (!parsed.ok) {
+      for (const entry of parsed.errors) {
+        errors.push(`${field.label}: "${entry.token}" — ${entry.message}`);
+      }
+    }
+  }
+  return errors;
 }
 
 /**
  * Size fields for a solve or tree-preview job.
  * Geometric and all-in are per-list tokens (`e`, `a`). Callers should send
  * `allow_all_in: 1` so `a` and stack-commits work.
+ * Invalid tokens throw — validate with {@link validateBettingLists} first.
  */
 export function encodeBettingJob(draft: BettingDraftInput) {
   const oopFlop = encodeBetList(draft.oopFlop);
@@ -512,9 +666,10 @@ export function encodeBettingJob(draft: BettingDraftInput) {
     oop_river_raises: encodeRaiseList(draft.oopRiverRaises, oopRiver),
     ip_river_raises: encodeRaiseList(draft.ipRiverRaises, ipRiver),
     oop_donk: [] as number[],
-    oop_flop_donk: encodeDonk(draft.oopFlopDonk, Boolean(draft.donkFlop), oopFlop),
-    oop_turn_donk: encodeDonk(draft.oopTurnDonk, Boolean(draft.donkTurn), oopTurn),
-    oop_river_donk: encodeDonk(draft.oopRiverDonk, Boolean(draft.donkRiver), oopRiver),
+    // donk* booleans are ignored: blank text is always no lead.
+    oop_flop_donk: encodeDonk(draft.oopFlopDonk),
+    oop_turn_donk: encodeDonk(draft.oopTurnDonk),
+    oop_river_donk: encodeDonk(draft.oopRiverDonk),
     merge_threshold: threshold > 0 ? threshold / 100 : 0,
   };
 }

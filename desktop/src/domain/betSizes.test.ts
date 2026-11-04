@@ -15,8 +15,10 @@ import {
   GEO_BASE,
   geometricPotFraction,
   mergeSizeFractions,
+  parseSizeListStrict,
   parseSizeTokenDetailed,
   potTagFromLabel,
+  validateBettingLists,
 } from "./betSizes";
 
 describe("betSizes", () => {
@@ -119,16 +121,135 @@ describe("betSizes", () => {
     ]);
   });
 
-  it("materializes empty donk lists as the street bet sizes", () => {
+  it("materializes empty donk lists as visible street bet text without copyBets", () => {
     expect(formatDonkField([], [0.5, 1])).toEqual({
       text: "50, 100",
-      copyBets: true,
+      copyBets: false,
     });
     expect(formatDonkField([EXPLICIT_EMPTY_SPEC], [0.5, 1])).toEqual({
       text: "",
       copyBets: false,
     });
     expect(formatDonkField([0.33], [0.5, 1]).text).toBe("33");
+  });
+
+  it("rejects unrecognized and space-delimited size tokens", () => {
+    expect(parseSizeListStrict("garbage")).toEqual({
+      ok: false,
+      errors: [
+        {
+          token: "garbage",
+          message:
+            "unrecognized size token (use comma-separated pot %, e, a, Nc)",
+        },
+      ],
+    });
+    const mixed = parseSizeListStrict("50, garbage");
+    expect(mixed.ok).toBe(false);
+    if (!mixed.ok) {
+      expect(mixed.errors).toEqual([
+        {
+          token: "garbage",
+          message:
+            "unrecognized size token (use comma-separated pot %, e, a, Nc)",
+        },
+      ]);
+    }
+    const spaced = parseSizeListStrict("50 100");
+    expect(spaced.ok).toBe(false);
+    if (!spaced.ok) {
+      expect(spaced.errors[0]?.token).toBe("50 100");
+    }
+    expect(() => encodeBetList("garbage")).toThrow(/garbage/);
+    expect(() => encodeBetList("50, garbage")).toThrow(/garbage/);
+    expect(() => encodeBetList("50 100")).toThrow(/50 100/);
+  });
+
+  it("keeps intentional empty markers and geo/all-in tokens", () => {
+    expect(parseSizeListStrict("")).toEqual({
+      ok: true,
+      specs: [EXPLICIT_EMPTY_SPEC],
+    });
+    expect(parseSizeListStrict("-")).toEqual({
+      ok: true,
+      specs: [EXPLICIT_EMPTY_SPEC],
+    });
+    expect(parseSizeListStrict("none")).toEqual({
+      ok: true,
+      specs: [EXPLICIT_EMPTY_SPEC],
+    });
+    expect(parseSizeListStrict("x")).toEqual({
+      ok: true,
+      specs: [EXPLICIT_EMPTY_SPEC],
+    });
+    expect(parseSizeListStrict("50, e, a")).toEqual({
+      ok: true,
+      specs: [0.5, GEO_BASE, -1e9],
+    });
+    expect(parseSizeListStrict("2.5x", { allowMultiple: true }).ok).toBe(true);
+    expect(parseSizeListStrict("2.5x", { allowMultiple: false }).ok).toBe(false);
+  });
+
+  it("blank donk always encodes no lead even when donk* flags are true", () => {
+    const encoded = encodeBettingJob({
+      oopBets: "",
+      ipBets: "",
+      oopFlop: "50",
+      ipFlop: "50",
+      oopTurn: "50",
+      ipTurn: "50",
+      oopRiver: "",
+      ipRiver: "",
+      oopFlopRaises: "",
+      ipFlopRaises: "",
+      oopTurnRaises: "",
+      ipTurnRaises: "",
+      oopRiverRaises: "",
+      ipRiverRaises: "",
+      oopFlopDonk: "",
+      oopTurnDonk: "",
+      oopRiverDonk: "",
+      donkFlop: true,
+      donkTurn: true,
+      donkRiver: true,
+    });
+    expect(encoded.oop_flop_donk).toEqual([EXPLICIT_EMPTY_SPEC]);
+    expect(encoded.oop_turn_donk).toEqual([EXPLICIT_EMPTY_SPEC]);
+    expect(encoded.oop_river_donk).toEqual([EXPLICIT_EMPTY_SPEC]);
+  });
+
+  it("validateBettingLists reports offending tokens by field", () => {
+    const errors = validateBettingLists({
+      oopBets: "",
+      ipBets: "",
+      oopFlop: "garbage",
+      ipFlop: "50, garbage",
+      oopTurn: "50 100",
+      ipTurn: "",
+      oopRiver: "",
+      ipRiver: "",
+      oopFlopRaises: "",
+      ipFlopRaises: "",
+      oopTurnRaises: "",
+      ipTurnRaises: "",
+      oopRiverRaises: "",
+      ipRiverRaises: "",
+      oopFlopDonk: "",
+      oopTurnDonk: "nope",
+      oopRiverDonk: "",
+    });
+    expect(errors.some((line) => /OOP flop bets: "garbage"/i.test(line))).toBe(
+      true,
+    );
+    expect(errors.some((line) => /IP flop bets: "garbage"/i.test(line))).toBe(
+      true,
+    );
+    expect(errors.some((line) => /OOP turn bets: "50 100"/i.test(line))).toBe(
+      true,
+    );
+    expect(errors.some((line) => /OOP turn donk: "nope"/i.test(line))).toBe(
+      true,
+    );
   });
 
   it("encodeBettingJob keeps e and a as list tokens only", () => {
