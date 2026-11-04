@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isHandLocked,
+  lockMutationCompletion,
   normalizeProbs,
   seedProbsFromStrategy,
   toggleHandIndex,
@@ -50,5 +51,32 @@ describe("lock helpers", () => {
         2,
       ),
     ).toBe(false);
+  });
+
+  it("discards draft writes when the live node diverges after await", () => {
+    expect(
+      lockMutationCompletion({
+        requestSolutionId: "s1",
+        requestNodeId: "p0",
+        liveSolutionId: "s1",
+        liveNodeId: "p0",
+      }),
+    ).toEqual({ applyLocksList: true, applyDraft: true });
+    expect(
+      lockMutationCompletion({
+        requestSolutionId: "s1",
+        requestNodeId: "p0",
+        liveSolutionId: "s1",
+        liveNodeId: "p1",
+      }),
+    ).toEqual({ applyLocksList: true, applyDraft: false });
+    expect(
+      lockMutationCompletion({
+        requestSolutionId: "s1",
+        requestNodeId: "p0",
+        liveSolutionId: "s2",
+        liveNodeId: "p0",
+      }),
+    ).toEqual({ applyLocksList: false, applyDraft: false });
   });
 });

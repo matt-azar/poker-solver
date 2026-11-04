@@ -101,6 +101,38 @@ export function shouldApply(
 }
 
 /**
+ * Token + solution (+ optional node) gate for post-await UI writes.
+ * When `requestNodeId` is provided, a live node mismatch fails closed.
+ */
+export function shouldApplyScoped(args: {
+  token: number;
+  latestToken: number;
+  requestSolutionId: string | null | undefined;
+  liveSolutionId: string | null | undefined;
+  requestNodeId?: string | null;
+  liveNodeId?: string | null;
+}): boolean {
+  if (
+    !shouldApply(
+      args.token,
+      args.latestToken,
+      args.requestSolutionId,
+      args.liveSolutionId,
+    )
+  ) {
+    return false;
+  }
+  if (
+    args.requestNodeId != null &&
+    args.requestNodeId !== "" &&
+    (args.liveNodeId == null || args.requestNodeId !== args.liveNodeId)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Monotonic status-generation gate.
  * Returns null when the body is missing a generation or is strictly older than
  * `seen` (stale / out-of-order). Callers must not mutate study state on null.

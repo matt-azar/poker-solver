@@ -147,3 +147,25 @@ export function seedProbsFromStrategy(
 export function formatProbPct(probability: number): string {
   return `${(probability * 100).toFixed(1)}%`;
 }
+
+/**
+ * After a lock mutation await: write the draft only when solution+node still
+ * match. Same-solution node navigation may still accept the locks list refresh.
+ */
+export function lockMutationCompletion(args: {
+  requestSolutionId: string;
+  requestNodeId: string;
+  liveSolutionId: string | null | undefined;
+  liveNodeId: string | null | undefined;
+}): { applyLocksList: boolean; applyDraft: boolean } {
+  if (
+    !args.liveSolutionId ||
+    args.liveSolutionId !== args.requestSolutionId
+  ) {
+    return { applyLocksList: false, applyDraft: false };
+  }
+  if (!args.liveNodeId || args.liveNodeId !== args.requestNodeId) {
+    return { applyLocksList: true, applyDraft: false };
+  }
+  return { applyLocksList: true, applyDraft: true };
+}

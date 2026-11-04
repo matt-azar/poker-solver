@@ -14,6 +14,7 @@ opponentSolutionNode,
   rangeDisplayWeight,
   rangeInclusionOf,
   shouldApply,
+  shouldApplyScoped,
   shouldApplyStatus,
   solutionNeedsReload,
   strategyMix,
@@ -240,6 +241,39 @@ describe("browse strategy grouping", () => {
     expect(solutionNeedsReload({ running: false, solution_id: "s2" }, "s1", false)).toBe(true);
     expect(solutionNeedsReload({ running: false, solution_id: "s1" }, "s1", true)).toBe(true);
     expect(solutionNeedsReload({ running: true, solution_id: "s2" }, "s1", false)).toBe(false);
+  });
+
+  it("shouldApplyScoped fails closed on node mismatch after await", () => {
+    expect(
+      shouldApplyScoped({
+        token: 1,
+        latestToken: 1,
+        requestSolutionId: "s1",
+        liveSolutionId: "s1",
+        requestNodeId: "p0",
+        liveNodeId: "p0",
+      }),
+    ).toBe(true);
+    expect(
+      shouldApplyScoped({
+        token: 1,
+        latestToken: 1,
+        requestSolutionId: "s1",
+        liveSolutionId: "s1",
+        requestNodeId: "p0",
+        liveNodeId: "p1",
+      }),
+    ).toBe(false);
+    expect(
+      shouldApplyScoped({
+        token: 1,
+        latestToken: 2,
+        requestSolutionId: "s1",
+        liveSolutionId: "s1",
+        requestNodeId: "p0",
+        liveNodeId: "p0",
+      }),
+    ).toBe(false);
   });
 });
 

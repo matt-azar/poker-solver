@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { editForNode, isHandEdited } from "./strategyEdits";
+import {
+  editForNode,
+  isHandEdited,
+  strategyMutationCompletion,
+} from "./strategyEdits";
 
 describe("strategy edit helpers", () => {
   it("finds edits by node and marks full-node hands as edited", () => {
@@ -21,5 +25,32 @@ describe("strategy edit helpers", () => {
     expect(isHandEdited(editForNode(edits, "p0.t-1.r-1"), 2)).toBe(true);
     expect(isHandEdited(editForNode(edits, "p0.t-1.r-1"), 1)).toBe(false);
     expect(isHandEdited(editForNode(edits, "p1.t-1.r-1"), 9)).toBe(true);
+  });
+
+  it("discards draft/reload when the live node diverges after await", () => {
+    expect(
+      strategyMutationCompletion({
+        requestSolutionId: "s1",
+        requestNodeId: "p0",
+        liveSolutionId: "s1",
+        liveNodeId: "p0",
+      }),
+    ).toEqual({ applyEditsList: true, applyDraft: true, reloadNode: true });
+    expect(
+      strategyMutationCompletion({
+        requestSolutionId: "s1",
+        requestNodeId: "p0",
+        liveSolutionId: "s1",
+        liveNodeId: "p1",
+      }),
+    ).toEqual({ applyEditsList: true, applyDraft: false, reloadNode: false });
+    expect(
+      strategyMutationCompletion({
+        requestSolutionId: "s1",
+        requestNodeId: "p0",
+        liveSolutionId: "s2",
+        liveNodeId: "p0",
+      }),
+    ).toEqual({ applyEditsList: false, applyDraft: false, reloadNode: false });
   });
 });
