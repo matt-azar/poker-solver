@@ -81,6 +81,7 @@ import {
   compareNoteIsValid,
   draftFromOpenedSolution,
   initialRevision,
+  recomputeSetupSolveReadiness,
   resolveBaselineSolutionId,
   shouldClearCompareNote,
   strategyEditScopeFromNode,
@@ -701,9 +702,13 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   setupMeta: null,
   canUndoSetup: false,
   updateDraft(partial) {
+    const draft = { ...get().draft, ...partial };
     set({
-      draft: { ...get().draft, ...partial },
+      draft,
       draftRevision: bumpRevision(get().draftRevision),
+      // Keep setupMeta.canSolve / missing coherent after manual edits so a
+      // board completed after an incomplete assistant apply unblocks Solve.
+      setupMeta: recomputeSetupSolveReadiness(get().setupMeta, draft),
     });
   },
   weights: {

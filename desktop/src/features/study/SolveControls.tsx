@@ -1,10 +1,28 @@
+import {
+  canExecuteCalculateEv,
+  canExecuteContinue,
+  canExecutePause,
+  canExecuteSave,
+  canExecuteSolve,
+  canExecuteStop,
+  executeCalculateEv,
+  executeContinue,
+  executePause,
+  executeSave,
+  executeSolve,
+  executeStop,
+  studyCommandContextFromStore,
+} from "../../commands/studyCommands";
 import { openSolutionFile, saveSolutionFile } from "../../commands/solutionFiles";
-import { solveControlFlags } from "../../domain/solveControls";
 import { useStudyStore } from "../../state/studyStore";
 
 export function SolveControls() {
   const phase = useStudyStore((s) => s.phase);
   const solutionId = useStudyStore((s) => s.solutionId);
+  const draft = useStudyStore((s) => s.draft);
+  const workspace = useStudyStore((s) => s.workspace);
+  const currentNode = useStudyStore((s) => s.currentNode);
+  const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
   const solve = useStudyStore((s) => s.solve);
   const continueSolve = useStudyStore((s) => s.continueSolve);
   const pause = useStudyStore((s) => s.pause);
@@ -14,8 +32,26 @@ export function SolveControls() {
   const openSolution = useStudyStore((s) => s.openSolution);
   const updateDraft = useStudyStore((s) => s.updateDraft);
 
-  const { canSolve, canContinue, canPause, canStop } = solveControlFlags(phase);
-  const hasSolution = Boolean(solutionId);
+  const ctx = studyCommandContextFromStore({
+    phase,
+    draft,
+    solutionId,
+    workspace,
+    currentNode,
+    solveValidationErrors,
+  });
+  const solveGate = canExecuteSolve(ctx);
+  const continueGate = canExecuteContinue(ctx);
+  const pauseGate = canExecutePause(ctx);
+  const stopGate = canExecuteStop(ctx);
+  const evGate = canExecuteCalculateEv(ctx);
+  const saveGate = canExecuteSave(ctx);
+
+  function commandDeps() {
+    return {
+      getContext: () => studyCommandContextFromStore(useStudyStore.getState()),
+    };
+  }
 
   function solutionFileDeps() {
     return {
@@ -31,62 +67,86 @@ export function SolveControls() {
       <button
         type="button"
         className="toolbar-btn primary"
-        disabled={!canSolve}
-        title={
-          canSolve
-            ? "Start a new solve from the current build settings"
-            : "Stop or wait for the current solve before starting another"
+        disabled={!solveGate.ok}
+        title={solveGate.reason}
+        onClick={() =>
+          void executeSolve({
+            ...commandDeps(),
+            solve,
+          })
         }
-        onClick={() => void solve()}
       >
         Solve
       </button>
       <button
         type="button"
         className="toolbar-btn"
-        disabled={!canContinue}
-        title={
-          canContinue
-            ? "Resume or add iterations to the current solution"
-            : "Continue is available after Pause, Stop, or Complete"
+        disabled={!continueGate.ok}
+        title={continueGate.reason}
+        onClick={() =>
+          void executeContinue({
+            ...commandDeps(),
+            continueSolve,
+          })
         }
-        onClick={() => void continueSolve()}
       >
         Continue
       </button>
       <button
         type="button"
         className="toolbar-btn"
-        disabled={!canPause}
-        title={canPause ? "Pause after the current sample" : "Nothing is solving"}
-        onClick={() => void pause()}
+        disabled={!pauseGate.ok}
+        title={pauseGate.reason}
+        onClick={() =>
+          void executePause({
+            ...commandDeps(),
+            pause,
+          })
+        }
       >
         Pause
       </button>
       <button
         type="button"
         className="toolbar-btn danger"
-        disabled={!canStop}
-        title={canStop ? "Stop and keep completed iterations" : "Nothing is solving"}
-        onClick={() => void stop()}
+        disabled={!stopGate.ok}
+        title={stopGate.reason}
+        onClick={() =>
+          void executeStop({
+            ...commandDeps(),
+            stop,
+          })
+        }
       >
         Stop
       </button>
       <button
         type="button"
         className="toolbar-btn"
-        disabled={!hasSolution}
-        title={hasSolution ? "Compute action EVs for the current node" : "Solve first"}
-        onClick={() => void calculateEv()}
+        disabled={!evGate.ok}
+        title={evGate.reason}
+        onClick={() =>
+          void executeCalculateEv({
+            ...commandDeps(),
+            calculateEv,
+          })
+        }
       >
         EV
       </button>
       <button
         type="button"
         className="toolbar-btn"
-        disabled={!hasSolution}
-        title={hasSolution ? "Save the current solution" : "Solve first"}
-        onClick={() => void saveSolutionFile(solutionFileDeps())}
+        disabled={!saveGate.ok}
+        title={saveGate.reason}
+        onClick={() =>
+          void executeSave({
+            ...commandDeps(),
+            save: async () => {
+              await saveSolutionFile(solutionFileDeps());
+            },
+          })
+        }
       >
         Save
       </button>

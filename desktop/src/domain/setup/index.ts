@@ -65,6 +65,7 @@ export {
   EMPTY_SETUP_META,
   applySetupTransaction,
   metaFromSetupResult,
+  recomputeSetupSolveReadiness,
   undoSetupTransactionGuarded,
   type ApplySetupTransactionResult,
   type SetupStudyMeta,
