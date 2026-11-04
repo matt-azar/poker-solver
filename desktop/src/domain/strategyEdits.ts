@@ -40,6 +40,28 @@ export function isHandEdited(edit: StrategyEditRecord | null, handIndex: number)
   return edit.hand_indices.includes(handIndex);
 }
 
+/**
+ * After a strategy-edit mutation await: write draft/list only when the live
+ * solution (+ node for draft) still matches the request scope.
+ */
+export function strategyMutationCompletion(args: {
+  requestSolutionId: string;
+  requestNodeId: string;
+  liveSolutionId: string | null | undefined;
+  liveNodeId: string | null | undefined;
+}): { applyEditsList: boolean; applyDraft: boolean; reloadNode: boolean } {
+  if (
+    !args.liveSolutionId ||
+    args.liveSolutionId !== args.requestSolutionId
+  ) {
+    return { applyEditsList: false, applyDraft: false, reloadNode: false };
+  }
+  if (!args.liveNodeId || args.liveNodeId !== args.requestNodeId) {
+    return { applyEditsList: true, applyDraft: false, reloadNode: false };
+  }
+  return { applyEditsList: true, applyDraft: true, reloadNode: true };
+}
+
 export {
   formatProbPct,
   normalizeProbs,

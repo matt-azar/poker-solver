@@ -69,7 +69,7 @@ vi.mock("../engine/client", () => ({
   engineClient: engineMocks.engineClient,
 }));
 
-const { useStudyStore } = await import("./studyStore");
+const { resetStatusPollingForTests, useStudyStore } = await import("./studyStore");
 
 function seedPublishedStudy() {
   useStudyStore.setState({
@@ -121,6 +121,7 @@ function seedPublishedStudy() {
 describe("studyStore lifecycle guards (R04/R08/R09)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetStatusPollingForTests();
     seedPublishedStudy();
     engineMocks.setStatusImpl(async () => ({
       running: false,
@@ -216,7 +217,7 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     expect(state.phase).toBe("failed");
   });
 
-  it("R08: rejects stale status bodies and keeps the newer generation", async () => {
+  it("R08: single-flight queues a follow-up so the newer generation wins", async () => {
     let releaseStale: (() => void) | null = null;
     const staleGate = new Promise<void>((resolve) => {
       releaseStale = resolve;
@@ -241,13 +242,16 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
       };
     });
 
-    const stale = useStudyStore.getState().refresh();
+    // Overlapping refresh() coalesces: the second call queues a follow-up
+    // instead of issuing a concurrent request. Release before awaiting both.
+    const first = useStudyStore.getState().refresh();
     await Promise.resolve();
-    await useStudyStore.getState().refresh();
+    const second = useStudyStore.getState().refresh();
     releaseStale?.();
-    await stale;
+    await Promise.all([first, second]);
 
     const state = useStudyStore.getState();
+    expect(calls).toBe(2);
     expect(state.status?.solution_id).toBe("s-new");
     expect(state.status?.status_generation).toBe(8);
   });

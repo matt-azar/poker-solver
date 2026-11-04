@@ -39,6 +39,7 @@ import {
   handIndexForCombo,
   isHandLocked,
   lockForNode,
+  lockMutationCompletion,
   normalizeProbs,
   seedProbsFromStrategy,
   toggleHandIndex,
@@ -47,10 +48,21 @@ import {
   type LockRecord,
   type LocksPayload,
 } from "../domain/locks";
-import type {
-  StrategyEditDraft,
-  StrategyEditRecord,
-  StrategyEditsPayload,
+import {
+  captureCompareRequestScope,
+  captureStudyMutationScope,
+  classifyStatusPollError,
+  compareRequestIsCurrent,
+  createTimeoutSignal,
+  nextStatusPollDelay,
+  STATUS_POLL_TIMEOUT_MS,
+  studyMutationScopeIsCurrent,
+} from "../domain/requestScope";
+import {
+  strategyMutationCompletion,
+  type StrategyEditDraft,
+  type StrategyEditRecord,
+  type StrategyEditsPayload,
 } from "../domain/strategyEdits";
 import { presentUserText } from "../domain/userText";
 import {
@@ -411,7 +423,32 @@ export function resetRangeEditHistoryForTests() {
   rangeHistory.clear();
 }
 
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+/** Test helper: reset status single-flight / backoff module state between cases. */
+export function resetStatusPollingForTests() {
+  statusPollActive = false;
+  statusRefreshQueued = false;
+  statusConsecutiveFailures = 0;
+  statusInFlight = null;
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  statusAbortController?.abort();
+  statusAbortController = null;
+  seenGeneration = -1;
+  statusToken = 0;
+}
+
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+/** True while AppShell (or solve/open) wants periodic status polls. */
+let statusPollActive = false;
+/** Coalesced in-flight status refresh; single-flight across poll + manual refresh. */
+let statusInFlight: Promise<void> | null = null;
+/** When true, another refresh was requested during the in-flight cycle. */
+let statusRefreshQueued = false;
+/** AbortController for the active status request (shutdown cancel vs timeout). */
+let statusAbortController: AbortController | null = null;
+let statusConsecutiveFailures = 0;
 let nodeToken = 0;
 let statusToken = 0;
 let seenGeneration = -1;
@@ -1088,8 +1125,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     try {
       const payload = (await engineClient.listLocks(solutionId)) as LocksPayload;
+      // Solution identity must still match; node may have moved within it.
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({ locks: payload.locks || [] });
     } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Failed to list locks",
       });
@@ -1109,7 +1153,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       set({ message: "Locks require a published decision node." });
       return;
     }
-    const draft = get().lockDraft;
+    const draft = structuredClone(get().lockDraft);
     if (draft.kind === "selected" && draft.handIndices.length === 0) {
       set({ message: "Select at least one combo, or switch to full-node lock." });
       return;
@@ -1136,16 +1180,37 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               probs: normalized.probs,
             };
       const payload = (await engineClient.putLock(solutionId, body)) as LocksPayload;
-      set({
-        locks: payload.locks || [],
-        lockDraft: { ...draft, probs: normalized.probs },
-        lockDraftBaseline: structuredClone({ ...draft, probs: normalized.probs }),
-        message:
-          draft.kind === "full"
-            ? `Full-node lock applied at ${node.node_id}`
-            : `Locked ${draft.handIndices.length} combo(s) at ${node.node_id}`,
+      const live = get();
+      const completion = lockMutationCompletion({
+        requestSolutionId: solutionId,
+        requestNodeId: node.node_id,
+        liveSolutionId: live.solutionId,
+        liveNodeId: live.currentNode?.node_id,
       });
+      if (!completion.applyLocksList) {
+        return;
+      }
+      if (completion.applyDraft) {
+        set({
+          locks: payload.locks || [],
+          lockDraft: { ...draft, probs: normalized.probs },
+          lockDraftBaseline: structuredClone({ ...draft, probs: normalized.probs }),
+          message:
+            draft.kind === "full"
+              ? `Full-node lock applied at ${node.node_id}`
+              : `Locked ${draft.handIndices.length} combo(s) at ${node.node_id}`,
+        });
+      } else {
+        // Same solution, different node — keep locks list, discard draft write.
+        set({
+          locks: payload.locks || [],
+          message: `Lock applied at ${node.node_id} (draft not restored; node changed).`,
+        });
+      }
     } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Lock failed",
       });
@@ -1157,6 +1222,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
+    const requestNodeId = node.node_id;
     const targets = handIndices ?? get().lockDraft.handIndices;
     if (!targets.length) {
       set({ message: "No combo selected to unlock." });
@@ -1164,11 +1230,28 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     try {
       for (const handIndex of targets) {
-        await engineClient.deleteLock(solutionId, node.node_id, handIndex);
+        await engineClient.deleteLock(solutionId, requestNodeId, handIndex);
+      }
+      if (get().solutionId !== solutionId) {
+        return;
       }
       await get().refreshLocks();
-      set({ message: `Unlocked ${targets.length} combo(s) at ${node.node_id}` });
+      if (
+        !studyMutationScopeIsCurrent(
+          captureStudyMutationScope({ solutionId, nodeId: requestNodeId }),
+          {
+            solutionId: get().solutionId,
+            nodeId: get().currentNode?.node_id,
+          },
+        )
+      ) {
+        return;
+      }
+      set({ message: `Unlocked ${targets.length} combo(s) at ${requestNodeId}` });
     } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Unlock failed",
       });
@@ -1180,11 +1263,21 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
+    const requestNodeId = node.node_id;
     try {
-      await engineClient.deleteLock(solutionId, node.node_id);
+      await engineClient.deleteLock(solutionId, requestNodeId);
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       await get().refreshLocks();
-      set({ message: `Cleared locks at ${node.node_id}` });
+      if (get().currentNode?.node_id !== requestNodeId) {
+        return;
+      }
+      set({ message: `Cleared locks at ${requestNodeId}` });
     } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Unlock node failed",
       });
@@ -1197,9 +1290,18 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     try {
       await engineClient.deleteLock(solutionId);
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       await get().refreshLocks();
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({ message: "Cleared all locks on this solution." });
     } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Clear locks failed",
       });
@@ -1300,8 +1402,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     try {
       const payload = (await engineClient.listStrategyEdits(solutionId)) as StrategyEditsPayload;
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({ strategyEdits: payload.edits || [] });
     } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({
         message:
           error instanceof EngineError ? error.message : "Failed to list strategy edits",
@@ -1326,7 +1434,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       });
       return;
     }
-    const draft = get().strategyEditDraft;
+    const requestNodeId = node.node_id;
+    const draft = structuredClone(get().strategyEditDraft);
     if (draft.kind === "selected" && draft.handIndices.length === 0) {
       set({ message: "Select at least one combo, or switch to full-node edit." });
       return;
@@ -1340,12 +1449,12 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       const body =
         draft.kind === "full"
           ? {
-              node_id: node.node_id,
+              node_id: requestNodeId,
               kind: "full" as const,
               probs: normalized.probs,
             }
           : {
-              node_id: node.node_id,
+              node_id: requestNodeId,
               kind: "selected" as const,
               hand_indices: draft.handIndices,
               probs: normalized.probs,
@@ -1354,17 +1463,42 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         solutionId,
         body,
       )) as StrategyEditsPayload;
-      set({
-        strategyEdits: payload.edits || [],
-        strategyEditDraft: { ...draft, probs: normalized.probs },
-        strategyEditDraftBaseline: structuredClone({ ...draft, probs: normalized.probs }),
-        message:
-          draft.kind === "full"
-            ? `Full-node strategy edit applied at ${node.node_id}`
-            : `Edited ${draft.handIndices.length} combo(s) at ${node.node_id}`,
+      const live = get();
+      const completion = strategyMutationCompletion({
+        requestSolutionId: solutionId,
+        requestNodeId,
+        liveSolutionId: live.solutionId,
+        liveNodeId: live.currentNode?.node_id,
       });
-      await get().navigateTo(node.node_id);
+      if (!completion.applyEditsList) {
+        return;
+      }
+      if (completion.applyDraft) {
+        set({
+          strategyEdits: payload.edits || [],
+          strategyEditDraft: { ...draft, probs: normalized.probs },
+          strategyEditDraftBaseline: structuredClone({
+            ...draft,
+            probs: normalized.probs,
+          }),
+          message:
+            draft.kind === "full"
+              ? `Full-node strategy edit applied at ${requestNodeId}`
+              : `Edited ${draft.handIndices.length} combo(s) at ${requestNodeId}`,
+        });
+      } else {
+        set({
+          strategyEdits: payload.edits || [],
+          message: `Strategy edit applied at ${requestNodeId} (draft not restored; node changed).`,
+        });
+      }
+      if (completion.reloadNode) {
+        await get().navigateTo(requestNodeId);
+      }
     } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Strategy edit failed",
       });
@@ -1376,6 +1510,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
+    const requestNodeId = node.node_id;
     const targets = handIndices ?? get().strategyEditDraft.handIndices;
     if (!targets.length) {
       set({ message: "No combo selected to clear." });
@@ -1383,12 +1518,27 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     try {
       for (const handIndex of targets) {
-        await engineClient.deleteStrategyEdit(solutionId, node.node_id, handIndex);
+        await engineClient.deleteStrategyEdit(solutionId, requestNodeId, handIndex);
+      }
+      if (get().solutionId !== solutionId) {
+        return;
       }
       await get().refreshStrategyEdits();
-      await get().navigateTo(node.node_id);
-      set({ message: `Cleared ${targets.length} strategy edit(s) at ${node.node_id}` });
+      const completion = strategyMutationCompletion({
+        requestSolutionId: solutionId,
+        requestNodeId,
+        liveSolutionId: get().solutionId,
+        liveNodeId: get().currentNode?.node_id,
+      });
+      if (!completion.reloadNode) {
+        return;
+      }
+      await get().navigateTo(requestNodeId);
+      set({ message: `Cleared ${targets.length} strategy edit(s) at ${requestNodeId}` });
     } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Clear strategy edit failed",
       });
@@ -1400,12 +1550,28 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !node) {
       return;
     }
+    const requestNodeId = node.node_id;
     try {
-      await engineClient.deleteStrategyEdit(solutionId, node.node_id);
+      await engineClient.deleteStrategyEdit(solutionId, requestNodeId);
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       await get().refreshStrategyEdits();
-      await get().navigateTo(node.node_id);
-      set({ message: `Cleared strategy edits at ${node.node_id}` });
+      const completion = strategyMutationCompletion({
+        requestSolutionId: solutionId,
+        requestNodeId,
+        liveSolutionId: get().solutionId,
+        liveNodeId: get().currentNode?.node_id,
+      });
+      if (!completion.reloadNode) {
+        return;
+      }
+      await get().navigateTo(requestNodeId);
+      set({ message: `Cleared strategy edits at ${requestNodeId}` });
     } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Clear node strategy edits failed",
       });
@@ -1418,13 +1584,25 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     try {
       await engineClient.deleteStrategyEdit(solutionId);
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       await get().refreshStrategyEdits();
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       const nodeId = get().currentNode?.node_id;
       if (nodeId) {
         await get().navigateTo(nodeId);
       }
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({ message: "Cleared all strategy edits on this solution." });
     } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Clear strategy edits failed",
       });
@@ -1452,107 +1630,170 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   startPolling() {
-    if (pollTimer) {
+    if (statusPollActive) {
       return;
     }
-    pollTimer = setInterval(() => {
-      void get().refresh();
-    }, 250);
+    statusPollActive = true;
     void get().refresh();
   },
   stopPolling() {
+    statusPollActive = false;
+    statusRefreshQueued = false;
     if (pollTimer) {
-      clearInterval(pollTimer);
+      clearTimeout(pollTimer);
       pollTimer = null;
     }
+    // Shutdown cancel: abort in-flight status so it is not reported as failure.
+    statusAbortController?.abort();
+    statusAbortController = null;
     clearAllAnalysisPolls();
   },
 
   async refresh() {
-    const token = ++statusToken;
-    try {
-      const status = await engineClient.status();
-      // Drop overlapping / older in-flight polls before touching study state.
-      if (!shouldApplyStatus(token, statusToken)) {
-        return;
+    if (statusInFlight) {
+      statusRefreshQueued = true;
+      await statusInFlight;
+      // If the owner finished before draining our queue, take ownership.
+      if (!statusInFlight && statusRefreshQueued) {
+        return get().refresh();
       }
-      const decision = acceptStatusGeneration(status, seenGeneration, {
-        // Token already proves this is the latest response; a lower generation
-        // means the explorer process restarted and re-baselined the counter.
-        allowRestart: true,
-      });
-      if (!decision.apply) {
-        return;
-      }
-      seenGeneration = decision.generation;
-      const reload = solutionNeedsReload(status, get().solutionId, continuationPending);
-      const baselineSolutionId = resolveBaselineSolutionId(
-        status.baseline_solution_id,
-        get().baselineSolutionId,
-      );
-      const nextSolutionId = reload && status.solution_id
-        ? status.solution_id
-        : get().solutionId;
-      const clearCompare = shouldClearCompareNote(
-        get().compareNote,
-        baselineSolutionId,
-        nextSolutionId ?? status.solution_id,
-      );
-      set({
-        status,
-        connection: "connected",
-        phase: phaseFromStatus(status, get().phase),
-        baselineSolutionId,
-        ...(clearCompare ? { compareNote: null } : {}),
-      });
-      if (reload && status.solution_id) {
-        continuationPending = false;
-        const reloadTarget =
-          pendingReloadNodeId === undefined
-            ? get().currentNode?.node_id || rootNodeId(status.root_node_id)
-            : pendingReloadNodeId === null
-              ? rootNodeId(status.root_node_id)
-              : pendingReloadNodeId;
-        pendingReloadNodeId = undefined;
-        set({
-          solutionId: status.solution_id,
-          message: status.paused
-            ? "Paused — browsing available. Continue to resume."
-            : status.cancelled
-              ? "Stopped — keeping completed iterations."
-              : "Solve complete.",
-        });
-        await get().navigateTo(reloadTarget, { history: "replace" });
-      } else if (status.running) {
-        const requested = status.iterations_requested;
-        const iterLabel =
-          requested != null && Number(requested) > 0
-            ? `${status.iterations ?? 0}/${requested}`
-            : `${status.iterations ?? 0}`;
-        set({
-          message: status.paused
-            ? "Pause requested — finishing current sample…"
-            : `Solving — ${iterLabel} iterations`,
-        });
-      }
-    } catch (error) {
-      if (!shouldApplyStatus(token, statusToken)) {
-        return;
-      }
-      const detail =
-        error instanceof Error ? error.message : "Engine unreachable";
-      let shellHint = "";
-      if (isTauriRuntime()) {
-        const shellStatus = await readEngineStatus();
-        if (shellStatus) {
-          shellHint = ` Shell: ${shellStatus}.`;
-        }
-      }
-      set({
-        connection: "disconnected",
-        message: `Engine unreachable: ${detail}.${shellHint} Use Reconnect — the installer should have placed holdem-explorer beside the app.`,
-      });
+      return;
     }
+
+    const runCycle = async () => {
+      let outcome: "success" | "failure" | "shutdown_cancel" = "success";
+      do {
+        statusRefreshQueued = false;
+        const token = ++statusToken;
+        const abort = new AbortController();
+        statusAbortController = abort;
+        const timed = createTimeoutSignal(STATUS_POLL_TIMEOUT_MS, abort.signal);
+        try {
+          const status = await engineClient.status(timed.signal);
+          // Drop superseded responses (invalidateLifecycleRequests bumped token).
+          if (!shouldApplyStatus(token, statusToken)) {
+            continue;
+          }
+          const decision = acceptStatusGeneration(status, seenGeneration, {
+            // Token already proves this is the latest response; a lower generation
+            // means the explorer process restarted and re-baselined the counter.
+            allowRestart: true,
+          });
+          if (!decision.apply) {
+            continue;
+          }
+          seenGeneration = decision.generation;
+          statusConsecutiveFailures = 0;
+          outcome = "success";
+          const reload = solutionNeedsReload(
+            status,
+            get().solutionId,
+            continuationPending,
+          );
+          const baselineSolutionId = resolveBaselineSolutionId(
+            status.baseline_solution_id,
+            get().baselineSolutionId,
+          );
+          const nextSolutionId =
+            reload && status.solution_id ? status.solution_id : get().solutionId;
+          const clearCompare = shouldClearCompareNote(
+            get().compareNote,
+            baselineSolutionId,
+            nextSolutionId ?? status.solution_id,
+          );
+          set({
+            status,
+            connection: "connected",
+            phase: phaseFromStatus(status, get().phase),
+            baselineSolutionId,
+            ...(clearCompare ? { compareNote: null } : {}),
+          });
+          if (reload && status.solution_id) {
+            continuationPending = false;
+            const reloadTarget =
+              pendingReloadNodeId === undefined
+                ? get().currentNode?.node_id || rootNodeId(status.root_node_id)
+                : pendingReloadNodeId === null
+                  ? rootNodeId(status.root_node_id)
+                  : pendingReloadNodeId;
+            pendingReloadNodeId = undefined;
+            set({
+              solutionId: status.solution_id,
+              message: status.paused
+                ? "Paused — browsing available. Continue to resume."
+                : status.cancelled
+                  ? "Stopped — keeping completed iterations."
+                  : "Solve complete.",
+            });
+            await get().navigateTo(reloadTarget, { history: "replace" });
+          } else if (status.running) {
+            const requested = status.iterations_requested;
+            const iterLabel =
+              requested != null && Number(requested) > 0
+                ? `${status.iterations ?? 0}/${requested}`
+                : `${status.iterations ?? 0}`;
+            set({
+              message: status.paused
+                ? "Pause requested — finishing current sample…"
+                : `Solving — ${iterLabel} iterations`,
+            });
+          }
+        } catch (error) {
+          const classified = classifyStatusPollError(error, {
+            pollActive: statusPollActive,
+            timedOut: timed.timedOut(),
+          });
+          outcome = classified.kind;
+          if (classified.kind === "shutdown_cancel") {
+            return;
+          }
+          if (!shouldApplyStatus(token, statusToken)) {
+            continue;
+          }
+          statusConsecutiveFailures += 1;
+          const detail =
+            error instanceof Error ? error.message : "Engine unreachable";
+          let shellHint = "";
+          if (isTauriRuntime()) {
+            const shellStatus = await readEngineStatus();
+            if (!shouldApplyStatus(token, statusToken) || !statusPollActive) {
+              continue;
+            }
+            if (shellStatus) {
+              shellHint = ` Shell: ${shellStatus}.`;
+            }
+          }
+          set({
+            connection: "disconnected",
+            message: `Engine unreachable: ${detail}.${shellHint} Use Reconnect — the installer should have placed holdem-explorer beside the app.`,
+          });
+        } finally {
+          timed.dispose();
+          if (statusAbortController === abort) {
+            statusAbortController = null;
+          }
+        }
+      } while (statusRefreshQueued && statusPollActive);
+
+      if (statusPollActive) {
+        const delay = nextStatusPollDelay({
+          outcome,
+          consecutiveFailures: statusConsecutiveFailures,
+        });
+        if (pollTimer) {
+          clearTimeout(pollTimer);
+        }
+        pollTimer = setTimeout(() => {
+          pollTimer = null;
+          void get().refresh();
+        }, delay);
+      }
+    };
+
+    statusInFlight = runCycle().finally(() => {
+      statusInFlight = null;
+    });
+    await statusInFlight;
   },
 
   async solve() {
@@ -2304,7 +2545,12 @@ pathTrail,
     const baseline = get().baselineSolutionId;
     const scenario = get().solutionId;
     const targetNode = nodeId || get().currentNode?.node_id;
-    if (!baseline || !scenario || !targetNode) {
+    const requestScope = captureCompareRequestScope({
+      baselineId: baseline,
+      scenarioId: scenario,
+      nodeId: targetNode,
+    });
+    if (!requestScope) {
       set({
         compareNote: null,
         message:
@@ -2314,13 +2560,30 @@ pathTrail,
     }
     try {
       const compareNote = (await engineClient.compare(
-        baseline,
-        scenario,
-        targetNode,
+        requestScope.baselineId,
+        requestScope.scenarioId,
+        requestScope.nodeId,
       )) as ComparePayload;
+      // Payload must match the request AND live study identity must still match.
+      // Otherwise a late response can steal the workspace into Compare.
+      const liveStillCurrent = compareRequestIsCurrent(requestScope, {
+        baselineId: get().baselineSolutionId,
+        scenarioId: get().solutionId,
+        nodeId: get().currentNode?.node_id,
+      });
       if (
-        !compareNoteIsValid(compareNote, baseline, scenario, targetNode)
+        !compareNoteIsValid(
+          compareNote,
+          requestScope.baselineId,
+          requestScope.scenarioId,
+          requestScope.nodeId,
+        ) ||
+        !liveStillCurrent
       ) {
+        if (!liveStillCurrent) {
+          // Superseded — discard silently rather than clobbering the new context.
+          return;
+        }
         set({
           compareNote: null,
           message:
@@ -2331,9 +2594,18 @@ pathTrail,
       set({
         compareNote,
         workspace: "compare",
-        message: `Compare ${baseline} → ${scenario}: EV Δ ${Number(compareNote.value_delta).toFixed(4)}`,
+        message: `Compare ${requestScope.baselineId} → ${requestScope.scenarioId}: EV Δ ${Number(compareNote.value_delta).toFixed(4)}`,
       });
     } catch (error) {
+      if (
+        !compareRequestIsCurrent(requestScope, {
+          baselineId: get().baselineSolutionId,
+          scenarioId: get().solutionId,
+          nodeId: get().currentNode?.node_id,
+        })
+      ) {
+        return;
+      }
       set({
         compareNote: null,
         message: error instanceof EngineError ? error.message : "Compare failed",
