@@ -84,6 +84,8 @@ describe("looksLikeSetupRequest", () => {
     expect(looksLikeSetupRequest("Duplicate this setup at 150bb")).toBe(true);
     expect(looksLikeSetupRequest("set iterations to 500")).toBe(true);
     expect(looksLikeSetupRequest("set pot to 40")).toBe(true);
+    expect(looksLikeSetupRequest("make pot 55")).toBe(true);
+    expect(looksLikeSetupRequest("pot to 55")).toBe(true);
   });
 
   it("leaves product questions as non-setup", () => {

@@ -234,25 +234,18 @@ export function StudyAssistantWindow() {
               content:
                 `${line.content}\n\nNothing was written to Build — the proposal had no field changes to apply.`,
             };
-          } else if (setupResultIsBroad(result)) {
-            // B02: broad / range / create setups need an obvious Apply control.
-            setPendingSetup({ runId: outcome.run.runId, result });
-            line = {
-              ...line,
-              content: `${line.content}\n\n${renderPendingSetupReview(result)}`,
-              setupRunId: outcome.run.runId,
-            };
           } else {
-            // Narrow scalar edits: auto-commit with receipt + Undo.
+            // Auto-commit scalar and broad setups. A pending Apply control is only
+            // for blocked/conflicted commits — waiting for confirmation on every
+            // create felt like "nothing happened" when Apply sat below the fold.
             const committed = commitPending(result);
             if (committed) {
               line = committed;
-            } else {
-              // Keep proposal visible with Apply when the patch is still usable.
+            } else if (setupResultHasApplyablePatch(result)) {
               setPendingSetup({ runId: outcome.run.runId, result });
               line = {
                 ...line,
-                content: `${line.content}\n\nNot applied yet.\n\n${renderPendingSetupReview(result)}`,
+                content: `Action needed — Apply to Build below.\n\n${line.content}\n\n${renderPendingSetupReview(result)}`,
                 setupRunId: outcome.run.runId,
               };
             }
@@ -459,51 +452,64 @@ export function StudyAssistantWindow() {
 
         {pendingSetup ? (
           <div
-            className="assistant-compose-actions"
+            className="help-chat-window__pending-apply"
             data-testid="assistant-pending-apply"
+            role="status"
+            aria-live="polite"
           >
-            <button
-              type="button"
-              className="toolbar-btn primary"
-              disabled={busy}
-              onClick={() => {
-                const committed = commitPending(pendingSetup.result);
-                if (committed) {
-                  setMessages((prev) => [...prev, committed]);
-                }
-              }}
-            >
-              Apply to Build
-            </button>
-            {pendingSetup.result.conflicts.length > 0 ? (
+            <p className="help-chat-window__pending-apply-label">
+              Setup ready — apply it to Build, or dismiss.
+              {setupResultIsBroad(pendingSetup.result)
+                ? " This replaces multiple fields."
+                : null}
+            </p>
+            <div className="assistant-compose-actions">
               <button
                 type="button"
-                className="toolbar-btn"
+                className="toolbar-btn primary"
                 disabled={busy}
                 onClick={() => {
-                  const committed = commitPending(pendingSetup.result, true);
+                  const committed = commitPending(pendingSetup.result);
                   if (committed) {
                     setMessages((prev) => [...prev, committed]);
                   }
                 }}
               >
-                Apply anyway
+                Apply to Build
               </button>
-            ) : null}
-            <button
-              type="button"
-              className="toolbar-btn"
-              disabled={busy}
-              onClick={() => {
-                setPendingSetup(null);
-                setMessages((prev) => [
-                  ...prev,
-                  { role: "assistant", content: "Discarded the pending setup proposal." },
-                ]);
-              }}
-            >
-              Dismiss
-            </button>
+              {pendingSetup.result.conflicts.length > 0 ? (
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    const committed = commitPending(pendingSetup.result, true);
+                    if (committed) {
+                      setMessages((prev) => [...prev, committed]);
+                    }
+                  }}
+                >
+                  Apply anyway
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="toolbar-btn"
+                disabled={busy}
+                onClick={() => {
+                  setPendingSetup(null);
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      role: "assistant",
+                      content: "Discarded the pending setup proposal.",
+                    },
+                  ]);
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         ) : null}
 
