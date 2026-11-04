@@ -242,4 +242,46 @@ describe("validateSetupForSolve", () => {
     };
     expect(validateSetupForSolve(draft)).toEqual({ ok: true, errors: [] });
   });
+
+  it("rejects malformed betting lists before solve", () => {
+    const draft: SpotDraft = {
+      ...DEFAULT_SPOT,
+      boardText: "Ah Kd 7c",
+      oopRange: "AA,KK",
+      ipRange: "QQ+",
+      pot: 5.5,
+      stack: 97.5,
+      oopFlop: "garbage",
+      ipFlop: "50, garbage",
+      oopTurn: "50 100",
+    };
+    const result = validateSetupForSolve(draft);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((line) => /OOP flop bets: "garbage"/i.test(line))).toBe(
+      true,
+    );
+    expect(result.errors.some((line) => /IP flop bets: "garbage"/i.test(line))).toBe(
+      true,
+    );
+    expect(result.errors.some((line) => /OOP turn bets: "50 100"/i.test(line))).toBe(
+      true,
+    );
+  });
+
+  it("allows intentional blank and sentinel betting lists", () => {
+    const draft: SpotDraft = {
+      ...DEFAULT_SPOT,
+      boardText: "Ah Kd 7c",
+      oopRange: "AA,KK",
+      ipRange: "QQ+",
+      pot: 5.5,
+      stack: 97.5,
+      oopFlop: "",
+      ipFlop: "50, e, a",
+      oopTurnRaises: "-",
+      oopFlopDonk: "",
+      donkFlop: true,
+    };
+    expect(validateSetupForSolve(draft)).toEqual({ ok: true, errors: [] });
+  });
 });
