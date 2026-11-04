@@ -3,6 +3,7 @@
  * strategy-edit draft binding, and Build draft sync from opened status.
  */
 
+import { formatStoredSizes } from "../betSizes";
 import type { ComparePayload } from "../locks";
 import { DEFAULT_SPOT, type NodePayload, type SpotDraft, type StatusPayload } from "../types";
 
@@ -273,39 +274,25 @@ export function draftPartialFromStatus(status: StatusPayload): Partial<SpotDraft
 }
 
 function joinConfigSizes(values: unknown): string {
-  if (!Array.isArray(values)) {
-    return "";
-  }
-  return values.map((value) => String(value)).join(", ");
+  return formatStoredSizes(values);
 }
 
 /** Display raise pot fractions + multiples as Build text (`50, 2x`). */
 function joinRaiseConfigSizes(fractions: unknown, multiples: unknown): string {
-  const parts: string[] = [];
-  if (Array.isArray(fractions)) {
-    for (const value of fractions) {
-      const n = Number(value);
-      if (!Number.isFinite(n)) {
-        continue;
-      }
-      if (n < 0) {
-        parts.push(`${Math.abs(n)}c`);
-      } else if (n > 0 && n <= 1) {
-        parts.push(String(Math.round(n * 100)));
-      } else {
-        parts.push(String(n));
-      }
-    }
-  }
+  const base = formatStoredSizes(fractions, { raise: true });
+  const extra: string[] = [];
   if (Array.isArray(multiples)) {
     for (const value of multiples) {
       const n = Number(value);
       if (Number.isFinite(n) && n > 0) {
-        parts.push(`${n}x`);
+        extra.push(`${n}x`);
       }
     }
   }
-  return parts.join(", ");
+  if (base === "-") {
+    return extra.length > 0 ? extra.join(", ") : "-";
+  }
+  return [base, ...extra].filter(Boolean).join(", ");
 }
 
 /**
@@ -327,7 +314,16 @@ export function openDraftBase(solutionPath = ""): SpotDraft {
     ipTurn: "",
     oopRiver: "",
     ipRiver: "",
+    oopFlopRaises: "",
+    ipFlopRaises: "",
+    oopTurnRaises: "",
+    ipTurnRaises: "",
+    oopRiverRaises: "",
+    ipRiverRaises: "",
     oopDonk: "",
+    oopFlopDonk: "",
+    oopTurnDonk: "",
+    oopRiverDonk: "",
     donkFlop: false,
     donkTurn: false,
     donkRiver: false,
@@ -411,8 +407,57 @@ export function draftPartialFromSolutionConfig(
   if ("ip_river_bets" in config) {
     partial.ipRiver = joinConfigSizes(config.ip_river_bets);
   }
+  if ("oop_flop_raises" in config) {
+    partial.oopFlopRaises = formatStoredSizes(config.oop_flop_raises, {
+      raise: true,
+      matchBets: config.oop_flop_bets,
+    });
+  }
+  if ("ip_flop_raises" in config) {
+    partial.ipFlopRaises = formatStoredSizes(config.ip_flop_raises, {
+      raise: true,
+      matchBets: config.ip_flop_bets,
+    });
+  }
+  if ("oop_turn_raises" in config) {
+    partial.oopTurnRaises = formatStoredSizes(config.oop_turn_raises, {
+      raise: true,
+      matchBets: config.oop_turn_bets,
+    });
+  }
+  if ("ip_turn_raises" in config) {
+    partial.ipTurnRaises = formatStoredSizes(config.ip_turn_raises, {
+      raise: true,
+      matchBets: config.ip_turn_bets,
+    });
+  }
+  if ("oop_river_raises" in config) {
+    partial.oopRiverRaises = formatStoredSizes(config.oop_river_raises, {
+      raise: true,
+      matchBets: config.oop_river_bets,
+    });
+  }
+  if ("ip_river_raises" in config) {
+    partial.ipRiverRaises = formatStoredSizes(config.ip_river_raises, {
+      raise: true,
+      matchBets: config.ip_river_bets,
+    });
+  }
   if ("oop_donk" in config) {
     partial.oopDonk = joinConfigSizes(config.oop_donk);
+  }
+  if ("oop_flop_donk" in config) {
+    partial.oopFlopDonk = joinConfigSizes(config.oop_flop_donk);
+  }
+  if ("oop_turn_donk" in config) {
+    partial.oopTurnDonk = joinConfigSizes(config.oop_turn_donk);
+  }
+  if ("oop_river_donk" in config) {
+    partial.oopRiverDonk = joinConfigSizes(config.oop_river_donk);
+  }
+  const mergeThreshold = asFiniteNumber(config.merge_threshold);
+  if (mergeThreshold !== undefined) {
+    partial.mergeThresholdPct = mergeThreshold * 100;
   }
   const maxRaises = asFiniteNumber(config.max_raises);
   if (maxRaises !== undefined) {

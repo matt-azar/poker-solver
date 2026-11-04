@@ -230,6 +230,100 @@ std::vector<double> optional_sizes(const std::string& text, const char* key)
     return read_number_array(text, key);
 }
 
+std::vector<double> read_size_array(const std::string& text, const char* key, bool allow_multiple)
+{
+    std::vector<double> values;
+    const std::size_t at = find_key(text, key);
+    if (at == std::string::npos)
+    {
+        return values;
+    }
+    const std::size_t start = text.find('[', value_at(text, at));
+    const std::size_t end = text.find(']', start);
+    if (start == std::string::npos || end == std::string::npos || end < start)
+    {
+        throw std::invalid_argument(std::string(key) + " must be an array");
+    }
+    std::size_t cursor = start + 1;
+    while (cursor < end)
+    {
+        while (cursor < end
+            && (std::isspace(static_cast<unsigned char>(text[cursor])) || text[cursor] == ','))
+        {
+            ++cursor;
+        }
+        if (cursor >= end)
+        {
+            break;
+        }
+        std::string token;
+        if (text[cursor] == '"')
+        {
+            ++cursor;
+            while (cursor < end && text[cursor] != '"')
+            {
+                if (text[cursor] == '\\')
+                {
+                    throw std::invalid_argument(std::string(key) + " size string is not escaped");
+                }
+                token.push_back(text[cursor]);
+                ++cursor;
+            }
+            if (cursor >= end || text[cursor] != '"')
+            {
+                throw std::invalid_argument(std::string(key) + " size string is not closed");
+            }
+            ++cursor;
+        }
+        else
+        {
+            const std::size_t token_start = cursor;
+            while (cursor < end && text[cursor] != ',')
+            {
+                ++cursor;
+            }
+            token = text.substr(token_start, cursor - token_start);
+            const auto not_space = [](unsigned char character)
+            {
+                return !std::isspace(character);
+            };
+            const auto first = std::find_if(token.begin(), token.end(), not_space);
+            const auto last = std::find_if(token.rbegin(), token.rend(), not_space).base();
+            token = first < last ? std::string(first, last) : std::string();
+        }
+        if (token.empty())
+        {
+            continue;
+        }
+        double number = 0.0;
+        const char* const begin = token.data();
+        const char* const stop = begin + token.size();
+        const std::from_chars_result parsed = std::from_chars(begin, stop, number);
+        if (parsed.ec == std::errc{} && parsed.ptr == stop && std::isfinite(number))
+        {
+            values.push_back(number);
+            continue;
+        }
+        double spec = 0.0;
+        std::string error;
+        if (!poker::streets::parse_size_token(token, allow_multiple, spec, error))
+        {
+            throw std::invalid_argument(std::string(key) + ": " + error);
+        }
+        values.push_back(spec);
+    }
+    return values;
+}
+
+std::vector<double> optional_size_specs(const std::string& text, const char* key, bool allow_multiple)
+{
+    if (find_key(text, key) == std::string::npos)
+    {
+        return {};
+    }
+    return read_size_array(text, key, allow_multiple);
+}
+
 Job parse_job(const std::string& text)
 {
     Job job;
@@ -251,8 +345,8 @@ Job parse_job(const std::string& text)
     job.ip = poker::holdem::Range::parse(read_string(text, "ip_range", "KK"));
     const bool oop_bets_present = find_key(text, "oop_bets") != std::string::npos;
     const bool ip_bets_present = find_key(text, "ip_bets") != std::string::npos;
-    job.oop_bets = read_number_array(text, "oop_bets");
-    job.ip_bets = read_number_array(text, "ip_bets");
+    job.oop_bets = oop_bets_present ? read_size_array(text, "oop_bets", false) : std::vector<double>{};
+    job.ip_bets = ip_bets_present ? read_size_array(text, "ip_bets", false) : std::vector<double>{};
     if (!oop_bets_present)
     {
         job.oop_bets = {0.5, 1.0};
@@ -265,17 +359,31 @@ Job parse_job(const std::string& text)
     // still copy that player's bet list when raise multiples are also empty.
     const bool oop_raises_present = find_key(text, "oop_raises") != std::string::npos;
     const bool ip_raises_present = find_key(text, "ip_raises") != std::string::npos;
-    job.oop_raises = optional_sizes(text, "oop_raises");
-    job.ip_raises = optional_sizes(text, "ip_raises");
-    job.oop_flop_bets = optional_sizes(text, "oop_flop_bets");
-    job.oop_turn_bets = optional_sizes(text, "oop_turn_bets");
-    job.oop_river_bets = optional_sizes(text, "oop_river_bets");
-    job.ip_flop_bets = optional_sizes(text, "ip_flop_bets");
-    job.ip_turn_bets = optional_sizes(text, "ip_turn_bets");
-    job.ip_river_bets = optional_sizes(text, "ip_river_bets");
-    job.oop_donk = optional_sizes(text, "oop_donk");
+    job.oop_raises = optional_size_specs(text, "oop_raises", true);
+    job.ip_raises = optional_size_specs(text, "ip_raises", true);
+    job.oop_flop_bets = optional_size_specs(text, "oop_flop_bets", false);
+    job.oop_turn_bets = optional_size_specs(text, "oop_turn_bets", false);
+    job.oop_river_bets = optional_size_specs(text, "oop_river_bets", false);
+    job.ip_flop_bets = optional_size_specs(text, "ip_flop_bets", false);
+    job.ip_turn_bets = optional_size_specs(text, "ip_turn_bets", false);
+    job.ip_river_bets = optional_size_specs(text, "ip_river_bets", false);
+    job.oop_flop_raises = optional_size_specs(text, "oop_flop_raises", true);
+    job.oop_turn_raises = optional_size_specs(text, "oop_turn_raises", true);
+    job.oop_river_raises = optional_size_specs(text, "oop_river_raises", true);
+    job.ip_flop_raises = optional_size_specs(text, "ip_flop_raises", true);
+    job.ip_turn_raises = optional_size_specs(text, "ip_turn_raises", true);
+    job.ip_river_raises = optional_size_specs(text, "ip_river_raises", true);
+    job.oop_donk = optional_size_specs(text, "oop_donk", false);
+    job.oop_flop_donk = optional_size_specs(text, "oop_flop_donk", false);
+    job.oop_turn_donk = optional_size_specs(text, "oop_turn_donk", false);
+    job.oop_river_donk = optional_size_specs(text, "oop_river_donk", false);
     job.oop_raise_multiples = optional_sizes(text, "oop_raise_multiples");
     job.ip_raise_multiples = optional_sizes(text, "ip_raise_multiples");
+    job.merge_threshold = read_number(text, "merge_threshold", 0);
+    if (!std::isfinite(job.merge_threshold) || job.merge_threshold < 0.0)
+    {
+        throw std::invalid_argument("merge_threshold must be a nonnegative fraction");
+    }
     if (!oop_raises_present && job.oop_raises.empty() && job.oop_raise_multiples.empty())
     {
         job.oop_raises = job.oop_bets;
@@ -913,8 +1021,18 @@ poker::streets::StreetConfig street_config(const Job& job)
     config.ip_flop_bets = job.ip_flop_bets;
     config.ip_turn_bets = job.ip_turn_bets;
     config.ip_river_bets = job.ip_river_bets;
+    config.oop_flop_raises = job.oop_flop_raises;
+    config.oop_turn_raises = job.oop_turn_raises;
+    config.oop_river_raises = job.oop_river_raises;
+    config.ip_flop_raises = job.ip_flop_raises;
+    config.ip_turn_raises = job.ip_turn_raises;
+    config.ip_river_raises = job.ip_river_raises;
     config.oop_donk_sizes = job.oop_donk;
+    config.oop_flop_donk = job.oop_flop_donk;
+    config.oop_turn_donk = job.oop_turn_donk;
+    config.oop_river_donk = job.oop_river_donk;
     config.oop_raise_multiples = job.oop_raise_multiples;
+    config.merge_threshold = job.merge_threshold;
     config.ip_raise_multiples = job.ip_raise_multiples;
     config.pot_cap = job.pot_cap;
     config.allow_three_bet = job.allow_three_bet;

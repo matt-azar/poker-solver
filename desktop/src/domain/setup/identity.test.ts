@@ -206,7 +206,7 @@ describe("openDraftBase / draftFromOpenedSolution", () => {
     expect(opened.warnings).toEqual([]);
     expect(opened.draft.oopRange).toBe("AA");
     expect(opened.draft.ipRange).toBe("KK");
-    expect(opened.draft.oopBets).toBe("0.5, 1");
+    expect(opened.draft.oopBets).toBe("50, 100");
     expect(opened.draft.ipFlop).toBe("");
     expect(opened.draft.treeEdits).toEqual(["force - c"]);
     expect(opened.draft.timeLimit).toBe("");

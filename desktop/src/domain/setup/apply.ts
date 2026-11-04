@@ -34,7 +34,16 @@ const TREE_KEYS = [
   "ipTurn",
   "oopRiver",
   "ipRiver",
+  "oopFlopRaises",
+  "ipFlopRaises",
+  "oopTurnRaises",
+  "ipTurnRaises",
+  "oopRiverRaises",
+  "ipRiverRaises",
   "oopDonk",
+  "oopFlopDonk",
+  "oopTurnDonk",
+  "oopRiverDonk",
 ] as const;
 
 type DraftKey = keyof SpotDraft;

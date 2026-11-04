@@ -49,7 +49,16 @@ export interface StudySetupTreePreset {
   ipTurn?: string;
   oopRiver?: string;
   ipRiver?: string;
+  oopFlopRaises?: string;
+  ipFlopRaises?: string;
+  oopTurnRaises?: string;
+  ipTurnRaises?: string;
+  oopRiverRaises?: string;
+  ipRiverRaises?: string;
   oopDonk?: string;
+  oopFlopDonk?: string;
+  oopTurnDonk?: string;
+  oopRiverDonk?: string;
   potCap?: number;
   noThreeBet?: boolean;
   geometric?: boolean;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { resolveRaiseSizeList, resolveSizeList } from "../../domain/betSizes";
+import { encodeBettingJob } from "../../domain/betSizes";
 import { engineClient, EngineError } from "../../engine/client";
 import type {
   MemoryPlanPayload,
@@ -56,66 +56,16 @@ function draftPreviewBody(draft: SpotDraft) {
     .trim()
     .split(/[\s,]+/)
     .filter(Boolean);
-  const sizeOpts = {
-    pot: draft.pot,
-    stack: draft.stack,
-    boardLen: board.length,
-    geometricFlag: draft.geometric,
-    mergeThresholdPct: draft.mergeThresholdPct ?? 0,
-  };
-  const oopFlop = resolveSizeList(draft.oopFlop, sizeOpts);
-  const ipFlop = resolveSizeList(draft.ipFlop, sizeOpts);
-  const oopTurn = resolveSizeList(draft.oopTurn, sizeOpts);
-  const ipTurn = resolveSizeList(draft.ipTurn, sizeOpts);
-  const oopRiver = resolveSizeList(draft.oopRiver, sizeOpts);
-  const ipRiver = resolveSizeList(draft.ipRiver, sizeOpts);
-  const oopShared =
-    oopRiver[0] != null
-      ? oopRiver
-      : oopTurn[0] != null
-        ? oopTurn
-        : oopFlop[0] != null
-          ? oopFlop
-          : resolveSizeList(draft.oopBets, sizeOpts);
-  const ipShared =
-    ipRiver[0] != null
-      ? ipRiver
-      : ipTurn[0] != null
-        ? ipTurn
-        : ipFlop[0] != null
-          ? ipFlop
-          : resolveSizeList(draft.ipBets, sizeOpts);
-  const oopRaises = resolveRaiseSizeList(draft.oopRaises, sizeOpts);
-  const ipRaises = resolveRaiseSizeList(draft.ipRaises, sizeOpts);
-  const oopDonk = draft.donkFlop
-    ? oopFlop
-    : draft.donkTurn
-      ? oopTurn
-      : draft.donkRiver
-        ? oopRiver
-        : resolveSizeList(draft.oopDonk, sizeOpts);
+  const sizes = encodeBettingJob(draft);
   return {
     board,
     oop_range: draft.oopRange,
     ip_range: draft.ipRange,
     pot: draft.pot,
     stack: draft.stack,
-    oop_bets: oopShared,
-    ip_bets: ipShared,
-    oop_raises: oopRaises.fractions,
-    ip_raises: ipRaises.fractions,
-    oop_raise_multiples: oopRaises.multiples,
-    ip_raise_multiples: ipRaises.multiples,
-    oop_flop_bets: oopFlop,
-    ip_flop_bets: ipFlop,
-    oop_turn_bets: oopTurn,
-    ip_turn_bets: ipTurn,
-    oop_river_bets: oopRiver,
-    ip_river_bets: ipRiver,
-    oop_donk: oopDonk,
+    ...sizes,
     pot_cap: draft.potCap || 0,
     allow_three_bet: draft.noThreeBet ? 0 : 1,
-    geometric: draft.geometric ? 1 : 0,
     all_in_threshold: draft.allInThreshold || 0,
     allow_all_in: draft.allowAllIn ? 1 : 0,
     max_raises: draft.maxRaises,
@@ -264,7 +214,19 @@ export function TreeLineEditor() {
     draft.ipTurn,
     draft.oopRiver,
     draft.ipRiver,
+    draft.oopFlopRaises,
+    draft.ipFlopRaises,
+    draft.oopTurnRaises,
+    draft.ipTurnRaises,
+    draft.oopRiverRaises,
+    draft.ipRiverRaises,
     draft.oopDonk,
+    draft.oopFlopDonk,
+    draft.oopTurnDonk,
+    draft.oopRiverDonk,
+    draft.donkFlop,
+    draft.donkTurn,
+    draft.donkRiver,
     draft.mergeThresholdPct,
     draft.potCap,
     draft.noThreeBet,

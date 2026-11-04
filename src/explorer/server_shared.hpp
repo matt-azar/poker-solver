@@ -93,9 +93,19 @@ struct Job
     std::vector<double> ip_flop_bets{};
     std::vector<double> ip_turn_bets{};
     std::vector<double> ip_river_bets{};
+    std::vector<double> oop_flop_raises{};
+    std::vector<double> oop_turn_raises{};
+    std::vector<double> oop_river_raises{};
+    std::vector<double> ip_flop_raises{};
+    std::vector<double> ip_turn_raises{};
+    std::vector<double> ip_river_raises{};
     std::vector<double> oop_donk{};
+    std::vector<double> oop_flop_donk{};
+    std::vector<double> oop_turn_donk{};
+    std::vector<double> oop_river_donk{};
     std::vector<double> oop_raise_multiples{};
     std::vector<double> ip_raise_multiples{};
+    double merge_threshold = 0.0;
     double pot_cap = 0.0;
     bool allow_three_bet = true;
     bool allow_all_in = true;
@@ -201,6 +211,10 @@ std::vector<double> read_number_array(const std::string& text, const char* key);
 std::vector<std::string> read_string_array(const std::string& text, const char* key);
 
 std::vector<double> optional_sizes(const std::string& text, const char* key);
+
+std::vector<double> read_size_array(const std::string& text, const char* key, bool allow_multiple);
+
+std::vector<double> optional_size_specs(const std::string& text, const char* key, bool allow_multiple);
 
 Job parse_job(const std::string& text);
 

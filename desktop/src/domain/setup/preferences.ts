@@ -19,7 +19,16 @@ export interface StudySetupPreferences {
     ipTurn?: string;
     oopRiver?: string;
     ipRiver?: string;
+    oopFlopRaises?: string;
+    ipFlopRaises?: string;
+    oopTurnRaises?: string;
+    ipTurnRaises?: string;
+    oopRiverRaises?: string;
+    ipRiverRaises?: string;
     oopDonk?: string;
+    oopFlopDonk?: string;
+    oopTurnDonk?: string;
+    oopRiverDonk?: string;
   };
   defaultPotCap?: number;
   defaultMaxRaises?: number;
@@ -73,7 +82,16 @@ export function normalizeStudySetupPreferences(
       "ipTurn",
       "oopRiver",
       "ipRiver",
+      "oopFlopRaises",
+      "ipFlopRaises",
+      "oopTurnRaises",
+      "ipTurnRaises",
+      "oopRiverRaises",
+      "ipRiverRaises",
       "oopDonk",
+      "oopFlopDonk",
+      "oopTurnDonk",
+      "oopRiverDonk",
     ] as const) {
       if (typeof bets[key] === "string") {
         tree[key] = bets[key];

@@ -147,6 +147,255 @@ export function parseSizeToken(token: string): number | null {
   return parsed && !parsed.geometric ? parsed.fraction : null;
 }
 
+/** Stored sentinels. The engine expands `e` / `2e` / `a` / `Nx` at the node. */
+export const ALL_IN_SPEC = -1e9;
+export const GEO_BASE = -2e9;
+export const MULTIPLE_BASE = -3e9;
+export const EXPLICIT_EMPTY_SPEC = -4e9;
+
+export function isExplicitEmptyList(specs: number[]): boolean {
+  return (
+    specs.length === 1 &&
+    specs[0] <= EXPLICIT_EMPTY_SPEC + 0.5 &&
+    specs[0] > EXPLICIT_EMPTY_SPEC - 1e6
+  );
+}
+
+function isGeometricSpec(spec: number): boolean {
+  return spec <= GEO_BASE + 0.5 && spec > MULTIPLE_BASE + 0.5;
+}
+
+function isMultipleSpec(spec: number): boolean {
+  return spec <= MULTIPLE_BASE + 0.5 && spec > EXPLICIT_EMPTY_SPEC + 0.5;
+}
+
+function isAllInSpec(spec: number): boolean {
+  return spec < -5e8 && spec > -1.5e9;
+}
+
+function isExplicitEmptySpec(spec: number): boolean {
+  return spec <= EXPLICIT_EMPTY_SPEC + 0.5 && spec > EXPLICIT_EMPTY_SPEC - 1e6;
+}
+
+function trimNumber(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+  const rounded = Math.round(value * 1e6) / 1e6;
+  if (Math.abs(rounded - Math.round(rounded)) < 1e-6) {
+    return String(Math.round(rounded));
+  }
+  return String(rounded);
+}
+
+/** One stored spec back into a Build token (`50`, `e`, `2e`, `20c`, `2.5x`, `a`). */
+export function formatEngineSpec(spec: number): string {
+  if (isExplicitEmptySpec(spec)) {
+    return "-";
+  }
+  if (isAllInSpec(spec)) {
+    return "a";
+  }
+  if (isGeometricSpec(spec)) {
+    const streets = Math.round(-(spec - GEO_BASE));
+    return streets <= 0 ? "e" : `${streets}e`;
+  }
+  if (isMultipleSpec(spec)) {
+    return `${trimNumber(-(spec - MULTIPLE_BASE))}x`;
+  }
+  if (spec < 0 && spec > -1e8) {
+    return `${trimNumber(-spec)}c`;
+  }
+  return trimNumber(spec * 100);
+}
+
+function finiteSpecs(values: unknown): number[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+}
+
+function sameSpecs(left: number[], right: number[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+/**
+ * Display a stored size list. An explicit-empty raise list is `-` (no raises).
+ * A raise list that matches the street's bets displays blank, which copies bets.
+ */
+export function formatStoredSizes(
+  values: unknown,
+  options?: { raise?: boolean; matchBets?: unknown },
+): string {
+  const specs = finiteSpecs(values);
+  if (specs.length === 0) {
+    return "";
+  }
+  if (isExplicitEmptyList(specs)) {
+    return options?.raise ? "-" : "";
+  }
+  if (options?.raise && options.matchBets !== undefined) {
+    const bets = finiteSpecs(options.matchBets);
+    if (sameSpecs(specs, bets)) {
+      return "";
+    }
+  }
+  return specs.map(formatEngineSpec).join(", ");
+}
+
+function encodeTokenList(text: string, allowMultiple: boolean, geometricFlag: boolean): number[] {
+  const parts = text
+    .split(/[,]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) {
+    return [EXPLICIT_EMPTY_SPEC];
+  }
+  if (
+    parts.length === 1 &&
+    (parts[0] === "-" || parts[0].toLowerCase() === "none" || parts[0].toLowerCase() === "x")
+  ) {
+    return [EXPLICIT_EMPTY_SPEC];
+  }
+  const out: number[] = [];
+  for (const part of parts) {
+    const lower = part.toLowerCase();
+    if (lower === "a" || lower === "allin" || lower === "all-in") {
+      out.push(ALL_IN_SPEC);
+      continue;
+    }
+    const geo = lower.match(/^(\d+)?e$/);
+    if (geo) {
+      const streets = geo[1] ? Number(geo[1]) : 0;
+      if (Number.isInteger(streets) && streets >= 0 && streets <= 100) {
+        out.push(GEO_BASE - streets);
+      }
+      continue;
+    }
+    const multiple = lower.match(/^(\d+(?:\.\d+)?)x$/);
+    if (multiple) {
+      if (allowMultiple) {
+        const value = Number(multiple[1]);
+        if (Number.isFinite(value) && value > 0) {
+          out.push(MULTIPLE_BASE - value);
+        }
+      }
+      continue;
+    }
+    const parsed = parseSizeTokenDetailed(part);
+    if (!parsed || parsed.geometric || parsed.raiseMultiple) {
+      continue;
+    }
+    out.push(parsed.fraction);
+  }
+  if (out.length === 0) {
+    return [EXPLICIT_EMPTY_SPEC];
+  }
+  if (geometricFlag && !out.some(isGeometricSpec)) {
+    out.push(GEO_BASE);
+  }
+  return out;
+}
+
+/** Blank bet text is an explicit-empty list (forced check). `e` stays a sentinel. */
+export function encodeBetList(text: string, geometricFlag: boolean): number[] {
+  return encodeTokenList(text, false, geometricFlag);
+}
+
+/**
+ * Blank raise text copies that street's bet specs, so max raises 1 still raises.
+ * `-` / `none` / `x` is an explicit empty raise list.
+ */
+export function encodeRaiseList(
+  text: string,
+  betSpecs: number[],
+  geometricFlag: boolean,
+): number[] {
+  if (!text.trim()) {
+    return betSpecs.slice();
+  }
+  return encodeTokenList(text, true, geometricFlag);
+}
+
+export interface BettingDraftInput {
+  oopBets: string;
+  ipBets: string;
+  oopFlop: string;
+  ipFlop: string;
+  oopTurn: string;
+  ipTurn: string;
+  oopRiver: string;
+  ipRiver: string;
+  oopFlopRaises: string;
+  ipFlopRaises: string;
+  oopTurnRaises: string;
+  ipTurnRaises: string;
+  oopRiverRaises: string;
+  ipRiverRaises: string;
+  oopFlopDonk: string;
+  oopTurnDonk: string;
+  oopRiverDonk: string;
+  donkFlop?: boolean;
+  donkTurn?: boolean;
+  donkRiver?: boolean;
+  geometric: boolean;
+  mergeThresholdPct?: number;
+}
+
+function encodeSharedBets(text: string): number[] {
+  if (!text.trim()) {
+    return [];
+  }
+  const specs = encodeTokenList(text, false, false);
+  return isExplicitEmptyList(specs) ? [] : specs;
+}
+
+function encodeDonk(text: string, checkbox: boolean, bets: number[], geometricFlag: boolean): number[] {
+  if (!text.trim()) {
+    return checkbox ? bets.slice() : [EXPLICIT_EMPTY_SPEC];
+  }
+  return encodeTokenList(text, false, geometricFlag);
+}
+
+/** Size fields for a solve or tree-preview job. Geometric stays off the engine flag. */
+export function encodeBettingJob(draft: BettingDraftInput) {
+  const geometric = draft.geometric;
+  const oopFlop = encodeBetList(draft.oopFlop, geometric);
+  const ipFlop = encodeBetList(draft.ipFlop, geometric);
+  const oopTurn = encodeBetList(draft.oopTurn, geometric);
+  const ipTurn = encodeBetList(draft.ipTurn, geometric);
+  const oopRiver = encodeBetList(draft.oopRiver, geometric);
+  const ipRiver = encodeBetList(draft.ipRiver, geometric);
+  const threshold = draft.mergeThresholdPct ?? 0;
+  return {
+    oop_bets: encodeSharedBets(draft.oopBets),
+    ip_bets: encodeSharedBets(draft.ipBets),
+    oop_raises: [] as number[],
+    ip_raises: [] as number[],
+    oop_raise_multiples: [] as number[],
+    ip_raise_multiples: [] as number[],
+    oop_flop_bets: oopFlop,
+    ip_flop_bets: ipFlop,
+    oop_turn_bets: oopTurn,
+    ip_turn_bets: ipTurn,
+    oop_river_bets: oopRiver,
+    ip_river_bets: ipRiver,
+    oop_flop_raises: encodeRaiseList(draft.oopFlopRaises, oopFlop, geometric),
+    ip_flop_raises: encodeRaiseList(draft.ipFlopRaises, ipFlop, geometric),
+    oop_turn_raises: encodeRaiseList(draft.oopTurnRaises, oopTurn, geometric),
+    ip_turn_raises: encodeRaiseList(draft.ipTurnRaises, ipTurn, geometric),
+    oop_river_raises: encodeRaiseList(draft.oopRiverRaises, oopRiver, geometric),
+    ip_river_raises: encodeRaiseList(draft.ipRiverRaises, ipRiver, geometric),
+    oop_donk: [] as number[],
+    oop_flop_donk: encodeDonk(draft.oopFlopDonk, Boolean(draft.donkFlop), oopFlop, geometric),
+    oop_turn_donk: encodeDonk(draft.oopTurnDonk, Boolean(draft.donkTurn), oopTurn, geometric),
+    oop_river_donk: encodeDonk(draft.oopRiverDonk, Boolean(draft.donkRiver), oopRiver, geometric),
+    geometric: 0,
+    merge_threshold: threshold > 0 ? threshold / 100 : 0,
+  };
+}
+
 export interface ResolveSizeOptions {
   pot: number;
   stack: number;

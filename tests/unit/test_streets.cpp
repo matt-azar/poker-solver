@@ -1261,8 +1261,11 @@ void run_street_tests()
     expect_turn_bluff_equilibrium();
 }
 
+void expect_pio_size_rules(const std::vector<int>& turn_board);
+
 void run_tree_rule_tests(const std::vector<int>& turn_board)
 {
+    expect_pio_size_rules(turn_board);
     {
         StreetConfig fixed_chips;
         fixed_chips.board = turn_board;
@@ -1413,6 +1416,255 @@ void run_tree_rule_tests(const std::vector<int>& turn_board)
     }
 }
 
+void expect_pio_size_rules(const std::vector<int>& turn_board)
+{
+    using poker::streets::explicit_empty_spec;
+    using poker::streets::geometric_pot_fraction;
+    using poker::streets::geometric_spec;
+    using poker::streets::kAllInSpec;
+
+    {
+        StreetConfig blank;
+        blank.board = turn_board;
+        blank.pot = 1000;
+        blank.stack = 3000;
+        blank.oop = Range::parse("QcQd");
+        blank.ip = Range::parse("JcJd");
+        blank.oop_bet_sizes = {1.0};
+        blank.ip_bet_sizes = {1.0};
+        blank.oop_turn_bets = {explicit_empty_spec()};
+        blank.ip_turn_bets = {explicit_empty_spec()};
+        blank.allow_all_in = true;
+        blank.max_raises = 1;
+        const StreetGame blank_game(blank);
+        const StreetGame::State open = blank_game.child_chance(blank_game.root(), 0);
+        CHECK(find_action(blank_game, open, "Check") >= 0);
+        CHECK(find_action(blank_game, open, "Bet 100") < 0);
+        CHECK(blank_game.action_count(blank_game.infoset(open)) == 1);
+        expect_street_batch(blank, poker::solver::Algorithm::VanillaCfr, 1, false);
+    }
+
+    const std::vector<int> flop_board = {card("Ah"), card("Kd"), card("7c")};
+    const auto bet_label = [](int tenths, bool all_in)
+    {
+        std::string text = "Bet " + poker::format_chips(tenths);
+        if (all_in)
+        {
+            text += " all-in";
+        }
+        return text;
+    };
+
+    {
+        StreetConfig two_e;
+        two_e.board = flop_board;
+        two_e.pot = 1000;
+        two_e.stack = 3000;
+        two_e.oop = Range::parse("QcQd");
+        two_e.ip = Range::parse("JcJd");
+        two_e.oop_flop_bets = {geometric_spec(2)};
+        two_e.allow_all_in = false;
+        two_e.max_raises = 1;
+        const double two = geometric_pot_fraction(1000, 3000, 2);
+        const double three = geometric_pot_fraction(1000, 3000, 3);
+        const int sized = poker::round_chips(two, 1000);
+        CHECK(std::abs(two - 2.0 * three) > 1e-6);
+        const StreetGame game(two_e);
+        const StreetGame::State open = game.child_chance(game.root(), 0);
+        CHECK(find_action(game, open, bet_label(sized, false).c_str()) >= 0);
+        const int doubled = poker::round_chips(2.0 * three, 1000);
+        if (doubled != sized)
+        {
+            CHECK(find_action(game, open, bet_label(doubled, false).c_str()) < 0);
+        }
+
+        StreetConfig three_e = two_e;
+        three_e.oop_flop_bets = {geometric_spec(3)};
+        const StreetGame three_game(three_e);
+        const StreetGame::State three_open = three_game.child_chance(three_game.root(), 0);
+        const int three_sized = poker::round_chips(three, 1000);
+        CHECK(find_action(three_game, three_open, bet_label(three_sized, false).c_str()) >= 0);
+
+        StreetConfig bare = two_e;
+        bare.oop_flop_bets = {geometric_spec(0)};
+        const StreetGame bare_game(bare);
+        const StreetGame::State bare_open = bare_game.child_chance(bare_game.root(), 0);
+        CHECK(find_action(bare_game, bare_open, bet_label(three_sized, false).c_str()) >= 0);
+    }
+
+    {
+        const std::vector<int> river_board = {
+            card("Ah"), card("Kd"), card("7c"), card("4s"), card("2h")};
+        StreetConfig river_e;
+        river_e.board = river_board;
+        river_e.pot = 1000;
+        river_e.stack = 3000;
+        river_e.oop = Range::parse("QcQd");
+        river_e.ip = Range::parse("JcJd");
+        river_e.oop_bet_sizes = {geometric_spec(0)};
+        river_e.allow_all_in = false;
+        river_e.max_raises = 0;
+        const StreetGame game(river_e);
+        const StreetGame::State open = game.child_chance(game.root(), 0);
+        CHECK(find_action(game, open, "Bet 300 all-in") >= 0);
+        CHECK(game.action_count(game.infoset(open)) == 2);
+    }
+
+    {
+        StreetConfig flop_then;
+        flop_then.board = flop_board;
+        flop_then.pot = 1000;
+        flop_then.stack = 3000;
+        flop_then.oop = Range::parse("QcQd");
+        flop_then.ip = Range::parse("JcJd");
+        flop_then.oop_flop_bets = {0.5};
+        flop_then.oop_turn_bets = {geometric_spec(0)};
+        flop_then.allow_all_in = false;
+        flop_then.max_raises = 1;
+        const StreetGame game(flop_then);
+        StreetGame::State node = game.child_chance(game.root(), 0);
+        node = game.child_action(node, find_action(game, node, "Bet 50"));
+        node = game.child_action(node, find_action(game, node, "Call"));
+        CHECK(game.is_chance(node));
+        const StreetGame::State turn = game.child_chance(node, 0);
+        const double fraction = geometric_pot_fraction(2000, 2500, 2);
+        const int sized = poker::round_chips(fraction, 2000);
+        const double root_three = geometric_pot_fraction(1000, 3000, 3);
+        CHECK(std::abs(fraction - root_three) > 1e-6);
+        CHECK(find_action(game, turn, bet_label(sized, sized == 2500).c_str()) >= 0);
+    }
+
+    {
+        StreetConfig one_raise;
+        one_raise.board = turn_board;
+        one_raise.pot = 1000;
+        one_raise.stack = 8000;
+        one_raise.oop = Range::parse("QcQd");
+        one_raise.ip = Range::parse("JcJd");
+        one_raise.oop_bet_sizes = {0.5};
+        one_raise.ip_raise_sizes = {geometric_spec(0)};
+        one_raise.allow_all_in = false;
+        one_raise.max_raises = 1;
+        const StreetGame game(one_raise);
+        StreetGame::State faced = game.child_chance(game.root(), 0);
+        faced = game.child_action(faced, find_action(game, faced, "Bet 50"));
+        const double fraction = geometric_pot_fraction(2000, 7500, 2);
+        const int sized = poker::round_chips(fraction, 2000);
+        const int add = 500 + sized;
+        std::string label = "Raise to " + poker::format_chips(add);
+        if (add == 8000)
+        {
+            label += " all-in";
+        }
+        CHECK(find_action(game, faced, label.c_str()) >= 0);
+        faced = game.child_action(faced, find_action(game, faced, label.c_str()));
+        CHECK(game.action_count(game.infoset(faced)) == 2);
+    }
+
+    {
+        StreetConfig by_street;
+        by_street.board = flop_board;
+        by_street.pot = 1000;
+        by_street.stack = 8000;
+        by_street.oop = Range::parse("QcQd");
+        by_street.ip = Range::parse("JcJd");
+        by_street.oop_flop_bets = {0.5};
+        by_street.ip_flop_bets = {0.5};
+        by_street.ip_flop_raises = {0.5};
+        by_street.oop_turn_bets = {0.5};
+        by_street.ip_turn_bets = {0.5};
+        by_street.ip_turn_raises = {explicit_empty_spec()};
+        by_street.allow_all_in = false;
+        by_street.max_raises = 1;
+        const StreetGame game(by_street);
+        StreetGame::State faced = game.child_chance(game.root(), 0);
+        faced = game.child_action(faced, find_action(game, faced, "Bet 50"));
+        CHECK(find_action(game, faced, "Raise to 150") >= 0);
+        StreetGame::State checked = game.child_chance(game.root(), 0);
+        checked = game.child_action(checked, find_action(game, checked, "Check"));
+        checked = game.child_action(checked, find_action(game, checked, "Check"));
+        CHECK(game.is_chance(checked));
+        const StreetGame::State turn = game.child_chance(checked, 0);
+        StreetGame::State turn_faced = game.child_action(turn, find_action(game, turn, "Bet 50"));
+        CHECK(find_action(game, turn_faced, "Fold") >= 0);
+        CHECK(find_action(game, turn_faced, "Call") >= 0);
+        CHECK(game.action_count(game.infoset(turn_faced)) == 2);
+    }
+
+    {
+        StreetConfig donk;
+        donk.board = flop_board;
+        donk.pot = 1000;
+        donk.stack = 5000;
+        donk.oop = Range::parse("QcQd");
+        donk.ip = Range::parse("JcJd");
+        donk.oop_bet_sizes = {1.0};
+        donk.ip_bet_sizes = {0.5};
+        donk.oop_turn_donk = {explicit_empty_spec()};
+        donk.allow_all_in = false;
+        donk.max_raises = 1;
+        const StreetGame game(donk);
+        StreetGame::State led = game.child_chance(game.root(), 0);
+        led = game.child_action(led, find_action(game, led, "Check"));
+        led = game.child_action(led, find_action(game, led, "Bet 50"));
+        led = game.child_action(led, find_action(game, led, "Call"));
+        CHECK(game.is_chance(led));
+        const StreetGame::State donk_turn = game.child_chance(led, 0);
+        CHECK(find_action(game, donk_turn, "Check") >= 0);
+        CHECK(game.action_count(game.infoset(donk_turn)) == 1);
+        StreetGame::State checked = game.child_chance(game.root(), 0);
+        checked = game.child_action(checked, find_action(game, checked, "Check"));
+        checked = game.child_action(checked, find_action(game, checked, "Check"));
+        const StreetGame::State probed = game.child_chance(checked, 0);
+        CHECK(find_action(game, probed, "Bet 100") >= 0);
+    }
+
+    {
+        StreetConfig shove;
+        shove.board = turn_board;
+        shove.pot = 1000;
+        shove.stack = 800;
+        shove.oop = Range::parse("QcQd");
+        shove.ip = Range::parse("JcJd");
+        shove.oop_bet_sizes = {kAllInSpec};
+        shove.ip_raise_sizes = {kAllInSpec};
+        shove.allow_all_in = false;
+        shove.max_raises = 1;
+        const StreetGame game(shove);
+        const StreetGame::State open = game.child_chance(game.root(), 0);
+        CHECK(find_action(game, open, "Bet 80 all-in") >= 0);
+    }
+
+    {
+        const char* text =
+            "street-config 1\n"
+            "board Ah Kd 7c\n"
+            "pot 100\n"
+            "stack 300\n"
+            "oop-flop-bets -\n"
+            "oop-turn-bets 2e\n"
+            "oop-raises 2.5x\n"
+            "oop-donk -\n"
+            "merge-threshold 0.1\n";
+        const StreetConfig parsed = poker::streets::parse_street_config(text);
+        CHECK(poker::streets::is_explicit_empty_list(parsed.oop_flop_bets));
+        CHECK(parsed.oop_turn_bets.size() == 1);
+        CHECK(parsed.oop_turn_bets[0] == geometric_spec(2));
+        CHECK(parsed.oop_raise_sizes.size() == 1);
+        CHECK(poker::streets::is_multiple_spec(parsed.oop_raise_sizes[0]));
+        CHECK(poker::streets::multiple_of(parsed.oop_raise_sizes[0]) == 2.5);
+        CHECK(poker::streets::is_explicit_empty_list(parsed.oop_donk_sizes));
+        CHECK(parsed.merge_threshold == 0.1);
+        const std::string again = poker::streets::format_street_config(parsed);
+        CHECK(again.find("oop-flop-bets -\n") != std::string::npos);
+        CHECK(again.find("oop-turn-bets 2e\n") != std::string::npos);
+        CHECK(again.find("oop-raises 2.5x\n") != std::string::npos);
+        CHECK(again.find("oop-donk -\n") != std::string::npos);
+        CHECK(again.find("merge-threshold 0.1\n") != std::string::npos);
+        CHECK(poker::streets::format_street_config(poker::streets::parse_street_config(again)) == again);
+    }
+}
+
 bool same_numbers(const std::vector<double>& left, const std::vector<double>& right)
 {
     if (left.size() != right.size())
@@ -1464,6 +1716,10 @@ bool same_config(const StreetConfig& left, const StreetConfig& right)
         && same_numbers(left.ip_turn_raises, right.ip_turn_raises)
         && same_numbers(left.ip_river_raises, right.ip_river_raises)
         && same_numbers(left.oop_donk_sizes, right.oop_donk_sizes)
+        && same_numbers(left.oop_flop_donk, right.oop_flop_donk)
+        && same_numbers(left.oop_turn_donk, right.oop_turn_donk)
+        && same_numbers(left.oop_river_donk, right.oop_river_donk)
+        && left.merge_threshold == right.merge_threshold
         && same_numbers(left.oop_raise_multiples, right.oop_raise_multiples)
         && same_numbers(left.ip_raise_multiples, right.ip_raise_multiples)
         && left.geometric == right.geometric

@@ -195,8 +195,18 @@ Job job_from_street(const poker::streets::StreetConfig& config)
     job.ip_flop_bets = config.ip_flop_bets;
     job.ip_turn_bets = config.ip_turn_bets;
     job.ip_river_bets = config.ip_river_bets;
+    job.oop_flop_raises = config.oop_flop_raises;
+    job.oop_turn_raises = config.oop_turn_raises;
+    job.oop_river_raises = config.oop_river_raises;
+    job.ip_flop_raises = config.ip_flop_raises;
+    job.ip_turn_raises = config.ip_turn_raises;
+    job.ip_river_raises = config.ip_river_raises;
     job.oop_donk = config.oop_donk_sizes;
+    job.oop_flop_donk = config.oop_flop_donk;
+    job.oop_turn_donk = config.oop_turn_donk;
+    job.oop_river_donk = config.oop_river_donk;
     job.oop_raise_multiples = config.oop_raise_multiples;
+    job.merge_threshold = config.merge_threshold;
     job.ip_raise_multiples = config.ip_raise_multiples;
     job.pot_cap = config.pot_cap;
     job.allow_three_bet = config.allow_three_bet;
@@ -431,6 +441,10 @@ std::string solution_config_json(const HeldSolution& held)
     payload += job.allow_all_in ? "true" : "false";
     append_size_array_json(payload, "oop_bets", job.oop_bets);
     append_size_array_json(payload, "ip_bets", job.ip_bets);
+    append_size_array_json(payload, "oop_raises", job.oop_raises);
+    append_size_array_json(payload, "ip_raises", job.ip_raises);
+    append_size_array_json(payload, "oop_raise_multiples", job.oop_raise_multiples);
+    append_size_array_json(payload, "ip_raise_multiples", job.ip_raise_multiples);
     if (street)
     {
         payload += ",\"allow_three_bet\":";
@@ -451,7 +465,18 @@ std::string solution_config_json(const HeldSolution& held)
         append_size_array_json(payload, "ip_turn_bets", job.ip_turn_bets);
         append_size_array_json(payload, "oop_river_bets", job.oop_river_bets);
         append_size_array_json(payload, "ip_river_bets", job.ip_river_bets);
+        append_size_array_json(payload, "oop_flop_raises", job.oop_flop_raises);
+        append_size_array_json(payload, "ip_flop_raises", job.ip_flop_raises);
+        append_size_array_json(payload, "oop_turn_raises", job.oop_turn_raises);
+        append_size_array_json(payload, "ip_turn_raises", job.ip_turn_raises);
+        append_size_array_json(payload, "oop_river_raises", job.oop_river_raises);
+        append_size_array_json(payload, "ip_river_raises", job.ip_river_raises);
         append_size_array_json(payload, "oop_donk", job.oop_donk);
+        append_size_array_json(payload, "oop_flop_donk", job.oop_flop_donk);
+        append_size_array_json(payload, "oop_turn_donk", job.oop_turn_donk);
+        append_size_array_json(payload, "oop_river_donk", job.oop_river_donk);
+        payload += ",\"merge_threshold\":";
+        payload += format_number(job.merge_threshold);
         payload += ',';
         append_tree_edits_json(payload, job.tree_edits);
     }
@@ -1696,13 +1721,28 @@ void handle_client(socket_t client)
                 };
                 write_sizes("oop_bets", job.oop_bets);
                 write_sizes("ip_bets", job.ip_bets);
+                write_sizes("oop_raises", job.oop_raises);
+                write_sizes("ip_raises", job.ip_raises);
+                write_sizes("oop_raise_multiples", job.oop_raise_multiples);
+                write_sizes("ip_raise_multiples", job.ip_raise_multiples);
                 write_sizes("oop_flop_bets", job.oop_flop_bets);
                 write_sizes("ip_flop_bets", job.ip_flop_bets);
                 write_sizes("oop_turn_bets", job.oop_turn_bets);
                 write_sizes("ip_turn_bets", job.ip_turn_bets);
                 write_sizes("oop_river_bets", job.oop_river_bets);
                 write_sizes("ip_river_bets", job.ip_river_bets);
+                write_sizes("oop_flop_raises", job.oop_flop_raises);
+                write_sizes("ip_flop_raises", job.ip_flop_raises);
+                write_sizes("oop_turn_raises", job.oop_turn_raises);
+                write_sizes("ip_turn_raises", job.ip_turn_raises);
+                write_sizes("oop_river_raises", job.oop_river_raises);
+                write_sizes("ip_river_raises", job.ip_river_raises);
                 write_sizes("oop_donk", job.oop_donk);
+                write_sizes("oop_flop_donk", job.oop_flop_donk);
+                write_sizes("oop_turn_donk", job.oop_turn_donk);
+                write_sizes("oop_river_donk", job.oop_river_donk);
+                payload += ",\"merge_threshold\":";
+                payload += format_number(job.merge_threshold);
                 payload += ',';
                 append_tree_edits_json(payload, job.tree_edits);
                 payload += '}';

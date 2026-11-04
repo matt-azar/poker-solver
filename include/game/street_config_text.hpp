@@ -44,15 +44,6 @@ inline double parse_finite(std::string_view text)
     return value;
 }
 
-inline std::string format_spec(double spec)
-{
-    if (spec < 0.0)
-    {
-        return format_number(-spec) + "c";
-    }
-    return format_number(spec);
-}
-
 inline void append_line(std::string& out, std::string_view key, std::string_view value)
 {
     out.append(key);
@@ -140,6 +131,10 @@ inline std::string format_street_config(const StreetConfig& config)
     append_flag(out, "geometric", config.geometric);
     append_line(out, "all-in-threshold", format_number(config.all_in_threshold));
     append_line(out, "pot-cap", format_number(config.pot_cap));
+    if (config.merge_threshold != 0.0)
+    {
+        append_line(out, "merge-threshold", format_number(config.merge_threshold));
+    }
     append_line(out, "rake-rate", format_number(config.rake.rate));
     append_line(out, "rake-cap", format_number(config.rake.cap));
     append_numbers(out, "icm-stacks", config.icm.stacks);
@@ -191,6 +186,9 @@ inline std::string format_street_config(const StreetConfig& config)
     append_specs(out, "ip-turn-raises", config.ip_turn_raises);
     append_specs(out, "ip-river-raises", config.ip_river_raises);
     append_specs(out, "oop-donk", config.oop_donk_sizes);
+    append_specs(out, "oop-flop-donk", config.oop_flop_donk);
+    append_specs(out, "oop-turn-donk", config.oop_turn_donk);
+    append_specs(out, "oop-river-donk", config.oop_river_donk);
     append_numbers(out, "oop-raise-multiples", config.oop_raise_multiples);
     append_numbers(out, "ip-raise-multiples", config.ip_raise_multiples);
     if (!config.tree_edits.empty())
@@ -243,6 +241,24 @@ inline std::vector<std::string_view> split_tokens(std::string_view value)
         }
     }
     return tokens;
+}
+
+// Pio tokens (`e`, `2e`, `a`, `75%`, `20c`, `2.5x` on raise lists, `-` for an
+// explicit empty list). Bare numbers stay pot fractions, matching older configs.
+inline std::vector<double> parse_pio_specs(std::string_view value, bool allow_multiple)
+{
+    std::vector<double> specs;
+    for (const std::string_view token : split_tokens(value))
+    {
+        double spec = 0.0;
+        std::string error;
+        if (!parse_size_token(token, allow_multiple, spec, error))
+        {
+            throw std::invalid_argument(error);
+        }
+        specs.push_back(spec);
+    }
+    return specs;
 }
 
 inline std::vector<double> parse_specs(std::string_view value)
@@ -332,6 +348,7 @@ struct SizeField
 {
     const char* key;
     std::vector<double> StreetConfig::* member;
+    bool allow_multiple;
 };
 
 inline StreetConfig parse_street_config(std::string_view text)
@@ -363,23 +380,26 @@ inline StreetConfig parse_street_config(std::string_view text)
     }
 
     static constexpr SizeField kSizeFields[] = {
-        {"oop-bets", &StreetConfig::oop_bet_sizes},
-        {"ip-bets", &StreetConfig::ip_bet_sizes},
-        {"oop-raises", &StreetConfig::oop_raise_sizes},
-        {"ip-raises", &StreetConfig::ip_raise_sizes},
-        {"oop-flop-bets", &StreetConfig::oop_flop_bets},
-        {"oop-turn-bets", &StreetConfig::oop_turn_bets},
-        {"oop-river-bets", &StreetConfig::oop_river_bets},
-        {"ip-flop-bets", &StreetConfig::ip_flop_bets},
-        {"ip-turn-bets", &StreetConfig::ip_turn_bets},
-        {"ip-river-bets", &StreetConfig::ip_river_bets},
-        {"oop-flop-raises", &StreetConfig::oop_flop_raises},
-        {"oop-turn-raises", &StreetConfig::oop_turn_raises},
-        {"oop-river-raises", &StreetConfig::oop_river_raises},
-        {"ip-flop-raises", &StreetConfig::ip_flop_raises},
-        {"ip-turn-raises", &StreetConfig::ip_turn_raises},
-        {"ip-river-raises", &StreetConfig::ip_river_raises},
-        {"oop-donk", &StreetConfig::oop_donk_sizes},
+        {"oop-bets", &StreetConfig::oop_bet_sizes, false},
+        {"ip-bets", &StreetConfig::ip_bet_sizes, false},
+        {"oop-raises", &StreetConfig::oop_raise_sizes, true},
+        {"ip-raises", &StreetConfig::ip_raise_sizes, true},
+        {"oop-flop-bets", &StreetConfig::oop_flop_bets, false},
+        {"oop-turn-bets", &StreetConfig::oop_turn_bets, false},
+        {"oop-river-bets", &StreetConfig::oop_river_bets, false},
+        {"ip-flop-bets", &StreetConfig::ip_flop_bets, false},
+        {"ip-turn-bets", &StreetConfig::ip_turn_bets, false},
+        {"ip-river-bets", &StreetConfig::ip_river_bets, false},
+        {"oop-flop-raises", &StreetConfig::oop_flop_raises, true},
+        {"oop-turn-raises", &StreetConfig::oop_turn_raises, true},
+        {"oop-river-raises", &StreetConfig::oop_river_raises, true},
+        {"ip-flop-raises", &StreetConfig::ip_flop_raises, true},
+        {"ip-turn-raises", &StreetConfig::ip_turn_raises, true},
+        {"ip-river-raises", &StreetConfig::ip_river_raises, true},
+        {"oop-donk", &StreetConfig::oop_donk_sizes, false},
+        {"oop-flop-donk", &StreetConfig::oop_flop_donk, false},
+        {"oop-turn-donk", &StreetConfig::oop_turn_donk, false},
+        {"oop-river-donk", &StreetConfig::oop_river_donk, false},
     };
 
     StreetConfig config;
@@ -526,6 +546,10 @@ inline StreetConfig parse_street_config(std::string_view text)
         {
             config.pot_cap = parse_finite(value);
         }
+        else if (key == "merge-threshold")
+        {
+            config.merge_threshold = parse_finite(value);
+        }
         else if (key == "rake-rate")
         {
             config.rake.rate = parse_finite(value);
@@ -565,7 +589,7 @@ inline StreetConfig parse_street_config(std::string_view text)
             {
                 if (key == field.key)
                 {
-                    config.*(field.member) = parse_specs(value);
+                    config.*(field.member) = parse_pio_specs(value, field.allow_multiple);
                     matched = true;
                     break;
                 }
