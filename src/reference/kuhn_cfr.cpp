@@ -1,6 +1,6 @@
-#include "solver/cfr.hpp"
+#include "solver/kuhn_cfr.hpp"
 
-#include "solver/best_response.hpp"
+#include "solver/kuhn_best_response.hpp"
 
 namespace poker::solver
 {

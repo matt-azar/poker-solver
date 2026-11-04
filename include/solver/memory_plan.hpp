@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game/street_game.hpp"
+#include "game/street_config.hpp"
 #include "solver/street_batch.hpp"
 
 #include <cstdint>

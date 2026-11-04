@@ -1,8 +1,8 @@
 #include "game/kuhn.hpp"
 #include "game/kuhn_game.hpp"
 #include "harness.hpp"
-#include "solver/best_response.hpp"
-#include "solver/cfr.hpp"
+#include "solver/kuhn_best_response.hpp"
+#include "solver/kuhn_cfr.hpp"
 #include "solver/regret_matching.hpp"
 #include "solver/trainer.hpp"
 

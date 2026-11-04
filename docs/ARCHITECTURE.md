@@ -19,31 +19,60 @@ See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [EXPLORER.md](EXPLORER.md), 
 | Target | Role | Depends on |
 | --- | --- | --- |
 | `poker_primitives` | Cards, hand eval, categories, ranges | — |
-| `poker_solver` | CFR trainer consumers, StreetBatch/RiverBatch, Kuhn | primitives |
-| `poker_study` | Checkpoint + value worker session services | solver |
+| `poker_solver` | Production postflop engine (`StreetBatchSolver`) + regret matching | primitives |
+| `poker_solver_reference` | Kuhn object code + Kuhn CFR/BR wrappers (optional) | solver |
+| `poker_solver_legacy_river` | `RiverBatchSolver` for PSOL kind=2 / oracle fixtures (optional) | solver |
+| `poker_study` | Checkpoint + value worker session services | solver (+ legacy river when enabled) |
 | `poker_equity` | Check-down equity | primitives only |
 | `poker_solver_core` | INTERFACE alias → `poker_study` (legacy name) | study |
 
-Shared solve declarations (`Algorithm`, `SolveConfig`, `SolveStats`) live in `include/solver/solve_types.hpp` so batch headers need not pull the full `CfrTrainer` template.
+CMake options (both default ON for the normal development build):
+
+- `POKER_SOLVER_ENABLE_REFERENCE` — Kuhn/Leduc CLIs, `--reference` on street/river CLIs, Kuhn unit tests. When OFF, `--reference` is rejected explicitly.
+- `POKER_SOLVER_ENABLE_LEGACY_RIVER` — `RiverBatchSolver` library, explorer (PSOL kind=2), river oracle tests. Production `poker_solver` never links this target.
+
+Shared solve declarations (`Algorithm`, `SolveConfig`, `SolveStats`) live in `include/solver/solve_types.hpp` so batch headers need not pull the full `CfrTrainer` template. `StreetConfig` / sizing rules live in `include/game/street_config.hpp`; `RiverConfig` in `include/game/river_config.hpp`. Reference enumerators (`StreetGame`, `RiverGame`) and `CfrTrainer` remain header-only under `include/game/` and `include/solver/trainer.hpp`.
 
 Canonical range catalogue assets live under `configs/range-profiles/`; the Study client imports them directly (no `desktop/` copies).
+
+### Production postflop layout
+
+`StreetBatchSolver` is a public facade (`include/solver/street_batch.hpp`, `src/solver/street_batch.cpp`). The private engine is split under `src/solver/postflop/`:
+
+| Path | Responsibility |
+| --- | --- |
+| `engine.hpp` | Private `Engine` declaration (nested types, members, method decls) |
+| `tree.cpp` | Public betting tree, deals, slot planning |
+| `tables.cpp` | Compact indexing, table allocation, training-state I/O |
+| `showdown.cpp` | Rank caches, blockers, terminal values |
+| `traversal.cpp` | Shared fixed-strategy walk (`frozen_walk`, sequential deal CFR) |
+| `algorithms/*.hpp` | Per-algorithm schedules (CFR+, vanilla, DCFR, PCFR+) |
+| `schedules.cpp` | Dispatch into those schedules |
+| `evaluation.cpp` | Profile utility, best response, NashConv helpers |
+| `inspection.cpp` | Node inspect, action values, reaches, runouts |
+| `execution.cpp` | Workers, slot passes (freeze / floor / discount), synchronization |
+
+Read `src/solver/postflop/algorithms/cfr_plus.hpp` for one complete CFR+ iteration without opening DCFR or PCFR+. DCFR math stays in `include/solver/dcfr.hpp`. Predictive notes: `include/solver/pcfr.hpp`.
 
 ### Runtime modules
 
 | Module | Role |
 | --- | --- |
 | `poker::holdem` | Card ids, seven-card hand values, range weights, joint hand distribution |
-| `poker::streets::StreetGame` | Reference flop/turn/river tree: one betting structure per runout, sizes per street |
+| `poker::streets::StreetConfig` | Shared postflop config + sizing/legality rules (production) |
+| `poker::streets::StreetGame` | Reference flop/turn/river enumerator |
 | `poker::solver::StreetBatchSolver` | Same streets on one public betting tree; production default |
 | `street_solver` | CLI over `StreetBatchSolver`; `--reference` for `StreetGame`; `--config` for `street-config 1` |
+| `poker::river::RiverConfig` | Shared river config (legacy batch + conversion) |
 | `poker::river::RiverGame` | Five-card oracle enumerator |
-| `poker::solver::RiverBatchSolver` | Public-tree river helper for oracle/legacy fixtures |
+| `poker::solver::RiverBatchSolver` | Legacy/oracle river engine (`poker_solver_legacy_river`) |
 | `river_solver` | Thin five-card CLI: maps river config to `StreetConfig`, solves on the street path |
 | `poker::solver::TreeEditSet` | Force/remove/add-size intents on matching public paths |
-| `poker::solver::CfrTrainer<Game>` | Vanilla CFR, CFR+, linear CFR, DCFR for any extensive-game type |
+| `poker::solver::CfrTrainer<Game>` | Vanilla CFR, CFR+, linear CFR, DCFR, PCFR+ for any extensive-game type |
 | `regret_matching` | Current strategy from cumulative regret; reach-weighted accumulation |
 | `compute_best_response` | Exact best response, deepest information set first |
-| `explorer` | Local Study HTTP server; serves `desktop/dist` or `legacy/ui/`; all boards use `StreetBatchSolver` |
+| `KuhnCfrTrainer` / Kuhn BR helpers | Kuhn-only wrappers (`kuhn_cfr.hpp`, `kuhn_best_response.hpp`) |
+| `explorer` | Local Study HTTP server; serves `desktop/dist` or `legacy/ui/`; fresh solves use `StreetBatchSolver` |
 | `poker::kuhn`, `poker::leduc` | Small reference games for shared CFR tests |
 
 ## Extensive-game interface

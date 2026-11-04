@@ -52,18 +52,18 @@ struct Legal
     int add[8] = {};
 };
 
-int betting_streets(const streets::StreetConfig& config)
+inline int betting_streets(const streets::StreetConfig& config)
 {
     // Flop: three streets. Turn: two. River: one.
     return 6 - static_cast<int>(config.board.size());
 }
 
-int round_chips(double fraction, int basis)
+inline int round_chips(double fraction, int basis)
 {
     return poker::round_chips(fraction, basis);
 }
 
-std::pmr::string chip_label(
+inline std::pmr::string chip_label(
     int code,
     int add,
     int street_total,
@@ -107,7 +107,7 @@ std::pmr::string chip_label(
 }
 
 
-std::string compact_action_token(int code, int add, int street_total, bool all_in, bool facing)
+inline std::string compact_action_token(int code, int add, int street_total, bool all_in, bool facing)
 {
     if (code == 0)
     {
@@ -126,7 +126,7 @@ std::string compact_action_token(int code, int add, int street_total, bool all_i
     return token;
 }
 
-bool token_matches_action(
+inline bool token_matches_action(
     std::string_view token,
     int code,
     int add,
@@ -142,7 +142,7 @@ bool token_matches_action(
     return token == compact_action_token(code, add, street_total, all_in, facing);
 }
 
-std::string compact_from_display_label(std::string_view label)
+inline std::string compact_from_display_label(std::string_view label)
 {
     if (label == "Fold")
     {
@@ -188,7 +188,7 @@ std::string compact_from_display_label(std::string_view label)
     return {};
 }
 
-bool path_token_matches_display(std::string_view token, std::string_view display)
+inline bool path_token_matches_display(std::string_view token, std::string_view display)
 {
     if (token == display)
     {
@@ -198,7 +198,7 @@ bool path_token_matches_display(std::string_view token, std::string_view display
     return !compact.empty() && token == compact;
 }
 
-bool path_matches_public_line(const poker::solver::LinePath& path, std::string_view public_path)
+inline bool path_matches_public_line(const poker::solver::LinePath& path, std::string_view public_path)
 {
     std::vector<std::string_view> steps;
     if (!public_path.empty())
@@ -230,7 +230,7 @@ bool path_matches_public_line(const poker::solver::LinePath& path, std::string_v
     return true;
 }
 
-bool resolve_add_size_amount(
+inline bool resolve_add_size_amount(
     const streets::StreetConfig& config, const BetState& state, const poker::solver::LineEdit& edit, int& out_add)
 {
     const int player = state.acting;
@@ -304,7 +304,7 @@ bool resolve_add_size_amount(
     return true;
 }
 
-void insert_aggressive_amount(Legal& legal, int add)
+inline void insert_aggressive_amount(Legal& legal, int add)
 {
     for (int i = 0; i < legal.count; ++i)
     {
@@ -330,7 +330,7 @@ void insert_aggressive_amount(Legal& legal, int add)
     ++legal.count;
 }
 
-void apply_tree_edits(
+inline void apply_tree_edits(
     Legal& legal,
     const streets::StreetConfig& config,
     const BetState& state,
@@ -403,7 +403,7 @@ void apply_tree_edits(
     }
 }
 
-Legal legal_actions(const streets::StreetConfig& config, const BetState& state)
+inline Legal legal_actions(const streets::StreetConfig& config, const BetState& state)
 {
     const int player = state.acting;
     const int to_call = state.committed - state.contrib[player];
@@ -450,7 +450,7 @@ Legal legal_actions(const streets::StreetConfig& config, const BetState& state)
     return legal;
 }
 
-void finish_street(const streets::StreetConfig& config, BetState& state)
+inline void finish_street(const streets::StreetConfig& config, BetState& state)
 {
     state.prev_aggressor = state.street_aggressor;
     state.street_aggressor = -1;
@@ -467,7 +467,7 @@ void finish_street(const streets::StreetConfig& config, BetState& state)
     state.terminal = true;
 }
 
-BetState apply_action(const streets::StreetConfig& config, BetState state, const Legal& legal, int action)
+inline BetState apply_action(const streets::StreetConfig& config, BetState state, const Legal& legal, int action)
 {
     const int player = state.acting;
     const int code = legal.code[action];
@@ -508,7 +508,7 @@ BetState apply_action(const streets::StreetConfig& config, BetState state, const
     return state;
 }
 
-std::uint64_t checked_add(std::uint64_t left, std::uint64_t right, const char* what)
+inline std::uint64_t checked_add(std::uint64_t left, std::uint64_t right, const char* what)
 {
     if (left > std::numeric_limits<std::uint64_t>::max() - right)
     {
@@ -517,7 +517,7 @@ std::uint64_t checked_add(std::uint64_t left, std::uint64_t right, const char* w
     return left + right;
 }
 
-std::uint64_t checked_mul(std::uint64_t left, std::uint64_t right, const char* what)
+inline std::uint64_t checked_mul(std::uint64_t left, std::uint64_t right, const char* what)
 {
     if (left != 0 && right > std::numeric_limits<std::uint64_t>::max() / left)
     {
@@ -526,7 +526,7 @@ std::uint64_t checked_mul(std::uint64_t left, std::uint64_t right, const char* w
     return left * right;
 }
 
-std::uint64_t budget_bytes(int mib)
+inline std::uint64_t budget_bytes(int mib)
 {
     if (mib <= 0)
     {
@@ -541,7 +541,7 @@ std::uint64_t budget_bytes(int mib)
     return value * 1048576ull;
 }
 
-std::uint64_t process_peak_working_set_bytes()
+inline std::uint64_t process_peak_working_set_bytes()
 {
 #ifdef _WIN32
     PROCESS_MEMORY_COUNTERS counters = {};
@@ -553,7 +553,7 @@ std::uint64_t process_peak_working_set_bytes()
     return 0;
 }
 
-std::uint32_t pack_rank(const holdem::HandValue& value)
+inline std::uint32_t pack_rank(const holdem::HandValue& value)
 {
     std::uint32_t rank = static_cast<std::uint32_t>(value.category);
     for (int i = 0; i < 5; ++i)

@@ -1,7 +1,8 @@
 #pragma once
 
-#include "game/river_game.hpp"
+#include "game/river_config.hpp"
 #include "game/street_config_text.hpp"
+#include "poker/card.hpp"
 
 #include <string>
 #include <string_view>

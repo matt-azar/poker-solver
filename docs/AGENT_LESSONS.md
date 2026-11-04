@@ -110,7 +110,7 @@ Engine and session types live under `include/game`, `include/solver`, `include/e
 - PCFR+: same alternating schedule and CFR+ floor / linear own-reach average; match on \(R+m\) with \(m=\) last instantaneous CF regret (cold-start zeros \(m\); PSOL v3 may restore \(m\), v1/v2 reload zeros \(m\)).
 - DCFR: same alternating frozen passes; after each pass **discount** the updating player's full regret row (signed; no CFR+ floor) with `t^α/(t^α+1)` on positives and `t^β/(t^β+1)` on non-positives; average with `t^γ` own-reach (defaults α=1.5, β=0, γ=2). PSOL v3 stores the actual params used. Reject DCFR and PCFR+ on the non-frozen walk and on legacy `RiverBatchSolver`.
 
-**Pointers:** `docs/STREETS.md` (frozen threads), `src/solver/street_batch.cpp` `train_frozen`, commits `9e0d87d`, `6a597df`, `e2ad8df`.
+**Pointers:** `docs/STREETS.md` (frozen threads), `src/solver/postflop/algorithms/cfr_plus.hpp` (CFR+ schedule), `src/solver/postflop/schedules.cpp` (`train_frozen` dispatch), commits `9e0d87d`, `6a597df`, `e2ad8df`.
 
 ### Session / publication lifecycle
 
@@ -240,7 +240,7 @@ Made-hand **categories** (when present) are category mass on a **five-card** boa
 
 Sizes are pot fractions unless negative / `Nc` chip form, or a Pio sentinel (`e`, `Ne`, `a`, `Nx`, `-`). Street-specific lists replace shared lists on that street. Empty raise list with non-empty raise-multiples does not fall back to bet sizes. Geometric = equal pot fractions over streets left at that node (river = all-in fraction). `2e` is two equal bets from the current pot and stack, not twice the root fraction — TS encoding matches `size_spec.hpp`; do not revive helpers that multiply the geometric fraction or a global geometric flag. Donk sizes only after IP aggression previous street; explicit-empty donk checks. `--no-three-bet` removes the re-raise. All-in threshold snaps large commitments to all-in when allowed. Blank list does not invent an all-in; list `a` explicitly.
 
-**Pointers:** `docs/STREETS.md`, `StreetConfig` comments in `street_game.hpp`.
+**Pointers:** `docs/STREETS.md`, `StreetConfig` comments in `street_config.hpp`.
 
 ### Five-card / river join specifics
 

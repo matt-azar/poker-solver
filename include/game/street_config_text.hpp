@@ -1,7 +1,8 @@
 #pragma once
 
 #include "game/chips.hpp"
-#include "game/street_game.hpp"
+#include "game/street_config.hpp"
+#include "poker/card.hpp"
 #include "solver/tree_edit.hpp"
 
 #include <charconv>
