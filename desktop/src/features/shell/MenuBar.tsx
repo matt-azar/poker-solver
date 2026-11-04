@@ -4,7 +4,25 @@ import {
   saveSolutionFileAs,
 } from "../../commands/solutionFiles";
 import { matchShortcut, SHORTCUTS } from "../../commands/shortcuts";
-import { solveControlFlags } from "../../domain/solveControls";
+import {
+  canExecuteCalculateEv,
+  canExecuteContinue,
+  canExecuteOpenLockEditor,
+  canExecuteOpenStrategyEditor,
+  canExecutePause,
+  canExecuteSave,
+  canExecuteSolve,
+  canExecuteStop,
+  executeCalculateEv,
+  executeContinue,
+  executeOpenLockEditor,
+  executeOpenStrategyEditor,
+  executePause,
+  executeSave,
+  executeSolve,
+  executeStop,
+  studyCommandContextFromStore,
+} from "../../commands/studyCommands";
 import type { ThemePreference } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
@@ -49,6 +67,11 @@ export function MenuBar({
   const undoRange = useStudyStore((s) => s.undoRange);
   const redoRange = useStudyStore((s) => s.redoRange);
   const phase = useStudyStore((s) => s.phase);
+  const draft = useStudyStore((s) => s.draft);
+  const solutionId = useStudyStore((s) => s.solutionId);
+  const storeWorkspace = useStudyStore((s) => s.workspace);
+  const currentNode = useStudyStore((s) => s.currentNode);
+  const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
   const setLockDrawerOpen = useStudyStore((s) => s.setLockDrawerOpen);
   const setStrategyEditDrawerOpen = useStudyStore((s) => s.setStrategyEditDrawerOpen);
   const resolveLocked = useStudyStore((s) => s.resolveLocked);
@@ -61,6 +84,12 @@ export function MenuBar({
   const settingsOpen = useSettingsStore((s) => s.settingsOpen);
   const setSettingsOpen = useSettingsStore((s) => s.setSettingsOpen);
   const updateSettings = useSettingsStore((s) => s.updateSettings);
+
+  function commandDeps() {
+    return {
+      getContext: () => studyCommandContextFromStore(useStudyStore.getState()),
+    };
+  }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -84,25 +113,15 @@ export function MenuBar({
         event.preventDefault();
         return;
       }
-      const flags = solveControlFlags(useStudyStore.getState().phase);
       if (action === "solve") {
-        if (!flags.canSolve) {
-          return;
-        }
         event.preventDefault();
-        void solve();
+        void executeSolve({ ...commandDeps(), solve });
       } else if (action === "stop") {
-        if (!flags.canStop) {
-          return;
-        }
         event.preventDefault();
-        void stop();
+        void executeStop({ ...commandDeps(), stop });
       } else if (action === "continue") {
-        if (!flags.canContinue) {
-          return;
-        }
         event.preventDefault();
-        void continueSolve();
+        void executeContinue({ ...commandDeps(), continueSolve });
       } else if (action === "help") {
         event.preventDefault();
         onHelpOpen(!helpOpen);
@@ -136,7 +155,22 @@ export function MenuBar({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const { canSolve, canContinue, canPause, canStop } = solveControlFlags(phase);
+  const commandCtx = studyCommandContextFromStore({
+    phase,
+    draft,
+    solutionId,
+    workspace: storeWorkspace,
+    currentNode,
+    solveValidationErrors,
+  });
+  const solveGate = canExecuteSolve(commandCtx);
+  const continueGate = canExecuteContinue(commandCtx);
+  const pauseGate = canExecutePause(commandCtx);
+  const stopGate = canExecuteStop(commandCtx);
+  const saveGate = canExecuteSave(commandCtx);
+  const evGate = canExecuteCalculateEv(commandCtx);
+  const lockGate = canExecuteOpenLockEditor(commandCtx);
+  const strategyGate = canExecuteOpenStrategyEditor(commandCtx);
 
   return (
     <header className="menu-bar" ref={rootRef}>
@@ -161,12 +195,19 @@ export function MenuBar({
             },
             {
               label: "Save solution…",
+              disabled: !saveGate.ok,
               onClick: () => {
-                void saveSolutionFileAs({
-                  getSolutionPath: () => useStudyStore.getState().draft.solutionPath,
-                  updateDraft,
-                  openSolution,
-                  saveSolution,
+                void executeSave({
+                  ...commandDeps(),
+                  save: async () => {
+                    await saveSolutionFileAs({
+                      getSolutionPath: () =>
+                        useStudyStore.getState().draft.solutionPath,
+                      updateDraft,
+                      openSolution,
+                      saveSolution,
+                    });
+                  },
                 });
               },
             },
@@ -184,24 +225,34 @@ export function MenuBar({
             {
               label: "Solve",
               shortcut: "S",
-              onClick: () => void solve(),
-              disabled: !canSolve,
+              onClick: () => void executeSolve({ ...commandDeps(), solve }),
+              disabled: !solveGate.ok,
             },
             {
               label: "Continue",
               shortcut: "C",
-              onClick: () => void continueSolve(),
-              disabled: !canContinue,
+              onClick: () =>
+                void executeContinue({ ...commandDeps(), continueSolve }),
+              disabled: !continueGate.ok,
             },
-            { label: "Pause", onClick: () => void pause(), disabled: !canPause },
+            {
+              label: "Pause",
+              onClick: () => void executePause({ ...commandDeps(), pause }),
+              disabled: !pauseGate.ok,
+            },
             {
               label: "Stop",
               shortcut: "X",
-              onClick: () => void stop(),
-              disabled: !canStop,
+              onClick: () => void executeStop({ ...commandDeps(), stop }),
+              disabled: !stopGate.ok,
             },
             { sep: true },
-            { label: "Calculate EV", onClick: () => void calculateEv() },
+            {
+              label: "Calculate EV",
+              onClick: () =>
+                void executeCalculateEv({ ...commandDeps(), calculateEv }),
+              disabled: !evGate.ok,
+            },
             { sep: true },
             {
               label: "Resolve locked",
@@ -222,11 +273,18 @@ export function MenuBar({
           items={[
             {
               label: "Open lock editor",
-              onClick: () => setLockDrawerOpen(true),
+              onClick: () =>
+                executeOpenLockEditor({ ...commandDeps(), setLockDrawerOpen }),
+              disabled: !lockGate.ok,
             },
             {
               label: "Open strategy editor",
-              onClick: () => setStrategyEditDrawerOpen(true),
+              onClick: () =>
+                executeOpenStrategyEditor({
+                  ...commandDeps(),
+                  setStrategyEditDrawerOpen,
+                }),
+              disabled: !strategyGate.ok,
             },
             {
               label: "Resolve locked",

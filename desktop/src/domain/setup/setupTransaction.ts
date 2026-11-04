@@ -1,6 +1,6 @@
-import { parseRangeText, snapshotWeights, type WeightSnapshot } from "../range";
+import { boardCards, parseRangeText, snapshotWeights, type WeightSnapshot } from "../range";
 import { DEFAULT_SPOT, type SpotDraft } from "../types";
-import { createBlankSetupDraft } from "./apply";
+import { createBlankSetupDraft, validateSetupForSolve } from "./apply";
 import {
   validateProposedDraftLimits,
   type LimitedSetupField,
@@ -9,9 +9,16 @@ import { bumpRevision, isStaleProposal } from "./revision";
 import type {
   SetupDraftResult,
   SetupFieldProvenance,
+  SetupMissing,
   SetupMode,
   SetupProfileRef,
 } from "./types";
+
+const BOARD_MISSING: SetupMissing = {
+  field: "board",
+  message: "Select a flop, turn, or river board before solving",
+  reason: "board_missing",
+};
 
 export interface SetupStudyMeta {
   profile: SetupProfileRef | null;
@@ -85,6 +92,47 @@ export function metaFromSetupResult(result: SetupDraftResult): SetupStudyMeta {
     conflicts: [...result.conflicts],
     missing: [...result.missing],
     canSolve: result.canSolve,
+  };
+}
+
+/**
+ * Recompute unresolved requirements and canSolve from the live draft.
+ * Provenance stays descriptive; a manually completed board clears
+ * `board_missing` / unresolved board tags. Live {@link validateSetupForSolve}
+ * remains the Solve authority — this only keeps setup metadata coherent.
+ */
+export function recomputeSetupSolveReadiness(
+  meta: SetupStudyMeta | null,
+  draft: SpotDraft,
+): SetupStudyMeta | null {
+  if (!meta) {
+    return null;
+  }
+  const boardLen = boardCards(draft.boardText).length;
+  const boardReady = boardLen >= 3 && boardLen <= 5;
+
+  const missing = meta.missing.filter((item) => item.reason !== "board_missing");
+  if (!draft.boardText.trim() || boardLen < 3) {
+    missing.unshift({ ...BOARD_MISSING });
+  }
+
+  const provenance = { ...meta.provenance };
+  if (boardReady && provenance.boardText === "unresolved") {
+    provenance.boardText = "manual";
+  }
+
+  const validation = validateSetupForSolve(draft);
+  const requiredUnresolved = Object.entries(provenance).some(
+    ([, tag]) => tag === "unresolved",
+  );
+  const canSolve =
+    validation.ok && meta.conflicts.length === 0 && !requiredUnresolved;
+
+  return {
+    ...meta,
+    provenance,
+    missing,
+    canSolve,
   };
 }
 

@@ -4,6 +4,7 @@ import { DEFAULT_SPOT } from "../types";
 import {
   applySetupTransaction,
   EMPTY_SETUP_META,
+  recomputeSetupSolveReadiness,
   undoSetupTransactionGuarded,
 } from "./setupTransaction";
 import type { SetupDraftResult } from "./types";
@@ -387,5 +388,50 @@ describe("undoSetupTransactionGuarded (A05)", () => {
     expect(undone.restoredKeys).toEqual([]);
     expect(undone.conflictKeys).toEqual(expect.arrayContaining(["pot", "stack"]));
     expect(undone.message).toMatch(/Could not revert/i);
+  });
+});
+
+describe("recomputeSetupSolveReadiness", () => {
+  it("returns null when there is no setup meta", () => {
+    expect(recomputeSetupSolveReadiness(null, { ...DEFAULT_SPOT })).toBeNull();
+  });
+
+  it("clears board_missing and canSolve after a manual board completes the draft", () => {
+    const incomplete = {
+      ...DEFAULT_SPOT,
+      boardText: "",
+      oopRange: "JJ+,AKs",
+      ipRange: "QQ+",
+      pot: 5.5,
+      stack: 97.5,
+    };
+    const meta = {
+      ...EMPTY_SETUP_META,
+      provenance: { boardText: "unresolved" as const, pot: "derived" as const },
+      missing: [
+        {
+          field: "board",
+          message: "Select a flop, turn, or river board before solving",
+          reason: "board_missing",
+        },
+      ],
+      canSolve: false,
+      summary: ["Missing board"],
+    };
+
+    const stillBlocked = recomputeSetupSolveReadiness(meta, incomplete);
+    expect(stillBlocked?.canSolve).toBe(false);
+    expect(stillBlocked?.missing.some((m) => m.reason === "board_missing")).toBe(
+      true,
+    );
+
+    const completed = {
+      ...incomplete,
+      boardText: "As 7d 2c",
+    };
+    const ready = recomputeSetupSolveReadiness(meta, completed);
+    expect(ready?.canSolve).toBe(true);
+    expect(ready?.missing.some((m) => m.reason === "board_missing")).toBe(false);
+    expect(ready?.provenance.boardText).toBe("manual");
   });
 });

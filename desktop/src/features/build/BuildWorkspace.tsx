@@ -1,5 +1,9 @@
 import { useRef, useState } from "react";
-import { validateSetupForSolve } from "../../domain/setup";
+import {
+  canExecuteSolve,
+  executeSolveAndOpenStudy,
+  studyCommandContextFromStore,
+} from "../../commands/studyCommands";
 import { useStudyStore } from "../../state/studyStore";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
@@ -143,16 +147,29 @@ export function BuildWorkspace() {
   const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
   const solve = useStudyStore((s) => s.solve);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
+  const phase = useStudyStore((s) => s.phase);
+  const solutionId = useStudyStore((s) => s.solutionId);
+  const workspace = useStudyStore((s) => s.workspace);
+  const currentNode = useStudyStore((s) => s.currentNode);
   const potProvenance = provenanceHint(setupMeta, "pot");
   const stackProvenance = provenanceHint(setupMeta, "stack");
-  const setupValidation = validateSetupForSolve(draft);
-  const profileBlocked = setupMeta != null && !setupMeta.canSolve;
-  const solveBlocked = !setupValidation.ok || profileBlocked;
-  const solveErrors = !setupValidation.ok
-    ? setupValidation.errors
-    : profileBlocked
-      ? ["Finish missing setup profile fields before solving"]
-      : solveValidationErrors;
+  // Live draft validation + engine phase — never stale setupMeta.canSolve.
+  const solveGate = canExecuteSolve(
+    studyCommandContextFromStore({
+      phase,
+      draft,
+      solutionId,
+      workspace,
+      currentNode,
+      solveValidationErrors,
+    }),
+  );
+  const solveBlocked = !solveGate.ok;
+  const solveErrors = !solveGate.ok
+    ? solveValidationErrors.length > 0
+      ? solveValidationErrors
+      : [solveGate.reason]
+    : solveValidationErrors;
 
   const [showTextOop, setShowTextOop] = useState(false);
   const [showTextIp, setShowTextIp] = useState(false);
@@ -198,11 +215,11 @@ export function BuildWorkspace() {
                 : "Solve uses the current Build draft"
             }
             onClick={() => {
-              void solve().then(() => {
-                // Stay on Build when client validation blocks; only switch after launch.
-                if (useStudyStore.getState().solveValidationErrors.length === 0) {
-                  setWorkspace("study");
-                }
+              void executeSolveAndOpenStudy({
+                getContext: () =>
+                  studyCommandContextFromStore(useStudyStore.getState()),
+                solve,
+                setWorkspace,
               });
             }}
           >
