@@ -36,11 +36,11 @@ explorer   # serves desktop/dist when present
 
 | Backend operation | Endpoint | Legacy UI (`legacy/ui/`) | New Study UI destination | Limitations | Tests |
 | --- | --- | --- | --- | --- | --- |
-| Status | `GET /api/status` | Poll 250ms | Status bar + solve strip + Graphs (`gap_series`) | Metrics null when unset; `samples` is chunk count, chart uses `gap_series` | `status.test.ts`; `test_explorer_http.cpp`, `test_session.cpp` |
+| Status | `GET /api/status` | Poll 250ms | Status bar + solve strip (`gap_series` retained in payload) | Metrics null when unset; `samples` is chunk count | `status.test.ts`; `test_explorer_http.cpp`, `test_session.cpp` |
 | Solve | `POST /api/solve` | Setup form | Build workspace + Solve | 409 if running; empty≠absent bets | HTTP + session |
 | Pause / Stop | `POST /api/pause`, `/stop` | Buttons | Solve controls | Chunk boundary before publish | session; HTTP stop |
 | Continue | `POST …/continue` | Continue | Solve controls | Same solution id | HTTP |
-| Browse node | `GET …/nodes/{id}` | Tree + matrix | Action history + matrix + navigator | One node at a time; root from `root_node_id` | browse + HTTP |
+| Browse node | `GET …/nodes/{id}` | Tree + matrix | Action history + matrix + combo inspector | One node at a time; root from `root_node_id` | browse + HTTP |
 | Action EV | `GET …/values` | Calculate EVs | Inspector / Analysis | Decision only; may 202 | value worker |
 | Runouts | `GET …/runouts` | Compare runouts | Lower dock + suit filter; row navigates | Chance / street only | engine; sparse HTTP |
 | Next-card picker | chance `cards[]` (+ legacy `children`) | Card grid | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout (400/404 → child id); flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
@@ -54,9 +54,9 @@ explorer   # serves desktop/dist when present
 | Recent | `GET /api/recent-solutions` | Dropdown | Library + File menu | Cap 10 | recent_files |
 | Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Build + Library (ranges grouped by folder) | Nested `configs/ranges` folders; template dirs still flat | templates/range lib |
 | Config parse | `POST /api/config` | Load config | Build | street/river text only; street echoes `tree_edits` | indirect |
-| Memory plan dry-run | `POST /api/plan-memory` | — | Build line editor | Labeled `estimated_peak_bytes`; not RSS | explorer HTTP |
-| Tree preview / line edits | `POST /api/tree-preview` | — | Build `TreeLineEditor` Force/Remove/AddSize | Canonical labels; edits into draft → solve | explorer HTTP + tree_edit |
-| Study assistant (AI) | Client-side unified chat: help answers + setup interpret → catalogue / generate / interpolate → `SpotDraft` | — | Floating **Help → Study assistant…** (all workspaces) + Build → Setup assistant + Range catalogue | Hideable/movable/resizable window; fake + OpenAI multi-tool (`answer_user` / `emit_study_setup_proposal`); context packs in `docs/ai-context/`; Tauri/localStorage credentials (prototype); pot type required; silent rake → cEV, silent stack → 100bb | `src/domain/{setup,profiles,assistant}` (help clients under `assistant/help/`), `features/assistant/StudyAssistantWindow`, credentials — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md), [ai-context](ai-context/README.md) |
+| Memory plan dry-run | `POST /api/plan-memory` | — | Engine API only (no mounted Study UI yet) | Labeled `estimated_peak_bytes`; not RSS | explorer HTTP |
+| Tree preview / line edits | `POST /api/tree-preview` | — | Engine API + draft `tree_edits` on solve; no mounted line editor | Canonical labels; imported edits still affect Solve | explorer HTTP + tree_edit |
+| Study assistant (AI) | Client-side unified chat: help answers + setup interpret → catalogue / generate / interpolate → `SpotDraft` | — | Floating Study assistant window (shell toggle) | OpenAI credentials required in product UI; fake provider retained for tests only; multi-tool (`answer_user` / `emit_study_setup_proposal`); context packs in `docs/ai-context/`; Tauri/localStorage credentials; pot type required; silent rake → cEV, silent stack → 100bb | `src/domain/{setup,profiles,assistant}` (help clients under `assistant/help/`), `features/assistant/StudyAssistantWindow`, credentials — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md), [ai-context](ai-context/README.md) |
 
 ## Numerical labels (do not relabel without math)
 
@@ -132,7 +132,7 @@ npm run tauri:build
 
 - Unit: `cd desktop && npm test` (browse, locks, strategy edits, status/`gap_series`, cards, analysis helpers, action colors)
 - Build: `cd desktop && npm run build`
-- Live: solve against `explorer`; Graphs read `status.gap_series`; Status bar shows EV / NashConv / mem
+- Live: solve against `explorer`; Status bar shows EV / NashConv / mem (`gap_series` in status payload, no Graphs UI)
 - Visual targets: 1440×900 dark/light, 1920×1080 dual-range, 1280×800 compact
 - Real-engine HTTP acceptance: `tests/unit/test_explorer_workflow.cpp` inside `poker_solver_tests` (Linux + Windows). Automates Build/solve/pause/inspect/save/open/continue/lock/compare against a spawned `explorer`. Does **not** cover Tauri webview lifecycle, native Open/Save dialogs, or the NSIS packaged install — re-validate those on Windows before a Study release.
 - Next study-productivity priorities (not gated by the acceptance suite): line-preserving turn/river card changes (`prepareBoardCardChange` only accepts the live deal node today; sibling-card swaps need parent/path APIs), and raising the default check-down equity work ceiling so full-range turn equity is usable without a manual `--max-pair-runouts` bump (see [EXPLORER.md](EXPLORER.md), [EQUITY.md](EQUITY.md)).

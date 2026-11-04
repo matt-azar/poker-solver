@@ -5,9 +5,7 @@ export type PlayerSeat = "oop" | "ip";
 export type MatrixMode =
   | "strategy"
   | "range"
-  | "action-range"
   | "ev"
-  | "equity"
   | "strategy-ev";
 
 export type FrequencyMode = "aggression" | `${number}`;

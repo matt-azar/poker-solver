@@ -186,25 +186,6 @@ export function SettingsDialog() {
           </select>
         </label>
 
-        <label className="settings-field">
-          Default size-merge threshold (%)
-          <input
-            type="number"
-            min={0}
-            max={50}
-            step={1}
-            value={settings.defaultMergeThresholdPct}
-            onChange={(event) =>
-              updateSettings({
-                defaultMergeThresholdPct: Number(event.target.value) || 0,
-              })
-            }
-          />
-          <span className="settings-hint">
-            Used as the Build default for merging near bet sizes (Pio-style).
-          </span>
-        </label>
-
         <h3 className="build-subhead">Solve</h3>
         <p className="settings-hint">
           Fast defaults · {hardwareHint}

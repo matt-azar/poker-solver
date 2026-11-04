@@ -3,7 +3,6 @@ import { create } from "zustand";
 const LAYOUT_KEY = "study-layout-v2";
 
 export interface StudyLayout {
-  leftNav: boolean;
   lowerDock: boolean;
   dualRange: boolean;
   inspectorWidth: number;
@@ -13,7 +12,6 @@ export interface StudyLayout {
 }
 
 export const DEFAULT_LAYOUT: StudyLayout = {
-  leftNav: true,
   // Closed until the player opens an analysis tab, so the matrix owns the page.
   lowerDock: false,
   dualRange: false,
@@ -48,11 +46,12 @@ export function clampHistoryHeight(height: number): number {
   return Math.min(historyMaxPx(), Math.max(HISTORY_MIN, Math.round(height)));
 }
 
-function sanitizeLayout(raw: Partial<StudyLayout>): StudyLayout {
-  const merged = { ...DEFAULT_LAYOUT, ...raw };
+function sanitizeLayout(raw: Partial<StudyLayout> & { leftNav?: unknown }): StudyLayout {
+  const { leftNav: _removed, ...rest } = raw;
+  const merged = { ...DEFAULT_LAYOUT, ...rest };
   return {
-    ...merged,
     lowerDock: merged.lowerDock !== false,
+    dualRange: Boolean(merged.dualRange),
     lowerDockHeight: clampDockHeight(
       Number(merged.lowerDockHeight) || DEFAULT_LAYOUT.lowerDockHeight,
     ),
@@ -63,6 +62,7 @@ function sanitizeLayout(raw: Partial<StudyLayout>): StudyLayout {
       520,
       Math.max(220, Number(merged.inspectorWidth) || DEFAULT_LAYOUT.inspectorWidth),
     ),
+    density: merged.density === "compact" ? "compact" : "comfortable",
   };
 }
 

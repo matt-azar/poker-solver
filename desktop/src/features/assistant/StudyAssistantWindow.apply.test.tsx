@@ -21,11 +21,14 @@ Object.defineProperty(window, "matchMedia", {
 const turnMock = vi.fn();
 
 vi.mock("../../platform/credentials", () => ({
-  hasAssistantOpenAiCredential: async () => false,
-  getAssistantOpenAiCredential: async () => ({ value: null, source: "none" as const }),
+  hasAssistantOpenAiCredential: async () => true,
+  getAssistantOpenAiCredential: async () => ({
+    value: "test-key",
+    source: "browser" as const,
+  }),
   setAssistantOpenAiCredential: async () => "browser" as const,
   clearAssistantOpenAiCredential: async () => undefined,
-  describeCredentialSource: () => "none",
+  describeCredentialSource: () => "browser",
   isTauriRuntime: () => false,
 }));
 
@@ -159,6 +162,9 @@ describe("StudyAssistantWindow apply UX", () => {
     turnMock.mockResolvedValue(scalarPotOutcome(0));
     const user = userEvent.setup();
     render(<StudyAssistantWindow />);
+    await waitFor(() => {
+      expect(screen.getByText(/OpenAI ready/i)).toBeTruthy();
+    });
     await sendPrompt(user, "Set pot to 55");
 
     await waitFor(() => {
@@ -173,6 +179,9 @@ describe("StudyAssistantWindow apply UX", () => {
     turnMock.mockResolvedValue(broadCreateOutcome(0));
     const user = userEvent.setup();
     render(<StudyAssistantWindow />);
+    await waitFor(() => {
+      expect(screen.getByText(/OpenAI ready/i)).toBeTruthy();
+    });
     await sendPrompt(user, "Set up CO vs BB SRP");
 
     await waitFor(() => {

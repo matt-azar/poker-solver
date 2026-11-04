@@ -5,21 +5,15 @@ import { ComboInspector } from "../matrix/ComboInspector";
 import { OpponentRangePanel } from "../matrix/OpponentRangePanel";
 import { RangeMatrix } from "../matrix/RangeMatrix";
 import { StrategyEditDrawer } from "../strategy/StrategyEditDrawer";
-import { NodeNavigator } from "../tree/NodeNavigator";
 import { useStudyStore } from "../../state/studyStore";
 import { ActionHistory } from "./ActionHistory";
 import { ContextStrip } from "./ContextStrip";
 
 export function StudyWorkspace() {
-  const leftNav = useStudyStore((s) => s.layout.leftNav);
   const dualRange = useStudyStore((s) => s.layout.dualRange);
   const inspectorWidth = useStudyStore((s) => s.layout.inspectorWidth);
-  const currentNode = useStudyStore((s) => s.currentNode);
   const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
   const strategyEditDrawerOpen = useStudyStore((s) => s.strategyEditDrawerOpen);
-  // Path chrome (ActionHistory) is the primary navigator. The left panel is
-  // optional diagnostics only — no competing child/ID list.
-  const showDiagnostics = leftNav && Boolean(currentNode);
 
   return (
     <div className="study-workspace">
@@ -27,19 +21,25 @@ export function StudyWorkspace() {
       <ActionHistory />
       <div
         className="study-main"
-        data-nav={showDiagnostics ? "true" : "false"}
+        data-nav="false"
         style={{ ["--inspector-w" as string]: `${inspectorWidth}px` }}
       >
-        {showDiagnostics ? <NodeNavigator /> : null}
         <section
           className="matrix-pane"
           data-dual={dualRange ? "true" : "false"}
           aria-label="Strategy matrix"
         >
           <ActionSummary />
-          <div className={dualRange ? "matrix-dual" : "matrix-stage"}>
-            <RangeMatrix />
-            {dualRange ? <OpponentRangePanel /> : <ComboInspector />}
+          <div className="matrix-stage">
+            {dualRange ? (
+              <div className="matrix-dual">
+                <RangeMatrix />
+                <OpponentRangePanel />
+              </div>
+            ) : (
+              <RangeMatrix />
+            )}
+            <ComboInspector />
           </div>
         </section>
       </div>

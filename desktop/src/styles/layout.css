@@ -2981,15 +2981,6 @@
     display: inline-flex;
   }
 
-  .study-main[data-nav="true"],
-  .study-main[data-nav="false"] {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .node-navigator {
-    display: none;
-  }
-
   .equity-hist-grid {
     grid-template-columns: 1fr;
   }

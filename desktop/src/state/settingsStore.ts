@@ -10,15 +10,12 @@ export interface UiSettings {
   themePreference: ThemePreference;
   evDisplayBasis: "local" | "root_centered";
   betSizeDisplay: BetSizeDisplayMode;
-  /** Default merge threshold (%) suggested on new Build spots. */
-  defaultMergeThresholdPct: number;
 }
 
 export const DEFAULT_UI_SETTINGS: UiSettings = {
   themePreference: "system",
   evDisplayBasis: "local",
   betSizeDisplay: "both",
-  defaultMergeThresholdPct: 10,
 };
 
 type PersistedUiSettings = Omit<UiSettings, "themePreference">;
@@ -26,19 +23,22 @@ type PersistedUiSettings = Omit<UiSettings, "themePreference">;
 function loadPersisted(): PersistedUiSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) {
-      const { themePreference: _t, ...rest } = DEFAULT_UI_SETTINGS;
-      return { ...rest };
-    }
-    const parsed = JSON.parse(raw) as Partial<UiSettings>;
-    const { themePreference: _ignored, ...rest } = {
-      ...DEFAULT_UI_SETTINGS,
-      ...parsed,
+    const parsed = raw
+      ? (JSON.parse(raw) as Partial<PersistedUiSettings>)
+      : {};
+    return {
+      evDisplayBasis:
+        parsed.evDisplayBasis === "root_centered" ? "root_centered" : "local",
+      betSizeDisplay:
+        parsed.betSizeDisplay === "pot" || parsed.betSizeDisplay === "chips"
+          ? parsed.betSizeDisplay
+          : DEFAULT_UI_SETTINGS.betSizeDisplay,
     };
-    return rest;
   } catch {
-    const { themePreference: _t, ...rest } = DEFAULT_UI_SETTINGS;
-    return { ...rest };
+    return {
+      evDisplayBasis: DEFAULT_UI_SETTINGS.evDisplayBasis,
+      betSizeDisplay: DEFAULT_UI_SETTINGS.betSizeDisplay,
+    };
   }
 }
 
@@ -92,7 +92,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const settings = withTheme({
       evDisplayBasis: DEFAULT_UI_SETTINGS.evDisplayBasis,
       betSizeDisplay: DEFAULT_UI_SETTINGS.betSizeDisplay,
-      defaultMergeThresholdPct: DEFAULT_UI_SETTINGS.defaultMergeThresholdPct,
     });
     savePersisted(settings);
     set({ settings });

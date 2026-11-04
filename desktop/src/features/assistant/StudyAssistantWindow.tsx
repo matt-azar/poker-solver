@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  createFakeUnifiedChatClient,
   createOpenAiUnifiedChatClient,
   type UnifiedChatClient,
   type UnifiedChatOutcome,
@@ -37,8 +36,6 @@ import {
 } from "../../state/assistantWindowStore";
 import { useStudyStore } from "../../state/studyStore";
 import { commitAssistantSetup } from "../../domain/assistant/commitAssistantSetup";
-
-type ProviderMode = "fake" | "openai";
 
 interface ChatLine {
   role: "user" | "assistant";
@@ -100,7 +97,6 @@ export function StudyAssistantWindow() {
   });
   const contextIndicator = formatContextIndicator(contextSnapshot);
 
-  const [providerMode, setProviderMode] = useState<ProviderMode>("fake");
   const [messages, setMessages] = useState<ChatLine[]>([]);
   const [draftText, setDraftText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -138,12 +134,7 @@ export function StudyAssistantWindow() {
   }
 
   useEffect(() => {
-    void (async () => {
-      await refreshCredentialState();
-      if (await hasAssistantOpenAiCredential()) {
-        setProviderMode("openai");
-      }
-    })();
+    void refreshCredentialState();
     return () => {
       abortRef.current?.abort();
     };
@@ -156,9 +147,6 @@ export function StudyAssistantWindow() {
   }, [messages, layout.visible, busy]);
 
   function makeClient(): UnifiedChatClient {
-    if (providerMode === "fake") {
-      return createFakeUnifiedChatClient();
-    }
     return createOpenAiUnifiedChatClient({
       getCredential: async () => {
         const lookup = await getAssistantOpenAiCredential();
@@ -195,7 +183,7 @@ export function StudyAssistantWindow() {
 
   async function send(text: string) {
     const question = text.trim();
-    if (!question || busy) return;
+    if (!question || busy || !credPresent) return;
 
     setBusy(true);
     setError(null);
@@ -367,18 +355,10 @@ export function StudyAssistantWindow() {
           <strong>Study assistant</strong>
           <span
             className="assistant-ready-pill"
-            data-ready={providerMode === "fake" || credPresent ? "true" : "false"}
-            title={
-              providerMode === "openai" && credPresent
-                ? describeCredentialSource(credSource)
-                : undefined
-            }
+            data-ready={credPresent ? "true" : "false"}
+            title={credPresent ? describeCredentialSource(credSource) : undefined}
           >
-            {providerMode === "fake"
-              ? "Demo ready"
-              : credPresent
-                ? "OpenAI ready"
-                : "Not connected"}
+            {credPresent ? "OpenAI ready" : "Not connected"}
           </span>
           <span
             className="help-chat-window__context"
@@ -389,18 +369,6 @@ export function StudyAssistantWindow() {
           </span>
         </div>
         <div className="help-chat-window__title-actions">
-          <label className="help-chat-window__provider">
-            <span className="sr-only">Provider</span>
-            <select
-              value={providerMode}
-              disabled={busy}
-              onChange={(event) => setProviderMode(event.target.value as ProviderMode)}
-              aria-label="Study assistant provider"
-            >
-              <option value="fake">Demo</option>
-              <option value="openai">OpenAI</option>
-            </select>
-          </label>
           <button
             type="button"
             className="icon-btn"
@@ -414,8 +382,11 @@ export function StudyAssistantWindow() {
       </div>
 
       <div className="help-chat-window__body">
-        {providerMode === "openai" && !credPresent ? (
+        {!credPresent ? (
           <div className="help-chat-window__creds">
+            <p className="muted">
+              Connect an OpenAI API key to use the study assistant.
+            </p>
             <div className="assistant-compose-actions">
               <input
                 type="password"
@@ -448,8 +419,7 @@ export function StudyAssistantWindow() {
               </button>
             </div>
           </div>
-        ) : null}
-        {providerMode === "openai" && credPresent ? (
+        ) : (
           <div className="assistant-compose-actions">
             <button
               type="button"
@@ -466,7 +436,7 @@ export function StudyAssistantWindow() {
               Clear key
             </button>
           </div>
-        ) : null}
+        )}
 
         <div className="help-chat-window__transcript" ref={transcriptRef}>
           {messages.length === 0 ? null : (
@@ -562,7 +532,7 @@ export function StudyAssistantWindow() {
             rows={2}
             value={draftText}
             placeholder="Ask anything, or e.g. Set up CO vs BB SRP with 100NL ranges"
-            disabled={busy}
+            disabled={busy || !credPresent}
             onChange={(event) => setDraftText(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -575,7 +545,7 @@ export function StudyAssistantWindow() {
             <button
               type="button"
               className="toolbar-btn primary"
-              disabled={busy || !draftText.trim()}
+              disabled={busy || !credPresent || !draftText.trim()}
               onClick={() => void send(draftText)}
             >
               {busy ? "Sending…" : "Send"}

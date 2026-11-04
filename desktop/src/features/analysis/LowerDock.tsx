@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { clampDockHeight } from "../../state/layoutStore";
 import { useStudyStore } from "../../state/studyStore";
-import { RangeExplorerPanel } from "./RangeExplorerPanel";
+import { AnalysisDockPanel } from "./AnalysisDockPanel";
 import { RunoutTable } from "./RunoutTable";
 
 const TABS = [
-  { id: "explorer", label: "Range Explorer" },
   { id: "runouts", label: "Runouts" },
   { id: "equity", label: "Equity" },
   { id: "categories", label: "Categories" },
 ] as const;
+
+type DockTabId = (typeof TABS)[number]["id"];
 
 export function LowerDock() {
   const layout = useStudyStore((s) => s.layout);
@@ -25,6 +26,13 @@ export function LowerDock() {
       setLayout({ lowerDockHeight: repaired });
     }
   }, [layout.lowerDockHeight, setLayout]);
+
+  // Migrate the removed Range Explorer default without editing studyStore.
+  useEffect(() => {
+    if (analysisTab === "explorer") {
+      setAnalysisTab("equity");
+    }
+  }, [analysisTab, setAnalysisTab]);
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent) => {
@@ -51,13 +59,18 @@ export function LowerDock() {
     [layout.lowerDockHeight, setLayout],
   );
 
-  const openTab = (id: (typeof TABS)[number]["id"]) => {
+  const openTab = (id: DockTabId) => {
     setAnalysisTab(id);
     setLayout({
       lowerDock: true,
       lowerDockHeight: Math.max(layout.lowerDockHeight, 200),
     });
   };
+
+  const activeTab: DockTabId =
+    analysisTab === "runouts" || analysisTab === "equity" || analysisTab === "categories"
+      ? analysisTab
+      : "equity";
 
   if (!layout.lowerDock) {
     return (
@@ -81,10 +94,10 @@ export function LowerDock() {
   }
 
   let body: ReactNode;
-  if (analysisTab === "runouts") {
+  if (activeTab === "runouts") {
     body = <RunoutTable />;
   } else {
-    body = <RangeExplorerPanel />;
+    body = <AnalysisDockPanel />;
   }
 
   return (
@@ -106,7 +119,7 @@ export function LowerDock() {
             key={tab.id}
             type="button"
             role="tab"
-            aria-selected={analysisTab === tab.id}
+            aria-selected={activeTab === tab.id}
             className="dock-tab"
             onClick={() => setAnalysisTab(tab.id)}
           >

@@ -6,8 +6,6 @@ import {
   normalizeBucketWeights,
   type EquityHandRow,
 } from "../../domain/analysis";
-import { mapActionColors } from "../../domain/actionColors";
-import { groupHands, strategyMix } from "../../domain/browse";
 import { useStudyStore } from "../../state/studyStore";
 
 interface CategoryPayload {
@@ -98,32 +96,16 @@ function bandKey(lo: number, hi: number): string {
   return `${lo}:${hi}`;
 }
 
-export function RangeExplorerPanel() {
-  const currentNode = useStudyStore((s) => s.currentNode);
+/** Equity and Categories panels for the Study lower dock. */
+export function AnalysisDockPanel() {
   const categories = useStudyStore((s) => s.categories) as CategoryPayload | null;
   const equity = useStudyStore((s) => s.equity) as EquityPayload | null;
   const loadCategories = useStudyStore((s) => s.loadCategories);
   const loadEquity = useStudyStore((s) => s.loadEquity);
   const analysisTab = useStudyStore((s) => s.analysisTab);
-  const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const [categorySeat, setCategorySeat] = useState<"oop" | "ip">("oop");
   const [equitySeat, setEquitySeat] = useState<"oop" | "ip">("oop");
   const [selectedBands, setSelectedBands] = useState<Set<string>>(() => new Set());
-
-  const colors = useMemo(
-    () => mapActionColors(currentNode?.actions ?? []),
-    [currentNode?.actions],
-  );
-
-  const topCells = useMemo(() => {
-    if (!currentNode) {
-      return [];
-    }
-    return groupHands(currentNode)
-      .filter((cell) => cell.defined && cell.marginalSum > 0)
-      .sort((a, b) => b.marginalSum - a.marginalSum)
-      .slice(0, 24);
-  }, [currentNode]);
 
   const categoryView = useMemo(
     () =>
@@ -293,61 +275,6 @@ export function RangeExplorerPanel() {
               </div>
             </div>
           </>
-        )}
-      </div>
-    );
-  }
-
-  if (analysisTab === "explorer") {
-    return (
-      <div className="range-explorer">
-        <div className="panel-title-row">
-          <h2 className="panel-title">Range explorer</h2>
-        </div>
-        {!topCells.length ? (
-          <p className="empty-hint">No range at this node.</p>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Hand</th>
-                <th>Mass</th>
-                <th>Mix</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topCells.map((cell) => {
-                const mix = strategyMix(cell);
-                return (
-                  <tr
-                    key={cell.text}
-                    style={{ cursor: "pointer" }}
-                    onClick={() =>
-                      setSelectedCell({ row: cell.row, col: cell.col, text: cell.text })
-                    }
-                  >
-                    <td>{cell.text}</td>
-                    <td className="tabular">{cell.marginalSum.toFixed(3)}</td>
-                    <td>
-                      <div className="combo-bars" style={{ width: 120 }}>
-                        {(mix ?? []).map((weight, index) =>
-                          weight > 0.001 ? (
-                            <span
-                              key={index}
-                              style={{
-                                width: `${weight * 100}%`,
-                                background: colors.byIndex[index],
-                              }}
-                            />
-                          ) : null,
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         )}
       </div>
     );
