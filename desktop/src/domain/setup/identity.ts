@@ -508,8 +508,10 @@ export function draftPartialFromSolutionConfig(
     partial.oopRiverDonk = donk.text;
     partial.donkRiver = donk.copyBets;
   }
-  // All-in is the `a` size token; always allow stack-commits on rebuild.
-  partial.allowAllIn = true;
+  if ("allow_all_in" in config) {
+    partial.allowAllIn =
+      config.allow_all_in === true || config.allow_all_in === 1;
+  }
   const mergeThreshold = asFiniteNumber(config.merge_threshold);
   if (mergeThreshold !== undefined) {
     partial.mergeThresholdPct = mergeThreshold * 100;

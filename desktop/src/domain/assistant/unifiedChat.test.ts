@@ -55,7 +55,7 @@ function emptyDraft(): SpotDraft {
     potCap: 1,
     noThreeBet: false,
     allInThreshold: 0,
-    allowAllIn: true,
+    allowAllIn: false,
     frozen: false,
     accuracy: "",
     maxRaises: 0,
