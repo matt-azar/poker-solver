@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FocusEvent,
+  type MouseEvent,
+  type RefObject,
+} from "react";
 import { mapActionColors } from "../../domain/actionColors";
 import {
   type AggregatedHandCell,
@@ -12,6 +21,15 @@ import {
   strategyMix,
 } from "../../domain/browse";
 import {
+  equityByCombo,
+  equityHandsForNode,
+  formatEvChip,
+  groupEquity,
+  overlaySubLabel,
+  useMatrixDisplayStore,
+  weightFillFraction,
+} from "../../domain/matrixDisplay";
+import {
   RANKS,
   type ActionValuesPayload,
   type EvDisplayBasis,
@@ -20,6 +38,7 @@ import {
 } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/matrix-density.css";
+import { ComboHoverPopup } from "./ComboHoverPopup";
 
 function cellKey(row: number, col: number): string {
   return `${row}:${col}`;
@@ -70,6 +89,14 @@ function evFill(value: number, scale: number): string {
   return `rgb(${160 + a}, ${70}, ${65})`;
 }
 
+function equityFill(equity: number): string {
+  const t = Math.max(0, Math.min(1, equity));
+  const r = Math.round(40 + (36 - 40) * t);
+  const g = Math.round(70 + (120 - 70) * t);
+  const b = Math.round(110 + (160 - 110) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 function maxAbsEv(
   cells: AggregatedHandCell[],
   node: NodePayload,
@@ -100,8 +127,17 @@ export function RangeMatrix() {
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const setHoverCell = useStudyStore((s) => s.setHoverCell);
   const actionFilter = useStudyStore((s) => s.actionFilter);
+  const equity = useStudyStore((s) => s.equity);
+  const displayPrefs = useMatrixDisplayStore((s) => s.prefs);
   const wrapRef = useRef<HTMLDivElement>(null);
   const side = useMeasuredSquareSide(wrapRef);
+  const [anchor, setAnchor] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    viewport?: boolean;
+  } | null>(null);
 
   const cells = useMemo(
     () => (currentNode ? groupHands(currentNode) : []),
@@ -115,6 +151,14 @@ export function RangeMatrix() {
     }
     return map;
   }, [cells]);
+
+  const equityMap = useMemo(() => {
+    const hands = equityHandsForNode(
+      equity as { pending?: boolean; oop_hands?: Array<{ combo: string; equity: number }>; ip_hands?: Array<{ combo: string; equity: number }> } | null,
+      currentNode?.player,
+    );
+    return equityByCombo(hands);
+  }, [equity, currentNode?.player]);
 
   const actions = currentNode?.actions;
   const colors = useMemo(() => mapActionColors(actions ?? []), [actions]);
@@ -131,6 +175,29 @@ export function RangeMatrix() {
       ? `Hand range matrix (${RANGE_INCLUSION_MEASURE})`
       : "Hand range matrix";
 
+  const focus = selectedCell ?? hoverCell;
+  const focusCell = focus
+    ? byKey.get(cellKey(focus.row, focus.col)) ?? null
+    : null;
+  const showPopup = Boolean(currentNode && focusCell && !isExcludedForPopup(focusCell, matrixMode));
+
+  const updateAnchorFromEvent = (
+    event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>,
+  ) => {
+    const target = event.currentTarget;
+    if (!target) {
+      return;
+    }
+    const cellRect = target.getBoundingClientRect();
+    setAnchor({
+      left: cellRect.left,
+      top: cellRect.top,
+      width: cellRect.width,
+      height: cellRect.height,
+      viewport: true,
+    });
+  };
+
   return (
     <div className="range-matrix-wrap" ref={wrapRef}>
       <div
@@ -138,7 +205,12 @@ export function RangeMatrix() {
         role="grid"
         aria-label={matrixAria}
         style={side > 0 ? { width: side, height: side } : undefined}
-        onMouseLeave={() => setHoverCell(null)}
+        onMouseLeave={() => {
+          setHoverCell(null);
+          if (!selectedCell) {
+            setAnchor(null);
+          }
+        }}
       >
         <div className="matrix-corner" />
         {RANKS.map((rank) => (
@@ -160,19 +232,50 @@ export function RangeMatrix() {
             nodeValues={nodeValues}
             evDisplayBasis={evDisplayBasis}
             evScale={evScale}
+            equityMap={equityMap}
+            displayPrefs={displayPrefs}
             setSelectedCell={setSelectedCell}
             setHoverCell={setHoverCell}
+            onCellPointer={updateAnchorFromEvent}
           />
         ))}
       </div>
+      {showPopup && currentNode && focusCell ? (
+        <ComboHoverPopup
+          cell={focusCell}
+          node={currentNode}
+          nodeValues={nodeValues}
+          evDisplayBasis={evDisplayBasis}
+          equityMap={equityMap}
+          pinned={Boolean(selectedCell)}
+          anchor={anchor}
+        />
+      ) : null}
     </div>
   );
+}
+
+function isExcludedForPopup(
+  cell: AggregatedHandCell,
+  mode: MatrixMode,
+): boolean {
+  if (mode === "range") {
+    const inclusion = rangeInclusionOf(cell);
+    return !cell.defined || inclusion == null || inclusion <= 0;
+  }
+  return isExcludedMatrixCell(cell);
 }
 
 interface Selected {
   row: number;
   col: number;
   text: string;
+}
+
+interface DisplayPrefs {
+  rangeWeightHeightFill: boolean;
+  cellOverlay: "none" | "ev" | "equity" | "both";
+  colorByOverlay: boolean;
 }
 
 interface RowProps {
@@ -187,8 +290,13 @@ interface RowProps {
   nodeValues: ActionValuesPayload | null;
   evDisplayBasis: EvDisplayBasis;
   evScale: number;
+  equityMap: Map<string, number>;
+  displayPrefs: DisplayPrefs;
   setSelectedCell: (cell: Selected | null) => void;
   setHoverCell: (cell: Selected | null) => void;
+  onCellPointer: (
+    event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>,
+  ) => void;
 }
 
 function MatrixRow({
@@ -203,8 +311,11 @@ function MatrixRow({
   nodeValues,
   evDisplayBasis,
   evScale,
+  equityMap,
+  displayPrefs,
   setSelectedCell,
   setHoverCell,
+  onCellPointer,
 }: RowProps) {
   return (
     <>
@@ -218,7 +329,7 @@ function MatrixRow({
             : row < col
               ? `${RANKS[row]}${RANKS[col]}s`
               : `${RANKS[col]}${RANKS[row]}o`);
-const inclusion = cell ? rangeInclusionOf(cell) : null;
+        const inclusion = cell ? rangeInclusionOf(cell) : null;
         const excluded =
           matrixMode === "range"
             ? !cell || !cell.defined || inclusion == null || inclusion <= 0
@@ -232,10 +343,12 @@ const inclusion = cell ? rangeInclusionOf(cell) : null;
         let solid: string | null = null;
         let dimmed = false;
         let filtered = false;
-let partialInclusion = false;
+        let partialInclusion = false;
         let actionMixing = false;
         let measure: string | undefined;
         let title = text;
+        let cellEv: number | null = null;
+        let cellEquity: number | null = null;
 
         if (!empty && cell) {
           const showStrategy =
@@ -252,7 +365,7 @@ let partialInclusion = false;
           }
 
           if (matrixMode === "range") {
-const weight = inclusion ?? 0;
+            const weight = inclusion ?? 0;
             solid = rangeFill(weight);
             sub = formatRangeInclusion(weight);
             measure = "inclusion-weight";
@@ -261,8 +374,9 @@ const weight = inclusion ?? 0;
           } else if (matrixMode === "ev") {
             const ev = groupEv(currentNode, nodeValues, cell, evDisplayBasis);
             if (ev) {
+              cellEv = ev.mixed;
               solid = evFill(ev.mixed, evScale);
-              sub = ev.mixed.toFixed(1);
+              sub = formatEvChip(ev.mixed);
             } else {
               solid = "var(--secondary)";
               sub = "—";
@@ -270,7 +384,61 @@ const weight = inclusion ?? 0;
           } else if (matrixMode === "strategy-ev") {
             const ev = groupEv(currentNode, nodeValues, cell, evDisplayBasis);
             if (ev) {
-              sub = ev.mixed.toFixed(1);
+              cellEv = ev.mixed;
+              sub = formatEvChip(ev.mixed);
+            }
+          }
+
+          if (
+            displayPrefs.cellOverlay !== "none" &&
+            (displayPrefs.cellOverlay === "ev" ||
+              displayPrefs.cellOverlay === "both") &&
+            cellEv == null
+          ) {
+            const ev = groupEv(currentNode, nodeValues, cell, evDisplayBasis);
+            if (ev) {
+              cellEv = ev.mixed;
+            }
+          }
+          if (
+            displayPrefs.cellOverlay === "equity" ||
+            displayPrefs.cellOverlay === "both"
+          ) {
+            cellEquity = groupEquity(cell, equityMap, currentNode);
+          }
+
+          const overlaySub = overlaySubLabel(
+            displayPrefs.cellOverlay,
+            cellEv,
+            cellEquity,
+          );
+          if (overlaySub) {
+            // Additive overlay replaces mode sub when set (strategy colors stay).
+            if (matrixMode === "strategy" || matrixMode === "strategy-ev") {
+              sub = overlaySub;
+            } else if (matrixMode === "range") {
+              sub = overlaySub;
+            } else if (matrixMode === "ev" && displayPrefs.cellOverlay !== "ev") {
+              sub = overlaySub;
+            }
+          }
+
+          if (
+            displayPrefs.colorByOverlay &&
+            displayPrefs.cellOverlay !== "none" &&
+            segments.length === 0
+          ) {
+            if (
+              (displayPrefs.cellOverlay === "ev" ||
+                displayPrefs.cellOverlay === "both") &&
+              cellEv != null
+            ) {
+              solid = evFill(cellEv, evScale);
+            } else if (
+              displayPrefs.cellOverlay === "equity" &&
+              cellEquity != null
+            ) {
+              solid = equityFill(cellEquity);
             }
           }
 
@@ -281,7 +449,7 @@ const weight = inclusion ?? 0;
                 : 0;
             dimmed = share < 0.02;
             filtered = share >= 0.02;
-            if (showStrategy) {
+            if (showStrategy && displayPrefs.cellOverlay === "none") {
               sub = `${(share * 100).toFixed(0)}%`;
             }
           }
@@ -291,6 +459,18 @@ const weight = inclusion ?? 0;
         if (actionMixing || !usesRangeWeightFill(matrixMode)) {
           partialInclusion = false;
         }
+
+        const useHeightFill =
+          displayPrefs.rangeWeightHeightFill &&
+          !empty &&
+          (matrixMode === "range" ||
+            matrixMode === "strategy" ||
+            matrixMode === "strategy-ev");
+        // Prefer inclusion weight; if undefined on a live cell, keep full height.
+        const fillFrac = weightFillFraction(
+          useHeightFill,
+          inclusion ?? (useHeightFill ? 1 : 0),
+        );
 
         return (
           <button
@@ -304,15 +484,56 @@ const weight = inclusion ?? 0;
             data-hover={hovered}
             data-dimmed={dimmed}
             data-filtered={filtered}
-data-partial-inclusion={partialInclusion}
+            data-partial-inclusion={partialInclusion}
             data-action-mixing={actionMixing}
+            data-weight-fill={useHeightFill ? "true" : "false"}
             data-measure={measure}
-            style={solid ? { background: solid } : undefined}
-            onMouseEnter={() => setHoverCell({ row, col, text })}
+            style={
+              useHeightFill
+                ? ({
+                    ["--weight-fill" as string]: String(fillFrac),
+                    background: "var(--empty-cell)",
+                  } as CSSProperties)
+                : solid
+                  ? { background: solid }
+                  : undefined
+            }
+            onMouseEnter={(event) => {
+              setHoverCell({ row, col, text });
+              onCellPointer(event);
+            }}
+            onFocus={(event) => {
+              onCellPointer(event);
+            }}
             onClick={() => setSelectedCell({ row, col, text })}
             title={title}
           >
-            {segments.length > 0 ? (
+            {useHeightFill ? (
+              <div className="matrix-cell__weight-fill">
+                {segments.length > 0 ? (
+                  <div className="matrix-cell__segments">
+                    {segments.map((seg, index) =>
+                      seg.weight > 0.001 ? (
+                        <span
+                          key={index}
+                          className="matrix-cell__seg"
+                          style={{
+                            flexGrow: seg.weight,
+                            flexBasis: 0,
+                            background: seg.color,
+                          }}
+                        />
+                      ) : null,
+                    )}
+                  </div>
+                ) : solid ? (
+                  <div
+                    className="matrix-cell__solid"
+                    style={{ background: solid }}
+                  />
+                ) : null}
+              </div>
+            ) : segments.length > 0 ? (
               <div className="matrix-cell__segments">
                 {segments.map((seg, index) =>
                   seg.weight > 0.001 ? (

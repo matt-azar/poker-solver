@@ -11,6 +11,7 @@ import type { MatrixMode } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import { ActionBlock } from "./ActionBlock";
+import { MatrixDisplayControls } from "./MatrixDisplayControls";
 import "../../styles/actions.css";
 
 const MODES: Array<{ id: MatrixMode; label: string }> = [
@@ -103,6 +104,7 @@ export function ActionSummary() {
           );
         })}
       </div>
+      <MatrixDisplayControls />
       {(actions ?? []).map((label, index) => {
         const display = formatActionDisplay(label, pot, betSizeDisplay);
         const freqText = formatFrequencyPct(freqs[index]);

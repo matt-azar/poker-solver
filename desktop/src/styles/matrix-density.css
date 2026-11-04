@@ -77,6 +77,22 @@
   opacity: 1;
 }
 
+/* Weight-height fill: empty portion stays --empty-cell; color grows from bottom */
+.range-matrix.matrix-density .matrix-cell[data-weight-fill="true"] {
+  background: color-mix(in srgb, var(--empty-cell) 88%, var(--panel));
+}
+
+.range-matrix.matrix-density .matrix-cell[data-weight-fill="true"] .matrix-cell__weight-fill {
+  z-index: 0;
+}
+
+.range-matrix.matrix-density
+  .matrix-cell[data-weight-fill="true"]
+  .matrix-cell__segments {
+  position: absolute;
+  inset: 0;
+}
+
 /* Selected / hover still read clearly on quiet excluded cells */
 .range-matrix.matrix-density .matrix-cell[data-excluded="true"][data-hover="true"] .matrix-cell__label,
 .range-matrix.matrix-density .matrix-cell[data-excluded="true"][data-selected="true"] .matrix-cell__label,
