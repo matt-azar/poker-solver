@@ -61,7 +61,6 @@ export interface StudySetupTreePreset {
   oopRiverDonk?: string;
   potCap?: number;
   noThreeBet?: boolean;
-  geometric?: boolean;
   maxRaises?: number;
 }
 

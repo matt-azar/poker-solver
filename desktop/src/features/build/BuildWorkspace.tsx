@@ -302,9 +302,8 @@ export function BuildWorkspace() {
           <p className="field-hint">
             Blank bet = check only. Blank raise = that street&apos;s bet sizes.
             Type - to remove raises. Max raises 1 allows one raise and no 3-bet;
-            0 removes raises. Sizes: 75 (75% pot), 20c, e, 2e, 3e, a, 2.5x.
-            All-in is added only when a size is listed. Geometric adds one e to
-            non-empty boxes only.
+            0 removes raises. Sizes: 75 (75% pot), 0.5%, 20c, e, 2e, 3e, a, 2.5x.
+            Add e or a on each street where you want geometric or all-in.
           </p>
           <div className="build-inline">
             <label>
@@ -458,22 +457,6 @@ export function BuildWorkspace() {
                 onChange={(event) => updateDraft({ noThreeBet: event.target.checked })}
               />
               No 3-bet
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={draft.geometric}
-                onChange={(event) => updateDraft({ geometric: event.target.checked })}
-              />
-              Geometric
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={draft.allowAllIn}
-                onChange={(event) => updateDraft({ allowAllIn: event.target.checked })}
-              />
-              All-in
             </label>
           </div>
 
