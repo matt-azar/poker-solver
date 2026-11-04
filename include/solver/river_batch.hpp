@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game/river_game.hpp"
+#include "game/river_config.hpp"
 #include "solver/street_batch.hpp"
 #include "solver/solve_types.hpp"
 #include "solver/training_state.hpp"

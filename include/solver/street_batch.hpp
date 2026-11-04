@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game/street_game.hpp"
+#include "game/street_config.hpp"
 #include "poker/hand_categories.hpp"
 #include "solver/budget_resource.hpp"
 #include "solver/table_scalar.hpp"
