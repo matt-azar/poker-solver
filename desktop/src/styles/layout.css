@@ -1926,18 +1926,30 @@
 .range-pair {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  column-gap: 36px;
+  row-gap: 16px;
   align-items: start;
 }
 
 .range-editor {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.range-editor + .range-editor {
+  border-left: 1px solid var(--border);
+  padding-left: 36px;
+  margin-left: -1px;
 }
 
 .range-paint-grid {
   display: grid;
-  width: 100%;
+  width: 90%;
+  max-width: 90%;
   aspect-ratio: 1;
+  align-self: center;
   grid-template-columns: repeat(13, minmax(0, 1fr));
   grid-template-rows: repeat(13, minmax(0, 1fr));
   gap: 1px;
@@ -2967,6 +2979,14 @@
 @media (max-width: 720px) {
   .range-pair {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .range-editor + .range-editor {
+    border-left: 0;
+    padding-left: 0;
+    margin-left: 0;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
   }
 }
 

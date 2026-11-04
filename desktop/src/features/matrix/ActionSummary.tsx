@@ -19,32 +19,6 @@ const MODES: Array<{ id: MatrixMode; label: string }> = [
   { id: "ev", label: "EV" },
 ];
 
-function childIdAt(
-  children: unknown[] | undefined,
-  index: number,
-): string | null {
-  if (!children) {
-    return null;
-  }
-  const child = children[index];
-  if (!child) {
-    return null;
-  }
-  if (typeof child === "string") {
-    return child;
-  }
-  if (
-    typeof child === "object" &&
-    child !== null &&
-    "node_id" in child &&
-    typeof (child as { node_id?: unknown }).node_id === "string" &&
-    (child as { node_id: string }).node_id
-  ) {
-    return (child as { node_id: string }).node_id;
-  }
-  return null;
-}
-
 export function ActionSummary() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const status = useStudyStore((s) => s.status);
@@ -53,7 +27,6 @@ export function ActionSummary() {
   const setMatrixMode = useStudyStore((s) => s.setMatrixMode);
   const actionFilter = useStudyStore((s) => s.actionFilter);
   const setActionFilter = useStudyStore((s) => s.setActionFilter);
-  const followAction = useStudyStore((s) => s.followAction);
   const nodeValues = useStudyStore((s) => s.nodeValues);
   const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
 
@@ -133,7 +106,6 @@ export function ActionSummary() {
       {(actions ?? []).map((label, index) => {
         const display = formatActionDisplay(label, pot, betSizeDisplay);
         const freqText = formatFrequencyPct(freqs[index]);
-        const childId = childIdAt(currentNode?.children, index);
         const filtered = actionFilter === index;
         return (
           <ActionBlock
@@ -148,13 +120,6 @@ export function ActionSummary() {
             title={`${formatActionTooltip(label, pot, betSizeDisplay)} · click to filter`}
             aria-label={`Filter ${display.primary}${freqText ? `, ${freqText}` : ""}`}
             onClick={() => setActionFilter(filtered ? null : index)}
-            onFollow={() => {
-              if (childId) {
-                void followAction(childId);
-              }
-            }}
-            followDisabled={!childId}
-            followLabel="Open"
           />
         );
       })}
@@ -175,7 +140,7 @@ export function ActionSummary() {
       ) : null}
       {(actions?.length ?? 0) > 0 ? (
         <p className="action-summary__hint">
-          Block filters the matrix · Open follows that action
+          Click an action to filter the matrix · use Next in the history strip to follow
         </p>
       ) : null}
     </div>

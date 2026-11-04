@@ -47,7 +47,10 @@ describe("ComboInspector lock selection", () => {
       lockDrawerOpen: false,
       strategyEditDrawerOpen: false,
       locks: [],
-      solutionId: null,
+      solutionId: "sol-test",
+      strategyEditDraft: { kind: "selected", handIndices: [], probs: [0.5, 0.5] },
+      strategyEditDraftBaseline: null,
+      strategyEditScope: null,
     });
   });
 
@@ -85,5 +88,21 @@ describe("ComboInspector lock selection", () => {
       (screen.getByRole("button", { name: "Lock selection" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+  });
+
+  it("keeps lock/edit actions without duplicate editor entry points", async () => {
+    const user = userEvent.setup();
+    render(<ComboInspector />);
+
+    expect(screen.getByRole("button", { name: "Lock selection" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Lock entire hand class" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit strategy" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Lock editor" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Strategy editor" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Lock" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Edit strategy" }));
+    expect(useStudyStore.getState().strategyEditDrawerOpen).toBe(true);
+    expect(useStudyStore.getState().strategyEditDraft.handIndices).toEqual([0, 1, 2]);
   });
 });
