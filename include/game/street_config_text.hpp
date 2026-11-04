@@ -128,7 +128,6 @@ inline std::string format_street_config(const StreetConfig& config)
     append_ints(out, "max-raises", config.max_raises);
     append_flag(out, "allow-all-in", config.allow_all_in);
     append_flag(out, "allow-three-bet", config.allow_three_bet);
-    append_flag(out, "geometric", config.geometric);
     append_line(out, "all-in-threshold", format_number(config.all_in_threshold));
     append_line(out, "pot-cap", format_number(config.pot_cap));
     if (config.merge_threshold != 0.0)
@@ -536,7 +535,9 @@ inline StreetConfig parse_street_config(std::string_view text)
         }
         else if (key == "geometric")
         {
-            config.geometric = parse_flag(value);
+            // Removed: list `e` / `2e` on size fields. Accept the old key so
+            // street-config 1 documents still load.
+            (void)parse_flag(value);
         }
         else if (key == "all-in-threshold")
         {

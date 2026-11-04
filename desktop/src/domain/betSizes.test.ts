@@ -102,7 +102,6 @@ describe("betSizes", () => {
     expect(formatStreetBetField([], [0.5, 1])).toBe("50, 100");
     expect(formatStreetBetField([EXPLICIT_EMPTY_SPEC], [0.5, 1])).toBe("");
     expect(formatStreetBetField([0.33], [0.5, 1])).toBe("33");
-    expect(formatStreetBetField([], [0.5], { appendGeometric: true })).toBe("50, e");
     expect(encodeBetList(formatStreetBetField([], [0.5, 1]))).toEqual([0.5, 1]);
     expect(encodeBetList(formatStreetBetField([EXPLICIT_EMPTY_SPEC], [0.5, 1]))).toEqual([
       EXPLICIT_EMPTY_SPEC,
@@ -132,11 +131,11 @@ describe("betSizes", () => {
     expect(formatDonkField([0.33], [0.5, 1]).text).toBe("33");
   });
 
-  it("encodeBettingJob does not inject geometric from a draft flag", () => {
+  it("encodeBettingJob keeps e and a as list tokens only", () => {
     const encoded = encodeBettingJob({
       oopBets: "",
       ipBets: "",
-      oopFlop: "50",
+      oopFlop: "50, e",
       ipFlop: "50",
       oopTurn: "",
       ipTurn: "",
@@ -152,8 +151,8 @@ describe("betSizes", () => {
       oopTurnDonk: "",
       oopRiverDonk: "",
     });
-    expect(encoded.geometric).toBe(0);
-    expect(encoded.oop_flop_bets).toEqual([0.5]);
+    expect(encoded).not.toHaveProperty("geometric");
+    expect(encoded.oop_flop_bets).toEqual([0.5, GEO_BASE]);
     expect(encoded.oop_river_bets).toEqual([0.5, -1e9]);
     expect(encoded.oop_turn_bets).toEqual([EXPLICIT_EMPTY_SPEC]);
     expect(encoded.oop_turn_raises).toEqual([EXPLICIT_EMPTY_SPEC]);

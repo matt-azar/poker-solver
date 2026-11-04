@@ -1374,7 +1374,6 @@ void run_explorer_http_tests()
                  "max-raises 1\n"
                  "allow-all-in 0\n"
                  "allow-three-bet 1\n"
-                 "geometric 0\n"
                  "all-in-threshold 0\n"
                  "pot-cap 0\n"
                  "rake-rate 0\n"

@@ -32,9 +32,7 @@ export interface StudySetupPreferences {
   };
   defaultPotCap?: number;
   defaultMaxRaises?: number;
-  defaultAllowAllIn?: boolean;
   defaultNoThreeBet?: boolean;
-  defaultGeometric?: boolean;
 }
 
 export interface StorageAdapter {
@@ -107,14 +105,8 @@ export function normalizeStudySetupPreferences(
   if (isFiniteNumber(source.defaultMaxRaises)) {
     prefs.defaultMaxRaises = source.defaultMaxRaises;
   }
-  if (typeof source.defaultAllowAllIn === "boolean") {
-    prefs.defaultAllowAllIn = source.defaultAllowAllIn;
-  }
   if (typeof source.defaultNoThreeBet === "boolean") {
     prefs.defaultNoThreeBet = source.defaultNoThreeBet;
-  }
-  if (typeof source.defaultGeometric === "boolean") {
-    prefs.defaultGeometric = source.defaultGeometric;
   }
   return prefs;
 }

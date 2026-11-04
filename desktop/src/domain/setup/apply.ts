@@ -155,8 +155,7 @@ function applyPrefs(
     draft.noThreeBet = prefs.defaultNoThreeBet;
     provenance.noThreeBet = "saved_preference";
   }
-  // Geometric / all-in toggles are gone; list `e` or `a` on each street instead.
-  draft.geometric = false;
+  // All-in is the `a` size token; always allow stack-commits.
   draft.allowAllIn = true;
 }
 

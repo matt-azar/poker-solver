@@ -40,8 +40,6 @@ export function draftFromParsedConfig(body: Record<string, unknown>): Partial<Sp
   const board = Array.isArray(body.board)
     ? body.board.map((card) => String(card)).join(" ")
     : "";
-  const appendGeometric = Boolean(body.geometric);
-  const geoOpts = { appendGeometric };
   const partial: Partial<SpotDraft> = {
     boardText: board,
     pot: Number(body.pot) || 0,
@@ -49,61 +47,59 @@ export function draftFromParsedConfig(body: Record<string, unknown>): Partial<Sp
     maxRaises: Number(body.max_raises) || 0,
     // All-in is a size token (`a`); always allow stack-commits on rebuild.
     allowAllIn: true,
-    geometric: false,
     oopBets: joinSizes(body.oop_bets),
     ipBets: joinSizes(body.ip_bets),
     oopRaises: joinRaiseDraft(body.oop_raises, body.oop_raise_multiples),
     ipRaises: joinRaiseDraft(body.ip_raises, body.ip_raise_multiples),
   };
   if (body.kind === "street") {
-    partial.oopFlop = formatStreetBetField(body.oop_flop_bets, body.oop_bets, geoOpts);
-    partial.ipFlop = formatStreetBetField(body.ip_flop_bets, body.ip_bets, geoOpts);
-    partial.oopTurn = formatStreetBetField(body.oop_turn_bets, body.oop_bets, geoOpts);
-    partial.ipTurn = formatStreetBetField(body.ip_turn_bets, body.ip_bets, geoOpts);
-    partial.oopRiver = formatStreetBetField(body.oop_river_bets, body.oop_bets, geoOpts);
-    partial.ipRiver = formatStreetBetField(body.ip_river_bets, body.ip_bets, geoOpts);
+    partial.oopFlop = formatStreetBetField(body.oop_flop_bets, body.oop_bets);
+    partial.ipFlop = formatStreetBetField(body.ip_flop_bets, body.ip_bets);
+    partial.oopTurn = formatStreetBetField(body.oop_turn_bets, body.oop_bets);
+    partial.ipTurn = formatStreetBetField(body.ip_turn_bets, body.ip_bets);
+    partial.oopRiver = formatStreetBetField(body.oop_river_bets, body.oop_bets);
+    partial.ipRiver = formatStreetBetField(body.ip_river_bets, body.ip_bets);
     partial.oopFlopRaises = formatStreetRaiseField(
       body.oop_flop_raises,
       body.oop_raises,
       body.oop_flop_bets,
-      { ...geoOpts, sharedBets: body.oop_bets },
+      { sharedBets: body.oop_bets },
     );
     partial.ipFlopRaises = formatStreetRaiseField(
       body.ip_flop_raises,
       body.ip_raises,
       body.ip_flop_bets,
-      { ...geoOpts, sharedBets: body.ip_bets },
+      { sharedBets: body.ip_bets },
     );
     partial.oopTurnRaises = formatStreetRaiseField(
       body.oop_turn_raises,
       body.oop_raises,
       body.oop_turn_bets,
-      { ...geoOpts, sharedBets: body.oop_bets },
+      { sharedBets: body.oop_bets },
     );
     partial.ipTurnRaises = formatStreetRaiseField(
       body.ip_turn_raises,
       body.ip_raises,
       body.ip_turn_bets,
-      { ...geoOpts, sharedBets: body.ip_bets },
+      { sharedBets: body.ip_bets },
     );
     partial.oopRiverRaises = formatStreetRaiseField(
       body.oop_river_raises,
       body.oop_raises,
       body.oop_river_bets,
-      { ...geoOpts, sharedBets: body.oop_bets },
+      { sharedBets: body.oop_bets },
     );
     partial.ipRiverRaises = formatStreetRaiseField(
       body.ip_river_raises,
       body.ip_raises,
       body.ip_river_bets,
-      { ...geoOpts, sharedBets: body.ip_bets },
+      { sharedBets: body.ip_bets },
     );
     partial.oopDonk = joinSizes(body.oop_donk);
     const flopDonk = formatDonkField(
       body.oop_flop_donk,
       body.oop_flop_bets ?? body.oop_bets,
       body.oop_donk,
-      geoOpts,
     );
     partial.oopFlopDonk = flopDonk.text;
     partial.donkFlop = flopDonk.copyBets;
@@ -111,7 +107,6 @@ export function draftFromParsedConfig(body: Record<string, unknown>): Partial<Sp
       body.oop_turn_donk,
       body.oop_turn_bets ?? body.oop_bets,
       body.oop_donk,
-      geoOpts,
     );
     partial.oopTurnDonk = turnDonk.text;
     partial.donkTurn = turnDonk.copyBets;
@@ -119,7 +114,6 @@ export function draftFromParsedConfig(body: Record<string, unknown>): Partial<Sp
       body.oop_river_donk,
       body.oop_river_bets ?? body.oop_bets,
       body.oop_donk,
-      geoOpts,
     );
     partial.oopRiverDonk = riverDonk.text;
     partial.donkRiver = riverDonk.copyBets;
