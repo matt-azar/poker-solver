@@ -3,7 +3,6 @@ import { mapActionColors } from "../../domain/actionColors";
 import {
   type AggregatedHandCell,
   formatRangeInclusion,
-  frequencyOf,
   groupEv,
   groupHands,
   hasWithinHandActionMixing,
@@ -16,7 +15,6 @@ import {
   RANKS,
   type ActionValuesPayload,
   type EvDisplayBasis,
-  type FrequencyMode,
   type MatrixMode,
   type NodePayload,
 } from "../../domain/types";
@@ -89,14 +87,13 @@ function maxAbsEv(
 }
 
 function usesRangeWeightFill(mode: MatrixMode): boolean {
-  return mode === "range" || mode === "action-range" || mode === "equity";
+  return mode === "range";
 }
 
 export function RangeMatrix() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const nodeValues = useStudyStore((s) => s.nodeValues);
   const matrixMode = useStudyStore((s) => s.matrixMode);
-  const frequencyMode = useStudyStore((s) => s.frequencyMode);
   const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
   const selectedCell = useStudyStore((s) => s.selectedCell);
   const hoverCell = useStudyStore((s) => s.hoverCell);
@@ -156,7 +153,6 @@ export function RangeMatrix() {
             byKey={byKey}
             colors={colors.byIndex}
             matrixMode={matrixMode}
-            frequencyMode={frequencyMode}
             selectedCell={selectedCell}
             hoverCell={hoverCell}
             actionFilter={actionFilter}
@@ -184,7 +180,6 @@ interface RowProps {
   byKey: Map<string, AggregatedHandCell>;
   colors: string[];
   matrixMode: MatrixMode;
-  frequencyMode: FrequencyMode;
   selectedCell: Selected | null;
   hoverCell: Selected | null;
   actionFilter: number | null;
@@ -201,7 +196,6 @@ function MatrixRow({
   byKey,
   colors,
   matrixMode,
-  frequencyMode,
   selectedCell,
   hoverCell,
   actionFilter,
@@ -272,13 +266,6 @@ const weight = inclusion ?? 0;
             } else {
               solid = "var(--secondary)";
               sub = "—";
-            }
-          } else if (matrixMode === "action-range" || matrixMode === "equity") {
-            const freq = frequencyOf(cell, frequencyMode);
-            if (freq != null) {
-              solid = rangeFill(freq);
-              sub = `${(freq * 100).toFixed(0)}`;
-              partialInclusion = freq > 1e-6 && freq < 1 - 1e-6;
             }
           } else if (matrixMode === "strategy-ev") {
             const ev = groupEv(currentNode, nodeValues, cell, evDisplayBasis);

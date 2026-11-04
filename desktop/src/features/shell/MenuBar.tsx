@@ -246,10 +246,6 @@ export function MenuBar({
           setOpen={setOpenMenu}
           items={[
             {
-              label: layout.leftNav ? "Hide navigator" : "Show navigator",
-              onClick: () => setLayout({ leftNav: !layout.leftNav }),
-            },
-            {
               label: layout.lowerDock ? "Hide lower dock" : "Show lower dock",
               onClick: () => setLayout({ lowerDock: !layout.lowerDock }),
             },
