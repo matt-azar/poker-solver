@@ -58,7 +58,6 @@ export interface SolveJobRequest {
   merge_threshold?: number;
   pot_cap?: number;
   allow_three_bet?: number;
-  geometric?: number;
   all_in_threshold?: number;
   allow_all_in?: number;
   frozen?: number;
@@ -302,8 +301,6 @@ export interface SpotDraft {
   mergeThresholdPct: number;
   potCap: number;
   noThreeBet: boolean;
-  /** Unused in Study UI; geometric is the `e` size token per street. */
-  geometric: boolean;
   allInThreshold: number;
   /** Always treated as true on solve/preview; all-in is the `a` size token. */
   allowAllIn: boolean;
@@ -380,7 +377,6 @@ export const DEFAULT_SPOT: SpotDraft = {
   mergeThresholdPct: 10,
   potCap: 0,
   noThreeBet: false,
-  geometric: false,
   allInThreshold: 0,
   allowAllIn: true,
   frozen: true,

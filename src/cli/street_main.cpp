@@ -38,7 +38,7 @@ void print_usage(const char* argv0)
               << " [--oop-donk 0.5,20c] [--oop-flop-donk -] [--oop-turn-donk 33]"
               << " [--oop-river-donk 50] [--merge-threshold 0.1]"
               << " [--pot-cap 1] [--no-three-bet]"
-              << " [--geometric] [--all-in-threshold 0.4]"
+              << " [--all-in-threshold 0.4]"
               << " [--rake-rate RATE] [--rake-cap CHIPS]"
               << " [--icm-stacks S0,S1,...] [--icm-payouts P1,P2,...]"
               << " [--incentive label|tag,PLAYER,KEY,DELTA] (repeatable)"
@@ -509,10 +509,6 @@ int main(int argc, char** argv)
             else if (arg == "--no-three-bet")
             {
                 config.allow_three_bet = false;
-            }
-            else if (arg == "--geometric")
-            {
-                config.geometric = true;
             }
             else if (arg == "--all-in-threshold")
             {

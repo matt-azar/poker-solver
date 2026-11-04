@@ -109,7 +109,6 @@ struct Job
     double pot_cap = 0.0;
     bool allow_three_bet = true;
     bool allow_all_in = true;
-    bool geometric = false;
     bool frozen = false;
     double all_in_threshold = 0.0;
     double accuracy = -1.0;

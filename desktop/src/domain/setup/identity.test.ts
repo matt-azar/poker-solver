@@ -252,7 +252,6 @@ describe("openDraftBase / draftFromOpenedSolution", () => {
     expect(inherited.oopTurn).toBe("");
     expect(inherited.ipTurn).toBe("");
     expect(inherited.oopFlopRaises).toBe("-");
-    expect(inherited.geometric).toBe(false);
     expect(inherited.allowAllIn).toBe(true);
 
     const checkOnly = draftPartialFromSolutionConfig({
@@ -264,15 +263,5 @@ describe("openDraftBase / draftFromOpenedSolution", () => {
     expect(checkOnly.oopBets).toBe("");
     expect(checkOnly.oopFlop).toBe("");
     expect(checkOnly.ipFlop).toBe("");
-  });
-
-  it("materializes a legacy geometric flag into Build e tokens", () => {
-    const partial = draftPartialFromSolutionConfig({
-      oop_bets: [0.5],
-      oop_flop_bets: [0.5],
-      geometric: true,
-    });
-    expect(partial.oopFlop).toBe("50, e");
-    expect(partial.geometric).toBe(false);
   });
 });

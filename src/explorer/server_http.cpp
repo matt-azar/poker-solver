@@ -211,7 +211,6 @@ Job job_from_street(const poker::streets::StreetConfig& config)
     job.pot_cap = config.pot_cap;
     job.allow_three_bet = config.allow_three_bet;
     job.allow_all_in = config.allow_all_in;
-    job.geometric = config.geometric;
     job.all_in_threshold = config.all_in_threshold;
     job.max_raises = config.max_raises;
     job.rake_rate = config.rake.rate;
@@ -449,8 +448,6 @@ std::string solution_config_json(const HeldSolution& held)
     {
         payload += ",\"allow_three_bet\":";
         payload += job.allow_three_bet ? "true" : "false";
-        payload += ",\"geometric\":";
-        payload += job.geometric ? "true" : "false";
         payload += ",\"pot_cap\":";
         payload += format_number(job.pot_cap);
         payload += ",\"all_in_threshold\":";
@@ -1694,8 +1691,6 @@ void handle_client(socket_t client)
                 payload += job.allow_all_in ? "true" : "false";
                 payload += ",\"allow_three_bet\":";
                 payload += job.allow_three_bet ? "true" : "false";
-                payload += ",\"geometric\":";
-                payload += job.geometric ? "true" : "false";
                 payload += ",\"pot_cap\":";
                 payload += format_number(job.pot_cap);
                 payload += ",\"all_in_threshold\":";

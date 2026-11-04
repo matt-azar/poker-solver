@@ -253,20 +253,6 @@ function sameSpecs(left: number[], right: number[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function listHasGeometric(specs: number[]): boolean {
-  return specs.some(isGeometricSpec);
-}
-
-function withOptionalGeometric(specs: number[], appendGeometric: boolean): number[] {
-  if (!appendGeometric || specs.length === 0 || isExplicitEmptyList(specs)) {
-    return specs;
-  }
-  if (listHasGeometric(specs)) {
-    return specs;
-  }
-  return [...specs, GEO_BASE];
-}
-
 function formatSpecList(specs: number[]): string {
   if (specs.length === 0 || isExplicitEmptyList(specs)) {
     return "";
@@ -318,19 +304,17 @@ export function resolveInheritedSpecs(
 /**
  * Format a per-street bet list for Build. Empty (`[]`, inherit shared) resolves
  * to the shared sizes so rebuild keeps the same tree. Explicit-empty → blank
- * (check-only). When `appendGeometric` is set (legacy config.geometric), append
- * bare `e` to non-empty lists that lack a geometric sentinel.
+ * (check-only).
  */
 export function formatStreetBetField(
   streetValues: unknown,
   sharedValues: unknown,
-  options?: { appendGeometric?: boolean },
 ): string {
   const resolved = resolveInheritedSpecs(streetValues, sharedValues);
   if (isExplicitEmptyList(resolved) || resolved.length === 0) {
     return "";
   }
-  return formatSpecList(withOptionalGeometric(resolved, Boolean(options?.appendGeometric)));
+  return formatSpecList(resolved);
 }
 
 /**
@@ -344,7 +328,7 @@ export function formatStreetRaiseField(
   raiseValues: unknown,
   sharedRaises: unknown,
   streetBets: unknown,
-  options?: { appendGeometric?: boolean; sharedBets?: unknown },
+  options?: { sharedBets?: unknown },
 ): string {
   const raises = finiteSpecs(raiseValues);
   if (isExplicitEmptyList(raises)) {
@@ -354,12 +338,11 @@ export function formatStreetRaiseField(
   if (resolved.length === 0 || isExplicitEmptyList(resolved)) {
     return "-";
   }
-  const withGeo = withOptionalGeometric(resolved, Boolean(options?.appendGeometric));
   const bets = resolveInheritedSpecs(streetBets, options?.sharedBets);
-  if (!isExplicitEmptyList(bets) && sameSpecs(withGeo, bets)) {
+  if (!isExplicitEmptyList(bets) && sameSpecs(resolved, bets)) {
     return "";
   }
-  return formatSpecList(withGeo);
+  return formatSpecList(resolved);
 }
 
 /**
@@ -370,34 +353,24 @@ export function formatDonkField(
   donkValues: unknown,
   streetBets: unknown,
   sharedDonk?: unknown,
-  options?: { appendGeometric?: boolean },
 ): { text: string; copyBets: boolean } {
   const donk = finiteSpecs(donkValues);
   if (isExplicitEmptyList(donk)) {
     return { text: "", copyBets: false };
   }
   if (donk.length > 0) {
-    return {
-      text: formatSpecList(withOptionalGeometric(donk, Boolean(options?.appendGeometric))),
-      copyBets: false,
-    };
+    return { text: formatSpecList(donk), copyBets: false };
   }
   const shared = finiteSpecs(sharedDonk);
   if (shared.length > 0 && !isExplicitEmptyList(shared)) {
-    return {
-      text: formatSpecList(withOptionalGeometric(shared, Boolean(options?.appendGeometric))),
-      copyBets: false,
-    };
+    return { text: formatSpecList(shared), copyBets: false };
   }
   // Engine empty donk → use normal bets. Materialize street bets, or mark copy.
   const bets = finiteSpecs(streetBets);
   if (bets.length === 0 || isExplicitEmptyList(bets)) {
     return { text: "", copyBets: false };
   }
-  return {
-    text: formatSpecList(withOptionalGeometric(bets, Boolean(options?.appendGeometric))),
-    copyBets: true,
-  };
+  return { text: formatSpecList(bets), copyBets: true };
 }
 
 function encodeTokenList(text: string, allowMultiple: boolean): number[] {
@@ -508,8 +481,8 @@ function encodeDonk(text: string, checkbox: boolean, bets: number[]): number[] {
 
 /**
  * Size fields for a solve or tree-preview job.
- * Geometric and all-in are per-list tokens (`e`, `a`); the engine geometric flag
- * stays off. Callers should send `allow_all_in: 1` so `a` and stack-commits work.
+ * Geometric and all-in are per-list tokens (`e`, `a`). Callers should send
+ * `allow_all_in: 1` so `a` and stack-commits work.
  */
 export function encodeBettingJob(draft: BettingDraftInput) {
   const oopFlop = encodeBetList(draft.oopFlop);
@@ -542,7 +515,6 @@ export function encodeBettingJob(draft: BettingDraftInput) {
     oop_flop_donk: encodeDonk(draft.oopFlopDonk, Boolean(draft.donkFlop), oopFlop),
     oop_turn_donk: encodeDonk(draft.oopTurnDonk, Boolean(draft.donkTurn), oopTurn),
     oop_river_donk: encodeDonk(draft.oopRiverDonk, Boolean(draft.donkRiver), oopRiver),
-    geometric: 0,
     merge_threshold: threshold > 0 ? threshold / 100 : 0,
   };
 }

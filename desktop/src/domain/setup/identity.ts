@@ -334,7 +334,6 @@ export function openDraftBase(solutionPath = ""): SpotDraft {
     donkRiver: false,
     potCap: 0,
     noThreeBet: false,
-    geometric: false,
     allInThreshold: 0,
     accuracy: "",
     timeLimit: "",
@@ -395,50 +394,40 @@ export function draftPartialFromSolutionConfig(
       config.ip_raise_multiples,
     );
   }
-  // Legacy geometric flag injected one `e` into non-empty lists. Materialize
-  // that into Build text; Study no longer has a geometric toggle.
-  const appendGeometric = Boolean(config.geometric);
-  const geoOpts = { appendGeometric };
   if ("oop_flop_bets" in config || "oop_bets" in config) {
     partial.oopFlop = formatStreetBetField(
       config.oop_flop_bets,
       config.oop_bets,
-      geoOpts,
     );
   }
   if ("ip_flop_bets" in config || "ip_bets" in config) {
     partial.ipFlop = formatStreetBetField(
       config.ip_flop_bets,
       config.ip_bets,
-      geoOpts,
     );
   }
   if ("oop_turn_bets" in config || "oop_bets" in config) {
     partial.oopTurn = formatStreetBetField(
       config.oop_turn_bets,
       config.oop_bets,
-      geoOpts,
     );
   }
   if ("ip_turn_bets" in config || "ip_bets" in config) {
     partial.ipTurn = formatStreetBetField(
       config.ip_turn_bets,
       config.ip_bets,
-      geoOpts,
     );
   }
   if ("oop_river_bets" in config || "oop_bets" in config) {
     partial.oopRiver = formatStreetBetField(
       config.oop_river_bets,
       config.oop_bets,
-      geoOpts,
     );
   }
   if ("ip_river_bets" in config || "ip_bets" in config) {
     partial.ipRiver = formatStreetBetField(
       config.ip_river_bets,
       config.ip_bets,
-      geoOpts,
     );
   }
   if ("oop_flop_raises" in config || "oop_raises" in config) {
@@ -446,7 +435,7 @@ export function draftPartialFromSolutionConfig(
       config.oop_flop_raises,
       config.oop_raises,
       config.oop_flop_bets,
-      { ...geoOpts, sharedBets: config.oop_bets },
+      { sharedBets: config.oop_bets },
     );
   }
   if ("ip_flop_raises" in config || "ip_raises" in config) {
@@ -454,7 +443,7 @@ export function draftPartialFromSolutionConfig(
       config.ip_flop_raises,
       config.ip_raises,
       config.ip_flop_bets,
-      { ...geoOpts, sharedBets: config.ip_bets },
+      { sharedBets: config.ip_bets },
     );
   }
   if ("oop_turn_raises" in config || "oop_raises" in config) {
@@ -462,7 +451,7 @@ export function draftPartialFromSolutionConfig(
       config.oop_turn_raises,
       config.oop_raises,
       config.oop_turn_bets,
-      { ...geoOpts, sharedBets: config.oop_bets },
+      { sharedBets: config.oop_bets },
     );
   }
   if ("ip_turn_raises" in config || "ip_raises" in config) {
@@ -470,7 +459,7 @@ export function draftPartialFromSolutionConfig(
       config.ip_turn_raises,
       config.ip_raises,
       config.ip_turn_bets,
-      { ...geoOpts, sharedBets: config.ip_bets },
+      { sharedBets: config.ip_bets },
     );
   }
   if ("oop_river_raises" in config || "oop_raises" in config) {
@@ -478,7 +467,7 @@ export function draftPartialFromSolutionConfig(
       config.oop_river_raises,
       config.oop_raises,
       config.oop_river_bets,
-      { ...geoOpts, sharedBets: config.oop_bets },
+      { sharedBets: config.oop_bets },
     );
   }
   if ("ip_river_raises" in config || "ip_raises" in config) {
@@ -486,7 +475,7 @@ export function draftPartialFromSolutionConfig(
       config.ip_river_raises,
       config.ip_raises,
       config.ip_river_bets,
-      { ...geoOpts, sharedBets: config.ip_bets },
+      { sharedBets: config.ip_bets },
     );
   }
   if ("oop_donk" in config) {
@@ -497,7 +486,6 @@ export function draftPartialFromSolutionConfig(
       config.oop_flop_donk,
       config.oop_flop_bets ?? config.oop_bets,
       config.oop_donk,
-      geoOpts,
     );
     partial.oopFlopDonk = donk.text;
     partial.donkFlop = donk.copyBets;
@@ -507,7 +495,6 @@ export function draftPartialFromSolutionConfig(
       config.oop_turn_donk,
       config.oop_turn_bets ?? config.oop_bets,
       config.oop_donk,
-      geoOpts,
     );
     partial.oopTurnDonk = donk.text;
     partial.donkTurn = donk.copyBets;
@@ -517,14 +504,11 @@ export function draftPartialFromSolutionConfig(
       config.oop_river_donk,
       config.oop_river_bets ?? config.oop_bets,
       config.oop_donk,
-      geoOpts,
     );
     partial.oopRiverDonk = donk.text;
     partial.donkRiver = donk.copyBets;
   }
-  // Geometric / allow-all-in toggles are gone: sizes use `e` / `a` tokens.
-  // Keep allowAllIn true so stack-commits and `a` remain legal on rebuild.
-  partial.geometric = false;
+  // All-in is the `a` size token; always allow stack-commits on rebuild.
   partial.allowAllIn = true;
   const mergeThreshold = asFiniteNumber(config.merge_threshold);
   if (mergeThreshold !== undefined) {

@@ -395,7 +395,6 @@ Job parse_job(const std::string& text)
     job.pot_cap = read_number(text, "pot_cap", 0);
     job.allow_three_bet = read_number(text, "allow_three_bet", 1) != 0.0;
     job.allow_all_in = read_number(text, "allow_all_in", 1) != 0.0;
-    job.geometric = read_number(text, "geometric", 0) != 0.0;
     job.frozen = read_number(text, "frozen", 0) != 0.0;
     const double memory_raw = read_number(text, "memory_mib", 1024);
     if (!std::isfinite(memory_raw) || memory_raw < 1.0 || memory_raw != std::floor(memory_raw)
@@ -1037,7 +1036,6 @@ poker::streets::StreetConfig street_config(const Job& job)
     config.pot_cap = job.pot_cap;
     config.allow_three_bet = job.allow_three_bet;
     config.allow_all_in = job.allow_all_in;
-    config.geometric = job.geometric;
     config.all_in_threshold = job.all_in_threshold;
     config.max_raises = job.max_raises;
     config.rake.rate = job.rake_rate;
