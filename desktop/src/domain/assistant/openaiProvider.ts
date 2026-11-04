@@ -240,9 +240,7 @@ const INTERPRET_JSON_SCHEMA = {
         accuracy: { type: "string" },
         timeLimit: { type: "string" },
         algorithm: { type: "string", enum: ["cfr_plus", "cfr", "dcfr"] },
-        geometric: { type: "boolean" },
         noThreeBet: { type: "boolean" },
-        allowAllIn: { type: "boolean" },
         donkFlop: { type: "boolean" },
         donkTurn: { type: "boolean" },
         donkRiver: { type: "boolean" },
@@ -461,7 +459,6 @@ function asTreeEdits(raw: unknown): StudySetupTreePreset | undefined {
   }
   if (typeof src.potCap === "number") out.potCap = src.potCap;
   if (typeof src.noThreeBet === "boolean") out.noThreeBet = src.noThreeBet;
-  if (typeof src.geometric === "boolean") out.geometric = src.geometric;
   if (typeof src.maxRaises === "number") out.maxRaises = src.maxRaises;
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -483,9 +480,7 @@ const FIELD_EDIT_NUMBERS = [
 const FIELD_EDIT_STRINGS = ["accuracy", "timeLimit", "incentives", "edgeTags"] as const;
 
 const FIELD_EDIT_BOOLS = [
-  "geometric",
   "noThreeBet",
-  "allowAllIn",
   "donkFlop",
   "donkTurn",
   "donkRiver",

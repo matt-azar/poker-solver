@@ -302,8 +302,10 @@ export interface SpotDraft {
   mergeThresholdPct: number;
   potCap: number;
   noThreeBet: boolean;
+  /** Unused in Study UI; geometric is the `e` size token per street. */
   geometric: boolean;
   allInThreshold: number;
+  /** Always treated as true on solve/preview; all-in is the `a` size token. */
   allowAllIn: boolean;
   frozen: boolean;
   accuracy: string;

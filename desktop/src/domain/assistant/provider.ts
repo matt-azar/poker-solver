@@ -66,9 +66,7 @@ export interface StudyFieldEdits {
   rakeRate?: number;
   /** Engine solve-rake cap. Cleared with rakeRate when making the sim rake-free. */
   rakeCap?: number;
-  geometric?: boolean;
   noThreeBet?: boolean;
-  allowAllIn?: boolean;
   donkFlop?: boolean;
   donkTurn?: boolean;
   donkRiver?: boolean;

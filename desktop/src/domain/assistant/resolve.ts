@@ -1087,7 +1087,6 @@ function buildSetupPatch(args: {
     }
     if (tree.potCap !== undefined) explicit.potCap = tree.potCap;
     if (tree.noThreeBet !== undefined) explicit.noThreeBet = tree.noThreeBet;
-    if (tree.geometric !== undefined) explicit.geometric = tree.geometric;
     if (tree.maxRaises !== undefined) explicit.maxRaises = tree.maxRaises;
   }
   if (intent.board) {

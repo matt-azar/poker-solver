@@ -54,6 +54,6 @@ Surface conflicts — never silent override. Solve is not started by the assista
 
 When the player names a Build field (pot, stack, iterations, accuracy, time limit, threads, memory, algorithm, samples, donk, merge threshold, solve rake) without asking for a new study, emit `update_study` with `fieldEdits` containing only those keys. Do not invent pot type, ranges, or stakes. Do not set solve rake from a 100NL/cEV range request.
 
-`fieldEdits` keys: `pot`, `stack`, `iterations`, `accuracy`, `timeLimit`, `threads`, `memoryMib`, `algorithm` (`cfr_plus` | `cfr` | `dcfr`), `samples`, `maxRaises`, `mergeThresholdPct`, `potCap`, `rakeRate`, `rakeCap`, `geometric`, `noThreeBet`, `allowAllIn`, `donkFlop`, `donkTurn`, `donkRiver`, `incentives`, `edgeTags`. Reject negative pot/stack/memory, zero threads, and fractional iterations.
+`fieldEdits` keys: `pot`, `stack`, `iterations`, `accuracy`, `timeLimit`, `threads`, `memoryMib`, `algorithm` (`cfr_plus` | `cfr` | `dcfr`), `samples`, `maxRaises`, `mergeThresholdPct`, `potCap`, `rakeRate`, `rakeCap`, `noThreeBet`, `donkFlop`, `donkTurn`, `donkRiver`, `incentives`, `edgeTags`. Reject negative pot/stack/memory, zero threads, and fractional iterations. Geometric and all-in are size tokens (`e`, `a`) on each street, not field toggles.
 
 Street sizes stay on `treeEdits` / `intent.treePreset`: `oopFlop`, `ipFlop`, `oopTurn`, `ipTurn`, `oopRiver`, `ipRiver`.

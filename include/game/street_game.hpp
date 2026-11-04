@@ -178,8 +178,10 @@ inline DonkSelection select_donk(const StreetConfig& config, int kind)
     return DonkSelection{};
 }
 
-// Chip adds for one decision. `state` needs the street betting fields
-// (acting, street, contrib, pot, committed, last_raise, num_raises, prev_aggressor).
+// Chip adds for one decision. Size-token decoding lives in size_spec.hpp;
+// this helper only applies street selection, min-raise, pot-cap, and stack rules.
+// `state` needs the street betting fields (acting, street, contrib, pot,
+// committed, last_raise, num_raises, prev_aggressor).
 template <typename State>
 void fill_aggressive_amounts(
     const StreetConfig& config,
