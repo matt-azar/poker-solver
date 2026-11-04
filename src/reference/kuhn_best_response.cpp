@@ -1,7 +1,7 @@
-#include "solver/best_response.hpp"
+#include "solver/kuhn_best_response.hpp"
 
 #include "game/kuhn_game.hpp"
-#include "solver/cfr.hpp"
+#include "solver/kuhn_cfr.hpp"
 #include "solver/trainer.hpp"
 
 namespace poker::solver

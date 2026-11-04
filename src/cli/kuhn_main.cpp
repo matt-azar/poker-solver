@@ -1,5 +1,5 @@
 #include "game/kuhn_game.hpp"
-#include "solver/cfr.hpp"
+#include "solver/kuhn_cfr.hpp"
 
 #include <cstdlib>
 #include <fstream>

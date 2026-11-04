@@ -1808,6 +1808,14 @@ struct StreetBatchSolver::Engine
         bound_algorithm_ = algorithm;
     }
 
+    // Algorithm schedules (bodies in src/solver/postflop/algorithms/*.hpp).
+    void train_more_vanilla_iterations(int count);
+    void train_more_cfr_plus_iterations(int count);
+    void train_frozen_vanilla_iterations(int count);
+    void train_frozen_cfr_plus_iterations(int count);
+    void train_frozen_dcfr_iterations(int count);
+    void train_frozen_pcfr_plus_iterations(int count);
+
     void train_more(int count, Algorithm algorithm)
     {
         check_usable();
@@ -1830,33 +1838,13 @@ struct StreetBatchSolver::Engine
         bind_training_algorithm(algorithm);
         average_ready = false;
         const auto started = std::chrono::steady_clock::now();
-        for (int step = 0; step < count; ++step)
+        if (algorithm == Algorithm::VanillaCfr)
         {
-            ++trained;
-            if (algorithm == Algorithm::VanillaCfr)
-            {
-                freeze_sigma();
-                for (const Deal& deal : deals)
-                {
-                    cfr_deal(0, 1.0, 1.0, deal.probability, deal, -1, -1, -1, 1.0);
-                }
-            }
-            else
-            {
-                const double weight_iter = static_cast<double>(trained);
-                freeze_sigma();
-                for (const Deal& deal : deals)
-                {
-                    cfr_deal(0, 1.0, 1.0, deal.probability, deal, -1, -1, 0, weight_iter);
-                }
-                floor_player(0);
-                freeze_sigma();
-                for (const Deal& deal : deals)
-                {
-                    cfr_deal(0, 1.0, 1.0, deal.probability, deal, -1, -1, 1, weight_iter);
-                }
-                floor_player(1);
-            }
+            train_more_vanilla_iterations(count);
+        }
+        else
+        {
+            train_more_cfr_plus_iterations(count);
         }
         train_seconds_ += std::chrono::duration<double>(
             std::chrono::steady_clock::now() - started).count();
@@ -4661,67 +4649,21 @@ struct StreetBatchSolver::Engine
         ensure_ranks();
         ensure_support_masks();
         const auto started = std::chrono::steady_clock::now();
-        for (int step = 0; step < count; ++step)
+        if (algorithm == Algorithm::VanillaCfr)
         {
-            ++trained;
-            if (algorithm == Algorithm::VanillaCfr)
-            {
-                frozen_pass(-1, 1.0, algorithm);
-            }
-            else if (algorithm == Algorithm::Dcfr)
-            {
-                // DCFR(1.5,0,2): freeze, update OOP, discount(OOP)+freeze, update IP,
-                // discount(IP). Both passes share t; sigma weight is t².
-                const DcfrFactors factors = dcfr_factors(trained, dcfr_params_);
-                slot_positive_discount_ = factors.positive_discount;
-                slot_negative_discount_ = factors.negative_discount;
-                freeze_sigma();
-                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
-                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
-                frozen_walk(workspace, 0, -1, -1, 0, 0, factors.average_weight, false);
-                discount_and_freeze(0, factors.positive_discount, factors.negative_discount);
-                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
-                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
-                frozen_walk(workspace, 0, -1, -1, 0, 1, factors.average_weight, false);
-                discount_player(1, factors.positive_discount, factors.negative_discount);
-            }
-            else if (algorithm == Algorithm::PcfrPlus)
-            {
-                // PCFR+: RM on R+m, accumulate instantaneous into prediction_,
-                // commit+floor updating player; linear sigma weight t.
-                const double weight_iter = static_cast<double>(trained);
-                freeze_sigma();
-                pcfr_zero_prediction(0);
-                pcfr_collect_ = true;
-                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
-                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
-                frozen_walk(workspace, 0, -1, -1, 0, 0, weight_iter, false);
-                pcfr_collect_ = false;
-                pcfr_commit(0);
-                freeze_sigma();
-                pcfr_zero_prediction(1);
-                pcfr_collect_ = true;
-                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
-                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
-                frozen_walk(workspace, 0, -1, -1, 0, 1, weight_iter, false);
-                pcfr_collect_ = false;
-                pcfr_commit(1);
-            }
-            else
-            {
-                // CFR+: freeze, update OOP, fuse floor(OOP)+freeze, update IP, floor(IP).
-                // Same tables as two frozen_pass calls; one fewer full slot scan.
-                const double weight_iter = static_cast<double>(trained);
-                freeze_sigma();
-                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
-                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
-                frozen_walk(workspace, 0, -1, -1, 0, 0, weight_iter, false);
-                floor_and_freeze(0);
-                std::fill(workspace.scratch[0].pi0.begin(), workspace.scratch[0].pi0.end(), 1.0);
-                std::fill(workspace.scratch[0].pi1.begin(), workspace.scratch[0].pi1.end(), 1.0);
-                frozen_walk(workspace, 0, -1, -1, 0, 1, weight_iter, false);
-                floor_player(1);
-            }
+            train_frozen_vanilla_iterations(count);
+        }
+        else if (algorithm == Algorithm::Dcfr)
+        {
+            train_frozen_dcfr_iterations(count);
+        }
+        else if (algorithm == Algorithm::PcfrPlus)
+        {
+            train_frozen_pcfr_plus_iterations(count);
+        }
+        else
+        {
+            train_frozen_cfr_plus_iterations(count);
         }
         train_seconds_ += std::chrono::duration<double>(
             std::chrono::steady_clock::now() - started).count();
@@ -7491,3 +7433,12 @@ std::vector<StreetStrategyEntry> StreetBatchSolver::average_strategy_entries() c
 }
 
 } // namespace poker::solver
+
+// Algorithm schedules: one header per CFR variant (header-only; no CMake change).
+// Included after Engine is complete and outside the TU namespace so each header
+// can open namespace poker::solver for out-of-line Engine member definitions.
+#include "postflop/algorithms/vanilla_cfr.hpp"
+#include "postflop/algorithms/cfr_plus.hpp"
+#include "postflop/algorithms/dcfr.hpp"
+#include "postflop/algorithms/pcfr_plus.hpp"
+
