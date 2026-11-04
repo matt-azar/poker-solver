@@ -5,6 +5,7 @@ import {
   canNavBack,
   canNavForward,
   compactActionLabel,
+  displayPathStepLabel,
   edgeStepFromNode,
   formatChoiceFrequency,
   groupCrumbsByStreet,
@@ -63,6 +64,14 @@ describe("actionHistory helpers", () => {
     expect(compactActionLabel("Bet 50", 100)).not.toMatch(/Bet 50%/i);
     expect(compactActionLabel("Check", 100)).toBe("Check");
     expect(compactActionLabel("As", 100)).toBe("As");
+  });
+
+  it("respects betSizeDisplay mode for path compact labels", () => {
+    expect(compactActionLabel("Bet 75", 100, "pot")).toBe("b75");
+    expect(compactActionLabel("Bet 75", 100, "chips")).toBe("75.0 chips");
+    expect(compactActionLabel("Bet 75", 100, "both")).toBe("b75");
+    expect(compactActionLabel("Raise to 400", 300, "pot", 100)).toBe("r100");
+    expect(compactActionLabel("Bet 150 all-in", 100, "pot")).toBe("b150");
   });
 
   it("pairs actions with child ids and strategy frequencies", () => {
@@ -175,10 +184,42 @@ describe("actionHistory helpers", () => {
       actor: "OOP",
       street: "flop",
       kind: "action",
+      sizePot: 100,
+      toCall: 0,
     });
     expect(edge?.alternatives).toEqual([
-      { label: "Check", nodeId: "n-check", kind: "action" },
+      {
+        label: "Check",
+        rawLabel: "Check",
+        nodeId: "n-check",
+        kind: "action",
+      },
     ]);
+  });
+
+  it("reformats stored path steps when betSizeDisplay changes", () => {
+    const step = {
+      label: "b50",
+      rawLabel: "Bet 50",
+      kind: "action" as const,
+      sizePot: 100,
+      toCall: 0,
+    };
+    expect(displayPathStepLabel(step, "pot")).toBe("b50");
+    expect(displayPathStepLabel(step, "chips")).toBe("50.0 chips");
+    expect(displayPathStepLabel(step, "both")).toBe("b50");
+    expect(
+      displayPathStepLabel(
+        {
+          label: "Raise to 400",
+          rawLabel: "Raise to 400",
+          kind: "action",
+          sizePot: 300,
+          toCall: 100,
+        },
+        "pot",
+      ),
+    ).toBe("r100");
   });
 
   it("tags path bets from source pot, not arrived pot (R10)", () => {

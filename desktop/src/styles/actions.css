@@ -13,6 +13,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--secondary);
+  /* Clip only the bottom frequency bar; keep size tags fully visible. */
   overflow: hidden;
 }
 
@@ -76,16 +77,24 @@
 }
 
 .action-block__primary {
+  position: relative;
+  z-index: 1;
   font-weight: 700;
   font-family: var(--font-mono);
   letter-spacing: 0.02em;
   white-space: nowrap;
+  /* Never clip pot tags (b75) behind the frequency bar or overflow. */
+  overflow: visible;
+  color: var(--text);
 }
 
 .action-block__chips {
+  position: relative;
+  z-index: 1;
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
+  overflow: visible;
 }
 
 .action-block__freq {

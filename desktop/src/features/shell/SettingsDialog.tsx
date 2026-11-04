@@ -180,10 +180,13 @@ export function SettingsDialog() {
               })
             }
           >
-            <option value="both">Pot tag + chips (b75 · 75.0)</option>
+            <option value="both">Pot tag + chips (b75 · 75.0 chips)</option>
             <option value="pot">Pot tag only (b75)</option>
-            <option value="chips">Chips only (75.0)</option>
+            <option value="chips">Chips only (75.0 chips)</option>
           </select>
+          <span className="settings-hint">
+            Updates Study action blocks and path size tags immediately.
+          </span>
         </label>
 
         <h3 className="build-subhead">Solve</h3>

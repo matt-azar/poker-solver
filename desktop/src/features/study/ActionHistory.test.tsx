@@ -19,6 +19,7 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
+const { useSettingsStore } = await import("../../state/settingsStore");
 const { useStudyStore } = await import("../../state/studyStore");
 const { ActionHistory } = await import("./ActionHistory");
 
@@ -64,6 +65,12 @@ describe("ActionHistory path chrome", () => {
       takeTrailAlternative: vi.fn(async () => undefined),
       followAction: vi.fn(async () => undefined),
       layout: { ...useStudyStore.getState().layout, historyHeight: 96 },
+    });
+    useSettingsStore.setState({
+      settings: {
+        ...useSettingsStore.getState().settings,
+        betSizeDisplay: "both",
+      },
     });
   });
 
@@ -131,5 +138,59 @@ describe("ActionHistory path chrome", () => {
     render(<ActionHistory />);
     await user.click(screen.getByLabelText("Back"));
     expect(goNavBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates Next and path size tags when betSizeDisplay changes", () => {
+    useStudyStore.setState({
+      pathTrail: [
+        {
+          nodeId: "root",
+          label: "Root",
+          rawLabel: "Root",
+          kind: "root",
+          street: "flop",
+          actor: null,
+        },
+        {
+          nodeId: "n-bet",
+          label: "b100",
+          rawLabel: "Bet 100",
+          kind: "action",
+          street: "flop",
+          actor: "OOP",
+          sizePot: 100,
+          toCall: 0,
+        },
+      ],
+      currentNode: {
+        ...rootNode,
+        node_id: "n-bet",
+        player: 1,
+        // Facing Bet 100: pot 200, to_call 100 → basis 300; Raise to 400 → r100.
+        pot: 200,
+        to_call: 100,
+        line: "Bet 100",
+        actions: ["Fold", "Call", "Raise to 400"],
+        children: ["n-f", "n-c", "n-r"],
+        strategy: [[0.2, 0.3, 0.5]],
+      },
+    });
+
+    const { rerender } = render(<ActionHistory />);
+    // Path crumb uses captured source pot → b100; Next shows raise tag.
+    expect(screen.getByText("b100")).toBeTruthy();
+    expect(screen.getByText("r100")).toBeTruthy();
+
+    useSettingsStore.setState({
+      settings: {
+        ...useSettingsStore.getState().settings,
+        betSizeDisplay: "chips",
+      },
+    });
+    rerender(<ActionHistory />);
+    expect(screen.queryByText("b100")).toBeNull();
+    expect(screen.queryByText("r100")).toBeNull();
+    expect(screen.getByText("100.0 chips")).toBeTruthy();
+    expect(screen.getByText("400.0 chips")).toBeTruthy();
   });
 });

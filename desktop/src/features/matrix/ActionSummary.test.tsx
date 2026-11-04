@@ -104,4 +104,57 @@ describe("ActionSummary", () => {
     expect(within(legend).getByText("b50")).toBeTruthy();
     expect(within(legend).getByText("b100")).toBeTruthy();
   });
+
+  it("reacts immediately when Settings betSizeDisplay changes", () => {
+    const { rerender } = render(<ActionSummary />);
+    expect(screen.getAllByText("b50").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("50.0 chips").length).toBeGreaterThan(0);
+
+    useSettingsStore.setState({
+      settings: {
+        ...useSettingsStore.getState().settings,
+        betSizeDisplay: "chips",
+      },
+    });
+    rerender(<ActionSummary />);
+    expect(screen.queryByText("b50")).toBeNull();
+    expect(screen.getAllByText("50.0 chips").length).toBeGreaterThan(0);
+
+    useSettingsStore.setState({
+      settings: {
+        ...useSettingsStore.getState().settings,
+        betSizeDisplay: "pot",
+      },
+    });
+    rerender(<ActionSummary />);
+    expect(screen.getAllByText("b50").length).toBeGreaterThan(0);
+    expect(screen.queryByText("50.0 chips")).toBeNull();
+  });
+
+  it("shows r-tags for engine Raise to labels using to_call basis", () => {
+    useStudyStore.setState({
+      currentNode: {
+        node_id: "n-facing",
+        kind: "decision",
+        player: 1,
+        pot: 200,
+        to_call: 100,
+        actions: ["Fold", "Call", "Raise to 400"],
+        children: ["n-f", "n-c", "n-r"],
+        combos: ["AsAh"],
+        marginal: [1],
+        reach_defined: true,
+        strategy: [[0.1, 0.4, 0.5]],
+      },
+      status: {
+        pot: 200,
+        root_node_id: "n-facing",
+      } as never,
+    });
+    render(<ActionSummary />);
+    // basis = pot + to_call = 300; raise increment = 400 - 100 = 300 → r100
+    expect(screen.getAllByText("r100").length).toBeGreaterThan(0);
+    expect(screen.getByText("400.0 chips")).toBeTruthy();
+    expect(screen.queryByText("Raise to 400")).toBeNull();
+  });
 });

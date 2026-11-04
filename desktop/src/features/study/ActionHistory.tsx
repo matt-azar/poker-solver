@@ -9,6 +9,7 @@ import {
 import { mapActionColors } from "../../domain/actionColors";
 import {
   actionSizePotBasis,
+  displayPathStepLabel,
   formatChoiceFrequency,
   groupCrumbsByStreet,
   groupPathByStreet,
@@ -25,6 +26,7 @@ import {
   formatActionDisplay,
   formatActionTooltip,
   formatFrequencyPct,
+  type BetSizeDisplayMode,
 } from "../../domain/betSizes";
 import { dealStreetFromBoard } from "../../domain/cards";
 import { useSettingsStore } from "../../state/settingsStore";
@@ -47,14 +49,44 @@ function stepsFromTrailOrCrumbs(
   pot: number,
   board: string[] | string | null | undefined,
   place: string | null | undefined,
+  mode: BetSizeDisplayMode,
+  toCall = 0,
 ): PathStreetGroup[] {
   if (
     trail.length > 0 &&
     (!currentNodeId || trail[trail.length - 1]?.nodeId === currentNodeId)
   ) {
-    return groupPathByStreet(trail, board);
+    // Reformat size tags under the live Bet size labels setting while keeping
+    // each step's captured source pot/to_call (not the arrived node pot).
+    const relabeled = trail.map((step) => ({
+      ...step,
+      label: displayPathStepLabel(step, mode, pot),
+      alternatives: step.alternatives?.map((alt) => ({
+        ...alt,
+        label: displayPathStepLabel(
+          {
+            label: alt.label,
+            rawLabel: alt.rawLabel || alt.label,
+            kind: alt.kind === "card" ? "card" : "action",
+            sizePot: step.sizePot,
+            toCall: step.toCall,
+          },
+          mode,
+          pot,
+        ),
+      })),
+    }));
+    return groupPathByStreet(relabeled, board);
   }
-  const crumbs = pathCrumbsFromTrail(trail, line, rootId, currentNodeId, pot);
+  const crumbs = pathCrumbsFromTrail(
+    trail,
+    line,
+    rootId,
+    currentNodeId,
+    pot,
+    mode,
+    toCall,
+  );
   return groupCrumbsByStreet(crumbs, board, place);
 }
 
@@ -174,6 +206,8 @@ export function ActionHistory() {
     currentNode,
     Number(status?.pot ?? draft.pot ?? 0),
   );
+  const toCall = Number(currentNode?.to_call ?? 0);
+  const displayOpts = useMemo(() => ({ toCall }), [toCall]);
   const place =
     typeof currentNode?.place === "string" ? currentNode.place : null;
 
@@ -188,9 +222,11 @@ export function ActionHistory() {
             pot,
             currentNode.board,
             place,
+            betSizeDisplay,
+            toCall,
           )
         : [],
-    [currentNode, pathTrail, pot, rootId, place],
+    [currentNode, pathTrail, pot, rootId, place, betSizeDisplay, toCall],
   );
 
   const choices = useMemo(() => nextChoicesFromNode(currentNode), [currentNode]);
@@ -437,7 +473,12 @@ export function ActionHistory() {
               <span className="muted">No branches</span>
             ) : (
               choices.map((choice, index) => {
-                const display = formatActionDisplay(choice.label, pot, betSizeDisplay);
+                const display = formatActionDisplay(
+                  choice.label,
+                  pot,
+                  betSizeDisplay,
+                  displayOpts,
+                );
                 const freqText =
                   formatFrequencyPct(choice.frequency) ??
                   formatChoiceFrequency(choice.frequency);
@@ -451,7 +492,7 @@ export function ActionHistory() {
                     frequencyText={freqText}
                     color={colors.byIndex[index]}
                     disabled={!choice.nodeId}
-                    title={`${formatActionTooltip(choice.label, pot, betSizeDisplay)} · follow`}
+                    title={`${formatActionTooltip(choice.label, pot, betSizeDisplay, displayOpts)} · follow`}
                     aria-label={`Follow ${display.primary}${freqText ? `, ${freqText}` : ""}`}
                     onClick={() => {
                       if (choice.nodeId) {

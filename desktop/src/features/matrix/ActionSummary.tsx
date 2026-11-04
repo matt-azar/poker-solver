@@ -36,6 +36,8 @@ export function ActionSummary() {
     currentNode,
     Number(status?.pot ?? draft.pot ?? 0),
   );
+  const toCall = Number(currentNode?.to_call ?? 0);
+  const displayOpts = useMemo(() => ({ toCall }), [toCall]);
 
   const colors = useMemo(
     () => mapActionColors(actions ?? []),
@@ -72,14 +74,19 @@ export function ActionSummary() {
   const legend = useMemo(
     () =>
       colors.legend.map((entry) => {
-        const display = formatActionDisplay(entry.label, pot, "pot");
+        const display = formatActionDisplay(
+          entry.label,
+          pot,
+          betSizeDisplay === "chips" ? "chips" : "pot",
+          displayOpts,
+        );
         return {
           key: entry.label,
           label: display.primary,
           color: entry.color,
         };
       }),
-    [colors.legend, pot],
+    [colors.legend, pot, betSizeDisplay, displayOpts],
   );
 
   return (
@@ -106,7 +113,12 @@ export function ActionSummary() {
       </div>
       <MatrixDisplayControls />
       {(actions ?? []).map((label, index) => {
-        const display = formatActionDisplay(label, pot, betSizeDisplay);
+        const display = formatActionDisplay(
+          label,
+          pot,
+          betSizeDisplay,
+          displayOpts,
+        );
         const freqText = formatFrequencyPct(freqs[index]);
         const filtered = actionFilter === index;
         return (
@@ -119,7 +131,7 @@ export function ActionSummary() {
             frequencyText={freqText}
             color={colors.byIndex[index]}
             active={filtered}
-            title={`${formatActionTooltip(label, pot, betSizeDisplay)} · click to filter`}
+            title={`${formatActionTooltip(label, pot, betSizeDisplay, displayOpts)} · click to filter`}
             aria-label={`Filter ${display.primary}${freqText ? `, ${freqText}` : ""}`}
             onClick={() => setActionFilter(filtered ? null : index)}
           />
