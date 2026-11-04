@@ -8,7 +8,6 @@ first-to-act 0
 max-raises 1
 allow-all-in 0
 allow-three-bet 1
-geometric 0
 all-in-threshold 0
 pot-cap 0
 rake-rate 0

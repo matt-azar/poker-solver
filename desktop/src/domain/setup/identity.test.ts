@@ -207,7 +207,8 @@ describe("openDraftBase / draftFromOpenedSolution", () => {
     expect(opened.draft.oopRange).toBe("AA");
     expect(opened.draft.ipRange).toBe("KK");
     expect(opened.draft.oopBets).toBe("50, 100");
-    expect(opened.draft.ipFlop).toBe("");
+    // Empty ip_flop_bets inherits shared ip_bets [0.5].
+    expect(opened.draft.ipFlop).toBe("50");
     expect(opened.draft.treeEdits).toEqual(["force - c"]);
     expect(opened.draft.timeLimit).toBe("");
     expect(opened.draft.solutionPath).toBe("/tmp/aa.psol");
@@ -234,16 +235,33 @@ describe("openDraftBase / draftFromOpenedSolution", () => {
     expect(opened.draft.timeLimit).toBe("");
   });
 
-  it("maps empty bet arrays to empty draft fields (check-only)", () => {
-    const partial = draftPartialFromSolutionConfig({
+  it("resolves inherited street bets into Build text; explicit-empty stays blank", () => {
+    const inherited = draftPartialFromSolutionConfig({
+      oop_bets: [0.5, 1],
+      ip_bets: [0.5],
+      oop_flop_bets: [],
+      ip_flop_bets: [],
+      oop_turn_bets: [-4e9],
+      ip_turn_bets: [-4e9],
+      oop_flop_raises: [],
+      ip_flop_raises: [],
+    });
+    expect(inherited.oopBets).toBe("50, 100");
+    expect(inherited.oopFlop).toBe("50, 100");
+    expect(inherited.ipFlop).toBe("50");
+    expect(inherited.oopTurn).toBe("");
+    expect(inherited.ipTurn).toBe("");
+    expect(inherited.oopFlopRaises).toBe("-");
+    expect(inherited.allowAllIn).toBe(true);
+
+    const checkOnly = draftPartialFromSolutionConfig({
       oop_bets: [],
       ip_bets: [],
       oop_flop_bets: [],
       ip_flop_bets: [],
     });
-    expect(partial.oopBets).toBe("");
-    expect(partial.ipBets).toBe("");
-    expect(partial.oopFlop).toBe("");
-    expect(partial.ipFlop).toBe("");
+    expect(checkOnly.oopBets).toBe("");
+    expect(checkOnly.oopFlop).toBe("");
+    expect(checkOnly.ipFlop).toBe("");
   });
 });

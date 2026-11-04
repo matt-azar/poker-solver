@@ -54,7 +54,6 @@ function emptyDraft(): SpotDraft {
     mergeThresholdPct: 0,
     potCap: 1,
     noThreeBet: false,
-    geometric: false,
     allInThreshold: 0,
     allowAllIn: true,
     frozen: false,

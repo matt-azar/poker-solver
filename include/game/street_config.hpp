@@ -60,9 +60,6 @@ struct StreetConfig
     // list does not fall back to the bet sizes.
     std::vector<double> oop_raise_multiples{};
     std::vector<double> ip_raise_multiples{};
-    // One extra size that splits the remaining stack into equal pot fractions
-    // over the streets still to play. On the river that size is all-in.
-    bool geometric = false;
     // A size that would commit more than this fraction of the starting stack
     // is replaced by all-in. Zero leaves every size as listed.
     double all_in_threshold = 0.0;
@@ -170,8 +167,10 @@ inline DonkSelection select_donk(const StreetConfig& config, int kind)
     return DonkSelection{};
 }
 
-// Chip adds for one decision. `state` needs the street betting fields
-// (acting, street, contrib, pot, committed, last_raise, num_raises, prev_aggressor).
+// Chip adds for one decision. Size-token decoding lives in size_spec.hpp;
+// this helper only applies street selection, min-raise, pot-cap, and stack rules.
+// `state` needs the street betting fields (acting, street, contrib, pot,
+// committed, last_raise, num_raises, prev_aggressor).
 template <typename State>
 void fill_aggressive_amounts(
     const StreetConfig& config,
@@ -338,17 +337,8 @@ void fill_aggressive_amounts(
             consider(street_total - state.contrib[player], false);
         }
     }
-    if (config.geometric)
-    {
-        offers = true;
-        const int streets_left = betting_street_count - state.street;
-        const int stack_left = facing ? max_add - to_call : max_add;
-        const double fraction = geometric_pot_fraction(basis, stack_left, streets_left);
-        const int sized = round_chips(fraction, basis);
-        consider(facing ? to_call + sized : sized, false);
-    }
-    // All-in is added only when this spot already has a size, or the CLI
-    // geometric flag injected one. A blank list stays check-only.
+    // All-in is added only when this spot already has a size (including an `a`
+    // or `e` token). A blank / explicit-empty list stays check-only.
     if (config.allow_all_in && offers)
     {
         consider(max_add, false);

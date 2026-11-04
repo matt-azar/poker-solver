@@ -32,7 +32,7 @@ Fractions are of the pot, rounded to the nearest tenth of a chip, with ties away
 - Equal amounts are one action.
 - The minimum opening bet is 0.1 chip. A later raise must increase the commitment by at least the previous full bet or raise.
 - With equal stacks, a player cannot raise an opponent who is already all-in.
-- The opening bet on a street does **not** count toward `max_raises`. Only facing raises do. `max_raises` 0 allows bets but no raises; at the raise cap the facing player can fold or call only. Check-only trees use empty bet size lists (and geometric/all-in off).
+- The opening bet on a street does **not** count toward `max_raises`. Only facing raises do. `max_raises` 0 allows bets but no raises; at the raise cap the facing player can fold or call only. Check-only trees use empty / explicit-empty bet size lists.
 - Raise sizes are separate from bet sizes. If raise sizes are omitted on the command line, or the JSON key is absent, they copy that player's bet sizes when raise multiples are also empty. A present empty raise array stays empty.
 - At most 8 actions are legal at one decision. That is the trainer's scratch limit: check plus seven bets, or fold, call, and six raises.
 

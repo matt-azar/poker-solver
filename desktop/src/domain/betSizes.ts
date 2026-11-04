@@ -1,8 +1,19 @@
 /**
- * Pio-style bet-size parsing and Study display helpers.
+ * Pio-style bet-size parsing and Study Build display helpers.
  *
  * Build inputs use pot percentages (`75` → 0.75 pot). Engine labels are chip
  * amounts (`Bet 75`); Study display can show pot tag + chips.
+ *
+ * Numeric encoding mirrors `include/game/size_spec.hpp`. A `number[]` entry is
+ * one of: pot fraction (≥ 0), fixed chips (−chips in (−1e8, 0)), all-in (−1e9),
+ * geometric (−2e9 − N streets), raise multiple (−3e9 − m), or explicit-empty
+ * (−4e9). Prefer {@link formatEngineSpec} / {@link encodeBetList} over reading
+ * raw numbers in UI code.
+ *
+ * Study Build blank bet = check-only; blank raise = copy that street's bets;
+ * blank donk = no lead. Engine JSON still distinguishes inherit (`[]`) from
+ * explicit-empty (`[-4e9]`). Import helpers below resolve inheritance into
+ * editable text so rebuild keeps the same tree.
  */
 
 export type BetSizeDisplayMode = "both" | "pot" | "chips";
@@ -12,8 +23,11 @@ export interface ParsedSizeToken {
   fraction: number;
   /** True when the token was geometric `e` / `Ne`. */
   geometric: boolean;
-  /** Multiplier on the geometric size (`3e` → 3). */
-  geometricMultiple: number;
+  /**
+   * Streets encoded by a geometric token. Bare `e` → 0 (engine picks streets
+   * left at the node). `2e` → 2 equal pot-fraction bets from the current pot.
+   */
+  geometricStreets: number;
   /** True when the token was a raise multiple (`2x` / `2.5x`). */
   raiseMultiple: boolean;
   /** Facing-bet multiple (`2x` → 2). */
@@ -51,7 +65,8 @@ export function geometricPotFraction(
  * - `75` / `75%` → 0.75
  * - `150` → 1.5
  * - `0.5` → 0.5 (explicit fraction)
- * - `e` / `2e` / `3e` → geometric (multiple)
+ * - `0.5%` → 0.005
+ * - `e` / `2e` / `3e` → geometric (streets; bare `e` encodes 0)
  * - `2x` / `2.5x` → raise multiple of the bet being faced
  * - `20c` → fixed chips as negative engine size
  */
@@ -63,14 +78,23 @@ export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
 
   const geo = raw.match(/^(\d+(?:\.\d+)?)?e$/);
   if (geo) {
-    const multiple = geo[1] ? Number(geo[1]) : 1;
-    if (!Number.isFinite(multiple) || multiple <= 0) {
+    if (geo[1] === undefined) {
+      return {
+        fraction: 0,
+        geometric: true,
+        geometricStreets: 0,
+        raiseMultiple: false,
+        raiseMultipleValue: 0,
+      };
+    }
+    const streets = Number(geo[1]);
+    if (!Number.isInteger(streets) || streets <= 0 || streets > 100) {
       return null;
     }
     return {
       fraction: 0,
       geometric: true,
-      geometricMultiple: multiple,
+      geometricStreets: streets,
       raiseMultiple: false,
       raiseMultipleValue: 0,
     };
@@ -85,7 +109,7 @@ export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
     return {
       fraction: 0,
       geometric: false,
-      geometricMultiple: 1,
+      geometricStreets: 0,
       raiseMultiple: true,
       raiseMultipleValue: multiple,
     };
@@ -99,7 +123,7 @@ export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
     return {
       fraction: pct / 100,
       geometric: false,
-      geometricMultiple: 1,
+      geometricStreets: 0,
       raiseMultiple: false,
       raiseMultipleValue: 0,
     };
@@ -113,7 +137,7 @@ export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
     return {
       fraction: -Math.abs(chips),
       geometric: false,
-      geometricMultiple: 1,
+      geometricStreets: 0,
       raiseMultiple: false,
       raiseMultipleValue: 0,
     };
@@ -128,7 +152,7 @@ export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
     return {
       fraction: value / 100,
       geometric: false,
-      geometricMultiple: 1,
+      geometricStreets: 0,
       raiseMultiple: false,
       raiseMultipleValue: 0,
     };
@@ -136,7 +160,7 @@ export function parseSizeTokenDetailed(token: string): ParsedSizeToken | null {
   return {
     fraction: value,
     geometric: false,
-    geometricMultiple: 1,
+    geometricStreets: 0,
     raiseMultiple: false,
     raiseMultipleValue: 0,
   };
@@ -188,7 +212,10 @@ function trimNumber(value: number): string {
   return String(rounded);
 }
 
-/** One stored spec back into a Build token (`50`, `e`, `2e`, `20c`, `2.5x`, `a`). */
+/**
+ * One stored spec back into a Build token (`50`, `0.5%`, `e`, `2e`, `20c`, `2.5x`, `a`).
+ * Percentages that would not round-trip as a bare Pio number are written with `%`.
+ */
 export function formatEngineSpec(spec: number): string {
   if (isExplicitEmptySpec(spec)) {
     return "-";
@@ -206,7 +233,13 @@ export function formatEngineSpec(spec: number): string {
   if (spec < 0 && spec > -1e8) {
     return `${trimNumber(-spec)}c`;
   }
-  return trimNumber(spec * 100);
+  const pct = spec * 100;
+  const bare = trimNumber(pct);
+  const parsed = parseSizeToken(bare);
+  if (parsed == null || Math.abs(parsed - spec) > 1e-9) {
+    return `${bare}%`;
+  }
+  return bare;
 }
 
 function finiteSpecs(values: unknown): number[] {
@@ -220,9 +253,18 @@ function sameSpecs(left: number[], right: number[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function formatSpecList(specs: number[]): string {
+  if (specs.length === 0 || isExplicitEmptyList(specs)) {
+    return "";
+  }
+  return specs.map(formatEngineSpec).join(", ");
+}
+
 /**
  * Display a stored size list. An explicit-empty raise list is `-` (no raises).
  * A raise list that matches the street's bets displays blank, which copies bets.
+ * Prefer {@link formatStreetBetField} / {@link formatStreetRaiseField} when
+ * importing config so inheritance is resolved into editable text.
  */
 export function formatStoredSizes(
   values: unknown,
@@ -244,7 +286,94 @@ export function formatStoredSizes(
   return specs.map(formatEngineSpec).join(", ");
 }
 
-function encodeTokenList(text: string, allowMultiple: boolean, geometricFlag: boolean): number[] {
+/** Resolve engine inherit (`[]`) against a shared list; leave explicit-empty as-is. */
+export function resolveInheritedSpecs(
+  streetValues: unknown,
+  sharedValues: unknown,
+): number[] {
+  const street = finiteSpecs(streetValues);
+  if (isExplicitEmptyList(street)) {
+    return street;
+  }
+  if (street.length === 0) {
+    return finiteSpecs(sharedValues);
+  }
+  return street;
+}
+
+/**
+ * Format a per-street bet list for Build. Empty (`[]`, inherit shared) resolves
+ * to the shared sizes so rebuild keeps the same tree. Explicit-empty → blank
+ * (check-only).
+ */
+export function formatStreetBetField(
+  streetValues: unknown,
+  sharedValues: unknown,
+): string {
+  const resolved = resolveInheritedSpecs(streetValues, sharedValues);
+  if (isExplicitEmptyList(resolved) || resolved.length === 0) {
+    return "";
+  }
+  return formatSpecList(resolved);
+}
+
+/**
+ * Format a per-street raise list for Build.
+ * - Explicit-empty → `-`
+ * - Empty (`[]`) resolves shared raises; if that is also empty → `-` (no raises)
+ * - Matching street bets → blank (encode copies bets)
+ * - Otherwise the resolved size text
+ */
+export function formatStreetRaiseField(
+  raiseValues: unknown,
+  sharedRaises: unknown,
+  streetBets: unknown,
+  options?: { sharedBets?: unknown },
+): string {
+  const raises = finiteSpecs(raiseValues);
+  if (isExplicitEmptyList(raises)) {
+    return "-";
+  }
+  const resolved = raises.length === 0 ? finiteSpecs(sharedRaises) : raises;
+  if (resolved.length === 0 || isExplicitEmptyList(resolved)) {
+    return "-";
+  }
+  const bets = resolveInheritedSpecs(streetBets, options?.sharedBets);
+  if (!isExplicitEmptyList(bets) && sameSpecs(resolved, bets)) {
+    return "";
+  }
+  return formatSpecList(resolved);
+}
+
+/**
+ * Format a donk list for Build. Empty (use normal bets) materializes the street
+ * (or shared) bet sizes. Explicit-empty → blank (no lead).
+ */
+export function formatDonkField(
+  donkValues: unknown,
+  streetBets: unknown,
+  sharedDonk?: unknown,
+): { text: string; copyBets: boolean } {
+  const donk = finiteSpecs(donkValues);
+  if (isExplicitEmptyList(donk)) {
+    return { text: "", copyBets: false };
+  }
+  if (donk.length > 0) {
+    return { text: formatSpecList(donk), copyBets: false };
+  }
+  const shared = finiteSpecs(sharedDonk);
+  if (shared.length > 0 && !isExplicitEmptyList(shared)) {
+    return { text: formatSpecList(shared), copyBets: false };
+  }
+  // Engine empty donk → use normal bets. Materialize street bets, or mark copy.
+  const bets = finiteSpecs(streetBets);
+  if (bets.length === 0 || isExplicitEmptyList(bets)) {
+    return { text: "", copyBets: false };
+  }
+  return { text: formatSpecList(bets), copyBets: true };
+}
+
+function encodeTokenList(text: string, allowMultiple: boolean): number[] {
   const parts = text
     .split(/[,]+/)
     .map((part) => part.trim())
@@ -292,30 +421,23 @@ function encodeTokenList(text: string, allowMultiple: boolean, geometricFlag: bo
   if (out.length === 0) {
     return [EXPLICIT_EMPTY_SPEC];
   }
-  if (geometricFlag && !out.some(isGeometricSpec)) {
-    out.push(GEO_BASE);
-  }
   return out;
 }
 
-/** Blank bet text is an explicit-empty list (forced check). `e` stays a sentinel. */
-export function encodeBetList(text: string, geometricFlag: boolean): number[] {
-  return encodeTokenList(text, false, geometricFlag);
+/** Blank bet text is an explicit-empty list (forced check). `e` / `a` stay sentinels. */
+export function encodeBetList(text: string): number[] {
+  return encodeTokenList(text, false);
 }
 
 /**
  * Blank raise text copies that street's bet specs, so max raises 1 still raises.
  * `-` / `none` / `x` is an explicit empty raise list.
  */
-export function encodeRaiseList(
-  text: string,
-  betSpecs: number[],
-  geometricFlag: boolean,
-): number[] {
+export function encodeRaiseList(text: string, betSpecs: number[]): number[] {
   if (!text.trim()) {
     return betSpecs.slice();
   }
-  return encodeTokenList(text, true, geometricFlag);
+  return encodeTokenList(text, true);
 }
 
 export interface BettingDraftInput {
@@ -339,7 +461,6 @@ export interface BettingDraftInput {
   donkFlop?: boolean;
   donkTurn?: boolean;
   donkRiver?: boolean;
-  geometric: boolean;
   mergeThresholdPct?: number;
 }
 
@@ -347,26 +468,29 @@ function encodeSharedBets(text: string): number[] {
   if (!text.trim()) {
     return [];
   }
-  const specs = encodeTokenList(text, false, false);
+  const specs = encodeTokenList(text, false);
   return isExplicitEmptyList(specs) ? [] : specs;
 }
 
-function encodeDonk(text: string, checkbox: boolean, bets: number[], geometricFlag: boolean): number[] {
+function encodeDonk(text: string, checkbox: boolean, bets: number[]): number[] {
   if (!text.trim()) {
     return checkbox ? bets.slice() : [EXPLICIT_EMPTY_SPEC];
   }
-  return encodeTokenList(text, false, geometricFlag);
+  return encodeTokenList(text, false);
 }
 
-/** Size fields for a solve or tree-preview job. Geometric stays off the engine flag. */
+/**
+ * Size fields for a solve or tree-preview job.
+ * Geometric and all-in are per-list tokens (`e`, `a`). Callers should send
+ * `allow_all_in: 1` so `a` and stack-commits work.
+ */
 export function encodeBettingJob(draft: BettingDraftInput) {
-  const geometric = draft.geometric;
-  const oopFlop = encodeBetList(draft.oopFlop, geometric);
-  const ipFlop = encodeBetList(draft.ipFlop, geometric);
-  const oopTurn = encodeBetList(draft.oopTurn, geometric);
-  const ipTurn = encodeBetList(draft.ipTurn, geometric);
-  const oopRiver = encodeBetList(draft.oopRiver, geometric);
-  const ipRiver = encodeBetList(draft.ipRiver, geometric);
+  const oopFlop = encodeBetList(draft.oopFlop);
+  const ipFlop = encodeBetList(draft.ipFlop);
+  const oopTurn = encodeBetList(draft.oopTurn);
+  const ipTurn = encodeBetList(draft.ipTurn);
+  const oopRiver = encodeBetList(draft.oopRiver);
+  const ipRiver = encodeBetList(draft.ipRiver);
   const threshold = draft.mergeThresholdPct ?? 0;
   return {
     oop_bets: encodeSharedBets(draft.oopBets),
@@ -381,110 +505,17 @@ export function encodeBettingJob(draft: BettingDraftInput) {
     ip_turn_bets: ipTurn,
     oop_river_bets: oopRiver,
     ip_river_bets: ipRiver,
-    oop_flop_raises: encodeRaiseList(draft.oopFlopRaises, oopFlop, geometric),
-    ip_flop_raises: encodeRaiseList(draft.ipFlopRaises, ipFlop, geometric),
-    oop_turn_raises: encodeRaiseList(draft.oopTurnRaises, oopTurn, geometric),
-    ip_turn_raises: encodeRaiseList(draft.ipTurnRaises, ipTurn, geometric),
-    oop_river_raises: encodeRaiseList(draft.oopRiverRaises, oopRiver, geometric),
-    ip_river_raises: encodeRaiseList(draft.ipRiverRaises, ipRiver, geometric),
+    oop_flop_raises: encodeRaiseList(draft.oopFlopRaises, oopFlop),
+    ip_flop_raises: encodeRaiseList(draft.ipFlopRaises, ipFlop),
+    oop_turn_raises: encodeRaiseList(draft.oopTurnRaises, oopTurn),
+    ip_turn_raises: encodeRaiseList(draft.ipTurnRaises, ipTurn),
+    oop_river_raises: encodeRaiseList(draft.oopRiverRaises, oopRiver),
+    ip_river_raises: encodeRaiseList(draft.ipRiverRaises, ipRiver),
     oop_donk: [] as number[],
-    oop_flop_donk: encodeDonk(draft.oopFlopDonk, Boolean(draft.donkFlop), oopFlop, geometric),
-    oop_turn_donk: encodeDonk(draft.oopTurnDonk, Boolean(draft.donkTurn), oopTurn, geometric),
-    oop_river_donk: encodeDonk(draft.oopRiverDonk, Boolean(draft.donkRiver), oopRiver, geometric),
-    geometric: 0,
+    oop_flop_donk: encodeDonk(draft.oopFlopDonk, Boolean(draft.donkFlop), oopFlop),
+    oop_turn_donk: encodeDonk(draft.oopTurnDonk, Boolean(draft.donkTurn), oopTurn),
+    oop_river_donk: encodeDonk(draft.oopRiverDonk, Boolean(draft.donkRiver), oopRiver),
     merge_threshold: threshold > 0 ? threshold / 100 : 0,
-  };
-}
-
-export interface ResolveSizeOptions {
-  pot: number;
-  stack: number;
-  boardLen: number;
-  /** When true, engine geometric flag is on — bare `e` tokens are dropped (engine adds geo). */
-  geometricFlag: boolean;
-  mergeThresholdPct?: number;
-}
-
-/**
- * Resolve a comma/space size list to engine pot fractions, expanding `e`/`Ne`
- * when the geometric checkbox is off, then optionally merging near sizes.
- * Raise multiples (`2x`) are ignored here — use {@link resolveRaiseSizeList}.
- */
-export function resolveSizeList(
-  text: string,
-  options: ResolveSizeOptions,
-): number[] {
-  const parts = text.split(/[,]+/).map((part) => part.trim()).filter(Boolean);
-  const streets = streetsRemaining(options.boardLen);
-  const geo = geometricPotFraction(options.pot, options.stack, streets);
-  const out: number[] = [];
-
-  for (const part of parts) {
-    const parsed = parseSizeTokenDetailed(part);
-    if (!parsed || parsed.raiseMultiple) {
-      continue;
-    }
-    if (parsed.geometric) {
-      if (options.geometricFlag) {
-        // Engine already injects one geometric size; skip token.
-        continue;
-      }
-      out.push(geo * parsed.geometricMultiple);
-      continue;
-    }
-    out.push(parsed.fraction);
-  }
-
-  return mergeSizeFractions(out, options.pot, options.mergeThresholdPct ?? 0);
-}
-
-export interface ResolvedRaiseSizes {
-  /** Pot-fraction / fixed-chip raise sizes for the engine. */
-  fractions: number[];
-  /** Facing-bet multiples (`2x` → 2) for `*_raise_multiples`. */
-  multiples: number[];
-}
-
-/**
- * Resolve a raise-size field: pot % (`50`, `100`) and facing multiples (`2x`).
- * Blank text → empty fractions and multiples (no copy from bet sizes).
- */
-export function resolveRaiseSizeList(
-  text: string,
-  options: ResolveSizeOptions,
-): ResolvedRaiseSizes {
-  const parts = text.split(/[,]+/).map((part) => part.trim()).filter(Boolean);
-  const streets = streetsRemaining(options.boardLen);
-  const geo = geometricPotFraction(options.pot, options.stack, streets);
-  const fractions: number[] = [];
-  const multiples: number[] = [];
-
-  for (const part of parts) {
-    const parsed = parseSizeTokenDetailed(part);
-    if (!parsed) {
-      continue;
-    }
-    if (parsed.raiseMultiple) {
-      multiples.push(parsed.raiseMultipleValue);
-      continue;
-    }
-    if (parsed.geometric) {
-      if (options.geometricFlag) {
-        continue;
-      }
-      fractions.push(geo * parsed.geometricMultiple);
-      continue;
-    }
-    fractions.push(parsed.fraction);
-  }
-
-  return {
-    fractions: mergeSizeFractions(
-      fractions,
-      options.pot,
-      options.mergeThresholdPct ?? 0,
-    ),
-    multiples: [...multiples].sort((a, b) => a - b),
   };
 }
 

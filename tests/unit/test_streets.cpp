@@ -982,7 +982,11 @@ void run_street_tests()
     geo.stack = 3000;
     geo.oop = Range::parse("QcQd");
     geo.ip = Range::parse("JcJd");
-    geo.geometric = true;
+    // Bare `e` on bets and raises (replaces the removed geometric flag).
+    geo.oop_bet_sizes = {poker::streets::geometric_spec(0)};
+    geo.ip_bet_sizes = {poker::streets::geometric_spec(0)};
+    geo.oop_raise_sizes = {poker::streets::geometric_spec(0)};
+    geo.ip_raise_sizes = {poker::streets::geometric_spec(0)};
     geo.allow_all_in = true;
     geo.max_raises = 1;
     const StreetGame geo_game(geo);
@@ -1074,7 +1078,10 @@ void run_street_tests()
     geo_match.stack = 3000;
     geo_match.oop = Range::parse("QcQd");
     geo_match.ip = Range::parse("JcJd");
-    geo_match.geometric = true;
+    geo_match.oop_bet_sizes = {poker::streets::geometric_spec(0)};
+    geo_match.ip_bet_sizes = {poker::streets::geometric_spec(0)};
+    geo_match.oop_raise_sizes = {poker::streets::geometric_spec(0)};
+    geo_match.ip_raise_sizes = {poker::streets::geometric_spec(0)};
     geo_match.allow_all_in = true;
     geo_match.max_raises = 1;
     expect_street_batch(geo_match, poker::solver::Algorithm::VanillaCfr, 2, false);
@@ -1722,7 +1729,6 @@ bool same_config(const StreetConfig& left, const StreetConfig& right)
         && left.merge_threshold == right.merge_threshold
         && same_numbers(left.oop_raise_multiples, right.oop_raise_multiples)
         && same_numbers(left.ip_raise_multiples, right.ip_raise_multiples)
-        && left.geometric == right.geometric
         && left.all_in_threshold == right.all_in_threshold
         && left.pot_cap == right.pot_cap
         && left.rake.rate == right.rake.rate
@@ -1785,7 +1791,6 @@ void expect_canonical_street_config()
         "max-raises 1\n"
         "allow-all-in 0\n"
         "allow-three-bet 1\n"
-        "geometric 0\n"
         "all-in-threshold 0\n"
         "pot-cap 1\n"
         "rake-rate 0\n"
@@ -1835,7 +1840,6 @@ void expect_canonical_street_config()
         "memory-mib 1024\n"
         "pot-cap 1\n"
         "all-in-threshold 0\n"
-        "geometric 0\n"
         "allow-three-bet 1\n"
         "allow-all-in 0\n"
         "max-raises 1\n"
@@ -1883,7 +1887,6 @@ void expect_canonical_street_config()
         "max-raises 1\n"
         "allow-all-in 0\n"
         "allow-three-bet 1\n"
-        "geometric 0\n"
         "all-in-threshold 0\n"
         "pot-cap 0\n"
         "rake-rate 0\n"

@@ -3,7 +3,12 @@
  * strategy-edit draft binding, and Build draft sync from opened status.
  */
 
-import { formatStoredSizes } from "../betSizes";
+import {
+  formatDonkField,
+  formatStoredSizes,
+  formatStreetBetField,
+  formatStreetRaiseField,
+} from "../betSizes";
 import type { ComparePayload } from "../locks";
 import { DEFAULT_SPOT, type NodePayload, type SpotDraft, type StatusPayload } from "../types";
 
@@ -329,7 +334,6 @@ export function openDraftBase(solutionPath = ""): SpotDraft {
     donkRiver: false,
     potCap: 0,
     noThreeBet: false,
-    geometric: false,
     allInThreshold: 0,
     accuracy: "",
     timeLimit: "",
@@ -345,7 +349,8 @@ export function openDraftBase(solutionPath = ""): SpotDraft {
 
 /**
  * Map GET /api/solutions/{id}/config (or POST /api/config) JSON onto SpotDraft.
- * Present empty bet arrays become empty strings (check-only), not defaults.
+ * Empty per-street lists (inherit) are resolved into shared sizes so Build text
+ * rebuilds the same tree. Explicit-empty stays blank (check-only) or `-`.
  */
 export function draftPartialFromSolutionConfig(
   config: Record<string, unknown>,
@@ -389,72 +394,122 @@ export function draftPartialFromSolutionConfig(
       config.ip_raise_multiples,
     );
   }
-  if ("oop_flop_bets" in config) {
-    partial.oopFlop = joinConfigSizes(config.oop_flop_bets);
+  if ("oop_flop_bets" in config || "oop_bets" in config) {
+    partial.oopFlop = formatStreetBetField(
+      config.oop_flop_bets,
+      config.oop_bets,
+    );
   }
-  if ("ip_flop_bets" in config) {
-    partial.ipFlop = joinConfigSizes(config.ip_flop_bets);
+  if ("ip_flop_bets" in config || "ip_bets" in config) {
+    partial.ipFlop = formatStreetBetField(
+      config.ip_flop_bets,
+      config.ip_bets,
+    );
   }
-  if ("oop_turn_bets" in config) {
-    partial.oopTurn = joinConfigSizes(config.oop_turn_bets);
+  if ("oop_turn_bets" in config || "oop_bets" in config) {
+    partial.oopTurn = formatStreetBetField(
+      config.oop_turn_bets,
+      config.oop_bets,
+    );
   }
-  if ("ip_turn_bets" in config) {
-    partial.ipTurn = joinConfigSizes(config.ip_turn_bets);
+  if ("ip_turn_bets" in config || "ip_bets" in config) {
+    partial.ipTurn = formatStreetBetField(
+      config.ip_turn_bets,
+      config.ip_bets,
+    );
   }
-  if ("oop_river_bets" in config) {
-    partial.oopRiver = joinConfigSizes(config.oop_river_bets);
+  if ("oop_river_bets" in config || "oop_bets" in config) {
+    partial.oopRiver = formatStreetBetField(
+      config.oop_river_bets,
+      config.oop_bets,
+    );
   }
-  if ("ip_river_bets" in config) {
-    partial.ipRiver = joinConfigSizes(config.ip_river_bets);
+  if ("ip_river_bets" in config || "ip_bets" in config) {
+    partial.ipRiver = formatStreetBetField(
+      config.ip_river_bets,
+      config.ip_bets,
+    );
   }
-  if ("oop_flop_raises" in config) {
-    partial.oopFlopRaises = formatStoredSizes(config.oop_flop_raises, {
-      raise: true,
-      matchBets: config.oop_flop_bets,
-    });
+  if ("oop_flop_raises" in config || "oop_raises" in config) {
+    partial.oopFlopRaises = formatStreetRaiseField(
+      config.oop_flop_raises,
+      config.oop_raises,
+      config.oop_flop_bets,
+      { sharedBets: config.oop_bets },
+    );
   }
-  if ("ip_flop_raises" in config) {
-    partial.ipFlopRaises = formatStoredSizes(config.ip_flop_raises, {
-      raise: true,
-      matchBets: config.ip_flop_bets,
-    });
+  if ("ip_flop_raises" in config || "ip_raises" in config) {
+    partial.ipFlopRaises = formatStreetRaiseField(
+      config.ip_flop_raises,
+      config.ip_raises,
+      config.ip_flop_bets,
+      { sharedBets: config.ip_bets },
+    );
   }
-  if ("oop_turn_raises" in config) {
-    partial.oopTurnRaises = formatStoredSizes(config.oop_turn_raises, {
-      raise: true,
-      matchBets: config.oop_turn_bets,
-    });
+  if ("oop_turn_raises" in config || "oop_raises" in config) {
+    partial.oopTurnRaises = formatStreetRaiseField(
+      config.oop_turn_raises,
+      config.oop_raises,
+      config.oop_turn_bets,
+      { sharedBets: config.oop_bets },
+    );
   }
-  if ("ip_turn_raises" in config) {
-    partial.ipTurnRaises = formatStoredSizes(config.ip_turn_raises, {
-      raise: true,
-      matchBets: config.ip_turn_bets,
-    });
+  if ("ip_turn_raises" in config || "ip_raises" in config) {
+    partial.ipTurnRaises = formatStreetRaiseField(
+      config.ip_turn_raises,
+      config.ip_raises,
+      config.ip_turn_bets,
+      { sharedBets: config.ip_bets },
+    );
   }
-  if ("oop_river_raises" in config) {
-    partial.oopRiverRaises = formatStoredSizes(config.oop_river_raises, {
-      raise: true,
-      matchBets: config.oop_river_bets,
-    });
+  if ("oop_river_raises" in config || "oop_raises" in config) {
+    partial.oopRiverRaises = formatStreetRaiseField(
+      config.oop_river_raises,
+      config.oop_raises,
+      config.oop_river_bets,
+      { sharedBets: config.oop_bets },
+    );
   }
-  if ("ip_river_raises" in config) {
-    partial.ipRiverRaises = formatStoredSizes(config.ip_river_raises, {
-      raise: true,
-      matchBets: config.ip_river_bets,
-    });
+  if ("ip_river_raises" in config || "ip_raises" in config) {
+    partial.ipRiverRaises = formatStreetRaiseField(
+      config.ip_river_raises,
+      config.ip_raises,
+      config.ip_river_bets,
+      { sharedBets: config.ip_bets },
+    );
   }
   if ("oop_donk" in config) {
     partial.oopDonk = joinConfigSizes(config.oop_donk);
   }
-  if ("oop_flop_donk" in config) {
-    partial.oopFlopDonk = joinConfigSizes(config.oop_flop_donk);
+  if ("oop_flop_donk" in config || "oop_donk" in config || "oop_flop_bets" in config) {
+    const donk = formatDonkField(
+      config.oop_flop_donk,
+      config.oop_flop_bets ?? config.oop_bets,
+      config.oop_donk,
+    );
+    partial.oopFlopDonk = donk.text;
+    partial.donkFlop = donk.copyBets;
   }
-  if ("oop_turn_donk" in config) {
-    partial.oopTurnDonk = joinConfigSizes(config.oop_turn_donk);
+  if ("oop_turn_donk" in config || "oop_donk" in config || "oop_turn_bets" in config) {
+    const donk = formatDonkField(
+      config.oop_turn_donk,
+      config.oop_turn_bets ?? config.oop_bets,
+      config.oop_donk,
+    );
+    partial.oopTurnDonk = donk.text;
+    partial.donkTurn = donk.copyBets;
   }
-  if ("oop_river_donk" in config) {
-    partial.oopRiverDonk = joinConfigSizes(config.oop_river_donk);
+  if ("oop_river_donk" in config || "oop_donk" in config || "oop_river_bets" in config) {
+    const donk = formatDonkField(
+      config.oop_river_donk,
+      config.oop_river_bets ?? config.oop_bets,
+      config.oop_donk,
+    );
+    partial.oopRiverDonk = donk.text;
+    partial.donkRiver = donk.copyBets;
   }
+  // All-in is the `a` size token; always allow stack-commits on rebuild.
+  partial.allowAllIn = true;
   const mergeThreshold = asFiniteNumber(config.merge_threshold);
   if (mergeThreshold !== undefined) {
     partial.mergeThresholdPct = mergeThreshold * 100;
@@ -463,14 +518,8 @@ export function draftPartialFromSolutionConfig(
   if (maxRaises !== undefined) {
     partial.maxRaises = Math.trunc(maxRaises);
   }
-  if ("allow_all_in" in config) {
-    partial.allowAllIn = Boolean(config.allow_all_in);
-  }
   if ("allow_three_bet" in config) {
     partial.noThreeBet = config.allow_three_bet === false;
-  }
-  if ("geometric" in config) {
-    partial.geometric = Boolean(config.geometric);
   }
   const potCap = asFiniteNumber(config.pot_cap);
   if (potCap !== undefined) {

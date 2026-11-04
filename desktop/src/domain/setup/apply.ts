@@ -148,14 +148,6 @@ function applyPrefs(
     provenance.maxRaises = "saved_preference";
   }
   if (
-    prefs.defaultAllowAllIn !== undefined &&
-    draft.allowAllIn === undefined &&
-    provenance.allowAllIn === undefined
-  ) {
-    draft.allowAllIn = prefs.defaultAllowAllIn;
-    provenance.allowAllIn = "saved_preference";
-  }
-  if (
     prefs.defaultNoThreeBet !== undefined &&
     draft.noThreeBet === undefined &&
     provenance.noThreeBet === undefined
@@ -163,14 +155,8 @@ function applyPrefs(
     draft.noThreeBet = prefs.defaultNoThreeBet;
     provenance.noThreeBet = "saved_preference";
   }
-  if (
-    prefs.defaultGeometric !== undefined &&
-    draft.geometric === undefined &&
-    provenance.geometric === undefined
-  ) {
-    draft.geometric = prefs.defaultGeometric;
-    provenance.geometric = "saved_preference";
-  }
+  // All-in is the `a` size token; always allow stack-commits.
+  draft.allowAllIn = true;
 }
 
 function collectConflicts(patch: SetupPatch): SetupConflict[] {
