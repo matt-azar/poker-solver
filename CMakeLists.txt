@@ -49,6 +49,14 @@ poker_set_warnings(poker_primitives)
 add_library(poker_solver STATIC
     src/solver/regret_matching.cpp
     src/solver/street_batch.cpp
+    src/solver/postflop/tree.cpp
+    src/solver/postflop/tables.cpp
+    src/solver/postflop/showdown.cpp
+    src/solver/postflop/traversal.cpp
+    src/solver/postflop/evaluation.cpp
+    src/solver/postflop/inspection.cpp
+    src/solver/postflop/execution.cpp
+    src/solver/postflop/schedules.cpp
 )
 target_include_directories(poker_solver PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
