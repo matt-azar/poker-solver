@@ -8,6 +8,10 @@ import {
 } from "../domain/betSizes";
 import { boardCards, parseAbsoluteNumberList } from "../domain/range";
 import {
+  formatEdgeTagsDraft,
+  formatIncentivesDraft,
+} from "../domain/setup/templateApply";
+import {
   type SolveJobRequest,
   type SolvePhase,
   type SpotDraft,
@@ -36,15 +40,27 @@ export function joinRaiseDraft(fractions: unknown, multiples: unknown): string {
   return [base, ...extra].filter(Boolean).join(", ");
 }
 
+export { formatEdgeTagsDraft, formatIncentivesDraft };
+
+function finiteOrZero(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Map POST /api/config JSON onto a SpotDraft patch.
+ * Preserves explicit zeros (rake_rate 0, pot_cap 0, …). Callers that load a
+ * full template must merge onto a cleared base — see draftFromFullTemplate.
+ */
 export function draftFromParsedConfig(body: Record<string, unknown>): Partial<SpotDraft> {
   const board = Array.isArray(body.board)
     ? body.board.map((card) => String(card)).join(" ")
     : "";
   const partial: Partial<SpotDraft> = {
     boardText: board,
-    pot: Number(body.pot) || 0,
-    stack: Number(body.stack) || 0,
-    maxRaises: Number(body.max_raises) || 0,
+    pot: finiteOrZero(body.pot),
+    stack: finiteOrZero(body.stack),
+    maxRaises: finiteOrZero(body.max_raises),
     // All-in is a size token (`a`); always allow stack-commits on rebuild.
     allowAllIn: true,
     oopBets: joinSizes(body.oop_bets),
@@ -120,34 +136,72 @@ export function draftFromParsedConfig(body: Record<string, unknown>): Partial<Sp
     if (body.merge_threshold != null) {
       partial.mergeThresholdPct = Number(body.merge_threshold) * 100;
     }
-    partial.potCap = Number(body.pot_cap) || 0;
+    // Preserve explicit zeros (pot_cap 0, all_in_threshold 0).
+    if ("pot_cap" in body) {
+      partial.potCap = finiteOrZero(body.pot_cap);
+    }
     partial.noThreeBet = body.allow_three_bet === false;
-    partial.allInThreshold = Number(body.all_in_threshold) || 0;
-    partial.memoryMib = Number(body.memory_mib) || 0;
-    partial.threads = Number(body.threads) || 1;
+    if ("all_in_threshold" in body) {
+      partial.allInThreshold = finiteOrZero(body.all_in_threshold);
+    }
+    if ("memory_mib" in body) {
+      partial.memoryMib = finiteOrZero(body.memory_mib);
+    }
+    if ("threads" in body) {
+      const threads = finiteOrZero(body.threads);
+      partial.threads = threads > 0 ? threads : 1;
+    }
     if (Array.isArray(body.tree_edits)) {
       partial.treeEdits = body.tree_edits.map((line) => String(line)).filter(Boolean);
     }
   }
-  if (Array.isArray(body.icm_stacks)) {
-    const stacks = body.icm_stacks
-      .map((value) => Number(value))
-      .filter((value) => Number.isFinite(value));
-    if (stacks.length >= 2) {
-      partial.useIcm = true;
-      partial.icmStacks = stacks.join(", ");
-      partial.icmPayouts = Array.isArray(body.icm_payouts)
-        ? body.icm_payouts
-            .map((value) => Number(value))
-            .filter((value) => Number.isFinite(value))
-            .join(", ")
-        : "";
+
+  // Engine solve rake — preserve explicit 0 (bundled templates set rake-rate 0).
+  if ("rake_rate" in body) {
+    partial.rakeRate = finiteOrZero(body.rake_rate);
+  }
+  if ("rake_cap" in body) {
+    partial.rakeCap = finiteOrZero(body.rake_cap);
+  }
+
+  if ("icm_stacks" in body) {
+    if (Array.isArray(body.icm_stacks)) {
+      const stacks = body.icm_stacks
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value));
+      if (stacks.length >= 2) {
+        partial.useIcm = true;
+        partial.icmStacks = stacks.join(", ");
+        partial.icmPayouts = Array.isArray(body.icm_payouts)
+          ? body.icm_payouts
+              .map((value) => Number(value))
+              .filter((value) => Number.isFinite(value))
+              .join(", ")
+          : "";
+      } else {
+        partial.useIcm = false;
+        partial.icmStacks = "";
+        partial.icmPayouts = "";
+      }
     } else {
       partial.useIcm = false;
       partial.icmStacks = "";
       partial.icmPayouts = "";
     }
   }
+
+  if ("incentives" in body) {
+    partial.incentives = formatIncentivesDraft(body.incentives);
+  }
+  if ("edge_tags" in body) {
+    partial.edgeTags = formatEdgeTagsDraft(body.edge_tags);
+  }
+  if ("time_limit" in body) {
+    const timeLimit = Number(body.time_limit);
+    partial.timeLimit =
+      Number.isFinite(timeLimit) && timeLimit >= 0 ? String(timeLimit) : "";
+  }
+
   return partial;
 }
 

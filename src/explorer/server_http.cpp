@@ -1738,6 +1738,31 @@ void handle_client(socket_t client)
                 write_sizes("oop_river_donk", job.oop_river_donk);
                 payload += ",\"merge_threshold\":";
                 payload += format_number(job.merge_threshold);
+                // Utility model: rake / ICM / incentives (explicit zeros preserved).
+                payload += ",\"rake_rate\":";
+                payload += format_number(job.rake_rate);
+                payload += ",\"rake_cap\":";
+                payload += format_number(job.rake_cap);
+                payload += ",\"icm_stacks\":[";
+                for (std::size_t index = 0; index < job.icm_stacks.size(); ++index)
+                {
+                    if (index > 0)
+                    {
+                        payload += ',';
+                    }
+                    payload += format_number(job.icm_stacks[index]);
+                }
+                payload += "],\"icm_payouts\":[";
+                for (std::size_t index = 0; index < job.icm_payouts.size(); ++index)
+                {
+                    if (index > 0)
+                    {
+                        payload += ',';
+                    }
+                    payload += format_number(job.icm_payouts[index]);
+                }
+                payload += "],";
+                poker::explorer::append_incentive_config_json(payload, job.incentives);
                 payload += ',';
                 append_tree_edits_json(payload, job.tree_edits);
                 payload += '}';
@@ -1785,7 +1810,31 @@ void handle_client(socket_t client)
                     }
                     payload += format_number(job.ip_bets[index]);
                 }
-                payload += "]}";
+                payload += "],\"rake_rate\":";
+                payload += format_number(job.rake_rate);
+                payload += ",\"rake_cap\":";
+                payload += format_number(job.rake_cap);
+                payload += ",\"icm_stacks\":[";
+                for (std::size_t index = 0; index < job.icm_stacks.size(); ++index)
+                {
+                    if (index > 0)
+                    {
+                        payload += ',';
+                    }
+                    payload += format_number(job.icm_stacks[index]);
+                }
+                payload += "],\"icm_payouts\":[";
+                for (std::size_t index = 0; index < job.icm_payouts.size(); ++index)
+                {
+                    if (index > 0)
+                    {
+                        payload += ',';
+                    }
+                    payload += format_number(job.icm_payouts[index]);
+                }
+                payload += "],";
+                poker::explorer::append_incentive_config_json(payload, job.incentives);
+                payload += '}';
             }
             else
             {
