@@ -9,7 +9,7 @@ function makeDeps(overrides: Partial<Parameters<typeof openSolutionFile>[0]> = {
   return {
     getSolutionPath: () => "",
     updateDraft: vi.fn(),
-    openSolution: vi.fn(async () => undefined),
+    openSolution: vi.fn(async () => ({ ok: true as const, path: "/tmp/spot.psol" })),
     saveSolution: vi.fn(async () => undefined),
     pickOpenPath: vi.fn(async () => null as string | null),
     pickSavePath: vi.fn(async () => null as string | null),
@@ -18,20 +18,43 @@ function makeDeps(overrides: Partial<Parameters<typeof openSolutionFile>[0]> = {
 }
 
 describe("openSolutionFile", () => {
-  it("opens the picked path and updates the draft", async () => {
+  it("opens the picked path without writing the draft path first", async () => {
     const deps = makeDeps({
       pickOpenPath: vi.fn(async () => "/tmp/spot.psol"),
+      openSolution: vi.fn(async () => ({ ok: true as const, path: "/tmp/spot.psol" })),
     });
-    await expect(openSolutionFile(deps)).resolves.toBe(true);
-    expect(deps.updateDraft).toHaveBeenCalledWith({ solutionPath: "/tmp/spot.psol" });
+    await expect(openSolutionFile(deps)).resolves.toEqual({
+      ok: true,
+      path: "/tmp/spot.psol",
+    });
+    expect(deps.updateDraft).not.toHaveBeenCalled();
     expect(deps.openSolution).toHaveBeenCalledWith("/tmp/spot.psol");
+  });
+
+  it("returns failure when openSolution rejects the open", async () => {
+    const deps = makeDeps({
+      pickOpenPath: vi.fn(async () => "/failed.psol"),
+      openSolution: vi.fn(async () => ({
+        ok: false as const,
+        error: "checkpoint not found",
+      })),
+    });
+    await expect(openSolutionFile(deps)).resolves.toEqual({
+      ok: false,
+      error: "checkpoint not found",
+    });
+    expect(deps.updateDraft).not.toHaveBeenCalled();
   });
 
   it("leaves the study alone when the picker is cancelled", async () => {
     const deps = makeDeps({
       pickOpenPath: vi.fn(async () => null),
     });
-    await expect(openSolutionFile(deps)).resolves.toBe(false);
+    await expect(openSolutionFile(deps)).resolves.toEqual({
+      ok: false,
+      error: "cancelled",
+      cancelled: true,
+    });
     expect(deps.updateDraft).not.toHaveBeenCalled();
     expect(deps.openSolution).not.toHaveBeenCalled();
   });
@@ -43,7 +66,10 @@ describe("saveSolutionFile", () => {
       getSolutionPath: () => "/tmp/existing.psol",
       pickSavePath: vi.fn(async () => "/tmp/other.psol"),
     });
-    await expect(saveSolutionFile(deps)).resolves.toBe(true);
+    await expect(saveSolutionFile(deps)).resolves.toEqual({
+      ok: true,
+      path: "/tmp/existing.psol",
+    });
     expect(deps.pickSavePath).not.toHaveBeenCalled();
     expect(deps.updateDraft).toHaveBeenCalledWith({ solutionPath: "/tmp/existing.psol" });
     expect(deps.saveSolution).toHaveBeenCalled();
@@ -54,7 +80,10 @@ describe("saveSolutionFile", () => {
       getSolutionPath: () => "  ",
       pickSavePath: vi.fn(async () => "/tmp/new.psol"),
     });
-    await expect(saveSolutionFile(deps)).resolves.toBe(true);
+    await expect(saveSolutionFile(deps)).resolves.toEqual({
+      ok: true,
+      path: "/tmp/new.psol",
+    });
     expect(deps.pickSavePath).toHaveBeenCalled();
     expect(deps.updateDraft).toHaveBeenCalledWith({ solutionPath: "/tmp/new.psol" });
     expect(deps.saveSolution).toHaveBeenCalled();
@@ -65,7 +94,11 @@ describe("saveSolutionFile", () => {
       getSolutionPath: () => "",
       pickSavePath: vi.fn(async () => null),
     });
-    await expect(saveSolutionFile(deps)).resolves.toBe(false);
+    await expect(saveSolutionFile(deps)).resolves.toEqual({
+      ok: false,
+      error: "cancelled",
+      cancelled: true,
+    });
     expect(deps.updateDraft).not.toHaveBeenCalled();
     expect(deps.saveSolution).not.toHaveBeenCalled();
   });
@@ -80,7 +113,10 @@ describe("saveSolutionFileAs", () => {
         return "/tmp/renamed.psol";
       }),
     });
-    await expect(saveSolutionFileAs(deps)).resolves.toBe(true);
+    await expect(saveSolutionFileAs(deps)).resolves.toEqual({
+      ok: true,
+      path: "/tmp/renamed.psol",
+    });
     expect(deps.updateDraft).toHaveBeenCalledWith({ solutionPath: "/tmp/renamed.psol" });
     expect(deps.saveSolution).toHaveBeenCalled();
   });
@@ -90,7 +126,11 @@ describe("saveSolutionFileAs", () => {
       getSolutionPath: () => "/tmp/existing.psol",
       pickSavePath: vi.fn(async () => null),
     });
-    await expect(saveSolutionFileAs(deps)).resolves.toBe(false);
+    await expect(saveSolutionFileAs(deps)).resolves.toEqual({
+      ok: false,
+      error: "cancelled",
+      cancelled: true,
+    });
     expect(deps.updateDraft).not.toHaveBeenCalled();
     expect(deps.saveSolution).not.toHaveBeenCalled();
   });

@@ -58,6 +58,9 @@ const engineMocks = vi.hoisted(() => {
       getNode: vi.fn(async (solutionId: string, nodeId: string) =>
         getNodeImpl(solutionId, nodeId),
       ),
+      getSolutionConfig: vi.fn(async () => null),
+      template: vi.fn(async () => ({ text: "" })),
+      parseConfig: vi.fn(async () => ({})),
       pause: vi.fn(async () => undefined),
       stop: vi.fn(async () => undefined),
     },
@@ -81,6 +84,9 @@ function seedPublishedStudy() {
       pot: 5.5,
       stack: 97.5,
       iterations: 10,
+      solutionPath: "/good.psol",
+      rakeRate: 0.05,
+      rakeCap: 3,
     },
     solutionId: "s1",
     baselineSolutionId: null,
@@ -105,6 +111,16 @@ function seedPublishedStudy() {
     runouts: null,
     categories: null,
     compareNote: null,
+    setupMeta: {
+      profile: null,
+      rangeSnapshot: { oop: "AA,KK", ip: "QQ+" },
+      profileDataRevision: null,
+      provenance: {},
+      summary: ["seeded"],
+      conflicts: [],
+      missing: [],
+      canSolve: true,
+    },
     status: {
       running: false,
       solution_id: "s1",
@@ -114,7 +130,7 @@ function seedPublishedStudy() {
     phase: "complete",
     message: "ready",
     solveValidationErrors: [],
-    selectedCell: { row: 0, col: 0 },
+    selectedCell: { row: 0, col: 0, text: "AA" },
   });
 }
 
@@ -294,7 +310,8 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     engineMocks.engineClient.open.mockRejectedValueOnce(
       new engineMocks.EngineError("checkpoint not found", 404),
     );
-    await useStudyStore.getState().openSolution("/missing.psol");
+    const result = await useStudyStore.getState().openSolution("/missing.psol");
+    expect(result).toEqual({ ok: false, error: "checkpoint not found" });
     const state = useStudyStore.getState();
     expect(state.solutionId).toBe("s1");
     expect(state.currentNode?.node_id).toBe("p0.child");
@@ -302,5 +319,78 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     expect(state.equity).toEqual({ node_id: "p0.child", pending: false });
     expect(state.phase).toBe("failed");
     expect(state.message).toMatch(/checkpoint not found/i);
+  });
+
+  it("failed Open preserves draft path, undo, and setup meta", async () => {
+    // Build range undo history against the good document.
+    useStudyStore.getState().setRangeText("oop", "AA,KK,QQ");
+    expect(useStudyStore.getState().canUndoRange).toBe(true);
+    expect(useStudyStore.getState().draft.solutionPath).toBe("/good.psol");
+    expect(useStudyStore.getState().setupMeta?.summary).toEqual(["seeded"]);
+
+    engineMocks.engineClient.open.mockRejectedValueOnce(
+      new engineMocks.EngineError("checkpoint not found", 404),
+    );
+    const result = await useStudyStore.getState().openSolution("/failed.psol");
+    expect(result.ok).toBe(false);
+
+    const state = useStudyStore.getState();
+    // Path must stay on the good document — Save must not target /failed.psol.
+    expect(state.draft.solutionPath).toBe("/good.psol");
+    expect(state.draft.oopRange).toBe("AA,KK,QQ");
+    expect(state.canUndoRange).toBe(true);
+    expect(state.setupMeta?.summary).toEqual(["seeded"]);
+    expect(state.solutionId).toBe("s1");
+    expect(state.currentNode?.node_id).toBe("p0.child");
+    expect(state.phase).toBe("failed");
+  });
+
+  it("zero-rake full template resets a 5% rake draft for the next job", async () => {
+    expect(useStudyStore.getState().draft.rakeRate).toBe(0.05);
+
+    engineMocks.engineClient.template.mockResolvedValueOnce({
+      text: "street-config 1\nrake-rate 0\nrake-cap 0\n",
+    });
+    engineMocks.engineClient.parseConfig.mockResolvedValueOnce({
+      kind: "street",
+      board: ["Ah", "Kd", "7c"],
+      pot: 100,
+      stack: 100,
+      oop_range: "AcAd:1",
+      ip_range: "2c3d:1",
+      max_raises: 0,
+      allow_all_in: false,
+      allow_three_bet: true,
+      pot_cap: 0,
+      all_in_threshold: 0,
+      rake_rate: 0,
+      rake_cap: 0,
+      icm_stacks: [],
+      icm_payouts: [],
+      incentives: [],
+      edge_tags: [],
+      oop_bets: [],
+      ip_bets: [],
+      oop_raises: [],
+      ip_raises: [],
+      memory_mib: 64,
+      threads: 1,
+      tree_edits: [],
+    });
+
+    await useStudyStore.getState().applyTemplate("flop-check-down");
+    const state = useStudyStore.getState();
+    expect(state.draft.rakeRate).toBe(0);
+    expect(state.draft.rakeCap).toBe(0);
+    expect(state.draft.solutionPath).toBe("/good.psol");
+    expect(state.draft.oopRange).toBe("AcAd:1");
+    expect(state.draft.useIcm).toBe(false);
+    expect(state.draft.incentives).toBe("");
+    expect(state.workspace).toBe("build");
+
+    const { buildJob } = await import("./studyDraft");
+    const job = buildJob(state.draft);
+    expect(job.rake_rate).toBe(0);
+    expect(job.rake_cap).toBe(0);
   });
 });

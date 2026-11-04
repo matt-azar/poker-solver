@@ -82,6 +82,7 @@ import {
   type SetupUndoEntry,
   type StrategyEditScope,
 } from "../domain/setup";
+import { draftFromFullTemplate } from "../domain/setup/templateApply";
 import { getRangeProfileCatalogue } from "../domain/profiles";
 import { EngineError, engineClient } from "../engine/client";
 import { isTauriRuntime } from "../platform";
@@ -90,11 +91,15 @@ import { useThemeStore } from "./themeStore";
 import { useLayoutStore } from "./layoutStore";
 
 import {
-  draftFromParsedConfig,
   phaseFromStatus,
   rootNodeId,
   buildJob,
 } from "./studyDraft";
+
+/** Typed result for transactional Open — failure preserves path + undo. */
+export type OpenSolutionResult =
+  | { ok: true; path: string }
+  | { ok: false; error: string };
 
 const SETUP_HISTORY_LIMIT = 30;
 const setupHistoryPast: SetupUndoEntry[] = [];
@@ -368,7 +373,7 @@ interface StudyState {
   loadEquity: () => Promise<void>;
   loadCategories: () => Promise<void>;
   saveSolution: () => Promise<void>;
-  openSolution: (path?: string) => Promise<void>;
+  openSolution: (path?: string) => Promise<OpenSolutionResult>;
   loadCompare: (nodeId?: string) => Promise<void>;
 
   libraryLists: LibraryLists;
@@ -2202,19 +2207,35 @@ pathTrail,
   async openSolution(path) {
     const target = (path ?? get().draft.solutionPath).trim();
     if (!target) {
-      set({ message: "Set a solution path before opening." });
-      return;
+      const error = "Set a solution path before opening.";
+      set({ message: error });
+      return { ok: false, error };
     }
-    const prior = snapshotPublishedStudy(get());
-    invalidateLifecycleRequests();
-    pendingReloadNodeId = null; // opened checkpoint lands at root
-    // Drop cross-solution Build undo / nav before the load completes.
-    setupHistoryPast.length = 0;
-    rangeHistory.past.length = 0;
-    rangeHistory.future.length = 0;
+    // Stage: show loading only. Do not clear path, undo, or published study
+    // until the engine open succeeds — failure must preserve the whole document.
     set({
       phase: "loading",
       message: `Opening ${target}…`,
+    });
+    try {
+      await engineClient.open(target);
+    } catch (error) {
+      const message =
+        error instanceof EngineError ? error.message : "Open failed";
+      // Document identity, draft path, undo stacks, and published study unchanged.
+      set({
+        phase: "failed",
+        message,
+      });
+      return { ok: false, error: message };
+    }
+
+    // Commit: open succeeded — reset histories and replace the visible document.
+    invalidateLifecycleRequests();
+    pendingReloadNodeId = null; // opened checkpoint lands at root
+    setupHistoryPast.length = 0;
+    rangeHistory.clear();
+    set({
       solutionId: null,
       currentNode: null,
       pathTrail: [],
@@ -2236,68 +2257,58 @@ pathTrail,
       canRedoRange: false,
       selectedCell: null,
     });
-    try {
-      await engineClient.open(target);
-      continuationPending = true;
-      get().startPolling();
-      await get().refresh();
-      // Replace Build draft wholesale from solution config + status — never merge
-      // into the previous draft (avoids 22s over an AA solution, stale time limits).
-      const status = get().status;
-      const solutionId = get().solutionId;
-      let config: Record<string, unknown> | null = null;
-      if (solutionId) {
-        try {
-          config = await engineClient.getSolutionConfig(solutionId);
-        } catch {
-          config = null;
-        }
+    continuationPending = true;
+    get().startPolling();
+    await get().refresh();
+    // Replace Build draft wholesale from solution config + status — never merge
+    // into the previous draft (avoids 22s over an AA solution, stale time limits).
+    const status = get().status;
+    const solutionId = get().solutionId;
+    let config: Record<string, unknown> | null = null;
+    if (solutionId) {
+      try {
+        config = await engineClient.getSolutionConfig(solutionId);
+      } catch {
+        config = null;
       }
-      const opened = draftFromOpenedSolution({
-        solutionPath: target,
-        status,
-        config,
-      });
-      const weights = {
-        oop: parseRangeText(opened.draft.oopRange),
-        ip: parseRangeText(opened.draft.ipRange),
-      };
-      const warningSuffix =
-        opened.warnings.length > 0 ? ` ${opened.warnings.join(" ")}` : "";
-      const syncNote = opened.configComplete
-        ? "Build draft replaced from solution config."
-        : "Build draft replaced from status; ranges/bet sizes cleared.";
-      set({
-        draft: opened.draft,
-        weights,
-        draftRevision: bumpRevision(get().draftRevision),
-        pathTrail: [],
-        boardChangeChanceNode: null,
-        boardChangeStreet: null,
-        navHistory: [],
-        navHistoryIndex: -1,
-        canNavBack: false,
-        canNavForward: false,
-        compareNote: null,
-        strategyEditScope: null,
-        strategyEditDraft: defaultLockDraft(0),
-        strategyEditDraftBaseline: null,
-        strategyEditDrawerOpen: false,
-        setupMeta: null,
-        canUndoSetup: false,
-        canUndoRange: false,
-        canRedoRange: false,
-        message: `Opened ${target}. ${syncNote}${warningSuffix}`,
-      });
-    } catch (error) {
-      // Missing/invalid checkpoint must leave the last valid study usable.
-      pendingReloadNodeId = undefined;
-      set({
-        ...prior,
-        phase: "failed",
-        message: error instanceof EngineError ? error.message : "Open failed",
-      });
     }
+    const opened = draftFromOpenedSolution({
+      solutionPath: target,
+      status,
+      config,
+    });
+    const weights = {
+      oop: parseRangeText(opened.draft.oopRange),
+      ip: parseRangeText(opened.draft.ipRange),
+    };
+    const warningSuffix =
+      opened.warnings.length > 0 ? ` ${opened.warnings.join(" ")}` : "";
+    const syncNote = opened.configComplete
+      ? "Build draft replaced from solution config."
+      : "Build draft replaced from status; ranges/bet sizes cleared.";
+    set({
+      draft: opened.draft,
+      weights,
+      draftRevision: bumpRevision(get().draftRevision),
+      pathTrail: [],
+      boardChangeChanceNode: null,
+      boardChangeStreet: null,
+      navHistory: [],
+      navHistoryIndex: -1,
+      canNavBack: false,
+      canNavForward: false,
+      compareNote: null,
+      strategyEditScope: null,
+      strategyEditDraft: defaultLockDraft(0),
+      strategyEditDraftBaseline: null,
+      strategyEditDrawerOpen: false,
+      setupMeta: null,
+      canUndoSetup: false,
+      canUndoRange: false,
+      canRedoRange: false,
+      message: `Opened ${target}. ${syncNote}${warningSuffix}`,
+    });
+    return { ok: true, path: target };
   },
 
   async loadCompare(nodeId) {
@@ -2442,15 +2453,35 @@ pathTrail,
     try {
       const template = await engineClient.template(trimmed);
       const parsed = await engineClient.parseConfig(template.text);
-      const partial = draftFromParsedConfig(parsed);
-      get().updateDraft(partial);
-      const oop = typeof parsed.oop_range === "string" ? parsed.oop_range : "";
-      const ip = typeof parsed.ip_range === "string" ? parsed.ip_range : "";
-      get().setRangeText("oop", oop);
-      get().setRangeText("ip", ip);
-      const kind = typeof parsed.kind === "string" ? parsed.kind : "configuration";
+      const state = get();
+      // Full template = complete setup transaction (no partial merge).
+      // Absent utility fields reset; explicit zeros (rake-rate 0) are preserved.
+      const next = draftFromFullTemplate(parsed, {
+        solutionPath: state.draft.solutionPath,
+        preserveSolveSession: {
+          iterations: state.draft.iterations,
+          algorithm: state.draft.algorithm,
+          samples: state.draft.samples,
+          accuracy: state.draft.accuracy,
+          frozen: state.draft.frozen,
+        },
+      });
+      const weights = {
+        oop: parseRangeText(next.oopRange),
+        ip: parseRangeText(next.ipRange),
+      };
+      rangeHistory.push(exactPairFromDraft(state.draft));
       set({
-        message: `Loaded template ${trimmed} (${kind}) into Build draft.`,
+        draft: next,
+        weights,
+        draftRevision: bumpRevision(state.draftRevision),
+        setupMeta: null,
+        canUndoSetup: setupHistoryPast.length > 0,
+        canUndoRange: rangeHistory.canUndo(),
+        canRedoRange: rangeHistory.canRedo(),
+        message: `Loaded template ${trimmed} (${
+          typeof parsed.kind === "string" ? parsed.kind : "configuration"
+        }) into Build draft.`,
         workspace: "build",
       });
     } catch (error) {
