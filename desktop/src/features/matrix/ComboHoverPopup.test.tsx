@@ -31,7 +31,7 @@ describe("ComboHoverPopup", () => {
     cleanup();
   });
 
-  it("renders six pair mini-squares with overlay meta", () => {
+  it("renders six pair mini-squares with strategy paint by default", () => {
     const cell = groupHands(node).find((entry) => entry.text === "AA")!;
     const equityMap = equityByCombo([
       { combo: "AhAd", equity: 0.8 },
@@ -55,16 +55,43 @@ describe("ComboHoverPopup", () => {
         evDisplayBasis="local"
         equityMap={equityMap}
         pinned={false}
-        anchor={{ left: 10, top: 10, width: 20, height: 20, viewport: true }}
+        matrixMode="strategy"
+        actionColors={["#3f8f6b", "#c46a2b"]}
       />,
     );
 
-    expect(screen.getByRole("dialog", { name: "AA combo breakdown" })).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "AA combo breakdown" });
+    expect(dialog).toBeTruthy();
+    expect(dialog.getAttribute("data-paint")).toBe("strategy");
     expect(screen.getByText("AA")).toBeTruthy();
     const squares = document.querySelectorAll(".combo-hover-square");
     expect(squares).toHaveLength(6);
     expect(document.querySelectorAll('.combo-hover-square[data-present="true"]')).toHaveLength(
       3,
     );
+    expect(document.querySelectorAll(".combo-hover-square__segments").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".combo-hover-square__meta").length).toBeGreaterThan(0);
+  });
+
+  it("uses range paint when the main matrix is in Range mode", () => {
+    useMatrixDisplayStore.getState().setCellOverlay("none");
+    const cell = groupHands(node).find((entry) => entry.text === "AA")!;
+    render(
+      <ComboHoverPopup
+        cell={cell}
+        node={node}
+        nodeValues={null}
+        evDisplayBasis="local"
+        equityMap={new Map()}
+        pinned={false}
+        matrixMode="range"
+        actionColors={["#3f8f6b", "#c46a2b"]}
+      />,
+    );
+    expect(
+      screen.getByRole("dialog", { name: "AA combo breakdown" }).getAttribute("data-paint"),
+    ).toBe("range");
+    expect(document.querySelectorAll(".combo-hover-square__fill").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".combo-hover-square__segments")).toHaveLength(0);
   });
 });

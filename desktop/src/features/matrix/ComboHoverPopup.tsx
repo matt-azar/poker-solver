@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties } from "react";
+import { useMemo } from "react";
 import {
   type AggregatedHandCell,
   formatRangeInclusion,
@@ -7,6 +7,9 @@ import {
 import {
   cellShape,
   comboBreakdown,
+  comboHoverPaint,
+  comboHoverShowEquity,
+  comboHoverShowEv,
   formatEquityPct,
   formatEvChip,
   type ComboBreakdownSquare,
@@ -17,6 +20,7 @@ import {
   RANKS,
   type ActionValuesPayload,
   type EvDisplayBasis,
+  type MatrixMode,
   type NodePayload,
 } from "../../domain/types";
 
@@ -27,15 +31,9 @@ interface Props {
   evDisplayBasis: EvDisplayBasis;
   equityMap: Map<string, number>;
   pinned: boolean;
-  /** Viewport (fixed) or wrap-relative anchor for the hovered / pinned cell. */
-  anchor: {
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-    /** When true, `left`/`top` are viewport coordinates (position:fixed). */
-    viewport?: boolean;
-  } | null;
+  matrixMode: MatrixMode;
+  /** Action colors aligned with node.actions indices. */
+  actionColors: string[];
 }
 
 function shapeColumns(shape: ReturnType<typeof cellShape>): number {
@@ -48,7 +46,10 @@ function shapeColumns(shape: ReturnType<typeof cellShape>): number {
   return 4;
 }
 
-/** Pio-style floating suit-pair breakdown for a hovered / pinned 169-cell. */
+/**
+ * Pio-style suit-pair breakdown docked beside the matrix (not over cells).
+ * Paint follows the main grid mode: strategy mix, range weight, or EV.
+ */
 export function ComboHoverPopup({
   cell,
   node,
@@ -56,7 +57,8 @@ export function ComboHoverPopup({
   evDisplayBasis,
   equityMap,
   pinned,
-  anchor,
+  matrixMode,
+  actionColors,
 }: Props) {
   const overlay = useMatrixDisplayStore((s) => s.prefs.cellOverlay);
   const squares = useMemo(
@@ -67,17 +69,18 @@ export function ComboHoverPopup({
   const shape = cellShape(cell.row, cell.col);
   const cols = shapeColumns(shape);
   const inclusion = rangeInclusionOf(cell);
-
-  const style = positionStyle(anchor);
+  const paint = comboHoverPaint(matrixMode);
+  const showEv = comboHoverShowEv(matrixMode, overlay);
+  const showEq = comboHoverShowEquity(matrixMode, overlay);
 
   return (
-    <div
+    <aside
       className="combo-hover-popup"
       role="dialog"
       aria-label={`${cell.text} combo breakdown`}
       data-pinned={pinned ? "true" : "false"}
       data-shape={shape}
-      style={style}
+      data-paint={paint}
     >
       <div className="combo-hover-popup__header">
         <strong>{cell.text}</strong>
@@ -91,19 +94,35 @@ export function ComboHoverPopup({
         style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
       >
         {squares.map((square) => (
-          <MiniSquare key={square.combo} square={square} overlay={overlay} />
+          <MiniSquare
+            key={square.combo}
+            square={square}
+            paint={paint}
+            showEv={showEv}
+            showEq={showEq}
+            overlay={overlay}
+            actionColors={actionColors}
+          />
         ))}
       </div>
-    </div>
+    </aside>
   );
 }
 
 function MiniSquare({
   square,
+  paint,
+  showEv,
+  showEq,
   overlay,
+  actionColors,
 }: {
   square: ComboBreakdownSquare;
+  paint: ReturnType<typeof comboHoverPaint>;
+  showEv: boolean;
+  showEq: boolean;
   overlay: MatrixCellOverlay;
+  actionColors: string[];
 }) {
   const weight =
     square.reach != null
@@ -111,24 +130,69 @@ function MiniSquare({
       : square.marginal != null
         ? square.marginal
         : null;
-  const fillPct =
-    weight != null ? `${Math.max(0, Math.min(1, weight)) * 100}%` : "0%";
-  const showEv = overlay === "ev" || overlay === "both";
-  const showEq = overlay === "equity" || overlay === "both";
+  const empty =
+    !square.present ||
+    (paint === "range" && !(weight != null && weight > 0)) ||
+    (paint === "strategy" &&
+      (!square.strategy || !square.strategy.some((w) => w > 0.001)));
+
+  void overlay;
 
   return (
     <div
       className="combo-hover-square"
       data-present={square.present ? "true" : "false"}
-      data-empty={!square.present || !(weight != null && weight > 0)}
+      data-empty={empty ? "true" : "false"}
+      data-paint={paint}
       title={square.combo}
     >
-      <div className="combo-hover-square__fill" style={{ height: fillPct }} />
+      {paint === "strategy" && square.strategy ? (
+        <div className="combo-hover-square__segments" aria-hidden>
+          {square.strategy.map((seg, index) =>
+            seg > 0.001 ? (
+              <span
+                key={index}
+                className="combo-hover-square__seg"
+                style={{
+                  flexGrow: seg,
+                  flexBasis: 0,
+                  background: actionColors[index] || "#666",
+                }}
+              />
+            ) : null,
+          )}
+        </div>
+      ) : null}
+      {paint === "range" ? (
+        <div
+          className="combo-hover-square__fill"
+          style={{
+            height:
+              weight != null
+                ? `${Math.max(0, Math.min(1, weight)) * 100}%`
+                : "0%",
+          }}
+        />
+      ) : null}
+      {paint === "ev" ? (
+        <div
+          className="combo-hover-square__ev-fill"
+          data-sign={
+            square.ev == null || !Number.isFinite(square.ev)
+              ? "none"
+              : square.ev >= 0
+                ? "pos"
+                : "neg"
+          }
+        />
+      ) : null}
       <div className="combo-hover-square__body">
         <span className="combo-hover-square__label">{square.label}</span>
-        <span className="combo-hover-square__weight tabular">
-          {weight == null ? "—" : formatRangeInclusion(weight)}
-        </span>
+        {paint === "range" ? (
+          <span className="combo-hover-square__weight tabular">
+            {weight == null ? "—" : formatRangeInclusion(weight)}
+          </span>
+        ) : null}
         {showEv ? (
           <span className="combo-hover-square__meta tabular">
             {formatEvChip(square.ev)}
@@ -144,28 +208,11 @@ function MiniSquare({
   );
 }
 
-function positionStyle(anchor: Props["anchor"]): CSSProperties | undefined {
-  if (!anchor) {
-    return undefined;
-  }
-  const gap = 8;
-  const preferRight = anchor.left + anchor.width + gap;
-  const top = Math.max(4, anchor.top);
-  if (anchor.viewport) {
-    const maxLeft =
-      typeof window !== "undefined"
-        ? Math.max(8, window.innerWidth - 200)
-        : preferRight;
-    return {
-      position: "fixed",
-      left: Math.min(preferRight, maxLeft),
-      top: Math.min(top, typeof window !== "undefined" ? window.innerHeight - 80 : top),
-      zIndex: 40,
-    };
-  }
-  return {
-    position: "absolute",
-    left: preferRight,
-    top,
-  };
+/** Empty dock placeholder when nothing is hovered / pinned. */
+export function ComboHoverDockEmpty() {
+  return (
+    <aside className="combo-hover-popup combo-hover-popup--empty" aria-hidden>
+      <p className="muted">Hover a hand</p>
+    </aside>
+  );
 }

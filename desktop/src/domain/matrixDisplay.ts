@@ -56,12 +56,48 @@ export interface ComboBreakdownSquare {
   reach: number | null;
   /** Posterior marginal mass; null when undefined. */
   marginal: number | null;
+  /** Per-action strategy mix for this combo (same order as node.actions). */
+  strategy: number[] | null;
   /** Mixed strategy EV for this combo under the display basis. */
   ev: number | null;
   /** Check-down equity for this combo when loaded. */
   equity: number | null;
   /** True when the combo is listed on the current node. */
   present: boolean;
+}
+
+/** How the hover mini-grid paints, mirroring the main matrix mode + overlay. */
+export type ComboHoverPaint =
+  | "strategy"
+  | "range"
+  | "ev";
+
+export function comboHoverPaint(mode: string): ComboHoverPaint {
+  if (mode === "range") {
+    return "range";
+  }
+  if (mode === "ev") {
+    return "ev";
+  }
+  // strategy, strategy-ev, and unknown → strategy mix bars
+  return "strategy";
+}
+
+/** Whether the hover popup should show EV numbers given mode + overlay. */
+export function comboHoverShowEv(mode: string, overlay: MatrixCellOverlay): boolean {
+  if (mode === "ev" || mode === "strategy-ev") {
+    return true;
+  }
+  return overlay === "ev" || overlay === "both";
+}
+
+/** Whether the hover popup should show equity numbers given mode + overlay. */
+export function comboHoverShowEquity(
+  mode: string,
+  overlay: MatrixCellOverlay,
+): boolean {
+  void mode;
+  return overlay === "equity" || overlay === "both";
 }
 
 function clampOverlay(value: unknown): MatrixCellOverlay {
@@ -399,20 +435,35 @@ export function comboBreakdown(
   const byCombo = new Map(cell.hands.map((hand) => [hand.combo, hand]));
   const reach = node && Array.isArray(node.reach) ? (node.reach as number[]) : null;
 
+  const actionCount = (node?.actions || []).length;
+
   return slots.map((slot) => {
     const hand = byCombo.get(slot.combo);
     const present = Boolean(hand);
     let reachVal: number | null = null;
     let marginalVal: number | null = null;
-    if (present && node?.reach_defined) {
-      const index = (node.combos || []).indexOf(slot.combo);
-      if (index >= 0) {
-        if (reach) {
-          const r = Number(reach[index] ?? 0);
-          reachVal = Number.isFinite(r) ? r : null;
+    let strategy: number[] | null = null;
+    if (present && hand) {
+      if (actionCount > 0 && hand.actions.length > 0) {
+        const mix = new Array(actionCount).fill(0);
+        for (const action of hand.actions) {
+          const index = (node?.actions || []).indexOf(action.action);
+          if (index >= 0) {
+            mix[index] = Math.max(0, Number(action.probability) || 0);
+          }
         }
-        const m = Number(node.marginal?.[index] ?? 0);
-        marginalVal = Number.isFinite(m) ? m : null;
+        strategy = mix;
+      }
+      if (node?.reach_defined) {
+        const index = (node.combos || []).indexOf(slot.combo);
+        if (index >= 0) {
+          if (reach) {
+            const r = Number(reach[index] ?? 0);
+            reachVal = Number.isFinite(r) ? r : null;
+          }
+          const m = Number(node.marginal?.[index] ?? 0);
+          marginalVal = Number.isFinite(m) ? m : null;
+        }
       }
     }
     const equity = equityMap.get(slot.combo);
@@ -421,6 +472,7 @@ export function comboBreakdown(
       label: slot.label,
       reach: reachVal,
       marginal: marginalVal,
+      strategy,
       ev: present ? comboEv(node, values, slot.combo, basis) : null,
       equity: equity != null && Number.isFinite(equity) ? equity : null,
       present,

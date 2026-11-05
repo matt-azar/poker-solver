@@ -10,7 +10,8 @@
  * (−4e9). Prefer {@link formatEngineSpec} / {@link encodeBetList} over reading
  * raw numbers in UI code.
  *
- * Study Build blank bet = check-only; blank raise = copy that street's bets;
+ * Study Build blank bet = check-only; blank raise = no pot-fraction raises
+ * (same as `-`; list sizes or `2.5x` explicitly — never copy that street's bets);
  * blank donk = no lead (donk* checkboxes are ignored when text is blank).
  * Size lists are comma-delimited; unrecognized tokens are errors, never skipped.
  * Engine JSON still distinguishes inherit (`[]`) from explicit-empty (`[-4e9]`).
@@ -251,10 +252,6 @@ function finiteSpecs(values: unknown): number[] {
   return values.map((value) => Number(value)).filter((value) => Number.isFinite(value));
 }
 
-function sameSpecs(left: number[], right: number[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
 function formatSpecList(specs: number[]): string {
   if (specs.length === 0 || isExplicitEmptyList(specs)) {
     return "";
@@ -264,7 +261,6 @@ function formatSpecList(specs: number[]): string {
 
 /**
  * Display a stored size list. An explicit-empty raise list is `-` (no raises).
- * A raise list that matches the street's bets displays blank, which copies bets.
  * Prefer {@link formatStreetBetField} / {@link formatStreetRaiseField} when
  * importing config so inheritance is resolved into editable text.
  */
@@ -279,12 +275,9 @@ export function formatStoredSizes(
   if (isExplicitEmptyList(specs)) {
     return options?.raise ? "-" : "";
   }
-  if (options?.raise && options.matchBets !== undefined) {
-    const bets = finiteSpecs(options.matchBets);
-    if (sameSpecs(specs, bets)) {
-      return "";
-    }
-  }
+  // matchBets is accepted for call-site compat but no longer blanks matching raises —
+  // blank raise fields mean no raises, so import must show the real raise text.
+  void options?.matchBets;
   return specs.map(formatEngineSpec).join(", ");
 }
 
@@ -323,14 +316,14 @@ export function formatStreetBetField(
  * Format a per-street raise list for Build.
  * - Explicit-empty → `-`
  * - Empty (`[]`) resolves shared raises; if that is also empty → `-` (no raises)
- * - Matching street bets → blank (encode copies bets)
- * - Otherwise the resolved size text
+ * - Otherwise the resolved size text (including when it matches street bets —
+ *   blank encode means no raises, so matching bets must stay visible)
  */
 export function formatStreetRaiseField(
   raiseValues: unknown,
   sharedRaises: unknown,
-  streetBets: unknown,
-  options?: { sharedBets?: unknown },
+  _streetBets?: unknown,
+  _options?: { sharedBets?: unknown },
 ): string {
   const raises = finiteSpecs(raiseValues);
   if (isExplicitEmptyList(raises)) {
@@ -339,10 +332,6 @@ export function formatStreetRaiseField(
   const resolved = raises.length === 0 ? finiteSpecs(sharedRaises) : raises;
   if (resolved.length === 0 || isExplicitEmptyList(resolved)) {
     return "-";
-  }
-  const bets = resolveInheritedSpecs(streetBets, options?.sharedBets);
-  if (!isExplicitEmptyList(bets) && sameSpecs(resolved, bets)) {
-    return "";
   }
   return formatSpecList(resolved);
 }
@@ -513,12 +502,14 @@ export function encodeBetList(text: string): number[] {
 }
 
 /**
- * Blank raise text copies that street's bet specs, so max raises 1 still raises.
- * `-` / `none` / `x` is an explicit empty raise list.
+ * Blank raise text is explicit-empty (no pot-fraction raises) — never copies
+ * that street's bets. List sizes or `2.5x` explicitly. `-` / `none` / `x` is
+ * the same explicit-empty sentinel. `betSpecs` is unused (kept for call-site
+ * compatibility).
  */
-export function encodeRaiseList(text: string, betSpecs: number[]): number[] {
+export function encodeRaiseList(text: string, _betSpecs: number[] = []): number[] {
   if (!text.trim()) {
-    return betSpecs.slice();
+    return [EXPLICIT_EMPTY_SPEC];
   }
   return requireSizeList(text, { allowMultiple: true }, "raise sizes");
 }
@@ -605,8 +596,8 @@ const BETTING_FIELD_SPECS: BettingFieldSpec[] = [
 
 /**
  * Validate every betting-list field with {@link parseSizeListStrict}.
- * Blank raise text (copy bets) and blank shared bets (inherit) are intentional
- * and skip parsing. Blank donk is intentional no-lead.
+ * Blank raise (no raises), blank shared bets (inherit), and blank donk (no lead)
+ * are intentional and skip parsing.
  */
 export function validateBettingLists(draft: BettingDraftFields): string[] {
   const errors: string[] = [];
@@ -617,7 +608,7 @@ export function validateBettingLists(draft: BettingDraftFields): string[] {
     }
     const trimmed = raw.trim();
     if (!trimmed) {
-      // Blank raise → copy street bets; blank shared bets → inherit; blank donk → no lead.
+      // Blank raise → no raises; blank shared bets → inherit; blank donk → no lead.
       continue;
     }
     const allowMultiple =

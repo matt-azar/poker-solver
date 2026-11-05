@@ -26,7 +26,7 @@ import {
 import type { ThemePreference } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
-import { WORKSPACES, WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 interface Props {
   workspace: WorkspaceId;
@@ -37,7 +37,7 @@ interface Props {
   onAssistantToggle: () => void;
 }
 
-type MenuId = "file" | "solve" | "tree" | "view" | "workspace" | "settings" | null;
+type MenuId = "file" | "solve" | "tree" | "view" | "settings" | null;
 
 export function MenuBar({
   workspace,
@@ -313,17 +313,6 @@ export function MenuBar({
             },
             { label: "Reset layout", onClick: () => resetLayout() },
           ]}
-        />
-        <Menu
-          id="workspace"
-          label="Workspace"
-          open={openMenu}
-          setOpen={setOpenMenu}
-          items={WORKSPACES.map((entry) => ({
-            label: entry.label,
-            onClick: () => onWorkspace(entry.id),
-            disabled: workspace === entry.id,
-          }))}
         />
         <Menu
           id="settings"
