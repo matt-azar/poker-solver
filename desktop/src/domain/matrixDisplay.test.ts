@@ -147,17 +147,65 @@ describe("overlay labels and weight fill", () => {
 });
 
 describe("combo breakdown slots", () => {
-  it("emits 6/4/12 suit-pair slots", () => {
+  const unpairedAk16 = [
+    "AcKc",
+    "AcKd",
+    "AcKh",
+    "AcKs",
+    "AdKc",
+    "AdKd",
+    "AdKh",
+    "AdKs",
+    "AhKc",
+    "AhKd",
+    "AhKh",
+    "AhKs",
+    "AsKc",
+    "AsKd",
+    "AsKh",
+    "AsKs",
+  ];
+
+  it("emits 6 pair / 16 unpaired (4×4) suit-pair slots", () => {
     expect(expectedComboSlots(0, 0, RANKS)).toHaveLength(6);
-    expect(expectedComboSlots(0, 1, RANKS)).toHaveLength(4);
-    expect(expectedComboSlots(1, 0, RANKS)).toHaveLength(12);
+    expect(expectedComboSlots(0, 1, RANKS)).toHaveLength(16);
+    expect(expectedComboSlots(1, 0, RANKS)).toHaveLength(16);
     expect(expectedComboSlots(0, 0, RANKS)[0]?.combo).toBe("AdAc");
-    expect(expectedComboSlots(0, 1, RANKS).map((s) => s.combo)).toEqual([
-      "AcKc",
-      "AdKd",
-      "AhKh",
-      "AsKs",
-    ]);
+    // Suited + offsuit share the same 4×4 high-suit × low-suit (cdhs) order.
+    expect(expectedComboSlots(0, 1, RANKS).map((s) => s.combo)).toEqual(unpairedAk16);
+    expect(expectedComboSlots(1, 0, RANKS).map((s) => s.combo)).toEqual(unpairedAk16);
+  });
+
+  it("marks only same-suit diagonals present for suited; only offsuit for offsuit", () => {
+    const suitedCombos = ["AcKc", "AdKd", "AhKh", "AsKs"];
+    const offsuitCombos = unpairedAk16.filter((c) => c[1] !== c[3]);
+    const aksNode = {
+      node_id: "n",
+      reach_defined: true,
+      actions: ["Check"],
+      combos: suitedCombos,
+      reach: suitedCombos.map(() => 1),
+      marginal: suitedCombos.map(() => 1),
+      strategy: suitedCombos.map(() => [1]),
+    };
+    const akoNode = {
+      node_id: "n",
+      reach_defined: true,
+      actions: ["Check"],
+      combos: offsuitCombos,
+      reach: offsuitCombos.map(() => 1),
+      marginal: offsuitCombos.map(() => 1),
+      strategy: offsuitCombos.map(() => [1]),
+    };
+    const aks = groupHands(aksNode).find((c) => c.text === "AKs")!;
+    const ako = groupHands(akoNode).find((c) => c.text === "AKo")!;
+    const aksSquares = comboBreakdown(aks, aksNode, null, new Map(), "local", RANKS);
+    const akoSquares = comboBreakdown(ako, akoNode, null, new Map(), "local", RANKS);
+    expect(aksSquares).toHaveLength(16);
+    expect(akoSquares).toHaveLength(16);
+    expect(aksSquares.filter((s) => s.present).map((s) => s.combo)).toEqual(suitedCombos);
+    expect(akoSquares.filter((s) => s.present)).toHaveLength(12);
+    expect(akoSquares.filter((s) => !s.present).map((s) => s.combo)).toEqual(suitedCombos);
   });
 
   it("fills breakdown with reach, EV, and equity per present combo", () => {

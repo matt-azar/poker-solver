@@ -94,4 +94,85 @@ describe("ComboHoverPopup", () => {
     expect(document.querySelectorAll(".combo-hover-square__fill").length).toBeGreaterThan(0);
     expect(document.querySelectorAll(".combo-hover-square__segments")).toHaveLength(0);
   });
+
+  it("renders 16 suited mini-squares (4 present) in a 4-column grid", () => {
+    const suited = ["AcKc", "AdKd", "AhKh", "AsKs"];
+    const aksNode: NodePayload = {
+      node_id: "n-aks",
+      player: 0,
+      reach_defined: true,
+      actions: ["Check"],
+      combos: suited,
+      reach: suited.map(() => 1),
+      marginal: suited.map(() => 1),
+      strategy: suited.map(() => [1]),
+    };
+    const cell = groupHands(aksNode).find((entry) => entry.text === "AKs")!;
+    render(
+      <ComboHoverPopup
+        cell={cell}
+        node={aksNode}
+        nodeValues={null}
+        evDisplayBasis="local"
+        equityMap={new Map()}
+        pinned={false}
+        matrixMode="strategy"
+        actionColors={["#3f8f6b"]}
+      />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "AKs combo breakdown" });
+    expect(dialog.getAttribute("data-shape")).toBe("suited");
+    const grid = dialog.querySelector(".combo-hover-popup__grid") as HTMLElement;
+    expect(grid.style.gridTemplateColumns).toContain("repeat(4");
+    expect(document.querySelectorAll(".combo-hover-square")).toHaveLength(16);
+    expect(document.querySelectorAll('.combo-hover-square[data-present="true"]')).toHaveLength(4);
+  });
+
+  it("renders 16 offsuit mini-squares (12 present) in a 4-column grid", () => {
+    const offsuit = [
+      "AcKd",
+      "AcKh",
+      "AcKs",
+      "AdKc",
+      "AdKh",
+      "AdKs",
+      "AhKc",
+      "AhKd",
+      "AhKs",
+      "AsKc",
+      "AsKd",
+      "AsKh",
+    ];
+    const akoNode: NodePayload = {
+      node_id: "n-ako",
+      player: 0,
+      reach_defined: true,
+      actions: ["Check"],
+      combos: offsuit,
+      reach: offsuit.map(() => 1),
+      marginal: offsuit.map(() => 1),
+      strategy: offsuit.map(() => [1]),
+    };
+    const cell = groupHands(akoNode).find((entry) => entry.text === "AKo")!;
+    render(
+      <ComboHoverPopup
+        cell={cell}
+        node={akoNode}
+        nodeValues={null}
+        evDisplayBasis="local"
+        equityMap={new Map()}
+        pinned={false}
+        matrixMode="strategy"
+        actionColors={["#3f8f6b"]}
+      />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "AKo combo breakdown" });
+    expect(dialog.getAttribute("data-shape")).toBe("offsuit");
+    const grid = dialog.querySelector(".combo-hover-popup__grid") as HTMLElement;
+    expect(grid.style.gridTemplateColumns).toContain("repeat(4");
+    expect(document.querySelectorAll(".combo-hover-square")).toHaveLength(16);
+    expect(document.querySelectorAll('.combo-hover-square[data-present="true"]')).toHaveLength(
+      12,
+    );
+  });
 });

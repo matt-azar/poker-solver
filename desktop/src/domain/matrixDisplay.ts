@@ -332,8 +332,13 @@ function suitPairLabel(suitA: string, suitB: string, sameSuit: boolean): string 
 }
 
 /**
- * Ordered suit-pair slots for a 169-cell (Pio-style: 6 pair / 4 suited / 12 offsuit).
- * Keys match engine canonicalize order used by {@link combosForCell} in range.ts.
+ * Ordered suit-pair slots for a 169-cell (GTO Wizard-style: 6 pair / 16 unpaired).
+ *
+ * Unpaired (suited and offsuit) use a stable 4×4 grid: outer = high-card suit,
+ * inner = low-card suit, both in cdhs order. Suited cells only mark the 4
+ * same-suit diagonals present; offsuit cells only mark the 12 different-suit
+ * slots present. Keys match engine canonicalize used by {@link combosForCell}
+ * in range.ts (higher rank first; pairs higher suit first).
  */
 export function expectedComboSlots(
   row: number,
@@ -357,25 +362,12 @@ export function expectedComboSlots(
     }
     return out;
   }
-  if (row < col) {
-    // Suited
-    for (const suit of SUITS_CDHS) {
-      out.push({
-        combo: `${highRank}${suit}${lowRank}${suit}`,
-        label: suitPairLabel(suit, suit, true),
-      });
-    }
-    return out;
-  }
-  // Offsuit
+  // Unpaired: full 4×4 high-suit × low-suit (cdhs × cdhs).
   for (const left of SUITS_CDHS) {
     for (const right of SUITS_CDHS) {
-      if (left === right) {
-        continue;
-      }
       out.push({
         combo: `${highRank}${left}${lowRank}${right}`,
-        label: suitPairLabel(left, right, false),
+        label: suitPairLabel(left, right, left === right),
       });
     }
   }
@@ -418,7 +410,8 @@ export function comboEv(
 
 /**
  * Break a 169-cell into suit-pair mini-squares with weight / EV / equity.
- * Missing node combos still appear as empty slots so the grid stays 4/6/12.
+ * Missing node combos still appear as empty slots so the grid stays 6 (pairs)
+ * or 16 (unpaired 4×4).
  */
 export function comboBreakdown(
   cell: AggregatedHandCell | null | undefined,
