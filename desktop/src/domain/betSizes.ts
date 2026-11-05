@@ -252,10 +252,6 @@ function finiteSpecs(values: unknown): number[] {
   return values.map((value) => Number(value)).filter((value) => Number.isFinite(value));
 }
 
-function sameSpecs(left: number[], right: number[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
 function formatSpecList(specs: number[]): string {
   if (specs.length === 0 || isExplicitEmptyList(specs)) {
     return "";
