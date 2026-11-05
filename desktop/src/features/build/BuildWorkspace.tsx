@@ -317,8 +317,9 @@ export function BuildWorkspace() {
 
           <h3 className="build-subhead">Betting tree</h3>
           <p className="field-hint">
-            Blank bet = check only. Blank raise = that street&apos;s bet sizes.
-            Type - to remove raises. Max raises 1 allows one raise and no 3-bet;
+            Blank bet = check only. Blank raise = no pot-fraction raises (same
+            as -); list sizes or 2.5x explicitly — raises never copy bets.
+            Max raises 1 allows one raise and no 3-bet;
             0 removes raises. Sizes: 75 (75% pot), 0.5%, 20c, e, 2e, 3e, a, 2.5x.
             Add e or a on each street where you want geometric or all-in.
           </p>

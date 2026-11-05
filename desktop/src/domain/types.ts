@@ -351,7 +351,7 @@ export const DEFAULT_SPOT: SpotDraft = {
   ipRange: "KK",
   pot: 100,
   stack: 200,
-  // Blank bet fields are forced checks. Blank raise fields copy that street's bets.
+  // Blank bet fields are forced checks. Blank raise fields are no pot-fraction raises.
   oopBets: "",
   ipBets: "",
   oopRaises: "",

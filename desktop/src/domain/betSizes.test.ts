@@ -60,7 +60,7 @@ describe("betSizes", () => {
     expect(encodeBetList("33, e, 2e")).toEqual([0.33, GEO_BASE, GEO_BASE - 2]);
     expect(encodeBetList("50")).toEqual([0.5]);
     expect(encodeBetList("50, a")).toEqual([0.5, -1e9]);
-    expect(encodeRaiseList("", [0.5])).toEqual([0.5]);
+    expect(encodeRaiseList("", [0.5])).toEqual([EXPLICIT_EMPTY_SPEC]);
     expect(encodeRaiseList("-", [0.5])).toEqual([EXPLICIT_EMPTY_SPEC]);
     expect(encodeRaiseList("2.5x", [0.5])[0]).toBeCloseTo(-3e9 - 2.5, 6);
   });
@@ -113,12 +113,15 @@ describe("betSizes", () => {
   it("resolves empty raises to no-raise rather than copying bets", () => {
     expect(formatStreetRaiseField([], [], [0.5])).toBe("-");
     expect(formatStreetRaiseField([EXPLICIT_EMPTY_SPEC], [], [0.5])).toBe("-");
-    expect(formatStreetRaiseField([0.5], [], [0.5])).toBe("");
+    // Matching street bets stays visible — blank encode means no raises.
+    expect(formatStreetRaiseField([0.5], [], [0.5])).toBe("50");
     expect(formatStreetRaiseField([1], [], [0.5])).toBe("100");
     expect(formatStreetRaiseField([], [1], [0.5])).toBe("100");
+    expect(encodeRaiseList("", [0.5])).toEqual([EXPLICIT_EMPTY_SPEC]);
     expect(encodeRaiseList(formatStreetRaiseField([], [], [0.5]), [0.5])).toEqual([
       EXPLICIT_EMPTY_SPEC,
     ]);
+    expect(encodeRaiseList("50", [0.33])).toEqual([0.5]);
   });
 
   it("materializes empty donk lists as visible street bet text without copyBets", () => {

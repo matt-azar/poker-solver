@@ -4,8 +4,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type FocusEvent,
-  type MouseEvent,
   type RefObject,
 } from "react";
 import { mapActionColors } from "../../domain/actionColors";
@@ -38,7 +36,7 @@ import {
 } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/matrix-density.css";
-import { ComboHoverPopup } from "./ComboHoverPopup";
+import { ComboHoverDockEmpty, ComboHoverPopup } from "./ComboHoverPopup";
 
 function cellKey(row: number, col: number): string {
   return `${row}:${col}`;
@@ -129,15 +127,8 @@ export function RangeMatrix() {
   const actionFilter = useStudyStore((s) => s.actionFilter);
   const equity = useStudyStore((s) => s.equity);
   const displayPrefs = useMatrixDisplayStore((s) => s.prefs);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const side = useMeasuredSquareSide(wrapRef);
-  const [anchor, setAnchor] = useState<{
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-    viewport?: boolean;
-  } | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const side = useMeasuredSquareSide(stageRef);
 
   const cells = useMemo(
     () => (currentNode ? groupHands(currentNode) : []),
@@ -179,78 +170,64 @@ export function RangeMatrix() {
   const focusCell = focus
     ? byKey.get(cellKey(focus.row, focus.col)) ?? null
     : null;
-  const showPopup = Boolean(currentNode && focusCell && !isExcludedForPopup(focusCell, matrixMode));
-
-  const updateAnchorFromEvent = (
-    event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>,
-  ) => {
-    const target = event.currentTarget;
-    if (!target) {
-      return;
-    }
-    const cellRect = target.getBoundingClientRect();
-    setAnchor({
-      left: cellRect.left,
-      top: cellRect.top,
-      width: cellRect.width,
-      height: cellRect.height,
-      viewport: true,
-    });
-  };
+  const showPopup = Boolean(
+    currentNode && focusCell && !isExcludedForPopup(focusCell, matrixMode),
+  );
 
   return (
-    <div className="range-matrix-wrap" ref={wrapRef}>
-      <div
-        className="range-matrix matrix-density"
-        role="grid"
-        aria-label={matrixAria}
-        style={side > 0 ? { width: side, height: side } : undefined}
-        onMouseLeave={() => {
-          setHoverCell(null);
-          if (!selectedCell) {
-            setAnchor(null);
-          }
-        }}
-      >
-        <div className="matrix-corner" />
-        {RANKS.map((rank) => (
-          <div key={`c-${rank}`} className="matrix-axis">
-            {rank}
-          </div>
-        ))}
-        {RANKS.map((rowRank, row) => (
-          <MatrixRow
-            key={`r-${rowRank}`}
-            row={row}
-            byKey={byKey}
-            colors={colors.byIndex}
-            matrixMode={matrixMode}
-            selectedCell={selectedCell}
-            hoverCell={hoverCell}
-            actionFilter={actionFilter}
-            currentNode={currentNode}
+    <div className="range-matrix-wrap">
+      <div className="range-matrix-stage" ref={stageRef}>
+        <div
+          className="range-matrix matrix-density"
+          role="grid"
+          aria-label={matrixAria}
+          style={side > 0 ? { width: side, height: side } : undefined}
+          onMouseLeave={() => setHoverCell(null)}
+        >
+          <div className="matrix-corner" />
+          {RANKS.map((rank) => (
+            <div key={`c-${rank}`} className="matrix-axis">
+              {rank}
+            </div>
+          ))}
+          {RANKS.map((rowRank, row) => (
+            <MatrixRow
+              key={`r-${rowRank}`}
+              row={row}
+              byKey={byKey}
+              colors={colors.byIndex}
+              matrixMode={matrixMode}
+              selectedCell={selectedCell}
+              hoverCell={hoverCell}
+              actionFilter={actionFilter}
+              currentNode={currentNode}
+              nodeValues={nodeValues}
+              evDisplayBasis={evDisplayBasis}
+              evScale={evScale}
+              equityMap={equityMap}
+              displayPrefs={displayPrefs}
+              setSelectedCell={setSelectedCell}
+              setHoverCell={setHoverCell}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="combo-hover-dock" aria-live="polite">
+        {showPopup && currentNode && focusCell ? (
+          <ComboHoverPopup
+            cell={focusCell}
+            node={currentNode}
             nodeValues={nodeValues}
             evDisplayBasis={evDisplayBasis}
-            evScale={evScale}
             equityMap={equityMap}
-            displayPrefs={displayPrefs}
-            setSelectedCell={setSelectedCell}
-            setHoverCell={setHoverCell}
-            onCellPointer={updateAnchorFromEvent}
+            pinned={Boolean(selectedCell)}
+            matrixMode={matrixMode}
+            actionColors={colors.byIndex}
           />
-        ))}
+        ) : (
+          <ComboHoverDockEmpty />
+        )}
       </div>
-      {showPopup && currentNode && focusCell ? (
-        <ComboHoverPopup
-          cell={focusCell}
-          node={currentNode}
-          nodeValues={nodeValues}
-          evDisplayBasis={evDisplayBasis}
-          equityMap={equityMap}
-          pinned={Boolean(selectedCell)}
-          anchor={anchor}
-        />
-      ) : null}
     </div>
   );
 }
@@ -294,9 +271,6 @@ interface RowProps {
   displayPrefs: DisplayPrefs;
   setSelectedCell: (cell: Selected | null) => void;
   setHoverCell: (cell: Selected | null) => void;
-  onCellPointer: (
-    event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>,
-  ) => void;
 }
 
 function MatrixRow({
@@ -315,7 +289,6 @@ function MatrixRow({
   displayPrefs,
   setSelectedCell,
   setHoverCell,
-  onCellPointer,
 }: RowProps) {
   return (
     <>
@@ -498,13 +471,7 @@ function MatrixRow({
                   ? { background: solid }
                   : undefined
             }
-            onMouseEnter={(event) => {
-              setHoverCell({ row, col, text });
-              onCellPointer(event);
-            }}
-            onFocus={(event) => {
-              onCellPointer(event);
-            }}
+            onMouseEnter={() => setHoverCell({ row, col, text })}
             onClick={() => setSelectedCell({ row, col, text })}
             title={title}
           >

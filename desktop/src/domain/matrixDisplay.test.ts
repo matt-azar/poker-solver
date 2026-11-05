@@ -3,6 +3,9 @@ import { groupHands } from "./browse";
 import {
   comboBreakdown,
   comboEv,
+  comboHoverPaint,
+  comboHoverShowEquity,
+  comboHoverShowEv,
   DEFAULT_MATRIX_DISPLAY_PREFS,
   equityByCombo,
   equityHandsForNode,
@@ -39,6 +42,22 @@ describe("matrixDisplay prefs", () => {
     const raw = localStorage.getItem("study-matrix-display-v1");
     expect(raw).toBeTruthy();
     expect(JSON.parse(raw!).rangeWeightHeightFill).toBe(true);
+  });
+});
+
+describe("combo hover paint", () => {
+  it("mirrors matrix mode and overlays for strategy / EV / equity", () => {
+    expect(comboHoverPaint("strategy")).toBe("strategy");
+    expect(comboHoverPaint("strategy-ev")).toBe("strategy");
+    expect(comboHoverPaint("range")).toBe("range");
+    expect(comboHoverPaint("ev")).toBe("ev");
+    expect(comboHoverShowEv("strategy", "none")).toBe(false);
+    expect(comboHoverShowEv("strategy", "ev")).toBe(true);
+    expect(comboHoverShowEv("strategy-ev", "none")).toBe(true);
+    expect(comboHoverShowEv("ev", "none")).toBe(true);
+    expect(comboHoverShowEquity("strategy", "equity")).toBe(true);
+    expect(comboHoverShowEquity("strategy", "none")).toBe(false);
+    expect(comboHoverShowEquity("strategy", "both")).toBe(true);
   });
 });
 
