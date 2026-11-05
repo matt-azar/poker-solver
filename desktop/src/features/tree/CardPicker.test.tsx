@@ -81,12 +81,4 @@ describe("CardPicker", () => {
     ).toBe("true");
   });
 
-  it("renders inline without a dialog chrome when embedded in the Cards row", () => {
-    render(
-      <CardPicker open variant="inline" street="river" onClose={() => undefined} />,
-    );
-    expect(screen.getByRole("region", { name: /river card picker/i })).toBeTruthy();
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByText("Change river")).toBeTruthy();
-  });
 });

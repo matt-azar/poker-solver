@@ -183,16 +183,6 @@ button.playing-card {
   gap: var(--space-3);
 }
 
-.card-picker[data-variant="inline"] {
-  width: 100%;
-  max-height: none;
-  box-shadow: none;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 4px 0 2px;
-}
-
 .card-picker__head {
   display: flex;
   align-items: center;

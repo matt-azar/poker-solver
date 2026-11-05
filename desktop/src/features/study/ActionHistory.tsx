@@ -20,11 +20,9 @@ import {
   type PathStreetGroup,
 } from "../../domain/actionHistory";
 import { type BetSizeDisplayMode } from "../../domain/betSizes";
-import { dealStreetFromBoard } from "../../domain/cards";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/path-nav.css";
-import { CardPicker } from "../tree/CardPicker";
 
 function suitOf(card: string): string {
   const suit = card.trim().slice(1, 2)?.toLowerCase() || "";
@@ -217,10 +215,6 @@ export function ActionHistory() {
     [currentNode, pathTrail, pot, rootId, place, betSizeDisplay, toCall],
   );
 
-  const dealNode = currentNode?.kind === "chance";
-  const dealingStreet = dealNode
-    ? dealStreetFromBoard(currentNode?.board)
-    : null;
   const terminal = currentNode?.kind === "terminal";
   const statusLabel = nodeStatusLabel(currentNode);
   const terminalKind = terminal
@@ -275,13 +269,10 @@ export function ActionHistory() {
     <section
       className="path-nav action-history"
       data-empty={currentNode ? "false" : "true"}
-      data-dealing={dealNode ? "true" : "false"}
       style={
         currentNode
           ? {
-              height: dealNode
-                ? Math.max(layout.historyHeight, 220)
-                : layout.historyHeight,
+              height: layout.historyHeight,
             }
           : undefined
       }
@@ -432,17 +423,6 @@ export function ActionHistory() {
           </span>
         ) : null}
       </div>
-
-      {dealNode ? (
-        <div className="path-nav__row path-nav__card-picker">
-          <CardPicker
-            open
-            variant="inline"
-            street={dealingStreet}
-            onClose={() => undefined}
-          />
-        </div>
-      ) : null}
 
       <div
         className="resize-handle"
