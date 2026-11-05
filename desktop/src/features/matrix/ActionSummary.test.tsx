@@ -83,7 +83,7 @@ describe("ActionSummary", () => {
     expect(within(b50!).queryByText("50%")).toBeNull();
   });
 
-  it("toggles filter on action-block click without a follow Open control", () => {
+  it("distinguishes filter toggle from Open (follow) controls", () => {
     render(<ActionSummary />);
     const b50Filter = screen.getByRole("button", {
       name: /Filter b50,\s*31\.9%/i,
@@ -93,8 +93,9 @@ describe("ActionSummary", () => {
     expect(useStudyStore.getState().actionFilter).toBe(1);
     expect(b50Filter.getAttribute("aria-pressed")).toBe("true");
 
-    expect(screen.queryByRole("button", { name: /Follow /i })).toBeNull();
-    expect(followAction).not.toHaveBeenCalled();
+    const openB50 = screen.getByRole("button", { name: "Follow b50" });
+    fireEvent.click(openB50);
+    expect(followAction).toHaveBeenCalledWith("n-b50");
   });
 
   it("shows a compact action-color legend with pot tags", () => {

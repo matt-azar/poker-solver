@@ -78,15 +78,14 @@ describe("ActionHistory path chrome", () => {
     cleanup();
   });
 
-  it("renders street-grouped path chrome with compact next labels", () => {
+  it("renders street-grouped path chrome without a duplicate Next action row", () => {
     render(<ActionHistory />);
     expect(screen.getByLabelText("Betting path by street")).toBeTruthy();
     expect(screen.getByText("Flop")).toBeTruthy();
     expect(screen.getByText("Root")).toBeTruthy();
     expect(screen.getByText("Ah")).toBeTruthy();
     expect(screen.getByText("OOP to act")).toBeTruthy();
-    // Next row keeps b50 compact (not Bet 50%).
-    expect(screen.getByText("b50")).toBeTruthy();
+    expect(screen.queryByLabelText("Next actions")).toBeNull();
     expect(screen.queryByText("Bet 50%")).toBeNull();
     expect(screen.getByLabelText("Back")).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("Forward")).toHaveProperty("disabled", true);
@@ -124,7 +123,7 @@ describe("ActionHistory path chrome", () => {
     });
     render(<ActionHistory />);
     expect(screen.getByText("IP folded")).toBeTruthy();
-    expect(screen.getByText("Fold terminal")).toBeTruthy();
+    expect(screen.getByText("IP folded").getAttribute("data-terminal")).toBe("fold");
     expect(screen.queryByText("Showdown")).toBeNull();
   });
 
@@ -140,7 +139,7 @@ describe("ActionHistory path chrome", () => {
     expect(goNavBack).toHaveBeenCalledTimes(1);
   });
 
-  it("updates Next and path size tags when betSizeDisplay changes", () => {
+  it("updates path size tags when betSizeDisplay changes", () => {
     useStudyStore.setState({
       pathTrail: [
         {
@@ -166,7 +165,6 @@ describe("ActionHistory path chrome", () => {
         ...rootNode,
         node_id: "n-bet",
         player: 1,
-        // Facing Bet 100: pot 200, to_call 100 → basis 300; Raise to 400 → r100.
         pot: 200,
         to_call: 100,
         line: "Bet 100",
@@ -177,9 +175,7 @@ describe("ActionHistory path chrome", () => {
     });
 
     const { rerender } = render(<ActionHistory />);
-    // Path crumb uses captured source pot → b100; Next shows raise tag.
     expect(screen.getByText("b100")).toBeTruthy();
-    expect(screen.getByText("r100")).toBeTruthy();
 
     useSettingsStore.setState({
       settings: {
@@ -189,8 +185,6 @@ describe("ActionHistory path chrome", () => {
     });
     rerender(<ActionHistory />);
     expect(screen.queryByText("b100")).toBeNull();
-    expect(screen.queryByText("r100")).toBeNull();
     expect(screen.getByText("100.0 chips")).toBeTruthy();
-    expect(screen.getByText("400.0 chips")).toBeTruthy();
   });
 });

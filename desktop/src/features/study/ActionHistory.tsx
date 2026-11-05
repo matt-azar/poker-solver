@@ -6,15 +6,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { mapActionColors } from "../../domain/actionColors";
 import {
   actionSizePotBasis,
   displayPathStepLabel,
-  formatChoiceFrequency,
   groupCrumbsByStreet,
   groupPathByStreet,
   isTerminalFold,
-  nextChoicesFromNode,
   nodeStatusLabel,
   pathCrumbsFromTrail,
   streetLabel,
@@ -22,18 +19,11 @@ import {
   type PathStep,
   type PathStreetGroup,
 } from "../../domain/actionHistory";
-import {
-  formatActionDisplay,
-  formatActionTooltip,
-  formatFrequencyPct,
-  type BetSizeDisplayMode,
-} from "../../domain/betSizes";
+import { type BetSizeDisplayMode } from "../../domain/betSizes";
 import { dealStreetFromBoard } from "../../domain/cards";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/path-nav.css";
-import "../../styles/actions.css";
-import { ActionBlock } from "../matrix/ActionBlock";
 import { CardPicker } from "../tree/CardPicker";
 
 function suitOf(card: string): string {
@@ -104,7 +94,6 @@ export function ActionHistory() {
   const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
   const layout = useStudyStore((s) => s.layout);
   const setLayout = useStudyStore((s) => s.setLayout);
-  const followAction = useStudyStore((s) => s.followAction);
 
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
   const [openAlts, setOpenAlts] = useState<number | null>(null);
@@ -207,7 +196,6 @@ export function ActionHistory() {
     Number(status?.pot ?? draft.pot ?? 0),
   );
   const toCall = Number(currentNode?.to_call ?? 0);
-  const displayOpts = useMemo(() => ({ toCall }), [toCall]);
   const place =
     typeof currentNode?.place === "string" ? currentNode.place : null;
 
@@ -229,11 +217,6 @@ export function ActionHistory() {
     [currentNode, pathTrail, pot, rootId, place, betSizeDisplay, toCall],
   );
 
-  const choices = useMemo(() => nextChoicesFromNode(currentNode), [currentNode]);
-  const colors = useMemo(
-    () => mapActionColors(currentNode?.actions ?? []),
-    [currentNode?.actions],
-  );
   const dealNode = currentNode?.kind === "chance";
   const dealingStreet = dealNode
     ? dealStreetFromBoard(currentNode?.board)
@@ -459,53 +442,7 @@ export function ActionHistory() {
             onClose={() => undefined}
           />
         </div>
-      ) : (
-        <div className="path-nav__row path-nav__next">
-          <span className="path-nav__label">Next</span>
-          <div className="path-nav__choices" role="group" aria-label="Next actions">
-            {!currentNode ? (
-              <span className="empty-hint">—</span>
-            ) : terminal ? (
-              <span className="muted">
-                {isTerminalFold(currentNode) ? "Fold terminal" : "Showdown terminal"}
-              </span>
-            ) : choices.length === 0 ? (
-              <span className="muted">No branches</span>
-            ) : (
-              choices.map((choice, index) => {
-                const display = formatActionDisplay(
-                  choice.label,
-                  pot,
-                  betSizeDisplay,
-                  displayOpts,
-                );
-                const freqText =
-                  formatFrequencyPct(choice.frequency) ??
-                  formatChoiceFrequency(choice.frequency);
-                return (
-                  <ActionBlock
-                    key={choice.key}
-                    variant="follow"
-                    primary={display.primary}
-                    secondary={display.secondary}
-                    frequency={choice.frequency}
-                    frequencyText={freqText}
-                    color={colors.byIndex[index]}
-                    disabled={!choice.nodeId}
-                    title={`${formatActionTooltip(choice.label, pot, betSizeDisplay, displayOpts)} · follow`}
-                    aria-label={`Follow ${display.primary}${freqText ? `, ${freqText}` : ""}`}
-                    onClick={() => {
-                      if (choice.nodeId) {
-                        void followAction(choice.nodeId);
-                      }
-                    }}
-                  />
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
+      ) : null}
 
       <div
         className="resize-handle"
