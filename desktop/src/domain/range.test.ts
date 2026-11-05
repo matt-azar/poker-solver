@@ -136,6 +136,30 @@ describe("exact range history snapshots", () => {
   });
 });
 
+describe("authoritative weight serialization", () => {
+  it("preserves tiny, near-1, and relative weights above 1", () => {
+    const { range, errors } = parseExactRange("AsAd:1e-18,AhAc:0.999,KhKd:1.5,QsQh");
+    expect(errors).toEqual([]);
+    const text = serializeExactRange(range);
+    const roundTrip = parseExactRange(text);
+    expect(roundTrip.errors).toEqual([]);
+    expect(roundTrip.range.get("AsAd")).toBeCloseTo(1e-18, 30);
+    expect(roundTrip.range.get("AhAc")).toBeCloseTo(0.999, 12);
+    expect(roundTrip.range.get("KhKd")).toBeCloseTo(1.5, 12);
+    expect(text).toContain("AsAd:");
+    expect(text).toContain("AhAc:0.999");
+    expect(text).toContain("KhKd:1.5");
+    expect(text).toMatch(/\bQsQh\b/);
+    expect(text).not.toContain("QsQh:");
+  });
+
+  it("rejects empty weight suffixes and unsupported dashed high-card spans", () => {
+    expect(parseExactRange("AA:").errors[0]?.message).toMatch(/nonnegative/i);
+    expect(parseExactRange("76s-54s").errors[0]?.message).toMatch(/unsupported/i);
+    expect(parseExactRange("A2s-A5s").errors).toEqual([]);
+  });
+});
+
 describe("parseRangeText compatibility wrappers", () => {
   it("still expands class tokens onto the 169-grid", () => {
     const grid = parseRangeText("AA,AKs:0.5");

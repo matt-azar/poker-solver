@@ -6,6 +6,8 @@ import {
   normalizeBucketWeights,
   type EquityHandRow,
 } from "../../domain/analysis";
+import { draftFromStudyNode } from "../../domain/equity/transfer";
+import { useEquityStore } from "../../state/equityStore";
 import { useStudyStore } from "../../state/studyStore";
 
 interface CategoryPayload {
@@ -103,9 +105,20 @@ export function AnalysisDockPanel() {
   const loadCategories = useStudyStore((s) => s.loadCategories);
   const loadEquity = useStudyStore((s) => s.loadEquity);
   const analysisTab = useStudyStore((s) => s.analysisTab);
+  const currentNode = useStudyStore((s) => s.currentNode);
+  const solutionId = useStudyStore((s) => s.solutionId);
+  const setWorkspace = useStudyStore((s) => s.setWorkspace);
   const [categorySeat, setCategorySeat] = useState<"oop" | "ip">("oop");
   const [equitySeat, setEquitySeat] = useState<"oop" | "ip">("oop");
   const [selectedBands, setSelectedBands] = useState<Set<string>>(() => new Set());
+  const [transferMessage, setTransferMessage] = useState<string | null>(null);
+
+  const studyTransfer = useMemo(() => {
+    if (!currentNode || !solutionId) {
+      return { ok: false as const, reason: "No Study node selected." };
+    }
+    return draftFromStudyNode({ node: currentNode, solutionId });
+  }, [currentNode, solutionId]);
 
   const categoryView = useMemo(
     () =>
@@ -169,11 +182,33 @@ export function AnalysisDockPanel() {
             <button type="button" className="toolbar-btn" onClick={() => void loadEquity()}>
               Refresh
             </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              disabled={!studyTransfer.ok}
+              title={
+                studyTransfer.ok
+                  ? "Copy this node's reaching ranges into the Equity calculator"
+                  : studyTransfer.reason
+              }
+              onClick={() => {
+                if (!studyTransfer.ok) {
+                  setTransferMessage(studyTransfer.reason);
+                  return;
+                }
+                useEquityStore.getState().importDraft(studyTransfer.draft);
+                setTransferMessage(null);
+                setWorkspace("equity");
+              }}
+            >
+              Open in Equity
+            </button>
           </div>
         </div>
         <p className="equity-note muted">
           Check-down showdown equity (fraction of pot). Not chip EV.
         </p>
+        {transferMessage ? <p className="equity-note">{transferMessage}</p> : null}
         {!equity ? (
           <p className="empty-hint">Click Refresh to load equity.</p>
         ) : equity.pending ? (

@@ -5,6 +5,8 @@ import {
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
 import { useStudyStore } from "../../state/studyStore";
+import { useEquityStore } from "../../state/equityStore";
+import { draftFromBuild } from "../../domain/equity/transfer";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
 import { SeatActionCatalogueTree } from "./SeatActionCatalogueTree";
@@ -205,6 +207,23 @@ export function BuildWorkspace() {
             OOP {comboCount(weights.oop, draft.boardText).toFixed(1)} · IP{" "}
             {comboCount(weights.ip, draft.boardText).toFixed(1)}
           </span>
+          <button
+            type="button"
+            className="toolbar-btn"
+            title="Copy current Build ranges and board into the Equity calculator"
+            onClick={() => {
+              useEquityStore.getState().importDraft(
+                draftFromBuild({
+                  oopRange: draft.oopRange,
+                  ipRange: draft.ipRange,
+                  boardText: draft.boardText,
+                }),
+              );
+              setWorkspace("equity");
+            }}
+          >
+            Open ranges in Equity
+          </button>
           <button
             type="button"
             className="toolbar-btn primary"

@@ -114,3 +114,16 @@ One earlier direct development-suite run, before this correction, reported `pass
 ## Explorer / study use
 
 Explorer node `/equity` builds two `Range` values from strategy-conditioned reaching weights and calls `showdown_equity` with that node's board. Those weights stay finite and nonnegative and are treated as check-down input weights (not chip EV). The calculator does not read the tree, the average strategy, or the engine budget. The JSON keeps the ten-bucket histogram and adds compact `oop_hands` / `ip_hands` rows (`combo`, check-down `equity`, raw `weight`) so the desktop Study Equity tab can filter histogram bands and inspect pair/suited/offsuit composition. Zero-weight and undefined combos remain omitted from those rows. Packaged Study raises the pair-runout ceiling to `kStudyExplorerMaxPairRunouts` via `--max-pair-runouts` (see [EXPLORER.md](EXPLORER.md)); the library default is unchanged. Ledger status: [FEATURE_PARITY.md](FEATURE_PARITY.md).
+
+## Standalone Equity calculator
+
+The desktop **Equity** workspace is independent of any solution. It posts background jobs to:
+
+| Method | Path |
+| --- | --- |
+| `POST` | `/api/equity/jobs` |
+| `GET` | `/api/equity/jobs/{id}` |
+| `POST` | `/api/equity/jobs/{id}/cancel` |
+| `GET` | `/api/equity/jobs/{id}/result` |
+
+Numerical entry point: `poker::holdem::calculate_equity` in `include/poker/equity_calculator.hpp`. Supports 2–6 players; boards of length 0/3/4/5; explicit dead cards; methods `auto`, `exact`, and `monte_carlo`. Equity is expected fractional pot ownership (k-way ties share `1/k`). Win/Tie/Loss are exclusive event probabilities. Auto selects exact when the bounded deal estimate is at or below `kEquityCalculatorAutoExactThreshold` (2,000,000); otherwise Monte Carlo. Exact requests that exceed `max_exact_deals` (default 5,000,000) fail with a work-limit error rather than returning a partial ratio. Monte Carlo uses an unbiased reject-entire-tuple sampler with a dedicated seeded RNG; approximate 95% intervals come from sample variance of pot-share outcomes. Per-combo / next-card analysis panes are follow-on work and are not mounted yet.

@@ -401,6 +401,48 @@ export class EngineClient {
     this.ensureOk(response, data);
     return data;
   }
+
+  /** Standalone equity calculator job (no solution required). */
+  async startEquityJob(
+    body: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<{ job_id: string; state: string }> {
+    const { response, data } = await this.request("POST", "/api/equity/jobs", body, { signal });
+    this.ensureOk(response, data, true);
+    return data as { job_id: string; state: string };
+  }
+
+  async getEquityJob(jobId: string, signal?: AbortSignal): Promise<unknown> {
+    const { response, data } = await this.request(
+      "GET",
+      `/api/equity/jobs/${encodeURIComponent(jobId)}`,
+      undefined,
+      { signal },
+    );
+    this.ensureOk(response, data);
+    return data;
+  }
+
+  async getEquityJobResult(jobId: string, signal?: AbortSignal): Promise<unknown> {
+    const { response, data } = await this.request(
+      "GET",
+      `/api/equity/jobs/${encodeURIComponent(jobId)}/result`,
+      undefined,
+      { signal },
+    );
+    this.ensureOk(response, data);
+    return data;
+  }
+
+  async cancelEquityJob(jobId: string): Promise<unknown> {
+    const { response, data } = await this.request(
+      "POST",
+      `/api/equity/jobs/${encodeURIComponent(jobId)}/cancel`,
+      {},
+    );
+    this.ensureOk(response, data);
+    return data;
+  }
 }
 
 /** Shared client; base URL resolved per request so Tauri detection is not racey. */

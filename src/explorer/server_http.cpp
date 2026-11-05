@@ -583,6 +583,11 @@ void handle_client(socket_t client)
         return;
     }
 
+    if (handle_equity_api(client, line, body))
+    {
+        return;
+    }
+
     if (line.rfind("GET /api/status", 0) == 0)
     {
         send_response(client, 200, "application/json", g_app.session.status());

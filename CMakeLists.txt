@@ -146,6 +146,8 @@ if(POKER_SOLVER_ENABLE_LEGACY_RIVER)
         src/explorer/server_jobs.cpp
         src/explorer/server_http.cpp
         src/explorer/server_run.cpp
+        src/explorer/equity_jobs.cpp
+        src/explorer/equity_http.cpp
     )
     target_include_directories(explorer PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src/explorer"
