@@ -2,11 +2,18 @@ import { useMemo } from "react";
 import { mapActionColors } from "../../domain/actionColors";
 import { groupEv, groupHands, withEvBasis } from "../../domain/browse";
 import { handIndexForCombo, isHandLocked, lockForNode } from "../../domain/locks";
+import {
+  cellShape,
+  comboBreakdown,
+  comboKey,
+  type ComboBreakdownSquare,
+} from "../../domain/matrixDisplay";
 import type {
   ActionValuesPayload,
   EvDisplayBasis,
   NodePayload,
 } from "../../domain/types";
+import { RANKS } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
 
 function comboActionEvs(
@@ -23,8 +30,9 @@ function comboActionEvs(
     return null;
   }
   const combos = displayed.combos || node.combos || [];
-  const valueIndex = combos.indexOf(combo);
-  const nodeIndex = (node.combos || []).indexOf(combo);
+  const key = comboKey(combo);
+  const valueIndex = combos.findIndex((entry) => comboKey(entry) === key);
+  const nodeIndex = (node.combos || []).findIndex((entry) => comboKey(entry) === key);
   if (valueIndex < 0 || nodeIndex < 0) {
     return null;
   }
@@ -42,6 +50,11 @@ function comboActionEvs(
   return row.map((entry) =>
     entry == null || Number.isNaN(Number(entry)) ? null : Number(entry),
   );
+}
+
+function shapeColumns(shape: ReturnType<typeof cellShape>): number {
+  // Pairs: 6 in 3 cols. Unpaired GTO 4×4: 16 in 4 cols.
+  return shape === "pair" ? 3 : 4;
 }
 
 /** Hands list for the hovered/selected 169-cell in the Study detail panel. */
@@ -78,6 +91,34 @@ export function ComboInspector() {
     [locks, currentNode],
   );
 
+  const squares = useMemo(() => {
+    if (!cell || !currentNode) {
+      return [] as ComboBreakdownSquare[];
+    }
+    return comboBreakdown(
+      cell,
+      currentNode,
+      nodeValues,
+      new Map(),
+      evDisplayBasis,
+      RANKS,
+    );
+  }, [cell, currentNode, nodeValues, evDisplayBasis]);
+
+  const handByCombo = useMemo(() => {
+    const map = new Map<
+      string,
+      { combo: string; actions: Array<{ action: string; probability: number }> }
+    >();
+    if (!cell) {
+      return map;
+    }
+    for (const hand of cell.hands) {
+      map.set(comboKey(hand.combo), hand);
+    }
+    return map;
+  }, [cell]);
+
   const ev =
     cell && currentNode
       ? groupEv(currentNode, nodeValues, cell, evDisplayBasis)
@@ -85,6 +126,8 @@ export function ComboInspector() {
   const pinned = Boolean(selectedCell);
   const actions = currentNode?.actions ?? [];
   const evReady = Boolean(nodeValues && !nodeValues.pending);
+  const shape = cell ? cellShape(cell.row, cell.col) : "pair";
+  const cols = shapeColumns(shape);
 
   return (
     <section className="combo-inspector" aria-label="Hands">
@@ -142,40 +185,66 @@ export function ComboInspector() {
               ))}
             </div>
           ) : null}
-          <div className="inspector-combos">
-            {cell.hands.map((hand) => {
-              const handIndex = handIndexForCombo(currentNode.combos, hand.combo);
-              const locked = handIndex >= 0 ? isHandLocked(nodeLock, handIndex) : false;
+          <div
+            className="inspector-combos hands-combo-grid"
+            data-shape={shape}
+            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+          >
+            {squares.map((square) => {
+              const hand = handByCombo.get(comboKey(square.combo));
+              const handIndex = currentNode
+                ? (() => {
+                    const key = comboKey(square.combo);
+                    const exact = handIndexForCombo(currentNode.combos, square.combo);
+                    if (exact >= 0) {
+                      return exact;
+                    }
+                    return (currentNode.combos || []).findIndex(
+                      (entry) => comboKey(entry) === key,
+                    );
+                  })()
+                : -1;
+              const locked =
+                handIndex >= 0 ? isHandLocked(nodeLock, handIndex) : false;
               const inDraft =
                 handIndex >= 0 && lockDraft.handIndices.includes(handIndex);
-              const actionEvs = comboActionEvs(
-                currentNode,
-                nodeValues,
-                hand.combo,
-                evDisplayBasis,
-              );
+              const actionEvs = square.present
+                ? comboActionEvs(
+                    currentNode,
+                    nodeValues,
+                    square.combo,
+                    evDisplayBasis,
+                  )
+                : null;
               return (
                 <div
-                  key={hand.combo}
+                  key={square.combo}
                   className="inspector-combo hands-combo"
+                  data-present={square.present ? "true" : "false"}
                   data-locked={locked ? "true" : "false"}
                   data-lock-draft={inDraft ? "true" : "false"}
                 >
-                  <input
-                    type="checkbox"
-                    checked={inDraft}
-                    disabled={handIndex < 0}
-                    onChange={() => {
-                      if (handIndex >= 0) {
-                        toggleLockHand(handIndex);
-                      }
-                    }}
-                    aria-label={`Select ${hand.combo} for lock`}
-                    title="Include in lock draft"
-                  />
-                  <code className="hands-combo__code">{hand.combo}</code>
+                  {square.present ? (
+                    <input
+                      type="checkbox"
+                      checked={inDraft}
+                      disabled={handIndex < 0}
+                      onChange={() => {
+                        if (handIndex >= 0) {
+                          toggleLockHand(handIndex);
+                        }
+                      }}
+                      aria-label={`Select ${square.combo} for lock`}
+                      title="Include in lock draft"
+                    />
+                  ) : (
+                    <span className="hands-combo__check-spacer" aria-hidden />
+                  )}
+                  <code className="hands-combo__code" title={square.combo}>
+                    {square.label}
+                  </code>
                   <div className="inspector-combo__mix hands-combo__mix">
-                    {hand.actions.map((action) => (
+                    {hand?.actions.map((action) => (
                       <i
                         key={action.action}
                         title={`${action.action} ${(action.probability * 100).toFixed(0)}%`}
@@ -191,21 +260,17 @@ export function ComboInspector() {
                       const value = actionEvs?.[index];
                       return (
                         <span
-                          key={`${hand.combo}-ev-${index}`}
+                          key={`${square.combo}-ev-${index}`}
                           className="hands-combo__ev tabular"
                           title={label}
                         >
-                          {value == null ? "—" : value.toFixed(2)}
+                          {!square.present || value == null
+                            ? "—"
+                            : value.toFixed(2)}
                         </span>
                       );
                     })}
                   </div>
-                  <span className="tabular muted hands-combo__freq">
-                    {locked ? "L · " : ""}
-                    {hand.actions
-                      .map((action) => `${(action.probability * 100).toFixed(0)}`)
-                      .join("/")}
-                  </span>
                   {handIndex >= 0 && locked ? (
                     <button
                       type="button"

@@ -70,13 +70,15 @@ describe("StudyDetailPanel", () => {
     expect(screen.getByText("Hover a hand in the grid.")).toBeTruthy();
   });
 
-  it("Hands lists combos for a hovered hand class", () => {
+  it("Hands lists suit slots for a hovered hand class", () => {
     useStudyStore.setState({
       hoverCell: { row: 0, col: 0, text: "AA" },
     });
     render(<StudyDetailPanel />);
-    expect(screen.getByText("AhAd")).toBeTruthy();
-    expect(screen.getByText("AhAs")).toBeTruthy();
+    // Pair cells show 6 suit-pair slots; labels are suit symbols with combo in title.
+    expect(document.querySelectorAll(".hands-combo")).toHaveLength(6);
+    expect(document.querySelector('[title="AhAd"]')).toBeTruthy();
+    expect(document.querySelector('[title="AsAh"]')).toBeTruthy();
     expect(screen.queryByText("Hover a hand in the grid.")).toBeNull();
   });
 });

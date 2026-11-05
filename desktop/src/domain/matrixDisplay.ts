@@ -6,11 +6,24 @@ import { create } from "zustand";
 import { withEvBasis } from "./browse";
 import type { AggregatedHandCell } from "./browse";
 import { SUIT_SYMBOLS, type CardSuit } from "./cards";
+import { canonicalizeCombo } from "./range";
 import type {
   ActionValuesPayload,
   EvDisplayBasis,
   NodePayload,
 } from "./types";
+
+/** Normalize a 4-char combo to engine order so slot lookups match fixture/node variants. */
+export function comboKey(combo: string): string {
+  if (combo.length < 4) {
+    return combo;
+  }
+  try {
+    return canonicalizeCombo(combo.slice(0, 2), combo.slice(2, 4));
+  } catch {
+    return combo;
+  }
+}
 
 const MATRIX_DISPLAY_KEY = "study-matrix-display-v1";
 
@@ -389,8 +402,9 @@ export function comboEv(
     return null;
   }
   const combos = displayed.combos || node.combos || [];
-  const valueIndex = combos.indexOf(combo);
-  const nodeIndex = (node.combos || []).indexOf(combo);
+  const key = comboKey(combo);
+  const valueIndex = combos.findIndex((entry) => comboKey(entry) === key);
+  const nodeIndex = (node.combos || []).findIndex((entry) => comboKey(entry) === key);
   if (valueIndex < 0 || nodeIndex < 0) {
     return null;
   }
@@ -425,13 +439,15 @@ export function comboBreakdown(
     return [];
   }
   const slots = expectedComboSlots(cell.row, cell.col, ranks);
-  const byCombo = new Map(cell.hands.map((hand) => [hand.combo, hand]));
+  const byCombo = new Map(
+    cell.hands.map((hand) => [comboKey(hand.combo), hand] as const),
+  );
   const reach = node && Array.isArray(node.reach) ? (node.reach as number[]) : null;
 
   const actionCount = (node?.actions || []).length;
 
   return slots.map((slot) => {
-    const hand = byCombo.get(slot.combo);
+    const hand = byCombo.get(comboKey(slot.combo));
     const present = Boolean(hand);
     let reachVal: number | null = null;
     let marginalVal: number | null = null;
@@ -448,7 +464,8 @@ export function comboBreakdown(
         strategy = mix;
       }
       if (node?.reach_defined) {
-        const index = (node.combos || []).indexOf(slot.combo);
+        const key = comboKey(slot.combo);
+        const index = (node.combos || []).findIndex((entry) => comboKey(entry) === key);
         if (index >= 0) {
           if (reach) {
             const r = Number(reach[index] ?? 0);
@@ -459,7 +476,9 @@ export function comboBreakdown(
         }
       }
     }
-    const equity = equityMap.get(slot.combo);
+    const equity =
+      equityMap.get(slot.combo) ??
+      (hand ? equityMap.get(hand.combo) : undefined);
     return {
       combo: slot.combo,
       label: slot.label,

@@ -113,7 +113,7 @@ describe("ComboInspector lock selection", () => {
     expect(screen.getByText("Hover a hand in the grid.")).toBeTruthy();
   });
 
-  it("lists strategy bars and per-action EV for each combo", () => {
+  it("lists strategy bars and per-action EV across the pair suit grid", () => {
     useStudyStore.setState({
       nodeValues: {
         node_id: "p0",
@@ -130,9 +130,44 @@ describe("ComboInspector lock selection", () => {
       },
     });
     render(<ComboInspector />);
-    expect(screen.getByText("AhAd")).toBeTruthy();
+    // Pairs use 6 suit slots (3 present in this fixture).
+    expect(document.querySelectorAll(".hands-combo")).toHaveLength(6);
+    expect(
+      document.querySelectorAll('.hands-combo[data-present="true"]'),
+    ).toHaveLength(3);
     expect(screen.getByText("0.50")).toBeTruthy();
     expect(screen.getByText("2.50")).toBeTruthy();
-    expect(document.querySelectorAll(".hands-combo__mix").length).toBe(3);
+    expect(
+      document.querySelectorAll('.hands-combo[data-present="true"] .hands-combo__mix i')
+        .length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("shows 16 offsuit suit slots for an unpaired offsuit cell", () => {
+    useStudyStore.setState({
+      currentNode: {
+        node_id: "p0",
+        reach_defined: true,
+        actions: ["Check", "Bet 50"],
+        // AKo-style: two offsuit combos only
+        combos: ["AcKd", "AsKh"],
+        marginal: [1, 1],
+        strategy: [
+          [0.5, 0.5],
+          [0.4, 0.6],
+        ],
+      },
+      // AKo is row>col for A=0,K=1 → row 1 col 0 in RANKS A,K,Q...
+      selectedCell: { row: 1, col: 0, text: "AKo" },
+      nodeValues: null,
+    });
+    render(<ComboInspector />);
+    expect(document.querySelectorAll(".hands-combo")).toHaveLength(16);
+    expect(
+      document.querySelectorAll('.hands-combo[data-present="true"]'),
+    ).toHaveLength(2);
+    expect(
+      document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
+    ).toBe("offsuit");
   });
 });
