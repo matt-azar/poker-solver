@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { mapActionColors } from "../../domain/actionColors";
-import { groupEv, groupHands, withEvBasis } from "../../domain/browse";
+import { groupHands, withEvBasis } from "../../domain/browse";
 import { handIndexForCombo, isHandLocked, lockForNode } from "../../domain/locks";
 import {
   cellShape,
@@ -62,6 +62,16 @@ function shapeColumns(shape: ReturnType<typeof cellShape>): number {
   return 4;
 }
 
+function squareMass(square: ComboBreakdownSquare): number {
+  if (square.reach != null && Number.isFinite(square.reach)) {
+    return Math.max(0, square.reach);
+  }
+  if (square.marginal != null && Number.isFinite(square.marginal)) {
+    return Math.max(0, square.marginal);
+  }
+  return square.present ? 1 : 0;
+}
+
 /** Hands list for the hovered/selected 169-cell in the Study detail panel. */
 export function ComboInspector() {
   const currentNode = useStudyStore((s) => s.currentNode);
@@ -110,6 +120,14 @@ export function ComboInspector() {
     );
   }, [cell, currentNode, nodeValues, evDisplayBasis]);
 
+  const maxMass = useMemo(() => {
+    let peak = 0;
+    for (const square of squares) {
+      peak = Math.max(peak, squareMass(square));
+    }
+    return peak;
+  }, [squares]);
+
   const handByCombo = useMemo(() => {
     const map = new Map<
       string,
@@ -124,10 +142,6 @@ export function ComboInspector() {
     return map;
   }, [cell]);
 
-  const ev =
-    cell && currentNode
-      ? groupEv(currentNode, nodeValues, cell, evDisplayBasis)
-      : null;
   const pinned = Boolean(selectedCell);
   const actions = currentNode?.actions ?? [];
   const evReady = Boolean(nodeValues && !nodeValues.pending);
@@ -151,26 +165,6 @@ export function ComboInspector() {
         <p className="empty-hint">Hover a hand in the grid.</p>
       ) : (
         <>
-          <div className="inspector-meta">
-            <div>
-              <span className="muted">Combos</span>
-              <strong>{cell.range_combos}</strong>
-            </div>
-            <div>
-              <span className="muted">Reach mass</span>
-              <strong className="tabular">
-                {cell.defined ? cell.marginalSum.toFixed(4) : "—"}
-              </strong>
-            </div>
-            <div>
-              <span className="muted">
-                {evDisplayBasis === "local" ? "Mixed EV" : "Mixed EV (global)"}
-              </span>
-              <strong className="tabular">
-                {ev ? ev.mixed.toFixed(3) : nodeValues?.pending ? "…" : "—"}
-              </strong>
-            </div>
-          </div>
           {!nodeValues || nodeValues.pending ? (
             <button type="button" className="toolbar-btn" onClick={() => void calculateEv()}>
               Calculate action EVs
@@ -221,6 +215,11 @@ export function ComboInspector() {
                     evDisplayBasis,
                   )
                 : null;
+              const mass = squareMass(square);
+              const massFill =
+                square.present && maxMass > 0
+                  ? Math.max(0, Math.min(1, mass / maxMass))
+                  : 0;
               return (
                 <div
                   key={square.combo}
@@ -228,10 +227,17 @@ export function ComboInspector() {
                   data-present={square.present ? "true" : "false"}
                   data-locked={locked ? "true" : "false"}
                   data-lock-draft={inDraft ? "true" : "false"}
+                  style={{ ["--mass-fill" as string]: String(massFill || 0) }}
+                  title={
+                    square.present
+                      ? `${square.combo} · mass ${mass.toFixed(4)}`
+                      : square.combo
+                  }
                 >
                   {square.present ? (
                     <input
                       type="checkbox"
+                      className="hands-combo__check"
                       checked={inDraft}
                       disabled={handIndex < 0}
                       onChange={() => {
@@ -245,9 +251,6 @@ export function ComboInspector() {
                   ) : (
                     <span className="hands-combo__check-spacer" aria-hidden />
                   )}
-                  <code className="hands-combo__code" title={square.combo}>
-                    {square.label}
-                  </code>
                   <div className="inspector-combo__mix hands-combo__mix">
                     {hand?.actions.map((action) => (
                       <i
@@ -260,21 +263,27 @@ export function ComboInspector() {
                       />
                     ))}
                   </div>
-                  <div className="hands-combo__evs">
-                    {actions.map((label, index) => {
-                      const value = actionEvs?.[index];
-                      return (
-                        <span
-                          key={`${square.combo}-ev-${index}`}
-                          className="hands-combo__ev tabular"
-                          title={label}
-                        >
-                          {!square.present || value == null
-                            ? "—"
-                            : value.toFixed(2)}
-                        </span>
-                      );
-                    })}
+                  <div className="hands-combo__body">
+                    <code className="hands-combo__code" title={square.combo}>
+                      {square.label}
+                    </code>
+                    <div className="hands-combo__evs">
+                      {actions.map((label, index) => {
+                        const value = actionEvs?.[index];
+                        return (
+                          <span
+                            key={`${square.combo}-ev-${index}`}
+                            className="hands-combo__ev tabular"
+                            title={label}
+                            style={{ color: colors.byIndex[index] }}
+                          >
+                            {!square.present || value == null
+                              ? "—"
+                              : value.toFixed(2)}
+                          </span>
+                        );
+                      })}
+                    </div>
                   </div>
                   {handIndex >= 0 && locked ? (
                     <button

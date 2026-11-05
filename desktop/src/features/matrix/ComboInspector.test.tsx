@@ -141,6 +141,12 @@ describe("ComboInspector lock selection", () => {
       document.querySelectorAll('.hands-combo[data-present="true"] .hands-combo__mix i')
         .length,
     ).toBeGreaterThan(0);
+    expect(screen.queryByText("Reach mass")).toBeNull();
+    expect(screen.queryByText("Mixed EV")).toBeNull();
+    const present = document.querySelector(
+      '.hands-combo[data-present="true"]',
+    ) as HTMLElement;
+    expect(present.style.getPropertyValue("--mass-fill")).toBe("1");
   });
 
   it("shows 12 offsuit suit slots for an unpaired offsuit cell", () => {
