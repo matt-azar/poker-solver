@@ -1,4 +1,7 @@
-import { formatActionDisplay } from "./betSizes";
+import {
+  formatActionDisplay,
+  type BetSizeDisplayMode,
+} from "./betSizes";
 import { groupHands } from "./browse";
 import type { NodeActionChild, NodeCardChild, NodePayload } from "./types";
 
@@ -27,7 +30,10 @@ export interface LineCrumb {
 }
 
 export interface PathAlternative {
+  /** Display label (may be compacted); prefer {@link rawLabel} for reformatting. */
   label: string;
+  /** Engine / raw label (`Bet 50`, `Raise to 400`) when known. */
+  rawLabel?: string;
   nodeId: string | null;
   kind: "action" | "card";
 }
@@ -49,6 +55,14 @@ export interface PathStep {
   alternatives?: PathAlternative[];
   /** Parent public-node id when known from trail or `parent_id`. */
   parentId?: string | null;
+  /**
+   * Source-node pot basis used when this size tag was captured
+   * (`actionSizePotBasis` at the parent). Lets path chrome reformat when
+   * Settings → Bet size labels changes without re-navigating.
+   */
+  sizePot?: number;
+  /** Source-node `to_call` for accurate `Raise to` pot tags. */
+  toCall?: number;
 }
 
 export interface PathStreetGroup {
@@ -181,7 +195,12 @@ export function boardCardsForStreet(
 }
 
 /** Compact primary action label for path chrome (`b50`, not `Bet 50%`). */
-export function compactActionLabel(label: string, pot: number): string {
+export function compactActionLabel(
+  label: string,
+  pot: number,
+  mode: BetSizeDisplayMode = "pot",
+  toCall = 0,
+): string {
   const trimmed = label.trim();
   if (!trimmed) {
     return trimmed;
@@ -192,20 +211,52 @@ export function compactActionLabel(label: string, pot: number): string {
       ? trimmed[0]!.toUpperCase() + trimmed[1]!.toLowerCase()
       : trimmed;
   }
-  return formatActionDisplay(trimmed, pot, "pot").primary;
+  return formatActionDisplay(trimmed, pot, mode, { toCall }).primary;
+}
+
+/**
+ * Reformat a stored path step label under the current Bet size labels setting.
+ * Prefers `rawLabel` + captured `sizePot` / `toCall` so Settings updates apply
+ * immediately without re-walking the tree.
+ */
+export function displayPathStepLabel(
+  step: Pick<PathStep, "label" | "rawLabel" | "kind" | "sizePot" | "toCall">,
+  mode: BetSizeDisplayMode,
+  potFallback = 0,
+): string {
+  if (step.kind === "root" || step.kind === "card") {
+    return step.label;
+  }
+  const raw = (step.rawLabel || step.label || "").trim();
+  if (!raw || raw === "Root") {
+    return step.label;
+  }
+  // Already a card code stored as an action-shaped step — leave alone.
+  if (/^[2-9TJQKA][cdhs]$/i.test(raw)) {
+    return step.label;
+  }
+  const pot =
+    step.sizePot != null && Number.isFinite(step.sizePot) && step.sizePot > 0
+      ? step.sizePot
+      : potFallback;
+  const toCall =
+    step.toCall != null && Number.isFinite(step.toCall) ? step.toCall : 0;
+  return compactActionLabel(raw, pot, mode, toCall);
 }
 
 export function lineCrumbs(
   line: string | null | undefined,
   rootNodeId: string | null | undefined,
   pot = 0,
+  mode: BetSizeDisplayMode = "pot",
+  toCall = 0,
 ): LineCrumb[] {
   const crumbs: LineCrumb[] = [
     { label: "Root", nodeId: rootNodeId || undefined, kind: "root" },
   ];
   for (const label of splitActionLine(line)) {
     crumbs.push({
-      label: compactActionLabel(label, pot),
+      label: compactActionLabel(label, pot, mode, toCall),
       rawLabel: label,
       kind: "action",
     });
@@ -223,6 +274,8 @@ export function pathCrumbsFromTrail(
   rootNodeId: string | null | undefined,
   currentNodeId: string | null | undefined,
   pot = 0,
+  mode: BetSizeDisplayMode = "pot",
+  toCall = 0,
 ): LineCrumb[] {
   if (
     trail &&
@@ -230,16 +283,29 @@ export function pathCrumbsFromTrail(
     (!currentNodeId || trail[trail.length - 1]?.nodeId === currentNodeId)
   ) {
     return trail.map((step) => ({
-      label: step.label,
+      label: displayPathStepLabel(step, mode, pot),
       nodeId: step.nodeId,
       street: step.street,
       actor: step.actor,
       kind: step.kind,
       rawLabel: step.rawLabel,
-      alternatives: step.alternatives,
+      alternatives: step.alternatives?.map((alt) => ({
+        ...alt,
+        label: displayPathStepLabel(
+          {
+            label: alt.label,
+            rawLabel: alt.rawLabel || alt.label,
+            kind: alt.kind === "card" ? "card" : "action",
+            sizePot: step.sizePot,
+            toCall: step.toCall,
+          },
+          mode,
+          pot,
+        ),
+      })),
     }));
   }
-  return lineCrumbs(line, rootNodeId, pot);
+  return lineCrumbs(line, rootNodeId, pot, mode, toCall);
 }
 
 export function groupPathByStreet(
@@ -567,10 +633,12 @@ export function edgeStepFromNode(
       street = "river";
     }
   }
+  const toCall = Number(from.to_call ?? 0);
   const alternatives: PathAlternative[] = choices
     .filter((item) => item.nodeId && item.nodeId !== toNodeId)
     .map((item) => ({
-      label: compactActionLabel(item.label, pot),
+      label: compactActionLabel(item.label, pot, "pot", toCall),
+      rawLabel: item.label,
       nodeId: item.nodeId,
       kind: item.kind,
     }));
@@ -582,7 +650,7 @@ export function edgeStepFromNode(
     typeof from.parent_id === "string" ? from.parent_id : from.node_id;
   return {
     nodeId: toNodeId,
-    label: compactActionLabel(choice.label, pot),
+    label: compactActionLabel(choice.label, pot, "pot", toCall),
     rawLabel: choice.label,
     kind: choice.kind === "card" ? "card" : "action",
     street,
@@ -590,6 +658,8 @@ export function edgeStepFromNode(
     card: choice.kind === "card" ? choice.label : undefined,
     alternatives: alternatives.length ? alternatives : undefined,
     parentId,
+    sizePot: choice.kind === "action" ? pot : undefined,
+    toCall: choice.kind === "action" ? toCall : undefined,
   };
 }
 
@@ -696,18 +766,21 @@ export function replaceTrailAlternative(
     return null;
   }
   const prior = trail[stepIndex]!;
+  const altRaw = alternative.rawLabel || alternative.label;
+  const priorRaw = prior.rawLabel || prior.label;
   const next: PathStep = {
     ...prior,
     nodeId: alternative.nodeId,
     label: alternative.label,
-    rawLabel: alternative.label,
+    rawLabel: altRaw,
     kind: alternative.kind === "card" ? "card" : "action",
-    card: alternative.kind === "card" ? alternative.label : undefined,
+    card: alternative.kind === "card" ? altRaw : undefined,
     alternatives: prior.alternatives
       ? [
           ...prior.alternatives.filter((alt) => alt.nodeId !== alternative.nodeId),
           {
             label: prior.label,
+            rawLabel: priorRaw,
             nodeId: prior.nodeId,
             kind: prior.kind === "card" ? "card" : "action",
           },
@@ -715,6 +788,7 @@ export function replaceTrailAlternative(
       : undefined,
   };
   // Drop descendants — they belong to the old branch.
+  // `pot` retained for callers; size tags reformat via sizePot/rawLabel.
   void pot;
   return [...trail.slice(0, stepIndex), next];
 }

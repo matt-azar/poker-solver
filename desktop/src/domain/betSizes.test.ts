@@ -319,6 +319,30 @@ describe("betSizes", () => {
     expect(formatActionDisplay("Raise 100", 100, "both").primary).toBe("r100");
   });
 
+  it("parses engine Raise to N and Bet N all-in into pot tags", () => {
+    // Production labels use "Raise to <street_total>", not "Raise N".
+    expect(potTagFromLabel("Raise to 400", 300, 100)).toBe("r100");
+    expect(formatActionDisplay("Raise to 400", 300, "both", { toCall: 100 })).toEqual(
+      {
+        primary: "r100",
+        secondary: "400.0 chips",
+        raw: "Raise to 400",
+        potTag: "r100",
+      },
+    );
+    // Without to_call, Raise to still yields a tag (street_total / pot).
+    expect(potTagFromLabel("Raise to 400", 200)).toBe("r200");
+
+    // Trailing all-in must not suppress the pot tag (regression).
+    expect(potTagFromLabel("Bet 150 all-in", 100)).toBe("b150");
+    const allIn = formatActionDisplay("Bet 150 all-in", 100, "both");
+    expect(allIn.primary).toBe("b150");
+    expect(allIn.secondary).toBe("150.0 chips");
+    expect(allIn.raw).toBe("Bet 150 all-in");
+    expect(allIn.primary).not.toMatch(/all-?in/i);
+    expect(allIn.primary).not.toMatch(/%/);
+  });
+
   it("keeps frequency formatting separate from pot tags", () => {
     expect(formatFrequencyPct(0.319)).toBe("31.9%");
     expect(formatFrequencyPct(0.5)).toBe("50.0%");

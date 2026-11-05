@@ -67,7 +67,8 @@ function draftPreviewBody(draft: SpotDraft) {
     pot_cap: draft.potCap || 0,
     allow_three_bet: draft.noThreeBet ? 0 : 1,
     all_in_threshold: draft.allInThreshold || 0,
-    allow_all_in: 1,
+    // List `a` per street for all-in; blank does not invent it (STREETS.md).
+    allow_all_in: 0,
     max_raises: draft.maxRaises,
     iterations: 1,
     memory_mib: draft.memoryMib,

@@ -83,7 +83,7 @@ describe("ActionSummary", () => {
     expect(within(b50!).queryByText("50%")).toBeNull();
   });
 
-  it("distinguishes filter toggle from Open (follow) controls", () => {
+  it("toggles filter on action-block click without a follow Open control", () => {
     render(<ActionSummary />);
     const b50Filter = screen.getByRole("button", {
       name: /Filter b50,\s*31\.9%/i,
@@ -93,9 +93,8 @@ describe("ActionSummary", () => {
     expect(useStudyStore.getState().actionFilter).toBe(1);
     expect(b50Filter.getAttribute("aria-pressed")).toBe("true");
 
-    const openB50 = screen.getByRole("button", { name: "Follow b50" });
-    fireEvent.click(openB50);
-    expect(followAction).toHaveBeenCalledWith("n-b50");
+    expect(screen.queryByRole("button", { name: /Follow /i })).toBeNull();
+    expect(followAction).not.toHaveBeenCalled();
   });
 
   it("shows a compact action-color legend with pot tags", () => {
@@ -104,5 +103,58 @@ describe("ActionSummary", () => {
     expect(within(legend).getByText("Check")).toBeTruthy();
     expect(within(legend).getByText("b50")).toBeTruthy();
     expect(within(legend).getByText("b100")).toBeTruthy();
+  });
+
+  it("reacts immediately when Settings betSizeDisplay changes", () => {
+    const { rerender } = render(<ActionSummary />);
+    expect(screen.getAllByText("b50").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("50.0 chips").length).toBeGreaterThan(0);
+
+    useSettingsStore.setState({
+      settings: {
+        ...useSettingsStore.getState().settings,
+        betSizeDisplay: "chips",
+      },
+    });
+    rerender(<ActionSummary />);
+    expect(screen.queryByText("b50")).toBeNull();
+    expect(screen.getAllByText("50.0 chips").length).toBeGreaterThan(0);
+
+    useSettingsStore.setState({
+      settings: {
+        ...useSettingsStore.getState().settings,
+        betSizeDisplay: "pot",
+      },
+    });
+    rerender(<ActionSummary />);
+    expect(screen.getAllByText("b50").length).toBeGreaterThan(0);
+    expect(screen.queryByText("50.0 chips")).toBeNull();
+  });
+
+  it("shows r-tags for engine Raise to labels using to_call basis", () => {
+    useStudyStore.setState({
+      currentNode: {
+        node_id: "n-facing",
+        kind: "decision",
+        player: 1,
+        pot: 200,
+        to_call: 100,
+        actions: ["Fold", "Call", "Raise to 400"],
+        children: ["n-f", "n-c", "n-r"],
+        combos: ["AsAh"],
+        marginal: [1],
+        reach_defined: true,
+        strategy: [[0.1, 0.4, 0.5]],
+      },
+      status: {
+        pot: 200,
+        root_node_id: "n-facing",
+      } as never,
+    });
+    render(<ActionSummary />);
+    // basis = pot + to_call = 300; raise increment = 400 - 100 = 300 → r100
+    expect(screen.getAllByText("r100").length).toBeGreaterThan(0);
+    expect(screen.getByText("400.0 chips")).toBeTruthy();
+    expect(screen.queryByText("Raise to 400")).toBeNull();
   });
 });

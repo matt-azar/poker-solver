@@ -61,8 +61,10 @@ export function draftFromParsedConfig(body: Record<string, unknown>): Partial<Sp
     pot: finiteOrZero(body.pot),
     stack: finiteOrZero(body.stack),
     maxRaises: finiteOrZero(body.max_raises),
-    // All-in is a size token (`a`); always allow stack-commits on rebuild.
-    allowAllIn: true,
+    // All-in is the `a` size token; do not invent it via allow_all_in.
+    allowAllIn:
+      body.allow_all_in === true ||
+      body.allow_all_in === 1,
     oopBets: joinSizes(body.oop_bets),
     ipBets: joinSizes(body.ip_bets),
     oopRaises: joinRaiseDraft(body.oop_raises, body.oop_raise_multiples),
@@ -251,8 +253,8 @@ export function buildJob(draft: SpotDraft): SolveJobRequest {
     pot_cap: draft.potCap || 0,
     allow_three_bet: draft.noThreeBet ? 0 : 1,
     all_in_threshold: draft.allInThreshold || 0,
-    // All-in is listed per street with `a`; always allow stack-commits.
-    allow_all_in: 1,
+    // List `a` per street for all-in; blank does not invent it (STREETS.md).
+    allow_all_in: 0,
     // Desktop always uses the frozen pass (required for multi-thread / CFR+).
     frozen: 1,
     accuracy: draft.accuracy.trim() === "" ? -1 : Number(draft.accuracy),

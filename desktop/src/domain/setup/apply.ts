@@ -156,8 +156,7 @@ function applyPrefs(
     draft.noThreeBet = prefs.defaultNoThreeBet;
     provenance.noThreeBet = "saved_preference";
   }
-  // All-in is the `a` size token; always allow stack-commits.
-  draft.allowAllIn = true;
+  // All-in stays the `a` size token; do not invent allowAllIn here.
 }
 
 function collectConflicts(patch: SetupPatch): SetupConflict[] {

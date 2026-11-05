@@ -300,7 +300,10 @@ export interface SpotDraft {
   potCap: number;
   noThreeBet: boolean;
   allInThreshold: number;
-  /** Always treated as true on solve/preview; all-in is the `a` size token. */
+  /**
+   * Draft mirror of engine `allow_all_in`. Study solve/preview hardcode 0 —
+   * list `a` per street for all-in; this flag does not invent it.
+   */
   allowAllIn: boolean;
   frozen: boolean;
   accuracy: string;
@@ -376,7 +379,7 @@ export const DEFAULT_SPOT: SpotDraft = {
   potCap: 0,
   noThreeBet: false,
   allInThreshold: 0,
-  allowAllIn: true,
+  allowAllIn: false,
   frozen: true,
   accuracy: "",
   // Facing raises only — opening street bets do not consume this cap.

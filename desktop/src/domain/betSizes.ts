@@ -634,8 +634,9 @@ export function validateBettingLists(draft: BettingDraftFields): string[] {
 
 /**
  * Size fields for a solve or tree-preview job.
- * Geometric and all-in are per-list tokens (`e`, `a`). Callers should send
- * `allow_all_in: 1` so `a` and stack-commits work.
+ * Geometric and all-in are per-list tokens (`e`, `a`). Study callers send
+ * `allow_all_in: 0` — list `a` explicitly; the engine's `force_all_in` path
+ * still offers that token when the auto all-in switch is off.
  * Invalid tokens throw — validate with {@link validateBettingLists} first.
  */
 export function encodeBettingJob(draft: BettingDraftInput) {
@@ -714,21 +715,111 @@ export function mergeSizeFractions(
   return merged.map((entry) => entry.fraction);
 }
 
+/** Parsed chip-sized engine action (`Bet 50`, `Raise to 400`, `Bet 150 all-in`). */
+export interface SizedActionParse {
+  /** bet / raise / donk / call — call has chips but no pot tag. */
+  kind: "bet" | "raise" | "donk" | "call";
+  /**
+   * Chip amount from the label: bet/donk/call size, or raise-to street total
+   * (or legacy `Raise N` size when not `Raise to`).
+   */
+  chips: number;
+  /** True when the engine label used the `Raise to N` form. */
+  raiseTo: boolean;
+  /** True when the label ends with `all-in`. */
+  allIn: boolean;
+}
+
+/**
+ * Parse an engine decision label into kind + chips.
+ * Accepts trailing ` all-in` (engine `chip_label`) and both `Raise to N`
+ * (production) and legacy `Raise N` forms.
+ */
+export function parseSizedAction(label: string): SizedActionParse | null {
+  const trimmed = label.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const allIn = /\s+all-?in$/i.test(trimmed);
+  const core = allIn
+    ? trimmed.replace(/\s+all-?in$/i, "").trim()
+    : trimmed;
+
+  const raiseTo = core.match(/^Raise\s+to\s+(-?\d+(?:\.\d+)?)$/i);
+  if (raiseTo) {
+    const chips = Number(raiseTo[1]);
+    if (!Number.isFinite(chips)) {
+      return null;
+    }
+    return { kind: "raise", chips, raiseTo: true, allIn };
+  }
+
+  const raise = core.match(/^Raise\s+(-?\d+(?:\.\d+)?)$/i);
+  if (raise) {
+    const chips = Number(raise[1]);
+    if (!Number.isFinite(chips)) {
+      return null;
+    }
+    return { kind: "raise", chips, raiseTo: false, allIn };
+  }
+
+  const betDonk = core.match(/^(Bet|Donk)\s+(-?\d+(?:\.\d+)?)$/i);
+  if (betDonk) {
+    const chips = Number(betDonk[2]);
+    if (!Number.isFinite(chips)) {
+      return null;
+    }
+    const kind = betDonk[1]!.toLowerCase().startsWith("d") ? "donk" : "bet";
+    return { kind, chips, raiseTo: false, allIn };
+  }
+
+  const call = core.match(/^Call\s+(-?\d+(?:\.\d+)?)$/i);
+  if (call) {
+    const chips = Number(call[1]);
+    if (!Number.isFinite(chips)) {
+      return null;
+    }
+    return { kind: "call", chips, raiseTo: false, allIn };
+  }
+
+  return null;
+}
+
+/**
+ * Chip amount used for pot-% tags.
+ * Bets/donks use the labeled size. `Raise to N` uses the raise increment
+ * (`N - to_call`) when facing a bet — engine sizes against pot+call
+ * ({@link actionSizePotBasis}). Legacy `Raise N` keeps N as the size.
+ */
+export function sizeChipsForPotTag(
+  parsed: SizedActionParse,
+  toCall = 0,
+): number {
+  if (parsed.kind === "raise" && parsed.raiseTo) {
+    return Math.max(0, Math.abs(parsed.chips) - Math.max(0, toCall));
+  }
+  return Math.abs(parsed.chips);
+}
+
 /** Compact pot tag like `b75` / `r150` from an engine action label + pot. */
 export function potTagFromLabel(
   label: string,
   pot: number,
+  toCall = 0,
 ): string | null {
-  const match = label.trim().match(/^(Bet|Raise|Donk)\s+(-?\d+(?:\.\d+)?)/i);
-  if (!match || !(pot > 0)) {
+  if (!(pot > 0)) {
     return null;
   }
-  const chips = Number(match[2]);
-  if (!Number.isFinite(chips)) {
+  const parsed = parseSizedAction(label);
+  if (!parsed || parsed.kind === "call") {
     return null;
   }
-  const pct = Math.round((Math.abs(chips) / pot) * 100);
-  const kind = match[1].toLowerCase().startsWith("r") ? "r" : "b";
+  const sizeChips = sizeChipsForPotTag(parsed, toCall);
+  if (!(sizeChips > 0) && parsed.kind === "raise" && parsed.raiseTo) {
+    // Raise-to equal to call only — still show r0 rather than dropping the tag.
+  }
+  const pct = Math.round((sizeChips / pot) * 100);
+  const kind = parsed.kind === "raise" ? "r" : "b";
   return `${kind}${pct}`;
 }
 
@@ -757,12 +848,8 @@ export function formatFrequencyPct(
 }
 
 export function chipsFromLabel(label: string): number | null {
-  const match = label.trim().match(/^(?:Bet|Raise|Donk|Call)\s+(-?\d+(?:\.\d+)?)/i);
-  if (!match) {
-    return null;
-  }
-  const chips = Number(match[1]);
-  return Number.isFinite(chips) ? chips : null;
+  const parsed = parseSizedAction(label);
+  return parsed ? parsed.chips : null;
 }
 
 export interface ActionDisplayParts {
@@ -776,25 +863,36 @@ export interface ActionDisplayParts {
   potTag: string | null;
 }
 
+export interface FormatActionDisplayOptions {
+  /** Facing amount at the decision node; required for accurate `Raise to` tags. */
+  toCall?: number;
+}
+
 /**
  * Display label for Study action blocks.
  *
  * Hard policy: a 50% pot bet stays primary `b50` (not `Bet 50%`). Frequency is
  * rendered separately via `formatFrequencyPct`. Absolute chips are optional
  * secondary/tooltip text with an explicit `chips` unit.
+ *
+ * Engine labels may be `Bet N`, `Raise to N`, and optional trailing ` all-in`.
  */
 export function formatActionDisplay(
   label: string,
   pot: number,
   mode: BetSizeDisplayMode = "both",
+  options: FormatActionDisplayOptions = {},
 ): ActionDisplayParts {
   const trimmed = label.trim();
-  const potTag = potTagFromLabel(trimmed, pot);
+  const toCall = Number(options.toCall ?? 0);
+  const potTag = potTagFromLabel(trimmed, pot, toCall);
   if (/^(check|fold|call)$/i.test(trimmed) || /^call\b/i.test(trimmed)) {
     return { primary: trimmed, secondary: null, raw: trimmed, potTag: null };
   }
-  if (/all[\s-]*in/i.test(trimmed)) {
-    return { primary: trimmed, secondary: null, raw: trimmed, potTag };
+  // Bare all-in (no size) — keep raw. Sized `Bet N all-in` continues below so
+  // pot tags still appear (do not treat "all-in" as a reason to skip tags).
+  if (/^all[\s-]*in$/i.test(trimmed)) {
+    return { primary: trimmed, secondary: null, raw: trimmed, potTag: null };
   }
   const chips = chipsFromLabel(trimmed);
   if (chips == null) {
@@ -824,8 +922,9 @@ export function formatActionTooltip(
   label: string,
   pot: number,
   mode: BetSizeDisplayMode = "both",
+  options: FormatActionDisplayOptions = {},
 ): string {
-  const display = formatActionDisplay(label, pot, mode);
+  const display = formatActionDisplay(label, pot, mode, options);
   const parts = [display.primary];
   if (display.secondary) {
     parts.push(display.secondary);

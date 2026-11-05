@@ -14,8 +14,6 @@ export function ComboInspector() {
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const selectCombosForLock = useStudyStore((s) => s.selectCombosForLock);
   const selectCombosForStrategyEdit = useStudyStore((s) => s.selectCombosForStrategyEdit);
-  const setLockDrawerOpen = useStudyStore((s) => s.setLockDrawerOpen);
-  const setStrategyEditDrawerOpen = useStudyStore((s) => s.setStrategyEditDrawerOpen);
   const toggleLockHand = useStudyStore((s) => s.toggleLockHand);
   const unlockHands = useStudyStore((s) => s.unlockHands);
   const lockDraft = useStudyStore((s) => s.lockDraft);
@@ -149,24 +147,14 @@ export function ComboInspector() {
                       .map((action) => `${(action.probability * 100).toFixed(0)}`)
                       .join("/")}
                   </span>
-                  {handIndex >= 0 ? (
-                    locked ? (
-                      <button
-                        type="button"
-                        className="toolbar-btn inspector-lock-btn"
-                        onClick={() => void unlockHands([handIndex])}
-                      >
-                        Unlock
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="toolbar-btn inspector-lock-btn"
-                        onClick={() => selectCombosForLock([hand.combo])}
-                      >
-                        Lock
-                      </button>
-                    )
+                  {handIndex >= 0 && locked ? (
+                    <button
+                      type="button"
+                      className="toolbar-btn inspector-lock-btn"
+                      onClick={() => void unlockHands([handIndex])}
+                    >
+                      Unlock
+                    </button>
                   ) : null}
                 </div>
               );
@@ -203,20 +191,6 @@ export function ComboInspector() {
               }
             >
               Edit strategy
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => setLockDrawerOpen(true)}
-            >
-              Lock editor
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => setStrategyEditDrawerOpen(true)}
-            >
-              Strategy editor
             </button>
             {pinned ? (
               <button
