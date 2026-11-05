@@ -95,7 +95,7 @@ describe("ComboHoverPopup", () => {
     expect(document.querySelectorAll(".combo-hover-square__segments")).toHaveLength(0);
   });
 
-  it("renders 16 suited mini-squares (4 present) in a 4-column grid", () => {
+  it("renders 4 suited mini-squares in a 2-column grid", () => {
     const suited = ["AcKc", "AdKd", "AhKh", "AsKs"];
     const aksNode: NodePayload = {
       node_id: "n-aks",
@@ -123,12 +123,12 @@ describe("ComboHoverPopup", () => {
     const dialog = screen.getByRole("dialog", { name: "AKs combo breakdown" });
     expect(dialog.getAttribute("data-shape")).toBe("suited");
     const grid = dialog.querySelector(".combo-hover-popup__grid") as HTMLElement;
-    expect(grid.style.gridTemplateColumns).toContain("repeat(4");
-    expect(document.querySelectorAll(".combo-hover-square")).toHaveLength(16);
+    expect(grid.style.gridTemplateColumns).toContain("repeat(2");
+    expect(document.querySelectorAll(".combo-hover-square")).toHaveLength(4);
     expect(document.querySelectorAll('.combo-hover-square[data-present="true"]')).toHaveLength(4);
   });
 
-  it("renders 16 offsuit mini-squares (12 present) in a 4-column grid", () => {
+  it("renders 12 offsuit mini-squares in a 4-column grid", () => {
     const offsuit = [
       "AcKd",
       "AcKh",
@@ -170,7 +170,7 @@ describe("ComboHoverPopup", () => {
     expect(dialog.getAttribute("data-shape")).toBe("offsuit");
     const grid = dialog.querySelector(".combo-hover-popup__grid") as HTMLElement;
     expect(grid.style.gridTemplateColumns).toContain("repeat(4");
-    expect(document.querySelectorAll(".combo-hover-square")).toHaveLength(16);
+    expect(document.querySelectorAll(".combo-hover-square")).toHaveLength(12);
     expect(document.querySelectorAll('.combo-hover-square[data-present="true"]')).toHaveLength(
       12,
     );

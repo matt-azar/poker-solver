@@ -143,7 +143,7 @@ describe("ComboInspector lock selection", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("shows 16 offsuit suit slots for an unpaired offsuit cell", () => {
+  it("shows 12 offsuit suit slots for an unpaired offsuit cell", () => {
     useStudyStore.setState({
       currentNode: {
         node_id: "p0",
@@ -162,7 +162,7 @@ describe("ComboInspector lock selection", () => {
       nodeValues: null,
     });
     render(<ComboInspector />);
-    expect(document.querySelectorAll(".hands-combo")).toHaveLength(16);
+    expect(document.querySelectorAll(".hands-combo")).toHaveLength(12);
     expect(
       document.querySelectorAll('.hands-combo[data-present="true"]'),
     ).toHaveLength(2);

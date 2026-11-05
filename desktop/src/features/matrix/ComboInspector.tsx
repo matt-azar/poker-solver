@@ -53,8 +53,13 @@ function comboActionEvs(
 }
 
 function shapeColumns(shape: ReturnType<typeof cellShape>): number {
-  // Pairs: 6 in 3 cols. Unpaired GTO 4×4: 16 in 4 cols.
-  return shape === "pair" ? 3 : 4;
+  if (shape === "suited") {
+    return 2;
+  }
+  if (shape === "pair") {
+    return 3;
+  }
+  return 4;
 }
 
 /** Hands list for the hovered/selected 169-cell in the Study detail panel. */

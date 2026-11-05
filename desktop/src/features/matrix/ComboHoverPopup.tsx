@@ -37,7 +37,9 @@ interface Props {
 }
 
 function shapeColumns(shape: ReturnType<typeof cellShape>): number {
-  // Pairs: 6 → 3×2. Unpaired (suited + offsuit): 16 → 4×4 suit×suit.
+  if (shape === "suited") {
+    return 2;
+  }
   if (shape === "pair") {
     return 3;
   }
