@@ -1,9 +1,50 @@
 import { useMemo } from "react";
 import { mapActionColors } from "../../domain/actionColors";
-import { groupEv, groupHands } from "../../domain/browse";
+import { groupEv, groupHands, withEvBasis } from "../../domain/browse";
 import { handIndexForCombo, isHandLocked, lockForNode } from "../../domain/locks";
+import type {
+  ActionValuesPayload,
+  EvDisplayBasis,
+  NodePayload,
+} from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
 
+function comboActionEvs(
+  node: NodePayload,
+  values: ActionValuesPayload | null,
+  combo: string,
+  basis: EvDisplayBasis,
+): Array<number | null> | null {
+  const displayed = withEvBasis(values, basis, node.actions);
+  if (!displayed || displayed.pending) {
+    return null;
+  }
+  if (displayed.node_id && node.node_id && displayed.node_id !== node.node_id) {
+    return null;
+  }
+  const combos = displayed.combos || node.combos || [];
+  const valueIndex = combos.indexOf(combo);
+  const nodeIndex = (node.combos || []).indexOf(combo);
+  if (valueIndex < 0 || nodeIndex < 0) {
+    return null;
+  }
+  if (!displayed.ev_defined?.[valueIndex]) {
+    return null;
+  }
+  const marginal = Number(node.marginal?.[nodeIndex] ?? 0);
+  if (!(marginal > 0)) {
+    return null;
+  }
+  const row = displayed.action_ev?.[valueIndex];
+  if (!row) {
+    return null;
+  }
+  return row.map((entry) =>
+    entry == null || Number.isNaN(Number(entry)) ? null : Number(entry),
+  );
+}
+
+/** Hands list for the hovered/selected 169-cell in the Study detail panel. */
 export function ComboInspector() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const nodeValues = useStudyStore((s) => s.nodeValues);
@@ -42,12 +83,19 @@ export function ComboInspector() {
       ? groupEv(currentNode, nodeValues, cell, evDisplayBasis)
       : null;
   const pinned = Boolean(selectedCell);
+  const actions = currentNode?.actions ?? [];
+  const evReady = Boolean(nodeValues && !nodeValues.pending);
 
   return (
-    <aside className="combo-inspector" aria-label="Combo inspector">
-      <div className="panel-title-row">
-        <h2 className="panel-title">{focus?.text ?? "Hand"}</h2>
-        <span className="muted">{pinned ? "Pinned" : focus ? "Hover" : ""}</span>
+    <section className="combo-inspector" aria-label="Hands">
+      <div className="combo-inspector__head panel-title-row">
+        <h2 className="panel-title">Hands</h2>
+        <span className="combo-inspector__focus tabular">
+          {focus?.text ?? ""}
+        </span>
+        <span className="muted">
+          {pinned ? "Pinned" : focus ? "Hover" : ""}
+        </span>
       </div>
       {!currentNode ? (
         <p className="empty-hint">Solve a spot, then hover a hand in the grid.</p>
@@ -68,7 +116,7 @@ export function ComboInspector() {
             </div>
             <div>
               <span className="muted">
-                {evDisplayBasis === "local" ? "Mixed EV (local)" : "Mixed EV (global)"}
+                {evDisplayBasis === "local" ? "Mixed EV" : "Mixed EV (global)"}
               </span>
               <strong className="tabular">
                 {ev ? ev.mixed.toFixed(3) : nodeValues?.pending ? "…" : "—"}
@@ -80,39 +128,36 @@ export function ComboInspector() {
               Calculate action EVs
             </button>
           ) : null}
-          <div className="inspector-actions">
-            {(currentNode.actions || []).map((label, index) => {
-              const share =
-                cell.defined && cell.marginalSum > 0
-                  ? cell.actionMass[index] / cell.marginalSum
-                  : null;
-              return (
-                <div key={`${label}-${index}`} className="inspector-action-row">
-                  <span
-                    className="action-swatch"
-                    style={{ background: colors.byIndex[index] }}
-                  />
-                  <span>{label}</span>
-                  <span className="tabular">
-                    {share == null ? "—" : `${(share * 100).toFixed(1)}%`}
-                  </span>
-                  <span className="tabular muted">
-                    {ev ? ev.action[index].toFixed(2) : "—"}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          {actions.length > 0 ? (
+            <div className="hands-ev-legend" aria-hidden={!evReady}>
+              <span className="hands-ev-legend__spacer" />
+              {actions.map((label, index) => (
+                <span
+                  key={`ev-h-${label}-${index}`}
+                  className="hands-ev-legend__action tabular"
+                  style={{ color: colors.byIndex[index] }}
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="inspector-combos">
             {cell.hands.map((hand) => {
               const handIndex = handIndexForCombo(currentNode.combos, hand.combo);
               const locked = handIndex >= 0 ? isHandLocked(nodeLock, handIndex) : false;
               const inDraft =
                 handIndex >= 0 && lockDraft.handIndices.includes(handIndex);
+              const actionEvs = comboActionEvs(
+                currentNode,
+                nodeValues,
+                hand.combo,
+                evDisplayBasis,
+              );
               return (
                 <div
                   key={hand.combo}
-                  className="inspector-combo"
+                  className="inspector-combo hands-combo"
                   data-locked={locked ? "true" : "false"}
                   data-lock-draft={inDraft ? "true" : "false"}
                 >
@@ -128,20 +173,34 @@ export function ComboInspector() {
                     aria-label={`Select ${hand.combo} for lock`}
                     title="Include in lock draft"
                   />
-                  <code>{hand.combo}</code>
-                  <div className="inspector-combo__mix">
+                  <code className="hands-combo__code">{hand.combo}</code>
+                  <div className="inspector-combo__mix hands-combo__mix">
                     {hand.actions.map((action) => (
-                      <span key={action.action} title={action.action}>
-                        <i
-                          style={{
-                            background: colors.byLabel[action.action] || "#666",
-                            width: `${Math.max(2, action.probability * 100)}%`,
-                          }}
-                        />
-                      </span>
+                      <i
+                        key={action.action}
+                        title={`${action.action} ${(action.probability * 100).toFixed(0)}%`}
+                        style={{
+                          background: colors.byLabel[action.action] || "#666",
+                          width: `${Math.max(0, action.probability * 100)}%`,
+                        }}
+                      />
                     ))}
                   </div>
-                  <span className="tabular muted">
+                  <div className="hands-combo__evs">
+                    {actions.map((label, index) => {
+                      const value = actionEvs?.[index];
+                      return (
+                        <span
+                          key={`${hand.combo}-ev-${index}`}
+                          className="hands-combo__ev tabular"
+                          title={label}
+                        >
+                          {value == null ? "—" : value.toFixed(2)}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <span className="tabular muted hands-combo__freq">
                     {locked ? "L · " : ""}
                     {hand.actions
                       .map((action) => `${(action.probability * 100).toFixed(0)}`)
@@ -204,6 +263,6 @@ export function ComboInspector() {
           </div>
         </>
       )}
-    </aside>
+    </section>
   );
 }

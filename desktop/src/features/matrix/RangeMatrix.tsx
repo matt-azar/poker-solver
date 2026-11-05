@@ -36,7 +36,6 @@ import {
 } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/matrix-density.css";
-import { ComboHoverDockEmpty, ComboHoverPopup } from "./ComboHoverPopup";
 
 function cellKey(row: number, col: number): string {
   return `${row}:${col}`;
@@ -166,14 +165,6 @@ export function RangeMatrix() {
       ? `Hand range matrix (${RANGE_INCLUSION_MEASURE})`
       : "Hand range matrix";
 
-  const focus = selectedCell ?? hoverCell;
-  const focusCell = focus
-    ? byKey.get(cellKey(focus.row, focus.col)) ?? null
-    : null;
-  const showPopup = Boolean(
-    currentNode && focusCell && !isExcludedForPopup(focusCell, matrixMode),
-  );
-
   return (
     <div className="range-matrix-wrap">
       <div className="range-matrix-stage" ref={stageRef}>
@@ -212,35 +203,8 @@ export function RangeMatrix() {
           ))}
         </div>
       </div>
-      <div className="combo-hover-dock" aria-live="polite">
-        {showPopup && currentNode && focusCell ? (
-          <ComboHoverPopup
-            cell={focusCell}
-            node={currentNode}
-            nodeValues={nodeValues}
-            evDisplayBasis={evDisplayBasis}
-            equityMap={equityMap}
-            pinned={Boolean(selectedCell)}
-            matrixMode={matrixMode}
-            actionColors={colors.byIndex}
-          />
-        ) : (
-          <ComboHoverDockEmpty />
-        )}
-      </div>
     </div>
   );
-}
-
-function isExcludedForPopup(
-  cell: AggregatedHandCell,
-  mode: MatrixMode,
-): boolean {
-  if (mode === "range") {
-    const inclusion = rangeInclusionOf(cell);
-    return !cell.defined || inclusion == null || inclusion <= 0;
-  }
-  return isExcludedMatrixCell(cell);
 }
 
 interface Selected {

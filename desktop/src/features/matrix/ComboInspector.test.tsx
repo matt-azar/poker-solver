@@ -105,4 +105,34 @@ describe("ComboInspector lock selection", () => {
     expect(useStudyStore.getState().strategyEditDrawerOpen).toBe(true);
     expect(useStudyStore.getState().strategyEditDraft.handIndices).toEqual([0, 1, 2]);
   });
+
+  it("shows Hands empty hint when nothing is hovered or selected", () => {
+    useStudyStore.setState({ selectedCell: null, hoverCell: null });
+    render(<ComboInspector />);
+    expect(screen.getByRole("heading", { name: "Hands" })).toBeTruthy();
+    expect(screen.getByText("Hover a hand in the grid.")).toBeTruthy();
+  });
+
+  it("lists strategy bars and per-action EV for each combo", () => {
+    useStudyStore.setState({
+      nodeValues: {
+        node_id: "p0",
+        pending: false,
+        combos: ["AhAd", "AhAs", "AhAc"],
+        ev_defined: [true, true, true],
+        value: [1.5, 1.2, 0.9],
+        action_ev: [
+          [0.5, 2.5],
+          [0.4, 2.0],
+          [0.3, 1.5],
+        ],
+        utility_basis: "local",
+      },
+    });
+    render(<ComboInspector />);
+    expect(screen.getByText("AhAd")).toBeTruthy();
+    expect(screen.getByText("0.50")).toBeTruthy();
+    expect(screen.getByText("2.50")).toBeTruthy();
+    expect(document.querySelectorAll(".hands-combo__mix").length).toBe(3);
+  });
 });
