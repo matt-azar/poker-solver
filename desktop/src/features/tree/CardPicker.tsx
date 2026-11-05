@@ -29,11 +29,6 @@ export interface CardPickerProps {
   onClose: () => void;
   /** Street whose next card is being chosen (defaults from current chance board). */
   street?: DealStreet | null;
-  /**
-   * `overlay` — modal dialog (board slot click).
-   * `inline` — embedded in the Study path “Cards” row (no dimmed backdrop).
-   */
-  variant?: "overlay" | "inline";
 }
 
 function rankKeyToRank(key: string): string | null {
@@ -59,7 +54,6 @@ export function CardPicker({
   open,
   onClose,
   street = null,
-  variant = "overlay",
 }: CardPickerProps) {
   const currentNode = useStudyStore((s) => s.currentNode);
   const boardChangeChanceNode = useStudyStore((s) => s.boardChangeChanceNode);
@@ -176,25 +170,20 @@ export function CardPicker({
   const panel = (
     <div
       className="card-picker"
-      data-variant={variant}
-      role={variant === "overlay" ? "dialog" : "region"}
+      role="dialog"
       aria-label={`${activeStreet} card picker`}
       tabIndex={-1}
-      onClick={variant === "overlay" ? (event) => event.stopPropagation() : undefined}
+      onClick={(event) => event.stopPropagation()}
       onKeyDown={onKeyDown}
       ref={(node) => {
-        if (variant === "overlay") {
-          node?.focus();
-        }
+        node?.focus();
       }}
     >
       <div className="card-picker__head">
         <h2 className="card-picker__title">{title}</h2>
-        {variant === "overlay" ? (
-          <button type="button" className="toolbar-btn card-picker__close" onClick={onClose}>
-            Close
-          </button>
-        ) : null}
+        <button type="button" className="toolbar-btn card-picker__close" onClick={onClose}>
+          Close
+        </button>
       </div>
       {!chanceReady ? (
         <p className="empty-hint">No next cards at this node.</p>
@@ -252,10 +241,6 @@ export function CardPicker({
       )}
     </div>
   );
-
-  if (variant === "inline") {
-    return panel;
-  }
 
   return (
     <div className="card-picker-overlay" role="presentation" onClick={onClose}>
