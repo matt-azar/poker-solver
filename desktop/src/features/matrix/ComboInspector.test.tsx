@@ -105,4 +105,69 @@ describe("ComboInspector lock selection", () => {
     expect(useStudyStore.getState().strategyEditDrawerOpen).toBe(true);
     expect(useStudyStore.getState().strategyEditDraft.handIndices).toEqual([0, 1, 2]);
   });
+
+  it("shows Hands empty hint when nothing is hovered or selected", () => {
+    useStudyStore.setState({ selectedCell: null, hoverCell: null });
+    render(<ComboInspector />);
+    expect(screen.getByRole("heading", { name: "Hands" })).toBeTruthy();
+    expect(screen.getByText("Hover a hand in the grid.")).toBeTruthy();
+  });
+
+  it("lists strategy bars and per-action EV across the pair suit grid", () => {
+    useStudyStore.setState({
+      nodeValues: {
+        node_id: "p0",
+        pending: false,
+        combos: ["AhAd", "AhAs", "AhAc"],
+        ev_defined: [true, true, true],
+        value: [1.5, 1.2, 0.9],
+        action_ev: [
+          [0.5, 2.5],
+          [0.4, 2.0],
+          [0.3, 1.5],
+        ],
+        utility_basis: "local",
+      },
+    });
+    render(<ComboInspector />);
+    // Pairs use 6 suit slots (3 present in this fixture).
+    expect(document.querySelectorAll(".hands-combo")).toHaveLength(6);
+    expect(
+      document.querySelectorAll('.hands-combo[data-present="true"]'),
+    ).toHaveLength(3);
+    expect(screen.getByText("0.50")).toBeTruthy();
+    expect(screen.getByText("2.50")).toBeTruthy();
+    expect(
+      document.querySelectorAll('.hands-combo[data-present="true"] .hands-combo__mix i')
+        .length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("shows 12 offsuit suit slots for an unpaired offsuit cell", () => {
+    useStudyStore.setState({
+      currentNode: {
+        node_id: "p0",
+        reach_defined: true,
+        actions: ["Check", "Bet 50"],
+        // AKo-style: two offsuit combos only
+        combos: ["AcKd", "AsKh"],
+        marginal: [1, 1],
+        strategy: [
+          [0.5, 0.5],
+          [0.4, 0.6],
+        ],
+      },
+      // AKo is row>col for A=0,K=1 → row 1 col 0 in RANKS A,K,Q...
+      selectedCell: { row: 1, col: 0, text: "AKo" },
+      nodeValues: null,
+    });
+    render(<ComboInspector />);
+    expect(document.querySelectorAll(".hands-combo")).toHaveLength(12);
+    expect(
+      document.querySelectorAll('.hands-combo[data-present="true"]'),
+    ).toHaveLength(2);
+    expect(
+      document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
+    ).toBe("offsuit");
+  });
 });

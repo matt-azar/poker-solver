@@ -106,6 +106,13 @@ describe("ActionSummary", () => {
     expect(within(legend).getByText("b100")).toBeTruthy();
   });
 
+  it("renders a panel Actions heading and frequency mix bar", () => {
+    render(<ActionSummary />);
+    expect(screen.getByRole("heading", { name: "Actions" })).toBeTruthy();
+    expect(screen.getByLabelText("Action frequency mix")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Matrix mode" })).toBeNull();
+  });
+
   it("reacts immediately when Settings betSizeDisplay changes", () => {
     const { rerender } = render(<ActionSummary />);
     expect(screen.getAllByText("b50").length).toBeGreaterThan(0);

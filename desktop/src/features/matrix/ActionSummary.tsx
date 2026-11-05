@@ -7,18 +7,10 @@ import {
   formatFrequencyPct,
 } from "../../domain/betSizes";
 import { groupHands } from "../../domain/browse";
-import type { MatrixMode } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import { ActionBlock } from "./ActionBlock";
-import { MatrixDisplayControls } from "./MatrixDisplayControls";
 import "../../styles/actions.css";
-
-const MODES: Array<{ id: MatrixMode; label: string }> = [
-  { id: "strategy", label: "Strategy" },
-  { id: "range", label: "Range" },
-  { id: "ev", label: "EV" },
-];
 
 function childIdAt(
   children: unknown[] | undefined,
@@ -46,16 +38,14 @@ function childIdAt(
   return null;
 }
 
+/** Node-level Actions stack for the Study detail panel. */
 export function ActionSummary() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const status = useStudyStore((s) => s.status);
   const draft = useStudyStore((s) => s.draft);
-  const matrixMode = useStudyStore((s) => s.matrixMode);
-  const setMatrixMode = useStudyStore((s) => s.setMatrixMode);
   const actionFilter = useStudyStore((s) => s.actionFilter);
   const setActionFilter = useStudyStore((s) => s.setActionFilter);
   const followAction = useStudyStore((s) => s.followAction);
-  const nodeValues = useStudyStore((s) => s.nodeValues);
   const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
 
   const actions = currentNode?.actions;
@@ -94,10 +84,6 @@ export function ActionSummary() {
     return totals.map((t) => t / mass);
   }, [currentNode, actions]);
 
-  const evReady = Boolean(nodeValues && !nodeValues.pending);
-  const strategyActive =
-    matrixMode === "strategy" || matrixMode === "strategy-ev";
-
   const legend = useMemo(
     () =>
       colors.legend.map((entry) => {
@@ -117,62 +103,75 @@ export function ActionSummary() {
   );
 
   return (
-    <div className="action-summary">
-      <div className="action-summary__modes" role="group" aria-label="Matrix mode">
-        {MODES.map((mode) => {
-          const pressed =
-            mode.id === "strategy"
-              ? strategyActive
-              : matrixMode === mode.id;
+    <section className="action-summary action-summary--panel" aria-label="Actions">
+      <div className="action-summary__head">
+        <h2 className="action-summary__title">Actions</h2>
+        {(actions?.length ?? 0) > 0 ? (
+          <span className="muted action-summary__hint-inline">
+            Filter · Open
+          </span>
+        ) : null}
+      </div>
+      <div className="action-summary__blocks">
+        {(actions ?? []).map((label, index) => {
+          const display = formatActionDisplay(
+            label,
+            pot,
+            betSizeDisplay,
+            displayOpts,
+          );
+          const freqText = formatFrequencyPct(freqs[index]);
+          const filtered = actionFilter === index;
+          const childId = childIdAt(currentNode?.children, index);
           return (
-            <button
-              key={mode.id}
-              type="button"
-              className="mode-btn"
-              aria-pressed={pressed}
-              disabled={mode.id === "ev" && !evReady}
-              onClick={() => setMatrixMode(mode.id)}
-            >
-              {mode.label}
-            </button>
+            <ActionBlock
+              key={`${label}-${index}`}
+              variant="filter"
+              primary={display.primary}
+              secondary={display.secondary}
+              frequency={freqs[index] ?? 0}
+              frequencyText={freqText}
+              color={colors.byIndex[index]}
+              active={filtered}
+              title={`${formatActionTooltip(label, pot, betSizeDisplay, displayOpts)} · click to filter`}
+              aria-label={`Filter ${display.primary}${freqText ? `, ${freqText}` : ""}`}
+              onClick={() => setActionFilter(filtered ? null : index)}
+              onFollow={() => {
+                if (childId) {
+                  void followAction(childId);
+                }
+              }}
+              followDisabled={!childId}
+              followLabel="Open"
+            />
           );
         })}
+        {!actions?.length ? (
+          <span className="muted">No actions at this node</span>
+        ) : null}
       </div>
-      <MatrixDisplayControls />
-      {(actions ?? []).map((label, index) => {
-        const display = formatActionDisplay(
-          label,
-          pot,
-          betSizeDisplay,
-          displayOpts,
-        );
-        const freqText = formatFrequencyPct(freqs[index]);
-        const filtered = actionFilter === index;
-        const childId = childIdAt(currentNode?.children, index);
-        return (
-          <ActionBlock
-            key={`${label}-${index}`}
-            variant="filter"
-            primary={display.primary}
-            secondary={display.secondary}
-            frequency={freqs[index] ?? 0}
-            frequencyText={freqText}
-            color={colors.byIndex[index]}
-            active={filtered}
-            title={`${formatActionTooltip(label, pot, betSizeDisplay, displayOpts)} · click to filter`}
-            aria-label={`Filter ${display.primary}${freqText ? `, ${freqText}` : ""}`}
-            onClick={() => setActionFilter(filtered ? null : index)}
-            onFollow={() => {
-              if (childId) {
-                void followAction(childId);
-              }
-            }}
-            followDisabled={!childId}
-            followLabel="Open"
-          />
-        );
-      })}
-      {!actions?.length ? <span className="muted">No actions at this node</span> : null}
+      {(actions?.length ?? 0) > 0 ? (
+        <div
+          className="action-summary__mix"
+          aria-label="Action frequency mix"
+          role="img"
+        >
+          {freqs.map((freq, index) =>
+            freq > 0.001 ? (
+              <span
+                key={`mix-${index}`}
+                className="action-summary__mix-seg"
+                style={{
+                  flexGrow: freq,
+                  flexBasis: 0,
+                  background: colors.byIndex[index],
+                }}
+                title={`${actions?.[index] ?? ""} · ${formatFrequencyPct(freq)}`}
+              />
+            ) : null,
+          )}
+        </div>
+      ) : null}
       {legend.length > 0 ? (
         <div className="action-summary__legend" aria-label="Action color legend">
           {legend.map((entry) => (
@@ -187,11 +186,6 @@ export function ActionSummary() {
           ))}
         </div>
       ) : null}
-      {(actions?.length ?? 0) > 0 ? (
-        <p className="action-summary__hint">
-          Block filters the matrix · Open follows that action
-        </p>
-      ) : null}
-    </div>
+    </section>
   );
 }

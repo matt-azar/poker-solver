@@ -789,6 +789,22 @@
   overflow: hidden;
 }
 
+.matrix-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  background: var(--secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px;
+}
+
+.matrix-toolbar__modes {
+  display: flex;
+  gap: 2px;
+}
+
 .matrix-stage {
   flex: 1 1 0;
   min-width: 0;
@@ -799,7 +815,8 @@
   align-items: stretch;
 }
 
-.action-summary {
+/* Legacy top-bar ActionSummary (kept for non-panel consumers). */
+.action-summary:not(.action-summary--panel) {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -876,7 +893,6 @@
   flex-direction: row;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 8px;
   overflow: hidden;
   background: var(--panel);
   border: 0;
@@ -892,20 +908,7 @@
   min-height: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
-}
-
-/* Full section height; width at least as large as height (square-or-wider). */
-.combo-hover-dock {
-  flex: 0 0 auto;
-  align-self: stretch;
-  height: 100%;
-  min-height: 0;
-  width: max(160px, 100cqh);
-  max-width: min(48%, 420px);
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
+  justify-content: flex-start;
 }
 
 .range-matrix {
@@ -1175,29 +1178,52 @@
   opacity: 0.55;
 }
 
-.combo-inspector {
-  width: var(--inspector-w);
-  min-width: 240px;
-  background: var(--secondary);
-  border-left: 1px solid var(--border);
+.study-detail-panel {
+  --detail-panel-w: clamp(360px, 34%, 420px);
+  flex: 0 0 var(--detail-panel-w);
+  width: var(--detail-panel-w);
+  min-width: 320px;
+  max-width: 440px;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--secondary);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.combo-inspector {
+  flex: 1 1 auto;
   min-height: 0;
+  width: auto;
+  background: transparent;
+  border-left: 0;
+  display: flex;
+  flex-direction: column;
   position: relative;
+  border-top: 1px solid var(--border);
 }
 
 .matrix-stage > .combo-inspector {
-  flex: 0 0 300px;
-  width: 300px;
+  flex: 1 1 auto;
+  width: auto;
   min-width: 0;
   max-height: none;
-  height: 100%;
+  height: auto;
 }
 
 .combo-inspector__head {
-  padding: 8px;
+  padding: 8px 10px 6px;
   border-bottom: 1px solid var(--border);
-  background: var(--secondary);
+  background: transparent;
+  margin-bottom: 0;
+}
+
+.combo-inspector__focus {
+  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 13px;
 }
 
 .combo-inspector__title {
@@ -1453,18 +1479,112 @@
 .inspector-combos {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  gap: 4px;
+  padding: 6px 10px 8px;
   overflow: auto;
   flex: 1;
+  min-height: 0;
+}
+
+.inspector-combos.hands-combo-grid {
+  display: grid;
+  gap: 4px;
+  align-content: start;
 }
 
 .inspector-combo {
   display: grid;
-  grid-template-columns: 52px 1fr auto;
-  gap: 8px;
+  grid-template-columns: 16px 52px minmax(48px, 1fr) auto;
+  gap: 6px;
   align-items: center;
   font-size: 12px;
+}
+
+.hands-combo {
+  grid-template-columns: 14px minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto;
+  gap: 2px 4px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  align-items: center;
+}
+
+.hands-combo[data-present="false"] {
+  opacity: 0.4;
+}
+
+.hands-combo__check-spacer {
+  width: 14px;
+  height: 14px;
+}
+
+.hands-combo__code {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 11px;
+  grid-column: 2;
+}
+
+.hands-combo__mix {
+  grid-column: 1 / -1;
+  display: flex;
+  height: 10px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--border) 40%, var(--panel));
+  overflow: hidden;
+}
+
+.hands-combo__mix > i {
+  display: block;
+  height: 100%;
+  min-width: 0;
+}
+
+.hands-combo__evs {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 4px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.hands-combo__ev {
+  font-size: 10px;
+  color: var(--muted);
+  min-width: 2.2em;
+  text-align: right;
+}
+
+.hands-combo .inspector-lock-btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.hands-combo__freq {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.hands-ev-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.hands-ev-legend__spacer {
+  flex: 0 0 calc(16px + 52px + 56px + 18px);
+}
+
+.hands-ev-legend__action {
+  min-width: 2.4em;
+  text-align: right;
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .inspector-combo__mix {
@@ -1472,7 +1592,7 @@
   height: 10px;
   border-radius: 2px;
   overflow: hidden;
-  background: var(--secondary);
+  background: var(--panel);
 }
 
 .inspector-combo__mix > span {
@@ -1490,8 +1610,19 @@
 }
 
 .combo-inspector .toolbar-btn {
-  margin: 8px;
+  margin: 6px 10px;
   align-self: flex-start;
+}
+
+.combo-inspector .inspector-lock-actions {
+  padding: 6px 10px 10px;
+  margin-top: 0;
+  border-top: 1px solid var(--border);
+  opacity: 0.92;
+}
+
+.combo-inspector .inspector-lock-actions .toolbar-btn {
+  margin: 0;
 }
 
 /* Analysis extras */
@@ -2021,12 +2152,18 @@
   }
 
   .node-navigator,
+  .study-detail-panel,
   .combo-inspector {
     width: 100%;
     max-width: none;
-    max-height: 160px;
+    min-width: 0;
+    max-height: 220px;
     border-left: 0;
     border-right: 0;
+  }
+
+  .matrix-stage {
+    flex-direction: column;
   }
 
   .build-grid {
@@ -2366,8 +2503,7 @@
   font-size: 11px;
 }
 
-.inspector-action-row,
-.inspector-combo {
+.inspector-action-row {
   display: grid;
   grid-template-columns: 10px 1fr auto auto;
   gap: 8px;
@@ -2375,27 +2511,6 @@
   padding: 3px 0;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
-}
-
-.inspector-combo {
-  grid-template-columns: 52px 1fr auto;
-}
-
-.inspector-combo__mix {
-  display: flex;
-  height: 8px;
-  background: var(--secondary);
-  overflow: hidden;
-}
-
-.inspector-combo__mix span {
-  display: flex;
-  flex: 1;
-}
-
-.inspector-combo__mix i {
-  display: block;
-  height: 100%;
 }
 
 .action-swatch {
@@ -3236,6 +3351,7 @@
     grid-template-columns: 1fr !important;
   }
 
+  .study-detail-panel,
   .combo-inspector {
     max-height: 40vh;
   }
