@@ -6,6 +6,7 @@ import { useHelpChatStore } from "../../state/assistantWindowStore";
 import { ensureEngine } from "../../platform/engine";
 import { BuildWorkspace } from "../build/BuildWorkspace";
 import { CompareWorkspace } from "../compare/CompareWorkspace";
+import { EquityWorkspace } from "../equity/EquityWorkspace";
 import { LibraryWorkspace } from "../library/LibraryWorkspace";
 import { StudyWorkspace } from "../study/StudyWorkspace";
 import { StudyAssistantWindow } from "../assistant/StudyAssistantWindow";
@@ -72,6 +73,8 @@ export function AppShell() {
     body = <StudyWorkspace />;
   } else if (workspace === "build") {
     body = <BuildWorkspace />;
+  } else if (workspace === "equity") {
+    body = <EquityWorkspace />;
   } else if (workspace === "compare") {
     body = <CompareWorkspace />;
   } else {

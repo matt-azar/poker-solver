@@ -122,7 +122,7 @@ export function resetSetupHistoryForTests() {
   setupHistoryPast.length = 0;
 }
 
-export type WorkspaceId = "study" | "build" | "compare" | "library";
+export type WorkspaceId = "study" | "build" | "compare" | "library" | "equity";
 
 export interface LibraryRecentEntry {
   path: string;

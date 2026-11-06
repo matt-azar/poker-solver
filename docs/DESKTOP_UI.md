@@ -44,7 +44,8 @@ explorer   # serves desktop/dist when present
 | Action EV | `GET …/values` | Calculate EVs | Inspector / Analysis | Decision only; may 202 | value worker |
 | Runouts | `GET …/runouts` | Compare runouts | Lower dock + suit filter; row navigates | Chance / street only | engine; sparse HTTP |
 | Next-card picker | chance `cards[]` (+ legacy `children`) | Card grid | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout (400/404 → child id); flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
-| Equity | `GET …/equity` | Averages + hist | Equity tab: averages, clickable band filter, shape composition, top hands | Check-down (not chip EV); buckets + `oop_hands`/`ip_hands` | equity tests; `analysis.test.ts` |
+| Equity (node) | `GET …/equity` | Averages + hist | Study Equity tab: averages, clickable band filter, shape composition, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); buckets + `oop_hands`/`ip_hands` | equity tests; `analysis.test.ts` |
+| Equity calculator | `POST/GET /api/equity/jobs…` | — | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | `equity_calculator_tests`; desktop Equity UI |
 | Categories | `GET …/categories` | Table | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | hand categories; `analysis.test.ts` |
 | Locks | PUT/DELETE `…/locks` | Hand detail | Lock drawer + inspector | All-zero PUT rejected; 0%≠unlock | HTTP + `locks.test.ts` |
 | Strategy edits | PUT/DELETE `…/strategy-edits` | Hand detail | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | HTTP + `strategyEdits.test.ts` |

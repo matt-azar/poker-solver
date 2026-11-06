@@ -113,6 +113,12 @@ export function MenuBar({
         event.preventDefault();
         return;
       }
+      // Solver shortcuts must not fire from the Equity calculator workspace.
+      if (workspace === "equity") {
+        if (action === "solve" || action === "stop" || action === "continue") {
+          return;
+        }
+      }
       if (action === "solve") {
         event.preventDefault();
         void executeSolve({ ...commandDeps(), solve });
@@ -130,6 +136,7 @@ export function MenuBar({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
+    workspace,
     solve,
     stop,
     continueSolve,

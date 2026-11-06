@@ -5,7 +5,7 @@ In-repo harness (`tests/harness.hpp`) + CTest. No Catch2/GoogleTest.
 ```sh
 cmake --build build
 ctest --test-dir build --output-on-failure
-# Suites: poker_engine_tests, poker_study_tests, poker_http_tests, equity_tests
+# Suites: poker_engine_tests, poker_study_tests, poker_http_tests, equity_tests, equity_calculator_tests
 ```
 
 On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.

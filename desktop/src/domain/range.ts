@@ -123,6 +123,48 @@ export function parseCard(text: string): string | null {
   return rank + suit;
 }
 
+/** Parse a card list that may omit spaces (`2c3d7h` or `2c 3d 7h`). */
+export function parseCardList(text: string): string[] {
+  const cards: string[] = [];
+  let index = 0;
+  const source = text.trim();
+  while (index < source.length) {
+    while (index < source.length && /[\s,]/.test(source[index]!)) {
+      index += 1;
+    }
+    if (index >= source.length) {
+      break;
+    }
+    let consumed = 2;
+    let rank = source[index]!.toUpperCase();
+    if (source.toLowerCase().startsWith("10", index)) {
+      rank = "T";
+      consumed = 3;
+    }
+    const suitIndex = index + consumed - 1;
+    if (suitIndex >= source.length) {
+      break;
+    }
+    const suit = source[suitIndex]!.toLowerCase();
+    if (!ORDER.includes(rank) || !"cdhs".includes(suit)) {
+      // Fall back: treat whitespace/comma tokens individually.
+      const tokenMatch = source.slice(index).match(/^[^\s,]+/);
+      if (!tokenMatch) {
+        break;
+      }
+      const parsed = parseCard(tokenMatch[0]!);
+      if (parsed) {
+        cards.push(parsed);
+      }
+      index += tokenMatch[0]!.length;
+      continue;
+    }
+    cards.push(rank + suit);
+    index = suitIndex + 1;
+  }
+  return cards;
+}
+
 export function boardSet(text: string): Set<string> {
   return new Set(boardCards(text).map(parseCard).filter((card): card is string => !!card));
 }
@@ -136,8 +178,35 @@ export function pairName(row: number, column: number): string {
   return `${RANKS[high]}${RANKS[low]}${row < column ? "s" : "o"}`;
 }
 
-function trimWeight(weight: number): string {
+/** Display-only rounding (not for authoritative serialization). */
+export function formatDisplayWeight(weight: number): string {
   return String(Math.round(weight * 1000) / 1000);
+}
+
+/**
+ * Authoritative weight text for range tokens. Omits the suffix only when the
+ * weight is exactly the default (1). Preserves tiny, near-1, and >1 values.
+ */
+export function formatExactWeight(weight: number): string | null {
+  if (!Number.isFinite(weight) || weight < 0) {
+    throw new Error("range weight must be a nonnegative number");
+  }
+  if (weight === 1) {
+    return null;
+  }
+  // Round-trip numeric formatting without fixed 3-decimal truncation.
+  let text = weight.toString();
+  if (text.includes("e") || text.includes("E")) {
+    text = weight.toPrecision(15).replace(/\.?0+e/, "e");
+  } else if (text.includes(".")) {
+    text = text.replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.0+$/, "");
+  }
+  return text;
+}
+
+function formatWeightedToken(name: string, weight: number): string {
+  const suffix = formatExactWeight(weight);
+  return suffix === null ? name : `${name}:${suffix}`;
 }
 
 /**
@@ -154,7 +223,7 @@ export function rangeText(grid: WeightGrid): string {
         continue;
       }
       const name = pairName(row, column);
-      parts.push(weight >= 0.999 ? name : `${name}:${trimWeight(weight)}`);
+      parts.push(formatWeightedToken(name, weight));
     }
   }
   return parts.join(",");
@@ -460,10 +529,20 @@ function applySpanExact(
     }
     return true;
   }
+  // Match C++: dashed non-pair spans must share the high card (A2s-A5s OK; 76s-54s not).
+  if (left.length < 2 || right.length < 2 || left[0]!.toUpperCase() !== right[0]!.toUpperCase()) {
+    return false;
+  }
+  if ((left.length === 3) !== (right.length === 3)) {
+    return false;
+  }
+  if (left.length === 3 && left[2] !== right[2]) {
+    return false;
+  }
   const shape = left.length === 3 ? left[2] : "";
   const high = rankAt(left[0]!);
   const from = rankAt(left[1]!);
-  const to = rankAt(right[1] || right[0]!);
+  const to = rankAt(right[1]!);
   for (let kicker = Math.min(from, to); kicker <= Math.max(from, to); kicker++) {
     if (kicker === high) {
       continue;
@@ -486,8 +565,12 @@ function applyExactToken(
   let token = rawToken.trim();
   const colon = token.indexOf(":");
   if (colon >= 0) {
-    weight = Number(token.slice(colon + 1));
+    const weightText = token.slice(colon + 1).trim();
     token = token.slice(0, colon).trim();
+    if (!weightText) {
+      return { token: rawToken, message: "range weight must be a nonnegative number" };
+    }
+    weight = Number(weightText);
   }
   if (!token) {
     return { token: rawToken, message: "empty range token" };
@@ -632,11 +715,11 @@ export function weightsFromExact(range: ExactRange): WeightGrid {
 }
 
 function formatExactToken(combo: string, weight: number): string {
-  return weight >= 0.999 ? combo : `${combo}:${trimWeight(weight)}`;
+  return formatWeightedToken(combo, weight);
 }
 
 function formatClassToken(name: string, weight: number): string {
-  return weight >= 0.999 ? name : `${name}:${trimWeight(weight)}`;
+  return formatWeightedToken(name, weight);
 }
 
 /**

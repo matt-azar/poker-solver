@@ -2,7 +2,7 @@ import { validateSetupForSolve } from "../domain/setup";
 import { solveControlFlags } from "../domain/solveControls";
 import type { NodePayload, SolvePhase, SpotDraft } from "../domain/types";
 
-export type StudyWorkspaceId = "study" | "build" | "compare" | "library";
+export type StudyWorkspaceId = "study" | "build" | "compare" | "library" | "equity";
 
 export interface StudyCommandContext {
   phase: SolvePhase;

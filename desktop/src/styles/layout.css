@@ -3957,3 +3957,181 @@
   background: var(--accent-soft);
   color: var(--accent);
 }
+
+/* Equity calculator workspace */
+.equity-workspace {
+  height: 100%;
+  overflow: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.equity-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.equity-toolbar-main,
+.equity-toolbar-actions,
+.equity-board-row,
+.equity-run-row,
+.equity-editor-head,
+.equity-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.equity-toolbar h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.equity-name {
+  min-width: 160px;
+}
+
+.equity-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.9fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .equity-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.equity-workspace .panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+
+.equity-player-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.equity-player-table th,
+.equity-player-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 4px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.equity-player-table .num,
+.equity-emphasis {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.equity-emphasis {
+  font-weight: 700;
+}
+
+.equity-player-table tr[data-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.equity-range-input {
+  min-width: 180px;
+  width: 100%;
+}
+
+.equity-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.equity-stale {
+  color: var(--warning, #b78103);
+  font-weight: 600;
+}
+
+.equity-error {
+  color: var(--danger, #c23b22);
+}
+
+.equity-range-textarea {
+  width: 100%;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  margin-top: var(--space-2);
+}
+
+.equity-recent ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.equity-recent li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.equity-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+}
+
+.equity-card-picker {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  max-width: 720px;
+  width: min(720px, 96vw);
+}
+
+.equity-card-picker-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.equity-card-picker-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.equity-card-picker-suit {
+  display: grid;
+  grid-template-columns: repeat(13, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.equity-card-btn {
+  font-size: 11px;
+  padding: 4px 0;
+}
+
+.equity-file-import {
+  cursor: pointer;
+}

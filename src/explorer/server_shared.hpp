@@ -425,6 +425,9 @@ std::string publish_loaded(const std::shared_ptr<HeldSolution>& held);
 
 void handle_client(socket_t client);
 
+// Standalone equity calculator HTTP routes. Returns true when handled.
+bool handle_equity_api(socket_t client, const std::string& line, const std::string& body);
+
 std::string executable_directory();
 
 void choose_ui_root();
