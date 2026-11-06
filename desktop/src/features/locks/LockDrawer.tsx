@@ -6,6 +6,7 @@ import {
   normalizeProbs,
 } from "../../domain/locks";
 import { useStudyStore } from "../../state/studyStore";
+import { LockPaintPanel } from "./LockPaintPanel";
 
 function playerLabel(player: number | null | undefined, toAct?: string | null): string {
   if (toAct) {
@@ -122,6 +123,11 @@ export function LockDrawer() {
           </div>
         </section>
 
+        <section className="lock-drawer__section" aria-label="Paint lock hands">
+          <div className="lock-drawer__section-title">Paint hands</div>
+          <LockPaintPanel />
+        </section>
+
         <section className="lock-drawer__section" aria-label="Selected hands">
           <div className="lock-drawer__section-title">
             Hands{" "}
@@ -132,7 +138,7 @@ export function LockDrawer() {
             </span>
           </div>
           {lockDraft.kind === "selected" && lockDraft.handIndices.length === 0 ? (
-            <p className="empty-hint">Select combos in the inspector.</p>
+            <p className="empty-hint">Paint hand classes above to select combos.</p>
           ) : (
             <ul className="lock-hand-list">
               {selectedHands.map(({ index, combo }) => {
@@ -168,37 +174,6 @@ export function LockDrawer() {
               })}
             </ul>
           )}
-          {lockDraft.kind === "selected" && (combos?.length ?? 0) > 0 ? (
-            <details className="lock-hand-picker">
-              <summary>Browse node combos</summary>
-              <ul className="lock-hand-list lock-hand-list--compact">
-                {(combos ?? []).map((combo, index) => {
-                  const locked = isHandLocked(nodeLock, index);
-                  const selected = lockDraft.handIndices.includes(index);
-                  return (
-                    <li
-                      key={`pick-${index}`}
-                      className="lock-hand-row"
-                      data-locked={locked ? "true" : "false"}
-                      data-in-draft={selected ? "true" : "false"}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        onChange={() => toggleLockHand(index)}
-                        aria-label={`Toggle ${combo}`}
-                      />
-                      <code>{combo}</code>
-                      <span className="muted tabular">#{index}</span>
-                      <span className="lock-hand-row__badge">
-                        {locked ? "locked" : "free"}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </details>
-          ) : null}
         </section>
 
         <section className="lock-drawer__section" aria-label="Probability row">

@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { mapActionColors } from "../../domain/actionColors";
 import { groupHands, withEvBasis } from "../../domain/browse";
-import { handIndexForCombo, isHandLocked, lockForNode } from "../../domain/locks";
 import {
   cellShape,
   comboBreakdown,
@@ -81,12 +80,6 @@ export function ComboInspector() {
   const hoverCell = useStudyStore((s) => s.hoverCell);
   const calculateEv = useStudyStore((s) => s.calculateEv);
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
-  const selectCombosForLock = useStudyStore((s) => s.selectCombosForLock);
-  const selectCombosForStrategyEdit = useStudyStore((s) => s.selectCombosForStrategyEdit);
-  const toggleLockHand = useStudyStore((s) => s.toggleLockHand);
-  const unlockHands = useStudyStore((s) => s.unlockHands);
-  const lockDraft = useStudyStore((s) => s.lockDraft);
-  const locks = useStudyStore((s) => s.locks);
 
   const focus = selectedCell ?? hoverCell;
   const cell = useMemo(() => {
@@ -99,11 +92,6 @@ export function ComboInspector() {
   const colors = useMemo(
     () => mapActionColors(currentNode?.actions ?? []),
     [currentNode?.actions],
-  );
-
-  const nodeLock = useMemo(
-    () => (currentNode ? lockForNode(locks, currentNode.node_id) : null),
-    [locks, currentNode],
   );
 
   const squares = useMemo(() => {
@@ -191,22 +179,6 @@ export function ComboInspector() {
           >
             {squares.map((square) => {
               const hand = handByCombo.get(comboKey(square.combo));
-              const handIndex = currentNode
-                ? (() => {
-                    const key = comboKey(square.combo);
-                    const exact = handIndexForCombo(currentNode.combos, square.combo);
-                    if (exact >= 0) {
-                      return exact;
-                    }
-                    return (currentNode.combos || []).findIndex(
-                      (entry) => comboKey(entry) === key,
-                    );
-                  })()
-                : -1;
-              const locked =
-                handIndex >= 0 ? isHandLocked(nodeLock, handIndex) : false;
-              const inDraft =
-                handIndex >= 0 && lockDraft.handIndices.includes(handIndex);
               const actionEvs = square.present
                 ? comboActionEvs(
                     currentNode,
@@ -220,48 +192,34 @@ export function ComboInspector() {
                 square.present && maxMass > 0
                   ? Math.max(0, Math.min(1, mass / maxMass))
                   : 0;
+              const segments = (hand?.actions ?? []).filter(
+                (action) => action.probability > 0.001,
+              );
               return (
                 <div
                   key={square.combo}
                   className="inspector-combo hands-combo"
                   data-present={square.present ? "true" : "false"}
-                  data-locked={locked ? "true" : "false"}
-                  data-lock-draft={inDraft ? "true" : "false"}
-                  style={{ ["--mass-fill" as string]: String(massFill || 0) }}
-                  title={
-                    square.present
-                      ? `${square.combo} · mass ${mass.toFixed(4)}`
-                      : square.combo
-                  }
+                  style={{ ["--mass-fill" as string]: String(massFill) }}
+                  title={square.combo}
                 >
-                  {square.present ? (
-                    <input
-                      type="checkbox"
-                      className="hands-combo__check"
-                      checked={inDraft}
-                      disabled={handIndex < 0}
-                      onChange={() => {
-                        if (handIndex >= 0) {
-                          toggleLockHand(handIndex);
-                        }
-                      }}
-                      aria-label={`Select ${square.combo} for lock`}
-                      title="Include in lock draft"
-                    />
-                  ) : (
-                    <span className="hands-combo__check-spacer" aria-hidden />
-                  )}
-                  <div className="inspector-combo__mix hands-combo__mix">
-                    {hand?.actions.map((action) => (
-                      <i
-                        key={action.action}
-                        title={`${action.action} ${(action.probability * 100).toFixed(0)}%`}
-                        style={{
-                          background: colors.byLabel[action.action] || "#666",
-                          width: `${Math.max(0, action.probability * 100)}%`,
-                        }}
-                      />
-                    ))}
+                  <div className="hands-combo__weight-fill">
+                    {segments.length > 0 ? (
+                      <div className="hands-combo__segments">
+                        {segments.map((action) => (
+                          <span
+                            key={action.action}
+                            className="hands-combo__seg"
+                            title={`${action.action} ${(action.probability * 100).toFixed(0)}%`}
+                            style={{
+                              flexGrow: action.probability,
+                              flexBasis: 0,
+                              background: colors.byLabel[action.action] || "#666",
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="hands-combo__body">
                     <code className="hands-combo__code" title={square.combo}>
@@ -285,52 +243,12 @@ export function ComboInspector() {
                       })}
                     </div>
                   </div>
-                  {handIndex >= 0 && locked ? (
-                    <button
-                      type="button"
-                      className="toolbar-btn inspector-lock-btn"
-                      onClick={() => void unlockHands([handIndex])}
-                    >
-                      Unlock
-                    </button>
-                  ) : null}
                 </div>
               );
             })}
           </div>
-          <div className="inspector-lock-actions">
-            <button
-              type="button"
-              className="toolbar-btn primary"
-              disabled={lockDraft.handIndices.length === 0}
-              onClick={() => {
-                const combos = lockDraft.handIndices
-                  .map((index) => currentNode.combos?.[index])
-                  .filter((combo): combo is string => typeof combo === "string");
-                selectCombosForLock(combos);
-              }}
-            >
-              Lock selection
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() =>
-                selectCombosForLock(cell.hands.map((hand) => hand.combo))
-              }
-            >
-              Lock entire hand class
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() =>
-                selectCombosForStrategyEdit(cell.hands.map((hand) => hand.combo))
-              }
-            >
-              Edit strategy
-            </button>
-            {pinned ? (
+          {pinned ? (
+            <div className="combo-inspector__unpin">
               <button
                 type="button"
                 className="toolbar-btn"
@@ -338,8 +256,8 @@ export function ComboInspector() {
               >
                 Clear selection
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </>
       )}
     </section>
