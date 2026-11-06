@@ -2,7 +2,7 @@
 
 Heads-up NLHE study application with solving, analysis, automation, persistence, training, and interface capabilities comparable to PioSolver/PioViewer — in this project's own design. Target includes postflop and Edge-style preflop. Living ledger: [FEATURE_PARITY.md](FEATURE_PARITY.md).
 
-Finished means a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train through a GUI without a terminal. Study surface today: `explorer` + React desktop client ([DESKTOP_UI.md](DESKTOP_UI.md)). Comparison target: documented PioSolver 3.11 [S1][S2]. Mark unverified details unverified. “All features” means the audited list.
+Finished means a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train through a GUI without a terminal. Study surface today: `explorer` + React desktop client ([DESKTOP_UI.md](../../DESKTOP_UI.md)). Comparison target: documented PioSolver 3.11 [S1][S2]. Mark unverified details unverified. “All features” means the audited list.
 
 Separate three releases:
 
@@ -22,7 +22,7 @@ Flop, turn, and river are one betting tree (two, one, or zero cards left). `Stre
 
 Also landed: conditional action EV on flop/turn/river decisions; stop-and-keep / pause / continue; versioned PSOL; runout EV comparison; check-down equity (+ buckets); five-card made-hand categories; node locks + compare; pot rake / ICM / action-label incentives; Windows NSIS Study installer. Draws/backdoors, compact saves, durable batch queue, trainer packs, and preflop are still open. No head-to-head Pio performance or solution-quality equivalence.
 
-Full-range check-down measures whether a large tree fits. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them. Assertion counts and sanitizer notes: [TESTING.md](TESTING.md), [BENCHMARKS.md](BENCHMARKS.md).
+Full-range check-down measures whether a large tree fits. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them. Assertion counts and sanitizer notes: [TESTING.md](../engineering/TESTING.md), [BENCHMARKS.md](../engineering/BENCHMARKS.md).
 
 ## 3. Feature coverage ledger
 
@@ -137,7 +137,7 @@ Add baseline-versus-modified comparison: strategy changes, both-player EV change
 
 ### M8 — Rake, ICM and opponent incentives
 
-The dual-player payoff abstraction is in place: `PlayerPayoff` holds both utilities, and `ChipPayoff` reproduces today's root-centered chip rule with `utility[1] == -utility[0]` when rake is zero. `RiverGame::terminal_payoff` and `StreetGame::terminal_payoff` use that adapter with `config.rake`; street and river batch solvers apply the same rake at training terminals. Optional `IcmConfig` (`stacks` / `payouts`) on street/river configs wraps those chip terminals through `IcmPayoff::from_chip_terminal` when enabled (`docs/ICM.md`); empty ICM stays bit-identical to chip/rake. Optional `IncentiveConfig` path-attributes ActionLabelMatch and CategoryTag deltas at those same terminals after chip/ICM (`docs/INCENTIVES.md`); `edge-tag` lines assign mid-tree category tags on public edges so CategoryTag rules fire during solve; empty incentives stay bit-identical. CFR and best response maximize each seat's own modeled utility (player-1 incentives affect training/response). Pot-rake rate/cap collection (whole-chip floor, optional cap) and CLI/config wiring are documented in `docs/RAKE.md`. Explorer exposes `rake_rate` / `rake_cap`, `icm_stacks` / `icm_payouts`, and `incentives` / `edge_tags` on solve and status.
+The dual-player payoff abstraction is in place: `PlayerPayoff` holds both utilities, and `ChipPayoff` reproduces today's root-centered chip rule with `utility[1] == -utility[0]` when rake is zero. `RiverGame::terminal_payoff` and `StreetGame::terminal_payoff` use that adapter with `config.rake`; street and river batch solvers apply the same rake at training terminals. Optional `IcmConfig` (`stacks` / `payouts`) on street/river configs wraps those chip terminals through `IcmPayoff::from_chip_terminal` when enabled (`docs/auxiliary/payoffs/ICM.md`); empty ICM stays bit-identical to chip/rake. Optional `IncentiveConfig` path-attributes ActionLabelMatch and CategoryTag deltas at those same terminals after chip/ICM (`docs/auxiliary/payoffs/INCENTIVES.md`); `edge-tag` lines assign mid-tree category tags on public edges so CategoryTag rules fire during solve; empty incentives stay bit-identical. CFR and best response maximize each seat's own modeled utility (player-1 incentives affect training/response). Pot-rake rate/cap collection (whole-chip floor, optional cap) and CLI/config wiring are documented in `docs/auxiliary/payoffs/RAKE.md`. Explorer exposes `rake_rate` / `rake_cap`, `icm_stacks` / `icm_payouts`, and `incentives` / `edge_tags` on solve and status.
 
 Next: previews and scenario persistence, combo/draw auto-tags, runout incentives. Keep chip EV and modeled utility separately labeled. Do not claim chip Nash-gap under active incentives.
 
@@ -153,7 +153,7 @@ Every report states its weighting measure. Weight each report by compatible-pair
 
 Version the engine command/API contract and expose all supported core operations independently of the UI. Add scripting examples, schema discovery, deterministic exits/errors and streaming progress. A UPI-compatible adapter is an optional interoperability layer with its own tests.
 
-Build a persistent job queue: templates × boards × scenarios, sequential default execution, resource admission, pause/retry/cancel, restart recovery, logs, checksummed output manifests, and report generation. Isolate failures by job. Include self-play hand-history export with documented semantics and supported target formats. The versioned `hand-history 1` document in [HAND_HISTORY.md](HAND_HISTORY.md) is the first export contract for one HU hand (board, stacks/pot, optional holes or range labels, action line, terminal pot/outcome).
+Build a persistent job queue: templates × boards × scenarios, sequential default execution, resource admission, pause/retry/cancel, restart recovery, logs, checksummed output manifests, and report generation. Isolate failures by job. Include self-play hand-history export with documented semantics and supported target formats. The versioned `hand-history 1` document in [HAND_HISTORY.md](../notes/HAND_HISTORY.md) is the first export contract for one HU hand (board, stacks/pot, optional holes or range labels, action line, terminal pot/outcome).
 
 **Gate:** generated reports match a direct small-tree aggregation oracle; CLI and UI produce equivalent results; an interrupted batch resumes with each completed job kept once. Start with a small reproducible board subset, then scale.
 
@@ -264,5 +264,5 @@ The phases below were the kernel plan through the baseline reviewed above. They 
 | 9. Graphical strategy explorer | Complete |
 | 10. Full HUNL research | Complete |
 
-Phase 10 recorded abstraction limits for unrestricted HUNL. [HUNL.md](HUNL.md) is the current write-up.
+Phase 10 recorded abstraction limits for unrestricted HUNL. [HUNL.md](../reference/HUNL.md) is the current write-up.
 

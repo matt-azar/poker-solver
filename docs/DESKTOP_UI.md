@@ -1,6 +1,6 @@
 # Desktop Study workstation
 
-React study client (`desktop/`) over the `explorer` HTTP API. Numerical kernels are unchanged.
+React study client (`desktop/`) over the `explorer` HTTP API. Numerical kernels are unchanged. Doc index: [README.md](README.md). Engine API: [EXPLORER.md](EXPLORER.md).
 
 ## Stack
 

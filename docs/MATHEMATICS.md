@@ -18,7 +18,7 @@ when `h0`, `h1`, and the board are pairwise disjoint, and `P = 0` otherwise. The
 
 The river tree uses that joint distribution as its only chance node. Player 0 is out of position. Both players have the same stack behind; the pot was posted equally on earlier streets.
 
-Player 0's terminal utility is `pot / 2` plus the opponent's river investment when player 0 wins or the opponent folds, and the negation of `pot / 2` plus player 0's own river investment when player 0 loses or folds. A split pot is worth 0 once the river investments match. `ChipPayoff` returns both players' utilities under this rule; chip EV stays zero-sum so player 1 is the negation of player 0. Optional pot rake subtracts the house take from the winner (or half each on a tie); see [RAKE.md](RAKE.md). Optional ICM wraps those chip terminals; see [ICM.md](ICM.md).
+Player 0's terminal utility is `pot / 2` plus the opponent's river investment when player 0 wins or the opponent folds, and the negation of `pot / 2` plus player 0's own river investment when player 0 loses or folds. A split pot is worth 0 once the river investments match. `ChipPayoff` returns both players' utilities under this rule; chip EV stays zero-sum so player 1 is the negation of player 0. Optional pot rake subtracts the house take from the winner (or half each on a tie); see [RAKE.md](auxiliary/payoffs/RAKE.md). Optional ICM wraps those chip terminals; see [ICM.md](auxiliary/payoffs/ICM.md).
 
 An opening fraction `f` bets `round(f * pot)` tenths of a chip (pot stored at scale 10). A raise fraction `f` increases the bet by `round(f * pot_after_the_call)`. The minimum later raise equals the previous full bet or raise; the minimum opening add is 0.1 chip. Reported utilities stay in chips. Details and a solved toy are in [RIVER.md](RIVER.md).
 
@@ -87,7 +87,7 @@ A player's average is accumulated only on that player's traversal. Vanilla CFR u
 
 ## Linear CFR and DCFR
 
-Linear CFR uses the vanilla schedule: one traversal updates both players. On iteration \(t\), starting at 1, the new regret and the average-strategy contribution are both multiplied by \(t\). Regrets are not floored. See [HUNL.md](HUNL.md).
+Linear CFR uses the vanilla schedule: one traversal updates both players. On iteration \(t\), starting at 1, the new regret and the average-strategy contribution are both multiplied by \(t\). Regrets are not floored. See [HUNL.md](auxiliary/reference/HUNL.md).
 
 Fixed DCFR(α=1.5, β=0, γ=2) uses alternating frozen passes like CFR+, keeps signed regrets, discounts the updating player's full row once after the pass with \(t^{1.5}/(t^{1.5}+1)\) on positives and \(0.5\) on non-positives, and averages with weight \(t^2\). DCFR requires the frozen pass on the public tree. See [STREETS.md](STREETS.md).
 
@@ -140,4 +140,4 @@ Kuhn Poker is a two-player zero-sum imperfect-information game used to pin the s
 V = -\frac{1}{18}.
 \]
 
-Equilibrium strategies form a family parameterized by \(\alpha \in [0, 1/3]\) (Kuhn, 1950). Tests check that family and that both vanilla CFR and CFR+ approach \(V\) with Nash gap below \(10^{-3}\) at 200,000 iterations. Measured times: [BENCHMARKS.md](BENCHMARKS.md).
+Equilibrium strategies form a family parameterized by \(\alpha \in [0, 1/3]\) (Kuhn, 1950). Tests check that family and that both vanilla CFR and CFR+ approach \(V\) with Nash gap below \(10^{-3}\) at 200,000 iterations. Measured times: [BENCHMARKS.md](auxiliary/engineering/BENCHMARKS.md).

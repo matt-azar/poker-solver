@@ -24,9 +24,9 @@ JavaScript checks from the repository root:
 node tests/legacy_ui/browse.test.js
 ```
 
-Explorer HTTP cases spawn a local `explorer` on an ephemeral port on Windows and Linux. [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) builds production targets, runs the C++ suite, and runs the JavaScript file on Windows and Linux. A second Linux job repeats the C++ suite under AddressSanitizer and UndefinedBehaviorSanitizer.
+Explorer HTTP cases spawn a local `explorer` on an ephemeral port on Windows and Linux. [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) builds production targets, runs the C++ suite, and runs the JavaScript file on Windows and Linux. A second Linux job repeats the C++ suite under AddressSanitizer and UndefinedBehaviorSanitizer.
 
-**Desktop acceptance** (`tests/unit/test_explorer_workflow.cpp`) is the scripted real-engine lifecycle over that same spawn: Build `plan-memory` → solve → pause/inspect → save → open → continue → lock/compare, plus failed Open and memory-budget rejection. It runs inside `poker_solver_tests` on Linux and Windows. It does **not** drive the React Study UI, Tauri sidecar lifecycle, or a packaged Windows installer — those remain manual / Windows-only before release (see [DESKTOP_UI.md](DESKTOP_UI.md)). Deeper Open races and stale stop replies stay in `test_explorer_http.cpp` / `test_session.cpp` rather than duplicated here.
+**Desktop acceptance** (`tests/unit/test_explorer_workflow.cpp`) is the scripted real-engine lifecycle over that same spawn: Build `plan-memory` → solve → pause/inspect → save → open → continue → lock/compare, plus failed Open and memory-budget rejection. It runs inside `poker_solver_tests` on Linux and Windows. It does **not** drive the React Study UI, Tauri sidecar lifecycle, or a packaged Windows installer — those remain manual / Windows-only before release (see [DESKTOP_UI.md](../../DESKTOP_UI.md)). Deeper Open races and stale stop replies stay in `test_explorer_http.cpp` / `test_session.cpp` rather than duplicated here.
 
 ## Categories
 

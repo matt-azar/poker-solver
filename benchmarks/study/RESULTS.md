@@ -95,35 +95,35 @@ A 2-second kill of `turn_srp_river_betting` on the `381c9a5` binary flushed `pha
 
 ## Freeze / floor parallelization microbench (`a04eb8c`)
 
-Short Linux Release timings only (not a completed study to 0.001). Warm one frozen CFR+ iteration, then two timed iterations of `flop_srp_one_size` at four threads: `origin/main` 4.595 s/iter versus freeze-parallel branch 3.833 s/iter (~1.20x). With walk profile enabled on the branch, `freeze_seconds` alone was 1.044 s/iter at one thread and 0.235 s/iter at four threads (~4.45x). See [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md) for the paired-flop alternating table. Do not treat these as a substitute for finishing the flop study wall.
+Short Linux Release timings only (not a completed study to 0.001). Warm one frozen CFR+ iteration, then two timed iterations of `flop_srp_one_size` at four threads: `origin/main` 4.595 s/iter versus freeze-parallel branch 3.833 s/iter (~1.20x). With walk profile enabled on the branch, `freeze_seconds` alone was 1.044 s/iter at one thread and 0.235 s/iter at four threads (~4.45x). See [docs/auxiliary/engineering/BENCHMARKS.md](../../docs/auxiliary/engineering/BENCHMARKS.md) for the paired-flop alternating table. Do not treat these as a substitute for finishing the flop study wall.
 
 ## Decision expand cache microbench (`cursor/engine-speed-e394`)
 
-On top of the freeze tip, caching structural support and acting-player slot bases cut paired-flop reset-30 train at four threads from median 3.452 s to 2.374 s (~1.45x). Profiled expand was the post-freeze hotspot. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
+On top of the freeze tip, caching structural support and acting-player slot bases cut paired-flop reset-30 train at four threads from median 3.452 s to 2.374 s (~1.45x). Profiled expand was the post-freeze hotspot. Details in [docs/auxiliary/engineering/BENCHMARKS.md](../../docs/auxiliary/engineering/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
 
 ## Board-support mask precompute microbench (`cursor/engine-speed-2-e394`)
 
-On top of `#46`, precomputing structural `hand_supported` masks for every walkable `(turn, river)` cut paired-flop reset-30 train at four threads from median 2.301 s to 2.116 s (~1.09x); turn_half_pot 1.176 s to 1.093 s (~1.08x). Profiled `support_seconds` collapsed; showdown remains the largest remaining bucket. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
+On top of `#46`, precomputing structural `hand_supported` masks for every walkable `(turn, river)` cut paired-flop reset-30 train at four threads from median 2.301 s to 2.116 s (~1.09x); turn_half_pot 1.176 s to 1.093 s (~1.08x). Profiled `support_seconds` collapsed; showdown remains the largest remaining bucket. Details in [docs/auxiliary/engineering/BENCHMARKS.md](../../docs/auxiliary/engineering/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
 
 ## Fused showdown + supported-hand indexes (`cursor/engine-speed-3-e394`)
 
-On top of `#51` / latest `main`, walking precomputed supported-hand indexes through terminal collect/fold/showdown and fusing showdown mass extraction cut paired-flop reset-30 train at four threads from median 2.289 s to 1.678 s (~1.36x); turn_half_pot 1.162 s to 0.839 s (~1.39x). Profiled `showdown_seconds` roughly halved on the paired flop. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
+On top of `#51` / latest `main`, walking precomputed supported-hand indexes through terminal collect/fold/showdown and fusing showdown mass extraction cut paired-flop reset-30 train at four threads from median 2.289 s to 1.678 s (~1.36x); turn_half_pot 1.162 s to 0.839 s (~1.39x). Profiled `showdown_seconds` roughly halved on the paired flop. Details in [docs/auxiliary/engineering/BENCHMARKS.md](../../docs/auxiliary/engineering/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
 
 ## Decision/expand idx* walk probe (`cursor/engine-speed-4-e394`, not shipped)
 
-On top of `#52`, walking the same supported-hand indexes through frozen decision expand / regret mix did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈0.99x). Profiled decision/expand buckets shrank, but wall train did not. Change reverted; details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md).
+On top of `#52`, walking the same supported-hand indexes through frozen decision expand / regret mix did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈0.99x). Profiled decision/expand buckets shrank, but wall train did not. Change reverted; details in [docs/auxiliary/engineering/BENCHMARKS.md](../../docs/auxiliary/engineering/BENCHMARKS.md).
 
 ## Sparse serial-chance reach / EV reduce probe (`cursor/engine-speed-5-e394`, not shipped)
 
-On top of `#52`, walking supported-hand indexes through frozen serial/parallel chance `pi` filters and EV reduces (and `card_reaches_pair`) did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈0.97x / 1.00x). One-thread `chance_seconds` became visible, but wall train did not move. Change reverted; details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md).
+On top of `#52`, walking supported-hand indexes through frozen serial/parallel chance `pi` filters and EV reduces (and `card_reaches_pair`) did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈0.97x / 1.00x). One-thread `chance_seconds` became visible, but wall train did not move. Change reverted; details in [docs/auxiliary/engineering/BENCHMARKS.md](../../docs/auxiliary/engineering/BENCHMARKS.md).
 
 ## Lean order_reach + showdown collect + non-actor aev (`cursor/engine-speed-6-e394`)
 
-On top of `#52`, skipping full `order_reach` zero-fills, dropping by-card work on showdown collect, and accumulating non-actor action EVs without `aev*` copies cut paired-flop reset-30 train at four threads from median 1.621 s to 1.485 s (~1.09x); turn_half_pot 0.815 s to 0.724 s (~1.13x). Profiled order/showdown/decision/collect buckets all shrank. Details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
+On top of `#52`, skipping full `order_reach` zero-fills, dropping by-card work on showdown collect, and accumulating non-actor action EVs without `aev*` copies cut paired-flop reset-30 train at four threads from median 1.621 s to 1.485 s (~1.09x); turn_half_pot 0.815 s to 0.724 s (~1.13x). Profiled order/showdown/decision/collect buckets all shrank. Details in [docs/auxiliary/engineering/BENCHMARKS.md](../../docs/auxiliary/engineering/BENCHMARKS.md). Not a multi-hour flop-to-0.001 chase.
 
 ## Fused actor σ-mix + skip non-updating aev probe (`cursor/engine-speed-7-e394`, not shipped)
 
-On top of `#56` / `main`, folding actor σ-mix into the frozen action loop and skipping actor `aev*` on non-updating CFR+ passes did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈1.01x). Profiled `decision_seconds` shrank and work moved into expand; wall train barely moved. Change reverted; details in [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md).
+On top of `#56` / `main`, folding actor σ-mix into the frozen action loop and skipping actor `aev*` on non-updating CFR+ passes did not clear ~1.05x on paired-flop or turn_half_pot reset-30 at four threads (quiet-host medians ≈1.01x). Profiled `decision_seconds` shrank and work moved into expand; wall train barely moved. Change reverted; details in [docs/auxiliary/engineering/BENCHMARKS.md](../../docs/auxiliary/engineering/BENCHMARKS.md).
 
 ## Next measurement
 

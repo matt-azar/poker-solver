@@ -2,7 +2,7 @@
 
 Heads-up no-limit Texas Hold'em GTO solver (C++20) with a local Study workstation.
 
-**Product surface:** postflop study through `explorer` and the React Study UI (`desktop/`) — solve, browse, lock, compare, save/reopen, and analyze. A Windows NSIS installer wraps that stack. Details: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md), [docs/EXPLORER.md](docs/EXPLORER.md), [docs/ROADMAP.md](docs/ROADMAP.md).
+**Product surface:** postflop study through `explorer` and the React Study UI (`desktop/`) — solve, browse, lock, compare, save/reopen, and analyze. A Windows NSIS installer wraps that stack. Details: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md), [docs/EXPLORER.md](docs/EXPLORER.md). Doc index: [docs/README.md](docs/README.md).
 
 Flop, turn, and river share one public betting tree (`StreetBatchSolver`). Convergence is an equilibrium of the configured bet-size tree.
 
@@ -79,7 +79,7 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-debug
 ```
 
-Production CLIs (multi-config): `build\Release\street_solver.exe`, `build\Release\river_solver.exe`, `build\Release\explorer.exe`, `build\Release\equity_calculator.exe`. Single-config builds omit the `Release` directory. Reference-game CLIs `kuhn_solver` and `leduc_solver` are also built; see [docs/LEDUC.md](docs/LEDUC.md).
+Production CLIs (multi-config): `build\Release\street_solver.exe`, `build\Release\river_solver.exe`, `build\Release\explorer.exe`, `build\Release\equity_calculator.exe`. Single-config builds omit the `Release` directory. Reference-game CLIs `kuhn_solver` and `leduc_solver` are also built; see [docs/auxiliary/reference/LEDUC.md](docs/auxiliary/reference/LEDUC.md).
 
 ## Run
 
@@ -120,27 +120,36 @@ legacy/ui/        Legacy explorer static page (fallback + regression)
 benchmarks/       Study benchmark runner, cases, and street micro-benches
 tests/            CTest suites: engine / study / HTTP (+ equity)
 configs/          Defaults, ranges, templates; canonical range-profiles/
-docs/             Architecture, product, mathematics, roadmap
+docs/             Primary CFR+/UI docs; auxiliary/ for the rest
+docs/ai-context/  Study assistant model packs (imported by desktop/)
 
 CMake libraries: poker_primitives → poker_solver → poker_study; poker_equity → primitives
 ```
 
 ## Documentation
 
-- [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md) — Study workstation + Windows packaging
-- [docs/EXPLORER.md](docs/EXPLORER.md) — local engine HTTP API and page
+Index: [docs/README.md](docs/README.md). Primary docs stay at `docs/`; supporting material is under `docs/auxiliary/`.
+
+### CFR+ workflow
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — modules, `StreetBatchSolver`, CFR+ schedules
 - [docs/STREETS.md](docs/STREETS.md) — flop / turn / river tree
-- [docs/RIVER.md](docs/RIVER.md) — five-card river CLI and chip rules
+- [docs/MATHEMATICS.md](docs/MATHEMATICS.md) — regret matching, NashConv, EV
 - [docs/HOLDEM.md](docs/HOLDEM.md) — cards, evaluator, ranges
+- [docs/RIVER.md](docs/RIVER.md) — five-card CLI onto the shared tree
 - [docs/EQUITY.md](docs/EQUITY.md) — check-down showdown equity
-- [docs/HUNL.md](docs/HUNL.md) — abstraction limits and algorithm choices
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- [docs/MATHEMATICS.md](docs/MATHEMATICS.md)
-- [docs/TESTING.md](docs/TESTING.md)
-- [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
-- [docs/ROADMAP.md](docs/ROADMAP.md)
-- [docs/FEATURE_PARITY.md](docs/FEATURE_PARITY.md)
-- [docs/LEDUC.md](docs/LEDUC.md) — Kuhn/Leduc reference games (engine tests)
+
+### Study UI
+
+- [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md) — Study workstation + Windows packaging
+- [docs/EXPLORER.md](docs/EXPLORER.md) — local engine HTTP API
+- [docs/STUDY_SETUP_ASSISTANT.md](docs/STUDY_SETUP_ASSISTANT.md) — Study assistant
+- [docs/ai-context/](docs/ai-context/README.md) — model-facing context packs
+
+### Auxiliary
+
+- [docs/auxiliary/](docs/auxiliary/README.md) — planning, engineering, payoffs, reference games, archive notes
+  ([ROADMAP](docs/auxiliary/planning/ROADMAP.md), [FEATURE_PARITY](docs/auxiliary/planning/FEATURE_PARITY.md), [TESTING](docs/auxiliary/engineering/TESTING.md), [BENCHMARKS](docs/auxiliary/engineering/BENCHMARKS.md), [LEDUC](docs/auxiliary/reference/LEDUC.md), [HUNL](docs/auxiliary/reference/HUNL.md), …)
 
 ## License
 

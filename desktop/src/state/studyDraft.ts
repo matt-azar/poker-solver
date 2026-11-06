@@ -253,7 +253,7 @@ export function buildJob(draft: SpotDraft): SolveJobRequest {
     pot_cap: draft.potCap || 0,
     allow_three_bet: draft.noThreeBet ? 0 : 1,
     all_in_threshold: draft.allInThreshold || 0,
-    // List `a` per street for all-in; blank does not invent it (STREETS.md).
+    // List `a` per street for all-in; blank does not invent it (docs/STREETS.md).
     allow_all_in: 0,
     // Desktop always uses the frozen pass (required for multi-thread / CFR+).
     frozen: 1,

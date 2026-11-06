@@ -1,0 +1,31 @@
+# Documentation
+
+Primary docs cover the **CFR+ postflop workflow** and the **Study UI**. Everything else lives under [`auxiliary/`](auxiliary/README.md).
+
+## CFR+ workflow
+
+| Doc | Contents |
+| --- | --- |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Modules, `StreetBatchSolver`, CFR+ schedules |
+| [STREETS.md](STREETS.md) | Flop / turn / river public tree, config, frozen passes |
+| [MATHEMATICS.md](MATHEMATICS.md) | Regret matching, NashConv, EV definitions |
+| [HOLDEM.md](HOLDEM.md) | Cards, hand evaluator, ranges |
+| [RIVER.md](RIVER.md) | Five-card CLI onto the shared street tree |
+| [EQUITY.md](EQUITY.md) | Check-down showdown equity (not chip EV) |
+
+Start with architecture, then streets + mathematics for how a solve runs.
+
+## Study UI
+
+| Doc | Contents |
+| --- | --- |
+| [DESKTOP_UI.md](DESKTOP_UI.md) | React Study workstation + Windows packaging |
+| [EXPLORER.md](EXPLORER.md) | Local engine HTTP API |
+| [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md) | Floating Study assistant |
+| [ai-context/](ai-context/README.md) | Model-facing context packs (imported by the desktop app) |
+
+Product entry: `explorer` + `desktop/`. Installer and packaging notes are in DESKTOP_UI.
+
+## Auxiliary
+
+Non-essential material — planning ledgers, engineering notes, optional payoffs, reference games, and archive notes — is under [`auxiliary/`](auxiliary/README.md).

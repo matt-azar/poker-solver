@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Agent lessons
 
-Before spawning sibling agents, changing solvers, or claiming a milestone is done, read [docs/AGENT_LESSONS.md](../../docs/AGENT_LESSONS.md).
+Before spawning sibling agents, changing solvers, or claiming a milestone is done, read [docs/auxiliary/engineering/AGENT_LESSONS.md](../../docs/auxiliary/engineering/AGENT_LESSONS.md).
 
 **Parallel work**
 
@@ -22,4 +22,4 @@ Before spawning sibling agents, changing solvers, or claiming a milestone is don
 - Nash gap is NashConv (sum of BR gains), not Pio’s averaged exploitability. Accuracy uses NashConv/pot.
 - Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; equity ≠ chip EV.
 - Street config is `street-config 1` text; river CLI defaults are often JSON — do not mix formats. Empty bet arrays mean check-only; absent keys mean defaults.
-- Do not change `LICENSE`. Update `FEATURE_PARITY.md` only with the commit that demonstrates the row.
+- Do not change `LICENSE`. Update `docs/auxiliary/planning/FEATURE_PARITY.md` only with the commit that demonstrates the row.

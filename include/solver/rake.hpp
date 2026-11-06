@@ -10,7 +10,7 @@ namespace poker::solver
 //
 // rate is a fraction of pot chips in [0, 1]. cap is a chip ceiling; cap == 0
 // means uncapped. Collection uses whole chips: floor(rate * pot), then min with
-// cap when cap > 0. See docs/RAKE.md.
+// cap when cap > 0. See docs/auxiliary/payoffs/RAKE.md.
 struct RakeConfig
 {
     double rate = 0.0;

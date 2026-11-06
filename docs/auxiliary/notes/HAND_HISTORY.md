@@ -56,4 +56,4 @@ outcome fold
 p0-net 50
 ```
 
-See [FEATURE_PARITY.md](FEATURE_PARITY.md) and [ROADMAP.md](ROADMAP.md) for M9/M11 status.
+See [FEATURE_PARITY.md](../planning/FEATURE_PARITY.md) and [ROADMAP.md](../planning/ROADMAP.md) for M9/M11 status.

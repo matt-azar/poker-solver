@@ -1,7 +1,7 @@
 // Desktop acceptance path: real explorer HTTP lifecycle on Linux and Windows.
 // Covers Build dry-run → solve → pause/inspect → save → open → continue →
 // lock/compare, plus a few failure paths. Does not drive the React/Tauri shell
-// (see docs/DESKTOP_UI.md and docs/TESTING.md for gaps).
+// (see docs/DESKTOP_UI.md and docs/auxiliary/engineering/TESTING.md for gaps).
 
 #include "harness.hpp"
 

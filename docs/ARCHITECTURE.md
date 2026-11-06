@@ -2,7 +2,7 @@
 
 Production postflop solving uses one public betting tree. Flop, turn, and river differ only by how many cards remain (two, one, or zero). `StreetBatchSolver` is the production engine; `StreetGame` + `CfrTrainer` is the reference enumerator (`--reference`). `RiverGame` is the five-card oracle. Kuhn and Leduc stay on `CfrTrainer` only and are not part of the Study product path.
 
-See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [EXPLORER.md](EXPLORER.md), [HOLDEM.md](HOLDEM.md).
+Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [EXPLORER.md](EXPLORER.md), [HOLDEM.md](HOLDEM.md).
 
 ## One postflop tree
 
@@ -120,6 +120,6 @@ unilateral exploitability.
 
 ## Reference games (Kuhn / Leduc)
 
-Kuhn and Leduc implement the same extensive-game interface and train only through `CfrTrainer`. Rules: [LEDUC.md](LEDUC.md). Equilibrium math for Kuhn: [MATHEMATICS.md](MATHEMATICS.md).
+Kuhn and Leduc implement the same extensive-game interface and train only through `CfrTrainer`. Rules: [LEDUC.md](auxiliary/reference/LEDUC.md). Equilibrium math for Kuhn: [MATHEMATICS.md](MATHEMATICS.md).
 
 Kuhn public sequences (`Sequence`): `Empty`, `Check`, `Bet`, `CheckBet`, and terminals `CheckCheck`, `BetFold`, `BetCall`, `CheckBetFold`, `CheckBetCall`. Twelve infosets: three private cards × four decision points. Chance deals six equally likely ordered card pairs.

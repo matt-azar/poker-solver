@@ -103,7 +103,7 @@ public:
 
     // Both players' root-centered utilities. Chip/rake first; when config_.icm
     // is enabled, wrap through IcmPayoff (ICM equity deltas, not chip EV).
-    // Optional path-attributed incentives apply last (docs/INCENTIVES.md).
+    // Optional path-attributed incentives apply last (docs/auxiliary/payoffs/INCENTIVES.md).
     poker::solver::PlayerPayoff terminal_payoff(const State& state) const
     {
         if (!state.terminal)
