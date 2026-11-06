@@ -24,6 +24,12 @@
 ; force-stop the sidecar, wait for handles, and Delete the old binary so the
 ; following File copy always replaces it.
 ;
+; Do NOT !insertmacro CheckIfAppIsRunning here. Tauri 2.5's macro uses fixed
+; labels (kill:/cancel:/app_check_done:) and the installer template already
+; inserts it once in the same Section — a second insert fails makensis with
+; "label kill: already declared". Kill the UI via nsis_tauri_utils instead;
+; the later template check then finds nothing and is a no-op.
+;
 ; Engine setup
 ; ------------
 ; POSTINSTALL verifies the sidecar is present, clears Mark-of-the-Web
@@ -32,6 +38,17 @@
 
 !define SIDECAR_EXE "holdem-explorer.exe"
 !define APP_EXE "Holdem Study.exe"
+
+!macro KillHoldemStudyUi
+  ; Same helpers CheckIfAppIsRunning uses on its kill path (no duplicate labels).
+  DetailPrint "Stopping ${MAINBINARYNAME}.exe if running..."
+  !if "${INSTALLMODE}" == "currentUser"
+    nsis_tauri_utils::KillProcessCurrentUser "${MAINBINARYNAME}.exe"
+  !else
+    nsis_tauri_utils::KillProcess "${MAINBINARYNAME}.exe"
+  !endif
+  Pop $0
+!macroend
 
 !macro KillHoldemStudySidecar
   ; Image-name kill is safe: ${SIDECAR_EXE} is not explorer.exe.
@@ -45,12 +62,7 @@
 !macroend
 
 !macro StopHoldemStudyForInstall
-  ; Close the UI first (Tauri 2.5 CheckIfAppIsRunning takes no args — it uses
-  ; ${MAINBINARYNAME}.exe / installMode). Doing this inside PREINSTALL —
-  ; before Tauri's own later check — ensures the sidecar kill below cannot be
-  ; raced by an ensure_engine respawn while the dialog is open. The template
-  ; check then finds nothing and is a no-op.
-  !insertmacro CheckIfAppIsRunning
+  !insertmacro KillHoldemStudyUi
   !insertmacro KillHoldemStudySidecar
   ; Give Windows time to release the exe image section after Stop-Process.
   Sleep 1500
