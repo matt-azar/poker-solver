@@ -156,7 +156,8 @@ jobs:
           cmake --build build-san --parallel
           --target poker_solver_tests --target poker_engine_tests
           --target poker_study_tests --target poker_http_tests
-          --target equity_tests --target equity_calculator
+          --target equity_tests --target equity_calculator_tests
+          --target equity_calculator
       - name: CTest
         run: ctest --test-dir build-san --output-on-failure
 
