@@ -42,11 +42,30 @@ function cellKey(row: number, col: number): string {
   return `${row}:${col}`;
 }
 
-/** Fit a square matrix into the wrap's measured box (shared with opponent pane). */
-export function useMeasuredSquareSide(
+/** Width ÷ height for the study matrix when the opponent grid is hidden. */
+export const SINGLE_MATRIX_WIDTH_OVER_HEIGHT = 1.5;
+
+/** Largest width×height box of `widthOverHeight` that fits inside the measured box. */
+export function fitAspectSize(
+  boxWidth: number,
+  boxHeight: number,
+  widthOverHeight: number,
+): { width: number; height: number } {
+  const ratio = widthOverHeight > 0 ? widthOverHeight : 1;
+  const width = Math.max(
+    0,
+    Math.floor(Math.min(Math.max(0, boxWidth), Math.max(0, boxHeight) * ratio)),
+  );
+  const height = ratio === 1 ? width : Math.max(0, Math.floor(width / ratio));
+  return { width, height };
+}
+
+/** Fit a width/height box into the wrap (opponent pane stays square). */
+export function useMeasuredAspectSize(
   wrapRef: RefObject<HTMLElement | null>,
-): number {
-  const [side, setSide] = useState(0);
+  widthOverHeight: number,
+): { width: number; height: number } {
+  const [size, setSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -54,16 +73,25 @@ export function useMeasuredSquareSide(
       return;
     }
     const measure = () => {
-      const next = Math.max(0, Math.floor(Math.min(el.clientWidth, el.clientHeight)));
-      setSide((prev) => (prev === next ? prev : next));
+      const next = fitAspectSize(el.clientWidth, el.clientHeight, widthOverHeight);
+      setSize((prev) =>
+        prev.width === next.width && prev.height === next.height ? prev : next,
+      );
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [wrapRef]);
+  }, [wrapRef, widthOverHeight]);
 
-  return side;
+  return size;
+}
+
+/** Fit a square matrix into the wrap's measured box (shared with opponent pane). */
+export function useMeasuredSquareSide(
+  wrapRef: RefObject<HTMLElement | null>,
+): number {
+  return useMeasuredAspectSize(wrapRef, 1).width;
 }
 
 function rangeFill(weight: number): string {
@@ -127,8 +155,12 @@ export function RangeMatrix() {
   const actionFilter = useStudyStore((s) => s.actionFilter);
   const equity = useStudyStore((s) => s.equity);
   const displayPrefs = useMatrixDisplayStore((s) => s.prefs);
+  const dualRange = useStudyStore((s) => s.layout.dualRange);
   const stageRef = useRef<HTMLDivElement>(null);
-  const side = useMeasuredSquareSide(stageRef);
+  const size = useMeasuredAspectSize(
+    stageRef,
+    dualRange ? 1 : SINGLE_MATRIX_WIDTH_OVER_HEIGHT,
+  );
 
   const cells = useMemo(
     () => (currentNode ? groupHands(currentNode) : []),
@@ -181,7 +213,9 @@ export function RangeMatrix() {
           className="range-matrix matrix-density"
           role="grid"
           aria-label={matrixAria}
-          style={side > 0 ? { width: side, height: side } : undefined}
+          style={
+            size.width > 0 ? { width: size.width, height: size.height } : undefined
+          }
           onMouseLeave={() => setHoverCell(null)}
         >
           <div className="matrix-corner" />
