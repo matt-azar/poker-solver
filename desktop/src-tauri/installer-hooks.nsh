@@ -8,7 +8,21 @@
 ; (basename of the externalBin entry — NOT "binaries/holdem-explorer.exe").
 ;
 ; CRITICAL: Never taskkill Windows File Explorer (`explorer.exe`).
-; The solver sidecar is deliberately named holdem-explorer.exe.
+; The solver sidecar is deliberately named holdem-explorer.exe so an
+; image-name kill of ${SIDECAR_EXE} cannot touch the desktop shell.
+;
+; Upgrade / reinstall lock
+; ------------------------
+; Tauri's CheckIfAppIsRunning only registers the UI exe. Force-closing
+; Holdem Study.exe does not run our Rust Exit handler, so holdem-explorer.exe
+; often keeps running and NSIS fails with:
+;   "Error opening file for writing: …\holdem-explorer.exe"
+; (Abort / Retry / Ignore). Ignoring leaves a stale sidecar — PR-only UI
+; bumps still "work", which hides the miss.
+;
+; PREINSTALL therefore: stop the UI (so it cannot respawn the engine), then
+; force-stop the sidecar, wait for handles, and Delete the old binary so the
+; following File copy always replaces it.
 ;
 ; Engine setup
 ; ------------
@@ -20,12 +34,36 @@
 !define APP_EXE "Holdem Study.exe"
 
 !macro KillHoldemStudySidecar
-  ; Path-scoped stop: only the installed sidecar, never C:\Windows\explorer.exe.
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$$p = Join-Path ''$INSTDIR'' ''${SIDECAR_EXE}''; Get-CimInstance Win32_Process -Filter \"Name=''${SIDECAR_EXE}''\" -ErrorAction SilentlyContinue | Where-Object { $$_.ExecutablePath -and ($$_.ExecutablePath -ieq $$p) } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"'
+  ; Image-name kill is safe: ${SIDECAR_EXE} is not explorer.exe.
+  ; /T covers any child helpers; missing process is fine (nonzero exit).
+  DetailPrint "Stopping ${SIDECAR_EXE} if running..."
+  nsExec::ExecToLog 'taskkill /F /T /IM "${SIDECAR_EXE}"'
+  Pop $0
+  ; Path-scoped backup: only the installed copy under $INSTDIR.
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$$target = [System.IO.Path]::GetFullPath((Join-Path ''$INSTDIR'' ''${SIDECAR_EXE}'')); Get-CimInstance Win32_Process -Filter \"Name=''${SIDECAR_EXE}''\" -ErrorAction SilentlyContinue | ForEach-Object { $$path = $$_.ExecutablePath; if (-not $$path) { try { $$path = (Get-Process -Id $$_.ProcessId -ErrorAction Stop).Path } catch { $$path = $$null } }; if ($$path -and ([System.IO.Path]::GetFullPath($$path) -ieq $$target)) { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue } }"'
+  Pop $0
+!macroend
+
+!macro StopHoldemStudyForInstall
+  ; Close the UI first (user dialog via Restart Manager). Doing this inside
+  ; PREINSTALL — before Tauri's own CheckIfAppIsRunning — ensures the sidecar
+  ; kill below cannot be raced by an ensure_engine respawn while the dialog
+  ; is open. The later template check then finds nothing and is a no-op.
+  !insertmacro CheckIfAppIsRunning "$INSTDIR\${APP_EXE}" "${PRODUCTNAME}"
+  !insertmacro KillHoldemStudySidecar
+  ; Give Windows time to release the exe image section after Stop-Process.
+  Sleep 1500
+  ClearErrors
+  Delete "$INSTDIR\${SIDECAR_EXE}"
+  ${If} ${Errors}
+    DetailPrint "Old ${SIDECAR_EXE} still present; File copy will overwrite if unlocked."
+  ${Else}
+    DetailPrint "Removed previous ${SIDECAR_EXE} so setup can replace it."
+  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
-  !insertmacro KillHoldemStudySidecar
+  !insertmacro StopHoldemStudyForInstall
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
@@ -52,5 +90,5 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  !insertmacro KillHoldemStudySidecar
+  !insertmacro StopHoldemStudyForInstall
 !macroend
