@@ -1,5 +1,6 @@
 import { LowerDock } from "../analysis/LowerDock";
 import { LockDrawer } from "../locks/LockDrawer";
+import { ActionNavBar } from "../matrix/ActionNavBar";
 import { MatrixDisplayControls } from "../matrix/MatrixDisplayControls";
 import { OpponentRangePanel } from "../matrix/OpponentRangePanel";
 import { RangeMatrix } from "../matrix/RangeMatrix";
@@ -44,6 +45,7 @@ function MatrixModeToolbar() {
           );
         })}
       </div>
+      <ActionNavBar />
       <MatrixDisplayControls />
     </div>
   );

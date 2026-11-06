@@ -44,19 +44,27 @@ function cellKey(row: number, col: number): string {
 /** Width ÷ height for the study matrix when the opponent grid is hidden. */
 export const SINGLE_MATRIX_WIDTH_OVER_HEIGHT = 1.5;
 
-/** Largest width×height box of `widthOverHeight` that fits inside the measured box. */
+/**
+ * Fit a `widthOverHeight` box into the measured stage.
+ * Square (ratio 1): largest square on the shorter side (dual / opponent).
+ * Non-square: fill height first so there is no empty vertical gap; width follows
+ * the aspect when the stage is wide enough, otherwise uses the full stage width.
+ */
 export function fitAspectSize(
   boxWidth: number,
   boxHeight: number,
   widthOverHeight: number,
 ): { width: number; height: number } {
   const ratio = widthOverHeight > 0 ? widthOverHeight : 1;
-  const width = Math.max(
-    0,
-    Math.floor(Math.min(Math.max(0, boxWidth), Math.max(0, boxHeight) * ratio)),
-  );
-  const height = ratio === 1 ? width : Math.max(0, Math.floor(width / ratio));
-  return { width, height };
+  const bw = Math.max(0, boxWidth);
+  const bh = Math.max(0, boxHeight);
+  if (ratio === 1) {
+    const side = Math.floor(Math.min(bw, bh));
+    return { width: side, height: side };
+  }
+  const height = Math.floor(bh);
+  const width = Math.floor(Math.min(bw, height * ratio));
+  return { width: Math.max(0, width), height: Math.max(0, height) };
 }
 
 /** Fit a width/height box into the wrap (opponent pane stays square). */

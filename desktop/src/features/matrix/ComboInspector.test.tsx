@@ -35,7 +35,7 @@ const aaNode: NodePayload = {
   ],
 };
 
-describe("ComboInspector lock selection", () => {
+describe("ComboInspector", () => {
   beforeEach(() => {
     useStudyStore.setState({
       currentNode: aaNode,
@@ -58,52 +58,21 @@ describe("ComboInspector lock selection", () => {
     cleanup();
   });
 
-  it("Lock selection uses checked combos, not the entire hand class", async () => {
-    const user = userEvent.setup();
+  it("does not expose Hands-panel lock drafting controls", () => {
     render(<ComboInspector />);
-
-    await user.click(screen.getByRole("checkbox", { name: "Select AhAd for lock" }));
-    expect(useStudyStore.getState().lockDraft.handIndices).toEqual([0]);
-
-    await user.click(screen.getByRole("button", { name: "Lock selection" }));
-
-    const draft = useStudyStore.getState().lockDraft;
-    expect(draft.handIndices).toEqual([0]);
-    expect(useStudyStore.getState().lockDrawerOpen).toBe(true);
+    expect(screen.queryByRole("button", { name: "Lock selection" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Lock entire hand class" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit strategy" })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /Select .+ for lock/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unlock" })).toBeNull();
   });
 
-  it("Lock entire hand class selects every combo in the focused class", async () => {
+  it("clears a pinned matrix selection without opening the lock drawer", async () => {
     const user = userEvent.setup();
     render(<ComboInspector />);
-
-    await user.click(screen.getByRole("button", { name: "Lock entire hand class" }));
-
-    expect(useStudyStore.getState().lockDraft.handIndices).toEqual([0, 1, 2]);
-    expect(useStudyStore.getState().lockDrawerOpen).toBe(true);
-  });
-
-  it("disables Lock selection when nothing is checked", () => {
-    render(<ComboInspector />);
-    expect(
-      (screen.getByRole("button", { name: "Lock selection" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-  });
-
-  it("keeps lock/edit actions without duplicate editor entry points", async () => {
-    const user = userEvent.setup();
-    render(<ComboInspector />);
-
-    expect(screen.getByRole("button", { name: "Lock selection" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Lock entire hand class" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Edit strategy" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Lock editor" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Strategy editor" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Lock" })).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "Edit strategy" }));
-    expect(useStudyStore.getState().strategyEditDrawerOpen).toBe(true);
-    expect(useStudyStore.getState().strategyEditDraft.handIndices).toEqual([0, 1, 2]);
+    await user.click(screen.getByRole("button", { name: "Clear selection" }));
+    expect(useStudyStore.getState().selectedCell).toBeNull();
+    expect(useStudyStore.getState().lockDrawerOpen).toBe(false);
   });
 
   it("shows Hands empty hint when nothing is hovered or selected", () => {
@@ -113,7 +82,7 @@ describe("ComboInspector lock selection", () => {
     expect(screen.getByText("Hover a hand in the grid.")).toBeTruthy();
   });
 
-  it("lists strategy bars and per-action EV across the pair suit grid", () => {
+  it("lists strategy weight-fill segments and per-action EV across the pair suit grid", () => {
     useStudyStore.setState({
       nodeValues: {
         node_id: "p0",
@@ -138,8 +107,9 @@ describe("ComboInspector lock selection", () => {
     expect(screen.getByText("0.50")).toBeTruthy();
     expect(screen.getByText("2.50")).toBeTruthy();
     expect(
-      document.querySelectorAll('.hands-combo[data-present="true"] .hands-combo__mix i')
-        .length,
+      document.querySelectorAll(
+        '.hands-combo[data-present="true"] .hands-combo__weight-fill .hands-combo__seg',
+      ).length,
     ).toBeGreaterThan(0);
     expect(screen.queryByText("Reach mass")).toBeNull();
     expect(screen.queryByText("Mixed EV")).toBeNull();
@@ -147,6 +117,24 @@ describe("ComboInspector lock selection", () => {
       '.hands-combo[data-present="true"]',
     ) as HTMLElement;
     expect(present.style.getPropertyValue("--mass-fill")).toBe("1");
+    expect(present.querySelector(".hands-combo__weight-fill")).toBeTruthy();
+    expect(present.querySelector(".inspector-combo__mix")).toBeNull();
+  });
+
+  it("scales --mass-fill by relative combo mass", () => {
+    useStudyStore.setState({
+      currentNode: {
+        ...aaNode,
+        reach: [1, 0.5, 0.25],
+        marginal: [1, 0.5, 0.25],
+      },
+    });
+    render(<ComboInspector />);
+    const fills = [
+      ...document.querySelectorAll('.hands-combo[data-present="true"]'),
+    ].map((el) => Number((el as HTMLElement).style.getPropertyValue("--mass-fill")));
+    expect(fills).toContain(1);
+    expect(fills.some((value) => value > 0 && value < 1)).toBe(true);
   });
 
   it("shows 12 offsuit suit slots for an unpaired offsuit cell", () => {

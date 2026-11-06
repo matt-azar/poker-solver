@@ -805,6 +805,12 @@
   gap: 2px;
 }
 
+.matrix-toolbar .action-nav {
+  margin-left: 0;
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--border);
+}
+
 .matrix-stage {
   flex: 1 1 0;
   min-width: 0;
@@ -884,7 +890,7 @@
 }
 
 .range-matrix-wrap {
-  /* Square column sized to stage height; leftover width goes to the detail panel. */
+  /* Default square (dual/opponent). Single layout overrides aspect below. */
   flex: 0 1 auto;
   min-width: 0;
   min-height: 0;
@@ -905,13 +911,28 @@
   container-type: size;
 }
 
+/* Single matrix: drop the square aspect so the column can be taller than wide
+   or match stage height. Prefer full height; width tracks 1.5× height when
+   horizontal room allows (matches SINGLE_MATRIX_WIDTH_OVER_HEIGHT). */
+.matrix-pane[data-dual="false"] .range-matrix-wrap {
+  aspect-ratio: 3 / 2;
+  height: 100%;
+  max-height: 100%;
+}
+
 .range-matrix-stage {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: flex-start;
+}
+
+.matrix-pane[data-dual="false"] .range-matrix-stage {
+  align-items: stretch;
 }
 
 .range-matrix {
@@ -1521,34 +1542,25 @@
   opacity: 0.4;
 }
 
-.hands-combo__check {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  z-index: 2;
-  margin: 0;
-}
-
-.hands-combo__check-spacer {
-  display: none;
-}
-
-.hands-combo__mix {
+/* Bottom-anchored mass wrapper — mirrors .matrix-cell__weight-fill. */
+.hands-combo__weight-fill {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  display: flex;
   height: calc(var(--mass-fill, 1) * 100%);
-  min-height: 0;
-  border-radius: 0;
-  background: transparent;
   overflow: hidden;
   pointer-events: none;
 }
 
-.hands-combo__mix > i {
-  display: block;
+.hands-combo__segments {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: row;
+}
+
+.hands-combo__seg {
   height: 100%;
   min-width: 0;
 }
@@ -1563,7 +1575,7 @@
   gap: 4px;
   height: 100%;
   min-height: 56px;
-  padding: 6px 8px 6px 22px;
+  padding: 6px 8px;
   color: #fff;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.75);
   box-sizing: border-box;
@@ -1597,13 +1609,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.hands-combo .inspector-lock-btn {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  z-index: 2;
-}
-
 .hands-combo__freq {
   font-size: 10px;
   white-space: nowrap;
@@ -1619,7 +1624,7 @@
 }
 
 .hands-ev-legend__spacer {
-  flex: 0 0 calc(16px + 52px + 56px + 18px);
+  flex: 0 0 0;
 }
 
 .hands-ev-legend__action {
@@ -1656,14 +1661,12 @@
   align-self: flex-start;
 }
 
-.combo-inspector .inspector-lock-actions {
+.combo-inspector__unpin {
   padding: 6px 10px 10px;
-  margin-top: 0;
   border-top: 1px solid var(--border);
-  opacity: 0.92;
 }
 
-.combo-inspector .inspector-lock-actions .toolbar-btn {
+.combo-inspector__unpin .toolbar-btn {
   margin: 0;
 }
 
@@ -2605,7 +2608,7 @@
   right: 0;
   bottom: 0;
   z-index: 30;
-  width: min(420px, 100%);
+  width: min(480px, 100%);
   display: flex;
   flex-direction: column;
   background: var(--panel);
@@ -2736,6 +2739,65 @@
   padding: 2px 0;
 }
 
+.lock-paint-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.lock-paint-panel__hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.lock-paint-grid {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  grid-template-columns: repeat(13, minmax(0, 1fr));
+  grid-template-rows: repeat(13, minmax(0, 1fr));
+  gap: 1px;
+  user-select: none;
+  touch-action: none;
+  container-type: size;
+  border: 1px solid var(--border);
+  background: var(--border);
+}
+
+.lock-paint-cell {
+  border: 0;
+  min-width: 0;
+  min-height: 0;
+  font-size: clamp(6px, 1.8cqmin, 11px);
+  padding: 0;
+  background: var(--empty-cell);
+  color: var(--muted);
+  user-select: none;
+  touch-action: none;
+  cursor: crosshair;
+  line-height: 1;
+}
+
+.lock-paint-cell[data-available="false"] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.lock-paint-cell[data-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 55%, var(--empty-cell));
+  color: #fff;
+}
+
+.lock-paint-cell[data-locked="true"] {
+  box-shadow: inset 0 0 0 1px var(--ok);
+}
+
+.lock-paint-cell[data-selected="true"][data-locked="true"] {
+  background: color-mix(in srgb, var(--ok) 45%, var(--accent) 25%);
+}
+
 .lock-prob-grid {
   display: flex;
   flex-direction: column;
@@ -2830,31 +2892,6 @@
   margin: 0;
   font-size: 11px;
   line-height: 1.35;
-}
-
-.inspector-combo[data-locked="true"] {
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
-}
-
-.inspector-combo[data-lock-draft="true"]:not([data-locked="true"]) {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.inspector-combo {
-  grid-template-columns: 16px 52px 1fr auto auto;
-}
-
-.inspector-lock-btn {
-  padding: 1px 6px;
-  font-size: 10px;
-  min-height: 0;
-}
-
-.inspector-lock-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  margin-top: var(--space-2);
 }
 
 @media (max-width: 900px) {
