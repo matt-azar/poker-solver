@@ -13,9 +13,9 @@
 ;
 ; Upgrade / reinstall lock
 ; ------------------------
-; Tauri's CheckIfAppIsRunning only registers the UI exe. Force-closing
-; Holdem Study.exe does not run our Rust Exit handler, so holdem-explorer.exe
-; often keeps running and NSIS fails with:
+; Tauri's CheckIfAppIsRunning only stops the UI image (${MAINBINARYNAME}.exe).
+; Force-closing Holdem Study.exe does not run our Rust Exit handler, so
+; holdem-explorer.exe often keeps running and NSIS fails with:
 ;   "Error opening file for writing: …\holdem-explorer.exe"
 ; (Abort / Retry / Ignore). Ignoring leaves a stale sidecar — PR-only UI
 ; bumps still "work", which hides the miss.
@@ -45,11 +45,12 @@
 !macroend
 
 !macro StopHoldemStudyForInstall
-  ; Close the UI first (user dialog via Restart Manager). Doing this inside
-  ; PREINSTALL — before Tauri's own CheckIfAppIsRunning — ensures the sidecar
-  ; kill below cannot be raced by an ensure_engine respawn while the dialog
-  ; is open. The later template check then finds nothing and is a no-op.
-  !insertmacro CheckIfAppIsRunning "$INSTDIR\${APP_EXE}" "${PRODUCTNAME}"
+  ; Close the UI first (Tauri 2.5 CheckIfAppIsRunning takes no args — it uses
+  ; ${MAINBINARYNAME}.exe / installMode). Doing this inside PREINSTALL —
+  ; before Tauri's own later check — ensures the sidecar kill below cannot be
+  ; raced by an ensure_engine respawn while the dialog is open. The template
+  ; check then finds nothing and is a no-op.
+  !insertmacro CheckIfAppIsRunning
   !insertmacro KillHoldemStudySidecar
   ; Give Windows time to release the exe image section after Stop-Process.
   Sleep 1500
