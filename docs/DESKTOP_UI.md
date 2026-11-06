@@ -47,7 +47,7 @@ explorer   # serves desktop/dist when present
 | Equity (node) | `GET …/equity` | Averages + hist | Study Equity tab: averages, clickable band filter, shape composition, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); buckets + `oop_hands`/`ip_hands` | equity tests; `analysis.test.ts` |
 | Equity calculator | `POST/GET /api/equity/jobs…` | — | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | `equity_calculator_tests`; desktop Equity UI |
 | Categories | `GET …/categories` | Table | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | hand categories; `analysis.test.ts` |
-| Locks | PUT/DELETE `…/locks` | Hand detail | Lock drawer + inspector | All-zero PUT rejected; 0%≠unlock | HTTP + `locks.test.ts` |
+| Locks | PUT/DELETE `…/locks` | Hand detail | Lock drawer (Tree → Open lock editor) with range-paint hand selection; Hands panel is read-only | All-zero PUT rejected; 0%≠unlock | HTTP + `locks.test.ts` |
 | Strategy edits | PUT/DELETE `…/strategy-edits` | Hand detail | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | HTTP + `strategyEdits.test.ts` |
 | Resolve locked | `POST …/resolve-locked` | Resolve + warm-start | Solver menu + drawer | New solution + baseline | HTTP |
 | Compare | `GET /api/compare` | Note | Compare workspace | Decision node | HTTP |
@@ -122,8 +122,8 @@ npm run tauri:build
 
 | Lock / strategy / compare op | UI | Backend |
 | --- | --- | --- |
-| Apply selected/full lock | Lock drawer / inspector | `PUT …/locks` |
-| Unlock | Lock drawer / inspector | `DELETE …/locks` |
+| Apply selected/full lock | Lock drawer (paint hand classes) | `PUT …/locks` |
+| Unlock | Lock drawer | `DELETE …/locks` |
 | Apply free-form strategy edit | Strategy editor / inspector | `PUT …/strategy-edits` |
 | Clear strategy edits | Strategy editor | `DELETE …/strategy-edits` |
 | Resolve locked | Solve/Tree menus + drawer | `POST …/resolve-locked` |
