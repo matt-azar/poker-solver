@@ -20,10 +20,15 @@
 ; (Abort / Retry / Ignore). Ignoring leaves a stale sidecar — PR-only UI
 ; bumps still "work", which hides the miss.
 ;
-; PREINSTALL therefore: taskkill the UI (do not re-insert CheckIfAppIsRunning —
-; Tauri already does that in the same section and the shared kill: label
-; breaks makensis), then force-stop the sidecar, wait for handles, and Delete
-; the old binary so the following File copy always replaces it.
+; PREINSTALL therefore: stop the UI (so it cannot respawn the engine), then
+; force-stop the sidecar, wait for handles, and Delete the old binary so the
+; following File copy always replaces it.
+;
+; Do NOT !insertmacro CheckIfAppIsRunning here. Tauri 2.5's macro uses fixed
+; labels (kill:/cancel:/app_check_done:) and the installer template already
+; inserts it once in the same Section — a second insert fails makensis with
+; "label kill: already declared". Kill the UI via nsis_tauri_utils instead;
+; the later template check then finds nothing and is a no-op.
 ;
 ; Engine setup
 ; ------------
@@ -33,6 +38,17 @@
 
 !define SIDECAR_EXE "holdem-explorer.exe"
 !define APP_EXE "Holdem Study.exe"
+
+!macro KillHoldemStudyUi
+  ; Same helpers CheckIfAppIsRunning uses on its kill path (no duplicate labels).
+  DetailPrint "Stopping ${MAINBINARYNAME}.exe if running..."
+  !if "${INSTALLMODE}" == "currentUser"
+    nsis_tauri_utils::KillProcessCurrentUser "${MAINBINARYNAME}.exe"
+  !else
+    nsis_tauri_utils::KillProcess "${MAINBINARYNAME}.exe"
+  !endif
+  Pop $0
+!macroend
 
 !macro KillHoldemStudySidecar
   ; Image-name kill is safe: ${SIDECAR_EXE} is not explorer.exe.
@@ -45,22 +61,7 @@
   Pop $0
 !macroend
 
-!macro KillHoldemStudyUi
-  ; Do NOT !insertmacro CheckIfAppIsRunning here during PREINSTALL: Tauri's
-  ; generated installer already inserts that macro in the same section, and
-  ; the shared `kill:` label then fails makensis ("label already declared").
-  ; Force-stop the UI by image name so ensure_engine cannot respawn the
-  ; sidecar before KillHoldemStudySidecar runs. Missing process is fine.
-  DetailPrint "Stopping ${APP_EXE} if running..."
-  nsExec::ExecToLog 'taskkill /F /T /IM "${APP_EXE}"'
-  Pop $0
-!macroend
-
 !macro StopHoldemStudyForInstall
-  ; Close the UI first via taskkill (not CheckIfAppIsRunning — Tauri 2.5's
-  ; zero-arg macro still uses a shared kill: label and is already inserted
-  ; later in this section). Then sidecar kill/Delete so File copy can replace
-  ; holdem-explorer.exe. Tauri's later check is a no-op if the UI is gone.
   !insertmacro KillHoldemStudyUi
   !insertmacro KillHoldemStudySidecar
   ; Give Windows time to release the exe image section after Stop-Process.
