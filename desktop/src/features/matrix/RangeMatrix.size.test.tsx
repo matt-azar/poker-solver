@@ -1,6 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fitAspectSize, SINGLE_MATRIX_WIDTH_OVER_HEIGHT } from "./RangeMatrix";
 
 Object.defineProperty(window, "matchMedia", {
   writable: true,
@@ -27,7 +26,9 @@ class ResizeObserverMock {
 vi.stubGlobal("ResizeObserver", ResizeObserverMock);
 
 const { useStudyStore } = await import("../../state/studyStore");
-const { RangeMatrix } = await import("./RangeMatrix");
+const { RangeMatrix, fitAspectSize, SINGLE_MATRIX_WIDTH_OVER_HEIGHT } = await import(
+  "./RangeMatrix"
+);
 
 function stubStageBox(width: number, height: number) {
   const proto = HTMLElement.prototype;
