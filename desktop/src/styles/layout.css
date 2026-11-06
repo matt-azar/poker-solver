@@ -884,7 +884,7 @@
 }
 
 .range-matrix-wrap {
-  /* Square column sized to stage height; leftover width goes to the detail panel. */
+  /* Default square (dual/opponent). Single layout overrides aspect below. */
   flex: 0 1 auto;
   min-width: 0;
   min-height: 0;
@@ -905,13 +905,28 @@
   container-type: size;
 }
 
+/* Single matrix: drop the square aspect so the column can be taller than wide
+   or match stage height. Prefer full height; width tracks 1.5× height when
+   horizontal room allows (matches SINGLE_MATRIX_WIDTH_OVER_HEIGHT). */
+.matrix-pane[data-dual="false"] .range-matrix-wrap {
+  aspect-ratio: 3 / 2;
+  height: 100%;
+  max-height: 100%;
+}
+
 .range-matrix-stage {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: flex-start;
+}
+
+.matrix-pane[data-dual="false"] .range-matrix-stage {
+  align-items: stretch;
 }
 
 .range-matrix {

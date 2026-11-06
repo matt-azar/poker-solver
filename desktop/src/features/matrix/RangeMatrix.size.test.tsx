@@ -65,16 +65,23 @@ describe("fitAspectSize", () => {
     expect(fitAspectSize(420, 380, 1)).toEqual({ width: 380, height: 380 });
   });
 
-  it("fits a 1.5-wide rectangle into a taller box by shrinking height", () => {
+  it("fills full height in a taller box when width is the constraint", () => {
     expect(fitAspectSize(300, 400, SINGLE_MATRIX_WIDTH_OVER_HEIGHT)).toEqual({
       width: 300,
-      height: 200,
+      height: 400,
     });
   });
 
-  it("fits a 1.5-wide rectangle into a wider box by using full height", () => {
+  it("fills full height in a wider box and keeps the 1.5 aspect", () => {
     expect(fitAspectSize(900, 400, SINGLE_MATRIX_WIDTH_OVER_HEIGHT)).toEqual({
       width: 600,
+      height: 400,
+    });
+  });
+
+  it("fills a square stage completely rather than shrinking height for 1.5", () => {
+    expect(fitAspectSize(400, 400, SINGLE_MATRIX_WIDTH_OVER_HEIGHT)).toEqual({
+      width: 400,
       height: 400,
     });
   });
@@ -85,7 +92,7 @@ describe("RangeMatrix single-layout size", () => {
     cleanup();
   });
 
-  it("draws the main grid 1.5× as wide as it is tall when the opponent grid is hidden", () => {
+  it("draws the main grid 1.5× as wide as it is tall when the stage is wide enough", () => {
     useStudyStore.setState({
       layout: { ...useStudyStore.getState().layout, dualRange: false },
       currentNode: null,
@@ -96,6 +103,22 @@ describe("RangeMatrix single-layout size", () => {
       const grid = screen.getByRole("grid", { name: /Hand range matrix/ });
       expect(grid.style.width).toBe("600px");
       expect(grid.style.height).toBe("400px");
+    } finally {
+      restore();
+    }
+  });
+
+  it("uses the full stage height when the opponent grid is hidden", () => {
+    useStudyStore.setState({
+      layout: { ...useStudyStore.getState().layout, dualRange: false },
+      currentNode: null,
+    });
+    const restore = stubStageBox(320, 480);
+    try {
+      render(<RangeMatrix />);
+      const grid = screen.getByRole("grid", { name: /Hand range matrix/ });
+      expect(grid.style.height).toBe("480px");
+      expect(grid.style.width).toBe("320px");
     } finally {
       restore();
     }
