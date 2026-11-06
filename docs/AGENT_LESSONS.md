@@ -160,7 +160,7 @@ Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fract
 - Some working-set / card-delay asserts are Windows-only (`#ifdef _WIN32`).
 - Assertion totals differ by compiler; fail missing parity checkpoints instead of skipping (`cc12bc8`).
 - **Tauri sidecar spawn:** `bundle.externalBin` may be `binaries/holdem-explorer`, but the installed file is `<exe_dir>/holdem-explorer.exe`. `shell().sidecar("binaries/holdem-explorer")` looks under a non-existent `binaries/` folder (os error 3). Spawn the absolute path beside the app (or `sidecar("holdem-explorer")`). Packaged UI must also **statically import** `@tauri-apps/api/core` — `@vite-ignore` dynamic imports leave a bare specifier that fails at runtime.
-- **NSIS upgrade + sidecar lock:** Tauri 2.5 `CheckIfAppIsRunning` takes **no args** (uses `${MAINBINARYNAME}.exe` only). A running/orphaned `holdem-explorer.exe` keeps the file locked → "Error opening file for writing: …\holdem-explorer.exe" (Ignore leaves a stale engine). PREINSTALL must `!insertmacro CheckIfAppIsRunning`, then `taskkill /F /T /IM holdem-explorer.exe`, Sleep, and `Delete` the old sidecar before File copy. Never `taskkill` `explorer.exe`.
+- **NSIS upgrade + sidecar lock:** A running/orphaned `holdem-explorer.exe` keeps the file locked → "Error opening file for writing: …\holdem-explorer.exe" (Ignore leaves a stale engine). PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning` — its `kill:` labels collide with the template's insert), then `taskkill /F /T /IM holdem-explorer.exe`, Sleep, and `Delete` the old sidecar. Never `taskkill` `explorer.exe`.
 
 ### Licensing
 
