@@ -20,7 +20,10 @@ export interface ActionBlockProps {
   title?: string;
   /** Filter toggle or follow navigate, depending on variant. */
   onClick?: () => void;
-  /** Distinct follow control inside a filter block. */
+  /**
+   * Optional in-block follow control (filter variant only).
+   * Prefer toolbar `ActionNavBar` for Study navigation.
+   */
   onFollow?: () => void;
   followDisabled?: boolean;
   followLabel?: string;

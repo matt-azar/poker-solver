@@ -12,32 +12,6 @@ import { useStudyStore } from "../../state/studyStore";
 import { ActionBlock } from "./ActionBlock";
 import "../../styles/actions.css";
 
-function childIdAt(
-  children: unknown[] | undefined,
-  index: number,
-): string | null {
-  if (!children) {
-    return null;
-  }
-  const child = children[index];
-  if (!child) {
-    return null;
-  }
-  if (typeof child === "string") {
-    return child;
-  }
-  if (
-    typeof child === "object" &&
-    child !== null &&
-    "node_id" in child &&
-    typeof (child as { node_id?: unknown }).node_id === "string" &&
-    (child as { node_id: string }).node_id
-  ) {
-    return (child as { node_id: string }).node_id;
-  }
-  return null;
-}
-
 /** Node-level Actions stack for the Study detail panel. */
 export function ActionSummary() {
   const currentNode = useStudyStore((s) => s.currentNode);
@@ -45,7 +19,6 @@ export function ActionSummary() {
   const draft = useStudyStore((s) => s.draft);
   const actionFilter = useStudyStore((s) => s.actionFilter);
   const setActionFilter = useStudyStore((s) => s.setActionFilter);
-  const followAction = useStudyStore((s) => s.followAction);
   const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
 
   const actions = currentNode?.actions;
@@ -107,9 +80,7 @@ export function ActionSummary() {
       <div className="action-summary__head">
         <h2 className="action-summary__title">Actions</h2>
         {(actions?.length ?? 0) > 0 ? (
-          <span className="muted action-summary__hint-inline">
-            Filter · Open
-          </span>
+          <span className="muted action-summary__hint-inline">Filter</span>
         ) : null}
       </div>
       <div className="action-summary__blocks">
@@ -122,7 +93,6 @@ export function ActionSummary() {
           );
           const freqText = formatFrequencyPct(freqs[index]);
           const filtered = actionFilter === index;
-          const childId = childIdAt(currentNode?.children, index);
           return (
             <ActionBlock
               key={`${label}-${index}`}
@@ -136,13 +106,6 @@ export function ActionSummary() {
               title={`${formatActionTooltip(label, pot, betSizeDisplay, displayOpts)} · click to filter`}
               aria-label={`Filter ${display.primary}${freqText ? `, ${freqText}` : ""}`}
               onClick={() => setActionFilter(filtered ? null : index)}
-              onFollow={() => {
-                if (childId) {
-                  void followAction(childId);
-                }
-              }}
-              followDisabled={!childId}
-              followLabel="Open"
             />
           );
         })}

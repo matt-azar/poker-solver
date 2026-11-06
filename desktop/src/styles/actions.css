@@ -325,3 +325,57 @@
 .action-history__choices .action-block {
   min-width: 5.5rem;
 }
+
+/* Matrix toolbar action navigation chips (above the grid). */
+.action-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-left: var(--space-2);
+}
+
+.action-nav__btn {
+  --action-color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.action-nav__btn:hover:not(:disabled) {
+  background: var(--panel);
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--action-color) 55%, var(--border));
+}
+
+.action-nav__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.action-nav__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.action-nav__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  background: var(--action-color);
+}
+
+.action-nav__label {
+  font-weight: 600;
+  white-space: nowrap;
+}
