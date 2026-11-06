@@ -20,9 +20,10 @@
 ; (Abort / Retry / Ignore). Ignoring leaves a stale sidecar — PR-only UI
 ; bumps still "work", which hides the miss.
 ;
-; PREINSTALL therefore: stop the UI (so it cannot respawn the engine), then
-; force-stop the sidecar, wait for handles, and Delete the old binary so the
-; following File copy always replaces it.
+; PREINSTALL therefore: taskkill the UI (do not re-insert CheckIfAppIsRunning —
+; Tauri already does that in the same section and the shared kill: label
+; breaks makensis), then force-stop the sidecar, wait for handles, and Delete
+; the old binary so the following File copy always replaces it.
 ;
 ; Engine setup
 ; ------------
@@ -44,12 +45,22 @@
   Pop $0
 !macroend
 
+!macro KillHoldemStudyUi
+  ; Do NOT !insertmacro CheckIfAppIsRunning here during PREINSTALL: Tauri's
+  ; generated installer already inserts that macro in the same section, and
+  ; the shared `kill:` label then fails makensis ("label already declared").
+  ; Force-stop the UI by image name so ensure_engine cannot respawn the
+  ; sidecar before KillHoldemStudySidecar runs. Missing process is fine.
+  DetailPrint "Stopping ${APP_EXE} if running..."
+  nsExec::ExecToLog 'taskkill /F /T /IM "${APP_EXE}"'
+  Pop $0
+!macroend
+
 !macro StopHoldemStudyForInstall
-  ; Close the UI first (user dialog via Restart Manager). Doing this inside
-  ; PREINSTALL — before Tauri's own CheckIfAppIsRunning — ensures the sidecar
-  ; kill below cannot be raced by an ensure_engine respawn while the dialog
-  ; is open. The later template check then finds nothing and is a no-op.
-  !insertmacro CheckIfAppIsRunning "$INSTDIR\${APP_EXE}" "${PRODUCTNAME}"
+  ; Close the UI first, then the sidecar, wait, and Delete so File copy can
+  ; replace holdem-explorer.exe. Tauri still runs CheckIfAppIsRunning after
+  ; PREINSTALL (no-op if we already stopped the UI).
+  !insertmacro KillHoldemStudyUi
   !insertmacro KillHoldemStudySidecar
   ; Give Windows time to release the exe image section after Stop-Process.
   Sleep 1500
