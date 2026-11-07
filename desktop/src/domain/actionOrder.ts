@@ -1,6 +1,6 @@
 /**
  * Order Study action segments most-aggressive → least-aggressive (left → right).
- * Shared by the main matrix and Hands / hover combo breakdowns.
+ * Shared by the main matrix and Hands combo breakdowns.
  */
 import { actionIdentity } from "./actionColors";
 

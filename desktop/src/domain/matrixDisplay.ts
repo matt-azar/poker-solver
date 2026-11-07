@@ -79,40 +79,6 @@ export interface ComboBreakdownSquare {
   present: boolean;
 }
 
-/** How the hover mini-grid paints, mirroring the main matrix mode + overlay. */
-export type ComboHoverPaint =
-  | "strategy"
-  | "range"
-  | "ev";
-
-export function comboHoverPaint(mode: string): ComboHoverPaint {
-  if (mode === "range") {
-    return "range";
-  }
-  if (mode === "ev") {
-    return "ev";
-  }
-  // strategy, strategy-ev, and unknown → strategy mix bars
-  return "strategy";
-}
-
-/** Whether the hover popup should show EV numbers given mode + overlay. */
-export function comboHoverShowEv(mode: string, overlay: MatrixCellOverlay): boolean {
-  if (mode === "ev" || mode === "strategy-ev") {
-    return true;
-  }
-  return overlay === "ev" || overlay === "both";
-}
-
-/** Whether the hover popup should show equity numbers given mode + overlay. */
-export function comboHoverShowEquity(
-  mode: string,
-  overlay: MatrixCellOverlay,
-): boolean {
-  void mode;
-  return overlay === "equity" || overlay === "both";
-}
-
 function clampOverlay(value: unknown): MatrixCellOverlay {
   if (value === "ev" || value === "equity" || value === "both" || value === "none") {
     return value;
