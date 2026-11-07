@@ -328,7 +328,7 @@ void run_rake_tests()
     }
     CHECK(river_rejects);
 
-    // Positive-rake RiverGame terminals (independent expected values from docs/RAKE.md).
+    // Positive-rake RiverGame terminals (independent expected values from docs/auxiliary/payoffs/RAKE.md).
     {
         const RakeConfig rake{0.05, 0.0};
         RiverConfig sized;

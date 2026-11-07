@@ -24,7 +24,7 @@ enum class IncentiveKind
 // One utility bias for one player when a match fires.
 //
 // On a match, `delta` is added to utility[player]; the other seat is unchanged
-// unless a second rule targets them. See docs/INCENTIVES.md.
+// unless a second rule targets them. See docs/auxiliary/payoffs/INCENTIVES.md.
 struct IncentiveRule
 {
     IncentiveKind kind = IncentiveKind::ActionLabelMatch;
@@ -276,7 +276,7 @@ inline void validate_edge_tag_spec(const IncentiveEdgeTagSpec& spec)
 }
 
 // Optional solve-path overlay. Empty rules leave chip/ICM terminals unchanged.
-// See docs/INCENTIVES.md.
+// See docs/auxiliary/payoffs/INCENTIVES.md.
 struct IncentiveConfig
 {
     std::vector<IncentiveRule> rules{};

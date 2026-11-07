@@ -11,7 +11,7 @@ Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor
 ### Hard rules
 
 1. **One writer per tree.** Delegated Task / best-of-n runners may still write into shared `/workspace` even when told to use an isolated worktree. Do not `git checkout`, reset, or commit on `/workspace` while siblings run unless you have confirmed they never touch that path.
-2. **Disjoint file ownership.** Assign path prefixes per agent. If two tracks need the same file (`CMakeLists.txt`, `explorer_main.cpp`, `FEATURE_PARITY.md`), serialize or let only the parent edit it.
+2. **Disjoint file ownership.** Assign path prefixes per agent. If two tracks need the same file (`CMakeLists.txt`, `explorer_main.cpp`, `docs/auxiliary/planning/FEATURE_PARITY.md`), serialize or let only the parent edit it.
 3. **Parent owns forge writes.** Subagents often lack `ManagePullRequest` and must not use `gh` to create/update PRs. After a sibling pushes, the parent opens/updates the PR and subscribes CI.
 4. **Snapshot before splitting.** If the tree is interleaved, commit everything onto `cursor/wip-…-c006`, then path-checkout onto clean feature branches from the correct base.
 5. **Re-check `git status` before every commit.** Restore unexpected paths with `git checkout HEAD -- <path>`.
@@ -70,7 +70,7 @@ A flop, turn, and river are **one** betting tree with two, one, or zero cards le
 
 **Do:** Keep `RiverGame` as the five-card oracle forever. Keep five-card StreetBatch pins against `RiverGame`.  
 **Don't:** Reintroduce `RiverBatchSolver` as the product `river_solver` path. Don't delete `RiverGame` or RiverBatch oracle tests.  
-**Pointers:** `docs/ARCHITECTURE.md`, `docs/ROADMAP.md` M6, `include/game/street_game.hpp`, `src/cli/river_main.cpp`.
+**Pointers:** `docs/ARCHITECTURE.md`, `docs/auxiliary/planning/ROADMAP.md` M6, `include/game/street_game.hpp`, `src/cli/river_main.cpp`.
 
 ### `*Game` vs `*Batch`
 
@@ -170,7 +170,7 @@ Do not change `LICENSE`, SPDX, or license metadata. `UNLICENSED` ≠ Unlicense. 
 
 - Branches: `cursor/<descriptive-name>-c006`, lowercase.
 - Prefer `base_branch=main` unless stacking on an unmerged dependency; say so in the PR body.
-- Update `FEATURE_PARITY.md` **only** in the commit that demonstrates the row change.
+- Update `docs/auxiliary/planning/FEATURE_PARITY.md` **only** in the commit that demonstrates the row change.
 
 ---
 
@@ -181,7 +181,7 @@ Do not change `LICENSE`, SPDX, or license metadata. `UNLICENSED` ≠ Unlicense. 
 Here the printed Nash gap is **NashConv** = sum of both players’ unilateral BR gains (`(u0(BR0)-u0) + (u1(BR1)-u1)`). Under zero-sum chips that equals `u0(BR0) + u1(BR1)`. Pio often reports the **average** of those gains.
 
 **Do:** Convert before comparing to Pio (often divide by 2). Accuracy stops use **NashConv / pot** (study bar often ≤ 0.001 where declared).  
-**Pointers:** `docs/ROADMAP.md` §6, `docs/MATHEMATICS.md`, `docs/HUNL.md`.
+**Pointers:** `docs/auxiliary/planning/ROADMAP.md` §6, `docs/MATHEMATICS.md`, `docs/auxiliary/reference/HUNL.md`.
 
 ### Own-reach averaging and CF regret
 
@@ -263,7 +263,7 @@ Release A emphasis: M0→M5 plus **core M6**. Most `FEATURE_PARITY.md` rows are 
 | M5 saves “done” | PSOL exists; compact/lazy/multi-file library does not |
 | M6 “done” | Five-card StreetBatch pins against `RiverGame` **and** `river_solver` on StreetBatch (not RiverBatch product path) |
 | M8 rake/ICM | Needs dual-player payoff first; chip path is still player-0 scalar + negation |
-| “As fast as Pio” | Forbidden without matched protocol (`docs/ROADMAP.md` §6) |
+| “As fast as Pio” | Forbidden without matched protocol (`docs/auxiliary/planning/ROADMAP.md` §6) |
 
 **Do:** Update ledger rows only with the demonstrating commit.  
 **Don't:** Mark milestones complete from a single happy-path HTTP smoke.
@@ -286,11 +286,12 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 
 | Topic | Start here |
 | --- | --- |
+| Docs index | `docs/README.md` |
 | Module map | `docs/ARCHITECTURE.md` |
-| Milestones / gates | `docs/ROADMAP.md`, `docs/FEATURE_PARITY.md` |
 | Street tree / budget / frozen | `docs/STREETS.md` |
 | River chips / oracle | `docs/RIVER.md` |
 | Math / EV / NashConv | `docs/MATHEMATICS.md` |
-| Explorer HTTP / UI | `docs/EXPLORER.md`, `docs/TESTING.md` |
+| Explorer HTTP / Study UI | `docs/EXPLORER.md`, `docs/DESKTOP_UI.md` |
 | Equity | `docs/EQUITY.md` |
-| Study benches | `benchmarks/study/README.md` |
+| Milestones / gates | `docs/auxiliary/planning/ROADMAP.md`, `docs/auxiliary/planning/FEATURE_PARITY.md` |
+| Testing / benches | `docs/auxiliary/engineering/TESTING.md`, `benchmarks/study/README.md` |

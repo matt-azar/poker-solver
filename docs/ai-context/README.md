@@ -16,7 +16,7 @@ The AI is **deeply integrated**: one persistent, hideable, movable, resizable ch
 
 - Keep packs short, factual, and product-accurate.
 - Do not invent GTO frequencies or unshipped features.
-- Sync material changes from player-facing docs (`DESKTOP_UI.md`, `STUDY_SETUP_ASSISTANT.md`) into these packs in the same commit.
+- Sync material changes from player-facing docs ([DESKTOP_UI.md](../DESKTOP_UI.md), [STUDY_SETUP_ASSISTANT.md](../STUDY_SETUP_ASSISTANT.md)) into these packs in the same commit.
 - Packs must not instruct the model to emit shell commands, executable paths, or API keys.
 
 ## Bundling

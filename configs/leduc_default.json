@@ -7,5 +7,5 @@
   "round1_raise": 2,
   "round2_raise": 4,
   "ante": 1,
-  "notes": "Standard six-card Leduc. See docs/LEDUC.md. Chance is enumerated. No RNG."
+  "notes": "Standard six-card Leduc. See docs/auxiliary/reference/LEDUC.md. Chance is enumerated. No RNG."
 }

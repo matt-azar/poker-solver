@@ -1,6 +1,6 @@
 # Benchmarks
 
-Primary production measurements are the **Street** and **River** sections below and [benchmarks/study/](../benchmarks/study/). Kuhn and Leduc tables are reference-trainer history.
+Primary production measurements are the **Street** and **River** sections below and [benchmarks/study/](../../../benchmarks/study/). Kuhn and Leduc tables are reference-trainer history.
 
 ## Kuhn vanilla CFR and CFR+
 
@@ -44,7 +44,7 @@ Historical, from before the pass-level floor. Same machine and compiler. `kuhn_s
 | vanilla CFR | 10000 | 0.0140505 | 7.117e5 | -0.0555306025757 | 0.00297179826288 |
 | linear CFR | 10000 | 0.0166417 | 6.009e5 | -0.0555625698041 | 0.00591309307769 |
 
-Linear CFR is closer to \(-1/18\) at this length. Vanilla CFR has the smaller Nash gap. The 10,000-iteration vanilla row above is an older run of the same value and the same gap. See [HUNL.md](HUNL.md).
+Linear CFR is closer to \(-1/18\) at this length. Vanilla CFR has the smaller Nash gap. The 10,000-iteration vanilla row above is an older run of the same value and the same gap. See [HUNL.md](../reference/HUNL.md).
 
 ## Leduc
 
@@ -55,7 +55,7 @@ Same machine and compiler. Command: `build\Release\leduc_solver.exe --algorithm 
 | vanilla CFR | 1000 | 0.7050075 | 1.418e3 | -0.0891149365429 | 0.0537834490152 |
 | CFR+ | 1000 | 1.3089424 | 7.640e2 | -0.0862957760813 | 0.0921236987006 |
 
-Published solves put the equilibrium value near -0.0856. One thousand iterations leaves a Nash gap around 0.05 to 0.09. At this length, CFR+ is closer in value and vanilla CFR has the smaller Nash gap. The unit tests check the gap against a 20-iteration run of the same algorithm, where both gaps are still above 0.15 and then fall. See [LEDUC.md](LEDUC.md).
+Published solves put the equilibrium value near -0.0856. One thousand iterations leaves a Nash gap around 0.05 to 0.09. At this length, CFR+ is closer in value and vanilla CFR has the smaller Nash gap. The unit tests check the gap against a 20-iteration run of the same algorithm, where both gaps are still above 0.15 and then fall. See [LEDUC.md](../reference/LEDUC.md).
 
 ## Five-card evaluator
 
@@ -70,7 +70,7 @@ Same machine and compiler. Command: `river_solver --config configs/river_default
 | CFR+ | 500 | 0.0209566 | 2.386e4 | 50.0013916447 | 0.00145265025502 |
 | CFR+ | 2000 | 0.076925 | 2.600e4 | 50.0000871092 | 9.09267588227e-05 |
 
-The unit-test toy (aces or fives versus kings, one all-in) is smaller: 4 information sets, 6 decision nodes, memory estimate 132 bytes. CFR+ for 4,000 iterations took 0.003934 seconds, about 1.017e6 iterations per second, and reached value 24.9999102275 with Nash gap 0.196997733488. The same algorithm at 40 iterations had gap 2.45089917903. These times enumerate every hand pair on every iteration. See [RIVER.md](RIVER.md).
+The unit-test toy (aces or fives versus kings, one all-in) is smaller: 4 information sets, 6 decision nodes, memory estimate 132 bytes. CFR+ for 4,000 iterations took 0.003934 seconds, about 1.017e6 iterations per second, and reached value 24.9999102275 with Nash gap 0.196997733488. The same algorithm at 40 iterations had gap 2.45089917903. These times enumerate every hand pair on every iteration. See [RIVER.md](../../RIVER.md).
 
 ## Public-tree river traversal
 
@@ -110,7 +110,7 @@ Check-only queens versus jacks on the flop `Ah Kd 7c`, one vanilla iteration:
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1 --algorithm vanilla
 ```
 
-1,980 terminals, 4,052 information sets, runtime 0.0090838 seconds, value 41.6161616162, Nash gap 0. That value is the average of every turn and river. See [STREETS.md](STREETS.md).
+1,980 terminals, 4,052 information sets, runtime 0.0090838 seconds, value 41.6161616162, Nash gap 0. That value is the average of every turn and river. See [STREETS.md](../../STREETS.md).
 
 ## Public-tree turn traversal
 
@@ -435,4 +435,4 @@ Limitations: Linux-only measurement on this agent; Windows Explorer coverage is 
 
 ## Practical study baseline after NashConv / compact indexing / PSOL IO (`dec4a5e`)
 
-Committed record: [benchmarks/study/RESULTS.md](../benchmarks/study/RESULTS.md) section **Main at `dec4a5e`**. CFR+ only. Quiet Linux cloud agent (4 CPUs, ~16 GiB RAM). Street pot prints are chips; runner quality uses printed `nash_gap_fraction_of_pot`. Turn to 0.001 in 600 iters / ~24 s; flop 400 iters / 4 threads in ~622 s at ~1.74 GiB engine peak (target not reached).
+Committed record: [benchmarks/study/RESULTS.md](../../../benchmarks/study/RESULTS.md) section **Main at `dec4a5e`**. CFR+ only. Quiet Linux cloud agent (4 CPUs, ~16 GiB RAM). Street pot prints are chips; runner quality uses printed `nash_gap_fraction_of_pot`. Turn to 0.001 in 600 iters / ~24 s; flop 400 iters / 4 threads in ~622 s at ~1.74 GiB engine peak (target not reached).

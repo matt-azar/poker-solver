@@ -50,13 +50,13 @@ struct RiverConfig
     int max_raises = 2;
     int first_to_act = 0;
     // Pot rake applied at terminals. Zero rate keeps the prior chip rule.
-    // See docs/RAKE.md.
+    // See docs/auxiliary/payoffs/RAKE.md.
     poker::solver::RakeConfig rake{};
     // Optional tournament ICM. Empty stacks leaves chip/rake terminals.
-    // stacks[] are tournament chip counts (not betting `stack`). See docs/ICM.md.
+    // stacks[] are tournament chip counts (not betting `stack`). See docs/auxiliary/payoffs/ICM.md.
     poker::solver::IcmConfig icm{};
     // Optional action-label incentive overlay. Empty rules leave terminals
-    // unchanged. Path-attributed at terminals; see docs/INCENTIVES.md.
+    // unchanged. Path-attributed at terminals; see docs/auxiliary/payoffs/INCENTIVES.md.
     poker::solver::IncentiveConfig incentives{};
 };
 

@@ -53,4 +53,4 @@ There is no closed form in this repository. Published solves put player 0's equi
 leduc_solver --iterations 1000 --algorithm cfr_plus
 ```
 
-Kuhn CLI and equilibrium family: [MATHEMATICS.md](MATHEMATICS.md). Architecture note: [ARCHITECTURE.md](ARCHITECTURE.md).
+Kuhn CLI and equilibrium family: [MATHEMATICS.md](../../MATHEMATICS.md). Architecture note: [ARCHITECTURE.md](../../ARCHITECTURE.md).

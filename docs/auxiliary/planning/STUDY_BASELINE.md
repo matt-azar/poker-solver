@@ -12,7 +12,7 @@ Product entry points: `explorer` + Study UI (`desktop/`), `street_solver`, and `
 - Versioned PSOL save/open/continue; recent-files list; street-config templates; named range presets
 - Node locks, resolve-locked, baseline compare (street-first in explorer)
 - Pot rake, optional ICM, optional action-label incentives on street/river terminals
-- Windows NSIS installer for Holdem Study ([DESKTOP_UI.md](DESKTOP_UI.md))
+- Windows NSIS installer for Holdem Study ([DESKTOP_UI.md](../../DESKTOP_UI.md))
 
 ## Still open
 
@@ -32,4 +32,4 @@ cmake --build build -j
 
 Explorer HTTP tests spawn on Linux and Windows. Prefer the weighted multi-combo persistence case in `tests/unit/test_explorer_http.cpp` when changing Continue/Open/session. Desktop lifecycle acceptance (Build → solve → pause/inspect → save/open/continue → lock/compare) is `tests/unit/test_explorer_workflow.cpp`; Windows packaged Tauri/NSIS remains a manual release gate.
 
-Study-corpus measurements: [benchmarks/study/RESULTS.md](../benchmarks/study/RESULTS.md).
+Study-corpus measurements: [benchmarks/study/RESULTS.md](../../../benchmarks/study/RESULTS.md).

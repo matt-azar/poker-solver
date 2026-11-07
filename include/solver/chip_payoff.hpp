@@ -20,7 +20,7 @@ namespace poker::solver
 // Under the zero-rake chip rule, utility[1] == -utility[0]. With positive rake,
 // the house takes collect(pot, rake) from the pot in whole chips; the winner's
 // root-centered utility is reduced by that amount (split evenly on a tie).
-// See docs/RAKE.md.
+// See docs/auxiliary/payoffs/RAKE.md.
 struct ChipPayoff
 {
     static PlayerPayoff terminal(

@@ -20,7 +20,7 @@ namespace poker::solver
 //   with prizes p[1], p[2], ...
 // Unpaid places (when p is shorter than n) contribute 0. Players with a zero
 // stack are treated as already eliminated and receive no share of remaining
-// prizes. See docs/ICM.md.
+// prizes. See docs/auxiliary/payoffs/ICM.md.
 //
 // Rejects empty stacks, negative or non-finite stacks/payouts, and a total
 // stack of zero.
@@ -201,7 +201,7 @@ struct IcmPayoff
 // off (plain chip/rake terminals). When enabled, stacks[0]/stacks[1] are the two
 // hero seats; further seats are untouched spectators. StreetConfig::stack /
 // RiverConfig::stack remain betting effective stack — not these tournament
-// stacks. See docs/ICM.md.
+// stacks. See docs/auxiliary/payoffs/ICM.md.
 struct IcmConfig
 {
     std::vector<double> stacks{};

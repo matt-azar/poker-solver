@@ -8,7 +8,7 @@ This note recorded the merge of overlapping river / five-card / payoff / solve-c
 - `RiverGame` remains the five-card oracle
 - `RiverBatchSolver` remains for internal oracle and legacy fixtures only
 
-Living docs: [ARCHITECTURE.md](ARCHITECTURE.md), [RIVER.md](RIVER.md), [STREETS.md](STREETS.md), [ROADMAP.md](ROADMAP.md) M6.
+Living docs: [ARCHITECTURE.md](../../ARCHITECTURE.md), [RIVER.md](../../RIVER.md), [STREETS.md](../../STREETS.md), [ROADMAP.md](../planning/ROADMAP.md) M6.
 
 ## Original merge order (archive)
 
