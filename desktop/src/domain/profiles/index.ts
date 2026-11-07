@@ -101,6 +101,40 @@ export {
 export {
   makeUserSavedRange,
   userSavedRangeId,
+  type MakeUserSavedRangeOptions,
 } from "./userSavedRange";
+
+export {
+  seatSlotKey,
+  placementSlotKey,
+  isFiledPlacement,
+  openPlacement,
+  parseLineFolderLabel,
+  lineFolderLabel,
+  normalizePositionName,
+  type SeatPlacement,
+} from "./seatActionPlacement";
+
+export {
+  CATALOGUE_LAYOUT_STORAGE_KEY,
+  EMPTY_CATALOGUE_LAYOUT,
+  parseCatalogueLayout,
+  readCatalogueLayout,
+  writeCatalogueLayout,
+  renameCatalogueBranch,
+  addCataloguePosition,
+  addCatalogueLine,
+  hideBundledAtom,
+  unhideBundledAtom,
+  type CatalogueLayout,
+  type CatalogueLayoutStorage,
+} from "./catalogueLayout";
+
+export {
+  buildSeatActionTree,
+  mergeAtomsForCatalogueTree,
+  lineFolder,
+  type SeatActionTreeNode,
+} from "./seatActionTree";
 
 export { loadBundledSeatActions } from "./bundledSeatActions";

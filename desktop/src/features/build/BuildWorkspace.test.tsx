@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,13 +29,14 @@ vi.mock("../../domain/profiles", async () => {
       memory.set(key, value);
     },
   };
-  const catalogue = actual.createSeatActionCatalogue([], storage);
+  let catalogue = actual.createSeatActionCatalogue([], storage);
   return {
     ...actual,
     loadBundledSeatActions: () => [],
     getSeatActionCatalogue: () => catalogue,
     resetSeatActionCatalogueForTests: () => {
       memory.clear();
+      catalogue = actual.createSeatActionCatalogue([], storage);
     },
   };
 });
@@ -103,21 +104,22 @@ describe("BuildWorkspace range tools", () => {
     const user = userEvent.setup();
     render(<BuildWorkspace />);
     await user.click(screen.getAllByRole("button", { name: "Catalogue" })[0]!);
-    expect(screen.getByRole("heading", { name: "Saved ranges" })).toBeTruthy();
-    await user.type(
-      screen.getByLabelText("Name for saved OOP range"),
-      "My BTN open",
-    );
-    await user.click(screen.getByRole("button", { name: "Save to catalogue" }));
+    expect(screen.getByRole("heading", { name: "Unfiled saves" })).toBeTruthy();
+    const nameField = screen.getByLabelText(
+      "Name for unfiled OOP range",
+    ) as HTMLInputElement;
+    fireEvent.change(nameField, { target: { value: "My BTN open" } });
+    expect(nameField.value).toBe("My BTN open");
+    await user.click(screen.getByRole("button", { name: "Save unfiled" }));
     expect(screen.getByRole("button", { name: "My BTN open" })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Edit" }));
-    const nameInput = screen.getByLabelText("Saved range name");
-    await user.clear(nameInput);
-    await user.type(nameInput, "Renamed open");
-    const rangeInput = screen.getByLabelText("Saved range text");
-    await user.clear(rangeInput);
-    await user.type(rangeInput, "AKs,AA");
+    fireEvent.change(screen.getByLabelText("Saved range name"), {
+      target: { value: "Renamed open" },
+    });
+    fireEvent.change(screen.getByLabelText("Saved range text"), {
+      target: { value: "AKs,AA" },
+    });
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     expect(screen.getByRole("button", { name: "Renamed open" })).toBeTruthy();
 
