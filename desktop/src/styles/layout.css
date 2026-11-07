@@ -1512,12 +1512,12 @@
   font-family: var(--font-mono);
 }
 
-/* Equity (“Eq”) row under the action metrics — smaller than action rows. */
+/* Equity (“Eq”) row under the action metrics — same 20px type as EV/freq. */
 .hands-combo__metric-row--eq .hands-combo__metric-action,
 .hands-combo__metric-row--eq .hands-combo__metric-value {
-  font-size: 11px;
-  font-weight: 650;
-  color: rgba(0, 0, 0, 0.72);
+  font-size: 20px;
+  font-weight: 700;
+  color: #111;
 }
 
 /* Hands panel showing combo breakdown for the focus hand. */

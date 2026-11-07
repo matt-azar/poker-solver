@@ -188,4 +188,32 @@ describe("ComboInspector", () => {
       document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
     ).toBe("offsuit");
   });
+
+  it("shows check-down equity in Hands when equity overlay is on", () => {
+    useStudyStore.setState({
+      currentNode: {
+        ...aaNode,
+        player: 0,
+      },
+      equity: {
+        pending: false,
+        node_id: "p0",
+        oop_hands: [
+          { combo: "AhAd", equity: 0.82, weight: 1 },
+          { combo: "AhAs", equity: 0.71, weight: 1 },
+          { combo: "AhAc", equity: 0.64, weight: 1 },
+        ],
+        ip_hands: [],
+      },
+    });
+    useMatrixDisplayStore.getState().setCellOverlay("equity");
+    render(<ComboInspector />);
+    const eqRows = document.querySelectorAll(".hands-combo__metric-row--eq");
+    expect(eqRows.length).toBeGreaterThan(0);
+    expect(screen.getByText("82")).toBeTruthy();
+    expect(screen.getByText("71")).toBeTruthy();
+    expect(screen.getByText("64")).toBeTruthy();
+    // Action metrics stay on frequency when overlay is equity-only.
+    expect(screen.getAllByText("Freq").length).toBeGreaterThan(0);
+  });
 });

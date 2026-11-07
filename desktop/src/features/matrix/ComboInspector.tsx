@@ -19,9 +19,12 @@ import {
   comboBadgeCards,
   comboBreakdown,
   comboKey,
+  equityByCombo,
+  equityHandsForNode,
   formatEquityPct,
   formatEvChip,
   type ComboBreakdownSquare,
+  type EquityPayloadLike,
   useMatrixDisplayStore,
   weightFillFraction,
 } from "../../domain/matrixDisplay";
@@ -95,6 +98,7 @@ function squareMass(square: ComboBreakdownSquare): number | null {
 export function ComboInspector() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const nodeValues = useStudyStore((s) => s.nodeValues);
+  const equity = useStudyStore((s) => s.equity);
   const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
   const selectedCell = useStudyStore((s) => s.selectedCell);
   const hoverCell = useStudyStore((s) => s.hoverCell);
@@ -118,6 +122,14 @@ export function ComboInspector() {
     [currentNode?.actions],
   );
 
+  const equityMap = useMemo(() => {
+    const hands = equityHandsForNode(
+      equity as EquityPayloadLike | null,
+      currentNode?.player,
+    );
+    return equityByCombo(hands);
+  }, [equity, currentNode?.player]);
+
   const squares = useMemo(() => {
     if (!cell || !currentNode) {
       return [] as ComboBreakdownSquare[];
@@ -126,11 +138,11 @@ export function ComboInspector() {
       cell,
       currentNode,
       nodeValues,
-      new Map(),
+      equityMap,
       evDisplayBasis,
       RANKS,
     );
-  }, [cell, currentNode, nodeValues, evDisplayBasis]);
+  }, [cell, currentNode, nodeValues, equityMap, evDisplayBasis]);
 
   const handByCombo = useMemo(() => {
     const map = new Map<
@@ -164,7 +176,8 @@ export function ComboInspector() {
   const weightFillOn = displayPrefs.rangeWeightHeightFill;
   const shape = cell ? cellShape(cell.row, cell.col) : "pair";
   const cols = shapeColumns(shape);
-  const metricLabel = showEv ? "EV" : showEq ? "Eq" : "Freq";
+  // Action rows show EV or frequency; equity always has its own labeled row.
+  const metricLabel = showEv ? "EV" : "Freq";
 
   return (
     <section className="combo-inspector" aria-label="Hands">

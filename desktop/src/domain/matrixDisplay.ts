@@ -193,7 +193,7 @@ export function equityHandsForNode(
   return hands;
 }
 
-/** combo → equity fraction map; skips non-finite values. */
+/** combo → equity fraction map; skips non-finite values. Keys are {@link comboKey}. */
 export function equityByCombo(
   hands: EquityHandLike[] | null | undefined,
 ): Map<string, number> {
@@ -206,7 +206,7 @@ export function equityByCombo(
     if (!hand.combo || !Number.isFinite(equity)) {
       continue;
     }
-    map.set(hand.combo, equity);
+    map.set(comboKey(hand.combo), equity);
   }
   return map;
 }
@@ -230,7 +230,7 @@ export function groupEquity(
   let unweightedSum = 0;
   let unweightedCount = 0;
   for (const hand of cell.hands) {
-    const equity = equityMap.get(hand.combo);
+    const equity = equityMap.get(comboKey(hand.combo));
     if (equity == null || !Number.isFinite(equity)) {
       continue;
     }
@@ -484,9 +484,7 @@ export function comboBreakdown(
         }
       }
     }
-    const equity =
-      equityMap.get(slot.combo) ??
-      (hand ? equityMap.get(hand.combo) : undefined);
+    const equity = equityMap.get(comboKey(slot.combo));
     return {
       combo: slot.combo,
       label: slot.label,

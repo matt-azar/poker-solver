@@ -78,6 +78,23 @@ describe("equity aggregation", () => {
     expect(groupEquity(aa, map, node)).toBeCloseTo(2 / 3, 12);
   });
 
+  it("normalizes equity combo keys so suit order variants still match", () => {
+    const node = {
+      node_id: "n",
+      player: 0,
+      reach_defined: true,
+      actions: ["Check"],
+      combos: ["AhAd"],
+      reach: [1],
+      marginal: [1],
+      strategy: [[1]],
+    };
+    const aa = groupHands(node).find((c) => c.text === "AA")!;
+    // Engine may emit AdAh; node lists AhAd — both canonicalize to the same key.
+    const map = equityByCombo([{ combo: "AdAh", equity: 0.75 }]);
+    expect(groupEquity(aa, map, node)).toBeCloseTo(0.75, 12);
+  });
+
   it("falls back to unweighted mean when reach is missing", () => {
     const node = {
       node_id: "n",
