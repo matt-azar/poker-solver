@@ -19,6 +19,7 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
+const { useMatrixDisplayStore } = await import("../../domain/matrixDisplay");
 const { useStudyStore } = await import("../../state/studyStore");
 const { ComboInspector } = await import("./ComboInspector");
 
@@ -37,6 +38,8 @@ const aaNode: NodePayload = {
 
 describe("ComboInspector", () => {
   beforeEach(() => {
+    localStorage.clear();
+    useMatrixDisplayStore.getState().resetPrefs();
     useStudyStore.setState({
       currentNode: aaNode,
       nodeValues: null,
@@ -51,6 +54,8 @@ describe("ComboInspector", () => {
       strategyEditDraft: { kind: "selected", handIndices: [], probs: [0.5, 0.5] },
       strategyEditDraftBaseline: null,
       strategyEditScope: null,
+      status: { pot: 100 },
+      draft: { ...useStudyStore.getState().draft, pot: 100 },
     });
   });
 
@@ -82,7 +87,7 @@ describe("ComboInspector", () => {
     expect(screen.getByText("Hover a hand in the grid.")).toBeTruthy();
   });
 
-  it("lists strategy weight-fill segments and per-action EV across the pair suit grid", () => {
+  it("renders GTOWizard-style badge, black metrics, and aggressive-left paint", () => {
     useStudyStore.setState({
       nodeValues: {
         node_id: "p0",
@@ -98,30 +103,34 @@ describe("ComboInspector", () => {
         utility_basis: "local",
       },
     });
+    useMatrixDisplayStore.getState().setCellOverlay("ev");
     render(<ComboInspector />);
-    // Pairs use 6 suit slots (3 present in this fixture).
     expect(document.querySelectorAll(".hands-combo")).toHaveLength(6);
     expect(
       document.querySelectorAll('.hands-combo[data-present="true"]'),
     ).toHaveLength(3);
-    expect(screen.getByText("0.50")).toBeTruthy();
-    expect(screen.getByText("2.50")).toBeTruthy();
-    expect(
-      document.querySelectorAll(
-        '.hands-combo[data-present="true"] .hands-combo__weight-fill .hands-combo__seg',
-      ).length,
-    ).toBeGreaterThan(0);
-    expect(screen.queryByText("Reach mass")).toBeNull();
-    expect(screen.queryByText("Mixed EV")).toBeNull();
+    expect(document.querySelector(".hands-combo__badge")).toBeTruthy();
+    expect(document.querySelector(".hands-combo__badge-suit")?.textContent).toMatch(
+      /[♠♥♦♣]/,
+    );
+    expect(screen.getByText("0.5")).toBeTruthy();
+    expect(screen.getByText("2.5")).toBeTruthy();
     const present = document.querySelector(
       '.hands-combo[data-present="true"]',
     ) as HTMLElement;
-    expect(present.style.getPropertyValue("--mass-fill")).toBe("1");
-    expect(present.querySelector(".hands-combo__weight-fill")).toBeTruthy();
-    expect(present.querySelector(".inspector-combo__mix")).toBeNull();
+    const segs = [
+      ...present.querySelectorAll(".hands-combo__weight-fill .hands-combo__seg"),
+    ] as HTMLElement[];
+    expect(segs.length).toBeGreaterThan(0);
+    // Bet (aggressive) should be the left-most segment (#C9843F → rgb).
+    expect(segs[0]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
+    expect(present.querySelector(".hands-combo__metric-action")?.textContent).toMatch(
+      /b50|Bet/i,
+    );
   });
 
-  it("scales --mass-fill by relative combo mass", () => {
+  it("uses absolute reach for --mass-fill when Weight fill is on", () => {
+    useMatrixDisplayStore.getState().setRangeWeightHeightFill(true);
     useStudyStore.setState({
       currentNode: {
         ...aaNode,
@@ -134,7 +143,24 @@ describe("ComboInspector", () => {
       ...document.querySelectorAll('.hands-combo[data-present="true"]'),
     ].map((el) => Number((el as HTMLElement).style.getPropertyValue("--mass-fill")));
     expect(fills).toContain(1);
-    expect(fills.some((value) => value > 0 && value < 1)).toBe(true);
+    expect(fills).toContain(0.5);
+    expect(fills).toContain(0.25);
+  });
+
+  it("keeps full-height fill when Weight fill is off", () => {
+    useMatrixDisplayStore.getState().setRangeWeightHeightFill(false);
+    useStudyStore.setState({
+      currentNode: {
+        ...aaNode,
+        reach: [1, 0.5, 0.25],
+        marginal: [1, 0.5, 0.25],
+      },
+    });
+    render(<ComboInspector />);
+    const fills = [
+      ...document.querySelectorAll('.hands-combo[data-present="true"]'),
+    ].map((el) => Number((el as HTMLElement).style.getPropertyValue("--mass-fill")));
+    expect(fills.every((value) => value === 1)).toBe(true);
   });
 
   it("shows 12 offsuit suit slots for an unpaired offsuit cell", () => {
@@ -143,7 +169,6 @@ describe("ComboInspector", () => {
         node_id: "p0",
         reach_defined: true,
         actions: ["Check", "Bet 50"],
-        // AKo-style: two offsuit combos only
         combos: ["AcKd", "AsKh"],
         marginal: [1, 1],
         strategy: [
@@ -151,7 +176,6 @@ describe("ComboInspector", () => {
           [0.4, 0.6],
         ],
       },
-      // AKo is row>col for A=0,K=1 → row 1 col 0 in RANKS A,K,Q...
       selectedCell: { row: 1, col: 0, text: "AKo" },
       nodeValues: null,
     });

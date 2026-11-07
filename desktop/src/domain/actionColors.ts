@@ -44,6 +44,12 @@ export function actionIdentity(label: string): string {
   if (match) {
     return `${match[1].toLowerCase()}:${match[2].replace(/\s+/g, "").toLowerCase()}`;
   }
+  // Compact pot tags from Study chrome (`b50`, `r150`).
+  const compact = normalized.match(/^([br])(\d+(?:\.\d+)?)/i);
+  if (compact) {
+    const kind = compact[1]!.toLowerCase() === "r" ? "raise" : "bet";
+    return `${kind}:${compact[2]}`;
+  }
   return lower;
 }
 

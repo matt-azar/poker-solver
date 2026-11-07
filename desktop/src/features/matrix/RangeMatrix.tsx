@@ -7,6 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { mapActionColors } from "../../domain/actionColors";
+import { orderActionIndicesByAggression } from "../../domain/actionOrder";
 import {
   type AggregatedHandCell,
   formatRangeInclusion,
@@ -335,9 +336,11 @@ function MatrixRow({
           if (showStrategy) {
             const mix = strategyMix(cell);
             if (mix) {
-              segments = mix.map((weight, index) => ({
+              const actionLabels = currentNode?.actions ?? [];
+              const order = orderActionIndicesByAggression(actionLabels);
+              segments = order.map((index) => ({
                 color: colors[index] || "#666",
-                weight,
+                weight: mix[index] ?? 0,
               }));
             }
             actionMixing = hasWithinHandActionMixing(cell);

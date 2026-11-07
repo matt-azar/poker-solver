@@ -1,11 +1,22 @@
 import { useMemo } from "react";
+import { actionSizePotBasis } from "../../domain/actionHistory";
 import { mapActionColors } from "../../domain/actionColors";
+import { orderActionIndicesByAggression } from "../../domain/actionOrder";
+import {
+  formatActionDisplay,
+  formatFrequencyPct,
+} from "../../domain/betSizes";
 import { groupHands, withEvBasis } from "../../domain/browse";
 import {
   cellShape,
+  comboBadgeCards,
   comboBreakdown,
   comboKey,
+  formatEquityPct,
+  formatEvChip,
   type ComboBreakdownSquare,
+  useMatrixDisplayStore,
+  weightFillFraction,
 } from "../../domain/matrixDisplay";
 import type {
   ActionValuesPayload,
@@ -13,6 +24,7 @@ import type {
   NodePayload,
 } from "../../domain/types";
 import { RANKS } from "../../domain/types";
+import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 
 function comboActionEvs(
@@ -61,14 +73,15 @@ function shapeColumns(shape: ReturnType<typeof cellShape>): number {
   return 4;
 }
 
-function squareMass(square: ComboBreakdownSquare): number {
+function squareMass(square: ComboBreakdownSquare): number | null {
   if (square.reach != null && Number.isFinite(square.reach)) {
     return Math.max(0, square.reach);
   }
   if (square.marginal != null && Number.isFinite(square.marginal)) {
-    return Math.max(0, square.marginal);
+    // Posterior mass can exceed 1 across a node; clamp for height fill.
+    return Math.max(0, Math.min(1, square.marginal));
   }
-  return square.present ? 1 : 0;
+  return square.present ? 1 : null;
 }
 
 /** Hands list for the hovered/selected 169-cell in the Study detail panel. */
@@ -80,6 +93,10 @@ export function ComboInspector() {
   const hoverCell = useStudyStore((s) => s.hoverCell);
   const calculateEv = useStudyStore((s) => s.calculateEv);
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
+  const status = useStudyStore((s) => s.status);
+  const draft = useStudyStore((s) => s.draft);
+  const displayPrefs = useMatrixDisplayStore((s) => s.prefs);
+  const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
 
   const focus = selectedCell ?? hoverCell;
   const cell = useMemo(() => {
@@ -108,14 +125,6 @@ export function ComboInspector() {
     );
   }, [cell, currentNode, nodeValues, evDisplayBasis]);
 
-  const maxMass = useMemo(() => {
-    let peak = 0;
-    for (const square of squares) {
-      peak = Math.max(peak, squareMass(square));
-    }
-    return peak;
-  }, [squares]);
-
   const handByCombo = useMemo(() => {
     const map = new Map<
       string,
@@ -132,9 +141,23 @@ export function ComboInspector() {
 
   const pinned = Boolean(selectedCell);
   const actions = currentNode?.actions ?? [];
-  const evReady = Boolean(nodeValues && !nodeValues.pending);
+  const actionOrder = useMemo(
+    () => orderActionIndicesByAggression(actions),
+    [actions],
+  );
+  const pot = actionSizePotBasis(
+    currentNode,
+    Number(status?.pot ?? draft.pot ?? 0),
+  );
+  const toCall = Number(currentNode?.to_call ?? 0);
+  const overlay = displayPrefs.cellOverlay;
+  const showEv = overlay === "ev" || overlay === "both";
+  const showEq = overlay === "equity" || overlay === "both";
+  const showFreq = overlay === "none" || overlay === "equity";
+  const weightFillOn = displayPrefs.rangeWeightHeightFill;
   const shape = cell ? cellShape(cell.row, cell.col) : "pair";
   const cols = shapeColumns(shape);
+  const metricLabel = showEv ? "EV" : showEq ? "Eq" : "Freq";
 
   return (
     <section className="combo-inspector" aria-label="Hands">
@@ -158,23 +181,10 @@ export function ComboInspector() {
               Calculate action EVs
             </button>
           ) : null}
-          {actions.length > 0 ? (
-            <div className="hands-ev-legend" aria-hidden={!evReady}>
-              <span className="hands-ev-legend__spacer" />
-              {actions.map((label, index) => (
-                <span
-                  key={`ev-h-${label}-${index}`}
-                  className="hands-ev-legend__action tabular"
-                  style={{ color: colors.byIndex[index] }}
-                >
-                  {label}
-                </span>
-              ))}
-            </div>
-          ) : null}
           <div
             className="inspector-combos hands-combo-grid"
             data-shape={shape}
+            data-weight-fill={weightFillOn ? "true" : "false"}
             style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
           >
             {squares.map((square) => {
@@ -188,33 +198,51 @@ export function ComboInspector() {
                   )
                 : null;
               const mass = squareMass(square);
-              const massFill =
-                square.present && maxMass > 0
-                  ? Math.max(0, Math.min(1, mass / maxMass))
-                  : 0;
-              const segments = (hand?.actions ?? []).filter(
-                (action) => action.probability > 0.001,
+              const massFill = weightFillFraction(
+                weightFillOn,
+                square.present ? (mass ?? 1) : 0,
               );
+              const freqByLabel = new Map(
+                (hand?.actions ?? []).map((entry) => [
+                  entry.action,
+                  entry.probability,
+                ]),
+              );
+              const segments = actionOrder
+                .map((index) => {
+                  const label = actions[index]!;
+                  const probability =
+                    square.strategy?.[index] ?? freqByLabel.get(label) ?? 0;
+                  return {
+                    index,
+                    label,
+                    probability,
+                    color: colors.byIndex[index] || "#666",
+                  };
+                })
+                .filter((entry) => entry.probability > 0.001);
+              const badgeCards = comboBadgeCards(square.combo);
               return (
                 <div
                   key={square.combo}
                   className="inspector-combo hands-combo"
                   data-present={square.present ? "true" : "false"}
+                  data-weight-fill={weightFillOn ? "true" : "false"}
                   style={{ ["--mass-fill" as string]: String(massFill) }}
                   title={square.combo}
                 >
                   <div className="hands-combo__weight-fill">
                     {segments.length > 0 ? (
                       <div className="hands-combo__segments">
-                        {segments.map((action) => (
+                        {segments.map((entry) => (
                           <span
-                            key={action.action}
+                            key={entry.label}
                             className="hands-combo__seg"
-                            title={`${action.action} ${(action.probability * 100).toFixed(0)}%`}
+                            title={`${entry.label} ${(entry.probability * 100).toFixed(0)}%`}
                             style={{
-                              flexGrow: action.probability,
+                              flexGrow: entry.probability,
                               flexBasis: 0,
-                              background: colors.byLabel[action.action] || "#666",
+                              background: entry.color,
                             }}
                           />
                         ))}
@@ -222,26 +250,68 @@ export function ComboInspector() {
                     ) : null}
                   </div>
                   <div className="hands-combo__body">
-                    <code className="hands-combo__code" title={square.combo}>
-                      {square.label}
-                    </code>
-                    <div className="hands-combo__evs">
-                      {actions.map((label, index) => {
-                        const value = actionEvs?.[index];
-                        return (
-                          <span
-                            key={`${square.combo}-ev-${index}`}
-                            className="hands-combo__ev tabular"
-                            title={label}
-                            style={{ color: colors.byIndex[index] }}
-                          >
-                            {!square.present || value == null
-                              ? "—"
-                              : value.toFixed(2)}
-                          </span>
-                        );
-                      })}
+                    <div className="hands-combo__top">
+                      <span className="hands-combo__badge" title={square.combo}>
+                        {badgeCards.length > 0
+                          ? badgeCards.map((card, index) => (
+                              <span
+                                key={`${square.combo}-${index}`}
+                                className="hands-combo__badge-card"
+                                data-red={card.red ? "true" : "false"}
+                              >
+                                <span className="hands-combo__badge-rank">
+                                  {card.rank}
+                                </span>
+                                <span className="hands-combo__badge-suit">
+                                  {card.symbol}
+                                </span>
+                              </span>
+                            ))
+                          : square.label}
+                      </span>
+                      <span className="hands-combo__metric-tag">{metricLabel}</span>
                     </div>
+                    {square.present ? (
+                      <div className="hands-combo__metrics">
+                        {actionOrder.map((index) => {
+                          const label = actions[index]!;
+                          const display = formatActionDisplay(
+                            label,
+                            pot,
+                            betSizeDisplay === "chips" ? "chips" : "pot",
+                            { toCall },
+                          );
+                          const freq = freqByLabel.get(label) ?? 0;
+                          let valueText = "—";
+                          if (showEv) {
+                            valueText = formatEvChip(actionEvs?.[index] ?? null);
+                          } else if (showFreq) {
+                            valueText = formatFrequencyPct(freq, 0) ?? "—";
+                          }
+                          return (
+                            <div
+                              key={`${square.combo}-metric-${index}`}
+                              className="hands-combo__metric-row"
+                            >
+                              <span className="hands-combo__metric-action">
+                                {display.primary}
+                              </span>
+                              <span className="hands-combo__metric-value tabular">
+                                {valueText}
+                              </span>
+                            </div>
+                          );
+                        })}
+                        {showEq ? (
+                          <div className="hands-combo__metric-row hands-combo__metric-row--eq">
+                            <span className="hands-combo__metric-action">Eq</span>
+                            <span className="hands-combo__metric-value tabular">
+                              {formatEquityPct(square.equity)}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               );
