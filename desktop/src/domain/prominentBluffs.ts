@@ -6,6 +6,33 @@ import type { EquityHandRow } from "./analysis";
 import { comboKey } from "./matrixDisplay";
 import { RANKS, type NodePayload } from "./types";
 
+/** Local copy of features/matrix/childIdAt — keep domain free of features imports. */
+function childIdAt(
+  children: unknown[] | undefined,
+  index: number,
+): string | null {
+  if (!children) {
+    return null;
+  }
+  const child = children[index];
+  if (!child) {
+    return null;
+  }
+  if (typeof child === "string") {
+    return child;
+  }
+  if (
+    typeof child === "object" &&
+    child !== null &&
+    "node_id" in child &&
+    typeof (child as { node_id?: unknown }).node_id === "string" &&
+    (child as { node_id: string }).node_id
+  ) {
+    return (child as { node_id: string }).node_id;
+  }
+  return null;
+}
+
 /** UI default; callers pass the live threshold from panel state. */
 export const DEFAULT_BLUFF_EQUITY_THRESHOLD = 0.3;
 
@@ -45,6 +72,11 @@ export function isBluffBettingAction(label: string): boolean {
   return /^all[\s-]*in$/i.test(trimmed);
 }
 
+/** True when the label is a Call (not Check). */
+export function isCallAction(label: string): boolean {
+  return /^call\b/i.test(label.trim());
+}
+
 /** Sum of betting-action probabilities for one strategy row. */
 export function betFrequency(
   strategyRow: number[] | null | undefined,
@@ -67,15 +99,18 @@ export function betFrequency(
   return sum;
 }
 
-/** Betting label with the largest probability on this row (ties → first). */
-export function topBettingAction(
+/**
+ * Index of the betting action with the largest probability (ties → first).
+ * Returns -1 when no betting action has positive mass.
+ */
+export function topBettingActionIndex(
   strategyRow: number[] | null | undefined,
   actions: string[] | null | undefined,
-): string | null {
+): number {
   if (!strategyRow?.length || !actions?.length) {
-    return null;
+    return -1;
   }
-  let bestLabel: string | null = null;
+  let bestIndex = -1;
   let bestProb = -1;
   const n = Math.min(strategyRow.length, actions.length);
   for (let index = 0; index < n; index += 1) {
@@ -88,9 +123,128 @@ export function topBettingAction(
       continue;
     }
     bestProb = probability;
-    bestLabel = label;
+    bestIndex = index;
   }
-  return bestLabel;
+  return bestIndex;
+}
+
+/** Betting label with the largest probability on this row (ties → first). */
+export function topBettingAction(
+  strategyRow: number[] | null | undefined,
+  actions: string[] | null | undefined,
+): string | null {
+  if (!actions?.length) {
+    return null;
+  }
+  const index = topBettingActionIndex(strategyRow, actions);
+  return index >= 0 ? (actions[index] ?? null) : null;
+}
+
+/** First Call action index on a facing node, or -1. */
+export function callActionIndex(actions: string[] | null | undefined): number {
+  if (!actions?.length) {
+    return -1;
+  }
+  return actions.findIndex((label) => isCallAction(label));
+}
+
+/** Facing-node child id for a betting action on the hero decision node. */
+export function facingChildIdForBet(
+  node: Pick<NodePayload, "children"> | null | undefined,
+  betActionIndex: number,
+): string | null {
+  if (betActionIndex < 0) {
+    return null;
+  }
+  return childIdAt(node?.children as unknown[] | undefined, betActionIndex);
+}
+
+/** Call-child node id from an opponent facing-bet node. */
+export function callChildIdFromFacing(
+  facing: Pick<NodePayload, "actions" | "children"> | null | undefined,
+): string | null {
+  const index = callActionIndex(facing?.actions);
+  if (index < 0) {
+    return null;
+  }
+  return childIdAt(facing?.children as unknown[] | undefined, index);
+}
+
+/**
+ * Distinct betting-action indices that are the max-prob size for at least one
+ * combo with betFreq >= minBetFreq (Mode B multi-size default).
+ */
+export function dominantBettingActionIndices(
+  node: NodePayload | null | undefined,
+  minBetFreq = MIN_BET_FREQ,
+): number[] {
+  if (!isDecisionWithStrategy(node)) {
+    return [];
+  }
+  const actions = node!.actions ?? [];
+  const combos = node!.combos ?? [];
+  const strategy = node!.strategy ?? [];
+  const seen = new Set<number>();
+  for (let index = 0; index < combos.length; index += 1) {
+    const row = strategy[index];
+    if (!(betFrequency(row, actions) >= minBetFreq)) {
+      continue;
+    }
+    const actionIndex = topBettingActionIndex(row, actions);
+    if (actionIndex >= 0) {
+      seen.add(actionIndex);
+    }
+  }
+  return [...seen].sort((left, right) => left - right);
+}
+
+/**
+ * Build acting-seat equity rows for Mode B: each combo uses equity from the
+ * Call-child payload of its dominant betting size.
+ */
+export function equityHandsForDominantSizes(args: {
+  node: NodePayload | null | undefined;
+  /** betActionIndex → acting-seat equity hands at that size's Call child */
+  handsByBetAction: Map<number, EquityHandRow[] | null | undefined>;
+  minBetFreq?: number;
+}): EquityHandRow[] {
+  const { node, handsByBetAction, minBetFreq = MIN_BET_FREQ } = args;
+  if (!isDecisionWithStrategy(node)) {
+    return [];
+  }
+  const actions = node!.actions ?? [];
+  const combos = node!.combos ?? [];
+  const strategy = node!.strategy ?? [];
+  const out: EquityHandRow[] = [];
+  for (let index = 0; index < combos.length; index += 1) {
+    const combo = combos[index];
+    if (!combo) {
+      continue;
+    }
+    const row = strategy[index];
+    if (!(betFrequency(row, actions) >= minBetFreq)) {
+      continue;
+    }
+    const actionIndex = topBettingActionIndex(row, actions);
+    if (actionIndex < 0) {
+      continue;
+    }
+    const hands = handsByBetAction.get(actionIndex);
+    if (!hands?.length) {
+      continue;
+    }
+    const key = comboKey(combo);
+    const match = hands.find((hand) => comboKey(hand.combo) === key);
+    if (!match || !Number.isFinite(Number(match.equity))) {
+      continue;
+    }
+    out.push({
+      combo,
+      equity: Number(match.equity),
+      weight: Number(match.weight),
+    });
+  }
+  return out;
 }
 
 /**
