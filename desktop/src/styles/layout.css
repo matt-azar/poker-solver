@@ -2620,31 +2620,43 @@
   }
 }
 
-/* --- Lock editor drawer (append-only) --- */
-
-/* Node-lock side drawer on Study. */
-.lock-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 30;
-  width: min(480px, 100%);
-  display: flex;
-  flex-direction: column;
-  background: var(--panel);
-  border-left: 1px solid var(--border);
-  box-shadow: var(--shadow-soft);
-  min-height: 0;
-}
+/* --- Pio-style dedicated Node Locking workspace --- */
 
 /* Study page column: context, history, matrix, lower dock. */
 .study-workspace {
   position: relative;
 }
 
-/* Lock drawer title bar. */
-.lock-drawer__header {
+/* Dimmed backdrop behind the Node Locking dialog. */
+.node-lock-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: var(--space-2);
+  background: color-mix(in srgb, var(--app-bg) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+/* Full dedicated Node Locking dialog (Pio-like). */
+.node-lock-workspace {
+  width: min(1280px, 100%);
+  height: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Title bar with Cancel / Save & Close. */
+.node-lock-workspace__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -2654,28 +2666,105 @@
   flex-shrink: 0;
 }
 
-/* Locked node id display. */
-.lock-drawer__node {
+/* Header action cluster. */
+.node-lock-workspace__header-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+/* Node id under the Node Locking title. */
+.node-lock-workspace__node {
   margin: 2px 0 0;
   font-size: 11px;
   line-height: 1.35;
 }
 
-/* Locked node id display. — inline code / id text. */
-.lock-drawer__node code {
+.node-lock-workspace__node code {
   font-family: var(--font-mono);
   font-size: 11px;
 }
 
-/* Scrollable lock drawer content. */
-.lock-drawer__body {
+/* Grid + rail body. */
+.node-lock-workspace__body {
   flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.9fr);
+  gap: 0;
+}
+
+/* Left: paint matrix + focused combos. */
+.node-lock-workspace__grid {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-right: 1px solid var(--border);
+}
+
+/* Right: strategy bars, sliders, resolve. */
+.node-lock-workspace__rail {
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   padding: var(--space-2) var(--space-3) var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  background: color-mix(in srgb, var(--secondary) 55%, var(--panel));
+}
+
+/* Scope + highlight toolbar above the paint grid. */
+.node-lock-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Overall / selected / draft strategy bars. */
+.node-lock-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.node-lock-bar__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.node-lock-bar__track {
+  display: flex;
+  height: 14px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--empty-cell);
+}
+
+.node-lock-bar__seg {
+  min-width: 0;
+  display: block;
+}
+
+.node-lock-bar__legend {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* Focused hand-class combo list under the paint grid. */
+.node-lock-focus {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 /* One section inside the lock drawer. */
@@ -2811,39 +2900,72 @@
 
 /* One hand-class cell in the lock paint grid. */
 .lock-paint-cell {
+  position: relative;
   border: 0;
   min-width: 0;
   min-height: 0;
   font-size: clamp(6px, 1.8cqmin, 11px);
   padding: 0;
   background: var(--empty-cell);
-  color: var(--muted);
+  color: #fff;
   user-select: none;
   touch-action: none;
   cursor: crosshair;
   line-height: 1;
+  overflow: hidden;
+}
+
+.lock-paint-cell__segments {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  z-index: 0;
+}
+
+.lock-paint-cell__seg {
+  min-width: 0;
+  display: block;
+}
+
+.lock-paint-cell__label {
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.75);
+  font-weight: 650;
 }
 
 /* One hand-class cell in the lock paint grid. */
 .lock-paint-cell[data-available="false"] {
   opacity: 0.35;
   cursor: default;
+  color: var(--muted);
+  text-shadow: none;
 }
 
-/* One hand-class cell in the lock paint grid. (active). */
+.lock-paint-cell[data-dimmed="true"] {
+  opacity: 0.28;
+}
+
+.lock-paint-cell[data-hover="true"] {
+  outline: 1px solid color-mix(in srgb, var(--text) 55%, transparent);
+  outline-offset: -1px;
+  z-index: 2;
+}
+
+/* Selected classes get an accent ring over strategy paint. */
 .lock-paint-cell[data-selected="true"] {
-  background: color-mix(in srgb, var(--accent) 55%, var(--empty-cell));
-  color: #fff;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 85%, #fff);
 }
 
-/* One hand-class cell in the lock paint grid. (active). */
+/* Locked classes get a green ring (stacks with selected). */
 .lock-paint-cell[data-locked="true"] {
-  box-shadow: inset 0 0 0 1px var(--ok);
+  box-shadow: inset 0 0 0 2px var(--ok);
 }
 
-/* One hand-class cell in the lock paint grid. (active). */
 .lock-paint-cell[data-selected="true"][data-locked="true"] {
-  background: color-mix(in srgb, var(--ok) 45%, var(--accent) 25%);
+  box-shadow:
+    inset 0 0 0 2px var(--ok),
+    inset 0 0 0 4px color-mix(in srgb, var(--accent) 80%, #fff);
 }
 
 /* Probability editor grid for a locked strategy row. */
@@ -2860,6 +2982,16 @@
   gap: 8px;
   align-items: center;
   font-size: 12px;
+}
+
+/* Slider + number + pct for Pio-style frequency editing. */
+.lock-prob-row--slider {
+  grid-template-columns: minmax(56px, 0.7fr) minmax(80px, 1.4fr) 64px auto;
+}
+
+.lock-prob-slider {
+  width: 100%;
+  accent-color: var(--accent);
 }
 
 /* Action label on a lock probability row. */
@@ -2958,16 +3090,23 @@
 
 /* Responsive overrides below 900px width. */
 @media (max-width: 900px) {
-  /* Node-lock side drawer on Study. */
-  .lock-drawer {
-    top: auto;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: 100%;
-    height: min(55vh, 420px);
-    border-left: 0;
-    border-top: 1px solid var(--border);
+  .node-lock-overlay {
+    padding: 0;
+  }
+
+  .node-lock-workspace {
+    border-radius: 0;
+    border: 0;
+  }
+
+  .node-lock-workspace__body {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(240px, 48%) minmax(0, 1fr);
+  }
+
+  .node-lock-workspace__grid {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
   }
 }
 
