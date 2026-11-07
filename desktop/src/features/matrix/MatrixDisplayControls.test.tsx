@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMatrixDisplayStore } from "../../domain/matrixDisplay";
 
@@ -30,6 +30,7 @@ describe("MatrixDisplayControls", () => {
     calculateEv.mockClear();
     useMatrixDisplayStore.getState().resetPrefs();
     useStudyStore.setState({
+      solutionId: "sol-1",
       currentNode: {
         node_id: "n1",
         reach_defined: true,
@@ -59,6 +60,52 @@ describe("MatrixDisplayControls", () => {
     const select = screen.getByLabelText("Overlay");
     fireEvent.change(select, { target: { value: "equity" } });
     expect(useMatrixDisplayStore.getState().prefs.cellOverlay).toBe("equity");
-    expect(screen.getByRole("button", { name: "Load Eq" })).toBeTruthy();
+  });
+
+  it("auto-loads equity when equity overlay is selected", async () => {
+    render(<MatrixDisplayControls />);
+    fireEvent.change(screen.getByLabelText("Overlay"), {
+      target: { value: "equity" },
+    });
+    await waitFor(() => {
+      expect(loadEquity).toHaveBeenCalled();
+    });
+    expect(calculateEv).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Load Eq" })).toBeNull();
+  });
+
+  it("auto-loads EV when EV overlay is selected", async () => {
+    render(<MatrixDisplayControls />);
+    fireEvent.change(screen.getByLabelText("Overlay"), {
+      target: { value: "ev" },
+    });
+    await waitFor(() => {
+      expect(calculateEv).toHaveBeenCalled();
+    });
+    expect(loadEquity).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Load EV" })).toBeNull();
+  });
+
+  it("auto-loads both when EV+Eq overlay is selected", async () => {
+    render(<MatrixDisplayControls />);
+    fireEvent.change(screen.getByLabelText("Overlay"), {
+      target: { value: "both" },
+    });
+    await waitFor(() => {
+      expect(loadEquity).toHaveBeenCalled();
+      expect(calculateEv).toHaveBeenCalled();
+    });
+  });
+
+  it("does not reload when equity for the live node is already ready", async () => {
+    useStudyStore.setState({
+      equity: { pending: false, node_id: "n1", solution_id: "sol-1" },
+    });
+    useMatrixDisplayStore.getState().setCellOverlay("equity");
+    render(<MatrixDisplayControls />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Overlay")).toBeTruthy();
+    });
+    expect(loadEquity).not.toHaveBeenCalled();
   });
 });

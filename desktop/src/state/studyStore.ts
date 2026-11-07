@@ -2359,7 +2359,7 @@ pathTrail,
     );
     set({
       message: "Loading equity…",
-      analysisTab: "equity",
+      // Keep the current analysis tab — matrix overlay auto-load must not steal focus.
       equity: { pending: true, node_id: node.node_id, solution_id: solutionId },
     });
     await pollAnalysis(
