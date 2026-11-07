@@ -3,11 +3,17 @@ import {
   DEFAULT_BLUFF_EQUITY_THRESHOLD,
   MIN_BET_FREQ,
   betFrequency,
+  callChildIdFromFacing,
+  dominantBettingActionIndices,
+  equityHandsForDominantSizes,
+  facingChildIdForBet,
   isBluffBettingAction,
   listProminentBluffs,
   matrixCellForCombo,
   topBettingAction,
+  topBettingActionIndex,
 } from "./prominentBluffs";
+import { fetchPostCallEquityHands } from "./prominentBluffsPostCall";
 import type { NodePayload } from "./types";
 
 function decision(partial: Partial<NodePayload> & Pick<NodePayload, "combos" | "actions" | "strategy">): NodePayload {
@@ -49,6 +55,160 @@ describe("betFrequency / topBettingAction", () => {
   it("includes bare All-in in the sum", () => {
     const actions = ["Check", "All-in"];
     expect(betFrequency([0.4, 0.6], actions)).toBeCloseTo(0.6, 12);
+  });
+
+  it("exposes the dominant betting action index", () => {
+    expect(topBettingActionIndex([0.2, 0.3, 0.5], ["Check", "Bet 33", "Bet 75"])).toBe(
+      2,
+    );
+  });
+});
+
+describe("call-path helpers", () => {
+  it("resolves facing and Call child ids", () => {
+    const hero = decision({
+      actions: ["Check", "Bet 50", "Bet 100"],
+      combos: ["AhAd"],
+      strategy: [[0.1, 0.2, 0.7]],
+      children: ["n-check", "n-bet50", "n-bet100"],
+    });
+    expect(facingChildIdForBet(hero, 2)).toBe("n-bet100");
+    expect(
+      callChildIdFromFacing({
+        actions: ["Fold", "Call", "Raise to 200"],
+        children: ["n-fold", "n-call", "n-raise"],
+      }),
+    ).toBe("n-call");
+    expect(
+      callChildIdFromFacing({
+        actions: ["Fold"],
+        children: ["n-fold"],
+      }),
+    ).toBeNull();
+  });
+
+  it("collects distinct dominant bet sizes across hands", () => {
+    const node = decision({
+      actions: ["Check", "Bet 50", "Bet 100"],
+      combos: ["AhAd", "KhKd", "7h2d"],
+      strategy: [
+        [0.1, 0.9, 0], // Bet 50
+        [0.1, 0.1, 0.8], // Bet 100
+        [0.995, 0.005, 0], // below floor
+      ],
+    });
+    expect(dominantBettingActionIndices(node)).toEqual([1, 2]);
+  });
+
+  it("builds Mode B equity hands from each hand's dominant size", () => {
+    const node = decision({
+      actions: ["Check", "Bet 50", "Bet 100"],
+      combos: ["AhAd", "KhKd"],
+      strategy: [
+        [0, 1, 0],
+        [0, 0.2, 0.8],
+      ],
+    });
+    const handsByBetAction = new Map([
+      [1, [{ combo: "AhAd", equity: 0.11, weight: 1 }]],
+      [2, [{ combo: "KhKd", equity: 0.22, weight: 1 }]],
+    ]);
+    const hands = equityHandsForDominantSizes({ node, handsByBetAction });
+    expect(hands).toEqual([
+      { combo: "AhAd", equity: 0.11, weight: 1 },
+      { combo: "KhKd", equity: 0.22, weight: 1 },
+    ]);
+    const rows = listProminentBluffs({
+      node,
+      equityHands: hands,
+      threshold: 0.3,
+    });
+    expect(rows.map((row) => row.combo)).toEqual(["AhAd", "KhKd"]);
+    expect(rows[0]!.equity).toBeCloseTo(0.11, 12);
+    expect(rows[1]!.equity).toBeCloseTo(0.22, 12);
+  });
+});
+
+describe("fetchPostCallEquityHands", () => {
+  it("walks bet → facing → Call and joins hero equity", async () => {
+    const hero = decision({
+      player: 0,
+      actions: ["Check", "Bet 50"],
+      combos: ["AhAd", "7h2d"],
+      strategy: [
+        [0.2, 0.8],
+        [0.1, 0.9],
+      ],
+      children: ["n-check", "n-bet50"],
+    });
+    const facing: NodePayload = {
+      node_id: "n-bet50",
+      kind: "decision",
+      actions: ["Fold", "Call"],
+      children: ["n-fold", "n-call"],
+      combos: [],
+    };
+    const result = await fetchPostCallEquityHands({
+      solutionId: "s1",
+      node: hero,
+      heroPlayer: 0,
+      deps: {
+        getNode: async (_sid, nodeId) => {
+          expect(nodeId).toBe("n-bet50");
+          return facing;
+        },
+        getEquity: async (_sid, nodeId) => {
+          expect(nodeId).toBe("n-call");
+          return {
+            pending: false,
+            oop_hands: [
+              { combo: "AhAd", equity: 0.4, weight: 1 },
+              { combo: "7h2d", equity: 0.08, weight: 1 },
+            ],
+            ip_hands: [],
+          };
+        },
+      },
+    });
+    expect(result.error).toBeNull();
+    expect(result.callNodeIds).toEqual(["n-call"]);
+    expect(result.hands.map((hand) => hand.combo)).toEqual(["AhAd", "7h2d"]);
+    const rows = listProminentBluffs({
+      node: hero,
+      equityHands: result.hands,
+      threshold: 0.3,
+    });
+    // AhAd equity 0.4 is not a bluff; 7h2d at 0.08 is.
+    expect(rows.map((row) => row.combo)).toEqual(["7h2d"]);
+  });
+
+  it("reports missing Call children", async () => {
+    const hero = decision({
+      actions: ["Bet 50"],
+      combos: ["AhAd"],
+      strategy: [[1]],
+      children: ["n-bet50"],
+    });
+    const result = await fetchPostCallEquityHands({
+      solutionId: "s1",
+      node: hero,
+      heroPlayer: 0,
+      deps: {
+        getNode: async () => ({
+          node_id: "n-bet50",
+          kind: "decision",
+          actions: ["Fold"],
+          children: ["n-fold"],
+          combos: [],
+        }),
+        getEquity: async () => {
+          throw new Error("should not fetch equity");
+        },
+      },
+    });
+    expect(result.hands).toEqual([]);
+    expect(result.missingCallCount).toBe(1);
+    expect(result.error).toMatch(/No Call child/i);
   });
 });
 
