@@ -1929,6 +1929,32 @@
   align-items: center;
 }
 
+.paint-weight-field {
+  min-width: 220px;
+}
+
+.paint-weight-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.paint-weight-controls input[type="range"] {
+  flex: 1 1 120px;
+  min-width: 100px;
+}
+
+.paint-weight-input {
+  width: 4.5rem;
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  min-height: 26px;
+  font-variant-numeric: tabular-nums;
+}
+
 .build-section label {
   display: flex;
   flex-direction: column;
@@ -4011,6 +4037,87 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.seat-tree__section-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.seat-tree__saved {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.seat-tree__saved-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.seat-tree__saved-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.seat-tree__saved-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seat-tree__save-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.seat-tree__save-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 180px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.seat-tree__save-form input,
+.seat-tree__edit input,
+.seat-tree__edit textarea {
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  min-height: 26px;
+}
+
+.seat-tree__edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.seat-tree__edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.seat-tree__error {
+  margin: 8px 0 0;
+  color: #c45c3a;
+  font-size: 12px;
 }
 
 .seat-tree__list {

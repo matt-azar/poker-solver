@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   canExecuteSolve,
   executeSolveAndOpenStudy,
@@ -141,6 +141,7 @@ export function BuildWorkspace() {
   const paintWeight = useStudyStore((s) => s.paintWeight);
   const setPaintWeight = useStudyStore((s) => s.setPaintWeight);
   const clearRange = useStudyStore((s) => s.clearRange);
+  const swapRanges = useStudyStore((s) => s.swapRanges);
   const undoRange = useStudyStore((s) => s.undoRange);
   const redoRange = useStudyStore((s) => s.redoRange);
   const canUndoRange = useStudyStore((s) => s.canUndoRange);
@@ -176,6 +177,24 @@ export function BuildWorkspace() {
   const [showTextOop, setShowTextOop] = useState(false);
   const [showTextIp, setShowTextIp] = useState(false);
   const [catalogueOpen, setCatalogueOpen] = useState<"oop" | "ip" | null>(null);
+  const [paintWeightDraft, setPaintWeightDraft] = useState(
+    paintWeight.toFixed(2),
+  );
+
+  useEffect(() => {
+    setPaintWeightDraft(paintWeight.toFixed(2));
+  }, [paintWeight]);
+
+  const commitPaintWeightDraft = (raw: string) => {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      setPaintWeightDraft(paintWeight.toFixed(2));
+      return;
+    }
+    const clamped = Math.max(0, Math.min(1, parsed));
+    setPaintWeight(clamped);
+    setPaintWeightDraft(clamped.toFixed(2));
+  };
 
   const showTextFor = (player: "oop" | "ip") =>
     player === "oop" ? showTextOop : showTextIp;
@@ -285,6 +304,11 @@ export function BuildWorkspace() {
               </button>
             </div>
             <SeatActionCatalogueTree
+              saveSource={{
+                label: catalogueOpen.toUpperCase(),
+                rangeText:
+                  catalogueOpen === "oop" ? draft.oopRange : draft.ipRange,
+              }}
               onPick={(atom) => {
                 setRangeText(catalogueOpen, atom.range);
                 setCatalogueOpen(null);
@@ -529,23 +553,49 @@ export function BuildWorkspace() {
         <section className="build-section" data-span="2">
           <h2>Ranges</h2>
           <div className="range-toolbar">
-            <label>
+            <label className="paint-weight-field">
               Paint weight
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={paintWeight}
-                onChange={(event) => setPaintWeight(Number(event.target.value))}
-              />
-              <span className="tabular">{paintWeight.toFixed(2)}</span>
+              <div className="paint-weight-controls">
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={paintWeight}
+                  aria-label="Paint weight slider"
+                  onChange={(event) => setPaintWeight(Number(event.target.value))}
+                />
+                <input
+                  type="number"
+                  className="paint-weight-input tabular"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={paintWeightDraft}
+                  aria-label="Paint weight value"
+                  onChange={(event) => setPaintWeightDraft(event.target.value)}
+                  onBlur={(event) => commitPaintWeightDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                />
+              </div>
             </label>
             <button type="button" className="toolbar-btn" disabled={!canUndoRange} onClick={undoRange}>
               Undo
             </button>
             <button type="button" className="toolbar-btn" disabled={!canRedoRange} onClick={redoRange}>
               Redo
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              title="Swap OOP and IP range values"
+              onClick={swapRanges}
+            >
+              Swap
             </button>
           </div>
           <div className="range-pair">

@@ -213,6 +213,8 @@ interface StudyState {
   /** Commit one undo entry for the stroke when anything changed. */
   endPaintStroke: () => void;
   clearRange: (player: "oop" | "ip") => void;
+  /** Swap OOP ↔ IP range text and grids (one undo step). Layout unchanged. */
+  swapRanges: () => void;
   undoRange: () => void;
   redoRange: () => void;
   canUndoRange: boolean;
@@ -888,6 +890,26 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       draft: {
         ...draft,
         [rangeKey(player)]: "",
+      },
+      draftRevision: bumpRevision(get().draftRevision),
+      canUndoRange: rangeHistory.canUndo(),
+      canRedoRange: rangeHistory.canRedo(),
+    });
+  },
+  swapRanges() {
+    const draft = get().draft;
+    const before = exactPairFromDraft(draft);
+    const nextPair = exactPairFromTexts(draft.ipRange, draft.oopRange);
+    if (exactPairsEqual(before, nextPair)) {
+      return;
+    }
+    rangeHistory.push(before);
+    set({
+      weights: weightsFromExactPair(nextPair),
+      draft: {
+        ...draft,
+        oopRange: draft.ipRange,
+        ipRange: draft.oopRange,
       },
       draftRevision: bumpRevision(get().draftRevision),
       canUndoRange: rangeHistory.canUndo(),
