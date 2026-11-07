@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { groupHands } from "./browse";
 import {
+  comboBadgeCards,
   comboBreakdown,
   comboEv,
   comboHoverPaint,
@@ -143,6 +144,21 @@ describe("overlay labels and weight fill", () => {
     expect(weightFillFraction(true, 0.3)).toBeCloseTo(0.3, 12);
     expect(weightFillFraction(true, null)).toBe(0);
     expect(weightFillFraction(true, 1.5)).toBe(1);
+  });
+});
+
+describe("comboBadgeCards", () => {
+  it("formats rank + suit glyph cards for a white badge", () => {
+    expect(comboBadgeCards("AcQc")).toEqual([
+      { rank: "A", suit: "c", symbol: "♣", red: false },
+      { rank: "Q", suit: "c", symbol: "♣", red: false },
+    ]);
+    expect(comboBadgeCards("AhKd")[0]).toMatchObject({
+      rank: "A",
+      suit: "h",
+      symbol: "♥",
+      red: true,
+    });
   });
 });
 

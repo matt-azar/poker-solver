@@ -337,6 +337,39 @@ function suitSymbol(suit: string): string {
   return SUIT_SYMBOLS[suit.toLowerCase() as CardSuit] ?? suit;
 }
 
+/** One card inside a GTOWizard-style combo badge (rank + suit glyph). */
+export interface ComboBadgeCard {
+  rank: string;
+  suit: CardSuit | string;
+  symbol: string;
+  /** True for hearts/diamonds — red suit styling. */
+  red: boolean;
+}
+
+/**
+ * Split an engine combo (`AcQc`, `AhKd`) into badge cards for Hands cells.
+ * Returns [] when the string is not a 4-char combo.
+ */
+export function comboBadgeCards(combo: string): ComboBadgeCard[] {
+  const key = comboKey(combo);
+  if (key.length < 4) {
+    return [];
+  }
+  const cards = [
+    { rank: key[0]!.toUpperCase(), suit: key[1]!.toLowerCase() },
+    { rank: key[2]!.toUpperCase(), suit: key[3]!.toLowerCase() },
+  ];
+  return cards.map((card) => {
+    const suit = card.suit as CardSuit;
+    return {
+      rank: card.rank,
+      suit,
+      symbol: suitSymbol(card.suit),
+      red: card.suit === "h" || card.suit === "d",
+    };
+  });
+}
+
 function suitPairLabel(suitA: string, suitB: string, sameSuit: boolean): string {
   if (sameSuit) {
     return suitSymbol(suitA) + suitSymbol(suitA);
