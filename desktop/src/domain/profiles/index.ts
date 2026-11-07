@@ -98,4 +98,9 @@ export {
   type SeatActionStorage,
 } from "./seatActionCatalogue";
 
+export {
+  makeUserSavedRange,
+  userSavedRangeId,
+} from "./userSavedRange";
+
 export { loadBundledSeatActions } from "./bundledSeatActions";

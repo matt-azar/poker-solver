@@ -9,9 +9,15 @@ export interface SeatActionStorage {
 
 export interface SeatActionCatalogue {
   list(): SeatActionRange[];
+  /** User-imported / Build-saved atoms only (excludes bundled seed). */
+  listUserImports(): SeatActionRange[];
   get(id: string): SeatActionRange | undefined;
   find(query: SeatActionQuery): SeatActionRange[];
   importAtom(atom: SeatActionRange): void;
+  /** True when `id` was saved/imported by the user (not bundled seed). */
+  isUserImport(id: string): boolean;
+  /** Remove one user-saved id. Bundled seed is untouched. */
+  removeUserImport(id: string): boolean;
   clearUserImports(): void;
 }
 
@@ -64,6 +70,11 @@ export function createSeatActionCatalogue(
 
   return {
     list: () => all(),
+    listUserImports() {
+      return [...user.values()].sort((a, b) =>
+        a.displayName.localeCompare(b.displayName),
+      );
+    },
     get(id: string) {
       return user.get(id) ?? bundled.get(id);
     },
@@ -97,6 +108,17 @@ export function createSeatActionCatalogue(
     importAtom(atom: SeatActionRange) {
       user.set(atom.id, atom);
       writeUser(storage, [...user.values()]);
+    },
+    isUserImport(id: string) {
+      return user.has(id);
+    },
+    removeUserImport(id: string) {
+      if (!user.has(id)) {
+        return false;
+      }
+      user.delete(id);
+      writeUser(storage, [...user.values()]);
+      return true;
     },
     clearUserImports() {
       user.clear();

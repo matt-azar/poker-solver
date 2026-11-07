@@ -53,7 +53,7 @@ explorer   # serves desktop/dist when present
 | Compare | `GET /api/compare` | Note | Compare workspace | Decision node | HTTP |
 | Save / Open | `POST …/save`, `/open` | File fields | File menu / Build | PSOL v2 + locks; browser path fields | checkpoint HTTP |
 | Recent | `GET /api/recent-solutions` | Dropdown | Library + File menu | Cap 10 | recent_files |
-| Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Build + Library (ranges grouped by folder) | Nested `configs/ranges` folders; template dirs still flat | templates/range lib |
+| Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Build + Library (ranges grouped by folder); Build Catalogue can save/edit user ranges (localStorage) and Swap OOP↔IP | Nested `configs/ranges` folders; template dirs still flat | templates/range lib; BuildWorkspace tests |
 | Config parse | `POST /api/config` | Load config | Build | street/river text only; street echoes `tree_edits` | indirect |
 | Memory plan dry-run | `POST /api/plan-memory` | — | Engine API only (no mounted Study UI yet) | Labeled `estimated_peak_bytes`; not RSS | explorer HTTP |
 | Tree preview / line edits | `POST /api/tree-preview` | — | Engine API + draft `tree_edits` on solve; no mounted line editor | Canonical labels; imported edits still affect Solve | explorer HTTP + tree_edit |
