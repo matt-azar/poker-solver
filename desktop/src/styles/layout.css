@@ -1,4 +1,16 @@
-/* App shell & workstation layout */
+/*
+ * App shell & workstation layout (Study / Build / Compare / Library / Equity chrome).
+ *
+ * Prefer tokens.css for colors/type/chrome heights.
+ * Sibling feature CSS (import from components, not here):
+ *   matrix-density.css  13×13 cell type
+ *   actions.css         Actions rail blocks
+ *   cards.css           PlayingCard / picker
+ *   path-nav.css        Action history path
+ *   opponent-range.css  Dual-range opponent column
+ *
+ * Hands combo tiles (.hands-combo*) and the Study detail rail live in this file.
+ */
 
 /* Root desktop chrome: menubar / body / status bar rows. */
 .app-shell {

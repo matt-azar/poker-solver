@@ -1,9 +1,22 @@
-/* Action blocks — frequency-first summaries with compact pot tags (b50).
-   Imported from ActionBlock / ActionSummary. Do not move into layout.css. */
+/*
+ * Action blocks — frequency-first summaries with compact pot tags (b50).
+ * Imported from ActionBlock / ActionSummary. Do not move into layout.css.
+ *
+ * These power the Actions list in the Study detail rail (and legacy bars).
+ * Hands combo tiles are separate: layout.css .hands-combo*.
+ *
+ * Common knobs:
+ *   .action-block min-height / min-width
+ *   .action-block__primary font-size (pot tag / action name)
+ *   .action-block__freq font-size
+ *   .action-block__bar height (bottom frequency strip)
+ *   .action-summary--panel .action-block* (taller rail variant)
+ */
 
+/* One action chip: swatch + label + % + optional Follow. */
 .action-block {
-  --action-color: var(--muted);
-  --action-freq: 0;
+  --action-color: var(--muted); /* Set inline from action color map */
+  --action-freq: 0; /* 0–1; drives the bottom bar width */
   display: inline-flex;
   align-items: stretch;
   gap: 0;
@@ -76,6 +89,7 @@
   min-width: 0;
 }
 
+/* Pot-fraction / action name (e.g. b50, Check) — main readable label. */
 .action-block__primary {
   position: relative;
   z-index: 1;
@@ -88,6 +102,7 @@
   color: var(--text);
 }
 
+/* Optional chip-amount subtitle when display mode is chips. */
 .action-block__chips {
   position: relative;
   z-index: 1;
@@ -97,6 +112,7 @@
   overflow: visible;
 }
 
+/* Frequency % on the right of the block. */
 .action-block__freq {
   margin-left: auto;
   padding-left: 6px;
@@ -114,6 +130,7 @@
   margin-left: 2px;
 }
 
+/* Bottom frequency strip; fill width = --action-freq. */
 .action-block__bar {
   position: absolute;
   left: 0;
@@ -188,6 +205,7 @@
   padding: 4px 8px;
 }
 
+/* Actions section inside Study detail rail (stacked full-width blocks). */
 .action-summary--panel {
   flex: 0 0 auto;
   flex-direction: column;
@@ -225,6 +243,7 @@
   gap: 6px;
 }
 
+/* Taller blocks when Actions sit in the detail rail. */
 .action-summary--panel .action-block {
   width: 100%;
   min-width: 0;

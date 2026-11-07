@@ -1,9 +1,16 @@
 /*
- * Matrix density (design brief §7, partial): quieter excluded hands,
- * active strategy remains prominent, partial range weight ≠ action mixing.
+ * Matrix density — type + quieting for the 13×13 Study hand grid.
  * Loaded from RangeMatrix only — do not fold into layout.css.
+ *
+ * Manual knobs you are most likely to change:
+ *   .matrix-axis font-size          → rank labels (A…2)
+ *   active .matrix-cell__label      → hand name (AKs) size on strategy paint
+ *   excluded/empty .matrix-cell__label → how quiet off-range cells look
+ * Shell/geometry of the grid itself: layout.css (.range-matrix*).
+ * Aspect ratio when dual-range is off: RangeMatrix.tsx SINGLE_MATRIX_WIDTH_OVER_HEIGHT.
  */
 
+/* Rank axis ticks (top + left of the 13×13). */
 .range-matrix.matrix-density .matrix-axis {
   font-weight: 500;
   font-size: 9px;
@@ -16,6 +23,7 @@
   background: color-mix(in srgb, var(--empty-cell) 88%, var(--panel));
 }
 
+/* Off-range hand names — smaller / muted so strategy cells dominate. */
 .range-matrix.matrix-density .matrix-cell[data-excluded="true"] .matrix-cell__label,
 .range-matrix.matrix-density .matrix-cell[data-empty="true"] .matrix-cell__label {
   color: color-mix(in srgb, var(--muted) 55%, var(--empty-cell));
@@ -31,7 +39,7 @@
   display: none;
 }
 
-/* Active hands stay typographically strong */
+/* In-range hand names on strategy/EV paint — primary matrix type size. */
 .range-matrix.matrix-density
   .matrix-cell:not([data-excluded="true"]):not([data-empty="true"])
   .matrix-cell__label {
@@ -42,6 +50,7 @@
   opacity: 1;
 }
 
+/* Secondary number under the hand name (freq / EV / equity overlay). */
 .range-matrix.matrix-density
   .matrix-cell:not([data-excluded="true"]):not([data-empty="true"])
   .matrix-cell__sub {

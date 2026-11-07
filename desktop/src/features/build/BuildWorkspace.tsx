@@ -1,3 +1,8 @@
+/**
+ * Build page — ranges, board, tree sizes, solve.
+ * Paint-grid / section chrome: styles/layout.css (.build-*, .range-paint-grid, .paint-cell).
+ * Catalogue tree: SeatActionCatalogueTree (+ .seat-tree* in layout.css).
+ */
 import { useEffect, useRef, useState } from "react";
 import {
   canExecuteSolve,

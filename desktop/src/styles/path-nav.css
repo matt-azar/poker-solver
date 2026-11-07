@@ -1,6 +1,14 @@
-/* Betting-path chrome (ActionHistory) + demoted node diagnostics (NodeNavigator).
- * Keep rules here — do not extend layout.css for this feature. */
+/*
+ * Betting-path chrome (ActionHistory) + demoted node diagnostics (NodeNavigator).
+ * Keep rules here — do not extend layout.css for this feature.
+ *
+ * Common knobs:
+ *   .path-nav min-height / max-height  → how tall the history strip can grow
+ *   .path-nav__crumb / .path-nav__btn  → crumb + step-button type size
+ *   .history-choice* still in layout.css for next-action chips (legacy class names)
+ */
 
+/* Resizable path / action-history strip under the Study context strip. */
 .path-nav {
   position: relative;
   flex: 0 1 auto;
@@ -48,6 +56,7 @@
   padding-top: 1px;
 }
 
+/* Step back / forward controls on a path row. */
 .path-nav__btn {
   border: 1px solid var(--border);
   background: var(--secondary);
