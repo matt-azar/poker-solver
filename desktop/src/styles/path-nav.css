@@ -4,8 +4,7 @@
  *
  * Common knobs:
  *   .path-nav min-height / max-height  → how tall the history strip can grow
- *   .path-nav__crumb / .path-nav__btn  → crumb + step-button type size
- *   .history-choice* still in layout.css for next-action chips (legacy class names)
+ *   .path-nav__step / .path-nav__btn  → step + control button type size
  */
 
 /* Resizable path / action-history strip under the Study context strip. */
@@ -30,7 +29,6 @@
   padding: 0;
 }
 
-.path-nav[data-empty="true"] .path-nav__next,
 .path-nav[data-empty="true"] .resize-handle {
   display: none;
 }
@@ -138,26 +136,22 @@
 
 /* Four-color deck: same --suit-* tokens as board / PlayingCard / picker. */
 .path-nav__card[data-suit="h"],
-.path-nav__step[data-suit="h"],
-.path-nav-choice[data-suit="h"] {
+.path-nav__step[data-suit="h"] {
   color: var(--suit-heart);
 }
 
 .path-nav__card[data-suit="d"],
-.path-nav__step[data-suit="d"],
-.path-nav-choice[data-suit="d"] {
+.path-nav__step[data-suit="d"] {
   color: var(--suit-diamond);
 }
 
 .path-nav__card[data-suit="c"],
-.path-nav__step[data-suit="c"],
-.path-nav-choice[data-suit="c"] {
+.path-nav__step[data-suit="c"] {
   color: var(--suit-club);
 }
 
 .path-nav__card[data-suit="s"],
-.path-nav__step[data-suit="s"],
-.path-nav-choice[data-suit="s"] {
+.path-nav__step[data-suit="s"] {
   color: var(--suit-spade);
 }
 
@@ -296,66 +290,6 @@
 
 .path-nav__status[data-terminal="showdown"] {
   color: color-mix(in srgb, var(--accent) 55%, var(--muted));
-}
-
-.path-nav__choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
-  overflow: auto;
-  max-height: 100%;
-  align-content: flex-start;
-}
-
-.path-nav-choice {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  background: var(--secondary);
-  border-radius: var(--radius);
-  padding: 2px 8px;
-  font-size: 12px;
-  color: var(--text);
-  min-height: 24px;
-}
-
-.path-nav-choice:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.path-nav-choice:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.path-nav-choice__swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: var(--choice-swatch, var(--muted));
-  flex-shrink: 0;
-}
-
-.path-nav-choice__label {
-  font-weight: 600;
-}
-
-.path-nav-choice__chips {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.path-nav-choice__freq {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.path-nav-choice[data-kind="card"] .path-nav-choice__label {
-  font-family: var(--font-mono);
-  letter-spacing: 0.03em;
 }
 
 /* Demoted left navigator: diagnostics only — no child ID list. */

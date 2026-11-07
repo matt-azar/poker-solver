@@ -106,15 +106,3 @@ export function mapActionColors(actions: string[]): ActionColorMap {
   return { byIndex, byLabel, legend };
 }
 
-export function accessibleActionColors(actions: string[]): ActionColorMap {
-  const alt = ["#1F6FEB", "#0F7B6C", "#B08900", "#C44B2B", "#8B3A9B", "#2B1A1A"];
-  const mapped = mapActionColors(actions);
-  const remapped: ActionColorMap = { byIndex: [], byLabel: {}, legend: [] };
-  mapped.legend.forEach((entry, index) => {
-    const color = isAllIn(entry.label) ? "#111111" : alt[index % alt.length];
-    remapped.legend.push({ label: entry.label, color });
-    remapped.byLabel[entry.label] = color;
-  });
-  remapped.byIndex = actions.map((label) => remapped.byLabel[normalizeLabel(label)]);
-  return remapped;
-}

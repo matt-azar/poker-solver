@@ -96,7 +96,6 @@ export function ActionSummary() {
           return (
             <ActionBlock
               key={`${label}-${index}`}
-              variant="filter"
               primary={display.primary}
               secondary={display.secondary}
               frequency={freqs[index] ?? 0}

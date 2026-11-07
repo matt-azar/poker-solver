@@ -1,7 +1,4 @@
-import type { KeyboardEvent, MouseEvent } from "react";
 import "../../styles/actions.css";
-
-export type ActionBlockVariant = "filter" | "follow";
 
 export interface ActionBlockProps {
   /** Compact pot tag (`b50`) or passive label — never a bare percent. */
@@ -13,20 +10,12 @@ export interface ActionBlockProps {
   /** Preformatted frequency text (`31.9%`), kept separate from `primary`. */
   frequencyText?: string | null;
   color: string;
-  /** Filter highlight state (filter variant). */
+  /** Filter highlight state. */
   active?: boolean;
-  variant: ActionBlockVariant;
   disabled?: boolean;
   title?: string;
-  /** Filter toggle or follow navigate, depending on variant. */
+  /** Filter toggle. Navigation lives in toolbar `ActionNavBar`. */
   onClick?: () => void;
-  /**
-   * Optional in-block follow control (filter variant only).
-   * Prefer toolbar `ActionNavBar` for Study navigation.
-   */
-  onFollow?: () => void;
-  followDisabled?: boolean;
-  followLabel?: string;
   className?: string;
   "aria-label"?: string;
 }
@@ -39,8 +28,8 @@ function clampFreq(frequency: number | null | undefined): number {
 }
 
 /**
- * Stable-geometry action block: primary size tag, separate frequency, optional
- * chips, and an in-block frequency bar that never resizes the click target.
+ * Stable-geometry action filter block: primary size tag, separate frequency,
+ * optional chips, and an in-block frequency bar that never resizes the click target.
  */
 export function ActionBlock({
   primary,
@@ -49,47 +38,20 @@ export function ActionBlock({
   frequencyText = null,
   color,
   active = false,
-  variant,
   disabled = false,
   title,
   onClick,
-  onFollow,
-  followDisabled = true,
-  followLabel = "Open",
   className,
   "aria-label": ariaLabel,
 }: ActionBlockProps) {
   const fill = clampFreq(frequency);
-  const showFollow = variant === "filter" && typeof onFollow === "function";
-
-  const handleFollowClick = (event: MouseEvent) => {
-    event.stopPropagation();
-    event.preventDefault();
-    if (!followDisabled) {
-      onFollow?.();
-    }
-  };
-
-  const handleFollowKey = (event: KeyboardEvent) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.stopPropagation();
-      event.preventDefault();
-      if (!followDisabled) {
-        onFollow?.();
-      }
-    }
-  };
 
   return (
     <div
-      className={[
-        "action-block",
-        `action-block--${variant}`,
-        className ?? "",
-      ]
+      className={["action-block", "action-block--filter", className ?? ""]
         .filter(Boolean)
         .join(" ")}
-      data-variant={variant}
+      data-variant="filter"
       data-active={active ? "true" : "false"}
       data-disabled={disabled ? "true" : "false"}
       style={{ ["--action-color" as string]: color }}
@@ -97,7 +59,7 @@ export function ActionBlock({
       <button
         type="button"
         className="action-block__main"
-        aria-pressed={variant === "filter" ? active : undefined}
+        aria-pressed={active}
         aria-label={ariaLabel}
         title={title}
         disabled={disabled}
@@ -114,11 +76,6 @@ export function ActionBlock({
           {frequencyText ? (
             <span className="action-block__freq tabular">{frequencyText}</span>
           ) : null}
-          {variant === "follow" ? (
-            <span className="action-block__chevron" aria-hidden>
-              ›
-            </span>
-          ) : null}
         </span>
         <span
           className="action-block__bar"
@@ -126,19 +83,6 @@ export function ActionBlock({
           style={{ ["--action-freq" as string]: String(fill) }}
         />
       </button>
-      {showFollow ? (
-        <button
-          type="button"
-          className="action-block__follow"
-          disabled={followDisabled}
-          title={followDisabled ? "No child node" : `Follow ${primary}`}
-          aria-label={`Follow ${primary}`}
-          onClick={handleFollowClick}
-          onKeyDown={handleFollowKey}
-        >
-          {followLabel}
-        </button>
-      ) : null}
     </div>
   );
 }
