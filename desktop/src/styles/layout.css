@@ -1,5 +1,6 @@
 /* App shell & workstation layout */
 
+/* Root desktop chrome: menubar / body / status bar rows. */
 .app-shell {
   display: grid;
   grid-template-rows: var(--menubar-h) 1fr var(--statusbar-h);
@@ -9,6 +10,7 @@
   color: var(--text);
 }
 
+/* Top application menu bar (File/Edit/… + workspace switcher). */
 .menu-bar {
   display: flex;
   align-items: center;
@@ -20,6 +22,7 @@
   z-index: 20;
 }
 
+/* Product name on the left of the menu bar. */
 .menu-bar__brand {
   font-weight: 600;
   font-size: 13px;
@@ -28,6 +31,7 @@
   white-space: nowrap;
 }
 
+/* File/Edit/View/… menu roots clustered together. */
 .menu-bar__menus {
   display: flex;
   align-items: stretch;
@@ -35,11 +39,13 @@
   gap: 0;
 }
 
+/* One top-level menu (button + dropdown). */
 .menu-root {
   position: relative;
   height: 100%;
 }
 
+/* One top-level menu (button + dropdown). — clickable button inside the parent. */
 .menu-root > button {
   height: 100%;
   border: 0;
@@ -49,11 +55,13 @@
   border-radius: var(--radius-sm);
 }
 
+/* One top-level menu (button + dropdown). — clickable button inside the parent. */
 .menu-root > button:hover,
 .menu-root[data-open="true"] > button {
   background: var(--secondary);
 }
 
+/* Flyout panel under an open menu root. */
 .menu-dropdown {
   position: absolute;
   top: 100%;
@@ -67,6 +75,7 @@
   z-index: 50;
 }
 
+/* Flyout panel under an open menu root. — clickable button inside the parent. */
 .menu-dropdown button,
 .menu-dropdown .menu-item {
   display: flex;
@@ -81,30 +90,36 @@
   color: var(--text);
 }
 
+/* Flyout panel under an open menu root. — clickable button inside the parent. */
 .menu-dropdown button:hover:not(:disabled) {
   background: var(--accent-soft);
 }
 
+/* Flyout panel under an open menu root. — clickable button inside the parent. */
 .menu-dropdown button:disabled {
   color: var(--muted);
   cursor: not-allowed;
 }
 
+/* Styles for .shortcut. (disabled). */
 .menu-dropdown button:disabled .shortcut {
   opacity: 0.6;
 }
 
+/* Styles for .shortcut. */
 .menu-dropdown .shortcut {
   color: var(--muted);
   font-size: 11px;
 }
 
+/* Horizontal divider between groups of menu items. */
 .menu-sep {
   height: 1px;
   background: var(--border);
   margin: 4px 0;
 }
 
+/* Build / Study / Equity / … workspace tab strip in the menu bar. */
 .workspace-switcher {
   display: flex;
   align-items: center;
@@ -115,11 +130,13 @@
   background: var(--secondary);
 }
 
+/* Full-width tab buttons (hidden on narrow layouts). */
 .workspace-switcher__tabs {
   display: flex;
   align-items: center;
 }
 
+/* One workspace tab button. */
 .workspace-switcher__tab {
   border: 0;
   background: transparent;
@@ -128,16 +145,19 @@
   border-right: 1px solid var(--border);
 }
 
+/* One workspace tab button. */
 .workspace-switcher__tab:last-child {
   border-right: 0;
 }
 
+/* One workspace tab button. (active). */
 .workspace-switcher__tab[aria-selected="true"] {
   background: var(--panel);
   color: var(--text);
   font-weight: 600;
 }
 
+/* Narrow-layout dropdown that replaces the tab strip. */
 .workspace-switcher__compact {
   display: none;
   align-items: center;
@@ -146,6 +166,7 @@
   min-height: 22px;
 }
 
+/* Workspace label beside the compact select. */
 .workspace-switcher__compact-label {
   font-size: 11px;
   color: var(--muted);
@@ -154,6 +175,7 @@
   white-space: nowrap;
 }
 
+/* Narrow-layout dropdown that replaces the tab strip. — native <select> inside the parent. */
 .workspace-switcher__compact select {
   border: 0;
   background: var(--panel);
@@ -166,10 +188,12 @@
   border-radius: var(--radius-sm);
 }
 
+/* Flexible gap pushing assistant/actions to the right edge. */
 .menu-bar__spacer {
   flex: 1;
 }
 
+/* Study Assistant toggle on the menu bar. */
 .menu-bar__assistant {
   height: 100%;
   border: 0;
@@ -179,17 +203,20 @@
   border-radius: var(--radius-sm);
 }
 
+/* Study Assistant toggle on the menu bar. (hover). */
 .menu-bar__assistant:hover,
 .menu-bar__assistant[aria-pressed="true"] {
   background: var(--secondary);
 }
 
+/* Right-side menu-bar icon/tool buttons. */
 .menu-bar__actions {
   display: flex;
   align-items: center;
   gap: var(--space-1);
 }
 
+/* Compact bordered toolbar/icon button (shared with toolbar-btn). */
 .icon-btn,
 .toolbar-btn {
   border: 1px solid var(--border);
@@ -200,27 +227,32 @@
   min-height: 22px;
 }
 
+/* Compact bordered toolbar/icon button (shared with toolbar-btn). (hover). */
 .icon-btn:hover,
 .toolbar-btn:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
 }
 
+/* Styles for .primary. */
 .toolbar-btn.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
 
+/* Styles for .primary. */
 [data-theme="dark"] .toolbar-btn.primary {
   color: #12151a;
 }
 
+/* Styles for .danger. (hover, disabled). */
 .toolbar-btn.danger:hover:not(:disabled) {
   border-color: var(--danger);
   color: var(--danger);
 }
 
+/* Main content area between menu bar and status bar. */
 .app-body {
   min-height: 0;
   overflow: hidden;
@@ -228,6 +260,7 @@
   flex-direction: column;
 }
 
+/* Bottom status strip: phase, message, metrics, connection. */
 .status-bar {
   display: flex;
   align-items: center;
@@ -240,6 +273,7 @@
   min-width: 0;
 }
 
+/* Solve/engine phase badge (SOLVING, COMPLETE, …). */
 .status-bar__phase {
   flex-shrink: 0;
   font-weight: 700;
@@ -254,11 +288,13 @@
   line-height: 18px;
 }
 
+/* Solve/engine phase badge (SOLVING, COMPLETE, …). (active). */
 .status-bar__phase[data-live="true"] {
   border-color: var(--accent);
   color: var(--accent);
 }
 
+/* Primary status message text (truncates). */
 .status-bar__msg {
   flex: 1;
   min-width: 0;
@@ -269,6 +305,7 @@
   font-weight: 500;
 }
 
+/* Right-side metric chips / connection cluster. */
 .status-bar__metrics {
   display: inline-flex;
   align-items: center;
@@ -278,6 +315,7 @@
   overflow: hidden;
 }
 
+/* Engine connection indicator dot. */
 .status-dot {
   width: 7px;
   height: 7px;
@@ -286,20 +324,24 @@
   flex-shrink: 0;
 }
 
+/* Engine connection indicator dot. */
 .status-dot[data-state="connected"] {
   background: var(--ok);
 }
 
+/* Engine connection indicator dot. */
 .status-dot[data-state="connecting"] {
   background: #c9a227;
 }
 
+/* Engine connection indicator dot. */
 .status-dot[data-state="disconnected"] {
   background: var(--danger);
 }
 
 /* Study workspace */
 
+/* Study page column: context, history, matrix, lower dock. */
 .study-workspace {
   display: flex;
   flex-direction: column;
@@ -308,6 +350,7 @@
   overflow: hidden;
 }
 
+/* Legacy Study sub-tab strip (if shown). */
 .study-tabs {
   display: flex;
   align-items: stretch;
@@ -316,6 +359,7 @@
   padding: 0 var(--space-1);
 }
 
+/* One Study sub-tab button. */
 .study-tab {
   border: 0;
   background: transparent;
@@ -324,12 +368,14 @@
   border-bottom: 2px solid transparent;
 }
 
+/* One Study sub-tab button. (active). */
 .study-tab[aria-selected="true"] {
   color: var(--text);
   border-bottom-color: var(--accent);
   background: var(--panel);
 }
 
+/* Top Study strip: board, pot/stacks, engine activity. */
 .context-strip {
   display: flex;
   align-items: center;
@@ -340,6 +386,7 @@
   min-height: var(--context-h);
 }
 
+/* One labeled value group in the context strip. */
 .context-strip__group {
   display: flex;
   flex-direction: column;
@@ -347,6 +394,7 @@
   min-width: 0;
 }
 
+/* Small uppercase label above a context value. */
 .context-strip__label {
   font-size: var(--label-size);
   color: var(--muted);
@@ -354,11 +402,13 @@
   letter-spacing: 0.04em;
 }
 
+/* Primary value text in a context group. */
 .context-strip__value {
   font-weight: 600;
   white-space: nowrap;
 }
 
+/* Board card row in the context strip. */
 .context-strip__board {
   display: flex;
   align-items: center;
@@ -368,6 +418,7 @@
   flex-wrap: wrap;
 }
 
+/* One community card chip on the board. */
 .board-card {
   border: 1px solid var(--border);
   background: var(--secondary);
@@ -388,6 +439,7 @@
   color: var(--suit-heart);
 }
 
+/* Four-color deck suit coloring for this suit. */
 .board-card[data-suit="d"],
 .card-picker-cell[data-suit="d"],
 .toolbar-btn[data-suit="d"],
@@ -396,6 +448,7 @@
   color: var(--suit-diamond);
 }
 
+/* Four-color deck suit coloring for this suit. */
 .board-card[data-suit="c"],
 .card-picker-cell[data-suit="c"],
 .toolbar-btn[data-suit="c"],
@@ -404,6 +457,7 @@
   color: var(--suit-club);
 }
 
+/* Four-color deck suit coloring for this suit. */
 .board-card[data-suit="s"],
 .card-picker-cell[data-suit="s"],
 .toolbar-btn[data-suit="s"],
@@ -412,12 +466,14 @@
   color: var(--suit-spade);
 }
 
+/* One community card chip on the board. (hover). */
 .board-card:hover,
 .board-card:focus-visible {
   outline: 2px solid var(--selection-outline);
   outline-offset: 1px;
 }
 
+/* Vertical divider between context groups. */
 .context-strip__sep {
   width: 1px;
   height: 28px;
@@ -425,11 +481,13 @@
   flex-shrink: 0;
 }
 
+/* Flexible spacer in the context strip. */
 .context-strip__grow {
   flex: 1;
   min-width: 8px;
 }
 
+/* Engine/activity cluster on the context strip. */
 .context-strip__engine {
   display: flex;
   align-items: center;
@@ -437,6 +495,7 @@
   flex-shrink: 0;
 }
 
+/* Live solve activity text next to the phase pill. */
 .context-strip__activity {
   font-size: 11px;
   max-width: 100%;
@@ -445,6 +504,7 @@
   white-space: nowrap;
 }
 
+/* Solve phase chip (solving / paused / complete / failed). */
 .phase-pill {
   display: inline-flex;
   align-items: center;
@@ -458,6 +518,7 @@
   text-transform: none;
 }
 
+/* Solve phase chip (solving / paused / complete / failed). */
 .phase-pill[data-phase="solving"],
 .phase-pill[data-phase="building"],
 .phase-pill[data-phase="pause_requested"],
@@ -467,6 +528,7 @@
   color: var(--accent);
 }
 
+/* Solve phase chip (solving / paused / complete / failed). (active). */
 .phase-pill[data-live="true"]::before {
   content: "";
   width: 6px;
@@ -477,16 +539,19 @@
   animation: engine-pulse 1.4s ease-out infinite;
 }
 
+/* Solve phase chip (solving / paused / complete / failed). */
 .phase-pill[data-phase="paused"] {
   border-color: #c9a227;
   color: #c9a227;
 }
 
+/* Solve phase chip (solving / paused / complete / failed). */
 .phase-pill[data-phase="complete"] {
   border-color: var(--ok);
   color: var(--ok);
 }
 
+/* Solve phase chip (solving / paused / complete / failed). */
 .phase-pill[data-phase="failed"] {
   border-color: var(--danger);
   color: var(--danger);
@@ -504,6 +569,7 @@
   }
 }
 
+/* Start / pause / stop / continue button group. */
 .solve-controls {
   display: flex;
   align-items: center;
@@ -511,6 +577,7 @@
   flex-wrap: wrap;
 }
 
+/* Standard bordered toolbar button used across workspaces. (disabled). */
 .solve-controls .toolbar-btn:disabled,
 .toolbar-btn:disabled {
   opacity: 1;
@@ -522,16 +589,19 @@
   box-shadow: none;
 }
 
+/* Styles for .primary. (disabled). */
 .solve-controls .toolbar-btn.primary:disabled {
   background: color-mix(in srgb, var(--accent) 28%, var(--secondary));
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   color: color-mix(in srgb, #fff 55%, var(--muted));
 }
 
+/* Styles for .danger. (disabled). */
 .solve-controls .toolbar-btn.danger:disabled {
   color: color-mix(in srgb, var(--danger) 40%, var(--muted));
 }
 
+/* Path history panel under the context strip (resizable). */
 .action-history {
   position: relative;
   flex: 0 1 auto;
@@ -546,6 +616,7 @@
   padding: 4px 0 6px;
 }
 
+/* Path history panel under the context strip (resizable). (empty). */
 .action-history[data-empty="true"] {
   height: auto;
   min-height: 0;
@@ -553,11 +624,13 @@
   padding: 0;
 }
 
+/* Styles for .action-history__next. (empty). */
 .action-history[data-empty="true"] .action-history__next,
 .action-history[data-empty="true"] .resize-handle {
   display: none;
 }
 
+/* One history row (crumbs or next-action choices). */
 .action-history__row {
   display: flex;
   align-items: center;
@@ -566,10 +639,12 @@
   min-width: 0;
 }
 
+/* Separator under a history crumb line. */
 .action-history__line {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
 }
 
+/* Street/actor label at the left of a history row. */
 .action-history__label {
   flex-shrink: 0;
   width: 36px;
@@ -580,6 +655,7 @@
   color: var(--muted);
 }
 
+/* Clickable path crumbs for the current line. */
 .action-history__crumbs {
   display: flex;
   align-items: center;
@@ -589,18 +665,21 @@
   flex: 1;
 }
 
+/* One crumb plus its separator. */
 .action-history__crumb-wrap {
   display: inline-flex;
   align-items: center;
   gap: 2px;
 }
 
+/* Separator between history crumbs. */
 .action-history__sep {
   color: var(--muted);
   padding: 0 2px;
   font-size: 12px;
 }
 
+/* One clickable node in the action path. */
 .action-history__crumb {
   border: 0;
   background: transparent;
@@ -612,21 +691,25 @@
   border-radius: var(--radius-sm);
 }
 
+/* One clickable node in the action path. (hover, disabled). */
 .action-history__crumb:hover:not(:disabled) {
   background: var(--accent-soft);
   color: var(--accent);
 }
 
+/* One clickable node in the action path. (disabled). */
 .action-history__crumb:disabled {
   cursor: default;
   color: var(--text);
 }
 
+/* One clickable node in the action path. (active). */
 .action-history__crumb[data-current="true"] {
   font-weight: 700;
   color: var(--accent);
 }
 
+/* Whose turn / actor tag on the right of a crumb row. */
 .action-history__actor {
   flex-shrink: 0;
   margin-left: auto;
@@ -635,6 +718,7 @@
   color: var(--muted);
 }
 
+/* Next legal actions / cards after the current node. */
 .action-history__choices {
   display: flex;
   flex-wrap: wrap;
@@ -646,6 +730,7 @@
   align-content: flex-start;
 }
 
+/* One next-action or runout-card choice chip. */
 .history-choice {
   display: inline-flex;
   align-items: center;
@@ -659,15 +744,18 @@
   min-height: 24px;
 }
 
+/* One next-action or runout-card choice chip. (hover, disabled). */
 .history-choice:hover:not(:disabled) {
   border-color: var(--accent);
 }
 
+/* One next-action or runout-card choice chip. (disabled). */
 .history-choice:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
+/* Action color square on a history choice. */
 .history-choice__swatch {
   width: 8px;
   height: 8px;
@@ -676,20 +764,24 @@
   flex-shrink: 0;
 }
 
+/* Action / card text on a history choice. */
 .history-choice__label {
   font-weight: 600;
 }
 
+/* Frequency % on a history choice. */
 .history-choice__freq {
   color: var(--muted);
   font-size: 11px;
 }
 
+/* Action / card text on a history choice. */
 .history-choice[data-kind="card"] .history-choice__label {
   font-family: var(--font-mono);
   letter-spacing: 0.03em;
 }
 
+/* Drag handle to resize a panel (horizontal bar by default). */
 .resize-handle {
   position: absolute;
   left: 0;
@@ -700,6 +792,7 @@
   z-index: 5;
 }
 
+/* Vertical drag handle (e.g. inspector width). */
 .resize-handle--vertical {
   top: 0;
   bottom: 0;
@@ -709,6 +802,7 @@
   cursor: ew-resize;
 }
 
+/* Study center grid: optional nav + matrix pane. */
 .study-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -717,10 +811,12 @@
   overflow: hidden;
 }
 
+/* Study center grid: optional nav + matrix pane. */
 .study-main[data-nav="false"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Optional left node tree for browsing the public tree. */
 .node-navigator {
   width: var(--nav-w);
   min-width: 140px;
@@ -733,6 +829,7 @@
   position: relative;
 }
 
+/* Header for the node navigator. */
 .node-navigator__head {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
@@ -743,12 +840,14 @@
   letter-spacing: 0.04em;
 }
 
+/* Scrollable list of nav-node rows. */
 .node-navigator__list {
   overflow: auto;
   padding: 4px;
   flex: 1;
 }
 
+/* One clickable node in the navigator list. */
 .nav-node {
   display: flex;
   width: 100%;
@@ -762,22 +861,26 @@
   color: var(--text);
 }
 
+/* One clickable node in the navigator list. (hover). */
 .nav-node:hover {
   background: var(--secondary);
 }
 
+/* One clickable node in the navigator list. (active). */
 .nav-node[data-active="true"] {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
 }
 
+/* Frequency shown on the right of a nav-node. */
 .nav-freq {
   margin-left: auto;
   color: var(--muted);
   font-size: 11px;
 }
 
+/* Study center column holding toolbar + matrix + Hands rail. */
 .matrix-pane {
   min-width: 0;
   min-height: 0;
@@ -789,6 +892,7 @@
   overflow: hidden;
 }
 
+/* Strategy/Range/EV modes, action nav, display controls. */
 .matrix-toolbar {
   display: flex;
   align-items: center;
@@ -800,17 +904,20 @@
   padding: 4px 8px;
 }
 
+/* Strategy / Range / EV mode button group. */
 .matrix-toolbar__modes {
   display: flex;
   gap: 2px;
 }
 
+/* Action navigation controls above / in the matrix toolbar. */
 .matrix-toolbar .action-nav {
   margin-left: 0;
   padding-left: var(--space-2);
   border-left: 1px solid var(--border);
 }
 
+/* Row that holds the range matrix and Study detail rail. */
 .matrix-stage {
   flex: 1 1 0;
   min-width: 0;
@@ -835,12 +942,14 @@
   padding: 4px 8px;
 }
 
+/* Mode toggles inside a legacy action-summary bar. */
 .action-summary__modes {
   display: flex;
   gap: 2px;
   margin-right: var(--space-2);
 }
 
+/* Strategy / Range / EV mode toggle button. */
 .mode-btn {
   border: 1px solid var(--border);
   background: var(--secondary);
@@ -850,6 +959,7 @@
   font-size: 12px;
 }
 
+/* Strategy / Range / EV mode toggle button. (active). */
 .mode-btn[aria-pressed="true"] {
   background: var(--panel);
   color: var(--text);
@@ -857,6 +967,7 @@
   font-weight: 600;
 }
 
+/* One action frequency chip (color + label + %). */
 .action-chip {
   display: inline-flex;
   align-items: center;
@@ -868,11 +979,13 @@
   font-size: 12px;
 }
 
+/* One action frequency chip (color + label + %). (active). */
 .action-chip[data-active="true"] {
   outline: 2px solid var(--accent);
   outline-offset: 0;
 }
 
+/* Color square on an action chip / inspector row. */
 .action-swatch {
   width: 10px;
   height: 10px;
@@ -880,15 +993,18 @@
   flex-shrink: 0;
 }
 
+/* Frequency percentage on an action chip. */
 .action-chip__freq {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
+/* Follow-this-action control beside action chips. */
 .follow-btn {
   margin-left: auto;
 }
 
+/* Outer box around the 13x13 hand matrix. */
 .range-matrix-wrap {
   /* Default square (dual/opponent). Single layout overrides aspect below. */
   flex: 0 1 auto;
@@ -914,12 +1030,14 @@
 /* Single matrix: drop the square aspect so the column can be taller than wide
    or match stage height. Prefer full height; width tracks 1.5× height when
    horizontal room allows (matches SINGLE_MATRIX_WIDTH_OVER_HEIGHT). */
+/* Outer box around the 13x13 hand matrix. */
 .matrix-pane[data-dual="false"] .range-matrix-wrap {
   aspect-ratio: 3 / 2;
   height: 100%;
   max-height: 100%;
 }
 
+/* Centering stage that sizes the square/rectangle matrix. */
 .range-matrix-stage {
   flex: 1 1 auto;
   min-width: 0;
@@ -931,10 +1049,12 @@
   justify-content: flex-start;
 }
 
+/* Centering stage that sizes the square/rectangle matrix. */
 .matrix-pane[data-dual="false"] .range-matrix-stage {
   align-items: stretch;
 }
 
+/* The 13x13 hand-class grid itself. */
 .range-matrix {
   display: grid;
   grid-template-columns: 18px repeat(13, minmax(0, 1fr));
@@ -948,6 +1068,7 @@
   container-type: size;
 }
 
+/* Empty top-left corner cell of the matrix axes. */
 .matrix-corner,
 .matrix-axis {
   background: var(--secondary);
@@ -959,6 +1080,7 @@
   font-weight: 600;
 }
 
+/* One hand-class cell (AA, AKs, ...) in the matrix. */
 .matrix-cell {
   position: relative;
   border: 0;
@@ -970,6 +1092,7 @@
   display: block;
 }
 
+/* Strategy color bars filling a matrix cell. */
 .matrix-cell__segments {
   position: absolute;
   inset: 0;
@@ -977,11 +1100,13 @@
   flex-direction: row;
 }
 
+/* One action segment inside a matrix cell. */
 .matrix-cell__seg {
   height: 100%;
   min-width: 0;
 }
 
+/* Bottom-anchored range-weight fill inside a cell. */
 .matrix-cell__weight-fill {
   position: absolute;
   left: 0;
@@ -992,11 +1117,13 @@
   pointer-events: none;
 }
 
+/* Solid EV/equity tint behind cell labels. */
 .matrix-cell__solid {
   position: absolute;
   inset: 0;
 }
 
+/* Hand name + optional sublabel stack in a cell. */
 .matrix-cell__label {
   position: relative;
   z-index: 1;
@@ -1013,37 +1140,44 @@
   line-height: 1.05;
 }
 
+/* Secondary number under the hand name (freq/EV/eq). */
 .matrix-cell__sub {
   font-size: 0.85em;
   font-weight: 500;
   opacity: 0.92;
 }
 
+/* Hand name + optional sublabel stack in a cell. (empty). */
 .matrix-cell[data-empty="true"] .matrix-cell__label {
   color: var(--muted);
   text-shadow: none;
 }
 
+/* One hand-class cell (AA, AKs, ...) in the matrix. */
 .matrix-cell[data-hover="true"] {
   outline: 1px dashed var(--hover-outline);
   outline-offset: -1px;
   z-index: 2;
 }
 
+/* One hand-class cell (AA, AKs, ...) in the matrix. (active). */
 .matrix-cell[data-selected="true"] {
   outline: 2px solid var(--selection-outline);
   outline-offset: -2px;
   z-index: 3;
 }
 
+/* One hand-class cell (AA, AKs, ...) in the matrix. */
 .matrix-cell[data-dimmed="true"] {
   opacity: 0.35;
 }
 
+/* One hand-class cell (AA, AKs, ...) in the matrix. */
 .matrix-cell[data-filtered="true"] {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
+/* Overlay / weight-fill controls on the matrix toolbar. */
 .matrix-display-controls {
   display: flex;
   align-items: center;
@@ -1052,16 +1186,19 @@
   flex-wrap: wrap;
 }
 
+/* Cell overlay select (EV / equity / both). */
 .matrix-display-controls__overlay {
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
+/* Label beside a matrix display control. */
 .matrix-display-controls__label {
   font-size: 11px;
 }
 
+/* Dropdown for matrix overlay mode. */
 .matrix-display-controls__select {
   border: 1px solid var(--border);
   background: var(--secondary);
@@ -1071,137 +1208,7 @@
   font-size: 12px;
 }
 
-.combo-hover-popup {
-  flex: 1 1 auto;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  overflow: auto;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-soft);
-  padding: var(--space-2);
-  display: flex;
-  flex-direction: column;
-}
-
-.combo-hover-popup--empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: none;
-  background: color-mix(in srgb, var(--secondary) 80%, transparent);
-}
-
-.combo-hover-popup--empty p {
-  margin: 0;
-  font-size: 12px;
-}
-
-.combo-hover-popup__header {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: var(--space-2);
-  font-size: 12px;
-  flex: 0 0 auto;
-}
-
-.combo-hover-popup__grid {
-  display: grid;
-  gap: 2px;
-  flex: 1 1 auto;
-  align-content: start;
-}
-
-.combo-hover-square {
-  position: relative;
-  min-height: 36px;
-  background: var(--empty-cell);
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  overflow: hidden;
-}
-
-.combo-hover-square__fill {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: color-mix(in srgb, var(--ok) 55%, var(--secondary));
-  pointer-events: none;
-}
-
-.combo-hover-square__segments {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: row;
-  pointer-events: none;
-}
-
-.combo-hover-square__seg {
-  height: 100%;
-  min-width: 0;
-}
-
-.combo-hover-square__ev-fill {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: var(--secondary);
-}
-
-.combo-hover-square__ev-fill[data-sign="pos"] {
-  background: color-mix(in srgb, #3f8f6b 55%, var(--secondary));
-}
-
-.combo-hover-square__ev-fill[data-sign="neg"] {
-  background: color-mix(in srgb, #b04540 50%, var(--secondary));
-}
-
-.combo-hover-square[data-paint="strategy"] .combo-hover-square__body {
-  color: #fff;
-  text-shadow: 0 0 2px rgba(0, 0, 0, 0.75);
-}
-
-.combo-hover-square__body {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1px;
-  padding: 2px;
-  min-height: 36px;
-  font-size: 40px;
-  line-height: 1.1;
-  color: var(--text);
-}
-
-.combo-hover-square__label {
-  font-weight: 600;
-}
-
-.combo-hover-square__weight {
-  font-variant-numeric: tabular-nums;
-}
-
-.combo-hover-square__meta {
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
-  font-size: 9px;
-}
-
-.combo-hover-square[data-empty="true"] .combo-hover-square__body {
-  color: var(--muted);
-}
-
-.combo-hover-square[data-present="false"] {
-  opacity: 0.55;
-}
-
+/* Right Study rail: Actions summary + Hands inspector. */
 .study-detail-panel {
   flex: 1 1 0;
   width: auto;
@@ -1216,6 +1223,7 @@
   overflow: hidden;
 }
 
+/* Hands panel showing combo breakdown for the focus hand. */
 .combo-inspector {
   flex: 1 1 auto;
   min-height: 0;
@@ -1228,6 +1236,7 @@
   border-top: 1px solid var(--border);
 }
 
+/* Hands panel showing combo breakdown for the focus hand. */
 .matrix-stage > .combo-inspector {
   flex: 1 1 auto;
   width: auto;
@@ -1236,6 +1245,7 @@
   height: auto;
 }
 
+/* Hands panel header (title + hover/pinned state). */
 .combo-inspector__head {
   padding: 8px 10px 6px;
   border-bottom: 1px solid var(--border);
@@ -1243,29 +1253,34 @@
   margin-bottom: 0;
 }
 
+/* Hover vs Pinned badge in the Hands header. */
 .combo-inspector__focus {
   font-weight: 700;
   font-family: var(--font-mono);
   font-size: 13px;
 }
 
+/* Hands title text. */
 .combo-inspector__title {
   font-weight: 700;
   font-size: 14px;
 }
 
+/* Extra meta under the Hands title. */
 .combo-inspector__meta {
   color: var(--muted);
   font-size: 12px;
   margin-top: 2px;
 }
 
+/* Scrollable body of the Hands / combo inspector. */
 .combo-inspector__body {
   overflow: auto;
   padding: 8px;
   flex: 1;
 }
 
+/* Legacy list row for one combo (pre-hands-combo layout). */
 .combo-row {
   display: grid;
   grid-template-columns: 52px 1fr;
@@ -1275,11 +1290,13 @@
   align-items: center;
 }
 
+/* Mono combo code in a legacy combo row. */
 .combo-code {
   font-family: var(--font-mono);
   font-weight: 600;
 }
 
+/* Mini strategy bars in a legacy combo row. */
 .combo-bars {
   display: flex;
   height: 12px;
@@ -1288,10 +1305,12 @@
   background: var(--secondary);
 }
 
+/* Mini strategy bars in a legacy combo row. — inline fragment. */
 .combo-bars > span {
   height: 100%;
 }
 
+/* Action list in a legacy combo inspector body. */
 .combo-actions {
   grid-column: 1 / -1;
   display: flex;
@@ -1301,6 +1320,7 @@
   color: var(--muted);
 }
 
+/* Bottom analysis dock (reports / charts / tables). */
 .lower-dock {
   flex: 0 1 auto;
   height: var(--dock-h);
@@ -1315,6 +1335,7 @@
   overflow: hidden;
 }
 
+/* Tab strip for lower-dock panels. */
 .lower-dock__tabs {
   display: flex;
   align-items: stretch;
@@ -1323,6 +1344,7 @@
   padding: 0 4px;
 }
 
+/* Tab strip for lower-dock panels. — clickable button inside the parent. */
 .lower-dock__tabs button {
   border: 0;
   background: transparent;
@@ -1331,12 +1353,14 @@
   border-bottom: 2px solid transparent;
 }
 
+/* Tab strip for lower-dock panels. — clickable button inside the parent. */
 .lower-dock__tabs button[aria-selected="true"] {
   color: var(--text);
   border-bottom-color: var(--accent);
   background: var(--panel);
 }
 
+/* Active lower-dock panel content. */
 .lower-dock__body {
   flex: 1;
   min-height: 0;
@@ -1344,6 +1368,7 @@
   padding: 8px;
 }
 
+/* Drag handle for lower-dock height. */
 .dock-resize {
   position: absolute;
   top: -3px;
@@ -1354,12 +1379,14 @@
   z-index: 5;
 }
 
+/* Generic dense data table used in docks/reports. */
 .data-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
 
+/* Generic dense data table used in docks/reports. */
 .data-table th,
 .data-table td {
   border-bottom: 1px solid var(--border);
@@ -1367,6 +1394,7 @@
   text-align: left;
 }
 
+/* Generic dense data table used in docks/reports. */
 .data-table th {
   color: var(--muted);
   font-weight: 600;
@@ -1375,10 +1403,12 @@
   top: 0;
 }
 
+/* Generic dense data table used in docks/reports. (hover). */
 .data-table tr:hover td {
   background: var(--secondary);
 }
 
+/* Frame around an SVG chart. */
 .chart-frame {
   height: 100%;
   min-height: 140px;
@@ -1387,6 +1417,7 @@
   gap: 6px;
 }
 
+/* SVG chart viewport. */
 .chart-svg {
   width: 100%;
   flex: 1;
@@ -1395,26 +1426,31 @@
   border-radius: var(--radius);
 }
 
+/* Muted secondary text color utility. */
 .muted {
   color: var(--muted);
 }
 
+/* Small helper / hint text. */
 .hint {
   color: var(--muted);
   font-size: 12px;
   margin: 0;
 }
 
+/* Tabular-nums utility for aligned figures. */
 .tabular {
   font-variant-numeric: tabular-nums;
 }
 
+/* Placeholder copy when a panel has nothing to show. */
 .empty-hint {
   color: var(--muted);
   font-size: 12px;
   padding: 12px;
 }
 
+/* Title row above a panel (heading + actions). */
 .panel-title-row {
   display: flex;
   align-items: baseline;
@@ -1425,12 +1461,14 @@
   background: var(--secondary);
 }
 
+/* Panel heading text. */
 .panel-title {
   margin: 0;
   font-size: 14px;
   font-weight: 700;
 }
 
+/* Header for the node navigator. */
 .node-navigator__head {
   display: flex;
   align-items: center;
@@ -1444,6 +1482,7 @@
   letter-spacing: 0.04em;
 }
 
+/* Extra meta lines under the navigator header. */
 .node-navigator__meta {
   display: grid;
   gap: 4px;
@@ -1455,12 +1494,14 @@
   font-size: 12px;
 }
 
+/* Extra meta lines under the navigator header. */
 .node-navigator__meta > div {
   display: flex;
   justify-content: space-between;
   gap: 8px;
 }
 
+/* Drag handle along the top edge of a panel. */
 .resize-handle--top {
   top: 0;
   bottom: auto;
@@ -1468,6 +1509,7 @@
   background: color-mix(in srgb, var(--border) 55%, transparent);
 }
 
+/* Key/value meta grid in an inspector panel. */
 .inspector-meta {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1477,12 +1519,14 @@
   font-size: 12px;
 }
 
+/* Key/value meta grid in an inspector panel. */
 .inspector-meta > div {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
+/* List of actions in the Actions / inspector panel. */
 .inspector-actions {
   display: flex;
   flex-direction: column;
@@ -1491,6 +1535,7 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* One action row (swatch + label + freq/EV). */
 .inspector-action-row {
   display: grid;
   grid-template-columns: 12px 1fr auto auto;
@@ -1499,6 +1544,7 @@
   font-size: 12px;
 }
 
+/* Container for combo tiles / list in Hands. */
 .inspector-combos {
   display: flex;
   flex-direction: column;
@@ -1509,6 +1555,7 @@
   min-height: 0;
 }
 
+/* Hands panel: N-column grid of specific combos for the hovered hand class. */
 .inspector-combos.hands-combo-grid {
   display: grid;
   gap: 3px;
@@ -1518,6 +1565,7 @@
   min-height: 0;
 }
 
+/* Legacy multi-column combo row layout. */
 .inspector-combo {
   display: grid;
   grid-template-columns: 16px 52px minmax(48px, 1fr) auto;
@@ -1526,6 +1574,7 @@
   font-size: 12px;
 }
 
+/* One combo tile in the Hands panel (e.g. AsKs). */
 .hands-combo {
   position: relative;
   display: block;
@@ -1538,11 +1587,13 @@
   overflow: hidden;
 }
 
+/* One combo tile in the Hands panel (e.g. AsKs). (absent). */
 .hands-combo[data-present="false"] {
   opacity: 0.4;
 }
 
-/* Bottom-anchored mass wrapper — mirrors .matrix-cell__weight-fill. */
+/* Colored strategy bars (and optional mass clip) behind the tile text.
+   Height tracks --mass-fill when range weight-fill is on; mirrors .matrix-cell__weight-fill. */
 .hands-combo__weight-fill {
   position: absolute;
   left: 0;
@@ -1553,10 +1604,12 @@
   pointer-events: none;
 }
 
+/* Weight-fill off: paint strategy bars through the full tile height. */
 .hands-combo[data-weight-fill="false"] .hands-combo__weight-fill {
   height: 100%;
 }
 
+/* Horizontal stack of action-colored strategy segments inside the weight-fill. */
 .hands-combo__segments {
   position: absolute;
   inset: 0;
@@ -1564,11 +1617,13 @@
   flex-direction: row;
 }
 
+/* One action's share of the strategy mix bar. */
 .hands-combo__seg {
   height: 100%;
   min-width: 0;
 }
 
+/* Foreground content over the strategy paint: badge row + metric rows. */
 .hands-combo__body {
   position: relative;
   z-index: 1;
@@ -1584,10 +1639,12 @@
   box-sizing: border-box;
 }
 
+/* Foreground content over the strategy paint: badge row + metric rows. (absent). */
 .hands-combo[data-present="false"] .hands-combo__body {
   color: var(--muted);
 }
 
+/* Top row of a tile: card badge on the left, metric mode tag on the right. */
 .hands-combo__top {
   display: flex;
   align-items: flex-start;
@@ -1595,6 +1652,7 @@
   gap: 4px;
 }
 
+/* White chip showing the two hole cards (rank + suit). */
 .hands-combo__badge {
   display: inline-flex;
   align-items: center;
@@ -1610,25 +1668,30 @@
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
 }
 
+/* One card inside the badge (rank glyph + suit symbol). */
 .hands-combo__badge-card {
   display: inline-flex;
   align-items: baseline;
   gap: 0;
 }
 
+/* One card inside the badge (rank glyph + suit symbol). */
 .hands-combo__badge-card[data-red="true"] {
   color: #c62828;
 }
 
+/* One card inside the badge (rank glyph + suit symbol). */
 .hands-combo__badge-card[data-red="false"] {
   color: #111;
 }
 
+/* Suit symbol next to the rank in the badge. */
 .hands-combo__badge-suit {
   font-size: 10px;
   margin-left: 0;
 }
 
+/* Small corner label for the metric mode: EV, Eq, or Freq. */
 .hands-combo__metric-tag {
   font-size: 10px;
   font-weight: 600;
@@ -1636,6 +1699,7 @@
   text-shadow: 0 0 2px rgba(255, 255, 255, 0.35);
 }
 
+/* Stack of per-action rows (and optional equity row) at the bottom of the tile. */
 .hands-combo__metrics {
   display: flex;
   flex-direction: column;
@@ -1644,6 +1708,7 @@
   margin-top: auto;
 }
 
+/* One action line: label on the left, EV/freq value on the right. */
 .hands-combo__metric-row {
   display: flex;
   align-items: baseline;
@@ -1652,15 +1717,17 @@
   min-width: 0;
 }
 
+/* Shared type for action names and their EV/frequency numbers. */
 .hands-combo__metric-action,
 .hands-combo__metric-value {
   color: #111;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 20px;
   line-height: 1.15;
   text-shadow: 0 0 2px rgba(255, 255, 255, 0.45);
 }
 
+/* Action name / pot tag on the left of a metric row (may ellipsize). */
 .hands-combo__metric-action {
   min-width: 0;
   overflow: hidden;
@@ -1668,12 +1735,14 @@
   white-space: nowrap;
 }
 
+/* Numeric EV or frequency on the right of a metric row. */
 .hands-combo__metric-value {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);
 }
 
+/* Equity (“Eq”) row under the action metrics — smaller than action rows. */
 .hands-combo__metric-row--eq .hands-combo__metric-action,
 .hands-combo__metric-row--eq .hands-combo__metric-value {
   font-size: 11px;
@@ -1681,11 +1750,13 @@
   color: rgba(0, 0, 0, 0.72);
 }
 
+/* Unused leftover; frequencies now render via .hands-combo__metric-value. */
 .hands-combo__freq {
   font-size: 10px;
   white-space: nowrap;
 }
 
+/* Tiny strategy mix bar on a legacy combo row. */
 .inspector-combo__mix {
   display: flex;
   height: 10px;
@@ -1694,36 +1765,43 @@
   background: var(--panel);
 }
 
+/* Tiny strategy mix bar on a legacy combo row. — inline fragment. */
 .inspector-combo__mix > span {
   display: contents;
 }
 
+/* Tiny strategy mix bar on a legacy combo row. — bar-segment fill element. */
 .inspector-combo__mix i {
   display: block;
   height: 100%;
 }
 
+/* Hands panel showing combo breakdown for the focus hand. */
 .combo-inspector {
   display: flex;
   flex-direction: column;
 }
 
+/* Standard bordered toolbar button used across workspaces. */
 .combo-inspector .toolbar-btn {
   margin: 6px 10px;
   align-self: flex-start;
 }
 
+/* Clear-selection footer when a hand is pinned. */
 .combo-inspector__unpin {
   padding: 6px 10px 10px;
   border-top: 1px solid var(--border);
 }
 
+/* Standard bordered toolbar button used across workspaces. */
 .combo-inspector__unpin .toolbar-btn {
   margin: 0;
 }
 
 /* Analysis extras */
 
+/* NashConv / convergence chart panel. */
 .convergence-chart,
 .range-explorer,
 .runout-table {
@@ -1734,6 +1812,7 @@
   min-height: 0;
 }
 
+/* SVG for the convergence chart. */
 .convergence-svg {
   width: 100%;
   flex: 1;
@@ -1743,6 +1822,7 @@
   border-radius: var(--radius);
 }
 
+/* Two-column equity histogram layout. */
 .equity-hist-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1750,16 +1830,19 @@
   min-height: 0;
 }
 
+/* One seat's equity histogram. */
 .equity-hist {
   min-width: 0;
 }
 
+/* Secondary heading under a panel title. */
 .panel-subtitle {
   margin: 0 0 4px;
   font-size: 12px;
   font-weight: 650;
 }
 
+/* Buttons clustered on a panel title row. */
 .panel-title-actions {
   display: flex;
   align-items: center;
@@ -1767,16 +1850,19 @@
   flex-wrap: wrap;
 }
 
+/* OOP / IP seat toggle button group. */
 .seat-toggle {
   display: inline-flex;
   gap: 2px;
 }
 
+/* Standard bordered toolbar button used across workspaces. (active). */
 .seat-toggle .toolbar-btn[aria-pressed="true"] {
   background: var(--accent-soft);
   border-color: var(--accent);
 }
 
+/* Stacked category / equity bar list. */
 .equity-bars {
   display: flex;
   flex-direction: column;
@@ -1784,6 +1870,7 @@
   padding: 0 8px 8px;
 }
 
+/* One labeled equity/category bar row. */
 .equity-bar-row {
   display: grid;
   grid-template-columns: 72px 1fr auto;
@@ -1792,6 +1879,7 @@
   font-size: 12px;
 }
 
+/* Clickable equity bar row. */
 .equity-bar-row--button {
   width: 100%;
   margin: 0;
@@ -1804,17 +1892,20 @@
   text-align: left;
 }
 
+/* Clickable equity bar row. (hover). */
 .equity-bar-row--button:hover,
 .equity-bar-row--button[data-active="true"] {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
 
+/* Explanatory note under equity charts. */
 .equity-note {
   margin: 0 0 8px;
   font-size: 12px;
 }
 
+/* Filters above equity composition. */
 .equity-filter-row {
   display: flex;
   align-items: center;
@@ -1824,6 +1915,7 @@
   font-size: 12px;
 }
 
+/* Category composition breakdown block. */
 .equity-composition {
   min-width: 0;
   display: flex;
@@ -1831,6 +1923,7 @@
   gap: 8px;
 }
 
+/* Track behind an equity/category bar. */
 .equity-bar-track {
   display: block;
   height: 8px;
@@ -1841,6 +1934,7 @@
   overflow: hidden;
 }
 
+/* Filled portion of an equity bar. */
 .equity-bar {
   display: block;
   height: 100%;
@@ -1848,6 +1942,7 @@
   background: var(--accent);
 }
 
+/* Made-hand category bar fill. */
 .category-bar {
   display: inline-block;
   height: 8px;
@@ -1860,6 +1955,7 @@
 
 /* Build workspace */
 
+/* Build page root layout. */
 .build-workspace {
   height: 100%;
   overflow: auto;
@@ -1869,6 +1965,7 @@
   gap: var(--space-3);
 }
 
+/* Build page title + summary header. */
 .build-header {
   display: flex;
   justify-content: space-between;
@@ -1877,12 +1974,14 @@
   flex-wrap: wrap;
 }
 
+/* Build page title + summary header. — page heading. */
 .build-header h1 {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
 }
 
+/* Short summary under the Build title. */
 .build-summary {
   display: flex;
   flex-wrap: wrap;
@@ -1892,6 +1991,7 @@
   color: var(--muted);
 }
 
+/* Two-column Build sections grid. */
 .build-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(280px, 1fr));
@@ -1899,6 +1999,7 @@
   align-content: start;
 }
 
+/* One Build card/section (ranges, tree, hardware, …). */
 .build-section {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1909,6 +2010,7 @@
   gap: var(--space-2);
 }
 
+/* One Build card/section (ranges, tree, hardware, …). — section heading. */
 .build-section h2 {
   margin: 0;
   font-size: 13px;
@@ -1916,11 +2018,13 @@
   letter-spacing: 0.02em;
 }
 
+/* Styles for .span-2. */
 .build-section.span-2,
 .build-section[data-span="2"] {
   grid-column: 1 / -1;
 }
 
+/* Inline control row inside a Build section. */
 .build-inline,
 .range-toolbar {
   display: flex;
@@ -1929,21 +2033,25 @@
   align-items: center;
 }
 
+/* Range paint weight control field. */
 .paint-weight-field {
   min-width: 220px;
 }
 
+/* Slider + numeric input for paint weight. */
 .paint-weight-controls {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
+/* Slider + numeric input for paint weight. — input control inside the parent. */
 .paint-weight-controls input[type="range"] {
   flex: 1 1 120px;
   min-width: 100px;
 }
 
+/* Numeric paint-weight text input. */
 .paint-weight-input {
   width: 4.5rem;
   color: var(--text);
@@ -1955,6 +2063,7 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* One Build card/section (ranges, tree, hardware, …). — form label. */
 .build-section label {
   display: flex;
   flex-direction: column;
@@ -1963,6 +2072,7 @@
   color: var(--muted);
 }
 
+/* One Build card/section (ranges, tree, hardware, …). — input control inside the parent. */
 .build-section label input,
 .build-section label select,
 .build-section label textarea {
@@ -1974,6 +2084,7 @@
   min-height: 26px;
 }
 
+/* Toggle chip group in Build (e.g. presets). */
 .build-picker {
   display: grid;
   grid-template-columns: repeat(13, minmax(0, 1fr));
@@ -1982,6 +2093,7 @@
   border: 1px solid var(--border);
 }
 
+/* Toggle chip group in Build (e.g. presets). — clickable button inside the parent. */
 .build-picker button {
   aspect-ratio: 1;
   border: 0;
@@ -1991,17 +2103,20 @@
   color: var(--muted);
 }
 
+/* Toggle chip group in Build (e.g. presets). — clickable button inside the parent. */
 .build-picker button[data-on="true"] {
   background: #2f7a52;
   color: #fff;
 }
 
+/* Responsive grid of labeled form fields. */
 .field-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: var(--space-2);
 }
 
+/* One labeled form field (span + input). */
 .field {
   display: flex;
   flex-direction: column;
@@ -2009,10 +2124,12 @@
   font-size: 12px;
 }
 
+/* One labeled form field (span + input). — inline fragment. */
 .field > span {
   color: var(--muted);
 }
 
+/* One labeled form field (span + input). — input control inside the parent. */
 .field input,
 .field select,
 .field textarea {
@@ -2023,11 +2140,13 @@
   min-height: 26px;
 }
 
+/* One labeled form field (span + input). — textarea inside the parent. */
 .field textarea {
   min-height: 56px;
   resize: vertical;
 }
 
+/* Styles for .check. */
 .field.check {
   flex-direction: row;
   align-items: center;
@@ -2035,6 +2154,7 @@
   padding-top: 18px;
 }
 
+/* Empty/placeholder workspace page. */
 .placeholder-workspace {
   height: 100%;
   display: flex;
@@ -2044,6 +2164,7 @@
   font-size: 14px;
 }
 
+/* Full-screen dimmer behind Help / Assistant windows. */
 .help-overlay {
   position: fixed;
   inset: 0;
@@ -2054,6 +2175,7 @@
   z-index: 100;
 }
 
+/* Static help content panel. */
 .help-panel {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -2063,20 +2185,24 @@
   max-width: 420px;
 }
 
+/* Static help content panel. — section heading. */
 .help-panel h2 {
   margin: 0 0 8px;
   font-size: 14px;
 }
 
+/* Static help content panel. — bullet list. */
 .help-panel ul {
   margin: 0;
   padding-left: 18px;
 }
 
+/* Static help content panel. — list item. */
 .help-panel li {
   margin: 4px 0;
 }
 
+/* Study Assistant / help chat floating window. */
 .help-chat-window {
   position: fixed;
   z-index: 90;
@@ -2092,6 +2218,7 @@
   color: var(--text);
 }
 
+/* Draggable title bar of the chat window. */
 .help-chat-window__title {
   display: flex;
   align-items: center;
@@ -2105,10 +2232,12 @@
   touch-action: none;
 }
 
+/* Draggable title bar of the chat window. */
 .help-chat-window__title:active {
   cursor: grabbing;
 }
 
+/* Title + subtitle text in the chat title bar. */
 .help-chat-window__title-text {
   display: flex;
   flex-direction: column;
@@ -2116,14 +2245,17 @@
   min-width: 0;
 }
 
+/* Title + subtitle text in the chat title bar. — emphasized text. */
 .help-chat-window__title-text strong {
   font-size: 12px;
 }
 
+/* Muted secondary text color utility. */
 .help-chat-window__title-text .muted {
   font-size: 10px;
 }
 
+/* Close / provider controls on the title bar. */
 .help-chat-window__title-actions {
   display: flex;
   align-items: center;
@@ -2131,12 +2263,14 @@
   flex-shrink: 0;
 }
 
+/* Model/provider select in the chat window. — native <select> inside the parent. */
 .help-chat-window__provider select {
   font: inherit;
   font-size: 11px;
   max-width: 88px;
 }
 
+/* Scrollable chat body (transcript + compose). */
 .help-chat-window__body {
   display: flex;
   flex-direction: column;
@@ -2146,6 +2280,7 @@
   flex: 1;
 }
 
+/* Intro blurb above chat suggestions. */
 .help-chat-window__lede {
   margin: 0;
   font-size: 11px;
@@ -2153,6 +2288,7 @@
   color: var(--muted, #888);
 }
 
+/* Send / apply / undo buttons under compose. */
 .help-chat-window__creds .assistant-compose-actions,
 .help-chat-window__compose .assistant-compose-actions {
   display: flex;
@@ -2161,6 +2297,7 @@
   align-items: center;
 }
 
+/* API credential fields inside the chat window. — input control inside the parent. */
 .help-chat-window__creds input[type="password"],
 .help-chat-window__compose textarea {
   width: 100%;
@@ -2169,16 +2306,19 @@
   box-sizing: border-box;
 }
 
+/* Suggested prompt chips. */
 .help-chat-window__suggestions {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
+/* Standard bordered toolbar button used across workspaces. */
 .help-chat-window__suggestions .toolbar-btn {
   font-size: 11px;
 }
 
+/* Message transcript list. */
 .help-chat-window__transcript {
   flex: 1;
   min-height: 96px;
@@ -2192,6 +2332,7 @@
   gap: 8px;
 }
 
+/* You / Assistant role label on a bubble. */
 .help-chat-bubble__role {
   font-size: 10px;
   text-transform: uppercase;
@@ -2200,22 +2341,26 @@
   margin-bottom: 2px;
 }
 
+/* Message body text in a chat bubble. */
 .help-chat-bubble__text {
   font-size: 12px;
   line-height: 1.4;
   white-space: pre-wrap;
 }
 
+/* Message body text in a chat bubble. */
 .help-chat-bubble--user .help-chat-bubble__text {
   color: var(--text);
 }
 
+/* Compose box + send actions. */
 .help-chat-window__compose {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
+/* Pending setup-apply receipt strip. */
 .help-chat-window__pending-apply {
   flex-shrink: 0;
   display: flex;
@@ -2227,6 +2372,7 @@
   background: color-mix(in srgb, var(--accent, #3b82f6) 12%, var(--panel));
 }
 
+/* Label for a pending apply action. */
 .help-chat-window__pending-apply-label {
   margin: 0;
   font-size: 12px;
@@ -2234,6 +2380,7 @@
   line-height: 1.35;
 }
 
+/* Send / apply / undo buttons under compose. */
 .help-chat-window__pending-apply .assistant-compose-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2241,6 +2388,7 @@
   align-items: center;
 }
 
+/* Corner resize handle on the chat window. */
 .help-chat-window__resize {
   position: absolute;
   right: 0;
@@ -2257,6 +2405,7 @@
     );
 }
 
+/* Visually hidden text kept for screen readers. */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -2269,11 +2418,14 @@
   border: 0;
 }
 
+/* Responsive overrides below 1100px width. */
 @media (max-width: 1100px) {
+  /* Study center grid: optional nav + matrix pane. */
   .study-main {
     grid-template-columns: 1fr;
   }
 
+  /* Optional left node tree for browsing the public tree. */
   .node-navigator,
   .study-detail-panel,
   .combo-inspector {
@@ -2285,10 +2437,12 @@
     border-right: 0;
   }
 
+  /* Row that holds the range matrix and Study detail rail. */
   .matrix-stage {
     flex-direction: column;
   }
 
+  /* Outer box around the 13x13 hand matrix. */
   .range-matrix-wrap {
     aspect-ratio: auto;
     flex: 1 1 auto;
@@ -2296,6 +2450,7 @@
     max-height: 55vh;
   }
 
+  /* Two-column Build sections grid. */
   .build-grid {
     grid-template-columns: 1fr;
   }
@@ -2303,6 +2458,7 @@
 
 /* Build extras + study tab controls */
 
+/* Legacy Study sub-tab strip (if shown). */
 .study-tabs {
   display: flex;
   align-items: center;
@@ -2313,10 +2469,12 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Extra controls beside Study tabs. */
 .study-tabs__controls {
   margin-left: auto;
 }
 
+/* One Study sub-tab button. */
 .study-tab {
   border: 0;
   background: var(--panel);
@@ -2328,6 +2486,7 @@
   font-size: 12px;
 }
 
+/* Build page title + summary header. */
 .build-header {
   grid-column: 1 / -1;
   display: flex;
@@ -2338,12 +2497,14 @@
   margin-bottom: var(--space-2);
 }
 
+/* Build page title + summary header. — page heading. */
 .build-header h1 {
   margin: 0;
   font-size: 18px;
   font-weight: 650;
 }
 
+/* Short summary under the Build title. */
 .build-summary {
   display: flex;
   flex-wrap: wrap;
@@ -2352,6 +2513,7 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Two-column Build sections grid. */
 .build-grid {
   grid-column: 1 / -1;
   display: grid;
@@ -2360,6 +2522,7 @@
   align-items: start;
 }
 
+/* Subheading inside a Build section. */
 .build-subhead {
   margin: 8px 0 0;
   font-size: 12px;
@@ -2369,6 +2532,7 @@
   color: var(--muted);
 }
 
+/* Header above one seat's range editor. */
 .range-editor__head {
   display: flex;
   flex-wrap: wrap;
@@ -2376,6 +2540,7 @@
   gap: 6px;
 }
 
+/* Header above one seat's range editor. — section heading. */
 .range-editor__head h2,
 .range-editor__head h3 {
   margin: 0 4px 0 0;
@@ -2383,12 +2548,14 @@
   font-weight: 700;
 }
 
+/* Inline control row inside a Build section. */
 .build-inline {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: var(--space-2);
 }
 
+/* One Build card/section (ranges, tree, hardware, …). — form label. */
 .build-section label {
   display: flex;
   flex-direction: column;
@@ -2397,6 +2564,7 @@
   color: var(--muted);
 }
 
+/* One Build card/section (ranges, tree, hardware, …). — input control inside the parent. */
 .build-section label input,
 .build-section label select,
 .build-section label textarea {
@@ -2408,6 +2576,7 @@
   font: inherit;
 }
 
+/* Styles for .check. */
 .build-section label.check {
   flex-direction: row;
   align-items: center;
@@ -2415,6 +2584,7 @@
   padding-top: 18px;
 }
 
+/* OOP + IP range editors side by side. */
 .range-pair {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -2423,6 +2593,7 @@
   align-items: start;
 }
 
+/* One seat's range text + paint grid. */
 .range-editor {
   min-width: 0;
   display: flex;
@@ -2430,12 +2601,14 @@
   align-items: stretch;
 }
 
+/* One seat's range text + paint grid. */
 .range-editor + .range-editor {
   border-left: 1px solid var(--border);
   padding-left: 36px;
   margin-left: -1px;
 }
 
+/* 13x13 paint grid for editing a range. */
 .range-paint-grid {
   display: grid;
   width: 90%;
@@ -2451,6 +2624,7 @@
   container-type: size;
 }
 
+/* One paintable hand-class cell in Build. */
 .paint-cell {
   border: 0;
   min-width: 0;
@@ -2464,10 +2638,12 @@
   cursor: crosshair;
 }
 
+/* One paintable hand-class cell in Build. (active). */
 .paint-cell[data-on="true"] {
   color: #fff;
 }
 
+/* Help text for the betting-tree editor. */
 .tree-editor-help,
 .tree-editor-error {
   margin: 0;
@@ -2475,10 +2651,12 @@
   color: var(--muted);
 }
 
+/* Validation error for the tree editor. */
 .tree-editor-error {
   color: var(--danger, #b33);
 }
 
+/* Estimated memory / plan readout for a build. */
 .memory-plan {
   display: flex;
   flex-wrap: wrap;
@@ -2490,11 +2668,13 @@
   border-radius: var(--radius-sm);
 }
 
+/* Tree size / node-count meta line. */
 .tree-meta {
   color: var(--muted);
   font-size: 11px;
 }
 
+/* List of pending tree line edits. — bullet list. */
 .tree-edits-list ul,
 .tree-preview,
 .tree-actions {
@@ -2503,6 +2683,7 @@
   padding: 0;
 }
 
+/* List of pending tree line edits. — list item. */
 .tree-edits-list li,
 .tree-actions li {
   display: flex;
@@ -2514,6 +2695,7 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Scrollable preview of the public tree. */
 .tree-preview {
   display: flex;
   flex-direction: column;
@@ -2522,6 +2704,7 @@
   overflow: auto;
 }
 
+/* One node block in the tree preview. */
 .tree-node {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2529,6 +2712,7 @@
   background: var(--secondary);
 }
 
+/* Header row for a tree preview node. */
 .tree-node-head {
   display: flex;
   flex-wrap: wrap;
@@ -2537,16 +2721,19 @@
   margin-bottom: 6px;
 }
 
+/* Public path label for a tree node. */
 .tree-path {
   font-size: 12px;
   font-weight: 600;
 }
 
+/* Action label/code in the tree editor. — inline code / id text. */
 .tree-action-label code {
   margin-left: 6px;
   color: var(--muted);
 }
 
+/* Add/remove action buttons on a tree node. */
 .tree-action-btns,
 .tree-add-size,
 .tree-add-dialog {
@@ -2556,16 +2743,19 @@
   align-items: center;
 }
 
+/* Control to add a bet size on a node. */
 .tree-add-size {
   margin-top: 6px;
 }
 
+/* Inline dialog for entering a new size. */
 .tree-add-dialog {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
 }
 
+/* Toolbar above a range editor (clear/paint tools). */
 .range-toolbar,
 .panel-title-row {
   display: flex;
@@ -2574,12 +2764,14 @@
   margin-bottom: 6px;
 }
 
+/* Panel heading text. */
 .panel-title {
   margin: 0;
   font-size: 12px;
   font-weight: 650;
 }
 
+/* Standard bordered toolbar button used across workspaces. */
 .toolbar-btn {
   border: 1px solid var(--border);
   background: var(--secondary);
@@ -2591,16 +2783,19 @@
   min-height: 28px;
 }
 
+/* Styles for .primary. */
 .toolbar-btn.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
 
+/* Styles for .danger. */
 .toolbar-btn.danger {
   color: var(--danger);
 }
 
+/* Threads/RAM hint under Build hardware fields. */
 .build-hardware-hint {
   display: flex;
   align-items: center;
@@ -2610,10 +2805,12 @@
   font-size: 12px;
 }
 
+/* Tabular-nums utility for aligned figures. */
 .tabular {
   font-variant-numeric: tabular-nums;
 }
 
+/* SVG for the convergence chart. */
 .convergence-svg {
   width: 100%;
   height: 140px;
@@ -2621,6 +2818,7 @@
   border: 1px solid var(--border);
 }
 
+/* Key/value meta grid in an inspector panel. */
 .inspector-meta {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2628,11 +2826,13 @@
   margin-bottom: 8px;
 }
 
+/* Key/value meta grid in an inspector panel. — inline fragment. */
 .inspector-meta span {
   display: block;
   font-size: 11px;
 }
 
+/* One action row (swatch + label + freq/EV). */
 .inspector-action-row {
   display: grid;
   grid-template-columns: 10px 1fr auto auto;
@@ -2643,6 +2843,7 @@
   font-size: 12px;
 }
 
+/* Color square on an action chip / inspector row. */
 .action-swatch {
   width: 8px;
   height: 8px;
@@ -2650,12 +2851,14 @@
   display: inline-block;
 }
 
+/* Drag handle to resize a panel (horizontal bar by default). */
 .resize-handle {
   height: 5px;
   cursor: ns-resize;
   background: transparent;
 }
 
+/* Drag handle along the top edge of a panel. */
 .resize-handle--top {
   position: absolute;
   top: 0;
@@ -2667,12 +2870,15 @@
   cursor: ns-resize;
 }
 
+/* Small helper / hint text. */
 .hint {
   color: var(--muted);
   font-size: 12px;
 }
 
+/* Responsive overrides below 1100px width. */
 @media (max-width: 1100px) {
+  /* Two-column Build sections grid. */
   .build-grid {
     grid-template-columns: 1fr;
   }
@@ -2680,6 +2886,7 @@
 
 /* --- Lock editor drawer (append-only) --- */
 
+/* Node-lock side drawer on Study. */
 .lock-drawer {
   position: absolute;
   top: 0;
@@ -2695,10 +2902,12 @@
   min-height: 0;
 }
 
+/* Study page column: context, history, matrix, lower dock. */
 .study-workspace {
   position: relative;
 }
 
+/* Lock drawer title bar. */
 .lock-drawer__header {
   display: flex;
   align-items: flex-start;
@@ -2709,17 +2918,20 @@
   flex-shrink: 0;
 }
 
+/* Locked node id display. */
 .lock-drawer__node {
   margin: 2px 0 0;
   font-size: 11px;
   line-height: 1.35;
 }
 
+/* Locked node id display. — inline code / id text. */
 .lock-drawer__node code {
   font-family: var(--font-mono);
   font-size: 11px;
 }
 
+/* Scrollable lock drawer content. */
 .lock-drawer__body {
   flex: 1;
   min-height: 0;
@@ -2730,12 +2942,14 @@
   gap: var(--space-3);
 }
 
+/* One section inside the lock drawer. */
 .lock-drawer__section {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
 
+/* Section heading in the lock drawer. */
 .lock-drawer__section-title {
   font-size: var(--label-size);
   font-weight: 600;
@@ -2744,17 +2958,20 @@
   color: var(--muted);
 }
 
+/* Full-node vs selected-combo lock kind toggles. */
 .lock-kind-toggle {
   display: flex;
   gap: var(--space-1);
   flex-wrap: wrap;
 }
 
+/* Standard bordered toolbar button used across workspaces. (active). */
 .lock-kind-toggle .toolbar-btn[data-active="true"] {
   background: var(--accent-soft);
   color: var(--accent);
 }
 
+/* List of hands in the lock draft. */
 .lock-hand-list {
   list-style: none;
   margin: 0;
@@ -2765,12 +2982,14 @@
   background: var(--secondary);
 }
 
+/* Compact variant of the lock hand list. */
 .lock-hand-list--compact {
   max-height: 140px;
   border: 0;
   background: transparent;
 }
 
+/* One hand row in the lock list. */
 .lock-hand-row {
   display: grid;
   grid-template-columns: 18px 1fr auto auto;
@@ -2781,24 +3000,29 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* One hand row in the lock list. */
 .lock-hand-row:last-child {
   border-bottom: 0;
 }
 
+/* One hand row in the lock list. (active). */
 .lock-hand-row[data-locked="true"] {
   background: color-mix(in srgb, var(--ok) 12%, transparent);
 }
 
+/* One hand row in the lock list. (active). */
 .lock-hand-row[data-in-draft="true"]:not([data-locked="true"]) {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+/* Locked / draft marker on a hand row. */
 .lock-hand-row__mark {
   color: var(--muted);
   font-size: 8px;
   text-align: center;
 }
 
+/* Hand label badge on a lock row. */
 .lock-hand-row__badge {
   font-size: 10px;
   text-transform: uppercase;
@@ -2806,10 +3030,12 @@
   color: var(--muted);
 }
 
+/* Hand label badge on a lock row. (active). */
 .lock-hand-row[data-locked="true"] .lock-hand-row__badge {
   color: var(--ok);
 }
 
+/* Expandable hand picker for locks. — disclosure summary. */
 .lock-hand-picker summary {
   cursor: pointer;
   font-size: 12px;
@@ -2817,12 +3043,14 @@
   padding: 2px 0;
 }
 
+/* 169-grid paint panel for selecting lock hands. */
 .lock-paint-panel {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
 
+/* Hint text above the lock paint grid. */
 .lock-paint-panel__hint {
   margin: 0;
   font-size: 11px;
@@ -2830,6 +3058,7 @@
   color: var(--muted);
 }
 
+/* 13x13 grid for painting lock selection. */
 .lock-paint-grid {
   display: grid;
   width: 100%;
@@ -2844,6 +3073,7 @@
   background: var(--border);
 }
 
+/* One hand-class cell in the lock paint grid. */
 .lock-paint-cell {
   border: 0;
   min-width: 0;
@@ -2858,30 +3088,36 @@
   line-height: 1;
 }
 
+/* One hand-class cell in the lock paint grid. */
 .lock-paint-cell[data-available="false"] {
   opacity: 0.35;
   cursor: default;
 }
 
+/* One hand-class cell in the lock paint grid. (active). */
 .lock-paint-cell[data-selected="true"] {
   background: color-mix(in srgb, var(--accent) 55%, var(--empty-cell));
   color: #fff;
 }
 
+/* One hand-class cell in the lock paint grid. (active). */
 .lock-paint-cell[data-locked="true"] {
   box-shadow: inset 0 0 0 1px var(--ok);
 }
 
+/* One hand-class cell in the lock paint grid. (active). */
 .lock-paint-cell[data-selected="true"][data-locked="true"] {
   background: color-mix(in srgb, var(--ok) 45%, var(--accent) 25%);
 }
 
+/* Probability editor grid for a locked strategy row. */
 .lock-prob-grid {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
+/* One action probability row in a lock. */
 .lock-prob-row {
   display: grid;
   grid-template-columns: minmax(64px, 1fr) 72px auto;
@@ -2890,10 +3126,12 @@
   font-size: 12px;
 }
 
+/* Action label on a lock probability row. */
 .lock-prob-row__label {
   font-family: var(--font-mono);
 }
 
+/* Numeric probability input for a lock action. */
 .lock-prob-input {
   width: 100%;
   border: 1px solid var(--border);
@@ -2904,6 +3142,7 @@
   font: inherit;
 }
 
+/* Sum readout for lock probabilities. */
 .lock-prob-sum,
 .lock-prob-preview {
   display: flex;
@@ -2913,17 +3152,20 @@
   font-size: 12px;
 }
 
+/* Validation note under the probability sum. */
 .lock-prob-sum__note {
   color: var(--danger);
   font-size: 11px;
 }
 
+/* Apply / cancel / resolve buttons. */
 .lock-drawer__actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
 }
 
+/* Warm-start option for resolve-locked. */
 .lock-warm-start {
   display: flex;
   align-items: flex-start;
@@ -2932,6 +3174,7 @@
   line-height: 1.35;
 }
 
+/* List of stored locks on the node. */
 .lock-record-list {
   list-style: none;
   margin: 0;
@@ -2941,6 +3184,7 @@
   overflow: auto;
 }
 
+/* One stored lock record row. */
 .lock-record-row {
   display: grid;
   grid-template-columns: 1fr auto auto auto;
@@ -2951,14 +3195,17 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* One stored lock record row. */
 .lock-record-row:last-child {
   border-bottom: 0;
 }
 
+/* One stored lock record row. (active). */
 .lock-record-row[data-current="true"] {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+/* One stored lock record row. — inline code / id text. */
 .lock-record-row code {
   font-family: var(--font-mono);
   overflow: hidden;
@@ -2966,13 +3213,16 @@
   white-space: nowrap;
 }
 
+/* Status/error message in the lock drawer. */
 .lock-drawer__message {
   margin: 0;
   font-size: 11px;
   line-height: 1.35;
 }
 
+/* Responsive overrides below 900px width. */
 @media (max-width: 900px) {
+  /* Node-lock side drawer on Study. */
   .lock-drawer {
     top: auto;
     left: 0;
@@ -2987,6 +3237,7 @@
 
 /* Compare workspace */
 
+/* Compare solutions workspace root. */
 .compare-workspace {
   height: 100%;
   min-height: 0;
@@ -2997,6 +3248,7 @@
   padding: var(--space-3);
 }
 
+/* Compare page header + refresh actions. */
 .compare-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -3005,17 +3257,20 @@
   align-items: flex-start;
 }
 
+/* Compare page title block. — page heading. */
 .compare-toolbar__title h1 {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
 }
 
+/* Compare page title block. — paragraph copy. */
 .compare-toolbar__title p {
   margin: 2px 0 0;
   font-size: 12px;
 }
 
+/* Refresh / load actions on Compare. */
 .compare-toolbar__actions {
   display: flex;
   flex-wrap: wrap;
@@ -3023,6 +3278,7 @@
   align-items: center;
 }
 
+/* Side-by-side solution identity header. */
 .compare-header {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -3033,6 +3289,7 @@
   gap: var(--space-2);
 }
 
+/* A vs B solution id cluster. */
 .compare-header__ids {
   display: flex;
   flex-wrap: wrap;
@@ -3040,6 +3297,7 @@
   align-items: flex-end;
 }
 
+/* One solution's id + label block. */
 .compare-id-block {
   display: flex;
   flex-direction: column;
@@ -3047,6 +3305,7 @@
   min-width: 0;
 }
 
+/* A / B label above a solution id. */
 .compare-label {
   font-size: var(--label-size);
   color: var(--muted);
@@ -3054,6 +3313,7 @@
   text-transform: uppercase;
 }
 
+/* Solution id string. */
 .compare-id {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -3063,17 +3323,20 @@
   padding: 2px 6px;
 }
 
+/* vs divider between compared solutions. */
 .compare-vs {
   font-size: 12px;
   padding-bottom: 4px;
 }
 
+/* Summary metric chips for the comparison. */
 .compare-metrics {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
 }
 
+/* One summary metric (label + value). */
 .compare-metric {
   display: flex;
   flex-direction: column;
@@ -3081,11 +3344,13 @@
   min-width: 88px;
 }
 
+/* Numeric value of a compare metric. */
 .compare-metric__value {
   font-size: 14px;
   font-weight: 600;
 }
 
+/* Note about utility / EV basis in Compare. */
 .compare-utility-note {
   margin: 0;
   font-size: 11px;
@@ -3093,11 +3358,13 @@
   line-height: 1.4;
 }
 
+/* Note about utility / EV basis in Compare. — emphasized text. */
 .compare-utility-note strong {
   color: var(--text);
   font-weight: 600;
 }
 
+/* Empty state when no comparison is loaded. */
 .compare-empty {
   flex: 1;
   min-height: 0;
@@ -3112,11 +3379,13 @@
   max-width: 560px;
 }
 
+/* Empty state when no comparison is loaded. — section heading. */
 .compare-empty h2 {
   margin: 0;
   font-size: 15px;
 }
 
+/* Empty state when no comparison is loaded. — paragraph copy. */
 .compare-empty p {
   margin: 0;
   color: var(--muted);
@@ -3124,11 +3393,13 @@
   line-height: 1.45;
 }
 
+/* Empty state when no comparison is loaded. — inline code / id text. */
 .compare-empty code {
   font-family: var(--font-mono);
   font-size: 12px;
 }
 
+/* Store/error banner on Compare. */
 .compare-store-message {
   margin: 0;
   padding: 6px 10px;
@@ -3139,6 +3410,7 @@
   font-size: 12px;
 }
 
+/* Panel wrapping the compare combo table. */
 .compare-table-panel {
   flex: 1;
   min-height: 0;
@@ -3151,6 +3423,7 @@
   padding: var(--space-2);
 }
 
+/* Filters/sort above the compare table. */
 .compare-table-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -3158,17 +3431,20 @@
   align-items: center;
 }
 
+/* Filter button group for the compare table. */
 .compare-filter-group {
   display: flex;
   gap: 4px;
 }
 
+/* Standard bordered toolbar button used across workspaces. (active). */
 .compare-filter-group .toolbar-btn[data-active="true"] {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
 }
 
+/* Sort control for the compare table. */
 .compare-sort {
   display: flex;
   align-items: center;
@@ -3177,6 +3453,7 @@
   color: var(--muted);
 }
 
+/* Sort control for the compare table. — native <select> inside the parent. */
 .compare-sort select {
   border: 1px solid var(--border);
   background: var(--secondary);
@@ -3186,11 +3463,13 @@
   color: var(--text);
 }
 
+/* Row count label for the compare table. */
 .compare-table-count {
   margin-left: auto;
   font-size: 11px;
 }
 
+/* Scroll container for the compare table. */
 .compare-table-scroll {
   flex: 1;
   min-height: 0;
@@ -3199,6 +3478,7 @@
   border-radius: var(--radius-sm);
 }
 
+/* Combo-level strategy/EV compare table. */
 .compare-table {
   width: max-content;
   min-width: 100%;
@@ -3206,6 +3486,7 @@
   font-size: 12px;
 }
 
+/* Combo-level strategy/EV compare table. */
 .compare-table th,
 .compare-table td {
   padding: 3px 8px;
@@ -3213,6 +3494,7 @@
   white-space: nowrap;
 }
 
+/* Combo-level strategy/EV compare table. */
 .compare-table thead th {
   position: sticky;
   top: 0;
@@ -3224,6 +3506,7 @@
   text-align: left;
 }
 
+/* Styles for .compare-subhead. */
 .compare-table thead tr.compare-subhead th {
   top: 22px;
   font-weight: 500;
@@ -3232,6 +3515,7 @@
   letter-spacing: 0.03em;
 }
 
+/* Combo column in the compare table. */
 .compare-col-combo {
   position: sticky;
   left: 0;
@@ -3242,48 +3526,58 @@
   min-width: 52px;
 }
 
+/* Combo column in the compare table. */
 .compare-table thead .compare-col-combo {
   z-index: 3;
   background: var(--secondary);
 }
 
+/* Lock marker column. */
 .compare-col-lock {
   text-align: center;
   width: 36px;
 }
 
+/* Per-action frequency/EV columns. */
 .compare-col-action {
   text-align: center;
   border-left: 1px solid var(--border);
 }
 
+/* Numeric cell alignment in compare. */
 .compare-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
   min-width: 52px;
 }
 
+/* Combo-level strategy/EV compare table. (active). */
 .compare-table tbody tr[data-locked="true"] {
   background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
+/* Combo-level strategy/EV compare table. (hover). */
 .compare-table tbody tr:hover {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+/* Lock glyph in a compare row. */
 .compare-lock-mark {
   color: var(--accent);
   font-size: 10px;
 }
 
+/* Positive delta highlighting. */
 .compare-delta-pos {
   color: var(--ok);
 }
 
+/* Negative delta highlighting. */
 .compare-delta-neg {
   color: var(--danger);
 }
 
+/* Empty body message in the compare table. */
 .compare-table-empty {
   text-align: center;
   color: var(--muted);
@@ -3292,6 +3586,7 @@
 
 /* Library workspace */
 
+/* Range / profile library workspace. */
 .library-workspace {
   height: 100%;
   overflow: auto;
@@ -3301,6 +3596,7 @@
   gap: var(--space-3);
 }
 
+/* Library page title header. */
 .library-header {
   display: flex;
   justify-content: space-between;
@@ -3309,18 +3605,21 @@
   flex-wrap: wrap;
 }
 
+/* Library page title header. — page heading. */
 .library-header h1 {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
 }
 
+/* Muted secondary text on Library. */
 .library-muted {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 12px;
 }
 
+/* Card grid of library sections. */
 .library-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(220px, 1fr));
@@ -3328,6 +3627,7 @@
   align-content: start;
 }
 
+/* One library category card. */
 .library-section {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -3339,6 +3639,7 @@
   min-height: 160px;
 }
 
+/* Section header inside a library card. */
 .library-section__head {
   display: flex;
   align-items: baseline;
@@ -3346,6 +3647,7 @@
   gap: var(--space-2);
 }
 
+/* One library category card. — section heading. */
 .library-section h2 {
   margin: 0;
   font-size: 13px;
@@ -3353,11 +3655,13 @@
   letter-spacing: 0.02em;
 }
 
+/* Item count badge on a library section. */
 .library-count {
   color: var(--muted);
   font-size: 11px;
 }
 
+/* List of library rows. */
 .library-list {
   list-style: none;
   margin: 0;
@@ -3367,6 +3671,7 @@
   gap: 2px;
 }
 
+/* One saved range/profile row. */
 .library-row {
   display: flex;
   align-items: center;
@@ -3376,10 +3681,12 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* One saved range/profile row. */
 .library-row:last-child {
   border-bottom: 0;
 }
 
+/* Primary content of a library row. */
 .library-row__main {
   min-width: 0;
   display: flex;
@@ -3387,6 +3694,7 @@
   gap: 2px;
 }
 
+/* Display name of a library item. */
 .library-row__name {
   font-size: 12px;
   font-weight: 600;
@@ -3395,6 +3703,7 @@
   white-space: nowrap;
 }
 
+/* Meta line under a library item name. */
 .library-row__meta {
   color: var(--muted);
   font-size: 11px;
@@ -3404,6 +3713,7 @@
   white-space: nowrap;
 }
 
+/* Empty state inside a library section. */
 .library-empty {
   margin: 0;
   color: var(--muted);
@@ -3411,6 +3721,7 @@
   line-height: 1.4;
 }
 
+/* OOP/IP target radios when applying a range. */
 .library-range-target {
   display: flex;
   flex-wrap: wrap;
@@ -3419,6 +3730,7 @@
   font-size: 12px;
 }
 
+/* Radio option for library range target. */
 .library-radio {
   display: inline-flex;
   align-items: center;
@@ -3427,12 +3739,14 @@
   cursor: pointer;
 }
 
+/* Folder groups of library ranges. */
 .library-range-folders {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
+/* Folder title above a range group. */
 .library-folder__title {
   margin: 0 0 4px;
   font-size: 12px;
@@ -3440,13 +3754,16 @@
   color: var(--muted);
 }
 
+/* Responsive overrides below 1100px width. */
 @media (max-width: 1100px) {
+  /* Card grid of library sections. */
   .library-grid {
     grid-template-columns: 1fr;
   }
 }
 
 
+/* Side-by-side hero + opponent range matrices. */
 .matrix-dual {
   display: flex;
   flex-direction: row;
@@ -3458,6 +3775,7 @@
   height: 100%;
 }
 
+/* Outer box around the 13x13 hand matrix. */
 .matrix-dual > .range-matrix-wrap,
 .matrix-dual > .opponent-range-pane {
   flex: 1 1 0;
@@ -3468,11 +3786,13 @@
   aspect-ratio: auto;
 }
 
+/* Outer box around the 13x13 hand matrix. */
 .matrix-pane[data-dual="true"] .range-matrix-wrap,
 .opponent-range-pane .range-paint-grid {
   max-width: 100%;
 }
 
+/* Opponent solution-range matrix pane. */
 .opponent-range-pane {
   min-width: 0;
   overflow: auto;
@@ -3481,11 +3801,14 @@
   padding: var(--space-2);
 }
 
+/* Responsive overrides below 720px width. */
 @media (max-width: 720px) {
+  /* OOP + IP range editors side by side. */
   .range-pair {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /* One seat's range text + paint grid. */
   .range-editor + .range-editor {
     border-left: 0;
     padding-left: 0;
@@ -3495,37 +3818,46 @@
   }
 }
 
+/* Responsive overrides below 1280px width. */
 @media (max-width: 1280px) {
   /* Keep workspace navigation reachable at the default Tauri 1280×800 size:
      collapse the tab strip into a labeled select instead of hiding it. */
+  /* Full-width tab buttons (hidden on narrow layouts). */
   .workspace-switcher__tabs {
     display: none;
   }
 
+  /* Narrow-layout dropdown that replaces the tab strip. */
   .workspace-switcher__compact {
     display: inline-flex;
   }
 
+  /* Two-column equity histogram layout. */
   .equity-hist-grid {
     grid-template-columns: 1fr;
   }
 }
 
+/* Responsive overrides below 1024px width. */
 @media (max-width: 1024px) {
+  /* Study center grid: optional nav + matrix pane. */
   .study-main {
     grid-template-columns: 1fr !important;
   }
 
+  /* Right Study rail: Actions summary + Hands inspector. */
   .study-detail-panel,
   .combo-inspector {
     max-height: 40vh;
   }
 
+  /* Bottom analysis dock (reports / charts / tables). */
   .lower-dock {
     max-height: 60vh;
   }
 }
 
+/* Modal overlay behind the board card picker. */
 .card-picker-overlay {
   position: fixed;
   inset: 0;
@@ -3536,6 +3868,7 @@
   padding: var(--space-3);
 }
 
+/* Suit x rank board card picker dialog. */
 .card-picker {
   width: min(560px, 100%);
   max-height: min(720px, 92vh);
@@ -3547,29 +3880,34 @@
   padding: var(--space-3);
 }
 
+/* Grid of ranks/suits in the card picker. */
 .card-picker-grid {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
+/* Suit column header/label in the picker. */
 .card-picker-grid > .card-picker-suit,
 .card-picker-corner {
   display: none;
 }
 
+/* One rank row in the card picker. */
 .card-picker-rank-row {
   display: grid;
   grid-template-columns: 20px repeat(4, minmax(0, 1fr));
   gap: 2px;
 }
 
+/* Rank label cell. */
 .card-picker-rank {
   display: grid;
   place-items: center;
   font-size: 11px;
 }
 
+/* One selectable deck card in the picker. */
 .card-picker-cell {
   display: flex;
   flex-direction: column;
@@ -3585,16 +3923,19 @@
   font-size: 11px;
 }
 
+/* One selectable deck card in the picker. */
 .card-picker-cell[data-focused="true"] {
   outline: 2px solid var(--selection-outline);
   outline-offset: 1px;
 }
 
+/* One selectable deck card in the picker. */
 .card-picker-cell[data-blocked="true"],
 .card-picker-cell[data-missing="true"] {
   opacity: 0.35;
 }
 
+/* Chance weight shown on a picker cell. */
 .card-picker-weight {
   font-size: 9px;
   color: var(--muted);
@@ -3602,22 +3943,26 @@
 
 /* Setup assistant (Build) */
 
+/* Note about profile / catalogue match on Build. */
 .build-profile-note {
   margin: 4px 0 0;
   font-size: var(--label-size);
   color: var(--muted);
 }
 
+/* Helper text under a form field. */
 .field-hint {
   margin-top: 2px;
   font-size: 11px;
   color: var(--muted);
 }
 
+/* Inline assistant panel (non-window). */
 .assistant-panel {
   gap: var(--space-2);
 }
 
+/* Assistant panel header. */
 .assistant-header {
   display: flex;
   justify-content: space-between;
@@ -3626,10 +3971,12 @@
   flex-wrap: wrap;
 }
 
+/* Assistant panel header. — section heading. */
 .assistant-header h2 {
   margin: 0;
 }
 
+/* Actions on the assistant header. */
 .assistant-header-actions {
   display: flex;
   gap: 8px;
@@ -3637,6 +3984,7 @@
   flex-wrap: wrap;
 }
 
+/* Provider select for the assistant. */
 .assistant-provider {
   display: flex;
   flex-direction: row;
@@ -3646,10 +3994,12 @@
   color: var(--muted);
 }
 
+/* Provider select for the assistant. — native <select> inside the parent. */
 .assistant-provider select {
   min-width: 140px;
 }
 
+/* Intro copy for the assistant. */
 .assistant-lede {
   margin: 0;
   font-size: 12px;
@@ -3657,28 +4007,33 @@
   max-width: 72ch;
 }
 
+/* Example prompt buttons. */
 .assistant-examples {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
+/* Standard bordered toolbar button used across workspaces. */
 .assistant-examples .toolbar-btn {
   font-size: 11px;
 }
 
+/* Assistant compose textarea + actions. */
 .assistant-compose {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+/* Assistant compose textarea + actions. — textarea inside the parent. */
 .assistant-compose textarea {
   width: 100%;
   resize: vertical;
   min-height: 52px;
 }
 
+/* Send / apply / undo buttons under compose. */
 .assistant-compose-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3686,15 +4041,18 @@
   align-items: center;
 }
 
+/* Assistant status line. */
 .assistant-status {
   margin: 0;
   font-size: 12px;
 }
 
+/* Muted secondary text color utility. */
 .assistant-status.muted {
   color: var(--muted);
 }
 
+/* Structured result block from the assistant. */
 .assistant-result,
 .assistant-meta {
   background: var(--secondary);
@@ -3707,37 +4065,45 @@
   gap: 6px;
 }
 
+/* Title above an assistant result list. */
 .assistant-result-title {
   font-weight: 600;
 }
 
+/* Structured result block from the assistant. — bullet list. */
 .assistant-result ul,
 .assistant-flags ul {
   margin: 0;
   padding-left: 1.2em;
 }
 
+/* Styles for .warn. */
 .assistant-flags.warn {
   color: var(--danger);
 }
 
+/* Hint under assistant output (ok/warn variants). */
 .assistant-hint {
   font-size: 11px;
   color: var(--muted);
 }
 
+/* Styles for .ok. */
 .assistant-hint.ok {
   color: var(--ok);
 }
 
+/* Styles for .warn. */
 .assistant-hint.warn {
   color: var(--danger);
 }
 
+/* Catalogue ranges data table. */
 .catalogue-table tr[data-synthetic="true"] {
   opacity: 0.92;
 }
 
+/* API key fields for the assistant. */
 .assistant-credentials {
   display: flex;
   flex-direction: column;
@@ -3747,11 +4113,13 @@
   border-radius: var(--radius-sm);
 }
 
+/* API key fields for the assistant. — input control inside the parent. */
 .assistant-credentials input[type="password"] {
   min-width: 220px;
   flex: 1;
 }
 
+/* Dimmer behind the range catalogue modal. */
 .catalogue-modal-overlay {
   position: fixed;
   inset: 0;
@@ -3762,6 +4130,7 @@
   padding: var(--space-3);
 }
 
+/* Modal shell for the range catalogue. */
 .catalogue-modal {
   width: min(420px, 100%);
   max-height: min(860px, 92vh);
@@ -3776,6 +4145,7 @@
   gap: var(--space-2);
 }
 
+/* Browse/search panel for catalogue ranges. */
 .catalogue-modal .range-catalogue-panel {
   border: 0;
   background: transparent;
@@ -3784,14 +4154,17 @@
   grid-column: auto;
 }
 
+/* Browse/search panel for catalogue ranges. — section heading. */
 .catalogue-modal .range-catalogue-panel > .panel-title-row h2 {
   font-size: 13px;
 }
 
+/* Browse/search panel for catalogue ranges. */
 .range-catalogue-panel {
   gap: var(--space-2);
 }
 
+/* Filter controls above the catalogue table. */
 .catalogue-filters {
   display: flex;
   flex-wrap: wrap;
@@ -3799,22 +4172,26 @@
   align-items: flex-end;
 }
 
+/* Filter controls above the catalogue table. — form label. */
 .catalogue-filters label {
   min-width: 140px;
 }
 
+/* Scroll wrapper for the catalogue table. */
 .catalogue-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 
+/* Catalogue ranges data table. */
 .catalogue-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
 
+/* Catalogue ranges data table. */
 .catalogue-table th,
 .catalogue-table td {
   text-align: left;
@@ -3823,34 +4200,41 @@
   vertical-align: top;
 }
 
+/* Catalogue ranges data table. */
 .catalogue-table th {
   color: var(--muted);
   font-weight: 600;
 }
 
+/* Catalogue ranges data table. */
 .catalogue-table tr[data-exact="true"] {
   background: color-mix(in srgb, var(--ok) 12%, transparent);
 }
 
+/* Catalogue ranges data table. (active). */
 .catalogue-table tr[data-selected="true"] {
   outline: 1px solid var(--border);
 }
 
+/* Range name cell in the catalogue. */
 .catalogue-name {
   font-weight: 600;
 }
 
+/* Stable id cell in the catalogue. */
 .catalogue-id {
   color: var(--muted);
   font-size: 11px;
 }
 
+/* Load/edit actions on a catalogue row. */
 .catalogue-row-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
+/* Subheading inside the catalogue panel. */
 .catalogue-subhead {
   margin: var(--space-2) 0 0;
   font-size: 13px;
@@ -3858,6 +4242,7 @@
 
 /* Status bar solve controls + settings */
 
+/* Optional status-bar action buttons. */
 .status-bar__controls {
   display: inline-flex;
   align-items: center;
@@ -3865,12 +4250,14 @@
   flex-shrink: 0;
 }
 
+/* Standard bordered toolbar button used across workspaces. */
 .status-bar__controls .toolbar-btn {
   min-height: 22px;
   padding: 1px 6px;
   font-size: 11px;
 }
 
+/* Collapsed lower-dock height/state. */
 .lower-dock--collapsed {
   flex: 0 0 auto;
   min-height: 0;
@@ -3883,27 +4270,32 @@
   background: var(--secondary);
 }
 
+/* Control that collapses the lower dock. */
 .lower-dock__hide {
   margin-left: auto;
 }
 
+/* Pot-fraction / size tag on an action chip. */
 .action-chip__size {
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
 }
 
+/* Primary action name on an action chip. */
 .action-chip__primary {
   font-weight: 700;
   font-family: var(--font-mono);
   letter-spacing: 0.02em;
 }
 
+/* Chip-amount subtitle on an action chip. */
 .action-chip__chips {
   color: var(--muted);
   font-size: 11px;
 }
 
+/* Frequency percentage on an action chip. */
 .action-chip__freq {
   margin-left: 2px;
   padding-left: 6px;
@@ -3911,11 +4303,13 @@
   color: var(--muted);
 }
 
+/* Chip-amount subtitle on a history choice. */
 .history-choice__chips {
   color: var(--muted);
   font-size: 11px;
 }
 
+/* Dimmer behind the Settings dialog. */
 .settings-overlay {
   position: fixed;
   inset: 0;
@@ -3926,6 +4320,7 @@
   padding: var(--space-3);
 }
 
+/* Settings modal content. */
 .settings-dialog {
   width: min(520px, 100%);
   max-height: min(720px, 90vh);
@@ -3940,12 +4335,14 @@
   box-shadow: var(--shadow-soft);
 }
 
+/* Two-column settings fields grid. */
 .settings-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
+/* One labeled settings control. */
 .settings-field {
   display: flex;
   flex-direction: column;
@@ -3954,6 +4351,7 @@
   font-weight: 600;
 }
 
+/* One labeled settings control. — native <select> inside the parent. */
 .settings-field select,
 .settings-field input {
   font: inherit;
@@ -3965,17 +4363,20 @@
   color: var(--text);
 }
 
+/* One labeled settings control. — input control inside the parent. */
 .settings-field input::placeholder {
   color: var(--muted);
   font-weight: 500;
 }
 
+/* Hint under a settings field. */
 .settings-hint {
   font-weight: 500;
   color: var(--muted);
   font-size: 11px;
 }
 
+/* Checkbox row in Settings. */
 .settings-check {
   display: flex;
   flex-direction: row;
@@ -3985,17 +4386,20 @@
   font-weight: 600;
 }
 
+/* Checkbox row in Settings. — input control inside the parent. */
 .settings-check input {
   width: auto;
   margin: 0;
 }
 
+/* Save/close actions on Settings. */
 .settings-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
 
+/* Assistant readiness row in settings/status. */
 .assistant-ready {
   margin: 0;
   padding: 6px 8px;
@@ -4006,26 +4410,31 @@
   color: var(--text);
 }
 
+/* Assistant readiness row in settings/status. */
 .assistant-ready[data-ready="false"],
 .assistant-hint[data-ready="false"] {
   border-color: color-mix(in srgb, #c9a227 45%, var(--border));
   background: color-mix(in srgb, #c9a227 12%, transparent);
 }
 
+/* Ready / not-ready pill for the assistant. */
 .assistant-ready-pill {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 
+/* Ready / not-ready pill for the assistant. */
 .assistant-ready-pill[data-ready="true"] {
   color: var(--ok);
 }
 
+/* Ready / not-ready pill for the assistant. */
 .assistant-ready-pill[data-ready="false"] {
   color: var(--danger);
 }
 
+/* Context snapshot summary in the chat window. */
 .help-chat-window__context {
   display: block;
   margin-top: 2px;
@@ -4039,6 +4448,7 @@
   text-overflow: ellipsis;
 }
 
+/* Section title in the seat-action catalogue tree. */
 .seat-tree__section-title {
   margin: 0 0 8px;
   font-size: 13px;
@@ -4046,12 +4456,14 @@
   color: var(--text);
 }
 
+/* User-saved ranges block in the seat tree. */
 .seat-tree__saved {
   margin-bottom: 14px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
 }
 
+/* List of saved user ranges. */
 .seat-tree__saved-list {
   list-style: none;
   margin: 0 0 10px;
@@ -4061,18 +4473,21 @@
   gap: 8px;
 }
 
+/* One saved user range row. */
 .seat-tree__saved-item {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
+/* Edit/delete actions on a saved range. */
 .seat-tree__saved-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
+/* Form to name/save the current range. */
 .seat-tree__save-form {
   display: flex;
   flex-wrap: wrap;
@@ -4080,6 +4495,7 @@
   align-items: flex-end;
 }
 
+/* Form to name/save the current range. — form label. */
 .seat-tree__save-form label {
   display: flex;
   flex-direction: column;
@@ -4089,6 +4505,7 @@
   color: var(--muted);
 }
 
+/* Form to name/save the current range. — input control inside the parent. */
 .seat-tree__save-form input,
 .seat-tree__edit input,
 .seat-tree__edit textarea {
@@ -4100,12 +4517,14 @@
   min-height: 26px;
 }
 
+/* Inline edit fields for a saved range. */
 .seat-tree__edit {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+/* Inline edit fields for a saved range. — form label. */
 .seat-tree__edit label {
   display: flex;
   flex-direction: column;
@@ -4114,28 +4533,33 @@
   color: var(--muted);
 }
 
+/* Validation error in the seat tree. */
 .seat-tree__error {
   margin: 8px 0 0;
   color: #c45c3a;
   font-size: 12px;
 }
 
+/* Nested folder/leaf list in the seat tree. */
 .seat-tree__list {
   list-style: none;
   margin: 0;
   padding: 0 0 0 12px;
 }
 
+/* Nested folder/leaf list in the seat tree. */
 .seat-tree > .seat-tree__list {
   padding-left: 0;
 }
 
+/* seat-tree__branch — disclosure summary. */
 .seat-tree__branch > summary {
   cursor: pointer;
   font-weight: 650;
   padding: 3px 0;
 }
 
+/* Clickable leaf range in the catalogue tree. */
 .seat-tree__leaf {
   display: block;
   width: 100%;
@@ -4149,6 +4573,7 @@
   font-size: 13px;
 }
 
+/* Clickable leaf range in the catalogue tree. (hover). */
 .seat-tree__leaf:hover {
   background: var(--accent-soft);
   color: var(--accent);
@@ -4164,6 +4589,7 @@
   gap: var(--space-3);
 }
 
+/* Equity page toolbar (title + run controls). */
 .equity-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -4172,6 +4598,7 @@
   align-items: center;
 }
 
+/* Primary cluster in the equity toolbar. */
 .equity-toolbar-main,
 .equity-toolbar-actions,
 .equity-board-row,
@@ -4184,16 +4611,19 @@
   align-items: center;
 }
 
+/* Equity page toolbar (title + run controls). — page heading. */
 .equity-toolbar h1 {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
 }
 
+/* Spot/name field on Equity. */
 .equity-name {
   min-width: 160px;
 }
 
+/* Main Equity two-pane layout. */
 .equity-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.9fr);
@@ -4201,12 +4631,15 @@
   align-items: start;
 }
 
+/* Responsive overrides below 1100px width. */
 @media (max-width: 1100px) {
+  /* Main Equity two-pane layout. */
   .equity-layout {
     grid-template-columns: 1fr;
   }
 }
 
+/* Styles for .panel. */
 .equity-workspace .panel {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -4214,12 +4647,14 @@
   padding: var(--space-3);
 }
 
+/* Players/ranges summary table on Equity. */
 .equity-player-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
 
+/* Players/ranges summary table on Equity. */
 .equity-player-table th,
 .equity-player-table td {
   border-bottom: 1px solid var(--border);
@@ -4228,25 +4663,30 @@
   vertical-align: middle;
 }
 
+/* Styles for .num. */
 .equity-player-table .num,
 .equity-emphasis {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
+/* Emphasized cell/text in equity results. */
 .equity-emphasis {
   font-weight: 700;
 }
 
+/* Players/ranges summary table on Equity. (active). */
 .equity-player-table tr[data-selected="true"] {
   background: var(--accent-soft);
 }
 
+/* Range input controls for a player. */
 .equity-range-input {
   min-width: 180px;
   width: 100%;
 }
 
+/* Equity job status line. */
 .equity-status {
   display: flex;
   flex-wrap: wrap;
@@ -4256,15 +4696,18 @@
   color: var(--muted);
 }
 
+/* Stale-results warning on Equity. */
 .equity-stale {
   color: var(--warning, #b78103);
   font-weight: 600;
 }
 
+/* Error banner on Equity. */
 .equity-error {
   color: var(--danger, #c23b22);
 }
 
+/* Exact range text area on Equity. */
 .equity-range-textarea {
   width: 100%;
   font-family: var(--mono, ui-monospace, monospace);
@@ -4272,6 +4715,7 @@
   margin-top: var(--space-2);
 }
 
+/* Recent equity spots list. — bullet list. */
 .equity-recent ul {
   list-style: none;
   margin: 0;
@@ -4281,12 +4725,14 @@
   gap: 4px;
 }
 
+/* Recent equity spots list. — list item. */
 .equity-recent li {
   display: flex;
   justify-content: space-between;
   gap: 8px;
 }
 
+/* Overlay for the equity board card picker. */
 .equity-picker-overlay {
   position: fixed;
   inset: 0;
@@ -4296,6 +4742,7 @@
   z-index: 40;
 }
 
+/* Board card picker used by Equity. */
 .equity-card-picker {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -4305,29 +4752,34 @@
   width: min(720px, 96vw);
 }
 
+/* Header of the equity card picker. */
 .equity-card-picker-head {
   display: flex;
   justify-content: space-between;
   margin-bottom: var(--space-2);
 }
 
+/* Card grid inside the equity picker. */
 .equity-card-picker-grid {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
+/* Suit label in the equity picker. */
 .equity-card-picker-suit {
   display: grid;
   grid-template-columns: repeat(13, minmax(0, 1fr));
   gap: 2px;
 }
 
+/* One card button in the equity picker. */
 .equity-card-btn {
   font-size: 11px;
   padding: 4px 0;
 }
 
+/* Import controls for equity range files. */
 .equity-file-import {
   cursor: pointer;
 }
