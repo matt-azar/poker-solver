@@ -72,7 +72,7 @@ export function fitAspectSize(
 }
 
 /** Fit a width/height box into the wrap (opponent pane stays square). */
-export function useMeasuredAspectSize(
+function useMeasuredAspectSize(
   wrapRef: RefObject<HTMLElement | null>,
   widthOverHeight: number,
 ): { width: number; height: number } {

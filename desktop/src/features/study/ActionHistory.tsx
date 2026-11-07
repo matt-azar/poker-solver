@@ -267,7 +267,7 @@ export function ActionHistory() {
 
   return (
     <section
-      className="path-nav action-history"
+      className="path-nav"
       data-empty={currentNode ? "false" : "true"}
       style={
         currentNode

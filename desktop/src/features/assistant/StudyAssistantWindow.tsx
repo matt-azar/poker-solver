@@ -589,6 +589,3 @@ export function StudyAssistantWindow() {
     </div>
   );
 }
-
-/** @deprecated Prefer StudyAssistantWindow — kept name alias for imports mid-refactor. */
-export const HelpChatWindow = StudyAssistantWindow;

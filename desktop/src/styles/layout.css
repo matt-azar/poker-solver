@@ -446,7 +446,6 @@
 .board-card[data-suit="h"],
 .card-picker-cell[data-suit="h"],
 .toolbar-btn[data-suit="h"],
-.history-choice[data-suit="h"],
 .runout-card[data-suit="h"] {
   color: var(--suit-heart);
 }
@@ -455,7 +454,6 @@
 .board-card[data-suit="d"],
 .card-picker-cell[data-suit="d"],
 .toolbar-btn[data-suit="d"],
-.history-choice[data-suit="d"],
 .runout-card[data-suit="d"] {
   color: var(--suit-diamond);
 }
@@ -464,7 +462,6 @@
 .board-card[data-suit="c"],
 .card-picker-cell[data-suit="c"],
 .toolbar-btn[data-suit="c"],
-.history-choice[data-suit="c"],
 .runout-card[data-suit="c"] {
   color: var(--suit-club);
 }
@@ -473,7 +470,6 @@
 .board-card[data-suit="s"],
 .card-picker-cell[data-suit="s"],
 .toolbar-btn[data-suit="s"],
-.history-choice[data-suit="s"],
 .runout-card[data-suit="s"] {
   color: var(--suit-spade);
 }
@@ -611,186 +607,6 @@
 /* Styles for .danger. (disabled). */
 .solve-controls .toolbar-btn.danger:disabled {
   color: color-mix(in srgb, var(--danger) 40%, var(--muted));
-}
-
-/* Path history panel under the context strip (resizable). */
-.action-history {
-  position: relative;
-  flex: 0 1 auto;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  min-height: 56px;
-  max-height: 22%;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 4px 0 6px;
-}
-
-/* Path history panel under the context strip (resizable). (empty). */
-.action-history[data-empty="true"] {
-  height: auto;
-  min-height: 0;
-  max-height: none;
-  padding: 0;
-}
-
-/* Styles for .action-history__next. (empty). */
-.action-history[data-empty="true"] .action-history__next,
-.action-history[data-empty="true"] .resize-handle {
-  display: none;
-}
-
-/* One history row (crumbs or next-action choices). */
-.action-history__row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 10px;
-  min-width: 0;
-}
-
-/* Separator under a history crumb line. */
-.action-history__line {
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-}
-
-/* Street/actor label at the left of a history row. */
-.action-history__label {
-  flex-shrink: 0;
-  width: 36px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-/* Clickable path crumbs for the current line. */
-.action-history__crumbs {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-/* One crumb plus its separator. */
-.action-history__crumb-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-
-/* Separator between history crumbs. */
-.action-history__sep {
-  color: var(--muted);
-  padding: 0 2px;
-  font-size: 12px;
-}
-
-/* One clickable node in the action path. */
-.action-history__crumb {
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 1px 4px;
-  border-radius: var(--radius-sm);
-}
-
-/* One clickable node in the action path. (hover, disabled). */
-.action-history__crumb:hover:not(:disabled) {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-/* One clickable node in the action path. (disabled). */
-.action-history__crumb:disabled {
-  cursor: default;
-  color: var(--text);
-}
-
-/* One clickable node in the action path. (active). */
-.action-history__crumb[data-current="true"] {
-  font-weight: 700;
-  color: var(--accent);
-}
-
-/* Whose turn / actor tag on the right of a crumb row. */
-.action-history__actor {
-  flex-shrink: 0;
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-/* Next legal actions / cards after the current node. */
-.action-history__choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
-  overflow: auto;
-  max-height: 100%;
-  align-content: flex-start;
-}
-
-/* One next-action or runout-card choice chip. */
-.history-choice {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  background: var(--secondary);
-  border-radius: var(--radius);
-  padding: 2px 8px;
-  font-size: 12px;
-  color: var(--text);
-  min-height: 24px;
-}
-
-/* One next-action or runout-card choice chip. (hover, disabled). */
-.history-choice:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-/* One next-action or runout-card choice chip. (disabled). */
-.history-choice:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-/* Action color square on a history choice. */
-.history-choice__swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: var(--choice-swatch, var(--muted));
-  flex-shrink: 0;
-}
-
-/* Action / card text on a history choice. */
-.history-choice__label {
-  font-weight: 600;
-}
-
-/* Frequency % on a history choice. */
-.history-choice__freq {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-/* Action / card text on a history choice. */
-.history-choice[data-kind="card"] .history-choice__label {
-  font-family: var(--font-mono);
-  letter-spacing: 0.03em;
 }
 
 /* Drag handle to resize a panel (horizontal bar by default). */
@@ -940,27 +756,6 @@
   align-items: stretch;
 }
 
-/* Legacy top-bar ActionSummary (kept for non-panel consumers). */
-.action-summary:not(.action-summary--panel) {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  flex: 0 0 auto;
-  background: var(--secondary);
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  padding: 4px 8px;
-}
-
-/* Mode toggles inside a legacy action-summary bar. */
-.action-summary__modes {
-  display: flex;
-  gap: 2px;
-  margin-right: var(--space-2);
-}
-
 /* Strategy / Range / EV mode toggle button. */
 .mode-btn {
   border: 1px solid var(--border);
@@ -977,43 +772,6 @@
   color: var(--text);
   border-color: var(--accent);
   font-weight: 600;
-}
-
-/* One action frequency chip (color + label + %). */
-.action-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  background: var(--secondary);
-  border-radius: var(--radius);
-  padding: 2px 8px;
-  font-size: 12px;
-}
-
-/* One action frequency chip (color + label + %). (active). */
-.action-chip[data-active="true"] {
-  outline: 2px solid var(--accent);
-  outline-offset: 0;
-}
-
-/* Color square on an action chip / inspector row. */
-.action-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-
-/* Frequency percentage on an action chip. */
-.action-chip__freq {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Follow-this-action control beside action chips. */
-.follow-btn {
-  margin-left: auto;
 }
 
 /* Outer box around the 13x13 hand matrix. */
@@ -1760,32 +1518,6 @@
   font-size: 11px;
   font-weight: 650;
   color: rgba(0, 0, 0, 0.72);
-}
-
-/* Unused leftover; frequencies now render via .hands-combo__metric-value. */
-.hands-combo__freq {
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-/* Tiny strategy mix bar on a legacy combo row. */
-.inspector-combo__mix {
-  display: flex;
-  height: 10px;
-  border-radius: 2px;
-  overflow: hidden;
-  background: var(--panel);
-}
-
-/* Tiny strategy mix bar on a legacy combo row. — inline fragment. */
-.inspector-combo__mix > span {
-  display: contents;
-}
-
-/* Tiny strategy mix bar on a legacy combo row. — bar-segment fill element. */
-.inspector-combo__mix i {
-  display: block;
-  height: 100%;
 }
 
 /* Hands panel showing combo breakdown for the focus hand. */
@@ -2853,14 +2585,6 @@
   padding: 3px 0;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
-}
-
-/* Color square on an action chip / inspector row. */
-.action-swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 1px;
-  display: inline-block;
 }
 
 /* Drag handle to resize a panel (horizontal bar by default). */
@@ -4110,11 +3834,6 @@
   color: var(--danger);
 }
 
-/* Catalogue ranges data table. */
-.catalogue-table tr[data-synthetic="true"] {
-  opacity: 0.92;
-}
-
 /* API key fields for the assistant. */
 .assistant-credentials {
   display: flex;
@@ -4157,101 +3876,6 @@
   gap: var(--space-2);
 }
 
-/* Browse/search panel for catalogue ranges. */
-.catalogue-modal .range-catalogue-panel {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  box-shadow: none;
-  grid-column: auto;
-}
-
-/* Browse/search panel for catalogue ranges. — section heading. */
-.catalogue-modal .range-catalogue-panel > .panel-title-row h2 {
-  font-size: 13px;
-}
-
-/* Browse/search panel for catalogue ranges. */
-.range-catalogue-panel {
-  gap: var(--space-2);
-}
-
-/* Filter controls above the catalogue table. */
-.catalogue-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: flex-end;
-}
-
-/* Filter controls above the catalogue table. — form label. */
-.catalogue-filters label {
-  min-width: 140px;
-}
-
-/* Scroll wrapper for the catalogue table. */
-.catalogue-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-/* Catalogue ranges data table. */
-.catalogue-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-/* Catalogue ranges data table. */
-.catalogue-table th,
-.catalogue-table td {
-  text-align: left;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-
-/* Catalogue ranges data table. */
-.catalogue-table th {
-  color: var(--muted);
-  font-weight: 600;
-}
-
-/* Catalogue ranges data table. */
-.catalogue-table tr[data-exact="true"] {
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
-}
-
-/* Catalogue ranges data table. (active). */
-.catalogue-table tr[data-selected="true"] {
-  outline: 1px solid var(--border);
-}
-
-/* Range name cell in the catalogue. */
-.catalogue-name {
-  font-weight: 600;
-}
-
-/* Stable id cell in the catalogue. */
-.catalogue-id {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-/* Load/edit actions on a catalogue row. */
-.catalogue-row-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-/* Subheading inside the catalogue panel. */
-.catalogue-subhead {
-  margin: var(--space-2) 0 0;
-  font-size: 13px;
-}
-
 /* Status bar solve controls + settings */
 
 /* Optional status-bar action buttons. */
@@ -4285,40 +3909,6 @@
 /* Control that collapses the lower dock. */
 .lower-dock__hide {
   margin-left: auto;
-}
-
-/* Pot-fraction / size tag on an action chip. */
-.action-chip__size {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-}
-
-/* Primary action name on an action chip. */
-.action-chip__primary {
-  font-weight: 700;
-  font-family: var(--font-mono);
-  letter-spacing: 0.02em;
-}
-
-/* Chip-amount subtitle on an action chip. */
-.action-chip__chips {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-/* Frequency percentage on an action chip. */
-.action-chip__freq {
-  margin-left: 2px;
-  padding-left: 6px;
-  border-left: 1px solid var(--border);
-  color: var(--muted);
-}
-
-/* Chip-amount subtitle on a history choice. */
-.history-choice__chips {
-  color: var(--muted);
-  font-size: 11px;
 }
 
 /* Dimmer behind the Settings dialog. */

@@ -2,7 +2,7 @@ import type { WorkspaceId } from "../../state/studyStore";
 
 export type { WorkspaceId };
 
-export const WORKSPACES: Array<{ id: WorkspaceId; label: string }> = [
+const WORKSPACES: Array<{ id: WorkspaceId; label: string }> = [
   { id: "study", label: "Study" },
   { id: "build", label: "Build" },
   { id: "equity", label: "Equity" },
