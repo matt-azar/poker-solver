@@ -1,8 +1,12 @@
 /*
  * Dual-range opponent pane sizing. Loaded from OpponentRangePanel only —
  * keep dual-pane geometry here instead of fighting layout.css.
+ *
+ * Toggle dual range from the Study View menu (layout.dualRange).
+ * Matrix cell look still comes from matrix-density.css + layout.css .range-matrix*.
  */
 
+/* Opponent solution-range column beside the hero matrix. */
 .opponent-range-pane {
   display: flex;
   flex-direction: column;
@@ -17,6 +21,7 @@
   gap: 0;
 }
 
+/* “IP range” / “OOP range” title strip. */
 .opponent-range-pane > .panel-title-row {
   flex: 0 0 auto;
   margin-bottom: 0;
@@ -39,6 +44,7 @@
   font-size: 12px;
 }
 
+/* Centers the square opponent 13×13 inside the pane. */
 .opponent-range-pane > .range-matrix-wrap {
   flex: 1 1 auto;
   min-width: 0;

@@ -1,3 +1,7 @@
+/**
+ * Top-level desktop chrome: menu bar, active workspace, status bar, dialogs.
+ * Global colors/type: styles/tokens.css. Shell grid: styles/layout.css (.app-shell*).
+ */
 import { useEffect, useState, type ReactNode } from "react";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";

@@ -1,6 +1,12 @@
-/* Shared playing-card + next-card picker styles (imported from card components).
-   Keep board/picker visuals here — do not extend layout.css for this slice. */
+/*
+ * Playing cards + board / next-card picker visuals.
+ * Imported from PlayingCard / CardPicker. Do not extend layout.css for this slice.
+ *
+ * Suit colors come from tokens.css (--suit-heart/diamond/club/spade).
+ * Common knobs: .playing-card[data-size="sm"|"md"] min-size + font-size.
+ */
 
+/* Face of a hole/board card (rank + suit glyph). */
 .playing-card {
   --playing-card-suit: var(--text);
   display: inline-flex;
@@ -40,6 +46,7 @@
   --playing-card-suit: var(--suit-spade);
 }
 
+/* Compact card (path / dense chrome). */
 .playing-card[data-size="sm"] {
   min-width: 28px;
   min-height: 36px;
@@ -47,6 +54,7 @@
   font-size: 11px;
 }
 
+/* Default Study board / picker card size. */
 .playing-card[data-size="md"] {
   min-width: 34px;
   min-height: 42px;

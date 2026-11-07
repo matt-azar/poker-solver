@@ -1,3 +1,10 @@
+/**
+ * Hands panel — per-combo tiles for the hovered/selected hand class.
+ *
+ * Markup classes (.hands-combo*) are styled in styles/layout.css.
+ * To change badge / metric type size, edit those CSS rules — not this file —
+ * unless you need different content or structure.
+ */
 import { useMemo } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
 import { mapActionColors } from "../../domain/actionColors";

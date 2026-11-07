@@ -1,13 +1,28 @@
-/* Hold'em Study — visual tokens (dark / light) */
+/*
+ * Hold'em Study — visual tokens (colors, type, chrome sizes).
+ *
+ * Prefer editing here for global look-and-feel. Component layout lives in:
+ *   layout.css          Study/Build chrome, Hands tiles, matrix shell
+ *   matrix-density.css  13×13 cell type density / quiet excluded hands
+ *   actions.css         Action frequency blocks in the Study detail rail
+ *   cards.css           PlayingCard + board card-picker
+ *   path-nav.css        Action-history / path crumbs
+ *   opponent-range.css  Dual-range opponent pane geometry
+ *
+ * Theme is toggled via [data-theme="light"|"dark"] on the document.
+ */
 
 :root,
 [data-theme="light"] {
-  --app-bg: #eceff2;
-  --panel: #ffffff;
-  --secondary: #f4f6f8;
+  /* Surfaces */
+  --app-bg: #eceff2; /* Window background behind panels */
+  --panel: #ffffff; /* Primary panel fill (matrix, docks, dialogs) */
+  --secondary: #f4f6f8; /* Toolbars, headers, chip backgrounds */
   --border: #ccd3db;
+  /* Type */
   --text: #1c2530;
-  --muted: #536170;
+  --muted: #536170; /* Secondary labels / frequencies */
+  /* Brand + status */
   --accent: #285f99;
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --danger: #a33b32;
@@ -21,8 +36,8 @@
   --suit-spade: #1c2530;
   --hover-outline: #8a97a8;
   --selection-outline: #285f99;
-  --empty-cell: #e4e8ed;
-  --matrix-label: #6a7684;
+  --empty-cell: #e4e8ed; /* Empty / excluded matrix + Hands tile fill */
+  --matrix-label: #6a7684; /* Rank axis labels on the 13×13 */
   --shadow-soft: 0 1px 0 color-mix(in srgb, var(--border) 70%, transparent);
   color-scheme: light;
 }
@@ -51,25 +66,28 @@
 }
 
 :root {
+  /* Typography */
   --font-sans: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue",
     sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  /* Spacing scale used by layout.css / feature CSS */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --radius-sm: 2px;
   --radius: 4px;
+  /* Shell chrome heights/widths (layout.css reads these) */
   --menubar-h: 32px;
   --tabs-h: 28px;
-  --context-h: 52px;
+  --context-h: 52px; /* Study context strip (board / pot / stacks) */
   --statusbar-h: 34px;
-  --history-h: 120px;
-  --dock-h: 240px;
-  --inspector-w: 300px;
-  --nav-w: 180px;
-  --body-size: 13px;
-  --label-size: 11px;
+  --history-h: 120px; /* Default action-history height before user resize */
+  --dock-h: 240px; /* Default lower analysis dock height */
+  --inspector-w: 300px; /* Study detail rail default width hint */
+  --nav-w: 180px; /* Optional left node navigator */
+  --body-size: 13px; /* Default UI body text */
+  --label-size: 11px; /* Uppercase field labels */
 }
 
 *,

@@ -1,3 +1,13 @@
+/**
+ * Study page composition: context strip → path history → matrix + detail rail → lower dock.
+ *
+ * Visual tweaks usually belong in CSS, not here:
+ *   styles/layout.css          chrome, Hands tiles, matrix shell
+ *   styles/matrix-density.css  13×13 cell type
+ *   styles/actions.css         Actions blocks in the detail rail
+ *   styles/path-nav.css        action-history path strip
+ * Structure of the right rail: matrix/StudyDetailPanel.tsx (Actions + Hands).
+ */
 import { LowerDock } from "../analysis/LowerDock";
 import { LockDrawer } from "../locks/LockDrawer";
 import { ActionNavBar } from "../matrix/ActionNavBar";

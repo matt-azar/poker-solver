@@ -42,7 +42,10 @@ function cellKey(row: number, col: number): string {
   return `${row}:${col}`;
 }
 
-/** Width ÷ height for the study matrix when the opponent grid is hidden. */
+/**
+ * Width ÷ height for the study matrix when the opponent grid is hidden.
+ * Dual-range keeps both grids square (ratio 1). Cell type: matrix-density.css.
+ */
 export const SINGLE_MATRIX_WIDTH_OVER_HEIGHT = 1.5;
 
 /**
