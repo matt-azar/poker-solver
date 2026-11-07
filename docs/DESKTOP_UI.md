@@ -46,7 +46,7 @@ explorer   # serves desktop/dist when present
 | Next-card picker | chance `cards[]` (+ legacy `children`) | Card grid | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout (400/404 → child id); flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
 | Equity (node) | `GET …/equity` | Averages + hist | Study Equity tab: averages, clickable band filter, shape composition, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); buckets + `oop_hands`/`ip_hands` | equity tests; `analysis.test.ts` |
 | Equity calculator | `POST/GET /api/equity/jobs…` | — | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | `equity_calculator_tests`; desktop Equity UI |
-| Prominent bluffs | Client join of node `strategy` + node `/equity` hands | — | Study Bluffs tab: betting hands with check-down equity &lt; user threshold (default 30%), bet freq ≥ 1%, sorted by bet freq; row selects matrix cell; After-call mode chrome only | Mode A only in this slice; bare All-in counts; no new explorer API | `prominentBluffs.test.ts` |
+| Prominent bluffs | Client join of node `strategy` + `/equity` (node or Call-child) | — | Study Bluffs tab: betting hands with check-down equity &lt; user threshold (default 30%), bet freq ≥ 1%, sorted by bet freq; row selects matrix cell; **At this node** / **After call** toggle | After call = `/equity` on Call child of each hand’s max-prob bet/raise; bare All-in counts; no new explorer API | `prominentBluffs.test.ts` |
 | Categories | `GET …/categories` | Table | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | hand categories; `analysis.test.ts` |
 | Locks | PUT/DELETE `…/locks` | Hand detail | Dedicated Node Locking workspace (Tree → Node locking…): strategy-colored 13×13 paint grid, frequency sliders, overall/selected bars, Save & Close; Hands panel is read-only | All-zero PUT rejected; 0%≠unlock | HTTP + `locks.test.ts` |
 | Strategy edits | PUT/DELETE `…/strategy-edits` | Hand detail | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | HTTP + `strategyEdits.test.ts` |
@@ -76,7 +76,7 @@ explorer   # serves desktop/dist when present
 | --- | --- |
 | Contracts + `EngineClient` | Done |
 | Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
-| Analysis dock + Build + Library | Done — Equity hist + band filter + composition; Categories made-hand/draws; Bluffs Mode A (threshold + matrix select); Library nested range folders |
+| Analysis dock + Build + Library | Done — Equity hist + band filter + composition; Categories made-hand/draws; Bluffs Mode A/B (node vs after-call equity); Library nested range folders |
 | Locks + Strategy edits + Compare | Done |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |
 | Visual / a11y / perf polish | Partial — focus-visible, reduced-motion, compact ≤1280, light/dark themes |
