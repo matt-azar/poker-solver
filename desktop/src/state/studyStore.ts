@@ -306,7 +306,7 @@ interface StudyState {
   setEvDisplayBasis: (basis: "local" | "root_centered") => void;
   actionFilter: number | null;
   setActionFilter: (index: number | null) => void;
-  analysisTab: "explorer" | "runouts" | "equity" | "categories";
+  analysisTab: "explorer" | "runouts" | "equity" | "categories" | "bluffs";
   setAnalysisTab: (tab: StudyState["analysisTab"]) => void;
   warmStart: boolean;
   setWarmStart: (value: boolean) => void;

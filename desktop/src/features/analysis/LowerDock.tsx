@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent,
 import { clampDockHeight } from "../../state/layoutStore";
 import { useStudyStore } from "../../state/studyStore";
 import { AnalysisDockPanel } from "./AnalysisDockPanel";
+import { BluffsPanel } from "./BluffsPanel";
 import { RunoutTable } from "./RunoutTable";
 
 const TABS = [
   { id: "runouts", label: "Runouts" },
   { id: "equity", label: "Equity" },
   { id: "categories", label: "Categories" },
+  { id: "bluffs", label: "Bluffs" },
 ] as const;
 
 type DockTabId = (typeof TABS)[number]["id"];
@@ -68,7 +70,10 @@ export function LowerDock() {
   };
 
   const activeTab: DockTabId =
-    analysisTab === "runouts" || analysisTab === "equity" || analysisTab === "categories"
+    analysisTab === "runouts" ||
+    analysisTab === "equity" ||
+    analysisTab === "categories" ||
+    analysisTab === "bluffs"
       ? analysisTab
       : "equity";
 
@@ -96,6 +101,8 @@ export function LowerDock() {
   let body: ReactNode;
   if (activeTab === "runouts") {
     body = <RunoutTable />;
+  } else if (activeTab === "bluffs") {
+    body = <BluffsPanel />;
   } else {
     body = <AnalysisDockPanel />;
   }
