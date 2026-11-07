@@ -4,8 +4,10 @@ import {
   lockMutationCompletion,
   normalizeProbs,
   seedProbsFromStrategy,
+  setLinkedActionProb,
   toggleHandIndex,
   uniformProbs,
+  weightedStrategyMix,
 } from "./locks";
 
 describe("lock helpers", () => {
@@ -51,6 +53,24 @@ describe("lock helpers", () => {
         2,
       ),
     ).toBe(false);
+  });
+
+  it("weights strategy mixes by marginal and links slider edits", () => {
+    const mix = weightedStrategyMix(
+      [
+        [1, 0],
+        [0, 1],
+      ],
+      [0, 1],
+      2,
+      [3, 1],
+    );
+    expect(mix?.[0]).toBeCloseTo(0.75, 12);
+    expect(mix?.[1]).toBeCloseTo(0.25, 12);
+    const linked = setLinkedActionProb([0.4, 0.6], 0, 0.7);
+    expect(linked[0]).toBeCloseTo(0.7, 12);
+    expect(linked[1]).toBeCloseTo(0.3, 12);
+    expect(linked[0] + linked[1]).toBeCloseTo(1, 12);
   });
 
   it("discards draft writes when the live node diverges after await", () => {

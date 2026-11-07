@@ -42,6 +42,7 @@ import {
   lockMutationCompletion,
   normalizeProbs,
   seedProbsFromStrategy,
+  setLinkedActionProb,
   toggleHandIndex,
   type ComparePayload,
   type LockDraft,
@@ -318,12 +319,16 @@ interface StudyState {
   setLockKind: (kind: LockDraft["kind"]) => void;
   setLockProbs: (probs: number[]) => void;
   setLockProbAt: (index: number, value: number) => void;
+  /** Linked slider: set one action and redistribute the rest to sum to 1. */
+  setLockProbLinked: (index: number, value: number) => void;
   toggleLockHand: (handIndex: number) => void;
   selectCombosForLock: (combos: string[]) => void;
+  clearLockSelection: () => void;
+  selectAllCombosForLock: () => void;
   seedLockFromStrategy: () => void;
   revertLockDraft: () => void;
   refreshLocks: () => Promise<void>;
-  applyLock: () => Promise<void>;
+  applyLock: () => Promise<boolean>;
   unlockHands: (handIndices?: number[]) => Promise<void>;
   unlockNode: () => Promise<void>;
   clearAllLocks: () => Promise<void>;
@@ -1108,6 +1113,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     probs[index] = value;
     set({ lockDraft: { ...get().lockDraft, probs } });
   },
+  setLockProbLinked(index, value) {
+    const probs = setLinkedActionProb(get().lockDraft.probs, index, value);
+    set({ lockDraft: { ...get().lockDraft, probs } });
+  },
   toggleLockHand(handIndex) {
     const handIndices = toggleHandIndex(get().lockDraft.handIndices, handIndex);
     set({ lockDraft: { ...get().lockDraft, handIndices, kind: "selected" } });
@@ -1131,6 +1140,31 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       strategyEditDrawerOpen: false,
     });
     void get().refreshLocks();
+  },
+  clearLockSelection() {
+    set({
+      lockDraft: {
+        ...get().lockDraft,
+        kind: "selected",
+        handIndices: [],
+      },
+    });
+  },
+  selectAllCombosForLock() {
+    const node = get().currentNode;
+    if (!node?.combos?.length) {
+      return;
+    }
+    const handIndices = node.combos.map((_, index) => index);
+    const actions = node.actions?.length ?? 0;
+    const probs = seedProbsFromStrategy(node.strategy ?? null, handIndices, actions);
+    set({
+      lockDraft: {
+        kind: "selected",
+        handIndices,
+        probs,
+      },
+    });
   },
   seedLockFromStrategy() {
     const node = get().currentNode;
@@ -1183,19 +1217,19 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const node = get().currentNode;
     if (!solutionId || !node || node.kind !== "decision") {
       set({ message: "Locks require a published decision node." });
-      return;
+      return false;
     }
     const draft = structuredClone(get().lockDraft);
     if (draft.kind === "selected" && draft.handIndices.length === 0) {
       set({ message: "Select at least one combo, or switch to full-node lock." });
-      return;
+      return false;
     }
     const normalized = normalizeProbs(draft.probs);
     if (!normalized.valid) {
       set({
         message: normalized.reason || "Lock probabilities are invalid.",
       });
-      return;
+      return false;
     }
     try {
       const body =
@@ -1220,7 +1254,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         liveNodeId: live.currentNode?.node_id,
       });
       if (!completion.applyLocksList) {
-        return;
+        return false;
       }
       if (completion.applyDraft) {
         set({
@@ -1239,13 +1273,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           message: `Lock applied at ${node.node_id} (draft not restored; node changed).`,
         });
       }
+      return true;
     } catch (error) {
       if (get().solutionId !== solutionId) {
-        return;
+        return false;
       }
       set({
         message: error instanceof EngineError ? error.message : "Lock failed",
       });
+      return false;
     }
   },
   async unlockHands(handIndices) {

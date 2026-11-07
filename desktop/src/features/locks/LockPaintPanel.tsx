@@ -1,11 +1,18 @@
-import { useMemo, useRef } from "react";
-import { isHandLocked, lockForNode } from "../../domain/locks";
+import { useMemo, useRef, useState } from "react";
+import { mapActionColors } from "../../domain/actionColors";
+import {
+  isHandLocked,
+  lockForNode,
+  weightedStrategyMix,
+} from "../../domain/locks";
 import { comboKey } from "../../domain/matrixDisplay";
 import { combosForCell, pairName } from "../../domain/range";
 import { RANKS } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
 
 type PaintMode = "add" | "remove";
+
+export type LockHighlightFilter = "all" | "selected" | "locked" | "unlocked";
 
 function cellFromEventTarget(
   target: EventTarget | null,
@@ -44,20 +51,30 @@ export function nodeIndicesForCell(
   return indices;
 }
 
+export interface LockPaintPanelProps {
+  /** Which cells stay visually emphasized (Pio presentation filter). */
+  highlight?: LockHighlightFilter;
+  /** Report the hovered hand class for the detail rail. */
+  onFocusChange?: (focus: { row: number; col: number; text: string } | null) => void;
+}
+
 /**
- * Mini 13×13 range-paint matrix for selecting hand classes into the lock draft.
- * Paint strokes add or remove every node combo in a class (Pio / GTOW style).
+ * Pio-style 13×13 range-paint matrix for selecting hand classes into the lock draft.
+ * Cells show current strategy mix; paint strokes add/remove every node combo in a class.
  */
-export function LockPaintPanel() {
+export function LockPaintPanel({
+  highlight = "all",
+  onFocusChange,
+}: LockPaintPanelProps) {
   const currentNode = useStudyStore((s) => s.currentNode);
   const locks = useStudyStore((s) => s.locks);
   const lockDraft = useStudyStore((s) => s.lockDraft);
   const toggleLockHand = useStudyStore((s) => s.toggleLockHand);
-  const gridRef = useRef<HTMLDivElement>(null);
   const paintingRef = useRef(false);
   const modeRef = useRef<PaintMode>("add");
   const visitedRef = useRef<Set<string>>(new Set());
   const paintedByPointerRef = useRef(false);
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
 
   const nodeLock = useMemo(
     () => (currentNode ? lockForNode(locks, currentNode.node_id) : null),
@@ -69,8 +86,18 @@ export function LockPaintPanel() {
     [lockDraft.handIndices],
   );
 
+  const colors = useMemo(
+    () => mapActionColors(currentNode?.actions ?? []),
+    [currentNode?.actions],
+  );
+
   const cellMeta = useMemo(() => {
     const combos = currentNode?.combos ?? [];
+    const strategy = currentNode?.strategy ?? null;
+    const marginal = Array.isArray(currentNode?.marginal)
+      ? (currentNode.marginal as number[])
+      : null;
+    const actionCount = currentNode?.actions?.length ?? 0;
     const meta: Array<
       Array<{
         label: string;
@@ -78,6 +105,7 @@ export function LockPaintPanel() {
         selected: boolean;
         locked: boolean;
         available: boolean;
+        segments: Array<{ color: string; weight: number }>;
       }>
     > = [];
     for (let row = 0; row < 13; row++) {
@@ -88,18 +116,33 @@ export function LockPaintPanel() {
           indices.length > 0 && indices.every((index) => selectedSet.has(index));
         const locked =
           indices.length > 0 && indices.every((index) => isHandLocked(nodeLock, index));
+        const mix = weightedStrategyMix(strategy, indices, actionCount, marginal);
+        const segments =
+          mix?.map((weight, actionIndex) => ({
+            weight,
+            color: colors.byIndex[actionIndex] || "#666",
+          })) ?? [];
         rowMeta.push({
           label: pairName(row, col),
           indices,
           selected,
           locked,
           available: indices.length > 0,
+          segments,
         });
       }
       meta.push(rowMeta);
     }
     return meta;
-  }, [currentNode?.combos, selectedSet, nodeLock]);
+  }, [
+    currentNode?.combos,
+    currentNode?.strategy,
+    currentNode?.marginal,
+    currentNode?.actions,
+    selectedSet,
+    nodeLock,
+    colors.byIndex,
+  ]);
 
   const applyCell = (row: number, col: number, mode: PaintMode) => {
     const key = `${row}:${col}`;
@@ -129,6 +172,12 @@ export function LockPaintPanel() {
     visitedRef.current.clear();
   };
 
+  const reportFocus = (row: number, col: number) => {
+    const key = `${row}:${col}`;
+    setHoverKey(key);
+    onFocusChange?.({ row, col, text: pairName(row, col) });
+  };
+
   if (!currentNode) {
     return (
       <div className="lock-paint-panel">
@@ -141,7 +190,7 @@ export function LockPaintPanel() {
     return (
       <div className="lock-paint-panel">
         <p className="lock-paint-panel__hint">
-          Full-node lock selects every combo. Switch to Selected combos to paint
+          Full-node lock constrains every combo. Switch to Selected combos to paint
           hand classes.
         </p>
       </div>
@@ -151,11 +200,10 @@ export function LockPaintPanel() {
   return (
     <div className="lock-paint-panel">
       <p className="lock-paint-panel__hint">
-        Paint hand classes to include their node combos in the lock. Click a
-        selected class again to remove it.
+        Paint hand classes to include their combos. Drag to add or remove. Cells show
+        the current strategy mix; green outline marks already-locked hands.
       </p>
       <div
-        ref={gridRef}
         className="lock-paint-grid"
         role="grid"
         aria-label="Paint lock hand classes"
@@ -182,24 +230,40 @@ export function LockPaintPanel() {
           }
         }}
         onPointerMove={(event) => {
-          if (!paintingRef.current) {
+          // jsdom lacks elementFromPoint; fall back to the event target.
+          const hit =
+            typeof document.elementFromPoint === "function"
+              ? document.elementFromPoint(event.clientX, event.clientY)
+              : event.target;
+          const under = cellFromEventTarget(hit);
+          if (under) {
+            reportFocus(under.row, under.col);
+          }
+          if (!paintingRef.current || !under) {
             return;
           }
-          const cell = cellFromEventTarget(
-            document.elementFromPoint(event.clientX, event.clientY),
-          );
-          if (!cell) {
-            return;
-          }
-          applyCell(cell.row, cell.col, modeRef.current);
+          applyCell(under.row, under.col, modeRef.current);
         }}
         onPointerUp={finishStroke}
         onPointerCancel={finishStroke}
         onLostPointerCapture={finishStroke}
+        onPointerLeave={() => {
+          setHoverKey(null);
+          onFocusChange?.(null);
+        }}
       >
         {RANKS.map((_, row) =>
           RANKS.map((_, col) => {
             const meta = cellMeta[row]![col]!;
+            const dimmed =
+              highlight === "selected"
+                ? !meta.selected
+                : highlight === "locked"
+                  ? !meta.locked
+                  : highlight === "unlocked"
+                    ? meta.locked || !meta.available
+                    : false;
+            const hovered = hoverKey === `${row}:${col}`;
             return (
               <button
                 key={`lock-paint-${row}-${col}`}
@@ -210,12 +274,14 @@ export function LockPaintPanel() {
                 data-available={meta.available ? "true" : "false"}
                 data-selected={meta.selected ? "true" : "false"}
                 data-locked={meta.locked ? "true" : "false"}
+                data-dimmed={dimmed ? "true" : "false"}
+                data-hover={hovered ? "true" : "false"}
                 title={meta.label}
                 aria-label={`${meta.label}${meta.selected ? " selected" : ""}${meta.locked ? " locked" : ""}`}
                 disabled={!meta.available}
+                onMouseEnter={() => reportFocus(row, col)}
+                onFocus={() => reportFocus(row, col)}
                 onClick={() => {
-                  // Pointer strokes already applied on pointerdown; skip the
-                  // synthesized mouse click. Keyboard activation still runs.
                   if (paintedByPointerRef.current) {
                     paintedByPointerRef.current = false;
                     return;
@@ -226,7 +292,24 @@ export function LockPaintPanel() {
                   visitedRef.current.clear();
                 }}
               >
-                {meta.label}
+                {meta.segments.length > 0 ? (
+                  <span className="lock-paint-cell__segments" aria-hidden>
+                    {meta.segments.map((seg, index) =>
+                      seg.weight > 0.001 ? (
+                        <span
+                          key={index}
+                          className="lock-paint-cell__seg"
+                          style={{
+                            flexGrow: seg.weight,
+                            flexBasis: 0,
+                            background: seg.color,
+                          }}
+                        />
+                      ) : null,
+                    )}
+                  </span>
+                ) : null}
+                <span className="lock-paint-cell__label">{meta.label}</span>
               </button>
             );
           }),

@@ -118,7 +118,7 @@ export function canExecuteOpenLockEditor(
   if (!ctx.currentNode || ctx.currentNode.kind !== "decision") {
     return eligible(false, "Locks require a decision node");
   }
-  return eligible(true, "Open the lock editor for the current decision");
+  return eligible(true, "Open Node Locking for the current decision");
 }
 
 export function canExecuteOpenStrategyEditor(

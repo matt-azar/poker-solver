@@ -279,7 +279,7 @@ export function MenuBar({
           setOpen={setOpenMenu}
           items={[
             {
-              label: "Open lock editor",
+              label: "Node locking…",
               onClick: () =>
                 executeOpenLockEditor({ ...commandDeps(), setLockDrawerOpen }),
               disabled: !lockGate.ok,

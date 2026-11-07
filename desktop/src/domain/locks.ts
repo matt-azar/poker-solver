@@ -144,6 +144,90 @@ export function seedProbsFromStrategy(
   return totals.map((value) => value / mass);
 }
 
+/**
+ * Weighted mix of strategy rows for a set of hand indices.
+ * Prefers engine marginal when present; otherwise equal weight among listed hands.
+ * Returns null when no usable rows contribute mass.
+ */
+export function weightedStrategyMix(
+  strategy: number[][] | null | undefined,
+  handIndices: number[],
+  actionCount: number,
+  marginal?: number[] | null,
+): number[] | null {
+  if (!strategy || handIndices.length === 0 || actionCount <= 0) {
+    return null;
+  }
+  const totals = emptyProbs(actionCount);
+  let mass = 0;
+  for (const handIndex of handIndices) {
+    const row = strategy[handIndex];
+    if (!row || row.length !== actionCount) {
+      continue;
+    }
+    const weight =
+      marginal && Number.isFinite(marginal[handIndex])
+        ? Math.max(0, Number(marginal[handIndex]))
+        : 1;
+    if (!(weight > 0)) {
+      continue;
+    }
+    mass += weight;
+    row.forEach((probability, actionIndex) => {
+      totals[actionIndex] += weight * Math.max(0, Number(probability) || 0);
+    });
+  }
+  if (!(mass > 0)) {
+    return null;
+  }
+  return totals.map((value) => value / mass);
+}
+
+/**
+ * Set one action probability and redistribute the remainder across the others
+ * in proportion to their previous shares (Pio-style linked sliders).
+ */
+export function setLinkedActionProb(
+  probs: number[],
+  index: number,
+  value: number,
+): number[] {
+  const actionCount = probs.length;
+  if (actionCount <= 0 || index < 0 || index >= actionCount) {
+    return probs.slice();
+  }
+  const target = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+  if (actionCount === 1) {
+    return [1];
+  }
+  const next = probs.map((entry) =>
+    Number.isFinite(entry) && entry >= 0 ? entry : 0,
+  );
+  const others = next.reduce(
+    (sum, entry, actionIndex) => (actionIndex === index ? sum : sum + entry),
+    0,
+  );
+  const remaining = 1 - target;
+  next[index] = target;
+  if (others > 1e-12) {
+    for (let actionIndex = 0; actionIndex < actionCount; actionIndex++) {
+      if (actionIndex === index) {
+        continue;
+      }
+      next[actionIndex] = (next[actionIndex] / others) * remaining;
+    }
+  } else {
+    const each = remaining / (actionCount - 1);
+    for (let actionIndex = 0; actionIndex < actionCount; actionIndex++) {
+      if (actionIndex === index) {
+        continue;
+      }
+      next[actionIndex] = each;
+    }
+  }
+  return next;
+}
+
 export function formatProbPct(probability: number): string {
   return `${(probability * 100).toFixed(1)}%`;
 }
