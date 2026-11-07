@@ -16,6 +16,19 @@ describe("userSavedRange", () => {
     expect(atom.provenance.classification).toBe("personal_adjustment");
   });
 
+  it("files a save under a seat×action placement", () => {
+    const atom = makeUserSavedRange("Custom HJ", "QQ+", {
+      placement: {
+        heroPosition: "HJ",
+        action: "open",
+        vsAction: "none",
+      },
+    });
+    expect(atom.heroPosition).toBe("HJ");
+    expect(atom.action).toBe("open");
+    expect(atom.vsAction).toBe("none");
+  });
+
   it("keeps an explicit id when updating an existing saved range", () => {
     const atom = makeUserSavedRange("Renamed", "QQ+", {
       id: "user-saved-old",

@@ -4232,11 +4232,103 @@
   color: var(--text);
 }
 
+/* Folder management controls above the seat tree. */
+.seat-tree__toolbar {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Inline save-into-folder form. */
+.seat-tree__save-into {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.seat-tree__save-into-label {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.seat-tree__save-form select {
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  min-height: 26px;
+}
+
+/* One leaf or folder row with trailing actions. */
+.seat-tree__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.seat-tree__row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.seat-tree__branch > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+}
+
+.seat-tree__branch > summary::-webkit-details-marker {
+  display: none;
+}
+
+.seat-tree__branch-label {
+  font-weight: 650;
+}
+
+.seat-tree__branch-label::before {
+  content: "▸ ";
+  color: var(--muted);
+}
+
+.seat-tree__branch[open] > summary .seat-tree__branch-label::before {
+  content: "▾ ";
+}
+
+.seat-tree__badge {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.seat-tree__empty-folder {
+  margin: 4px 0 8px 12px;
+}
+
+.seat-tree__edit--dock {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
 /* User-saved ranges block in the seat tree. */
 .seat-tree__saved {
-  margin-bottom: 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 /* List of saved user ranges. */
@@ -4328,10 +4420,9 @@
   padding-left: 0;
 }
 
-/* seat-tree__branch — disclosure summary. */
+/* seat-tree__branch — disclosure summary padding (layout above). */
 .seat-tree__branch > summary {
   cursor: pointer;
-  font-weight: 650;
   padding: 3px 0;
 }
 

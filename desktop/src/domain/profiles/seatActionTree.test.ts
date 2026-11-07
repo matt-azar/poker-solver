@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { buildSeatActionTree } from "./seatActionTree";
+import {
+  buildSeatActionTree,
+  mergeAtomsForCatalogueTree,
+} from "./seatActionTree";
 import type { SeatActionRange } from "./seatActionTypes";
 
-function atom(partial: Pick<SeatActionRange, "id" | "displayName" | "heroPosition" | "action" | "vsAction"> &
-  Partial<SeatActionRange>): SeatActionRange {
+function atom(
+  partial: Pick<
+    SeatActionRange,
+    "id" | "displayName" | "heroPosition" | "action" | "vsAction"
+  > &
+    Partial<SeatActionRange>,
+): SeatActionRange {
   return {
     schemaVersion: 1,
     range: "AA",
@@ -60,5 +68,73 @@ describe("buildSeatActionTree", () => {
       "BB call vs CO open",
       "BB 3bet vs CO open",
     ]);
+  });
+
+  it("keeps empty custom positions and applies renames", () => {
+    const tree = buildSeatActionTree([], {
+      extraPositions: ["EP"],
+      renames: { EP: "Early", "EP-open": "RFI" },
+    });
+    expect(tree).toHaveLength(1);
+    expect(tree[0]).toMatchObject({
+      kind: "branch",
+      id: "EP",
+      label: "Early",
+    });
+    if (tree[0]?.kind !== "branch") return;
+    expect(tree[0].children[0]).toMatchObject({
+      kind: "branch",
+      id: "EP-open",
+      label: "RFI",
+      children: [],
+    });
+  });
+});
+
+describe("mergeAtomsForCatalogueTree", () => {
+  it("lets a filed user save override the bundled slot", () => {
+    const bundled = atom({
+      id: "hj",
+      displayName: "HJ open",
+      heroPosition: "HJ",
+      action: "open",
+      vsAction: "none",
+      range: "AA,KK",
+    });
+    const user = atom({
+      id: "user-saved-hj",
+      displayName: "My HJ open",
+      heroPosition: "HJ",
+      action: "open",
+      vsAction: "none",
+      range: "QQ+",
+    });
+    const merged = mergeAtomsForCatalogueTree([bundled, user], {
+      isUserImport: (id) => id.startsWith("user-"),
+    });
+    expect(merged.atoms.map((entry) => entry.id)).toEqual(["user-saved-hj"]);
+    expect(merged.overriddenUserIds.has("user-saved-hj")).toBe(true);
+  });
+
+  it("drops hidden bundled ids and skips unfiled USER saves", () => {
+    const bundled = atom({
+      id: "co",
+      displayName: "CO open",
+      heroPosition: "CO",
+      action: "open",
+      vsAction: "none",
+    });
+    const unfiled = atom({
+      id: "user-saved-misc",
+      displayName: "Misc",
+      heroPosition: "USER",
+      action: "unknown",
+      vsAction: "none",
+    });
+    const merged = mergeAtomsForCatalogueTree([bundled, unfiled], {
+      isUserImport: (id) => id.startsWith("user-"),
+      hiddenBundledIds: ["co"],
+    });
+    expect(merged.atoms).toEqual([]);
   });
 });
