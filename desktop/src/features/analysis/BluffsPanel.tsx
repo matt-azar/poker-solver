@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { EquityHandRow } from "../../domain/analysis";
 import { formatFrequencyPct } from "../../domain/betSizes";
-import { formatEquityPct, equityHandsForNode } from "../../domain/matrixDisplay";
+import {
+  formatEquityPct,
+  formatEvChip,
+  equityHandsForNode,
+} from "../../domain/matrixDisplay";
 import {
   DEFAULT_BLUFF_EQUITY_THRESHOLD,
   MIN_BET_FREQ,
@@ -48,6 +52,9 @@ export function BluffsPanel() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const equity = useStudyStore((s) => s.equity) as EquityPayload | null;
   const loadEquity = useStudyStore((s) => s.loadEquity);
+  const nodeValues = useStudyStore((s) => s.nodeValues);
+  const calculateEv = useStudyStore((s) => s.calculateEv);
+  const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const solutionId = useStudyStore((s) => s.solutionId);
   const status = useStudyStore((s) => s.status);
@@ -82,6 +89,37 @@ export function BluffsPanel() {
     }
     void loadEquity();
   }, [solutionId, currentNode, equityReady, equityPending, loadEquity]);
+
+  const valuesPending = Boolean(nodeValues?.pending);
+  const valuesReady = Boolean(nodeValues && !nodeValues.pending);
+  const valuesForNode =
+    valuesReady &&
+    (!nodeValues?.node_id ||
+      !currentNode?.node_id ||
+      nodeValues.node_id === currentNode.node_id);
+
+  useEffect(() => {
+    if (!solutionId || !currentNode) {
+      return;
+    }
+    if (
+      currentNode.kind === "chance" ||
+      currentNode.kind === "terminal" ||
+      !currentNode.actions?.length
+    ) {
+      return;
+    }
+    if (valuesReady || valuesPending) {
+      return;
+    }
+    void calculateEv();
+  }, [
+    solutionId,
+    currentNode,
+    valuesReady,
+    valuesPending,
+    calculateEv,
+  ]);
 
   useEffect(() => {
     if (equityMode !== "after_call") {
@@ -187,8 +225,19 @@ export function BluffsPanel() {
       threshold,
       equityMode,
       minBetFreq: MIN_BET_FREQ,
+      nodeValues: valuesForNode ? nodeValues : null,
+      evDisplayBasis,
     });
-  }, [currentNode, equityHands, threshold, equityMode, postCallPending]);
+  }, [
+    currentNode,
+    equityHands,
+    threshold,
+    equityMode,
+    postCallPending,
+    valuesForNode,
+    nodeValues,
+    evDisplayBasis,
+  ]);
 
   const visible = rows.slice(0, DISPLAY_CAP);
   const thresholdLabel = `${Math.round(threshold * 100)}%`;
@@ -310,6 +359,7 @@ export function BluffsPanel() {
               <tr>
                 <th>Hand</th>
                 <th>Bet %</th>
+                <th>EV</th>
                 <th>Eq</th>
                 <th>Size</th>
               </tr>
@@ -334,6 +384,7 @@ export function BluffsPanel() {
                   <td className="tabular">
                     {formatFrequencyPct(row.betFreq) ?? "—"}
                   </td>
+                  <td className="tabular">{formatEvChip(row.ev)}</td>
                   <td className="tabular">{formatEquityPct(row.equity)}</td>
                   <td>{row.topBetAction ?? "—"}</td>
                 </tr>

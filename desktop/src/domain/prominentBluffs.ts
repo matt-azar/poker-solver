@@ -3,8 +3,13 @@
  * Local betting predicate — do not change browse.isAggressive.
  */
 import type { EquityHandRow } from "./analysis";
-import { comboKey } from "./matrixDisplay";
-import { RANKS, type NodePayload } from "./types";
+import { comboEv, comboKey } from "./matrixDisplay";
+import {
+  RANKS,
+  type ActionValuesPayload,
+  type EvDisplayBasis,
+  type NodePayload,
+} from "./types";
 
 /** Local copy of features/matrix/childIdAt — keep domain free of features imports. */
 function childIdAt(
@@ -44,6 +49,8 @@ export type BluffEquityMode = "node" | "after_call";
 export interface ProminentBluffRow {
   combo: string;
   betFreq: number;
+  /** Mixed action EV (chips) for the combo; null when values pending/undefined. */
+  ev: number | null;
   equity: number;
   /** Betting action with the largest probability for this hand, if any. */
   topBetAction: string | null;
@@ -322,11 +329,16 @@ export interface ListProminentBluffsArgs {
   /** Reserved for Mode B; Mode A ignores and uses equityHands. */
   equityMode?: BluffEquityMode;
   minBetFreq?: number;
+  /** Optional node `/values` payload — mixed EV via {@link comboEv}. */
+  nodeValues?: ActionValuesPayload | null;
+  /** Display basis for EV; defaults to Study local (Fold = 0). */
+  evDisplayBasis?: EvDisplayBasis;
 }
 
 /**
  * Prominent bluffs for the acting seat at a decision node.
  * Sort: descending betFreq, then combo localeCompare.
+ * EV is display-only (does not filter); null when values are missing/pending.
  */
 export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBluffRow[] {
   const {
@@ -334,6 +346,8 @@ export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBlu
     equityHands,
     threshold,
     minBetFreq = MIN_BET_FREQ,
+    nodeValues = null,
+    evDisplayBasis = "local",
   } = args;
   if (!isDecisionWithStrategy(node) || !Number.isFinite(threshold)) {
     return [];
@@ -364,6 +378,7 @@ export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBlu
     rows.push({
       combo,
       betFreq,
+      ev: comboEv(node, nodeValues, combo, evDisplayBasis),
       equity: equityEntry.equity,
       topBetAction: topBettingAction(row, actions),
       weight: Number.isFinite(equityEntry.weight) ? equityEntry.weight : null,

@@ -302,6 +302,83 @@ describe("listProminentBluffs", () => {
     expect(rows[0]!.equity).toBeCloseTo(0.12, 12);
   });
 
+  it("joins mixed EV from /values via comboEv (null when missing)", () => {
+    const node = decision({
+      actions: ["Check", "Bet 50"],
+      combos: ["7h2d", "KhKd"],
+      strategy: [
+        [0.1, 0.9],
+        [0.2, 0.8],
+      ],
+      marginal: [1, 1],
+    });
+    const rowsMissing = listProminentBluffs({
+      node,
+      equityHands: [
+        { combo: "7h2d", equity: 0.1, weight: 1 },
+        { combo: "KhKd", equity: 0.2, weight: 1 },
+      ],
+      threshold: 0.3,
+    });
+    expect(rowsMissing.every((row) => row.ev === null)).toBe(true);
+
+    const rows = listProminentBluffs({
+      node,
+      equityHands: [
+        { combo: "7h2d", equity: 0.1, weight: 1 },
+        { combo: "KhKd", equity: 0.2, weight: 1 },
+      ],
+      threshold: 0.3,
+      nodeValues: {
+        pending: false,
+        node_id: "p0",
+        utility_basis: "local",
+        combos: ["7h2d", "KhKd"],
+        value: [1.5, -0.25],
+        ev_defined: [true, true],
+        action_ev: [
+          [0, 1.5],
+          [0, -0.25],
+        ],
+      },
+      evDisplayBasis: "local",
+    });
+    expect(rows.map((row) => row.combo)).toEqual(["7h2d", "KhKd"]);
+    expect(rows[0]!.ev).toBeCloseTo(1.5, 12);
+    expect(rows[1]!.ev).toBeCloseTo(-0.25, 12);
+  });
+
+  it("keeps EV null while values are pending or for another node", () => {
+    const node = decision({
+      node_id: "p0",
+      actions: ["Bet 50"],
+      combos: ["7h2d"],
+      strategy: [[1]],
+      marginal: [1],
+    });
+    const pending = listProminentBluffs({
+      node,
+      equityHands: [{ combo: "7h2d", equity: 0.05, weight: 1 }],
+      threshold: 0.3,
+      nodeValues: { pending: true, node_id: "p0" },
+    });
+    expect(pending[0]!.ev).toBeNull();
+
+    const otherNode = listProminentBluffs({
+      node,
+      equityHands: [{ combo: "7h2d", equity: 0.05, weight: 1 }],
+      threshold: 0.3,
+      nodeValues: {
+        pending: false,
+        node_id: "other",
+        combos: ["7h2d"],
+        value: [9],
+        ev_defined: [true],
+      },
+    });
+    expect(otherNode[0]!.ev).toBeNull();
+  });
+
   it("returns empty for chance nodes or missing strategy", () => {
     expect(
       listProminentBluffs({
