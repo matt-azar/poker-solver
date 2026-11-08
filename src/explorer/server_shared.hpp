@@ -61,6 +61,19 @@ inline void close_socket(socket_t socket) { ::close(socket); }
 namespace explorer_detail
 {
 
+// Live solve progress: publish the iteration counter every iteration. Full
+// BR/EV evaluation (and gap_series append) runs at least this often; a higher
+// Samples setting can make evals more frequent via solve_stats_eval_every.
+inline constexpr int kSolveStatsEvalMaxGap = 10;
+
+inline int solve_stats_eval_every(int iteration_budget, int samples)
+{
+    const int budget = iteration_budget > 0 ? iteration_budget : 1;
+    const int sample_count = samples > 0 ? samples : 1;
+    const int from_samples = budget / sample_count > 0 ? budget / sample_count : 1;
+    return from_samples < kSolveStatsEvalMaxGap ? from_samples : kSolveStatsEvalMaxGap;
+}
+
 // Owned process-wide study server state (session, workers, static roots).
 struct ExplorerAppContext
 {

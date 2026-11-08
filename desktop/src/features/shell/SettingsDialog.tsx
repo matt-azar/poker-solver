@@ -205,7 +205,7 @@ export function SettingsDialog() {
               <option value="dcfr">DCFR</option>
             </select>
           </label>
-          <label className="settings-field">
+          <label className="settings-field" title="How many full EV/gap refreshes to aim for during a solve. Live progress never waits more than 10 iterations between refreshes; Iter n/x updates every iteration.">
             Samples
             <input
               type="number"

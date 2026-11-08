@@ -1290,7 +1290,7 @@ void run_explorer_http_tests()
     // Check-down: OOP check matches label +1 and tagged +1 → modeled u0 = 52.
     CHECK_NEAR(incentive_ev, 52.0, 1e-6);
 
-    // time_limit 0 stops after the first completed sample chunk and keeps the solve.
+    // time_limit 0 stops after the first completed iteration and keeps the solve.
     const std::string timed =
         "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\",\"2h\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","
         "\"pot\":100,\"stack\":100,\"iterations\":40,\"samples\":4,\"time_limit\":0,"
@@ -1304,7 +1304,7 @@ void run_explorer_http_tests()
     CHECK(timed_status.body.find("\"cancelled\":false") != std::string::npos);
     double timed_iters = 0.0;
     CHECK(json_number(timed_status.body, "iterations", timed_iters));
-    CHECK(timed_iters == 10.0);
+    CHECK(timed_iters == 1.0);
     CHECK(timed_iters < 40.0);
     const std::string timed_solution = json_string(timed_status.body, "solution_id");
     CHECK(!timed_solution.empty());
@@ -1321,7 +1321,7 @@ void run_explorer_http_tests()
     CHECK(timed_continue_status.body.find("\"time_limit_reached\":true") != std::string::npos);
     double timed_continue_iters = 0.0;
     CHECK(json_number(timed_continue_status.body, "iterations", timed_continue_iters));
-    CHECK(timed_continue_iters == 20.0);
+    CHECK(timed_continue_iters == 2.0);
     CHECK(json_string(timed_continue_status.body, "solution_id") == timed_solution);
 
     check_persistence_workflow_under_value_load();

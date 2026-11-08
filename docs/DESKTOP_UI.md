@@ -36,7 +36,7 @@ explorer   # serves desktop/dist when present
 
 | Backend operation | Endpoint | Legacy UI (`legacy/ui/`) | New Study UI destination | Limitations | Tests |
 | --- | --- | --- | --- | --- | --- |
-| Status | `GET /api/status` | Poll 250ms | Status bar + solve strip (`gap_series` retained in payload) | Metrics null when unset; `samples` is chunk count | `status.test.ts`; `test_explorer_http.cpp`, `test_session.cpp` |
+| Status | `GET /api/status` | Poll 250ms | Status bar + solve strip (`gap_series` retained in payload) | Metrics null when unset; Iter n/x every iteration; EV/gap at least every 10 iters | `status.test.ts`; `test_explorer_http.cpp`, `test_session.cpp` |
 | Solve | `POST /api/solve` | Setup form | Build workspace + Solve | 409 if running; empty≠absent bets | HTTP + session |
 | Pause / Stop | `POST /api/pause`, `/stop` | Buttons | Solve controls | Chunk boundary before publish | session; HTTP stop |
 | Continue | `POST …/continue` | Continue | Solve controls | Same solution id | HTTP |
