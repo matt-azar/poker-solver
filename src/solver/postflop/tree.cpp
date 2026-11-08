@@ -14,6 +14,7 @@ StreetBatchSolver::Engine::Engine(streets::StreetConfig incoming, BudgetResource
     , nodes(heap_)
     , parent_link(heap_)
     , slots(heap_)
+    , player_slots_{std::pmr::vector<std::uint32_t>(heap_), std::pmr::vector<std::uint32_t>(heap_)}
     , decision_ids(heap_)
     , regret(heap_)
     , strategy_sum(heap_)
@@ -480,6 +481,8 @@ std::uint64_t StreetBatchSolver::Engine::planned_allocation_bytes() const
     // (built before this plan); do not double-count them here.
     add(checked_mul(slot_index_cells(), sizeof(int), "plan"));
     add(checked_mul(planned_slots_, sizeof(Slot), "plan"));
+    // Player-side slot indexes (each multi-action slot appears in exactly one).
+    add(checked_mul(planned_slots_, sizeof(std::uint32_t), "plan"));
     // regret + strategy_sum + shared sigma workspace (float storage).
     const std::uint64_t table = checked_mul(
         static_cast<std::uint64_t>(planned_cursor_), sizeof(TableScalar), "plan");
@@ -601,6 +604,14 @@ void StreetBatchSolver::Engine::allocate_slots()
 {
     budget_->set_stage("slots");
     slots.reserve(static_cast<std::size_t>(planned_slots_));
+    player_slots_[0].clear();
+    player_slots_[1].clear();
+    if (planned_slots_ > 0)
+    {
+        // Rough split; exact sizes land during visit_slots commit.
+        player_slots_[0].reserve(static_cast<std::size_t>((planned_slots_ + 1) / 2));
+        player_slots_[1].reserve(static_cast<std::size_t>(planned_slots_ / 2));
+    }
 }
 
 
@@ -715,8 +726,15 @@ void StreetBatchSolver::Engine::add_slot(int node_index, int hand, int turn, int
     slot.hand = static_cast<std::uint16_t>(hand);
     slot.turn = static_cast<std::int8_t>(turn);
     slot.river = static_cast<std::int8_t>(river);
-    node.slot_of[static_cast<std::size_t>(key)] = static_cast<int>(slots.size());
+    const std::uint32_t slot_index = static_cast<std::uint32_t>(slots.size());
+    node.slot_of[static_cast<std::size_t>(key)] = static_cast<int>(slot_index);
     slots.push_back(slot);
+    const int player = node.player;
+    if (player != 0 && player != 1)
+    {
+        throw std::logic_error("street slot registered for a non-player node");
+    }
+    player_slots_[player].push_back(slot_index);
     cursor_ += node.n_actions;
 }
 
