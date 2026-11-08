@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_BLUFF_EQUITY_THRESHOLD,
-  MIN_BET_FREQ,
-  MIN_REACH_MASS,
+  DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD,
+  MIN_VALUE_BLUFFS_BET_FREQ,
+  MIN_VALUE_BLUFFS_REACH_MASS,
   betFrequency,
   callChildIdFromFacing,
   dominantBettingActionIndices,
@@ -10,14 +10,14 @@ import {
   equityPassesThreshold,
   facingChildIdForBet,
   formatReachMass,
-  isBluffBettingAction,
-  listProminentBluffs,
+  isValueBluffsBettingAction,
+  listValueBluffs,
   matrixCellForCombo,
-  sortProminentBluffs,
+  sortValueBluffs,
   topBettingAction,
   topBettingActionIndex,
-} from "./prominentBluffs";
-import { fetchPostCallEquityHands } from "./prominentBluffsPostCall";
+} from "./valueBluffs";
+import { fetchPostCallEquityHands } from "./valueBluffsPostCall";
 import type { NodePayload } from "./types";
 
 function decision(partial: Partial<NodePayload> & Pick<NodePayload, "combos" | "actions" | "strategy">): NodePayload {
@@ -32,19 +32,19 @@ function decision(partial: Partial<NodePayload> & Pick<NodePayload, "combos" | "
   };
 }
 
-describe("isBluffBettingAction", () => {
+describe("isValueBluffsBettingAction", () => {
   it("counts Bet, Raise, sized all-in, and bare All-in", () => {
-    expect(isBluffBettingAction("Bet 50")).toBe(true);
-    expect(isBluffBettingAction("Raise to 100")).toBe(true);
-    expect(isBluffBettingAction("Bet 100 all-in")).toBe(true);
-    expect(isBluffBettingAction("All-in")).toBe(true);
-    expect(isBluffBettingAction("all in")).toBe(true);
+    expect(isValueBluffsBettingAction("Bet 50")).toBe(true);
+    expect(isValueBluffsBettingAction("Raise to 100")).toBe(true);
+    expect(isValueBluffsBettingAction("Bet 100 all-in")).toBe(true);
+    expect(isValueBluffsBettingAction("All-in")).toBe(true);
+    expect(isValueBluffsBettingAction("all in")).toBe(true);
   });
 
   it("rejects passive actions", () => {
-    expect(isBluffBettingAction("Check")).toBe(false);
-    expect(isBluffBettingAction("Fold")).toBe(false);
-    expect(isBluffBettingAction("Call")).toBe(false);
+    expect(isValueBluffsBettingAction("Check")).toBe(false);
+    expect(isValueBluffsBettingAction("Fold")).toBe(false);
+    expect(isValueBluffsBettingAction("Call")).toBe(false);
   });
 });
 
@@ -122,7 +122,7 @@ describe("call-path helpers", () => {
       { combo: "AhAd", equity: 0.11, weight: 1 },
       { combo: "KhKd", equity: 0.22, weight: 1 },
     ]);
-    const rows = listProminentBluffs({
+    const rows = listValueBluffs({
       node,
       equityHands: hands,
       threshold: 0.3,
@@ -177,7 +177,7 @@ describe("fetchPostCallEquityHands", () => {
     expect(result.error).toBeNull();
     expect(result.callNodeIds).toEqual(["n-call"]);
     expect(result.hands.map((hand) => hand.combo)).toEqual(["AhAd", "7h2d"]);
-    const rows = listProminentBluffs({
+    const rows = listValueBluffs({
       node: hero,
       equityHands: result.hands,
       threshold: 0.3,
@@ -224,7 +224,7 @@ describe("matrixCellForCombo", () => {
   });
 });
 
-describe("listProminentBluffs", () => {
+describe("listValueBluffs", () => {
   const node = decision({
     actions: ["Check", "Bet 50", "Bet 100", "All-in"],
     combos: ["AhAd", "KhKd", "7h2d", "9h9d", "2c2d"],
@@ -247,23 +247,23 @@ describe("listProminentBluffs", () => {
   ];
 
   it("filters equity < threshold, betFreq >= 1%, sorts by bet freq", () => {
-    const rows = listProminentBluffs({
+    const rows = listValueBluffs({
       node,
       equityHands: hands,
-      threshold: DEFAULT_BLUFF_EQUITY_THRESHOLD,
+      threshold: DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD,
     });
     expect(rows.map((row) => row.combo)).toEqual(["2c2d", "7h2d", "KhKd"]);
     expect(rows[0]!.betFreq).toBeCloseTo(1, 12);
     expect(rows[1]!.betFreq).toBeCloseTo(0.8, 12);
     expect(rows[2]!.betFreq).toBeCloseTo(0.5, 12);
     expect(rows.every((row) => row.equity < 0.3)).toBe(true);
-    expect(rows.every((row) => (row.reach ?? 0) >= MIN_REACH_MASS)).toBe(true);
-    expect(MIN_BET_FREQ).toBe(0.01);
-    expect(MIN_REACH_MASS).toBe(0.005);
+    expect(rows.every((row) => (row.reach ?? 0) >= MIN_VALUE_BLUFFS_REACH_MASS)).toBe(true);
+    expect(MIN_VALUE_BLUFFS_BET_FREQ).toBe(0.01);
+    expect(MIN_VALUE_BLUFFS_REACH_MASS).toBe(0.005);
   });
 
   it("drops combos with reach mass below 0.005", () => {
-    const rows = listProminentBluffs({
+    const rows = listValueBluffs({
       node: decision({
         actions: ["Bet 50"],
         combos: ["7h2d", "KhKd", "2c2d"],
@@ -288,7 +288,7 @@ describe("listProminentBluffs", () => {
   });
 
   it("sorts by column ascending or descending", () => {
-    const base = listProminentBluffs({
+    const base = listValueBluffs({
       node: decision({
         actions: ["Bet 50"],
         combos: ["KhKd", "AhAd", "7h2d"],
@@ -302,21 +302,21 @@ describe("listProminentBluffs", () => {
       ],
       threshold: 0.3,
     });
-    expect(sortProminentBluffs(base, "combo", "asc").map((row) => row.combo)).toEqual([
+    expect(sortValueBluffs(base, "combo", "asc").map((row) => row.combo)).toEqual([
       "7h2d",
       "AhAd",
       "KhKd",
     ]);
     expect(
-      sortProminentBluffs(base, "reach", "desc").map((row) => row.combo),
+      sortValueBluffs(base, "reach", "desc").map((row) => row.combo),
     ).toEqual(["7h2d", "KhKd", "AhAd"]);
     expect(
-      sortProminentBluffs(base, "betFreq", "asc").map((row) => row.combo),
+      sortValueBluffs(base, "betFreq", "asc").map((row) => row.combo),
     ).toEqual(["7h2d", "KhKd", "AhAd"]);
   });
 
   it("excludes missing equity and check-only / high-equity hands", () => {
-    const rows = listProminentBluffs({
+    const rows = listValueBluffs({
       node: decision({
         actions: ["Check", "Bet 50"],
         combos: ["AhAd", "KhKd"],
@@ -334,7 +334,7 @@ describe("listProminentBluffs", () => {
   });
 
   it("uses strict less-than on the threshold", () => {
-    const rows = listProminentBluffs({
+    const rows = listValueBluffs({
       node: decision({
         actions: ["Bet 50"],
         combos: ["AhAd"],
@@ -351,7 +351,7 @@ describe("listProminentBluffs", () => {
     expect(equityPassesThreshold(0.31, 0.3, "gt")).toBe(true);
     expect(equityPassesThreshold(0.29, 0.3, "lt")).toBe(true);
 
-    const rows = listProminentBluffs({
+    const rows = listValueBluffs({
       node: decision({
         actions: ["Bet 50"],
         combos: ["AhAd", "7h2d", "KhKd"],
@@ -369,7 +369,7 @@ describe("listProminentBluffs", () => {
   });
 
   it("joins equity via comboKey canonicalization", () => {
-    const rows = listProminentBluffs({
+    const rows = listValueBluffs({
       node: decision({
         actions: ["Check", "Bet 50"],
         combos: ["AdAh"],
@@ -393,7 +393,7 @@ describe("listProminentBluffs", () => {
       ],
       marginal: [1, 1],
     });
-    const rowsMissing = listProminentBluffs({
+    const rowsMissing = listValueBluffs({
       node,
       equityHands: [
         { combo: "7h2d", equity: 0.1, weight: 1 },
@@ -403,7 +403,7 @@ describe("listProminentBluffs", () => {
     });
     expect(rowsMissing.every((row) => row.ev === null)).toBe(true);
 
-    const rows = listProminentBluffs({
+    const rows = listValueBluffs({
       node,
       equityHands: [
         { combo: "7h2d", equity: 0.1, weight: 1 },
@@ -437,7 +437,7 @@ describe("listProminentBluffs", () => {
       strategy: [[1]],
       marginal: [1],
     });
-    const pending = listProminentBluffs({
+    const pending = listValueBluffs({
       node,
       equityHands: [{ combo: "7h2d", equity: 0.05, weight: 1 }],
       threshold: 0.3,
@@ -445,7 +445,7 @@ describe("listProminentBluffs", () => {
     });
     expect(pending[0]!.ev).toBeNull();
 
-    const otherNode = listProminentBluffs({
+    const otherNode = listValueBluffs({
       node,
       equityHands: [{ combo: "7h2d", equity: 0.05, weight: 1 }],
       threshold: 0.3,
@@ -462,7 +462,7 @@ describe("listProminentBluffs", () => {
 
   it("returns empty for chance nodes or missing strategy", () => {
     expect(
-      listProminentBluffs({
+      listValueBluffs({
         node: { node_id: "c", kind: "chance", combos: ["AhAd"], actions: ["Bet 50"], strategy: [[1]] },
         equityHands: hands,
         threshold: 0.3,
@@ -471,7 +471,7 @@ describe("listProminentBluffs", () => {
   });
 
   it("tie-breaks equal bet frequency by combo string", () => {
-    const rows = listProminentBluffs({
+    const rows = listValueBluffs({
       node: decision({
         actions: ["Bet 50"],
         combos: ["KhKd", "AhAd"],

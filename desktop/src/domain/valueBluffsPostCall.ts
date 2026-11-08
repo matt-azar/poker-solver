@@ -5,12 +5,12 @@
 import type { EquityHandRow } from "./analysis";
 import { equityHandsForNode } from "./matrixDisplay";
 import {
-  MIN_BET_FREQ,
+  MIN_VALUE_BLUFFS_BET_FREQ,
   callChildIdFromFacing,
   dominantBettingActionIndices,
   equityHandsForDominantSizes,
   facingChildIdForBet,
-} from "./prominentBluffs";
+} from "./valueBluffs";
 import type { NodePayload } from "./types";
 
 export interface PostCallEquityResult {
@@ -93,7 +93,7 @@ export async function fetchPostCallEquityHands(args: {
     heroPlayer,
     deps,
     signal,
-    minBetFreq = MIN_BET_FREQ,
+    minBetFreq = MIN_VALUE_BLUFFS_BET_FREQ,
   } = args;
 
   const actionIndices = dominantBettingActionIndices(node, minBetFreq);

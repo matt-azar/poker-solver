@@ -7,19 +7,19 @@ import {
   equityHandsForNode,
 } from "../../domain/matrixDisplay";
 import {
-  DEFAULT_BLUFF_EQUITY_THRESHOLD,
-  MIN_BET_FREQ,
-  MIN_REACH_MASS,
+  DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD,
+  MIN_VALUE_BLUFFS_BET_FREQ,
+  MIN_VALUE_BLUFFS_REACH_MASS,
   formatReachMass,
-  listProminentBluffs,
+  listValueBluffs,
   matrixCellForCombo,
-  sortProminentBluffs,
-  type BluffEquityCompare,
-  type BluffEquityMode,
-  type BluffSortDir,
-  type BluffSortKey,
-} from "../../domain/prominentBluffs";
-import { fetchPostCallEquityHands } from "../../domain/prominentBluffsPostCall";
+  sortValueBluffs,
+  type ValueBluffsEquityCompare,
+  type ValueBluffsEquityMode,
+  type ValueBluffsSortDir,
+  type ValueBluffsSortKey,
+} from "../../domain/valueBluffs";
+import { fetchPostCallEquityHands } from "../../domain/valueBluffsPostCall";
 import { engineClient } from "../../engine/client";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
@@ -39,7 +39,7 @@ interface PostCallCache {
   error: string | null;
 }
 
-const SORT_COLUMNS: Array<{ key: BluffSortKey; label: string }> = [
+const SORT_COLUMNS: Array<{ key: ValueBluffsSortKey; label: string }> = [
   { key: "combo", label: "Hand" },
   { key: "betFreq", label: "Bet %" },
   { key: "ev", label: "EV" },
@@ -50,7 +50,7 @@ const SORT_COLUMNS: Array<{ key: BluffSortKey; label: string }> = [
 
 function clampThreshold(raw: number): number {
   if (!Number.isFinite(raw)) {
-    return DEFAULT_BLUFF_EQUITY_THRESHOLD;
+    return DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD;
   }
   return Math.min(1, Math.max(0, raw));
 }
@@ -73,7 +73,7 @@ function postCallCacheKey(
 function SettingsGearIcon() {
   return (
     <svg
-      className="bluffs-settings-icon"
+      className="value-bluffs-settings-icon"
       viewBox="0 0 24 24"
       width="16"
       height="16"
@@ -96,10 +96,10 @@ function SortHeader({
   onSort,
 }: {
   label: string;
-  columnKey: BluffSortKey;
-  sortKey: BluffSortKey;
-  sortDir: BluffSortDir;
-  onSort: (key: BluffSortKey) => void;
+  columnKey: ValueBluffsSortKey;
+  sortKey: ValueBluffsSortKey;
+  sortDir: ValueBluffsSortDir;
+  onSort: (key: ValueBluffsSortKey) => void;
 }) {
   const active = sortKey === columnKey;
   const ariaSort = active
@@ -111,7 +111,7 @@ function SortHeader({
     <th aria-sort={ariaSort}>
       <button
         type="button"
-        className="bluffs-sort-btn"
+        className="value-bluffs-sort-btn"
         data-active={active ? "true" : "false"}
         onClick={() => onSort(columnKey)}
         aria-label={`Sort by ${label}${
@@ -119,7 +119,7 @@ function SortHeader({
         }`}
       >
         <span>{label}</span>
-        <span className="bluffs-sort-indicator" aria-hidden="true">
+        <span className="value-bluffs-sort-indicator" aria-hidden="true">
           {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
         </span>
       </button>
@@ -127,8 +127,8 @@ function SortHeader({
   );
 }
 
-/** Study lower-dock Bluffs tab — Mode A (node) and Mode B (after call). */
-export function BluffsPanel() {
+/** Study lower-dock Value / Bluffs tab — Mode A (node) and Mode B (after call). */
+export function ValueBluffsPanel() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const equity = useStudyStore((s) => s.equity) as EquityPayload | null;
   const loadEquity = useStudyStore((s) => s.loadEquity);
@@ -141,16 +141,16 @@ export function BluffsPanel() {
   const status = useStudyStore((s) => s.status);
 
   const [thresholdPct, setThresholdPct] = useState(
-    () => Math.round(DEFAULT_BLUFF_EQUITY_THRESHOLD * 100),
+    () => Math.round(DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD * 100),
   );
-  const [equityCompare, setEquityCompare] = useState<BluffEquityCompare>("lt");
+  const [equityCompare, setEquityCompare] = useState<ValueBluffsEquityCompare>("lt");
   const [minBetPct, setMinBetPct] = useState(() =>
-    Math.round(MIN_BET_FREQ * 100),
+    Math.round(MIN_VALUE_BLUFFS_BET_FREQ * 100),
   );
-  const [minReachMass, setMinReachMass] = useState(MIN_REACH_MASS);
-  const [equityMode, setEquityMode] = useState<BluffEquityMode>("node");
-  const [sortKey, setSortKey] = useState<BluffSortKey>("betFreq");
-  const [sortDir, setSortDir] = useState<BluffSortDir>("desc");
+  const [minReachMass, setMinReachMass] = useState(MIN_VALUE_BLUFFS_REACH_MASS);
+  const [equityMode, setEquityMode] = useState<ValueBluffsEquityMode>("node");
+  const [sortKey, setSortKey] = useState<ValueBluffsSortKey>("betFreq");
+  const [sortDir, setSortDir] = useState<ValueBluffsSortDir>("desc");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [postCall, setPostCall] = useState<PostCallCache | null>(null);
   const [postCallPending, setPostCallPending] = useState(false);
@@ -161,8 +161,8 @@ export function BluffsPanel() {
   const settingsRef = useRef<HTMLDivElement | null>(null);
 
   const threshold = clampThreshold(thresholdPct / 100);
-  const minBetFreq = clampUnit(minBetPct / 100, MIN_BET_FREQ);
-  const reachFloor = clampUnit(minReachMass, MIN_REACH_MASS);
+  const minBetFreq = clampUnit(minBetPct / 100, MIN_VALUE_BLUFFS_BET_FREQ);
+  const reachFloor = clampUnit(minReachMass, MIN_VALUE_BLUFFS_REACH_MASS);
   const equityPending = Boolean(equity?.pending);
   const equityReady = Boolean(equity && !equity.pending);
   const revision =
@@ -341,7 +341,7 @@ export function BluffsPanel() {
     if (equityMode === "after_call" && (postCallPending || !equityHands)) {
       return [];
     }
-    const listed = listProminentBluffs({
+    const listed = listValueBluffs({
       node: currentNode,
       equityHands,
       threshold,
@@ -352,7 +352,7 @@ export function BluffsPanel() {
       nodeValues: valuesForNode ? nodeValues : null,
       evDisplayBasis,
     });
-    return sortProminentBluffs(listed, sortKey, sortDir);
+    return sortValueBluffs(listed, sortKey, sortDir);
   }, [
     currentNode,
     equityHands,
@@ -395,7 +395,7 @@ export function BluffsPanel() {
     void loadEquity();
   };
 
-  const onSort = (key: BluffSortKey) => {
+  const onSort = (key: ValueBluffsSortKey) => {
     if (key === sortKey) {
       setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
       return;
@@ -405,8 +405,8 @@ export function BluffsPanel() {
   };
 
   const resetViewerSettings = () => {
-    setMinBetPct(Math.round(MIN_BET_FREQ * 100));
-    setMinReachMass(MIN_REACH_MASS);
+    setMinBetPct(Math.round(MIN_VALUE_BLUFFS_BET_FREQ * 100));
+    setMinReachMass(MIN_VALUE_BLUFFS_REACH_MASS);
     setEquityCompare("lt");
     setSortKey("betFreq");
     setSortDir("desc");
@@ -414,7 +414,7 @@ export function BluffsPanel() {
 
   return (
     <div className="range-explorer">
-      <div className="panel-title-row bluffs-toolbar">
+      <div className="panel-title-row value-bluffs-toolbar">
         <div className="panel-title-actions">
           <button
             type="button"
@@ -424,21 +424,21 @@ export function BluffsPanel() {
           >
             Refresh
           </button>
-          <div className="bluffs-settings" ref={settingsRef}>
+          <div className="value-bluffs-settings" ref={settingsRef}>
             <button
               type="button"
-              className="toolbar-btn bluffs-settings-toggle"
-              aria-label="Bluff viewer settings"
+              className="toolbar-btn value-bluffs-settings-toggle"
+              aria-label="Value / Bluffs settings"
               aria-haspopup="menu"
               aria-expanded={settingsOpen}
-              title="Bluff viewer settings"
+              title="Value / Bluffs settings"
               onClick={() => setSettingsOpen((open) => !open)}
             >
               <SettingsGearIcon />
             </button>
             {settingsOpen ? (
-              <div className="bluffs-settings-menu" role="menu" aria-label="Bluff viewer settings">
-                <label className="bluffs-settings-field">
+              <div className="value-bluffs-settings-menu" role="menu" aria-label="Value / Bluffs settings">
+                <label className="value-bluffs-settings-field">
                   <span>Min bet %</span>
                   <input
                     type="number"
@@ -456,7 +456,7 @@ export function BluffsPanel() {
                     }}
                   />
                 </label>
-                <label className="bluffs-settings-field">
+                <label className="value-bluffs-settings-field">
                   <span>Min reach</span>
                   <input
                     type="number"
@@ -474,7 +474,7 @@ export function BluffsPanel() {
                     }}
                   />
                 </label>
-                <p className="bluffs-settings-hint muted">
+                <p className="value-bluffs-settings-hint muted">
                   Click column headers to sort ascending/descending. Equity
                   threshold stays in the toolbar above.
                 </p>
@@ -495,12 +495,12 @@ export function BluffsPanel() {
         </div>
       </div>
 
-      <div className="bluffs-controls">
-        <label className="bluffs-control">
+      <div className="value-bluffs-controls">
+        <label className="value-bluffs-control">
           <span className="muted">Equity</span>
           <button
             type="button"
-            className="toolbar-btn bluffs-compare-toggle"
+            className="toolbar-btn value-bluffs-compare-toggle"
             aria-label={`Equity comparison ${compareSymbol}; click to switch`}
             title={
               equityCompare === "lt"
@@ -515,7 +515,7 @@ export function BluffsPanel() {
           </button>
           <input
             type="number"
-            className="bluffs-threshold"
+            className="value-bluffs-threshold"
             min={0}
             max={100}
             step={1}
@@ -531,7 +531,7 @@ export function BluffsPanel() {
           />
           <span className="muted">%</span>
         </label>
-        <div className="seat-toggle" role="group" aria-label="Bluff equity mode">
+        <div className="seat-toggle" role="group" aria-label="Value / Bluffs equity mode">
           <button
             type="button"
             className="toolbar-btn"
@@ -609,7 +609,7 @@ export function BluffsPanel() {
               {visible.map((row) => (
                 <tr
                   key={row.combo}
-                  className="bluffs-row"
+                  className="value-bluffs-row"
                   tabIndex={0}
                   role="button"
                   aria-label={`Select ${row.combo} on the matrix`}
