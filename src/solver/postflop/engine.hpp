@@ -522,6 +522,11 @@ struct StreetBatchSolver::Engine
 
     mutable int active_count_ = 0;
 
+    // Dynamic claim cursor for Chance/Response first-card tasks. Workers race
+    // fetch_add until index >= active_count_; static chunk ranges only gate
+    // whether a worker enters the steal loop (all workers get [0, active]).
+    mutable std::atomic<int> next_active_{0};
+
     mutable int chunk_begin_[kMaxThreads] = {};
 
     mutable int chunk_end_[kMaxThreads] = {};
