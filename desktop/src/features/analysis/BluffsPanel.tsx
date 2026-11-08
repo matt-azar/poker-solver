@@ -14,6 +14,7 @@ import {
   listProminentBluffs,
   matrixCellForCombo,
   sortProminentBluffs,
+  type BluffEquityCompare,
   type BluffEquityMode,
   type BluffSortDir,
   type BluffSortKey,
@@ -142,6 +143,7 @@ export function BluffsPanel() {
   const [thresholdPct, setThresholdPct] = useState(
     () => Math.round(DEFAULT_BLUFF_EQUITY_THRESHOLD * 100),
   );
+  const [equityCompare, setEquityCompare] = useState<BluffEquityCompare>("lt");
   const [minBetPct, setMinBetPct] = useState(() =>
     Math.round(MIN_BET_FREQ * 100),
   );
@@ -343,6 +345,7 @@ export function BluffsPanel() {
       node: currentNode,
       equityHands,
       threshold,
+      equityCompare,
       equityMode,
       minBetFreq,
       minReachMass: reachFloor,
@@ -354,6 +357,7 @@ export function BluffsPanel() {
     currentNode,
     equityHands,
     threshold,
+    equityCompare,
     equityMode,
     postCallPending,
     valuesForNode,
@@ -370,6 +374,8 @@ export function BluffsPanel() {
   const betFloorLabel = `${Math.round(minBetFreq * 1000) / 10}%`;
   const reachFloorLabel = reachFloor.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
   const modeLabel = equityMode === "after_call" ? "after call" : "at this node";
+  const compareSymbol = equityCompare === "gt" ? ">" : "<";
+  const compareLabel = equityCompare === "gt" ? "value bets" : "bluffs";
 
   const onRowActivate = (combo: string) => {
     const cell = matrixCellForCombo(combo);
@@ -401,14 +407,14 @@ export function BluffsPanel() {
   const resetViewerSettings = () => {
     setMinBetPct(Math.round(MIN_BET_FREQ * 100));
     setMinReachMass(MIN_REACH_MASS);
+    setEquityCompare("lt");
     setSortKey("betFreq");
     setSortDir("desc");
   };
 
   return (
     <div className="range-explorer">
-      <div className="panel-title-row">
-        <h2 className="panel-title">Prominent bluffs</h2>
+      <div className="panel-title-row bluffs-toolbar">
         <div className="panel-title-actions">
           <button
             type="button"
@@ -491,7 +497,22 @@ export function BluffsPanel() {
 
       <div className="bluffs-controls">
         <label className="bluffs-control">
-          <span className="muted">Equity &lt;</span>
+          <span className="muted">Equity</span>
+          <button
+            type="button"
+            className="toolbar-btn bluffs-compare-toggle"
+            aria-label={`Equity comparison ${compareSymbol}; click to switch`}
+            title={
+              equityCompare === "lt"
+                ? "Bluffs: equity < threshold. Click for value bets (>)"
+                : "Value bets: equity > threshold. Click for bluffs (<)"
+            }
+            onClick={() =>
+              setEquityCompare((value) => (value === "lt" ? "gt" : "lt"))
+            }
+          >
+            {compareSymbol}
+          </button>
           <input
             type="number"
             className="bluffs-threshold"
@@ -532,8 +553,8 @@ export function BluffsPanel() {
       </div>
 
       <p className="equity-note muted">
-        Check-down equity &lt; {thresholdLabel} ({modeLabel}); bet/raise/all-in ≥{" "}
-        {betFloorLabel}; reach ≥ {reachFloorLabel}
+        Check-down equity {compareSymbol} {thresholdLabel} ({modeLabel});{" "}
+        bet/raise/all-in ≥ {betFloorLabel}; reach ≥ {reachFloorLabel}
         {equityMode === "after_call"
           ? "; each hand uses its highest-frequency bet/raise size"
           : ""}
@@ -543,7 +564,9 @@ export function BluffsPanel() {
       {!currentNode ? (
         <p className="empty-hint">Browse a decision node after a solve.</p>
       ) : currentNode.kind === "chance" || currentNode.kind === "terminal" ? (
-        <p className="empty-hint">Bluffs need a decision node (bet or raise).</p>
+        <p className="empty-hint">
+          Value / Bluffs needs a decision node (bet or raise).
+        </p>
       ) : equityMode === "node" && !equity ? (
         <p className="empty-hint">Click Refresh to load equity.</p>
       ) : equityMode === "node" && equity?.pending ? (
@@ -554,8 +577,8 @@ export function BluffsPanel() {
         <p className="empty-hint">{postCallMessage}</p>
       ) : !visible.length ? (
         <p className="empty-hint">
-          No bluffs with bet ≥ {betFloorLabel}, reach ≥ {reachFloorLabel}, and
-          equity &lt; {thresholdLabel} ({modeLabel}).
+          No {compareLabel} with bet ≥ {betFloorLabel}, reach ≥ {reachFloorLabel}
+          , and equity {compareSymbol} {thresholdLabel} ({modeLabel}).
         </p>
       ) : (
         <>

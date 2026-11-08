@@ -1656,6 +1656,11 @@
   font-size: 12px;
 }
 
+/* Value / Bluffs toolbar: Refresh + settings only (no panel title). */
+.bluffs-toolbar {
+  justify-content: flex-end;
+}
+
 /* Bluffs tab: threshold + mode chrome above the list. */
 .bluffs-controls {
   display: flex;
@@ -1680,6 +1685,12 @@
   background: var(--background);
   color: var(--foreground);
   font: inherit;
+}
+
+.bluffs-compare-toggle {
+  min-width: 2rem;
+  padding-inline: 6px;
+  font-weight: 700;
 }
 
 .bluffs-row {

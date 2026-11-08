@@ -9,7 +9,7 @@ const TABS = [
   { id: "runouts", label: "Runouts" },
   { id: "equity", label: "Equity" },
   { id: "categories", label: "Categories" },
-  { id: "bluffs", label: "Bluffs" },
+  { id: "bluffs", label: "Value / Bluffs" },
 ] as const;
 
 type DockTabId = (typeof TABS)[number]["id"];
