@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { mapActionColors } from "../../domain/actionColors";
+import { orderActionIndicesByAggression } from "../../domain/actionOrder";
 import {
   formatProbPct,
   isHandLocked,
@@ -40,14 +41,19 @@ function StrategyBar({
   actions: string[];
   colors: string[];
 }) {
+  const order = useMemo(
+    () => orderActionIndicesByAggression(actions),
+    [actions],
+  );
   return (
     <div className="node-lock-bar" aria-label={label}>
       <div className="node-lock-bar__label muted">{label}</div>
       {mix && actions.length > 0 ? (
         <>
           <div className="node-lock-bar__track">
-            {mix.map((weight, index) =>
-              weight > 0.001 ? (
+            {order.map((index) => {
+              const weight = mix[index] ?? 0;
+              return weight > 0.001 ? (
                 <span
                   key={`${actions[index]}-${index}`}
                   className="node-lock-bar__seg"
@@ -58,12 +64,12 @@ function StrategyBar({
                     background: colors[index] || "#666",
                   }}
                 />
-              ) : null,
-            )}
+              ) : null;
+            })}
           </div>
           <div className="node-lock-bar__legend tabular">
-            {actions
-              .map((action, index) => `${action} ${formatProbPct(mix[index] ?? 0)}`)
+            {order
+              .map((index) => `${actions[index]} ${formatProbPct(mix[index] ?? 0)}`)
               .join(" · ")}
           </div>
         </>

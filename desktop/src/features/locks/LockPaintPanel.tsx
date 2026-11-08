@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { mapActionColors } from "../../domain/actionColors";
+import { orderActionIndicesByAggression } from "../../domain/actionOrder";
 import {
   isHandLocked,
   lockForNode,
@@ -117,11 +118,15 @@ export function LockPaintPanel({
         const locked =
           indices.length > 0 && indices.every((index) => isHandLocked(nodeLock, index));
         const mix = weightedStrategyMix(strategy, indices, actionCount, marginal);
+        const actionLabels = currentNode?.actions ?? [];
+        const order = orderActionIndicesByAggression(actionLabels);
         const segments =
-          mix?.map((weight, actionIndex) => ({
-            weight,
-            color: colors.byIndex[actionIndex] || "#666",
-          })) ?? [];
+          mix == null
+            ? []
+            : order.map((actionIndex) => ({
+                weight: mix[actionIndex] ?? 0,
+                color: colors.byIndex[actionIndex] || "#666",
+              }));
         rowMeta.push({
           label: pairName(row, col),
           indices,

@@ -1,6 +1,7 @@
 /**
  * Order Study action segments most-aggressive → least-aggressive (left → right).
- * Shared by the main matrix and Hands combo breakdowns.
+ * Shared by the main matrix, Hands combo breakdowns, Node Locking bars/cells,
+ * and the Actions panel frequency mix bar.
  */
 import { actionIdentity } from "./actionColors";
 

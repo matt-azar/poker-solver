@@ -130,4 +130,41 @@ describe("Node Locking workspace", () => {
     await user.click(screen.getByRole("button", { name: "Select all" }));
     expect(useStudyStore.getState().lockDraft.handIndices).toEqual([0, 1, 2]);
   });
+
+  it("paints strategy segments aggressive-left in cells and overall bar", () => {
+    useStudyStore.setState({
+      currentNode: {
+        ...aaNode,
+        actions: ["Check", "Bet 50", "Bet 100"],
+        strategy: [
+          [0.2, 0.3, 0.5],
+          [0.2, 0.3, 0.5],
+          [0.2, 0.3, 0.5],
+        ],
+      },
+      lockDraft: { kind: "selected", handIndices: [], probs: [0.2, 0.3, 0.5] },
+    });
+    render(<LockDrawer />);
+
+    const aa = screen.getByRole("button", { name: "AA" });
+    const cellSegs = [
+      ...aa.querySelectorAll(".lock-paint-cell__seg"),
+    ] as HTMLElement[];
+    expect(cellSegs.length).toBe(3);
+    // Bet 100 (most aggressive) left, then Bet 50, then Check.
+    expect(cellSegs[0]?.style.background).toMatch(/196,\s*92,\s*58|#C45C3A/i);
+    expect(cellSegs[1]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
+    expect(cellSegs[2]?.style.background).toMatch(/63,\s*143,\s*107|#3F8F6B/i);
+
+    const overall = screen.getByLabelText("Overall range");
+    const barSegs = [
+      ...overall.querySelectorAll(".node-lock-bar__seg"),
+    ] as HTMLElement[];
+    expect(barSegs.length).toBe(3);
+    expect(barSegs[0]?.style.background).toMatch(/196,\s*92,\s*58|#C45C3A/i);
+    expect(barSegs[2]?.style.background).toMatch(/63,\s*143,\s*107|#3F8F6B/i);
+    expect(overall.querySelector(".node-lock-bar__legend")?.textContent).toMatch(
+      /^Bet 100 .* · Bet 50 .* · Check /,
+    );
+  });
 });
