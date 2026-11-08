@@ -35,6 +35,7 @@ import {
   type MatrixMode,
   type NodePayload,
 } from "../../domain/types";
+import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/matrix-density.css";
 
@@ -158,7 +159,8 @@ export function RangeMatrix() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const nodeValues = useStudyStore((s) => s.nodeValues);
   const matrixMode = useStudyStore((s) => s.matrixMode);
-  const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
+  // Settings is the authority for local vs global EV display.
+  const evDisplayBasis = useSettingsStore((s) => s.settings.evDisplayBasis);
   const selectedCell = useStudyStore((s) => s.selectedCell);
   const hoverCell = useStudyStore((s) => s.hoverCell);
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);

@@ -5,7 +5,7 @@
  * To change badge / metric type size, edit those CSS rules — not this file —
  * unless you need different content or structure.
  */
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
 import { mapActionColors } from "../../domain/actionColors";
 import { orderActionIndicesByAggression } from "../../domain/actionOrder";
@@ -97,9 +97,11 @@ function squareMass(square: ComboBreakdownSquare): number | null {
 /** Hands list for the hovered/selected 169-cell in the Study detail panel. */
 export function ComboInspector() {
   const currentNode = useStudyStore((s) => s.currentNode);
+  const solutionId = useStudyStore((s) => s.solutionId);
   const nodeValues = useStudyStore((s) => s.nodeValues);
   const equity = useStudyStore((s) => s.equity);
-  const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
+  // Settings is the authority for local vs global EV (studyStore stays synced for assistants).
+  const evDisplayBasis = useSettingsStore((s) => s.settings.evDisplayBasis);
   const selectedCell = useStudyStore((s) => s.selectedCell);
   const hoverCell = useStudyStore((s) => s.hoverCell);
   const calculateEv = useStudyStore((s) => s.calculateEv);
@@ -178,6 +180,31 @@ export function ComboInspector() {
   const cols = shapeColumns(shape);
   // Action rows show EV or frequency; equity always has its own labeled row.
   const metricLabel = showEv ? "EV" : "Freq";
+
+  // Hands EV rows need /values; kick a load when the overlay asks for EV and
+  // nothing is in flight (MatrixDisplayControls also loads — same store gate).
+  useEffect(() => {
+    if (!showEv || !solutionId || !currentNode) {
+      return;
+    }
+    if (
+      currentNode.kind === "chance" ||
+      currentNode.kind === "terminal"
+    ) {
+      return;
+    }
+    if (nodeValues?.pending) {
+      return;
+    }
+    if (
+      nodeValues &&
+      !nodeValues.pending &&
+      (!nodeValues.node_id || nodeValues.node_id === currentNode.node_id)
+    ) {
+      return;
+    }
+    void calculateEv();
+  }, [showEv, solutionId, currentNode, nodeValues, calculateEv]);
 
   return (
     <section className="combo-inspector" aria-label="Hands">

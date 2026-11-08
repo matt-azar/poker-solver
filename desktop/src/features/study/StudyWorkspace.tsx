@@ -31,7 +31,10 @@ function MatrixModeToolbar() {
   const matrixMode = useStudyStore((s) => s.matrixMode);
   const setMatrixMode = useStudyStore((s) => s.setMatrixMode);
   const nodeValues = useStudyStore((s) => s.nodeValues);
+  const calculateEv = useStudyStore((s) => s.calculateEv);
+  const currentNode = useStudyStore((s) => s.currentNode);
   const evReady = Boolean(nodeValues && !nodeValues.pending);
+  const evPending = Boolean(nodeValues?.pending);
   const strategyActive =
     matrixMode === "strategy" || matrixMode === "strategy-ev";
 
@@ -47,8 +50,24 @@ function MatrixModeToolbar() {
               type="button"
               className="mode-btn"
               aria-pressed={pressed}
-              disabled={mode.id === "ev" && !evReady}
-              onClick={() => setMatrixMode(mode.id)}
+              disabled={
+                mode.id === "ev" &&
+                currentNode?.kind != null &&
+                currentNode.kind !== "decision"
+              }
+              title={
+                mode.id === "ev" && !evReady
+                  ? evPending
+                    ? "Calculating action EVs…"
+                    : "Calculate action EVs for this mode"
+                  : undefined
+              }
+              onClick={() => {
+                if (mode.id === "ev" && !evReady && !evPending) {
+                  void calculateEv();
+                }
+                setMatrixMode(mode.id);
+              }}
             >
               {mode.label}
             </button>

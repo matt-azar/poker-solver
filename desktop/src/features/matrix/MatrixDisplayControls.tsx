@@ -64,36 +64,48 @@ export function MatrixDisplayControls() {
   const nodeValues = useStudyStore((s) => s.nodeValues);
   const currentNode = useStudyStore((s) => s.currentNode);
   const solutionId = useStudyStore((s) => s.solutionId);
+  const matrixMode = useStudyStore((s) => s.matrixMode);
 
   const nodeId = currentNode?.node_id ?? null;
+  // Skip chance/terminal; treat missing kind with actions as a decision (fixtures).
+  const decisionNode =
+    currentNode != null &&
+    currentNode.kind !== "chance" &&
+    currentNode.kind !== "terminal" &&
+    (currentNode.kind === "decision" ||
+      currentNode.kind == null ||
+      (currentNode.actions?.length ?? 0) > 0);
   const wantEquity = prefs.cellOverlay === "equity" || prefs.cellOverlay === "both";
-  const wantEv = prefs.cellOverlay === "ev" || prefs.cellOverlay === "both";
+  // Overlay EV, EV matrix mode, or strategy+EV after a prior calc all need /values.
+  const wantEv =
+    decisionNode &&
+    (prefs.cellOverlay === "ev" ||
+      prefs.cellOverlay === "both" ||
+      matrixMode === "ev" ||
+      matrixMode === "strategy-ev");
   const equityReady = analysisReady(equity, solutionId, nodeId);
   const equityPending = analysisPendingForNode(equity, solutionId, nodeId);
   const evReady = analysisReady(nodeValues, solutionId, nodeId);
   const evPending = analysisPendingForNode(nodeValues, solutionId, nodeId);
 
-  // Auto-compute when the overlay needs EV / equity for the live node.
-  // Explorer has one analysis worker: concurrent /equity + /values polls cancel
-  // each other forever (footer blink). When both are wanted, finish equity first.
+  // Auto-compute when the overlay / EV mode needs analysis for the live node.
+  // Explorer has one value worker: equity and /values cancel each other, so when
+  // both are needed load equity first and only then request EV (BluffsPanel same).
   useEffect(() => {
-    if (!currentNode || !solutionId) {
+    if (!currentNode || !solutionId || !decisionNode) {
       return;
     }
     if (wantEquity && !equityReady && !equityPending) {
       void loadEquity();
     }
-    const canComputeEv =
-      currentNode.kind !== "chance" &&
-      currentNode.kind !== "terminal" &&
-      Boolean(currentNode.actions?.length);
-    const equityBlockingEv = wantEquity && !equityReady;
-    if (wantEv && canComputeEv && !evReady && !evPending && !equityBlockingEv) {
+    const equityBlocking = wantEquity && !equityReady;
+    if (wantEv && !evReady && !evPending && !equityBlocking) {
       void calculateEv();
     }
   }, [
     currentNode,
     solutionId,
+    decisionNode,
     wantEquity,
     wantEv,
     equityReady,
