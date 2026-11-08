@@ -74,6 +74,8 @@ export function MatrixDisplayControls() {
   const evPending = analysisPendingForNode(nodeValues, solutionId, nodeId);
 
   // Auto-compute when the overlay needs EV / equity for the live node.
+  // Explorer has one analysis worker: concurrent /equity + /values polls cancel
+  // each other forever (footer blink). When both are wanted, finish equity first.
   useEffect(() => {
     if (!currentNode || !solutionId) {
       return;
@@ -81,7 +83,12 @@ export function MatrixDisplayControls() {
     if (wantEquity && !equityReady && !equityPending) {
       void loadEquity();
     }
-    if (wantEv && !evReady && !evPending) {
+    const canComputeEv =
+      currentNode.kind !== "chance" &&
+      currentNode.kind !== "terminal" &&
+      Boolean(currentNode.actions?.length);
+    const equityBlockingEv = wantEquity && !equityReady;
+    if (wantEv && canComputeEv && !evReady && !evPending && !equityBlockingEv) {
       void calculateEv();
     }
   }, [

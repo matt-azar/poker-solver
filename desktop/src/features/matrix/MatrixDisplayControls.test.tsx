@@ -86,13 +86,30 @@ describe("MatrixDisplayControls", () => {
     expect(screen.queryByRole("button", { name: "Load EV" })).toBeNull();
   });
 
-  it("auto-loads both when EV+Eq overlay is selected", async () => {
+  it("auto-loads equity first when EV+Eq overlay is selected", async () => {
     render(<MatrixDisplayControls />);
     fireEvent.change(screen.getByLabelText("Overlay"), {
       target: { value: "both" },
     });
     await waitFor(() => {
       expect(loadEquity).toHaveBeenCalled();
+    });
+    // Do not start /values until equity is ready — concurrent polls thrash the worker.
+    expect(calculateEv).not.toHaveBeenCalled();
+  });
+
+  it("starts EV after equity is ready for EV+Eq overlay", async () => {
+    useMatrixDisplayStore.getState().setCellOverlay("both");
+    render(<MatrixDisplayControls />);
+    await waitFor(() => {
+      expect(loadEquity).toHaveBeenCalled();
+    });
+    expect(calculateEv).not.toHaveBeenCalled();
+
+    useStudyStore.setState({
+      equity: { pending: false, node_id: "n1", solution_id: "sol-1" },
+    });
+    await waitFor(() => {
       expect(calculateEv).toHaveBeenCalled();
     });
   });

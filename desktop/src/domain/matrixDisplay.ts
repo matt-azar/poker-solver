@@ -306,10 +306,9 @@ function suitSymbol(suit: string): string {
 /** One card inside a GTOWizard-style combo badge (rank + suit glyph). */
 export interface ComboBadgeCard {
   rank: string;
+  /** Suit letter for four-color deck styling via data-suit (h/d/c/s). */
   suit: CardSuit | string;
   symbol: string;
-  /** True for hearts/diamonds — red suit styling. */
-  red: boolean;
 }
 
 /**
@@ -331,7 +330,6 @@ export function comboBadgeCards(combo: string): ComboBadgeCard[] {
       rank: card.rank,
       suit,
       symbol: suitSymbol(card.suit),
-      red: card.suit === "h" || card.suit === "d",
     };
   });
 }

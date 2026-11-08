@@ -113,6 +113,15 @@ describe("ComboInspector", () => {
     expect(document.querySelector(".hands-combo__badge-suit")?.textContent).toMatch(
       /[♠♥♦♣]/,
     );
+    // Four-color deck: each badge card carries data-suit (never red/black pairs).
+    const badgeCards = [
+      ...document.querySelectorAll(".hands-combo__badge-card"),
+    ] as HTMLElement[];
+    expect(badgeCards.length).toBeGreaterThan(0);
+    for (const card of badgeCards) {
+      expect(card.getAttribute("data-suit")).toMatch(/^[cdhs]$/);
+      expect(card.hasAttribute("data-red")).toBe(false);
+    }
     expect(screen.getByText("0.5")).toBeTruthy();
     expect(screen.getByText("2.5")).toBeTruthy();
     const present = document.querySelector(
