@@ -1346,6 +1346,11 @@ void handle_client(socket_t client)
             // full-node edit without leaving stale hands edited.
             held->strategy_edits.upsert(std::move(edit));
             reapply_strategy_edits(*held);
+            // Drop cached /values pages — profile changed under the same solution id.
+            if (g_app.values != nullptr)
+            {
+                g_app.values->cancel();
+            }
             send_response(client, 200, "application/json", json_strategy_edits(held->strategy_edits));
         }
         catch (const std::exception& error)
@@ -1461,6 +1466,10 @@ void handle_client(socket_t client)
                     held->strategy_edits.erase(infoset_id);
                 }
                 reapply_strategy_edits(*held);
+            }
+            if (g_app.values != nullptr)
+            {
+                g_app.values->cancel();
             }
             send_response(client, 200, "application/json", json_strategy_edits(held->strategy_edits));
         }

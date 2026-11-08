@@ -5,6 +5,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -44,9 +45,14 @@ using ValueErrorBody = std::function<std::string(const std::string& what, const 
 
 // One background query. shutdown is idempotent, joins outside the queue lock,
 // and runs before the Session it borrows from is destroyed.
+// Completed pages are kept in a small LRU so Study navigation can reuse
+// equity/values without recomputing (submit of a different node still cancels
+// the in-flight walk — callers should serialize competing kinds).
 class ValueWorker
 {
 public:
+    static constexpr std::size_t kResultCacheCap = 48;
+
     ValueWorker(Session& session, ValueEvaluate evaluate, ValueErrorBody error_body);
     ~ValueWorker();
 
@@ -62,8 +68,20 @@ public:
     bool live() const;
 
 private:
+    struct CachedResult
+    {
+        std::uint64_t solution_id = 0;
+        std::string node_id;
+        std::string kind;
+        bool ok = false;
+        std::string body;
+    };
+
     void thread_main();
     void ensure_started();
+    const CachedResult* find_cached_unlocked(const ValueRequest& request) const;
+    void store_cached_unlocked(CachedResult entry);
+    void clear_cache_unlocked();
 
     Session& session_;
     ValueEvaluate evaluate_;
@@ -77,16 +95,11 @@ private:
     bool stop_ = false;
     bool pending_ = false;
     bool inflight_ = false;
-    bool has_result_ = false;
-    bool result_ok_ = false;
     std::uint64_t serial_ = 0;
     ValueRequest pending_request_;
     ValueRequest inflight_request_;
     std::uint64_t inflight_serial_ = 0;
-    std::uint64_t result_solution_ = 0;
-    std::string result_node_;
-    std::string result_kind_;
-    std::string result_body_;
+    std::deque<CachedResult> result_cache_;
 };
 
 } // namespace poker::explorer

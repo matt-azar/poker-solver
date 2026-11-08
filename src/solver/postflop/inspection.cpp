@@ -763,13 +763,26 @@ StreetActionValues StreetBatchSolver::Engine::compute_action_values(
         page.node_ev = node_ev;
     }
     // Sunk-cost shift for UI local EV: acting seat's utility if they folded now.
+    // Prefer betting_state_along so local_offset stays correct even if a node
+    // skipped storing contrib (decision/chance historically left them at 0).
     {
+        std::vector<int> chain;
+        for (int at = node_index; at >= 0; at = parent_link[static_cast<std::size_t>(at)].parent)
+        {
+            chain.push_back(at);
+            if (chain.size() > nodes.size())
+            {
+                throw std::logic_error("node parent cycle");
+            }
+        }
+        std::reverse(chain.begin(), chain.end());
+        const BetState betting = betting_state_along(chain);
         PlayerPayoff fold_pay = apply_icm_terminal(
             config.icm,
             ChipPayoff::terminal(
                 config.pot,
-                node.contrib[0],
-                node.contrib[1],
+                betting.contrib[0],
+                betting.contrib[1],
                 actor,
                 0,
                 config.rake));

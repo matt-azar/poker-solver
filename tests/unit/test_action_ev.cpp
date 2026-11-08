@@ -1392,6 +1392,89 @@ void test_river_bluff_fixture()
     CHECK(after.profile_epoch == solver.profile_epoch());
 }
 
+void test_local_offset_includes_street_contrib_after_call()
+{
+    // Root pot 100 chips. OOP bets half-pot (50), IP calls → both contrib 50.
+    // Next-street decision local_offset must be half_pot + actor_contrib = 100,
+    // not bare half_pot 50 (the bug when decision nodes left contrib at 0).
+    StreetConfig config;
+    config.board = {card_id("Kh"), card_id("7d"), card_id("2c")};
+    config.pot = 1000;
+    config.stack = 10000;
+    config.oop = Range::parse("AhAd");
+    config.ip = Range::parse("KcKd");
+    config.oop_bet_sizes = {0.5};
+    config.ip_bet_sizes = {0.5};
+    config.oop_turn_bets = {0.5};
+    config.ip_turn_bets = {0.5};
+    config.allow_all_in = false;
+    config.max_raises = 1;
+    config.memory_mib = 64;
+    StreetBatchSolver solver(config);
+    solver.run_frozen_iterations(1, Algorithm::CfrPlus);
+    solver.prepare_inspection();
+
+    const StreetInspection root = solver.inspect_node(solver.root_node_id());
+    const int bet = find_action(
+        [&]()
+        {
+            std::vector<std::string> labels;
+            for (const auto& action : root.actions)
+            {
+                labels.push_back(action.label);
+            }
+            return labels;
+        }(),
+        "Bet");
+    CHECK(bet >= 0);
+    set_named_average(solver, root.node_id, combo_name("Ah", "Ad"), {{"Bet", 1.0}});
+
+    const StreetInspection facing = solver.inspect_node(root.actions[static_cast<std::size_t>(bet)].child_id);
+    CHECK(facing.player == 1);
+    CHECK(facing.contrib[0] == poker::chip_units(50));
+    CHECK(facing.contrib[1] == 0);
+    const int call = find_action(
+        [&]()
+        {
+            std::vector<std::string> labels;
+            for (const auto& action : facing.actions)
+            {
+                labels.push_back(action.label);
+            }
+            return labels;
+        }(),
+        "Call");
+    CHECK(call >= 0);
+    set_named_average(solver, facing.node_id, combo_name("Kc", "Kd"), {{"Call", 1.0}});
+
+    StreetInspection cursor = solver.inspect_node(facing.actions[static_cast<std::size_t>(call)].child_id);
+    CHECK(cursor.kind == "chance");
+    CHECK(!cursor.cards.empty());
+    cursor = solver.inspect_node(cursor.cards[0].child_id);
+    while (cursor.kind == "chance" && !cursor.cards.empty())
+    {
+        cursor = solver.inspect_node(cursor.cards[0].child_id);
+    }
+    CHECK(cursor.kind == "decision");
+    CHECK(cursor.contrib[0] == poker::chip_units(50));
+    CHECK(cursor.contrib[1] == poker::chip_units(50));
+
+    const StreetActionValues page = solver.action_values(cursor.node_id);
+    CHECK_NEAR(page.local_offset, 100.0, 1e-9);
+    const int fold = find_action(page.actions, "Fold");
+    if (fold >= 0)
+    {
+        for (std::size_t hand = 0; hand < page.combos.size(); ++hand)
+        {
+            if (!page.ev_defined[hand])
+            {
+                continue;
+            }
+            CHECK_NEAR(page_action(page, static_cast<int>(hand), fold) + page.local_offset, 0.0, 1e-6);
+        }
+    }
+}
+
 } // namespace
 
 void run_action_value_tests()
@@ -1403,4 +1486,5 @@ void run_action_value_tests()
     test_profile_revision_drops_stale_values();
     test_tiny_compatible_mass();
     test_river_bluff_fixture();
+    test_local_offset_includes_street_contrib_after_call();
 }

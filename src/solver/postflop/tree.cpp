@@ -188,6 +188,9 @@ int StreetBatchSolver::Engine::build_node(const BetState& state, std::string_vie
         node.chance = true;
         node.street = state.street;
         node.deal_which = state.deal_which;
+        // Keep street investments for inspection / local_offset (same as terminals).
+        node.contrib[0] = state.contrib[0];
+        node.contrib[1] = state.contrib[1];
         const int id = static_cast<int>(nodes.size());
         nodes.push_back(std::move(node));
         BetState next = state;
@@ -210,6 +213,9 @@ int StreetBatchSolver::Engine::build_node(const BetState& state, std::string_vie
     node.street = state.street;
     node.depth = depth;
     node.n_actions = legal.count;
+    // Decision nodes need contrib for /values local_offset (Fold-now sunk cost).
+    node.contrib[0] = state.contrib[0];
+    node.contrib[1] = state.contrib[1];
     node.path.assign(path.data(), path.size());
     if (config.board.size() == 3)
     {

@@ -28,6 +28,42 @@ void ValueWorker::ensure_started()
     started_ = true;
 }
 
+const ValueWorker::CachedResult* ValueWorker::find_cached_unlocked(const ValueRequest& request) const
+{
+    for (auto it = result_cache_.rbegin(); it != result_cache_.rend(); ++it)
+    {
+        if (it->solution_id == request.solution_id && it->node_id == request.node_id
+            && it->kind == request.kind)
+        {
+            return &(*it);
+        }
+    }
+    return nullptr;
+}
+
+void ValueWorker::store_cached_unlocked(CachedResult entry)
+{
+    for (auto it = result_cache_.begin(); it != result_cache_.end(); ++it)
+    {
+        if (it->solution_id == entry.solution_id && it->node_id == entry.node_id
+            && it->kind == entry.kind)
+        {
+            result_cache_.erase(it);
+            break;
+        }
+    }
+    result_cache_.push_back(std::move(entry));
+    while (result_cache_.size() > kResultCacheCap)
+    {
+        result_cache_.pop_front();
+    }
+}
+
+void ValueWorker::clear_cache_unlocked()
+{
+    result_cache_.clear();
+}
+
 ValueReply ValueWorker::submit(const ValueRequest& request)
 {
     std::lock_guard<std::mutex> lock(mu_);
@@ -41,17 +77,17 @@ ValueReply ValueWorker::submit(const ValueRequest& request)
         return reply;
     }
     ensure_started();
-    const bool finished = has_result_ && result_solution_ == request.solution_id && result_node_ == request.node_id
-        && result_kind_ == request.kind && !pending_ && !inflight_;
     const bool same_inflight = inflight_ && inflight_request_.solution_id == request.solution_id
         && inflight_request_.node_id == request.node_id && inflight_request_.kind == request.kind && !pending_;
     const bool same_pending = pending_ && pending_request_.solution_id == request.solution_id
         && pending_request_.node_id == request.node_id && pending_request_.kind == request.kind;
-    if (finished)
+    // Idle cache hit: reuse a prior page without waking the worker.
+    if (const CachedResult* cached = find_cached_unlocked(request);
+        cached != nullptr && !pending_ && !inflight_)
     {
         reply.ready = true;
-        reply.ok = result_ok_;
-        reply.body = result_body_;
+        reply.ok = cached->ok;
+        reply.body = cached->body;
         reply.job_id = request.job_id;
         return reply;
     }
@@ -60,11 +96,12 @@ ValueReply ValueWorker::submit(const ValueRequest& request)
         reply.job_id = same_pending ? pending_request_.job_id : inflight_request_.job_id;
         return reply;
     }
+    // Different request: queue it and cancel the in-flight walk. Other cached
+    // nodes/kinds remain so Study can navigate without recomputing.
     ++serial_;
     pending_ = true;
     cancel_.store(true);
     pending_request_ = request;
-    has_result_ = false;
     cv_.notify_one();
     return reply;
 }
@@ -75,7 +112,7 @@ void ValueWorker::cancel()
     cancel_.store(true);
     pending_ = false;
     ++serial_;
-    has_result_ = false;
+    clear_cache_unlocked();
 }
 
 void ValueWorker::cancel_and_drain()
@@ -85,7 +122,7 @@ void ValueWorker::cancel_and_drain()
         cancel_.store(true);
         pending_ = false;
         ++serial_;
-        has_result_ = false;
+        clear_cache_unlocked();
     }
     cv_.notify_all();
     std::unique_lock<std::mutex> lock(mu_);
@@ -100,7 +137,7 @@ void ValueWorker::shutdown()
         pending_ = false;
         cancel_.store(true);
         ++serial_;
-        has_result_ = false;
+        clear_cache_unlocked();
     }
     cv_.notify_all();
     if (thread_.joinable())
@@ -196,12 +233,13 @@ void ValueWorker::thread_main()
             {
                 continue;
             }
-            has_result_ = true;
-            result_ok_ = ok;
-            result_solution_ = request.solution_id;
-            result_node_ = request.node_id;
-            result_kind_ = request.kind;
-            result_body_ = std::move(body);
+            store_cached_unlocked(CachedResult{
+                request.solution_id,
+                request.node_id,
+                request.kind,
+                ok,
+                std::move(body),
+            });
         }
     }
 }
