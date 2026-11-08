@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent,
 import { clampDockHeight } from "../../state/layoutStore";
 import { useStudyStore } from "../../state/studyStore";
 import { AnalysisDockPanel } from "./AnalysisDockPanel";
-import { BluffsPanel } from "./BluffsPanel";
+import { ValueBluffsPanel } from "./ValueBluffsPanel";
 import { RunoutTable } from "./RunoutTable";
 
 const TABS = [
   { id: "runouts", label: "Runouts" },
   { id: "equity", label: "Equity" },
   { id: "categories", label: "Categories" },
-  { id: "bluffs", label: "Value / Bluffs" },
+  { id: "value-bluffs", label: "Value / Bluffs" },
 ] as const;
 
 type DockTabId = (typeof TABS)[number]["id"];
@@ -29,10 +29,14 @@ export function LowerDock() {
     }
   }, [layout.lowerDockHeight, setLayout]);
 
-  // Migrate the removed Range Explorer default without editing studyStore.
+  // Migrate removed / renamed dock tabs without editing studyStore.
   useEffect(() => {
     if (analysisTab === "explorer") {
       setAnalysisTab("equity");
+      return;
+    }
+    if ((analysisTab as string) === "bluffs") {
+      setAnalysisTab("value-bluffs");
     }
   }, [analysisTab, setAnalysisTab]);
 
@@ -73,7 +77,7 @@ export function LowerDock() {
     analysisTab === "runouts" ||
     analysisTab === "equity" ||
     analysisTab === "categories" ||
-    analysisTab === "bluffs"
+    analysisTab === "value-bluffs"
       ? analysisTab
       : "equity";
 
@@ -101,8 +105,8 @@ export function LowerDock() {
   let body: ReactNode;
   if (activeTab === "runouts") {
     body = <RunoutTable />;
-  } else if (activeTab === "bluffs") {
-    body = <BluffsPanel />;
+  } else if (activeTab === "value-bluffs") {
+    body = <ValueBluffsPanel />;
   } else {
     body = <AnalysisDockPanel />;
   }

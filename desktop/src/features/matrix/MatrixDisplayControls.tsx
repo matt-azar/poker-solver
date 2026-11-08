@@ -90,7 +90,7 @@ export function MatrixDisplayControls() {
 
   // Auto-compute when the overlay / EV mode needs analysis for the live node.
   // Explorer has one value worker: equity and /values cancel each other, so when
-  // both are needed load equity first and only then request EV (BluffsPanel same).
+  // both are needed load equity first and only then request EV (ValueBluffsPanel same).
   useEffect(() => {
     if (!currentNode || !solutionId || !decisionNode) {
       return;

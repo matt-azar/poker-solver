@@ -1657,12 +1657,12 @@
 }
 
 /* Value / Bluffs toolbar: Refresh + settings only (no panel title). */
-.bluffs-toolbar {
+.value-bluffs-toolbar {
   justify-content: flex-end;
 }
 
-/* Bluffs tab: threshold + mode chrome above the list. */
-.bluffs-controls {
+/* Value / Bluffs tab: threshold + mode chrome above the list. */
+.value-bluffs-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1670,14 +1670,14 @@
   margin: 0 0 8px;
 }
 
-.bluffs-control {
+.value-bluffs-control {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
 }
 
-.bluffs-threshold {
+.value-bluffs-threshold {
   width: 4.5rem;
   padding: 2px 6px;
   border: 1px solid var(--border);
@@ -1687,26 +1687,26 @@
   font: inherit;
 }
 
-.bluffs-compare-toggle {
+.value-bluffs-compare-toggle {
   min-width: 2rem;
   padding-inline: 6px;
   font-weight: 700;
 }
 
-.bluffs-row {
+.value-bluffs-row {
   cursor: pointer;
 }
 
-.bluffs-row:focus-visible {
+.value-bluffs-row:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-.bluffs-settings {
+.value-bluffs-settings {
   position: relative;
 }
 
-.bluffs-settings-toggle {
+.value-bluffs-settings-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1714,11 +1714,11 @@
   padding-inline: 6px;
 }
 
-.bluffs-settings-icon {
+.value-bluffs-settings-icon {
   display: block;
 }
 
-.bluffs-settings-menu {
+.value-bluffs-settings-menu {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
@@ -1734,7 +1734,7 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 
-.bluffs-settings-field {
+.value-bluffs-settings-field {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
@@ -1742,7 +1742,7 @@
   font-size: 12px;
 }
 
-.bluffs-settings-field input {
+.value-bluffs-settings-field input {
   width: 5.5rem;
   padding: 2px 6px;
   border: 1px solid var(--border);
@@ -1752,13 +1752,13 @@
   font: inherit;
 }
 
-.bluffs-settings-hint {
+.value-bluffs-settings-hint {
   margin: 0;
   font-size: 11px;
   line-height: 1.35;
 }
 
-.bluffs-sort-btn {
+.value-bluffs-sort-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1772,17 +1772,17 @@
   cursor: pointer;
 }
 
-.bluffs-sort-btn:hover,
-.bluffs-sort-btn[data-active="true"] {
+.value-bluffs-sort-btn:hover,
+.value-bluffs-sort-btn[data-active="true"] {
   color: var(--accent);
 }
 
-.bluffs-sort-indicator {
+.value-bluffs-sort-indicator {
   font-size: 10px;
   opacity: 0.7;
 }
 
-.bluffs-sort-btn[data-active="true"] .bluffs-sort-indicator {
+.value-bluffs-sort-btn[data-active="true"] .value-bluffs-sort-indicator {
   opacity: 1;
 }
 

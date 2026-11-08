@@ -1,7 +1,6 @@
 /**
- * Prominent bluffs / value bets: betting hands with check-down equity on one
- * side of a user threshold. Local betting predicate — do not change
- * browse.isAggressive.
+ * Value / Bluffs viewer: betting hands with check-down equity on one side of a
+ * user threshold. Local betting predicate — do not change browse.isAggressive.
  */
 import type { EquityHandRow } from "./analysis";
 import { comboEv, comboKey } from "./matrixDisplay";
@@ -40,21 +39,21 @@ function childIdAt(
 }
 
 /** UI default; callers pass the live threshold from panel state. */
-export const DEFAULT_BLUFF_EQUITY_THRESHOLD = 0.3;
+export const DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD = 0.3;
 
 /** Include only when bet frequency is at least this fraction. */
-export const MIN_BET_FREQ = 0.01;
+export const MIN_VALUE_BLUFFS_BET_FREQ = 0.01;
 
 /** Include only when node reach mass is at least this value. */
-export const MIN_REACH_MASS = 0.005;
+export const MIN_VALUE_BLUFFS_REACH_MASS = 0.005;
 
-export type BluffEquityMode = "node" | "after_call";
+export type ValueBluffsEquityMode = "node" | "after_call";
 
 /** Equity vs threshold: bluffs use exclusive &lt;; value bets use exclusive &gt;. */
-export type BluffEquityCompare = "lt" | "gt";
+export type ValueBluffsEquityCompare = "lt" | "gt";
 
-/** Sortable Bluffs table columns. */
-export type BluffSortKey =
+/** Sortable Value / Bluffs table columns. */
+export type ValueBluffsSortKey =
   | "combo"
   | "betFreq"
   | "ev"
@@ -62,9 +61,9 @@ export type BluffSortKey =
   | "reach"
   | "topBetAction";
 
-export type BluffSortDir = "asc" | "desc";
+export type ValueBluffsSortDir = "asc" | "desc";
 
-export interface ProminentBluffRow {
+export interface ValueBluffsRow {
   combo: string;
   betFreq: number;
   /** Mixed action EV (chips) for the combo; null when values pending/undefined. */
@@ -83,10 +82,10 @@ export interface SelectedMatrixCell {
 }
 
 /**
- * Bluff-tool betting actions: Bet*, Raise*, and bare All-in.
+ * Value / Bluffs betting actions: Bet*, Raise*, and bare All-in.
  * Sized `Bet N all-in` / `Raise … all-in` already match Bet/Raise prefixes.
  */
-export function isBluffBettingAction(label: string): boolean {
+export function isValueBluffsBettingAction(label: string): boolean {
   const trimmed = label.trim();
   if (!trimmed) {
     return false;
@@ -113,7 +112,7 @@ export function betFrequency(
   let sum = 0;
   const n = Math.min(strategyRow.length, actions.length);
   for (let index = 0; index < n; index += 1) {
-    if (!isBluffBettingAction(actions[index] ?? "")) {
+    if (!isValueBluffsBettingAction(actions[index] ?? "")) {
       continue;
     }
     const probability = Number(strategyRow[index]);
@@ -140,7 +139,7 @@ export function topBettingActionIndex(
   const n = Math.min(strategyRow.length, actions.length);
   for (let index = 0; index < n; index += 1) {
     const label = actions[index] ?? "";
-    if (!isBluffBettingAction(label)) {
+    if (!isValueBluffsBettingAction(label)) {
       continue;
     }
     const probability = Number(strategyRow[index]);
@@ -201,7 +200,7 @@ export function callChildIdFromFacing(
  */
 export function dominantBettingActionIndices(
   node: NodePayload | null | undefined,
-  minBetFreq = MIN_BET_FREQ,
+  minBetFreq = MIN_VALUE_BLUFFS_BET_FREQ,
 ): number[] {
   if (!isDecisionWithStrategy(node)) {
     return [];
@@ -233,7 +232,7 @@ export function equityHandsForDominantSizes(args: {
   handsByBetAction: Map<number, EquityHandRow[] | null | undefined>;
   minBetFreq?: number;
 }): EquityHandRow[] {
-  const { node, handsByBetAction, minBetFreq = MIN_BET_FREQ } = args;
+  const { node, handsByBetAction, minBetFreq = MIN_VALUE_BLUFFS_BET_FREQ } = args;
   if (!isDecisionWithStrategy(node)) {
     return [];
   }
@@ -342,7 +341,7 @@ function isDecisionWithStrategy(node: NodePayload | null | undefined): boolean {
 export function equityPassesThreshold(
   equity: number,
   threshold: number,
-  compare: BluffEquityCompare = "lt",
+  compare: ValueBluffsEquityCompare = "lt",
 ): boolean {
   if (!Number.isFinite(equity) || !Number.isFinite(threshold)) {
     return false;
@@ -350,16 +349,16 @@ export function equityPassesThreshold(
   return compare === "gt" ? equity > threshold : equity < threshold;
 }
 
-export interface ListProminentBluffsArgs {
+export interface ListValueBluffsArgs {
   node: NodePayload | null | undefined;
   /** Acting-seat check-down equity hands (Mode A: current node). */
   equityHands: EquityHandRow[] | null | undefined;
   /** Exclusive bound used with {@link equityCompare}. */
   threshold: number;
   /** `lt` = bluffs (equity &lt; threshold); `gt` = value (equity &gt; threshold). */
-  equityCompare?: BluffEquityCompare;
+  equityCompare?: ValueBluffsEquityCompare;
   /** Reserved for Mode B; Mode A ignores and uses equityHands. */
-  equityMode?: BluffEquityMode;
+  equityMode?: ValueBluffsEquityMode;
   minBetFreq?: number;
   /** Minimum node reach mass (inclusive). */
   minReachMass?: number;
@@ -369,7 +368,7 @@ export interface ListProminentBluffsArgs {
   evDisplayBasis?: EvDisplayBasis;
 }
 
-/** Format reach mass for the Bluffs table (two decimal digits). */
+/** Format reach mass for the Value / Bluffs table (two decimal digits). */
 export function formatReachMass(reach: number | null | undefined): string {
   if (reach == null || !Number.isFinite(reach)) {
     return "—";
@@ -399,11 +398,11 @@ function compareNullableNumber(
  * Sort bluff rows by column. Null EV/reach sort last in both directions.
  * Ties break on combo localeCompare.
  */
-export function sortProminentBluffs(
-  rows: ProminentBluffRow[],
-  key: BluffSortKey,
-  dir: BluffSortDir,
-): ProminentBluffRow[] {
+export function sortValueBluffs(
+  rows: ValueBluffsRow[],
+  key: ValueBluffsSortKey,
+  dir: ValueBluffsSortDir,
+): ValueBluffsRow[] {
   const sign = dir === "asc" ? 1 : -1;
   return [...rows].sort((left, right) => {
     let delta = 0;
@@ -437,19 +436,19 @@ export function sortProminentBluffs(
 }
 
 /**
- * Prominent bluffs / value bets for the acting seat at a decision node.
+ * Value / Bluffs rows for the acting seat at a decision node.
  * Default order: descending betFreq, then combo localeCompare.
  * EV is display-only (does not filter); null when values are missing/pending.
- * Combos with undefined reach or reach &lt; {@link MIN_REACH_MASS} are dropped.
+ * Combos with undefined reach or reach &lt; {@link MIN_VALUE_BLUFFS_REACH_MASS} are dropped.
  */
-export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBluffRow[] {
+export function listValueBluffs(args: ListValueBluffsArgs): ValueBluffsRow[] {
   const {
     node,
     equityHands,
     threshold,
     equityCompare = "lt",
-    minBetFreq = MIN_BET_FREQ,
-    minReachMass = MIN_REACH_MASS,
+    minBetFreq = MIN_VALUE_BLUFFS_BET_FREQ,
+    minReachMass = MIN_VALUE_BLUFFS_REACH_MASS,
     nodeValues = null,
     evDisplayBasis = "local",
   } = args;
@@ -461,7 +460,7 @@ export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBlu
   const strategy = node!.strategy ?? [];
   const reach = Array.isArray(node!.reach) ? (node!.reach as number[]) : null;
   const byCombo = equityLookup(equityHands);
-  const rows: ProminentBluffRow[] = [];
+  const rows: ValueBluffsRow[] = [];
 
   for (let index = 0; index < combos.length; index += 1) {
     const combo = combos[index];
@@ -498,5 +497,5 @@ export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBlu
     });
   }
 
-  return sortProminentBluffs(rows, "betFreq", "desc");
+  return sortValueBluffs(rows, "betFreq", "desc");
 }

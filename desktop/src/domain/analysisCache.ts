@@ -2,7 +2,7 @@
  * Client-side analysis page cache + serialized ValueWorker queue.
  *
  * Explorer runs one ValueWorker: a new equity/values/runouts submit cancels the
- * in-flight walk. Study used to fire overlapping polls (matrix overlay, Bluffs,
+ * in-flight walk. Study used to fire overlapping polls (matrix overlay, Value / Bluffs,
  * Hands, manual Calculate) which cancelled each other forever. This module:
  *   1. Remembers ready pages by solution/node/revision/kind so navigation is free.
  *   2. Runs worker-bound kinds one at a time (user jobs before prefetch).
