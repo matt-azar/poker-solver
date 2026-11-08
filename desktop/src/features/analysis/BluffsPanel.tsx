@@ -98,6 +98,8 @@ export function BluffsPanel() {
       !currentNode?.node_id ||
       nodeValues.node_id === currentNode.node_id);
 
+  // Load /values only after node equity is ready — explorer has one analysis
+  // worker; concurrent equity+values polls can cancel each other forever.
   useEffect(() => {
     if (!solutionId || !currentNode) {
       return;
@@ -109,6 +111,9 @@ export function BluffsPanel() {
     ) {
       return;
     }
+    if (!equityReady) {
+      return;
+    }
     if (valuesReady || valuesPending) {
       return;
     }
@@ -116,6 +121,7 @@ export function BluffsPanel() {
   }, [
     solutionId,
     currentNode,
+    equityReady,
     valuesReady,
     valuesPending,
     calculateEv,
