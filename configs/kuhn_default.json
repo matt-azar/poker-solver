@@ -2,6 +2,6 @@
   "game": "kuhn",
   "algorithm": "vanilla_cfr",
   "iterations": 200000,
-  "nash_gap_threshold": null,
+  "accuracy_threshold": null,
   "notes": "Chance is fully enumerated. Runs are deterministic for a given algorithm, iteration count, and traversal order. Seed is unused. Use algorithm cfr_plus for regret flooring, alternating updates, and iteration-weighted averaging."
 }

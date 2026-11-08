@@ -694,6 +694,16 @@ std::string build_status(const StatusDraft& draft)
     append_optional(out, draft.has_br, draft.p2_best_response);
     out += ",\"nash_gap\":";
     append_optional(out, draft.has_gap, draft.nash_gap);
+    // Pio Accuracy = NashConv / 2. Job accuracy targets are pot fractions of this.
+    out += ",\"accuracy_chips\":";
+    if (draft.has_gap)
+    {
+        out += format_number(0.5 * draft.nash_gap);
+    }
+    else
+    {
+        out += "null";
+    }
     out += ",\"algorithm\":";
     append_escaped(out, poker::solver::algorithm_name(job.algorithm));
     out += ",\"board\":[";
@@ -718,6 +728,8 @@ std::string build_status(const StatusDraft& draft)
         out += format_number(sample_values[i]);
         out += ",\"nash_gap\":";
         out += format_number(sample_gaps[i]);
+        out += ",\"accuracy_chips\":";
+        out += format_number(0.5 * sample_gaps[i]);
         out += '}';
     }
     out += "],\"solution_id\":";

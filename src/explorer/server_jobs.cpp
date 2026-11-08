@@ -225,9 +225,10 @@ void solve_job(std::uint64_t job_id, Job job)
             progress.running = true;
             progress.time_limit_reached = time_limit_reached;
             g_app.session.set_progress(job_id, build_status(progress));
+            // job.accuracy is pot fraction of Pio Accuracy (NashConv/2).
             if (should_eval
                 && job.accuracy >= 0.0
-                && gap <= job.accuracy * poker::tenths_to_chips(job.pot))
+                && 0.5 * gap <= job.accuracy * poker::tenths_to_chips(job.pot))
             {
                 break;
             }
@@ -658,9 +659,10 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
             progress.root_id = held->root_id;
             progress.time_limit_reached = time_limit_reached;
             g_app.session.set_progress(job_id, build_status(progress));
+            // job.accuracy is pot fraction of Pio Accuracy (NashConv/2).
             if (should_eval
                 && held->job.accuracy >= 0.0
-                && gap <= held->job.accuracy * poker::tenths_to_chips(held->job.pot))
+                && 0.5 * gap <= held->job.accuracy * poker::tenths_to_chips(held->job.pot))
             {
                 break;
             }
@@ -932,9 +934,10 @@ void resolve_locked_job(
             progress.baseline_solution_id = held->baseline_solution_id;
             progress.time_limit_reached = time_limit_reached;
             g_app.session.set_progress(job_id, build_status(progress));
+            // job.accuracy is pot fraction of Pio Accuracy (NashConv/2).
             if (should_eval
                 && held->job.accuracy >= 0.0
-                && gap <= held->job.accuracy * poker::tenths_to_chips(held->job.pot))
+                && 0.5 * gap <= held->job.accuracy * poker::tenths_to_chips(held->job.pot))
             {
                 break;
             }

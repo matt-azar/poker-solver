@@ -16,7 +16,7 @@ The production solvers find an equilibrium of a finite bet-size tree: a river, t
 
 **Subgame solving.** Libratus-style resolving re-solves a public state with a gadget for the opponent's range. The river/street solvers take a pot and two ranges and solve that subtree; the caller supplies the ranges.
 
-**Exploitability.** The Nash gap everywhere in this repository is NashConv, `(u0(BR0)-u0(σ̄)) + (u1(BR1)-u1(σ̄))`, from an exact best response on the game that was solved. Under zero-sum chips that equals `u0(BR0) + u1(BR1)`.
+**Exploitability.** The Nash gap diagnostic is NashConv, `(u0(BR0)-u0(σ̄)) + (u1(BR1)-u1(σ̄))`, from an exact best response on the game that was solved. Under zero-sum chips that equals `u0(BR0) + u1(BR1)`. Pio Accuracy / stop criterion is half of that sum.
 
 **Storage and threads.** The street solver charges bytes it requests from its allocator against `memory_mib`. `allocated_bytes` is that live total. `estimated_peak_bytes` is a separate plan. `reserved_bytes` is unused reservation credit. Persistent StreetBatch tables use 32-bit `TableScalar` storage; regret plus strategy-sum is `regret_strategy_sum_bytes`, and the shared frozen/average cache is `sigma_workspace_bytes` (together 12 bytes per hand-action entry). Process RSS is reported separately when the OS provides it. The frozen pass can split the first future public card across 1 to 64 threads; one thread is the default. Extra worker scratch and the card-result buffer are charged to the budget. Native thread stacks sit outside the budget. Measured speedup: [BENCHMARKS.md](../engineering/BENCHMARKS.md). Evaluation stays on the caller.
 

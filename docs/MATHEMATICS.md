@@ -102,7 +102,7 @@ With \(\bar\sigma_{-i}\) frozen, player \(i\)'s best response maximizes that pla
 + \bigl(u_1(\bar\sigma_0,\mathrm{BR}_1)-u_1(\bar\sigma)\bigr).
 \]
 
-Under zero-sum chip EV, \(u_0+u_1=0\), so this equals \(u_0(\mathrm{BR}_0)+u_1(\mathrm{BR}_1)\). With rake, ICM, or incentives the absolute-sum form is wrong; production evaluation uses `EvaluationResult` (`include/solver/evaluation.hpp`). It is zero at Nash when neither seat has a profitable deviation. Pio reports the average of the two unilateral gains; convert before comparing. Accuracy stopping uses NashConv / pot for ordinary chip targets; do not treat every modeled-utility target as a chip-pot percentage when ICM or incentives are active.
+Under zero-sum chip EV, \(u_0+u_1=0\), so this equals \(u_0(\mathrm{BR}_0)+u_1(\mathrm{BR}_1)\). With rake, ICM, or incentives the absolute-sum form is wrong; production evaluation uses `EvaluationResult` (`include/solver/evaluation.hpp`). It is zero at Nash when neither seat has a profitable deviation. **Accuracy** (Pio exploitability) is the average of the two unilateral gains, \(\mathrm{NashConv}/2\). Accuracy stopping uses Accuracy / pot by default (optional absolute chips); do not treat every modeled-utility target as a chip-pot percentage when ICM or incentives are active.
 
 One checked river toy: pot 100, one all-in, aces or fives against kings. Equilibrium value for OOP is +25 (aces always bet, fives bet 1/2, kings call 1/2). CFR+ at 4,000 iterations reached 24.9999102275; Nash gap fell from 2.45089917903 at 40 iterations to 0.196997733488.
 

@@ -186,7 +186,7 @@ export class FakeHelpChatClient implements HelpChatClient {
       return {
         provider: "fake",
         message:
-          "Action EV defaults to local decision EV (Fold = 0). Chip EV is root-centered. Accuracy/Nash gap is NashConv (sum of BR gains), reported as NashConv/pot. Equity is check-down pot fraction — not chip EV.",
+          "Action EV defaults to local decision EV (Fold = 0). Chip EV is root-centered. Accuracy is Pio exploitability (average of BR gains = NashConv/2), reported as Accuracy/pot by default. Equity is check-down pot fraction — not chip EV.",
       };
     }
 

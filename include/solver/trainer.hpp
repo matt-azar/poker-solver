@@ -442,24 +442,24 @@ public:
         const auto start = std::chrono::steady_clock::now();
         int completed = 0;
         SolveStats stats;
-        std::vector<double> gap_history;
-        std::vector<int> gap_iterations;
+        std::vector<double> accuracy_history;
+        std::vector<int> accuracy_iterations;
         bool fresh_evaluation = false;
         for (int step = 0; step < config.max_iterations; ++step)
         {
             run_iterations(1);
             ++completed;
             fresh_evaluation = false;
-            const bool check_gap = config.nash_gap_threshold >= 0.0
+            const bool check_accuracy = config.accuracy_threshold >= 0.0
                 && config.eval_every > 0
                 && completed % config.eval_every == 0;
-            if (check_gap)
+            if (check_accuracy)
             {
                 stats = evaluate();
-                gap_history.push_back(stats.nash_gap);
-                gap_iterations.push_back(completed);
+                accuracy_history.push_back(stats.accuracy);
+                accuracy_iterations.push_back(completed);
                 fresh_evaluation = true;
-                if (stats.nash_gap <= config.nash_gap_threshold)
+                if (stats.accuracy <= config.accuracy_threshold)
                 {
                     break;
                 }
@@ -481,17 +481,17 @@ public:
             const bool hit_time = stats.time_limit_reached;
             stats = evaluate();
             stats.time_limit_reached = hit_time;
-            if (config.nash_gap_threshold >= 0.0)
+            if (config.accuracy_threshold >= 0.0)
             {
-                gap_history.push_back(stats.nash_gap);
-                gap_iterations.push_back(completed);
+                accuracy_history.push_back(stats.accuracy);
+                accuracy_iterations.push_back(completed);
             }
         }
         stats.iterations = completed;
         stats.runtime_seconds = std::chrono::duration<double>(end - start).count();
         stats.memory_bytes_estimate = memory_bytes_estimate();
-        stats.nash_gap_history = std::move(gap_history);
-        stats.nash_gap_iterations = std::move(gap_iterations);
+        stats.accuracy_history = std::move(accuracy_history);
+        stats.accuracy_iterations = std::move(accuracy_iterations);
         locks_ = previous_locks;
         return stats;
     }

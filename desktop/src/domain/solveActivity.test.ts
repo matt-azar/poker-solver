@@ -13,12 +13,13 @@ describe("solveActivity", () => {
     expect(phaseLabel("complete")).toBe("Complete");
   });
 
-  it("builds a solving activity line with iters and Nash gap", () => {
+  it("builds a solving activity line with iters and Pio Accuracy", () => {
     const message = engineActivityMessage(
       "solving",
       {
         iterations: 40,
         iterations_requested: 200,
+        // NashConv 1.5 → Pio Accuracy 0.75 chips = 0.75% pot
         nash_gap: 1.5,
         pot: 100,
         runtime_seconds: 4,
@@ -27,7 +28,7 @@ describe("solveActivity", () => {
     );
     expect(message).toContain("Solving");
     expect(message).toContain("40 / 200 iters");
-    expect(message).toContain("1.50% pot");
+    expect(message).toContain("0.75% pot");
     expect(message).toContain("10.0 it/s");
   });
 
@@ -36,6 +37,7 @@ describe("solveActivity", () => {
       iterations: 12,
       iterations_requested: 100,
       player0_expected_utility: 3.25,
+      // NashConv 2 → Accuracy 1 chip = 1% pot
       nash_gap: 2,
       pot: 100,
       runtime_seconds: 2,
@@ -44,7 +46,7 @@ describe("solveActivity", () => {
     expect(metrics.iterations).toBe("12");
     expect(metrics.target).toBe("100");
     expect(metrics.ev).toBe("3.250");
-    expect(metrics.nash).toContain("2.00% pot");
+    expect(metrics.nash).toContain("1.00% pot");
     expect(metrics.rate).toBe("6.0/s");
     expect(metrics.memory).toBe("2.0 MiB");
     expect(metrics.eta).toBe("—");

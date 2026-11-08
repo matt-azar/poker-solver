@@ -6,9 +6,9 @@ Cases run one at a time. The runner does not interpret a shell command string.
 
 NashConv is the sum of unilateral BR gains (under zero-sum chips equal to
 player0_best_response_utility + player1_best_response_utility).
-The quality target is NashConv/pot at most 0.001. Prefer the solver's printed
-nash_gap_fraction_of_pot when present; otherwise divide printed nash_gap by
-printed pot (chip units).
+Pio Accuracy is NashConv/2. The quality target is Accuracy/pot at most 0.001.
+Prefer the solver's printed accuracy_fraction_of_pot when present; otherwise
+derive from printed accuracy or half of nash_gap over pot (chip units).
 """
 
 from __future__ import annotations
@@ -64,6 +64,8 @@ METRIC_FIELDS = (
     "player0_best_response_utility",
     "player1_best_response_utility",
     "nash_gap",
+    "accuracy",
+    "accuracy_fraction_of_pot",
     "nash_gap_fraction_of_pot",
 )
 
@@ -86,6 +88,8 @@ STREET_ONLY_FIELDS = (
     "estimated_peak_bytes",
     "regret_strategy_sum_bytes",
     "process_peak_working_set_bytes",
+    "accuracy",
+    "accuracy_fraction_of_pot",
     "nash_gap_fraction_of_pot",
 )
 
@@ -338,13 +342,14 @@ def as_float(value: object) -> float | None:
 
 
 def quality_from_metrics(metrics: dict) -> dict:
-    """Derive NashConv/pot for the quality gate.
+    """Derive Pio Accuracy/pot for the quality gate.
 
-    Prefer the solver's printed nash_gap_fraction_of_pot (chip-normalized).
-    Otherwise divide nash_gap by pot. Pot must be in chips; tenths would
-    understate the fraction by 10x.
+    Prefer the solver's printed accuracy_fraction_of_pot (chip-normalized).
+    Fall back to accuracy/pot, then half of nash_gap/pot for older logs.
+    Pot must be in chips; tenths would understate the fraction by 10x.
     """
     nash_gap = as_float(metrics.get("nash_gap"))
+    accuracy = as_float(metrics.get("accuracy"))
     pot = as_float(metrics.get("pot"))
     player0 = as_float(metrics.get("player0_best_response_utility"))
     player1 = as_float(metrics.get("player1_best_response_utility"))
@@ -352,31 +357,32 @@ def quality_from_metrics(metrics: dict) -> dict:
     if player0 is not None and player1 is not None:
         summed = player0 + player1
     # Prefer printed nash_gap for the reported NashConv; BR0+BR1 equals gains
-    # only under zero-sum chips.
+    # only under zero-sum chips. Accuracy is NashConv/2.
     nashconv = nash_gap if nash_gap is not None else summed
-    printed = as_float(metrics.get("nash_gap_fraction_of_pot"))
+    printed = as_float(metrics.get("accuracy_fraction_of_pot"))
     derived = None
     source = None
     if printed is not None:
         derived = printed
-        source = "printed_nash_gap_fraction_of_pot"
+        source = "printed_accuracy_fraction_of_pot"
+    elif accuracy is not None and pot is not None and pot != 0:
+        derived = accuracy / pot
+        source = "runner_derived_from_accuracy_and_pot"
     elif nash_gap is not None and pot is not None and pot != 0:
-        derived = nash_gap / pot
-        source = "runner_derived_from_nash_gap_and_pot"
+        derived = (0.5 * nash_gap) / pot
+        source = "runner_derived_from_half_nash_gap_and_pot"
     measured = derived is not None
-    if printed is not None:
-        reached = bool(measured and printed <= TARGET)
-    else:
-        reached = bool(
-            measured and nash_gap is not None and pot is not None and nash_gap <= TARGET * pot
-        )
+    reached = bool(measured and derived is not None and derived <= TARGET)
     return {
         "nashconv": nashconv,
+        "accuracy": accuracy if accuracy is not None else (
+            0.5 * nashconv if nashconv is not None else None
+        ),
         "nashconv_from_best_responses": summed,
         "nashconv_printed_nash_gap": nash_gap,
-        "nashconv_over_pot": derived,
+        "nashconv_over_pot": derived,  # Accuracy/pot (legacy key name)
         "nashconv_over_pot_source": source,
-        "printed_nash_gap_fraction_of_pot": printed,
+        "printed_accuracy_fraction_of_pot": printed,
         "quality_target": TARGET,
         "quality_measured": measured,
         "quality_reached": reached,
@@ -629,9 +635,9 @@ def write_summary(path: Path, payload: dict) -> None:
         "",
         "NashConv is `player0_best_response_utility + player1_best_response_utility`, "
         "the sum of the two unilateral deviation gains. "
-        "The target is NashConv/pot at most 0.001. "
-        "The pot fraction in this file is derived by the runner from printed `nash_gap` and `pot` "
-        "when both are present.",
+        "Pio Accuracy is NashConv/2. The target is Accuracy/pot at most 0.001. "
+        "The pot fraction in this file prefers printed `accuracy_fraction_of_pot`, "
+        "then `accuracy`/`pot`, then half of `nash_gap`/`pot`.",
         "",
         f"Source commit: `{payload['source'].get('commit')}` "
         f"({payload['source'].get('branch')})",
@@ -673,7 +679,7 @@ def write_summary(path: Path, payload: dict) -> None:
                 f"- Engine memory budget MiB: {format_number(case['memory_mib_in_command'])}",
                 f"- Player 0 EV: {format_number(case['quality']['player0_expected_utility'])}",
                 f"- NashConv: {format_number(case['quality']['nashconv'])}",
-                f"- NashConv/pot (runner-derived): {format_number(case['quality']['nashconv_over_pot'])}",
+                f"- Accuracy/pot (runner-derived): {format_number(case['quality']['nashconv_over_pot'])}",
                 f"- Quality measured: {case['quality']['quality_measured']}",
                 f"- Quality reached: {case['quality']['quality_reached']}",
                 f"- Deals: {format_number(metrics.get('deals'))}",
@@ -835,10 +841,10 @@ def main(argv: list[str]) -> int:
         "nashconv_definition": (
             "player0_best_response_utility + player1_best_response_utility"
         ),
-        "quality_target_nashconv_over_pot": TARGET,
+        "quality_target_nashconv_over_pot": TARGET,  # Accuracy/pot; legacy key name
         "nashconv_over_pot_derivation": (
-            "The runner computes nash_gap / pot when both were printed. "
-            "That quotient is not a solver field."
+            "Prefer printed accuracy_fraction_of_pot; else accuracy/pot; "
+            "else (nash_gap/2)/pot. That quotient is runner-derived."
         ),
         "timing_label": args.timing_label,
         "dry_run": bool(args.dry_run),

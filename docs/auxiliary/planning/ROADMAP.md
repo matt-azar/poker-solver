@@ -95,7 +95,7 @@ Add a visual tree preview with add/remove/force line operations, explicit canoni
 
 Introduce separate operations: cancel-and-discard, stop-and-keep, pause at a safe boundary, resume, and finish at a target. Existing cancellation must retain its tested semantics. A stop-and-keep publishes a coherent evaluated average at a complete algorithm boundary. Cancellation during construction publishes nothing.
 
-Provide iteration, elapsed-time and measured-gap targets, configurable evaluation cadence, convergence history, and honest progress information. CLI `--time-limit` and `SolveConfig::max_wall_seconds` stop at an iteration boundary and set `SolveStats::time_limit_reached`. `SolveConfig::eval_every` (default 1; CLI `--eval-every`, rejecting non-positive values) controls how often a thresholded solve measures the Nash gap. When a Nash-gap threshold is set, each accuracy evaluation appends to `SolveStats::nash_gap_history` (and `nash_gap_iterations`) at that cadence. Gap targets can only be declared achieved at an actual evaluated checkpoint. Support continuing the exact algorithm state without resetting regrets, average weights, or iteration numbering.
+Provide iteration, elapsed-time and measured-gap targets, configurable evaluation cadence, convergence history, and honest progress information. CLI `--time-limit` and `SolveConfig::max_wall_seconds` stop at an iteration boundary and set `SolveStats::time_limit_reached`. `SolveConfig::eval_every` (default 1; CLI `--eval-every`, rejecting non-positive values) controls how often a thresholded solve measures Pio Accuracy (NashConv/2). When an Accuracy threshold is set, each evaluation appends to `SolveStats::accuracy_history` (and `accuracy_iterations`) at that cadence. Targets can only be declared achieved at an actual evaluated checkpoint. Support continuing the exact algorithm state without resetting regrets, average weights, or iteration numbering.
 
 Design immutable solution revisions and an exclusive training owner. Browsing and training use a snapshot when the budget has room for one. Otherwise suspend browsing and show that state.
 
@@ -211,13 +211,13 @@ Preserve these mathematical invariants: card removal, fixed pair-conditional cha
 
 Define a matching-case manifest: board/ranges with weights, pot/contributions, stacks, every betting line, rake/ICM, payoff convention, algorithm settings, thread count and precision. Verify the games match before comparing outputs.
 
-Pio reports the average of the two unilateral best-response improvements; our existing NashConv is their sum. Convert explicitly before comparing accuracy [S15]. For ordinary chip EV, reconcile root-centered and reference display conventions with known fold/call examples.
+Pio Accuracy is the average of the two unilateral best-response improvements; NashConv is their sum. Stopping and study targets use Pio Accuracy (pot fraction by default) [S15]. For ordinary chip EV, reconcile root-centered and reference display conventions with known fold/call examples.
 
 Compare best-response quality, root EV, representative combo/action EV and aggregate strategies. Different equilibrium mixtures can share the same quality. Use independent tiny-game oracles and, where supported, cross-evaluate exported profiles.
 
 Measure time to the same normalized deviation target on matched trees and hardware. Separate cold/warm starts, cache init, training, evaluation and end-to-end wall. Record compiler, power state, thermal conditions, memory, repetition order and variance. Benchmark Pio's pinned algorithm on the same machine.
 
-Choose explicit release service-level targets after measuring a representative corpus: solve time at stated quality, largest supported tree per RAM tier, first-node latency, cached navigation latency, save/load time and cancellation response. An initial correctness target for ordinary postflop benchmarks is measured NashConv/pot at or below 0.001, with stricter targets where the tree allows.
+Choose explicit release service-level targets after measuring a representative corpus: solve time at stated quality, largest supported tree per RAM tier, first-node latency, cached navigation latency, save/load time and cancellation response. An initial correctness target for ordinary postflop benchmarks is measured Pio Accuracy/pot at or below 0.001, with stricter targets where the tree allows.
 
 ## 7. Dependencies and execution policy for Cursor
 

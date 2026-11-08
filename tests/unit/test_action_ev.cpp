@@ -886,7 +886,7 @@ void test_profile_revision_drops_stale_values()
 
     SolveConfig solved;
     solved.max_iterations = 4;
-    solved.nash_gap_threshold = -1.0;
+    solved.accuracy_threshold = -1.0;
     StreetBatchSolver frozen_solve(config);
     frozen_solve.solve_frozen(solved, Algorithm::CfrPlus);
     (void)frozen_solve.inspect_node(frozen_solve.root_node_id());

@@ -1990,8 +1990,8 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
     note_profile_mutation();
     int completed = 0;
     SolveStats stats;
-    stats.nash_gap_history.clear();
-    stats.nash_gap_iterations.clear();
+    stats.accuracy_history.clear();
+    stats.accuracy_iterations.clear();
     bool fresh = false;
     try
     {
@@ -2001,16 +2001,16 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
             note_profile_mutation();
             ++completed;
             fresh = false;
-            const bool check_gap = config.nash_gap_threshold >= 0.0
+            const bool check_accuracy = config.accuracy_threshold >= 0.0
                 && config.eval_every > 0
                 && completed % config.eval_every == 0;
-            if (check_gap)
+            if (check_accuracy)
             {
                 apply_evaluation(stats, evaluate());
-                stats.nash_gap_history.push_back(stats.nash_gap);
-                stats.nash_gap_iterations.push_back(completed);
+                stats.accuracy_history.push_back(stats.accuracy);
+                stats.accuracy_iterations.push_back(completed);
                 fresh = true;
-                if (stats.nash_gap <= config.nash_gap_threshold)
+                if (stats.accuracy <= config.accuracy_threshold)
                 {
                     break;
                 }
@@ -2030,10 +2030,10 @@ SolveStats RiverBatchSolver::solve(const SolveConfig& config, Algorithm algorith
         if (!fresh)
         {
             apply_evaluation(stats, evaluate());
-            if (config.nash_gap_threshold >= 0.0)
+            if (config.accuracy_threshold >= 0.0)
             {
-                stats.nash_gap_history.push_back(stats.nash_gap);
-                stats.nash_gap_iterations.push_back(completed);
+                stats.accuracy_history.push_back(stats.accuracy);
+                stats.accuracy_iterations.push_back(completed);
             }
         }
         stats.iterations = completed;
