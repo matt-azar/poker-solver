@@ -404,6 +404,11 @@ struct StreetBatchSolver::Engine
 
     std::pmr::vector<Slot> slots;
 
+    // Side indexes into `slots` by acting player. Built in add_slot. Floor /
+    // discount / PCFR commit scan these instead of skipping interleaved
+    // opponent rows; freeze and fused floor+freeze still walk all slots.
+    std::pmr::vector<std::uint32_t> player_slots_[2];
+
     std::pmr::vector<int> decision_ids;
 
     std::pmr::vector<TableScalar> regret;
@@ -591,6 +596,10 @@ struct StreetBatchSolver::Engine
     SlotPass slot_pass_ = SlotPass::Freeze;
 
     int slot_floor_player_ = -1;
+
+    // When true, chunk_begin_/chunk_end_ index player_slots_[slot_floor_player_]
+    // rather than the dense slots vector (player-only slot passes).
+    bool slot_pass_player_list_ = false;
 
     double slot_positive_discount_ = 1.0;
 
@@ -1073,6 +1082,9 @@ struct StreetBatchSolver::Engine
 
 
     void partition_slots();
+
+
+    void partition_player_slots(int player);
 
 
     void apply_freeze_range(std::size_t begin, std::size_t end);

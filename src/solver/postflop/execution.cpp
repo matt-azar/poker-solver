@@ -327,6 +327,24 @@ void StreetBatchSolver::Engine::partition_slots()
 
 
 
+void StreetBatchSolver::Engine::partition_player_slots(int player)
+{
+    const int workers = config.threads;
+    const int total = static_cast<int>(player_slots_[player].size());
+    const int base = total / workers;
+    const int remainder = total % workers;
+    int cursor = 0;
+    for (int worker = 0; worker < workers; ++worker)
+    {
+        const int count = base + (worker < remainder ? 1 : 0);
+        chunk_begin_[worker] = cursor;
+        chunk_end_[worker] = cursor + count;
+        cursor += count;
+    }
+}
+
+
+
 void StreetBatchSolver::Engine::apply_freeze_range(std::size_t begin, std::size_t end)
 {
     const bool predictive =
@@ -368,6 +386,23 @@ void StreetBatchSolver::Engine::apply_freeze_range(std::size_t begin, std::size_
 
 void StreetBatchSolver::Engine::apply_floor_range(std::size_t begin, std::size_t end, int player)
 {
+    if (slot_pass_player_list_)
+    {
+        const std::pmr::vector<std::uint32_t>& list = player_slots_[player];
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[list[index]];
+            for (int action = 0; action < slot_action_count(slot); ++action)
+            {
+                TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                if (cumulative < 0.0)
+                {
+                    cumulative = 0.0;
+                }
+            }
+        }
+        return;
+    }
     for (std::size_t index = begin; index < end; ++index)
     {
         const Slot& slot = slots[index];
@@ -446,6 +481,24 @@ void StreetBatchSolver::Engine::apply_floor_and_freeze_range(std::size_t begin, 
 // prediction_ as m for the next match. Opponent prediction rows are untouched.
 void StreetBatchSolver::Engine::apply_pcfr_commit_range(std::size_t begin, std::size_t end, int player)
 {
+    if (slot_pass_player_list_)
+    {
+        const std::pmr::vector<std::uint32_t>& list = player_slots_[player];
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[list[index]];
+            for (int action = 0; action < slot_action_count(slot); ++action)
+            {
+                const std::size_t at = static_cast<std::size_t>(slot.base + action);
+                regret[at] += prediction_[at];
+                if (regret[at] < 0.0)
+                {
+                    regret[at] = 0.0;
+                }
+            }
+        }
+        return;
+    }
     for (std::size_t index = begin; index < end; ++index)
     {
         const Slot& slot = slots[index];
@@ -469,6 +522,19 @@ void StreetBatchSolver::Engine::apply_pcfr_commit_range(std::size_t begin, std::
 
 void StreetBatchSolver::Engine::apply_pcfr_zero_prediction_range(std::size_t begin, std::size_t end, int player)
 {
+    if (slot_pass_player_list_)
+    {
+        const std::pmr::vector<std::uint32_t>& list = player_slots_[player];
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[list[index]];
+            for (int action = 0; action < slot_action_count(slot); ++action)
+            {
+                prediction_[static_cast<std::size_t>(slot.base + action)] = 0.0;
+            }
+        }
+        return;
+    }
     for (std::size_t index = begin; index < end; ++index)
     {
         const Slot& slot = slots[index];
@@ -490,6 +556,21 @@ void StreetBatchSolver::Engine::apply_pcfr_zero_prediction_range(std::size_t beg
 // the post-pass value; do not add the increment again.
 void StreetBatchSolver::Engine::apply_discount_range(std::size_t begin, std::size_t end, int player)
 {
+    if (slot_pass_player_list_)
+    {
+        const std::pmr::vector<std::uint32_t>& list = player_slots_[player];
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            const Slot& slot = slots[list[index]];
+            for (int action = 0; action < slot_action_count(slot); ++action)
+            {
+                TableScalar& cumulative = regret[static_cast<std::size_t>(slot.base + action)];
+                cumulative = static_cast<TableScalar>(dcfr_discount_post_pass(
+                    cumulative, slot_positive_discount_, slot_negative_discount_));
+            }
+        }
+        return;
+    }
     for (std::size_t index = begin; index < end; ++index)
     {
         const Slot& slot = slots[index];
@@ -577,12 +658,27 @@ void StreetBatchSolver::Engine::run_slot_pass(SlotPass pass, int player)
 {
     slot_pass_ = pass;
     slot_floor_player_ = player;
-    if (config.threads <= 1 || worker_count_ == 0 || slots.empty())
+    slot_pass_player_list_ = player >= 0
+        && (pass == SlotPass::Floor
+            || pass == SlotPass::Discount
+            || pass == SlotPass::PcfrCommit
+            || pass == SlotPass::PcfrZeroPrediction);
+    const int total = slot_pass_player_list_
+        ? static_cast<int>(player_slots_[player].size())
+        : static_cast<int>(slots.size());
+    if (config.threads <= 1 || worker_count_ == 0 || total == 0)
     {
-        run_slot_range(0, static_cast<int>(slots.size()));
+        run_slot_range(0, total);
         return;
     }
-    partition_slots();
+    if (slot_pass_player_list_)
+    {
+        partition_player_slots(player);
+    }
+    else
+    {
+        partition_slots();
+    }
     dispatch_workers(PoolJob::Slots);
 }
 
