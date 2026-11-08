@@ -31,6 +31,7 @@ describe("MatrixDisplayControls", () => {
     useMatrixDisplayStore.getState().resetPrefs();
     useStudyStore.setState({
       solutionId: "sol-1",
+      matrixMode: "strategy",
       currentNode: {
         node_id: "n1",
         reach_defined: true,
@@ -112,6 +113,15 @@ describe("MatrixDisplayControls", () => {
     await waitFor(() => {
       expect(calculateEv).toHaveBeenCalled();
     });
+  });
+
+  it("auto-loads EV when matrix mode is EV", async () => {
+    useStudyStore.setState({ matrixMode: "ev" });
+    render(<MatrixDisplayControls />);
+    await waitFor(() => {
+      expect(calculateEv).toHaveBeenCalled();
+    });
+    expect(loadEquity).not.toHaveBeenCalled();
   });
 
   it("does not reload when equity for the live node is already ready", async () => {

@@ -18,6 +18,7 @@ opponentSolutionNode,
   shouldApplyStatus,
   solutionNeedsReload,
   strategyMix,
+  withEvBasis,
 } from "./browse";
 import { createRangeHistory, snapshotWeights, blankGrid } from "./range";
 import { mapActionColors, actionIdentity } from "./actionColors";
@@ -181,6 +182,59 @@ describe("browse strategy grouping", () => {
     const global = groupEv(node, values, aa, "root_centered");
     expect(global?.action[0]).toBeCloseTo(-50, 12);
     expect(global?.mixed).toBeCloseTo(-50, 12);
+  });
+
+  it("applies local_offset at Check/Bet nodes when Fold is not legal", () => {
+    const node = {
+      reach_defined: true,
+      actions: ["Check", "Bet 50"],
+      combos: ["AhAd"],
+      reach: [1],
+      marginal: [1],
+      strategy: [[0.5, 0.5]],
+      node_id: "open",
+    };
+    const values = {
+      node_id: "open",
+      utility_basis: "root_centered",
+      local_offset: 50,
+      actions: ["Check", "Bet 50"],
+      combos: ["AhAd"],
+      ev_defined: [true],
+      value: [0],
+      action_ev: [[-10, 10]],
+      node_ev: 0,
+    };
+    const aa = cellOf(node, "AA");
+    const local = groupEv(node, values, aa, "local");
+    expect(local?.action[0]).toBeCloseTo(40, 12);
+    expect(local?.action[1]).toBeCloseTo(60, 12);
+    expect(local?.mixed).toBeCloseTo(50, 12);
+    const global = groupEv(node, values, aa, "root_centered");
+    expect(global?.action[0]).toBeCloseTo(-10, 12);
+    expect(global?.mixed).toBeCloseTo(0, 12);
+  });
+
+  it("indexes Fold from values.actions even when node action labels omit Fold", () => {
+    const values = {
+      node_id: "facing",
+      utility_basis: "root_centered",
+      local_offset: 50,
+      actions: ["Fold", "Call"],
+      combos: ["AhAd"],
+      ev_defined: [true],
+      value: [-50],
+      action_ev: [[-50, -25]],
+      node_ev: -50,
+    };
+    // Node labels without Fold must not prevent local conversion — action_ev
+    // columns follow values.actions.
+    const localized = withEvBasis(values, "local", ["Call", "Raise 100"]);
+    expect(localized?.utility_basis).toBe("local");
+    expect(localized?.action_ev?.[0]?.[0]).toBeCloseTo(0, 12);
+    expect(localized?.action_ev?.[0]?.[1]).toBeCloseTo(25, 12);
+    expect(localized?.value?.[0]).toBeCloseTo(0, 12);
+    expect(localized?.node_ev).toBeCloseTo(0, 12);
   });
 
   it("flags excluded, partial range weight, and action mixing visually", () => {

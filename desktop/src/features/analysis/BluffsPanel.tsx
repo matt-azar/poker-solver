@@ -20,6 +20,7 @@ import {
 } from "../../domain/prominentBluffs";
 import { fetchPostCallEquityHands } from "../../domain/prominentBluffsPostCall";
 import { engineClient } from "../../engine/client";
+import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 
 const DISPLAY_CAP = 50;
@@ -132,7 +133,8 @@ export function BluffsPanel() {
   const loadEquity = useStudyStore((s) => s.loadEquity);
   const nodeValues = useStudyStore((s) => s.nodeValues);
   const calculateEv = useStudyStore((s) => s.calculateEv);
-  const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
+  // Settings is the authority for local vs global EV display.
+  const evDisplayBasis = useSettingsStore((s) => s.settings.evDisplayBasis);
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const solutionId = useStudyStore((s) => s.solutionId);
   const status = useStudyStore((s) => s.status);

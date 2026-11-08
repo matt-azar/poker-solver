@@ -1,3 +1,4 @@
+import { canonicalizeCombo } from "./range";
 import type {
   ActionValuesPayload,
   EvDisplayBasis,
@@ -8,11 +9,52 @@ import type {
 } from "./types";
 import { RANKS } from "./types";
 
+/** Normalize a 4-char combo so node/values suit-order variants still match. */
+function comboKey(combo: string): string {
+  if (combo.length < 4) {
+    return combo;
+  }
+  try {
+    return canonicalizeCombo(combo.slice(0, 2), combo.slice(2, 4));
+  } catch {
+    return combo;
+  }
+}
+
 export function foldActionIndex(actions: string[] | null | undefined): number {
   if (!actions) {
     return -1;
   }
   return actions.findIndex((label) => label === "Fold");
+}
+
+/**
+ * Baseline to subtract from root-centered chips for local decision EV.
+ * Prefer the Fold column when present (Fold → 0 even with path incentives).
+ * Otherwise use -local_offset so local = root + local_offset per /values docs.
+ * action_ev columns follow values.actions; prefer that list over node labels.
+ */
+function localEvBaseline(
+  values: ActionValuesPayload,
+  hand: number,
+  actionLabels?: string[] | null,
+): number {
+  const actions =
+    values.actions && values.actions.length > 0
+      ? values.actions
+      : actionLabels || [];
+  const foldIdx = foldActionIndex(actions);
+  const offset = Number(values.local_offset ?? 0);
+  const offsetBaseline = Number.isFinite(offset) ? -offset : 0;
+  if (foldIdx < 0) {
+    return offsetBaseline;
+  }
+  const row = values.action_ev?.[hand];
+  if (!row) {
+    return offsetBaseline;
+  }
+  const foldEv = Number(row[foldIdx] ?? NaN);
+  return Number.isFinite(foldEv) ? foldEv : offsetBaseline;
 }
 
 /**
@@ -31,15 +73,13 @@ export function withEvBasis(
   if (values.utility_basis === "local") {
     return values;
   }
-  const actions = actionLabels || values.actions || [];
-  const foldIdx = foldActionIndex(actions);
   const offset = Number(values.local_offset ?? 0);
+  const shift = Number.isFinite(offset) ? offset : 0;
   const actionEv = (values.action_ev || []).map((row, hand) => {
     if (!row || !values.ev_defined?.[hand]) {
       return row;
     }
-    const baseline =
-      foldIdx >= 0 ? Number(row[foldIdx] ?? 0) : -offset;
+    const baseline = localEvBaseline(values, hand, actionLabels);
     return row.map((entry) =>
       entry == null || Number.isNaN(Number(entry))
         ? entry
@@ -50,17 +90,13 @@ export function withEvBasis(
     if (!values.ev_defined?.[hand] || entry == null || Number.isNaN(Number(entry))) {
       return entry;
     }
-    const row = values.action_ev?.[hand];
-    const baseline =
-      foldIdx >= 0 && row
-        ? Number(row[foldIdx] ?? 0)
-        : -offset;
+    const baseline = localEvBaseline(values, hand, actionLabels);
     return Number(entry) - baseline;
   });
   const nodeEv =
     values.node_ev == null || Number.isNaN(Number(values.node_ev))
       ? values.node_ev
-      : Number(values.node_ev) + offset;
+      : Number(values.node_ev) + shift;
   return {
     ...values,
     utility_basis: "local",
@@ -416,8 +452,11 @@ export function groupEv(
   let mixed = 0;
   const action = (node.actions || []).map(() => 0);
   for (const hand of cell.hands || []) {
-    const nodeIndex = (node.combos || []).indexOf(hand.combo);
-    const valueIndex = combos.indexOf(hand.combo);
+    const key = comboKey(hand.combo);
+    const nodeIndex = (node.combos || []).findIndex(
+      (entry) => comboKey(entry) === key,
+    );
+    const valueIndex = combos.findIndex((entry) => comboKey(entry) === key);
     if (nodeIndex < 0 || valueIndex < 0) {
       continue;
     }
