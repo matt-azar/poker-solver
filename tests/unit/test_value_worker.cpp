@@ -106,6 +106,46 @@ void test_exception_then_success()
     CHECK(!worker.live());
 }
 
+void test_idle_cache_keeps_prior_nodes()
+{
+    Session session;
+    const std::uint64_t solution = publish(session, std::make_shared<int>(1));
+    int calls = 0;
+    ValueWorker worker(
+        session,
+        [&](const std::shared_ptr<void>&, const ValueRequest& request, const std::atomic<bool>&) {
+            ++calls;
+            return request.kind + ":" + request.node_id;
+        },
+        [](const std::string& what, const ValueRequest&) { return what; });
+    ValueRequest values_a;
+    values_a.solution_id = solution;
+    values_a.job_id = 1;
+    values_a.node_id = "A";
+    values_a.kind = "actions";
+    CHECK(wait_ready(worker, values_a).body == "actions:A");
+    ValueRequest equity_a = values_a;
+    equity_a.kind = "equity";
+    equity_a.job_id = 2;
+    CHECK(wait_ready(worker, equity_a).body == "equity:A");
+    ValueRequest values_b = values_a;
+    values_b.node_id = "B";
+    values_b.job_id = 3;
+    CHECK(wait_ready(worker, values_b).body == "actions:B");
+    const int after_three = calls;
+    // Returning to A/values and A/equity must hit the LRU without re-evaluate.
+    const ValueReply again_values = worker.submit(values_a);
+    CHECK(again_values.ready);
+    CHECK(again_values.ok);
+    CHECK(again_values.body == "actions:A");
+    const ValueReply again_equity = worker.submit(equity_a);
+    CHECK(again_equity.ready);
+    CHECK(again_equity.ok);
+    CHECK(again_equity.body == "equity:A");
+    CHECK(calls == after_three);
+    worker.shutdown();
+}
+
 void test_newer_node_supersedes_paused_walk()
 {
     Session session;
@@ -342,6 +382,7 @@ void run_value_worker_tests()
 {
     test_idle_shutdown_joins();
     test_exception_then_success();
+    test_idle_cache_keeps_prior_nodes();
     test_newer_node_supersedes_paused_walk();
     test_replacement_destroys_engine_before_the_next_one();
     test_shutdown_during_query_and_pending_work();

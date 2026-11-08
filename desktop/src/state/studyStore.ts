@@ -30,6 +30,12 @@ import {
   type PathStep,
 } from "../domain/actionHistory";
 import {
+  AnalysisPageCache,
+  AnalysisRequestQueue,
+  type AnalysisPriority,
+  type WorkerAnalysisKind,
+} from "../domain/analysisCache";
+import {
   acceptStatusGeneration,
   shouldApply,
   shouldApplyStatus,
@@ -481,6 +487,19 @@ const analysisTokens: Record<AnalysisKind, number> = {
 };
 const analysisPollTimers: Partial<Record<AnalysisKind, ReturnType<typeof setInterval>>> = {};
 const analysisRequestIdentity: Partial<Record<AnalysisKind, AnalysisIdentity>> = {};
+/** Survives navigation so Study does not recompute EV/equity on every click. */
+const analysisPageCache = new AnalysisPageCache(64);
+/** One ValueWorker-bound job at a time (equity/values/runouts cancel each other). */
+const analysisRequestQueue = new AnalysisRequestQueue();
+/** Bumped on navigate so in-flight prefetch polls abandon promptly. */
+let analysisPrefetchEpoch = 0;
+
+/** Test helper: drop analysis cache/queue without resetting the whole store. */
+export function resetAnalysisCacheForTests() {
+  analysisPageCache.clear();
+  analysisRequestQueue.cancelQueued();
+  analysisPrefetchEpoch += 1;
+}
 
 type PublishedStudySnapshot = {
   solutionId: string | null;
@@ -678,6 +697,154 @@ function analysisRevision(
     return status.status_generation;
   }
   return 0;
+}
+
+function cachedAnalysisForNode(
+  solutionId: string,
+  nodeId: string,
+  revision: number,
+) {
+  return {
+    nodeValues:
+      analysisPageCache.get<ActionValuesPayload>({
+        solutionId,
+        nodeId,
+        revision,
+        kind: "values",
+      }) ?? null,
+    equity:
+      analysisPageCache.get({
+        solutionId,
+        nodeId,
+        revision,
+        kind: "equity",
+      }) ?? null,
+    runouts:
+      analysisPageCache.get({
+        solutionId,
+        nodeId,
+        revision,
+        kind: "runouts",
+      }) ?? null,
+    categories:
+      analysisPageCache.get({
+        solutionId,
+        nodeId,
+        revision,
+        kind: "categories",
+      }) ?? null,
+  };
+}
+
+function dropAnalysisCaches() {
+  analysisPageCache.clear();
+  analysisRequestQueue.cancelQueued();
+}
+
+function enqueueWorkerAnalysis(args: {
+  kind: WorkerAnalysisKind;
+  solutionId: string;
+  nodeId: string;
+  revision: number;
+  priority: AnalysisPriority;
+  run: () => Promise<void>;
+}): void {
+  analysisRequestQueue.enqueue({
+    kind: args.kind,
+    solutionId: args.solutionId,
+    nodeId: args.nodeId,
+    revision: args.revision,
+    priority: args.priority,
+    run: args.run,
+  });
+}
+
+/** Resolve a child node id from a decision node's `children` entry. */
+function childNodeIdAt(children: unknown[] | undefined, index: number): string | null {
+  if (!children) {
+    return null;
+  }
+  const child = children[index];
+  if (!child) {
+    return null;
+  }
+  if (typeof child === "string") {
+    return child;
+  }
+  if (
+    typeof child === "object" &&
+    child !== null &&
+    "node_id" in child &&
+    typeof (child as { node_id?: unknown }).node_id === "string" &&
+    (child as { node_id: string }).node_id
+  ) {
+    return (child as { node_id: string }).node_id;
+  }
+  return null;
+}
+
+/** Warm child decision /values in the background after the live node is ready. */
+function prefetchChildValues(
+  solutionId: string,
+  node: NodePayload,
+  revision: number,
+): void {
+  const children = node.children;
+  if (!children?.length) {
+    return;
+  }
+  for (let index = 0; index < children.length; index += 1) {
+    const childId = childNodeIdAt(children, index);
+    if (!childId) {
+      continue;
+    }
+    if (
+      analysisPageCache.get({
+        solutionId,
+        nodeId: childId,
+        revision,
+        kind: "values",
+      })
+    ) {
+      continue;
+    }
+    const epoch = analysisPrefetchEpoch;
+    enqueueWorkerAnalysis({
+      kind: "values",
+      solutionId,
+      nodeId: childId,
+      revision,
+      priority: "prefetch",
+      run: async () => {
+        // Prefetch only fills the cache; navigateTo restores it onto the live node.
+        if (epoch !== analysisPrefetchEpoch) {
+          return;
+        }
+        try {
+          let body: ActionValuesPayload | null = null;
+          for (let attempt = 0; attempt < 120 && !body; attempt += 1) {
+            if (epoch !== analysisPrefetchEpoch) {
+              return;
+            }
+            const page = await engineClient.getValues(solutionId, childId);
+            if (page && !page.pending) {
+              body = page;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+          if (body && epoch === analysisPrefetchEpoch) {
+            analysisPageCache.set(
+              { solutionId, nodeId: childId, revision, kind: "values" },
+              body,
+            );
+          }
+        } catch {
+          // Prefetch failures are silent — user/auto paths paint errors.
+        }
+      },
+    });
+  }
 }
 
 function syncThemeProxy(set: (partial: Partial<StudyState>) => void) {
@@ -1531,6 +1698,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         solutionId,
         body,
       )) as StrategyEditsPayload;
+      // Profile changed under the same solution id — drop cached EV/equity pages.
+      analysisPageCache.clearSolution(solutionId);
+      analysisRequestQueue.cancelQueued(
+        (job) => job.solutionId === solutionId && job.kind === "values",
+      );
       const live = get();
       const completion = strategyMutationCompletion({
         requestSolutionId: solutionId,
@@ -1876,6 +2048,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const prior = snapshotPublishedStudy(get());
     invalidateLifecycleRequests();
+    dropAnalysisCaches();
     pendingReloadNodeId = null; // new solve always lands at root
     set({
       phase: "solving",
@@ -1924,6 +2097,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const prior = snapshotPublishedStudy(get());
     const resumeNodeId = get().currentNode?.node_id ?? null;
     invalidateLifecycleRequests();
+    dropAnalysisCaches();
     pendingReloadNodeId = resumeNodeId;
     set({
       phase: "solving",
@@ -1964,6 +2138,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const prior = snapshotPublishedStudy(get());
     const resumeNodeId = get().currentNode?.node_id ?? null;
     invalidateLifecycleRequests();
+    dropAnalysisCaches();
     pendingReloadNodeId = resumeNodeId;
     set({
       phase: "solving",
@@ -2035,8 +2210,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const historyMode = opts?.history ?? "push";
     const token = bumpNodeToken();
     const previous = get().currentNode;
-    // Drop every analysis result and in-flight poll so panels never show another node.
+    // Cancel in-flight polls and drop queued auto/prefetch work for other nodes.
+    // Keep the page cache so returning to a node restores EV/equity instantly.
     invalidateAllAnalysisRequests();
+    analysisPrefetchEpoch += 1;
+    analysisRequestQueue.cancelQueued((job) => job.priority !== "user");
     const priorScope = get().strategyEditScope;
     set({
       solutionId,
@@ -2053,7 +2231,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (typeof node.status_generation === "number" && node.status_generation < seenGeneration) {
         return;
       }
-const rootId = get().status?.root_node_id || rootNodeId(undefined);
+      const rootId = get().status?.root_node_id || rootNodeId(undefined);
       // Size tags use the source node's pot/basis inside advancePathTrail /
       // edgeStepFromNode; pass previous pot only as a fallback when missing.
       const potFallback = Number(
@@ -2103,6 +2281,8 @@ const rootId = get().status?.root_node_id || rootNodeId(undefined);
       // Only reset when identity changes — never silently rebind hand indices.
       const strategyScopeChanged =
         priorScope != null && !strategyEditScopesEqual(priorScope, nextScope);
+      const revision = analysisRevision(node, get().status);
+      const cached = cachedAnalysisForNode(nextSolutionId, node.node_id, revision);
       set({
         currentNode: node,
         solutionId: nextSolutionId,
@@ -2110,11 +2290,12 @@ const rootId = get().status?.root_node_id || rootNodeId(undefined);
         actionFilter: null,
         lockDraft: defaultLockDraft(node.actions?.length ?? 0),
         lockDraftBaseline: defaultLockDraft(node.actions?.length ?? 0),
-pathTrail,
+        pathTrail,
         navHistory,
         navHistoryIndex,
         canNavBack: navHistoryIndex > 0,
         canNavForward: navHistoryIndex >= 0 && navHistoryIndex < navHistory.length - 1,
+        ...cached,
         ...(strategyScopeChanged
           ? {
               strategyEditScope: null,
@@ -2275,62 +2456,119 @@ pathTrail,
     if (!solutionId || !node) {
       return;
     }
+    if (
+      node.kind === "chance" ||
+      node.kind === "terminal" ||
+      (node.kind != null && node.kind !== "decision" && !(node.actions?.length ?? 0))
+    ) {
+      return;
+    }
     const revision = analysisRevision(node, get().status);
-    const { token, identity } = beginAnalysisRequest(
-      "values",
+    const nodeId = node.node_id;
+    const cached = analysisPageCache.get<ActionValuesPayload>({
       solutionId,
-      node.node_id,
+      nodeId,
       revision,
-    );
+      kind: "values",
+    });
+    if (cached) {
+      set({
+        nodeValues: cached,
+        phase: phaseFromStatus(get().status, "complete"),
+        message: "Action EVs ready.",
+        matrixMode: get().matrixMode === "strategy" ? "strategy-ev" : get().matrixMode,
+      });
+      return;
+    }
+    if (
+      get().nodeValues?.pending &&
+      get().nodeValues?.node_id === nodeId &&
+      get().nodeValues?.solution_id === solutionId
+    ) {
+      return;
+    }
     set({
       phase: "analysis_pending",
       message: "Calculating action EVs…",
-      nodeValues: { pending: true, node_id: node.node_id, solution_id: solutionId },
+      nodeValues: { pending: true, node_id: nodeId, solution_id: solutionId },
     });
-    await pollAnalysis(
-      "values",
-      token,
-      () => engineClient.getValues(solutionId, node.node_id),
-      (values) => {
-        if (!analysisRequestIsCurrent("values", token)) {
-          return;
-        }
-        const live = get().currentNode;
+    enqueueWorkerAnalysis({
+      kind: "values",
+      solutionId,
+      nodeId,
+      revision,
+      priority: "auto",
+      run: async () => {
+        const liveNode = get().currentNode;
         const liveSolution = get().solutionId;
         if (
-          !live ||
-          live.node_id !== identity.nodeId ||
-          liveSolution !== identity.solutionId
+          !liveNode ||
+          liveNode.node_id !== nodeId ||
+          liveSolution !== solutionId
         ) {
           return;
         }
-        if (values.node_id && values.node_id !== identity.nodeId) {
-          return;
-        }
-        set({
-          nodeValues: values,
-          phase: phaseFromStatus(get().status, "complete"),
-          message: "Action EVs ready.",
-          matrixMode: get().matrixMode === "strategy" ? "strategy-ev" : get().matrixMode,
-        });
-      },
-      (message) => {
-        if (!analysisRequestIsCurrent("values", token)) {
-          return;
-        }
-        // Keep a settled failure payload so overlay auto-load does not retry-loop.
-        set({
-          phase: phaseFromStatus(get().status, "complete"),
-          message,
-          nodeValues: {
-            pending: false,
-            error: message,
-            node_id: identity.nodeId,
-            solution_id: identity.solutionId,
+        const { token, identity } = beginAnalysisRequest(
+          "values",
+          solutionId,
+          nodeId,
+          revision,
+        );
+        await pollAnalysis(
+          "values",
+          token,
+          () => engineClient.getValues(solutionId, nodeId),
+          (values) => {
+            if (!analysisRequestIsCurrent("values", token)) {
+              return;
+            }
+            const live = get().currentNode;
+            if (
+              !live ||
+              live.node_id !== identity.nodeId ||
+              get().solutionId !== identity.solutionId
+            ) {
+              analysisPageCache.set(
+                { solutionId, nodeId, revision, kind: "values" },
+                values,
+              );
+              return;
+            }
+            if (values.node_id && values.node_id !== identity.nodeId) {
+              return;
+            }
+            analysisPageCache.set(
+              { solutionId, nodeId, revision, kind: "values" },
+              values,
+            );
+            set({
+              nodeValues: values,
+              phase: phaseFromStatus(get().status, "complete"),
+              message: "Action EVs ready.",
+              matrixMode:
+                get().matrixMode === "strategy" ? "strategy-ev" : get().matrixMode,
+            });
+            prefetchChildValues(solutionId, live, revision);
           },
-        });
+          (message) => {
+            if (!analysisRequestIsCurrent("values", token)) {
+              return;
+            }
+            // Keep a settled failure payload so overlay auto-load does not retry-loop.
+            set({
+              phase: phaseFromStatus(get().status, "complete"),
+              message,
+              nodeValues: {
+                pending: false,
+                error: message,
+                node_id: identity.nodeId,
+                solution_id: identity.solutionId,
+              },
+            });
+          },
+        );
       },
-    );
+    });
   },
 
   async loadRunouts() {
@@ -2340,50 +2578,84 @@ pathTrail,
       return;
     }
     const revision = analysisRevision(node, get().status);
-    const { token, identity } = beginAnalysisRequest(
-      "runouts",
+    const nodeId = node.node_id;
+    const cached = analysisPageCache.get({
       solutionId,
-      node.node_id,
+      nodeId,
       revision,
-    );
+      kind: "runouts",
+    });
+    if (cached) {
+      set({ runouts: cached, analysisTab: "runouts", message: "Runouts ready." });
+      return;
+    }
     set({
       message: "Loading runouts…",
       analysisTab: "runouts",
-      runouts: { pending: true, node_id: node.node_id, solution_id: solutionId },
+      runouts: { pending: true, node_id: nodeId, solution_id: solutionId },
     });
-    await pollAnalysis(
-      "runouts",
-      token,
-      () =>
-        engineClient.getRunouts(solutionId, node.node_id) as Promise<{
-          pending?: boolean;
-          node_id?: string;
-          solution_id?: string;
-        }>,
-      (runouts) => {
-        if (!analysisRequestIsCurrent("runouts", token)) {
-          return;
-        }
-        const live = get().currentNode;
+    enqueueWorkerAnalysis({
+      kind: "runouts",
+      solutionId,
+      nodeId,
+      revision,
+      priority: "auto",
+      run: async () => {
         if (
-          !live ||
-          live.node_id !== identity.nodeId ||
-          get().solutionId !== identity.solutionId
+          get().currentNode?.node_id !== nodeId ||
+          get().solutionId !== solutionId
         ) {
           return;
         }
-        if (runouts.node_id && runouts.node_id !== identity.nodeId) {
-          return;
-        }
-        set({ runouts, message: "Runouts ready." });
+        const { token, identity } = beginAnalysisRequest(
+          "runouts",
+          solutionId,
+          nodeId,
+          revision,
+        );
+        await pollAnalysis(
+          "runouts",
+          token,
+          () =>
+            engineClient.getRunouts(solutionId, nodeId) as Promise<{
+              pending?: boolean;
+              node_id?: string;
+              solution_id?: string;
+            }>,
+          (runouts) => {
+            if (!analysisRequestIsCurrent("runouts", token)) {
+              return;
+            }
+            const live = get().currentNode;
+            if (
+              !live ||
+              live.node_id !== identity.nodeId ||
+              get().solutionId !== identity.solutionId
+            ) {
+              analysisPageCache.set(
+                { solutionId, nodeId, revision, kind: "runouts" },
+                runouts,
+              );
+              return;
+            }
+            if (runouts.node_id && runouts.node_id !== identity.nodeId) {
+              return;
+            }
+            analysisPageCache.set(
+              { solutionId, nodeId, revision, kind: "runouts" },
+              runouts,
+            );
+            set({ runouts, message: "Runouts ready." });
+          },
+          (message) => {
+            if (!analysisRequestIsCurrent("runouts", token)) {
+              return;
+            }
+            set({ message, runouts: null });
+          },
+        );
       },
-      (message) => {
-        if (!analysisRequestIsCurrent("runouts", token)) {
-          return;
-        }
-        set({ message, runouts: null });
-      },
-    );
+    });
   },
 
   async loadEquity() {
@@ -2393,59 +2665,103 @@ pathTrail,
       return;
     }
     const revision = analysisRevision(node, get().status);
-    const { token, identity } = beginAnalysisRequest(
-      "equity",
+    const nodeId = node.node_id;
+    const cached = analysisPageCache.get({
       solutionId,
-      node.node_id,
+      nodeId,
       revision,
-    );
+      kind: "equity",
+    });
+    if (cached) {
+      set({ equity: cached, message: "Equity ready." });
+      return;
+    }
+    if (
+      get().equity &&
+      typeof get().equity === "object" &&
+      (get().equity as { pending?: boolean; node_id?: string; solution_id?: string })
+        .pending &&
+      (get().equity as { node_id?: string }).node_id === nodeId &&
+      (get().equity as { solution_id?: string }).solution_id === solutionId
+    ) {
+      return;
+    }
     set({
       message: "Loading equity…",
       // Keep the current analysis tab — matrix overlay auto-load must not steal focus.
-      equity: { pending: true, node_id: node.node_id, solution_id: solutionId },
+      equity: { pending: true, node_id: nodeId, solution_id: solutionId },
     });
-    await pollAnalysis(
-      "equity",
-      token,
-      () =>
-        engineClient.getEquity(solutionId, node.node_id) as Promise<{
-          pending?: boolean;
-          node_id?: string;
-          solution_id?: string;
-        }>,
-      (equity) => {
-        if (!analysisRequestIsCurrent("equity", token)) {
-          return;
-        }
-        const live = get().currentNode;
+    enqueueWorkerAnalysis({
+      kind: "equity",
+      solutionId,
+      nodeId,
+      revision,
+      priority: "auto",
+      run: async () => {
         if (
-          !live ||
-          live.node_id !== identity.nodeId ||
-          get().solutionId !== identity.solutionId
+          get().currentNode?.node_id !== nodeId ||
+          get().solutionId !== solutionId
         ) {
           return;
         }
-        if (equity.node_id && equity.node_id !== identity.nodeId) {
-          return;
-        }
-        set({ equity, message: "Equity ready." });
-      },
-      (message) => {
-        if (!analysisRequestIsCurrent("equity", token)) {
-          return;
-        }
-        // Keep a settled failure payload so overlay auto-load does not retry-loop.
-        set({
-          message,
-          equity: {
-            pending: false,
-            error: message,
-            node_id: identity.nodeId,
-            solution_id: identity.solutionId,
+        const { token, identity } = beginAnalysisRequest(
+          "equity",
+          solutionId,
+          nodeId,
+          revision,
+        );
+        await pollAnalysis(
+          "equity",
+          token,
+          () =>
+            engineClient.getEquity(solutionId, nodeId) as Promise<{
+              pending?: boolean;
+              node_id?: string;
+              solution_id?: string;
+            }>,
+          (equity) => {
+            if (!analysisRequestIsCurrent("equity", token)) {
+              return;
+            }
+            const live = get().currentNode;
+            if (
+              !live ||
+              live.node_id !== identity.nodeId ||
+              get().solutionId !== identity.solutionId
+            ) {
+              analysisPageCache.set(
+                { solutionId, nodeId, revision, kind: "equity" },
+                equity,
+              );
+              return;
+            }
+            if (equity.node_id && equity.node_id !== identity.nodeId) {
+              return;
+            }
+            analysisPageCache.set(
+              { solutionId, nodeId, revision, kind: "equity" },
+              equity,
+            );
+            set({ equity, message: "Equity ready." });
           },
-        });
+          (message) => {
+            if (!analysisRequestIsCurrent("equity", token)) {
+              return;
+            }
+            // Keep a settled failure payload so overlay auto-load does not retry-loop.
+            set({
+              message,
+              equity: {
+                pending: false,
+                error: message,
+                node_id: identity.nodeId,
+                solution_id: identity.solutionId,
+              },
+            });
+          },
+        );
       },
-    );
+    });
   },
 
   async loadCategories() {
@@ -2455,22 +2771,37 @@ pathTrail,
       return;
     }
     const revision = analysisRevision(node, get().status);
+    const nodeId = node.node_id;
+    const cached = analysisPageCache.get({
+      solutionId,
+      nodeId,
+      revision,
+      kind: "categories",
+    });
+    if (cached) {
+      set({
+        categories: cached,
+        analysisTab: "categories",
+        message: "Categories ready.",
+      });
+      return;
+    }
     const { token, identity } = beginAnalysisRequest(
       "categories",
       solutionId,
-      node.node_id,
+      nodeId,
       revision,
     );
     set({
       message: "Loading categories…",
       analysisTab: "categories",
-      categories: { pending: true, node_id: node.node_id, solution_id: solutionId },
+      categories: { pending: true, node_id: nodeId, solution_id: solutionId },
     });
     await pollAnalysis(
       "categories",
       token,
       () =>
-        engineClient.getCategories(solutionId, node.node_id) as Promise<{
+        engineClient.getCategories(solutionId, nodeId) as Promise<{
           pending?: boolean;
           node_id?: string;
           solution_id?: string;
@@ -2485,11 +2816,19 @@ pathTrail,
           live.node_id !== identity.nodeId ||
           get().solutionId !== identity.solutionId
         ) {
+          analysisPageCache.set(
+            { solutionId, nodeId, revision, kind: "categories" },
+            categories,
+          );
           return;
         }
         if (categories.node_id && categories.node_id !== identity.nodeId) {
           return;
         }
+        analysisPageCache.set(
+          { solutionId, nodeId, revision, kind: "categories" },
+          categories,
+        );
         set({ categories, message: "Categories ready." });
       },
       (message) => {
@@ -2551,6 +2890,7 @@ pathTrail,
 
     // Commit: open succeeded — reset histories and replace the visible document.
     invalidateLifecycleRequests();
+    dropAnalysisCaches();
     pendingReloadNodeId = null; // opened checkpoint lands at root
     setupHistoryPast.length = 0;
     rangeHistory.clear();
