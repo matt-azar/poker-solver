@@ -111,8 +111,16 @@ void StreetBatchSolver::Engine::run_chunk(int worker_index, int begin, int end)
     }
     WorkerContext& ctx = context_for(worker_index);
     Scratch& child = ctx.scratch[static_cast<std::size_t>(task_depth_)];
-    for (int index = begin; index < end; ++index)
+    // Steal remaining first-future-card indexes. Nested chance stays serial on
+    // this worker (serial_chance=true); early finishers keep claiming until the
+    // shared cursor hits active_count_, which balances uneven turn/river trees.
+    for (;;)
     {
+        const int index = next_active_.fetch_add(1, std::memory_order_relaxed);
+        if (index >= active_count_)
+        {
+            break;
+        }
         const int card = active_cards_[index];
         const int pause = delay_us_.load(std::memory_order_relaxed);
         if (pause > 0)
@@ -167,8 +175,13 @@ void StreetBatchSolver::Engine::run_response_chunk(int worker_index, int begin, 
     }
     WorkerContext& ctx = context_for(worker_index);
     Scratch& child = ctx.scratch[static_cast<std::size_t>(task_depth_)];
-    for (int index = begin; index < end; ++index)
+    for (;;)
     {
+        const int index = next_active_.fetch_add(1, std::memory_order_relaxed);
+        if (index >= active_count_)
+        {
+            break;
+        }
         const int card = active_cards_[index];
         int next_turn = task_turn_;
         int next_river = task_river_;

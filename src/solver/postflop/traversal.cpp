@@ -70,16 +70,13 @@ void StreetBatchSolver::Engine::parallel_response_chance(
         active[card] = true;
         active_cards_[active_count_++] = card;
     }
+    // Every worker enters the steal loop; next_active_ claims indexes dynamically.
+    next_active_.store(0, std::memory_order_relaxed);
     const int workers = config.threads;
-    const int base = active_count_ / workers;
-    const int remainder = active_count_ % workers;
-    int cursor = 0;
     for (int worker = 0; worker < workers; ++worker)
     {
-        const int count = base + (worker < remainder ? 1 : 0);
-        chunk_begin_[worker] = cursor;
-        chunk_end_[worker] = cursor + count;
-        cursor += count;
+        chunk_begin_[worker] = 0;
+        chunk_end_[worker] = active_count_;
     }
     task_node_ = node.child[0];
     task_turn_ = turn;
@@ -457,16 +454,14 @@ void StreetBatchSolver::Engine::parallel_chance(
         active[card] = true;
         active_cards_[active_count_++] = card;
     }
+    // Every worker enters the steal loop; next_active_ claims indexes dynamically.
+    // Nested river deals inside each first-card walk stay serial on that worker.
+    next_active_.store(0, std::memory_order_relaxed);
     const int workers = config.threads;
-    const int base = active_count_ / workers;
-    const int remainder = active_count_ % workers;
-    int cursor = 0;
     for (int worker = 0; worker < workers; ++worker)
     {
-        const int count = base + (worker < remainder ? 1 : 0);
-        chunk_begin_[worker] = cursor;
-        chunk_end_[worker] = cursor + count;
-        cursor += count;
+        chunk_begin_[worker] = 0;
+        chunk_end_[worker] = active_count_;
     }
     task_node_ = node.child[0];
     task_turn_ = turn;
