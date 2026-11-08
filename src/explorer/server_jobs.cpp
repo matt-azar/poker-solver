@@ -60,13 +60,18 @@ void solve_job(std::uint64_t job_id, Job job)
                 sample_iterations, sample_values, sample_gaps, nullptr)));
             return;
         }
-        const int chunk = std::max(1, job.iterations / job.samples);
         // Flop, turn, and river share StreetBatchSolver. RiverBatchSolver
         // remains only for opening older river-kind PSOL checkpoints and for
         // the river_solver CLI.
         auto street = std::make_shared<poker::solver::StreetBatchSolver>(street_config(job));
         poker::solver::StreetMemoryReport street_memory = street->memory_report();
         const poker::solver::StreetMemoryReport* memory_ptr = &street_memory;
+        const int eval_every = solve_stats_eval_every(job.iterations, job.samples);
+        const int expected_evals =
+            (job.iterations + eval_every - 1) / eval_every;
+        sample_iterations.reserve(static_cast<std::size_t>(expected_evals));
+        sample_values.reserve(static_cast<std::size_t>(expected_evals));
+        sample_gaps.reserve(static_cast<std::size_t>(expected_evals));
         const auto hold_current = [&]()
         {
             auto kept_solution = std::make_shared<HeldSolution>();
@@ -183,19 +188,24 @@ void solve_job(std::uint64_t job_id, Job job)
                     return;
                 }
             }
-            const int step = std::min(chunk, job.iterations - done);
+            // Train one iteration so Iter n/x can advance every step.
             // Fresh solves start with empty locks; continue_job / resolve-locked pass HeldSolution locks.
             if (job.frozen)
             {
-                street->continue_frozen_iterations(step, job.algorithm, nullptr);
+                street->continue_frozen_iterations(1, job.algorithm, nullptr);
             }
             else
             {
-                street->continue_iterations(step, job.algorithm, nullptr);
+                street->continue_iterations(1, job.algorithm, nullptr);
             }
-            done += step;
-            remember(street->evaluate());
-            street_memory = street->memory_report();
+            ++done;
+            const bool should_eval =
+                (done % eval_every == 0) || (done >= job.iterations);
+            if (should_eval)
+            {
+                remember(street->evaluate());
+                street_memory = street->memory_report();
+            }
             if (g_app.session.stop_requested(job_id))
             {
                 publish_stopped();
@@ -208,13 +218,15 @@ void solve_job(std::uint64_t job_id, Job job)
                     return;
                 }
             }
+            // Iteration counter every iter; EV / gap_series on eval strides.
             StatusDraft progress = draft_for(
                 job, job_id, done, seconds_now(), evaluated, value, p1, p2, gap,
                 sample_iterations, sample_values, sample_gaps, memory_ptr);
             progress.running = true;
             progress.time_limit_reached = time_limit_reached;
             g_app.session.set_progress(job_id, build_status(progress));
-            if (job.accuracy >= 0.0
+            if (should_eval
+                && job.accuracy >= 0.0
                 && gap <= job.accuracy * poker::tenths_to_chips(job.pot))
             {
                 break;
@@ -556,8 +568,7 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
     double p2 = held->p2_best_response;
     double gap = held->nash_gap;
     bool time_limit_reached = false;
-    const int samples = std::max(1, held->job.samples);
-    const int chunk = std::max(1, extra / samples);
+    const int eval_every = solve_stats_eval_every(extra, held->job.samples);
     const auto seconds_now = [&]()
     {
         return held->runtime_seconds
@@ -573,47 +584,61 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
     };
     try
     {
-        const std::size_t chunks = static_cast<std::size_t>((extra + chunk - 1) / chunk);
-        held->sample_iterations.reserve(held->sample_iterations.size() + chunks);
-        held->sample_values.reserve(held->sample_values.size() + chunks);
-        held->sample_gaps.reserve(held->sample_gaps.size() + chunks);
+        const int expected_evals = (extra + eval_every - 1) / eval_every;
+        held->sample_iterations.reserve(
+            held->sample_iterations.size() + static_cast<std::size_t>(expected_evals));
+        held->sample_values.reserve(
+            held->sample_values.size() + static_cast<std::size_t>(expected_evals));
+        held->sample_gaps.reserve(
+            held->sample_gaps.size() + static_cast<std::size_t>(expected_evals));
         while (done < target)
         {
             if (g_app.session.stop_requested(job_id) || g_app.session.pause_requested(job_id))
             {
                 break;
             }
-            const int step = std::min(chunk, target - done);
             const poker::solver::LockSet* const locks = locks_arg(*held);
             if (held->street)
             {
                 if (held->job.frozen)
                 {
-                    held->street->continue_frozen_iterations(step, held->job.algorithm, locks);
+                    held->street->continue_frozen_iterations(1, held->job.algorithm, locks);
                 }
                 else
                 {
-                    held->street->continue_iterations(step, held->job.algorithm, locks);
+                    held->street->continue_iterations(1, held->job.algorithm, locks);
                 }
-                const poker::solver::EvaluationResult evaluation = held->street->evaluate();
-                value = evaluation.u0;
-                p1 = evaluation.br0;
-                p2 = evaluation.br1;
-                gap = evaluation.nash_gap;
             }
             else
             {
-                held->river->continue_iterations(step, held->job.algorithm);
-                const poker::solver::EvaluationResult evaluation = held->river->evaluate();
-                value = evaluation.u0;
-                p1 = evaluation.br0;
-                p2 = evaluation.br1;
-                gap = evaluation.nash_gap;
+                held->river->continue_iterations(1, held->job.algorithm);
             }
-            done += step;
-            held->sample_iterations.push_back(done);
-            held->sample_values.push_back(value);
-            held->sample_gaps.push_back(gap);
+            ++done;
+            // Absolute completed-iteration stride (and the continue target).
+            const bool should_eval =
+                (done % eval_every == 0) || (done >= target);
+            if (should_eval)
+            {
+                if (held->street)
+                {
+                    const poker::solver::EvaluationResult evaluation = held->street->evaluate();
+                    value = evaluation.u0;
+                    p1 = evaluation.br0;
+                    p2 = evaluation.br1;
+                    gap = evaluation.nash_gap;
+                }
+                else
+                {
+                    const poker::solver::EvaluationResult evaluation = held->river->evaluate();
+                    value = evaluation.u0;
+                    p1 = evaluation.br0;
+                    p2 = evaluation.br1;
+                    gap = evaluation.nash_gap;
+                }
+                held->sample_iterations.push_back(done);
+                held->sample_values.push_back(value);
+                held->sample_gaps.push_back(gap);
+            }
             if (g_app.session.stop_requested(job_id) || g_app.session.pause_requested(job_id))
             {
                 break;
@@ -633,7 +658,8 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
             progress.root_id = held->root_id;
             progress.time_limit_reached = time_limit_reached;
             g_app.session.set_progress(job_id, build_status(progress));
-            if (held->job.accuracy >= 0.0
+            if (should_eval
+                && held->job.accuracy >= 0.0
                 && gap <= held->job.accuracy * poker::tenths_to_chips(held->job.pot))
             {
                 break;
@@ -853,8 +879,7 @@ void resolve_locked_job(
         double p2 = held->p2_best_response;
         double gap = held->nash_gap;
         bool time_limit_reached = false;
-        const int eval_samples = std::max(1, held->job.samples);
-        const int chunk = std::max(1, iterations / eval_samples);
+        const int eval_every = solve_stats_eval_every(iterations, held->job.samples);
         const auto seconds_now = [&]()
         {
             return held->runtime_seconds
@@ -875,24 +900,28 @@ void resolve_locked_job(
             {
                 break;
             }
-            const int step = std::min(chunk, target - done);
             if (held->job.frozen)
             {
-                held->street->continue_frozen_iterations(step, held->job.algorithm, locks);
+                held->street->continue_frozen_iterations(1, held->job.algorithm, locks);
             }
             else
             {
-                held->street->continue_iterations(step, held->job.algorithm, locks);
+                held->street->continue_iterations(1, held->job.algorithm, locks);
             }
-            done += step;
-            const poker::solver::EvaluationResult evaluation = held->street->evaluate();
-            value = evaluation.u0;
-            p1 = evaluation.br0;
-            p2 = evaluation.br1;
-            gap = evaluation.nash_gap;
-            held->sample_iterations.push_back(done);
-            held->sample_values.push_back(value);
-            held->sample_gaps.push_back(gap);
+            ++done;
+            const bool should_eval =
+                (done % eval_every == 0) || (done >= target);
+            if (should_eval)
+            {
+                const poker::solver::EvaluationResult evaluation = held->street->evaluate();
+                value = evaluation.u0;
+                p1 = evaluation.br0;
+                p2 = evaluation.br1;
+                gap = evaluation.nash_gap;
+                held->sample_iterations.push_back(done);
+                held->sample_values.push_back(value);
+                held->sample_gaps.push_back(gap);
+            }
             StatusDraft progress = draft_for(
                 held->job, job_id, done, seconds_now(), true, value, p1, p2, gap,
                 held->sample_iterations, held->sample_values, held->sample_gaps,
@@ -903,7 +932,8 @@ void resolve_locked_job(
             progress.baseline_solution_id = held->baseline_solution_id;
             progress.time_limit_reached = time_limit_reached;
             g_app.session.set_progress(job_id, build_status(progress));
-            if (held->job.accuracy >= 0.0
+            if (should_eval
+                && held->job.accuracy >= 0.0
                 && gap <= held->job.accuracy * poker::tenths_to_chips(held->job.pot))
             {
                 break;
