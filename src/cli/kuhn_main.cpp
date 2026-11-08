@@ -154,7 +154,7 @@ int main(int argc, char** argv)
 
     poker::solver::SolveConfig config;
     config.max_iterations = iterations;
-    config.nash_gap_threshold = gap_threshold;
+    config.accuracy_threshold = gap_threshold;
     config.eval_interval = eval_interval;
 
     poker::solver::CfrTrainer<poker::kuhn::KuhnGame> trainer(poker::kuhn::KuhnGame{}, algorithm);

@@ -103,13 +103,17 @@ The Nash gap is NashConv, the sum of unilateral BR gains
 \((u_0(\mathrm{BR}_0)-u_0(\bar\sigma))+(u_1(\mathrm{BR}_1)-u_1(\bar\sigma))\).
 Under zero-sum chips this equals \(u_0(\mathrm{BR}_0)+u_1(\mathrm{BR}_1)\).
 `StreetBatchSolver::evaluate()`, `RiverBatchSolver::evaluate()`, and
-`evaluate_strategy` share `EvaluationResult`. Accuracy stopping uses that
-NashConv / pot for ordinary chip targets. This is not Pio's averaged
-unilateral exploitability.
+`evaluate_strategy` share `EvaluationResult`. Pio **Accuracy** is
+\(\mathrm{NashConv}/2\). Accuracy stopping uses that Accuracy metric
+(pot fraction by default; optional absolute chips).
 
 ## Stopping
 
-`SolveConfig` sets a maximum iteration count and an optional Nash-gap threshold. The threshold applies only when it is non-negative and `eval_interval` is positive. Runtime reported by `solve` is the regret-update loop, including gap checks that end the run early.
+`SolveConfig` sets a maximum iteration count and an optional Accuracy threshold
+(`accuracy_threshold`, absolute chips of Pio Accuracy). The threshold applies
+only when it is non-negative and `eval_interval` is positive. Runtime reported
+by `solve` is the regret-update loop, including Accuracy checks that end the
+run early.
 
 ## Design limits
 

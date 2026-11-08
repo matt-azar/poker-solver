@@ -45,7 +45,7 @@ SolveConfig short_cfr_plus()
 {
     SolveConfig solve;
     solve.max_iterations = 20;
-    solve.nash_gap_threshold = 0.1; // chips; pot is 100
+    solve.accuracy_threshold = 0.1; // Pio Accuracy chips; pot is 100
     solve.eval_every = 1;
     return solve;
 }
@@ -55,7 +55,9 @@ void check_zero_gap(const EvaluationResult& evaluation, double tol = 1e-9)
     CHECK_NEAR(evaluation.gain0, 0.0, tol);
     CHECK_NEAR(evaluation.gain1, 0.0, tol);
     CHECK_NEAR(evaluation.nash_gap, 0.0, tol);
+    CHECK_NEAR(evaluation.accuracy, 0.0, tol);
     CHECK_NEAR(evaluation.nash_gap, evaluation.gain0 + evaluation.gain1, tol);
+    CHECK_NEAR(evaluation.accuracy, 0.5 * evaluation.nash_gap, tol);
 }
 
 void check_batch_matches_reference(StreetConfig cfg, double tol = 1e-6)

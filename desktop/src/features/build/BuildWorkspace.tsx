@@ -537,7 +537,7 @@ export function BuildWorkspace() {
               />
             </label>
             <label>
-              Accuracy (NashConv/pot)
+              Accuracy (pot fraction)
               <input
                 value={draft.accuracy}
                 placeholder="off"

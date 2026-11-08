@@ -161,28 +161,28 @@ SolveStats StreetBatchSolver::solve_frozen(
     engine_->reset();
     int completed = 0;
     SolveStats stats;
-    stats.nash_gap_history.clear();
-    stats.nash_gap_iterations.clear();
+    stats.accuracy_history.clear();
+    stats.accuracy_iterations.clear();
     bool fresh = false;
     for (int step = 0; step < config.max_iterations; ++step)
     {
         engine_->train_frozen(1, algorithm);
         ++completed;
         fresh = false;
-        const bool check_gap = config.nash_gap_threshold >= 0.0
+        const bool check_accuracy = config.accuracy_threshold >= 0.0
             && config.eval_every > 0
             && completed % config.eval_every == 0;
-        if (check_gap)
+        if (check_accuracy)
         {
             apply_evaluation(stats, evaluate());
-            stats.nash_gap_history.push_back(stats.nash_gap);
-            stats.nash_gap_iterations.push_back(completed);
+            stats.accuracy_history.push_back(stats.accuracy);
+            stats.accuracy_iterations.push_back(completed);
             fresh = true;
             if (progress != nullptr)
             {
                 progress(completed, stats, progress_context);
             }
-            if (stats.nash_gap <= config.nash_gap_threshold)
+            if (stats.accuracy <= config.accuracy_threshold)
             {
                 break;
             }
@@ -201,10 +201,10 @@ SolveStats StreetBatchSolver::solve_frozen(
     if (!fresh)
     {
         apply_evaluation(stats, evaluate());
-        if (config.nash_gap_threshold >= 0.0)
+        if (config.accuracy_threshold >= 0.0)
         {
-            stats.nash_gap_history.push_back(stats.nash_gap);
-            stats.nash_gap_iterations.push_back(completed);
+            stats.accuracy_history.push_back(stats.accuracy);
+            stats.accuracy_iterations.push_back(completed);
         }
     }
     const auto end = std::chrono::steady_clock::now();
@@ -229,28 +229,28 @@ SolveStats StreetBatchSolver::solve(
     engine_->reset();
     int completed = 0;
     SolveStats stats;
-    stats.nash_gap_history.clear();
-    stats.nash_gap_iterations.clear();
+    stats.accuracy_history.clear();
+    stats.accuracy_iterations.clear();
     bool fresh = false;
     for (int step = 0; step < config.max_iterations; ++step)
     {
         engine_->train_more(1, algorithm);
         ++completed;
         fresh = false;
-        const bool check_gap = config.nash_gap_threshold >= 0.0
+        const bool check_accuracy = config.accuracy_threshold >= 0.0
             && config.eval_every > 0
             && completed % config.eval_every == 0;
-        if (check_gap)
+        if (check_accuracy)
         {
             apply_evaluation(stats, evaluate());
-            stats.nash_gap_history.push_back(stats.nash_gap);
-            stats.nash_gap_iterations.push_back(completed);
+            stats.accuracy_history.push_back(stats.accuracy);
+            stats.accuracy_iterations.push_back(completed);
             fresh = true;
             if (progress != nullptr)
             {
                 progress(completed, stats, progress_context);
             }
-            if (stats.nash_gap <= config.nash_gap_threshold)
+            if (stats.accuracy <= config.accuracy_threshold)
             {
                 break;
             }
@@ -269,10 +269,10 @@ SolveStats StreetBatchSolver::solve(
     if (!fresh)
     {
         apply_evaluation(stats, evaluate());
-        if (config.nash_gap_threshold >= 0.0)
+        if (config.accuracy_threshold >= 0.0)
         {
-            stats.nash_gap_history.push_back(stats.nash_gap);
-            stats.nash_gap_iterations.push_back(completed);
+            stats.accuracy_history.push_back(stats.accuracy);
+            stats.accuracy_iterations.push_back(completed);
         }
     }
     const auto end = std::chrono::steady_clock::now();

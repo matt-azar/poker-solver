@@ -32,6 +32,40 @@ export function phaseLabel(phase: SolvePhase): string {
   }
 }
 
+/** Pio Accuracy in chips = NashConv / 2. Prefer status.accuracy_chips when present. */
+export function measuredAccuracyChips(
+  status: StatusPayload | null | undefined,
+): number | null {
+  if (status == null) {
+    return null;
+  }
+  const chips = Number(status.accuracy_chips);
+  if (Number.isFinite(chips)) {
+    return chips;
+  }
+  const nash = Number(status.nash_gap);
+  if (Number.isFinite(nash)) {
+    return 0.5 * nash;
+  }
+  return null;
+}
+
+/** Format Pio Accuracy (average of unilateral BR gains), with % pot when available. */
+export function formatAccuracy(
+  accuracyChips: number | null | undefined,
+  pot: number | null | undefined,
+): string {
+  if (accuracyChips == null || Number.isNaN(accuracyChips)) {
+    return "—";
+  }
+  const abs = accuracyChips.toFixed(3);
+  if (pot && pot > 0) {
+    return `${abs} (${((accuracyChips / pot) * 100).toFixed(2)}% pot)`;
+  }
+  return abs;
+}
+
+/** @deprecated Prefer formatAccuracy with Pio Accuracy chips. */
 export function formatNashGap(
   gap: number | null | undefined,
   pot: number | null | undefined,
@@ -39,11 +73,7 @@ export function formatNashGap(
   if (gap == null || Number.isNaN(gap)) {
     return "—";
   }
-  const abs = gap.toFixed(3);
-  if (pot && pot > 0) {
-    return `${abs} (${((gap / pot) * 100).toFixed(2)}% pot)`;
-  }
-  return abs;
+  return formatAccuracy(0.5 * gap, pot);
 }
 
 export function formatBytes(bytes: number | null | undefined): string {
@@ -114,9 +144,10 @@ export function engineActivityMessage(
     target != null && Number(target) > 0
       ? `${iter} / ${target} iters`
       : `${iter} iters`;
+  const accuracyChips = measuredAccuracyChips(status);
   const gapPart =
-    status?.nash_gap != null
-      ? ` · Nash ${formatNashGap(status.nash_gap, status.pot)}`
+    accuracyChips != null
+      ? ` · Acc ${formatAccuracy(accuracyChips, status?.pot)}`
       : "";
   const runtime = formatRuntime(
     status?.runtime_seconds ?? status?.runtime ?? null,
@@ -179,7 +210,7 @@ export function statusMetrics(status: StatusPayload | null | undefined): {
         ? "—"
         : String(status.iterations_requested),
     ev: ev == null ? "—" : ev.toFixed(3),
-    nash: formatNashGap(status?.nash_gap, status?.pot),
+    nash: formatAccuracy(measuredAccuracyChips(status), status?.pot),
     runtime: runtime ?? "—",
     rate: rate == null ? "—" : `${rate.toFixed(1)}/s`,
     memory: formatBytes(
@@ -207,7 +238,7 @@ function formatEta(seconds: number | null): string {
 
 /**
  * ETA to the active stop criterion when it is not a wall-clock time limit.
- * Prefers remaining iterations / rate; falls back to Nash-gap extrapolation.
+ * Prefers remaining iterations / rate; falls back to Pio Accuracy extrapolation.
  */
 export function estimateRemainingSeconds(
   status: StatusPayload | null | undefined,
@@ -234,21 +265,26 @@ export function estimateRemainingSeconds(
   }
 
   const pot = Number(status.pot ?? 0);
-  const gap = Number(status.nash_gap);
-  const accuracy =
+  const measured = measuredAccuracyChips(status);
+  // status.accuracy is the job target: pot fraction by default (≤1), else chips.
+  const accuracyTarget =
     status.accuracy != null
       ? Number(status.accuracy)
-      : status.nash_gap_threshold != null
-        ? Number(status.nash_gap_threshold)
+      : status.accuracy_threshold != null
+        ? Number(status.accuracy_threshold)
         : NaN;
-  // Accuracy is NashConv/pot in the UI; engine threshold is absolute chips.
   const gapTarget =
-    Number.isFinite(accuracy) && accuracy >= 0
-      ? pot > 0 && accuracy <= 1
-        ? accuracy * pot
-        : accuracy
+    Number.isFinite(accuracyTarget) && accuracyTarget >= 0
+      ? pot > 0 && accuracyTarget <= 1
+        ? accuracyTarget * pot
+        : accuracyTarget
       : NaN;
-  if (!(rate != null && rate > 0) || !(gap > 0) || !(gapTarget >= 0) || gap <= gapTarget) {
+  if (
+    !(rate != null && rate > 0) ||
+    !(measured != null && measured > 0) ||
+    !(gapTarget >= 0) ||
+    measured <= gapTarget
+  ) {
     return null;
   }
 
@@ -258,10 +294,14 @@ export function estimateRemainingSeconds(
     const b = series[series.length - 1]!;
     const iterA = Number(a.iterations ?? a.iteration ?? 0);
     const iterB = Number(b.iterations ?? b.iteration ?? 0);
-    const gapA = Number(a.nash_gap);
-    const gapB = Number(b.nash_gap);
+    const gapA = Number(
+      a.accuracy_chips != null ? a.accuracy_chips : 0.5 * Number(a.nash_gap),
+    );
+    const gapB = Number(
+      b.accuracy_chips != null ? b.accuracy_chips : 0.5 * Number(b.nash_gap),
+    );
     if (iterB > iterA && gapA > gapB && gapB > gapTarget && gapB > 0) {
-      // Log-linear decay toward the target gap.
+      // Log-linear decay toward the target Accuracy.
       const decay = Math.log(gapA / gapB) / (iterB - iterA);
       if (decay > 0) {
         const itersLeft = Math.log(gapB / gapTarget) / decay;

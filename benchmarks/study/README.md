@@ -8,9 +8,9 @@ NashConv is the sum of unilateral BR gains
 `(u0(BR0)-u0)+(u1(BR1)-u1)`. Under zero-sum chips that equals
 `player0_best_response_utility + player1_best_response_utility`. Player 0 is out of position.
 
-The quality target is NashConv/pot at most **0.001**.
+The quality target is Pio Accuracy/pot at most **0.001** (Accuracy = NashConv/2).
 
-`river_solver` prints `nash_gap` and `pot` and does not print the pot fraction. `benchmarks/run_study_benchmarks.py` divides those two numbers. That quotient is the runner's derivation. `street_solver` also prints `nash_gap_fraction_of_pot`; the runner still records its own division and uses that division for the target.
+`street_solver` prints `accuracy` and `accuracy_fraction_of_pot` (Pio Accuracy). `river_solver` prints `accuracy` / `accuracy_fraction_of_pot` as well. The runner prefers those fields and falls back to half of `nash_gap`/`pot` for older logs.
 
 Clocks stay distinct:
 
@@ -40,7 +40,7 @@ Each execution is exactly one of:
 
 | Outcome | When |
 | --- | --- |
-| `success` | Exit 0 and the runner-derived NashConv/pot is at most 0.001 |
+| `success` | Exit 0 and the runner-derived Accuracy/pot is at most 0.001 |
 | `target-not-reached` | Exit 0, but the target was not measured or is above 0.001, including a stop at the iteration cap |
 | `invalid-input` | Non-zero exit from a bad flag or a rejected configuration |
 | `resource-rejection` | Non-zero exit that reports an allocation or memory-budget failure |
@@ -69,7 +69,7 @@ Useful because the frozen turn pass separates construction, rank-cache fill, tra
 
 ### `turn_srp_river_betting_to_target`
 
-The same tree, ranges, sizes, frozen pass, thread count, and engine budget as `turn_srp_river_betting`. The iteration cap is 8000 and the wall is 3600 seconds. `--accuracy 0.001` still stops early when NashConv/pot is at most 0.001. This case measures cold time to that target. It is role `scale`, so `--cases reference` does not run it, and it does not replace the 400-iteration reference.
+The same tree, ranges, sizes, frozen pass, thread count, and engine budget as `turn_srp_river_betting`. The iteration cap is 8000 and the wall is 3600 seconds. `--accuracy 0.001` still stops early when Accuracy/pot is at most 0.001. This case measures cold time to that target. It is role `scale`, so `--cases reference` does not run it, and it does not replace the 400-iteration reference.
 
 ### `flop_srp_one_size`
 
@@ -136,7 +136,7 @@ Raw stdout, stderr, `results.json`, and `summary.md` are written to the output d
 Follow-ups for the solver CLIs:
 
 - `street_solver --accuracy` hardcodes `eval_interval` to 20. The cadence cannot be changed.
-- `river_solver --gap-threshold` is an absolute Nash gap in chips. The river CLI does not print `nash_gap_fraction_of_pot`.
+- `river_solver --gap-threshold` is absolute Pio Accuracy in chips; `--accuracy` defaults to pot fraction.
 - The river CLI does not print construction, cache, train, or evaluation splits, engine allocation, process peak working set, or a thread count. It has no `--frozen`, `--threads`, `--memory-mib`, or `--accuracy`.
 - Street `total_seconds` is not process wall time. `runtime_seconds` is not process wall time on either CLI.
 - Per-street raise lists exist on `StreetConfig` but have no command-line flags. A non-empty per-street bet list is reused as that street's raise list, which hides `--oop-raises` and `--ip-raises` for that street.

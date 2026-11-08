@@ -34,9 +34,11 @@ enum class Algorithm
 struct SolveConfig
 {
     int max_iterations = 1;
-    // Negative: do not stop early. Otherwise stop when the Nash gap is at or below this value.
-    double nash_gap_threshold = -1.0;
-    // How often to measure (and record) the Nash gap when a threshold is set.
+    // Negative: do not stop early. Otherwise stop when Pio Accuracy (average of
+    // unilateral BR gains, NashConv/2) is at or below this absolute chip value.
+    // Callers that accept a pot fraction must multiply by pot chips first.
+    double accuracy_threshold = -1.0;
+    // How often to measure (and record) Accuracy when a threshold is set.
     // Must be positive for mid-loop evaluation. Default evaluates every iteration.
     // eval_interval is a legacy alias for the same storage.
     union
@@ -65,14 +67,15 @@ struct SolveStats
     double p1_expected_utility = 0.0;
     double p1_best_response_utility = 0.0;
     double p2_best_response_utility = 0.0;
-    double nash_gap = 0.0;
+    double nash_gap = 0.0; // NashConv = gain0 + gain1
+    double accuracy = 0.0; // Pio Accuracy = NashConv / 2
     // True when the loop halted because max_wall_seconds was reached.
     bool time_limit_reached = false;
-    // Nash gaps recorded at each accuracy evaluation when nash_gap_threshold >= 0
+    // Pio Accuracy values recorded at each evaluation when accuracy_threshold >= 0
     // (including a final evaluate that was not already a mid-loop checkpoint).
     // Cleared at solve start. Empty when no threshold was armed.
-    std::vector<double> nash_gap_history;
-    std::vector<int> nash_gap_iterations;
+    std::vector<double> accuracy_history;
+    std::vector<int> accuracy_iterations;
 };
 
 struct BestResponseResult
@@ -94,6 +97,7 @@ inline void apply_evaluation(SolveStats& stats, const EvaluationResult& evaluati
     stats.p1_best_response_utility = evaluation.br0;
     stats.p2_best_response_utility = evaluation.br1;
     stats.nash_gap = evaluation.nash_gap;
+    stats.accuracy = evaluation.accuracy;
 }
 
 inline BestResponseResult best_response_from_evaluation(const EvaluationResult& evaluation)

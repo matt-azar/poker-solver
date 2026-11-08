@@ -176,11 +176,11 @@ Do not change `LICENSE`, SPDX, or license metadata. `UNLICENSED` ≠ Unlicense. 
 
 ## 4. Poker / solver correctness traps
 
-### NashConv vs Pio “exploitability”
+### NashConv vs Pio Accuracy
 
-Here the printed Nash gap is **NashConv** = sum of both players’ unilateral BR gains (`(u0(BR0)-u0) + (u1(BR1)-u1)`). Under zero-sum chips that equals `u0(BR0) + u1(BR1)`. Pio often reports the **average** of those gains.
+Here the printed Nash gap is **NashConv** = sum of both players’ unilateral BR gains (`(u0(BR0)-u0) + (u1(BR1)-u1)`). Under zero-sum chips that equals `u0(BR0) + u1(BR1)`. Pio **Accuracy** is the **average** of those gains (`NashConv / 2`).
 
-**Do:** Convert before comparing to Pio (often divide by 2). Accuracy stops use **NashConv / pot** (study bar often ≤ 0.001 where declared).  
+**Do:** Accuracy stops use **Accuracy / pot** by default (optional `chips` unit). A study bar of ≤ 0.001 means Pio Accuracy/pot, not NashConv/pot.  
 **Pointers:** `docs/auxiliary/planning/ROADMAP.md` §6, `docs/MATHEMATICS.md`, `docs/auxiliary/reference/HUNL.md`.
 
 ### Own-reach averaging and CF regret

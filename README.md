@@ -97,7 +97,7 @@ explorer
 
 `street_solver` and `river_solver` both solve on `StreetBatchSolver` (or `StreetGame` with `--reference`). `river_solver` maps a fixed five-card board into that shared tree. `--memory-mib` is the engine allocation budget in mebibytes (default 1024). `--threads N` is the frozen-pass thread count including the caller (default 1; `N > 1` requires `--frozen`). No solver uses an RNG.
 
-The reported **Nash gap** is NashConv: `u0(BR0) + u1(BR1)`. Accuracy stopping uses NashConv / pot.
+The reported **Nash gap** is NashConv: `u0(BR0) + u1(BR1)`. **Accuracy** (Pio exploitability) is NashConv/2. Accuracy stopping uses Accuracy / pot by default.
 
 Configs: [`configs/street_default.txt`](configs/street_default.txt), [`configs/river_default.json`](configs/river_default.json). Rules: [docs/STREETS.md](docs/STREETS.md), [docs/RIVER.md](docs/RIVER.md).
 
