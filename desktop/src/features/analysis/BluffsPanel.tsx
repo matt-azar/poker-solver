@@ -376,8 +376,6 @@ export function BluffsPanel() {
   const modeLabel = equityMode === "after_call" ? "after call" : "at this node";
   const compareSymbol = equityCompare === "gt" ? ">" : "<";
   const compareLabel = equityCompare === "gt" ? "value bets" : "bluffs";
-  const panelTitle =
-    equityCompare === "gt" ? "Value bets" : "Prominent bluffs";
 
   const onRowActivate = (combo: string) => {
     const cell = matrixCellForCombo(combo);
@@ -416,8 +414,7 @@ export function BluffsPanel() {
 
   return (
     <div className="range-explorer">
-      <div className="panel-title-row">
-        <h2 className="panel-title">{panelTitle}</h2>
+      <div className="panel-title-row bluffs-toolbar">
         <div className="panel-title-actions">
           <button
             type="button"

@@ -1656,6 +1656,11 @@
   font-size: 12px;
 }
 
+/* Value / Bluffs toolbar: Refresh + settings only (no panel title). */
+.bluffs-toolbar {
+  justify-content: flex-end;
+}
+
 /* Bluffs tab: threshold + mode chrome above the list. */
 .bluffs-controls {
   display: flex;
