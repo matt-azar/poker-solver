@@ -100,7 +100,7 @@ int main(int argc, char** argv)
 
     poker::solver::SolveConfig solve_config;
     solve_config.max_iterations = iterations;
-    solve_config.nash_gap_threshold = gap_threshold;
+    solve_config.accuracy_threshold = gap_threshold;
     solve_config.eval_interval = eval_interval;
 
     poker::solver::CfrTrainer<poker::leduc::LeducGame> trainer(game, algorithm);

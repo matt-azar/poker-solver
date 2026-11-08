@@ -34,7 +34,8 @@ void print_usage(const char* argv0)
               << " [--edge-tag [PLAYER,]ACTION,TAG[,TAG...]] (repeatable)"
               << " [--first oop|ip]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus]"
-              << " [--gap-threshold X] [--eval-every N] [--eval-interval N]"
+              << " [--gap-threshold X] [--accuracy X [fraction|chips]]"
+              << " [--eval-every N] [--eval-interval N]"
               << " [--time-limit SECONDS]"
               << " [--print-strategies] [--reference] [--report file | -]\n";
 }
@@ -244,7 +245,10 @@ struct Options
 {
     poker::river::RiverConfig config;
     int iterations = 500;
+    // Absolute chips of Pio Accuracy when set via --gap-threshold / JSON.
+    // --accuracy uses pot fraction by default unless "chips" is given.
     double gap_threshold = -1.0;
+    bool accuracy_is_fraction = false;
     int eval_every = 1000;
     double time_limit = -1.0;
     bool print_strategies = false;
@@ -659,7 +663,23 @@ int main(int argc, char** argv)
             }
             else if (arg == "--gap-threshold")
             {
+                // Absolute chips of Pio Accuracy (NashConv/2).
                 options.gap_threshold = std::atof(need("--gap-threshold"));
+                options.accuracy_is_fraction = false;
+            }
+            else if (arg == "--accuracy")
+            {
+                options.gap_threshold = std::atof(need("--accuracy"));
+                options.accuracy_is_fraction = true;
+                if (i + 1 < argc)
+                {
+                    const std::string unit = argv[i + 1];
+                    if (unit == "fraction" || unit == "chips")
+                    {
+                        ++i;
+                        options.accuracy_is_fraction = (unit == "fraction");
+                    }
+                }
             }
             else if (arg == "--eval-every" || arg == "--eval-interval")
             {
@@ -731,7 +751,13 @@ int main(int argc, char** argv)
 
         poker::solver::SolveConfig solve_config;
         solve_config.max_iterations = options.iterations;
-        solve_config.nash_gap_threshold = options.gap_threshold;
+        if (options.gap_threshold >= 0.0)
+        {
+            const double pot_chips = poker::tenths_to_chips(street.pot);
+            solve_config.accuracy_threshold = options.accuracy_is_fraction
+                ? options.gap_threshold * pot_chips
+                : options.gap_threshold;
+        }
         solve_config.eval_every = options.eval_every;
         solve_config.max_wall_seconds = options.time_limit;
 
@@ -762,12 +788,15 @@ int main(int argc, char** argv)
             std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
             std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
             std::cout << "nash_gap: " << stats.nash_gap << "\n";
-            if (!stats.nash_gap_history.empty())
+            std::cout << "accuracy: " << stats.accuracy << "\n";
+            std::cout << "accuracy_fraction_of_pot: "
+                      << stats.accuracy / poker::tenths_to_chips(street.pot) << "\n";
+            if (!stats.accuracy_history.empty())
             {
-                std::cout << "nash_gap_history:";
-                for (double gap : stats.nash_gap_history)
+                std::cout << "accuracy_history:";
+                for (double value : stats.accuracy_history)
                 {
-                    std::cout << " " << gap;
+                    std::cout << " " << value;
                 }
                 std::cout << "\n";
             }
@@ -830,12 +859,15 @@ int main(int argc, char** argv)
             std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
             std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
             std::cout << "nash_gap: " << stats.nash_gap << "\n";
-            if (!stats.nash_gap_history.empty())
+            std::cout << "accuracy: " << stats.accuracy << "\n";
+            std::cout << "accuracy_fraction_of_pot: "
+                      << stats.accuracy / poker::tenths_to_chips(street.pot) << "\n";
+            if (!stats.accuracy_history.empty())
             {
-                std::cout << "nash_gap_history:";
-                for (double gap : stats.nash_gap_history)
+                std::cout << "accuracy_history:";
+                for (double value : stats.accuracy_history)
                 {
-                    std::cout << " " << gap;
+                    std::cout << " " << value;
                 }
                 std::cout << "\n";
             }

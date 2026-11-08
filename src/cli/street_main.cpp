@@ -46,7 +46,7 @@ void print_usage(const char* argv0)
               << " [--all-in | --no-all-in] [--max-raises N]"
               << " [--iterations N] [--algorithm vanilla|cfr_plus|dcfr|pcfr_plus]"
               << " [--dcfr-alpha A] [--dcfr-beta B] [--dcfr-gamma G]"
-              << " [--accuracy 0.05] [--eval-every N] [--time-limit SECONDS]"
+              << " [--accuracy 0.05 [fraction|chips]] [--eval-every N] [--time-limit SECONDS]"
               << " [--memory-mib N] [--threads N]"
               << " [--plan-memory] [--reference] [--frozen] [--report file | -]\n";
 }
@@ -322,10 +322,12 @@ void print_checkpoint(int iterations, const poker::solver::SolveStats& stats, vo
     std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
     std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
     std::cout << "nash_gap: " << stats.nash_gap << "\n";
+    std::cout << "accuracy: " << stats.accuracy << "\n";
     if (context->pot != 0)
     {
-        std::cout << "nash_gap_fraction_of_pot: "
-                  << stats.nash_gap / poker::tenths_to_chips(context->pot) << "\n";
+        const double pot_chips = poker::tenths_to_chips(context->pot);
+        std::cout << "accuracy_fraction_of_pot: " << stats.accuracy / pot_chips << "\n";
+        std::cout << "nash_gap_fraction_of_pot: " << stats.nash_gap / pot_chips << "\n";
     }
     std::cout.flush();
 }
@@ -347,6 +349,7 @@ int main(int argc, char** argv)
         config.max_raises = 1;
         int iterations = 400;
         double accuracy = -1.0;
+        bool accuracy_is_fraction = true; // pot fraction default (Pio allows chips|fraction)
         int eval_every = 20;
         bool have_eval_every = false;
         double time_limit = -1.0;
@@ -615,6 +618,15 @@ int main(int argc, char** argv)
             else if (arg == "--accuracy")
             {
                 accuracy = std::atof(need("--accuracy"));
+                if (i + 1 < argc)
+                {
+                    const std::string unit = argv[i + 1];
+                    if (unit == "fraction" || unit == "chips")
+                    {
+                        ++i;
+                        accuracy_is_fraction = (unit == "fraction");
+                    }
+                }
             }
             else if (arg == "--eval-every")
             {
@@ -798,7 +810,11 @@ int main(int argc, char** argv)
         solve_config.max_iterations = iterations;
         if (accuracy >= 0.0)
         {
-            solve_config.nash_gap_threshold = accuracy * poker::tenths_to_chips(config.pot);
+            // Engine threshold is absolute chips of Pio Accuracy (NashConv/2).
+            // Default unit is pot fraction; optional trailing "chips" uses absolute chips.
+            const double pot_chips = poker::tenths_to_chips(config.pot);
+            solve_config.accuracy_threshold =
+                accuracy_is_fraction ? accuracy * pot_chips : accuracy;
             // CLI default cadence stays 20; --eval-every overrides. Library default is 1.
             solve_config.eval_every = have_eval_every ? eval_every : 20;
         }
@@ -937,14 +953,17 @@ int main(int argc, char** argv)
         std::cout << "player0_best_response_utility: " << stats.p1_best_response_utility << "\n";
         std::cout << "player1_best_response_utility: " << stats.p2_best_response_utility << "\n";
         std::cout << "nash_gap: " << stats.nash_gap << "\n";
+        std::cout << "accuracy: " << stats.accuracy << "\n";
+        std::cout << "accuracy_fraction_of_pot: "
+                  << stats.accuracy / poker::tenths_to_chips(config.pot) << "\n";
         std::cout << "nash_gap_fraction_of_pot: "
                   << stats.nash_gap / poker::tenths_to_chips(config.pot) << "\n";
-        if (!stats.nash_gap_history.empty())
+        if (!stats.accuracy_history.empty())
         {
-            std::cout << "nash_gap_history:";
-            for (double gap : stats.nash_gap_history)
+            std::cout << "accuracy_history:";
+            for (double value : stats.accuracy_history)
             {
-                std::cout << " " << gap;
+                std::cout << " " << value;
             }
             std::cout << "\n";
         }

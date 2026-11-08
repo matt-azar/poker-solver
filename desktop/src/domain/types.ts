@@ -127,6 +127,8 @@ export interface GapSeriesPoint {
   iteration?: number;
   value?: number;
   nash_gap: number;
+  /** Pio Accuracy in chips (NashConv/2). */
+  accuracy_chips?: number;
 }
 
 export interface StatusPayload {
@@ -147,6 +149,8 @@ export interface StatusPayload {
   player0_expected_utility?: number | null;
   value?: number | null;
   nash_gap?: number | null;
+  /** Measured Pio Accuracy in chips (NashConv/2). */
+  accuracy_chips?: number | null;
   p1_best_response?: number | null;
   p2_best_response?: number | null;
   pot?: number | null;

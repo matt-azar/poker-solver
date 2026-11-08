@@ -65,7 +65,9 @@ river_solver --iterations 200 --report report.txt
 
 The reported Nash gap is NashConv, the sum of unilateral BR gains
 `(u0(BR0)-u0(σ̄)) + (u1(BR1)-u1(σ̄))`. Under zero-sum chips that equals
-`u0(BR0) + u1(BR1)`. Player 0 is out of position.
+`u0(BR0) + u1(BR1)`. Pio Accuracy (the stop metric) is NashConv/2.
+`--accuracy` defaults to pot fraction; `--gap-threshold` is Accuracy in chips.
+Player 0 is out of position.
 
 ## Strategy report
 

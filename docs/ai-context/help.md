@@ -29,7 +29,7 @@ For the full unified role (Q&A + mutating setup), see `unified.md`.
 
 - **Chip EV**: root-centered, chips.
 - **Action EV**: local decision EV by default (Fold = 0); Global = root-centered.
-- **Accuracy / Nash gap**: NashConv (sum of BR gains); accuracy = NashConv/pot.
+- **Accuracy**: Pio exploitability = average of BR gains (NashConv/2); targets are Accuracy/pot by default. NashConv (sum) remains available as a diagnostic.
 - **Equity**: check-down fraction of pot — **not** chip EV.
 - Locks: 0% inside a row that sums to 1 is a constraint; unlock is DELETE; all-zero rows rejected.
 

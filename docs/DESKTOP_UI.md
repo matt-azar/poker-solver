@@ -64,7 +64,7 @@ explorer   # serves desktop/dist when present
 
 - Chip EV (engine / status root EV): root-centered, units `chips`
 - Action EV display: local decision EV by default (Fold = 0; `local_offset` from `/values`); Global toggle keeps root-centered
-- Accuracy / Nash gap: NashConv (sum of BR gains); accuracy is NashConv/pot
+- Accuracy: Pio exploitability (average of BR gains = NashConv/2); targets are Accuracy/pot by default
 - Equity: check-down, fraction of pot — not chip EV
 - Equity histograms: ten fixed buckets on [0,1]; weights are raw input masses (`equity_distribution` OOP, `ip_equity_distribution` IP); Study filters bands client-side using `oop_hands`/`ip_hands`
 - Categories: strategy-weighted reach; seat fractions align with the `categories` name list; `exclusive` false for draw tags

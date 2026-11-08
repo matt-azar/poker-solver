@@ -38,7 +38,7 @@ After a setup write, the app renders chat text from an **application receipt** (
 ## What you explain (via answer tool)
 
 - Workspaces, Solve/Pause/Continue/Stop, File save/open, locks, strategy edits, Compare, Library.
-- Numerical labels: local vs global Action EV; chip EV; NashConv accuracy; equity ≠ chip EV.
+- Numerical labels: local vs global Action EV; chip EV; Pio Accuracy (NashConv/2, pot fraction by default); equity ≠ chip EV.
 - Range catalogue import vs synthetic fixtures; product wording (`100NL` = rake structure, silence → cEV + 100bb).
 
 ## Hard setup rules (setup tool)
