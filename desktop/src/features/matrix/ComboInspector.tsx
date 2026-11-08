@@ -277,7 +277,7 @@ export function ComboInspector() {
                               <span
                                 key={`${square.combo}-${index}`}
                                 className="hands-combo__badge-card"
-                                data-red={card.red ? "true" : "false"}
+                                data-suit={card.suit}
                               >
                                 <span className="hands-combo__badge-rank">
                                   {card.rank}

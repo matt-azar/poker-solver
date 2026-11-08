@@ -146,17 +146,15 @@ describe("overlay labels and weight fill", () => {
 });
 
 describe("comboBadgeCards", () => {
-  it("formats rank + suit glyph cards for a white badge", () => {
+  it("formats rank + suit glyph cards for four-color badge styling", () => {
     expect(comboBadgeCards("AcQc")).toEqual([
-      { rank: "A", suit: "c", symbol: "♣", red: false },
-      { rank: "Q", suit: "c", symbol: "♣", red: false },
+      { rank: "A", suit: "c", symbol: "♣" },
+      { rank: "Q", suit: "c", symbol: "♣" },
     ]);
-    expect(comboBadgeCards("AhKd")[0]).toMatchObject({
-      rank: "A",
-      suit: "h",
-      symbol: "♥",
-      red: true,
-    });
+    expect(comboBadgeCards("AhKd")).toEqual([
+      { rank: "A", suit: "h", symbol: "♥" },
+      { rank: "K", suit: "d", symbol: "♦" },
+    ]);
   });
 });
 

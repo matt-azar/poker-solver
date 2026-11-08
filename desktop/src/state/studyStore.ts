@@ -2318,10 +2318,16 @@ pathTrail,
         if (!analysisRequestIsCurrent("values", token)) {
           return;
         }
+        // Keep a settled failure payload so overlay auto-load does not retry-loop.
         set({
           phase: phaseFromStatus(get().status, "complete"),
           message,
-          nodeValues: null,
+          nodeValues: {
+            pending: false,
+            error: message,
+            node_id: identity.nodeId,
+            solution_id: identity.solutionId,
+          },
         });
       },
     );
@@ -2428,7 +2434,16 @@ pathTrail,
         if (!analysisRequestIsCurrent("equity", token)) {
           return;
         }
-        set({ message, equity: null });
+        // Keep a settled failure payload so overlay auto-load does not retry-loop.
+        set({
+          message,
+          equity: {
+            pending: false,
+            error: message,
+            node_id: identity.nodeId,
+            solution_id: identity.solutionId,
+          },
+        });
       },
     );
   },

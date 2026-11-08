@@ -1445,14 +1445,21 @@
   gap: 0;
 }
 
-/* One card inside the badge (rank glyph + suit symbol). */
-.hands-combo__badge-card[data-red="true"] {
-  color: #c62828;
+/* Four-color deck on the always-white badge face (light --suit-* values). */
+.hands-combo__badge-card[data-suit="h"] {
+  color: #a33b32;
 }
 
-/* One card inside the badge (rank glyph + suit symbol). */
-.hands-combo__badge-card[data-red="false"] {
-  color: #111;
+.hands-combo__badge-card[data-suit="d"] {
+  color: #1f5fbf;
+}
+
+.hands-combo__badge-card[data-suit="c"] {
+  color: #2f7a52;
+}
+
+.hands-combo__badge-card[data-suit="s"] {
+  color: #1c2530;
 }
 
 /* Suit symbol next to the rank in the badge. */
@@ -1492,7 +1499,7 @@
 .hands-combo__metric-value {
   color: #111;
   font-weight: 700;
-  font-size: 20px;
+  font-size: 16px;
   line-height: 1.15;
   text-shadow: 0 0 2px rgba(255, 255, 255, 0.45);
 }
@@ -1512,10 +1519,10 @@
   font-family: var(--font-mono);
 }
 
-/* Equity (“Eq”) row under the action metrics — same 20px type as EV/freq. */
+/* Equity (“Eq”) row under the action metrics — same type size as EV/freq. */
 .hands-combo__metric-row--eq .hands-combo__metric-action,
 .hands-combo__metric-row--eq .hands-combo__metric-value {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
   color: #111;
 }
