@@ -7,6 +7,7 @@ import {
   callChildIdFromFacing,
   dominantBettingActionIndices,
   equityHandsForDominantSizes,
+  equityPassesThreshold,
   facingChildIdForBet,
   formatReachMass,
   isBluffBettingAction,
@@ -343,6 +344,28 @@ describe("listProminentBluffs", () => {
       threshold: 0.3,
     });
     expect(rows).toEqual([]);
+  });
+
+  it("supports exclusive greater-than for value bets", () => {
+    expect(equityPassesThreshold(0.3, 0.3, "gt")).toBe(false);
+    expect(equityPassesThreshold(0.31, 0.3, "gt")).toBe(true);
+    expect(equityPassesThreshold(0.29, 0.3, "lt")).toBe(true);
+
+    const rows = listProminentBluffs({
+      node: decision({
+        actions: ["Bet 50"],
+        combos: ["AhAd", "7h2d", "KhKd"],
+        strategy: [[1], [1], [1]],
+      }),
+      equityHands: [
+        { combo: "AhAd", equity: 0.8, weight: 1 },
+        { combo: "7h2d", equity: 0.1, weight: 1 },
+        { combo: "KhKd", equity: 0.3, weight: 1 },
+      ],
+      threshold: 0.3,
+      equityCompare: "gt",
+    });
+    expect(rows.map((row) => row.combo)).toEqual(["AhAd"]);
   });
 
   it("joins equity via comboKey canonicalization", () => {

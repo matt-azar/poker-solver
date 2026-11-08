@@ -1682,6 +1682,12 @@
   font: inherit;
 }
 
+.bluffs-compare-toggle {
+  min-width: 2rem;
+  padding-inline: 6px;
+  font-weight: 700;
+}
+
 .bluffs-row {
   cursor: pointer;
 }

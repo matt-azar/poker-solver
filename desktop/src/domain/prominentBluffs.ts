@@ -1,6 +1,7 @@
 /**
- * Prominent bluffs: betting hands with check-down equity below a threshold.
- * Local betting predicate — do not change browse.isAggressive.
+ * Prominent bluffs / value bets: betting hands with check-down equity on one
+ * side of a user threshold. Local betting predicate — do not change
+ * browse.isAggressive.
  */
 import type { EquityHandRow } from "./analysis";
 import { comboEv, comboKey } from "./matrixDisplay";
@@ -48,6 +49,9 @@ export const MIN_BET_FREQ = 0.01;
 export const MIN_REACH_MASS = 0.005;
 
 export type BluffEquityMode = "node" | "after_call";
+
+/** Equity vs threshold: bluffs use exclusive &lt;; value bets use exclusive &gt;. */
+export type BluffEquityCompare = "lt" | "gt";
 
 /** Sortable Bluffs table columns. */
 export type BluffSortKey =
@@ -334,12 +338,26 @@ function isDecisionWithStrategy(node: NodePayload | null | undefined): boolean {
   return Boolean(actions?.length && combos?.length && strategy?.length);
 }
 
+/** True when equity passes the exclusive threshold comparison. */
+export function equityPassesThreshold(
+  equity: number,
+  threshold: number,
+  compare: BluffEquityCompare = "lt",
+): boolean {
+  if (!Number.isFinite(equity) || !Number.isFinite(threshold)) {
+    return false;
+  }
+  return compare === "gt" ? equity > threshold : equity < threshold;
+}
+
 export interface ListProminentBluffsArgs {
   node: NodePayload | null | undefined;
   /** Acting-seat check-down equity hands (Mode A: current node). */
   equityHands: EquityHandRow[] | null | undefined;
-  /** Exclusive upper bound: equity < threshold. */
+  /** Exclusive bound used with {@link equityCompare}. */
   threshold: number;
+  /** `lt` = bluffs (equity &lt; threshold); `gt` = value (equity &gt; threshold). */
+  equityCompare?: BluffEquityCompare;
   /** Reserved for Mode B; Mode A ignores and uses equityHands. */
   equityMode?: BluffEquityMode;
   minBetFreq?: number;
@@ -419,7 +437,7 @@ export function sortProminentBluffs(
 }
 
 /**
- * Prominent bluffs for the acting seat at a decision node.
+ * Prominent bluffs / value bets for the acting seat at a decision node.
  * Default order: descending betFreq, then combo localeCompare.
  * EV is display-only (does not filter); null when values are missing/pending.
  * Combos with undefined reach or reach &lt; {@link MIN_REACH_MASS} are dropped.
@@ -429,6 +447,7 @@ export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBlu
     node,
     equityHands,
     threshold,
+    equityCompare = "lt",
     minBetFreq = MIN_BET_FREQ,
     minReachMass = MIN_REACH_MASS,
     nodeValues = null,
@@ -455,7 +474,10 @@ export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBlu
       continue;
     }
     const equityEntry = byCombo.get(comboKey(combo));
-    if (!equityEntry || !(equityEntry.equity < threshold)) {
+    if (
+      !equityEntry ||
+      !equityPassesThreshold(equityEntry.equity, threshold, equityCompare)
+    ) {
       continue;
     }
     if (!reach || !node!.reach_defined) {
