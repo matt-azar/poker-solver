@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
 import { mapActionColors } from "../../domain/actionColors";
+import { orderActionIndicesByAggression } from "../../domain/actionOrder";
 import {
   formatActionDisplay,
   formatActionTooltip,
@@ -75,6 +76,11 @@ export function ActionSummary() {
     [colors.legend, pot, betSizeDisplay, displayOpts],
   );
 
+  const mixOrder = useMemo(
+    () => orderActionIndicesByAggression(actions ?? []),
+    [actions],
+  );
+
   return (
     <section className="action-summary action-summary--panel" aria-label="Actions">
       <div className="action-summary__head">
@@ -118,8 +124,9 @@ export function ActionSummary() {
           aria-label="Action frequency mix"
           role="img"
         >
-          {freqs.map((freq, index) =>
-            freq > 0.001 ? (
+          {mixOrder.map((index) => {
+            const freq = freqs[index] ?? 0;
+            return freq > 0.001 ? (
               <span
                 key={`mix-${index}`}
                 className="action-summary__mix-seg"
@@ -130,8 +137,8 @@ export function ActionSummary() {
                 }}
                 title={`${actions?.[index] ?? ""} · ${formatFrequencyPct(freq)}`}
               />
-            ) : null,
-          )}
+            ) : null;
+          })}
         </div>
       ) : null}
       {legend.length > 0 ? (
