@@ -1684,6 +1684,90 @@
   outline-offset: -2px;
 }
 
+.bluffs-settings {
+  position: relative;
+}
+
+.bluffs-settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding-inline: 6px;
+}
+
+.bluffs-settings-icon {
+  display: block;
+}
+
+.bluffs-settings-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel, var(--background));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.bluffs-settings-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.bluffs-settings-field input {
+  width: 5.5rem;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.bluffs-settings-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.bluffs-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.bluffs-sort-btn:hover,
+.bluffs-sort-btn[data-active="true"] {
+  color: var(--accent);
+}
+
+.bluffs-sort-indicator {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.bluffs-sort-btn[data-active="true"] .bluffs-sort-indicator {
+  opacity: 1;
+}
+
 /* Filters above equity composition. */
 .equity-filter-row {
   display: flex;

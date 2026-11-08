@@ -9,9 +9,14 @@ import {
 import {
   DEFAULT_BLUFF_EQUITY_THRESHOLD,
   MIN_BET_FREQ,
+  MIN_REACH_MASS,
+  formatReachMass,
   listProminentBluffs,
   matrixCellForCombo,
+  sortProminentBluffs,
   type BluffEquityMode,
+  type BluffSortDir,
+  type BluffSortKey,
 } from "../../domain/prominentBluffs";
 import { fetchPostCallEquityHands } from "../../domain/prominentBluffsPostCall";
 import { engineClient } from "../../engine/client";
@@ -32,9 +37,25 @@ interface PostCallCache {
   error: string | null;
 }
 
+const SORT_COLUMNS: Array<{ key: BluffSortKey; label: string }> = [
+  { key: "combo", label: "Hand" },
+  { key: "betFreq", label: "Bet %" },
+  { key: "ev", label: "EV" },
+  { key: "equity", label: "Eq" },
+  { key: "reach", label: "Reach" },
+  { key: "topBetAction", label: "Size" },
+];
+
 function clampThreshold(raw: number): number {
   if (!Number.isFinite(raw)) {
     return DEFAULT_BLUFF_EQUITY_THRESHOLD;
+  }
+  return Math.min(1, Math.max(0, raw));
+}
+
+function clampUnit(raw: number, fallback: number): number {
+  if (!Number.isFinite(raw)) {
+    return fallback;
   }
   return Math.min(1, Math.max(0, raw));
 }
@@ -45,6 +66,63 @@ function postCallCacheKey(
   revision: number,
 ): string {
   return `${solutionId}|${nodeId}|${revision}`;
+}
+
+function SettingsGearIcon() {
+  return (
+    <svg
+      className="bluffs-settings-icon"
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.07 7.07 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.23-1.12.54-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.77 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.89 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.68.22l2.39-.96c.5.4 1.05.71 1.63.94l.36 2.54c.05.24.25.42.5.42h3.84c.25 0 .45-.18.5-.42l.36-2.54c.58-.23 1.12-.54 1.63-.94l2.39.96c.25.12.54.02.68-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"
+      />
+    </svg>
+  );
+}
+
+function SortHeader({
+  label,
+  columnKey,
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  columnKey: BluffSortKey;
+  sortKey: BluffSortKey;
+  sortDir: BluffSortDir;
+  onSort: (key: BluffSortKey) => void;
+}) {
+  const active = sortKey === columnKey;
+  const ariaSort = active
+    ? sortDir === "asc"
+      ? "ascending"
+      : "descending"
+    : "none";
+  return (
+    <th aria-sort={ariaSort}>
+      <button
+        type="button"
+        className="bluffs-sort-btn"
+        data-active={active ? "true" : "false"}
+        onClick={() => onSort(columnKey)}
+        aria-label={`Sort by ${label}${
+          active ? ` (${sortDir === "asc" ? "ascending" : "descending"})` : ""
+        }`}
+      >
+        <span>{label}</span>
+        <span className="bluffs-sort-indicator" aria-hidden="true">
+          {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </button>
+    </th>
+  );
 }
 
 /** Study lower-dock Bluffs tab — Mode A (node) and Mode B (after call). */
@@ -62,15 +140,25 @@ export function BluffsPanel() {
   const [thresholdPct, setThresholdPct] = useState(
     () => Math.round(DEFAULT_BLUFF_EQUITY_THRESHOLD * 100),
   );
+  const [minBetPct, setMinBetPct] = useState(() =>
+    Math.round(MIN_BET_FREQ * 100),
+  );
+  const [minReachMass, setMinReachMass] = useState(MIN_REACH_MASS);
   const [equityMode, setEquityMode] = useState<BluffEquityMode>("node");
+  const [sortKey, setSortKey] = useState<BluffSortKey>("betFreq");
+  const [sortDir, setSortDir] = useState<BluffSortDir>("desc");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [postCall, setPostCall] = useState<PostCallCache | null>(null);
   const [postCallPending, setPostCallPending] = useState(false);
   const [postCallMessage, setPostCallMessage] = useState<string | null>(null);
   const [postCallRefreshNonce, setPostCallRefreshNonce] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const cacheRef = useRef<PostCallCache | null>(null);
+  const settingsRef = useRef<HTMLDivElement | null>(null);
 
   const threshold = clampThreshold(thresholdPct / 100);
+  const minBetFreq = clampUnit(minBetPct / 100, MIN_BET_FREQ);
+  const reachFloor = clampUnit(minReachMass, MIN_REACH_MASS);
   const equityPending = Boolean(equity?.pending);
   const equityReady = Boolean(equity && !equity.pending);
   const revision =
@@ -209,6 +297,30 @@ export function BluffsPanel() {
     };
   }, [equityMode, solutionId, currentNode, revision, postCallRefreshNonce]);
 
+  useEffect(() => {
+    if (!settingsOpen) {
+      return;
+    }
+    const onPointerDown = (event: MouseEvent) => {
+      const root = settingsRef.current;
+      if (!root || root.contains(event.target as Node)) {
+        return;
+      }
+      setSettingsOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSettingsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [settingsOpen]);
+
   const expectedPostCallKey =
     solutionId && currentNode
       ? postCallCacheKey(solutionId, currentNode.node_id, revision)
@@ -225,15 +337,17 @@ export function BluffsPanel() {
     if (equityMode === "after_call" && (postCallPending || !equityHands)) {
       return [];
     }
-    return listProminentBluffs({
+    const listed = listProminentBluffs({
       node: currentNode,
       equityHands,
       threshold,
       equityMode,
-      minBetFreq: MIN_BET_FREQ,
+      minBetFreq,
+      minReachMass: reachFloor,
       nodeValues: valuesForNode ? nodeValues : null,
       evDisplayBasis,
     });
+    return sortProminentBluffs(listed, sortKey, sortDir);
   }, [
     currentNode,
     equityHands,
@@ -243,10 +357,16 @@ export function BluffsPanel() {
     valuesForNode,
     nodeValues,
     evDisplayBasis,
+    minBetFreq,
+    reachFloor,
+    sortKey,
+    sortDir,
   ]);
 
   const visible = rows.slice(0, DISPLAY_CAP);
   const thresholdLabel = `${Math.round(threshold * 100)}%`;
+  const betFloorLabel = `${Math.round(minBetFreq * 1000) / 10}%`;
+  const reachFloorLabel = reachFloor.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
   const modeLabel = equityMode === "after_call" ? "after call" : "at this node";
 
   const onRowActivate = (combo: string) => {
@@ -267,6 +387,22 @@ export function BluffsPanel() {
     void loadEquity();
   };
 
+  const onSort = (key: BluffSortKey) => {
+    if (key === sortKey) {
+      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir(key === "combo" || key === "topBetAction" ? "asc" : "desc");
+  };
+
+  const resetViewerSettings = () => {
+    setMinBetPct(Math.round(MIN_BET_FREQ * 100));
+    setMinReachMass(MIN_REACH_MASS);
+    setSortKey("betFreq");
+    setSortDir("desc");
+  };
+
   return (
     <div className="range-explorer">
       <div className="panel-title-row">
@@ -280,6 +416,74 @@ export function BluffsPanel() {
           >
             Refresh
           </button>
+          <div className="bluffs-settings" ref={settingsRef}>
+            <button
+              type="button"
+              className="toolbar-btn bluffs-settings-toggle"
+              aria-label="Bluff viewer settings"
+              aria-haspopup="menu"
+              aria-expanded={settingsOpen}
+              title="Bluff viewer settings"
+              onClick={() => setSettingsOpen((open) => !open)}
+            >
+              <SettingsGearIcon />
+            </button>
+            {settingsOpen ? (
+              <div className="bluffs-settings-menu" role="menu" aria-label="Bluff viewer settings">
+                <label className="bluffs-settings-field">
+                  <span>Min bet %</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    value={minBetPct}
+                    aria-label="Minimum bet frequency percent"
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      if (!Number.isFinite(next)) {
+                        return;
+                      }
+                      setMinBetPct(Math.min(100, Math.max(0, next)));
+                    }}
+                  />
+                </label>
+                <label className="bluffs-settings-field">
+                  <span>Min reach</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.001}
+                    value={minReachMass}
+                    aria-label="Minimum reach mass"
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      if (!Number.isFinite(next)) {
+                        return;
+                      }
+                      setMinReachMass(Math.min(1, Math.max(0, next)));
+                    }}
+                  />
+                </label>
+                <p className="bluffs-settings-hint muted">
+                  Click column headers to sort ascending/descending. Equity
+                  threshold stays in the toolbar above.
+                </p>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  role="menuitem"
+                  onClick={() => {
+                    resetViewerSettings();
+                    setSettingsOpen(false);
+                  }}
+                >
+                  Reset defaults
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -326,8 +530,8 @@ export function BluffsPanel() {
       </div>
 
       <p className="equity-note muted">
-        Check-down equity &lt; {thresholdLabel} ({modeLabel}); bet/raise/all-in ≥
-        1%; sorted by bet frequency
+        Check-down equity &lt; {thresholdLabel} ({modeLabel}); bet/raise/all-in ≥{" "}
+        {betFloorLabel}; reach ≥ {reachFloorLabel}
         {equityMode === "after_call"
           ? "; each hand uses its highest-frequency bet/raise size"
           : ""}
@@ -348,7 +552,8 @@ export function BluffsPanel() {
         <p className="empty-hint">{postCallMessage}</p>
       ) : !visible.length ? (
         <p className="empty-hint">
-          No bluffs with bet ≥ 1% and equity &lt; {thresholdLabel} ({modeLabel}).
+          No bluffs with bet ≥ {betFloorLabel}, reach ≥ {reachFloorLabel}, and
+          equity &lt; {thresholdLabel} ({modeLabel}).
         </p>
       ) : (
         <>
@@ -363,11 +568,16 @@ export function BluffsPanel() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Hand</th>
-                <th>Bet %</th>
-                <th>EV</th>
-                <th>Eq</th>
-                <th>Size</th>
+                {SORT_COLUMNS.map((column) => (
+                  <SortHeader
+                    key={column.key}
+                    label={column.label}
+                    columnKey={column.key}
+                    sortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={onSort}
+                  />
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -392,6 +602,7 @@ export function BluffsPanel() {
                   </td>
                   <td className="tabular">{formatEvChip(row.ev)}</td>
                   <td className="tabular">{formatEquityPct(row.equity)}</td>
+                  <td className="tabular">{formatReachMass(row.reach)}</td>
                   <td>{row.topBetAction ?? "—"}</td>
                 </tr>
               ))}

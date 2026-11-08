@@ -44,7 +44,21 @@ export const DEFAULT_BLUFF_EQUITY_THRESHOLD = 0.3;
 /** Include only when bet frequency is at least this fraction. */
 export const MIN_BET_FREQ = 0.01;
 
+/** Include only when node reach mass is at least this value. */
+export const MIN_REACH_MASS = 0.005;
+
 export type BluffEquityMode = "node" | "after_call";
+
+/** Sortable Bluffs table columns. */
+export type BluffSortKey =
+  | "combo"
+  | "betFreq"
+  | "ev"
+  | "equity"
+  | "reach"
+  | "topBetAction";
+
+export type BluffSortDir = "asc" | "desc";
 
 export interface ProminentBluffRow {
   combo: string;
@@ -329,16 +343,86 @@ export interface ListProminentBluffsArgs {
   /** Reserved for Mode B; Mode A ignores and uses equityHands. */
   equityMode?: BluffEquityMode;
   minBetFreq?: number;
+  /** Minimum node reach mass (inclusive). */
+  minReachMass?: number;
   /** Optional node `/values` payload — mixed EV via {@link comboEv}. */
   nodeValues?: ActionValuesPayload | null;
   /** Display basis for EV; defaults to Study local (Fold = 0). */
   evDisplayBasis?: EvDisplayBasis;
 }
 
+/** Format reach mass for the Bluffs table (two decimal digits). */
+export function formatReachMass(reach: number | null | undefined): string {
+  if (reach == null || !Number.isFinite(reach)) {
+    return "—";
+  }
+  return reach.toFixed(2);
+}
+
+function compareNullableNumber(
+  left: number | null | undefined,
+  right: number | null | undefined,
+): number {
+  const leftOk = left != null && Number.isFinite(left);
+  const rightOk = right != null && Number.isFinite(right);
+  if (!leftOk && !rightOk) {
+    return 0;
+  }
+  if (!leftOk) {
+    return 1;
+  }
+  if (!rightOk) {
+    return -1;
+  }
+  return (left as number) - (right as number);
+}
+
+/**
+ * Sort bluff rows by column. Null EV/reach sort last in both directions.
+ * Ties break on combo localeCompare.
+ */
+export function sortProminentBluffs(
+  rows: ProminentBluffRow[],
+  key: BluffSortKey,
+  dir: BluffSortDir,
+): ProminentBluffRow[] {
+  const sign = dir === "asc" ? 1 : -1;
+  return [...rows].sort((left, right) => {
+    let delta = 0;
+    switch (key) {
+      case "combo":
+        delta = left.combo.localeCompare(right.combo);
+        break;
+      case "betFreq":
+        delta = left.betFreq - right.betFreq;
+        break;
+      case "ev":
+        delta = compareNullableNumber(left.ev, right.ev);
+        break;
+      case "equity":
+        delta = left.equity - right.equity;
+        break;
+      case "reach":
+        delta = compareNullableNumber(left.reach, right.reach);
+        break;
+      case "topBetAction":
+        delta = (left.topBetAction ?? "").localeCompare(right.topBetAction ?? "");
+        break;
+      default:
+        delta = 0;
+    }
+    if (delta !== 0) {
+      return sign * delta;
+    }
+    return left.combo.localeCompare(right.combo);
+  });
+}
+
 /**
  * Prominent bluffs for the acting seat at a decision node.
- * Sort: descending betFreq, then combo localeCompare.
+ * Default order: descending betFreq, then combo localeCompare.
  * EV is display-only (does not filter); null when values are missing/pending.
+ * Combos with undefined reach or reach &lt; {@link MIN_REACH_MASS} are dropped.
  */
 export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBluffRow[] {
   const {
@@ -346,6 +430,7 @@ export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBlu
     equityHands,
     threshold,
     minBetFreq = MIN_BET_FREQ,
+    minReachMass = MIN_REACH_MASS,
     nodeValues = null,
     evDisplayBasis = "local",
   } = args;
@@ -373,8 +458,13 @@ export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBlu
     if (!equityEntry || !(equityEntry.equity < threshold)) {
       continue;
     }
-    const handReach =
-      reach && node!.reach_defined ? Number(reach[index] ?? 0) : null;
+    if (!reach || !node!.reach_defined) {
+      continue;
+    }
+    const handReach = Number(reach[index] ?? 0);
+    if (!Number.isFinite(handReach) || !(handReach >= minReachMass)) {
+      continue;
+    }
     rows.push({
       combo,
       betFreq,
@@ -382,16 +472,9 @@ export function listProminentBluffs(args: ListProminentBluffsArgs): ProminentBlu
       equity: equityEntry.equity,
       topBetAction: topBettingAction(row, actions),
       weight: Number.isFinite(equityEntry.weight) ? equityEntry.weight : null,
-      reach: handReach != null && Number.isFinite(handReach) ? handReach : null,
+      reach: handReach,
     });
   }
 
-  rows.sort((left, right) => {
-    const delta = right.betFreq - left.betFreq;
-    if (delta !== 0) {
-      return delta;
-    }
-    return left.combo.localeCompare(right.combo);
-  });
-  return rows;
+  return sortProminentBluffs(rows, "betFreq", "desc");
 }

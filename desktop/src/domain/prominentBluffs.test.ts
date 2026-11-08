@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_BLUFF_EQUITY_THRESHOLD,
   MIN_BET_FREQ,
+  MIN_REACH_MASS,
   betFrequency,
   callChildIdFromFacing,
   dominantBettingActionIndices,
   equityHandsForDominantSizes,
   facingChildIdForBet,
+  formatReachMass,
   isBluffBettingAction,
   listProminentBluffs,
   matrixCellForCombo,
+  sortProminentBluffs,
   topBettingAction,
   topBettingActionIndex,
 } from "./prominentBluffs";
@@ -253,7 +256,62 @@ describe("listProminentBluffs", () => {
     expect(rows[1]!.betFreq).toBeCloseTo(0.8, 12);
     expect(rows[2]!.betFreq).toBeCloseTo(0.5, 12);
     expect(rows.every((row) => row.equity < 0.3)).toBe(true);
+    expect(rows.every((row) => (row.reach ?? 0) >= MIN_REACH_MASS)).toBe(true);
     expect(MIN_BET_FREQ).toBe(0.01);
+    expect(MIN_REACH_MASS).toBe(0.005);
+  });
+
+  it("drops combos with reach mass below 0.005", () => {
+    const rows = listProminentBluffs({
+      node: decision({
+        actions: ["Bet 50"],
+        combos: ["7h2d", "KhKd", "2c2d"],
+        strategy: [[1], [1], [1]],
+        reach: [0.004, 0.005, 1],
+      }),
+      equityHands: [
+        { combo: "7h2d", equity: 0.1, weight: 1 },
+        { combo: "KhKd", equity: 0.1, weight: 1 },
+        { combo: "2c2d", equity: 0.1, weight: 1 },
+      ],
+      threshold: 0.3,
+    });
+    expect(rows.map((row) => row.combo)).toEqual(["2c2d", "KhKd"]);
+    expect(rows.find((row) => row.combo === "KhKd")!.reach).toBeCloseTo(0.005, 12);
+  });
+
+  it("formats reach mass to two decimals", () => {
+    expect(formatReachMass(1.234)).toBe("1.23");
+    expect(formatReachMass(0.005)).toBe("0.01");
+    expect(formatReachMass(null)).toBe("—");
+  });
+
+  it("sorts by column ascending or descending", () => {
+    const base = listProminentBluffs({
+      node: decision({
+        actions: ["Bet 50"],
+        combos: ["KhKd", "AhAd", "7h2d"],
+        strategy: [[0.5], [0.9], [0.2]],
+        reach: [0.5, 0.2, 0.8],
+      }),
+      equityHands: [
+        { combo: "KhKd", equity: 0.2, weight: 1 },
+        { combo: "AhAd", equity: 0.1, weight: 1 },
+        { combo: "7h2d", equity: 0.05, weight: 1 },
+      ],
+      threshold: 0.3,
+    });
+    expect(sortProminentBluffs(base, "combo", "asc").map((row) => row.combo)).toEqual([
+      "7h2d",
+      "AhAd",
+      "KhKd",
+    ]);
+    expect(
+      sortProminentBluffs(base, "reach", "desc").map((row) => row.combo),
+    ).toEqual(["7h2d", "KhKd", "AhAd"]);
+    expect(
+      sortProminentBluffs(base, "betFreq", "asc").map((row) => row.combo),
+    ).toEqual(["7h2d", "KhKd", "AhAd"]);
   });
 
   it("excludes missing equity and check-only / high-equity hands", () => {
