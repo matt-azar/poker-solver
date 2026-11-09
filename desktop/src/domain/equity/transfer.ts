@@ -33,7 +33,11 @@ export function draftFromBuild(input: {
   return draft;
 }
 
-function rangeFromReach(combos: string[] | undefined, reach: number[] | undefined): string {
+/** Serialize strategy-conditioned reach weights into Build/Equity range text. */
+export function rangeFromReach(
+  combos: string[] | undefined,
+  reach: number[] | undefined,
+): string {
   if (!combos || !reach || combos.length !== reach.length) {
     return "";
   }
@@ -91,7 +95,7 @@ export function draftFromStudyNode(input: {
       ? rawBoard.trim().split(/[\s,]+/).filter(Boolean)
       : [];
   const draft = createDefaultEquityDraft();
-  draft.name = `Study ${input.solutionId} / ${node.id}`;
+  draft.name = `Study ${input.solutionId} / ${node.node_id}`;
   draft.board = board;
   draft.players[0] = {
     id: "p1",

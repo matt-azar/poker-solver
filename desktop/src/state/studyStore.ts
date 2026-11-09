@@ -8,6 +8,10 @@ import {
   type DealStreet,
 } from "../domain/cards";
 import {
+  draftBuildSpotFromStudy,
+  evaluateBuildSpotEligibility,
+} from "../domain/build/transferFromStudy";
+import {
   lineCardOptionsFromChance,
   lineCardReportStreet,
   lineCardTargetId,
@@ -406,6 +410,11 @@ interface StudyState {
   loadLineCardReport: () => Promise<void>;
   /** Navigate to a report row's resolved node while preserving Study selection. */
   openLineCardRow: (resolvedNodeId: string) => Promise<void>;
+  /**
+   * Create a Build draft from the current street-start turn/river decision
+   * (raw reaching ranges, pot, effective stack) and open Build for review.
+   */
+  createBuildSpotFromHere: () => Promise<void>;
   /**
    * Open-path gate for turn/river card changes from the board strip.
    * Resolves the matching deal-chance ancestor via `pathTrail` (preferred) or
@@ -2616,6 +2625,74 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         message,
       });
     }
+  },
+
+  async createBuildSpotFromHere() {
+    const node = get().currentNode;
+    const solutionId = get().solutionId;
+    const gate = evaluateBuildSpotEligibility(node);
+    if (!gate.ok) {
+      set({ message: gate.reason });
+      return;
+    }
+    if (!node || !solutionId) {
+      set({ message: "Solve a spot before creating a Build draft from Study." });
+      return;
+    }
+    set({ message: "Creating Build spot from this decision…" });
+    let config: Record<string, unknown> | null = null;
+    try {
+      config = await engineClient.getSolutionConfig(solutionId);
+    } catch {
+      config = null;
+    }
+    const transferred = draftBuildSpotFromStudy({
+      node,
+      solutionId,
+      pathTrail: get().pathTrail,
+      config,
+      prefsDraft: get().draft,
+    });
+    if (!transferred.ok) {
+      set({ message: transferred.reason });
+      return;
+    }
+    // Optional: compare legal root actions via tree-preview.
+    let actionNote = "";
+    try {
+      const preview = await engineClient.treePreview(buildJob(transferred.draft));
+      const root = preview.nodes.find((entry) => !entry.terminal && !entry.chance);
+      const previewLabels = (root?.actions ?? []).map((action) => action.label);
+      const source = transferred.sourceActions;
+      const missing = source.filter((label) => !previewLabels.includes(label));
+      const extra = previewLabels.filter((label) => !source.includes(label));
+      if (missing.length || extra.length) {
+        actionNote = ` Root actions differ from source${
+          missing.length ? ` (missing ${missing.join(", ")})` : ""
+        }${extra.length ? ` (extra ${extra.join(", ")})` : ""}.`;
+      } else if (source.length) {
+        actionNote = " Root actions match the source decision.";
+      }
+    } catch (error) {
+      actionNote = ` Tree preview could not verify root actions (${
+        error instanceof EngineError ? error.message : "preview failed"
+      }).`;
+    }
+    const weights = {
+      oop: parseRangeText(transferred.draft.oopRange),
+      ip: parseRangeText(transferred.draft.ipRange),
+    };
+    rangeHistory.push(exactPairFromDraft(get().draft));
+    set({
+      draft: transferred.draft,
+      weights,
+      draftRevision: bumpRevision(get().draftRevision),
+      setupMeta: transferred.meta,
+      canUndoRange: rangeHistory.canUndo(),
+      canRedoRange: rangeHistory.canRedo(),
+      workspace: "build",
+      message: `${transferred.warnings[0] ?? "Build spot ready."}${actionNote}`,
+    });
   },
 
   clearBoardCardChange() {
