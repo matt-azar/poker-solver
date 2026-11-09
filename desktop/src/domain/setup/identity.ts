@@ -62,6 +62,24 @@ export function analysisPayloadMatchesNode(
 }
 
 /**
+ * True when a finished successful payload belongs to the live node.
+ * Settled failures (`error`) are not ready — auto-load must retry them.
+ */
+export function analysisPayloadReady(
+  payload:
+    | { node_id?: string; solution_id?: string; pending?: boolean; error?: string }
+    | null
+    | undefined,
+  solutionId: string | null | undefined,
+  nodeId: string | null | undefined,
+): boolean {
+  if (!payload || payload.pending || payload.error) {
+    return false;
+  }
+  return analysisPayloadMatchesNode(payload, solutionId, nodeId);
+}
+
+/**
  * Resolve baseline from status: explicit null clears; undefined keeps prior.
  * (`??` incorrectly retains a stale baseline when the backend sends null.)
  */

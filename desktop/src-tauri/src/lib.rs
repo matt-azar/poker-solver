@@ -19,8 +19,8 @@ const ENGINE_PORT: u16 = 8765;
 
 /// Study packaging equity work ceiling (`kStudyExplorerMaxPairRunouts` in
 /// `include/poker/equity.hpp`). Keeps the library default at 1.1M; passes
-/// `--max-pair-runouts` so denser ranges work without admitting full-range turn (~51M).
-const STUDY_EXPLORER_MAX_PAIR_RUNOUTS: u64 = 5_000_000;
+/// `--max-pair-runouts` so Study admits a full-range turn (~51.4M pair-runouts).
+const STUDY_EXPLORER_MAX_PAIR_RUNOUTS: u64 = 51_369_120;
 
 /// Bundle key in `tauri.conf.json` `bundle.externalBin` (build-time path under
 /// `src-tauri/`). At install time Tauri places only the **basename** next to the

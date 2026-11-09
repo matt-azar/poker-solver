@@ -164,7 +164,7 @@ export function ValueBluffsPanel() {
   const minBetFreq = clampUnit(minBetPct / 100, MIN_VALUE_BLUFFS_BET_FREQ);
   const reachFloor = clampUnit(minReachMass, MIN_VALUE_BLUFFS_REACH_MASS);
   const equityPending = Boolean(equity?.pending);
-  const equityReady = Boolean(equity && !equity.pending);
+  const equityReady = Boolean(equity && !equity.pending && !(equity as { error?: string }).error);
   const revision =
     typeof currentNode?.status_generation === "number"
       ? currentNode.status_generation
@@ -183,7 +183,7 @@ export function ValueBluffsPanel() {
   }, [solutionId, currentNode, equityReady, equityPending, loadEquity]);
 
   const valuesPending = Boolean(nodeValues?.pending);
-  const valuesReady = Boolean(nodeValues && !nodeValues.pending);
+  const valuesReady = Boolean(nodeValues && !nodeValues.pending && !nodeValues.error);
   const valuesForNode =
     valuesReady &&
     (!nodeValues?.node_id ||

@@ -227,6 +227,8 @@ export type EvDisplayBasis = "local" | "root_centered";
 
 export interface ActionValuesPayload {
   pending?: boolean;
+  /** Settled failure message when /values could not complete. */
+  error?: string;
   solution_id?: string;
   job_id?: string;
   status_generation?: number;

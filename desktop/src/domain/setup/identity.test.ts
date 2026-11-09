@@ -5,6 +5,7 @@ import {
   analysisIdentitiesEqual,
   analysisIdentityKey,
   analysisPayloadMatchesNode,
+  analysisPayloadReady,
   compareNoteIsValid,
   draftFromOpenedSolution,
   draftPartialFromSolutionConfig,
@@ -47,6 +48,23 @@ describe("analysis identity", () => {
     ).toBe(true);
     expect(
       analysisPayloadMatchesNode({ pending: true }, "s1", "root"),
+    ).toBe(true);
+  });
+
+  it("treats settled errors as not ready so auto-load can retry", () => {
+    expect(
+      analysisPayloadReady(
+        { pending: false, error: "equity work limit exceeded", node_id: "root" },
+        "s1",
+        "root",
+      ),
+    ).toBe(false);
+    expect(
+      analysisPayloadReady(
+        { pending: false, node_id: "root", oop_equity: 0.5 },
+        "s1",
+        "root",
+      ),
     ).toBe(true);
   });
 });

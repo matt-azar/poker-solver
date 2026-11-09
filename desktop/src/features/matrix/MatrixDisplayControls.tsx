@@ -3,7 +3,7 @@ import {
   type MatrixCellOverlay,
   useMatrixDisplayStore,
 } from "../../domain/matrixDisplay";
-import { analysisPayloadMatchesNode } from "../../domain/setup/identity";
+import { analysisPayloadReady } from "../../domain/setup/identity";
 import { useStudyStore } from "../../state/studyStore";
 
 const OVERLAYS: Array<{ id: MatrixCellOverlay; label: string }> = [
@@ -17,19 +17,16 @@ type AnalysisPayload = {
   pending?: boolean;
   node_id?: string;
   solution_id?: string;
+  error?: string;
 } | null;
 
-/** True when a finished (non-pending) payload belongs to the live node. */
+/** True when a finished successful payload belongs to the live node. */
 function analysisReady(
   payload: AnalysisPayload,
   solutionId: string | null | undefined,
   nodeId: string | null | undefined,
 ): boolean {
-  return Boolean(
-    payload &&
-      !payload.pending &&
-      analysisPayloadMatchesNode(payload, solutionId, nodeId),
-  );
+  return analysisPayloadReady(payload, solutionId, nodeId);
 }
 
 /** True when an in-flight pending payload is for the live node. */

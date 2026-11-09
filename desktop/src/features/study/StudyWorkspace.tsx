@@ -8,6 +8,7 @@
  *   styles/path-nav.css        action-history path strip
  * Structure of the right rail: matrix/StudyDetailPanel.tsx (Actions + Hands).
  */
+import { useEffect } from "react";
 import { LowerDock } from "../analysis/LowerDock";
 import { LockDrawer } from "../locks/LockDrawer";
 import { ActionNavBar } from "../matrix/ActionNavBar";
@@ -21,6 +22,25 @@ import { useStudyStore } from "../../state/studyStore";
 import { ActionHistory } from "./ActionHistory";
 import { ContextStrip } from "./ContextStrip";
 
+/** Keep EV + equity warm for every decision node without a manual Calculate click. */
+function AlwaysOnNodeAnalysis() {
+  const solutionId = useStudyStore((s) => s.solutionId);
+  const currentNode = useStudyStore((s) => s.currentNode);
+  const ensureNodeAnalysis = useStudyStore((s) => s.ensureNodeAnalysis);
+  const nodeId = currentNode?.node_id;
+  const kind = currentNode?.kind;
+  useEffect(() => {
+    if (!solutionId || !nodeId) {
+      return;
+    }
+    if (kind === "chance" || kind === "terminal") {
+      return;
+    }
+    void ensureNodeAnalysis();
+  }, [solutionId, nodeId, kind, ensureNodeAnalysis]);
+  return null;
+}
+
 const MODES: Array<{ id: MatrixMode; label: string }> = [
   { id: "strategy", label: "Strategy" },
   { id: "range", label: "Range" },
@@ -31,9 +51,8 @@ function MatrixModeToolbar() {
   const matrixMode = useStudyStore((s) => s.matrixMode);
   const setMatrixMode = useStudyStore((s) => s.setMatrixMode);
   const nodeValues = useStudyStore((s) => s.nodeValues);
-  const calculateEv = useStudyStore((s) => s.calculateEv);
   const currentNode = useStudyStore((s) => s.currentNode);
-  const evReady = Boolean(nodeValues && !nodeValues.pending);
+  const evReady = Boolean(nodeValues && !nodeValues.pending && !nodeValues.error);
   const evPending = Boolean(nodeValues?.pending);
   const strategyActive =
     matrixMode === "strategy" || matrixMode === "strategy-ev";
@@ -59,13 +78,12 @@ function MatrixModeToolbar() {
                 mode.id === "ev" && !evReady
                   ? evPending
                     ? "Calculating action EVs…"
-                    : "Calculate action EVs for this mode"
+                    : nodeValues?.error
+                      ? String(nodeValues.error)
+                      : "Action EVs loading…"
                   : undefined
               }
               onClick={() => {
-                if (mode.id === "ev" && !evReady && !evPending) {
-                  void calculateEv();
-                }
                 setMatrixMode(mode.id);
               }}
             >
@@ -87,6 +105,7 @@ export function StudyWorkspace() {
 
   return (
     <div className="study-workspace">
+      <AlwaysOnNodeAnalysis />
       <ContextStrip />
       <ActionHistory />
       <div className="study-main" data-nav="false">
