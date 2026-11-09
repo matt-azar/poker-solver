@@ -3,6 +3,7 @@ import {
   nodeEffectiveStack,
   nodePot,
 } from "../../domain/actionHistory";
+import { evaluateBuildSpotEligibility } from "../../domain/build/transferFromStudy";
 import {
   boardGroups,
   dealStreetFromBoard,
@@ -53,6 +54,7 @@ export function ContextStrip() {
   const prepareBoardCardChange = useStudyStore((s) => s.prepareBoardCardChange);
   const clearBoardCardChange = useStudyStore((s) => s.clearBoardCardChange);
   const loadLineCardReport = useStudyStore((s) => s.loadLineCardReport);
+  const createBuildSpotFromHere = useStudyStore((s) => s.createBuildSpotFromHere);
   const boardChangeStreet = useStudyStore((s) => s.boardChangeStreet);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerStreet, setPickerStreet] = useState<DealStreet | null>(null);
@@ -76,6 +78,7 @@ export function ContextStrip() {
     ? "Deal"
     : toActLabel(currentNode?.to_act, currentNode?.player ?? null);
   const line = currentNode?.line || currentNode?.node_id || "root";
+  const buildSpotGate = evaluateBuildSpotEligibility(currentNode);
   const showRootConfig =
     currentNode != null &&
     (Number(currentNode.pot) !== rootPot ||
@@ -234,6 +237,19 @@ export function ContextStrip() {
           Compare cards
         </button>
       ) : null}
+      <button
+        type="button"
+        className="toolbar-btn"
+        disabled={!buildSpotGate.ok}
+        title={
+          buildSpotGate.ok
+            ? "Create a Build draft from this street-start decision (reaching ranges, pot, stack)"
+            : buildSpotGate.reason
+        }
+        onClick={() => void createBuildSpotFromHere()}
+      >
+        Create Build spot
+      </button>
       <div className="context-strip__grow" />
       <div className="context-strip__engine" title={activity}>
         <span className="phase-pill" data-phase={phase} data-live={live ? "true" : "false"}>
