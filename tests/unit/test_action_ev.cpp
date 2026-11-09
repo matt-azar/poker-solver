@@ -1477,6 +1477,70 @@ void test_local_offset_includes_street_contrib_after_call()
 
 } // namespace
 
+void test_parallel_flop_action_ev_matches_serial()
+{
+    StreetConfig serial_cfg;
+    serial_cfg.board = {card_id("Ah"), card_id("Kd"), card_id("7c")};
+    serial_cfg.pot = 1000;
+    serial_cfg.stack = 1000;
+    // Wide enough that cold flop EV pays for a first-chance steal.
+    serial_cfg.oop = Range::parse("QcQd:2,JsJd:1,TcTd:1,9c9d:1");
+    serial_cfg.ip = Range::parse("QcTc:1,JhTh:1,2c3d:2,8c8d:1");
+    serial_cfg.oop_bet_sizes = {0.5};
+    serial_cfg.ip_bet_sizes = {0.5};
+    serial_cfg.oop_raise_sizes = {0.5};
+    serial_cfg.ip_raise_sizes = {0.5};
+    serial_cfg.allow_all_in = true;
+    serial_cfg.max_raises = 1;
+    serial_cfg.memory_mib = 256;
+    serial_cfg.threads = 1;
+
+    StreetConfig parallel_cfg = serial_cfg;
+    parallel_cfg.threads = 4;
+
+    StreetBatchSolver trained(serial_cfg);
+    trained.run_frozen_iterations(2, Algorithm::CfrPlus);
+    const auto tables = trained.training_tables();
+    const std::string root = trained.root_node_id();
+
+    // Same cold start for both: install the trained profile, then first query.
+    StreetBatchSolver serial(serial_cfg);
+    serial.install_training_tables(tables);
+    const StreetActionValues serial_page = serial.action_values(root);
+    CHECK(serial_page.query_seconds > 0.0);
+
+    StreetBatchSolver parallel(parallel_cfg);
+    parallel.install_training_tables(tables);
+    CHECK(parallel.thread_count() == 4);
+    const StreetActionValues parallel_page = parallel.action_values(root);
+    CHECK(parallel_page.query_seconds > 0.0);
+    expect_same_defined_values(serial_page, parallel_page);
+    CHECK_NEAR(serial_page.local_offset, parallel_page.local_offset, 1e-12);
+
+    std::cerr << "flop action EV serial_ms=" << (serial_page.query_seconds * 1000.0)
+              << " parallel_ms=" << (parallel_page.query_seconds * 1000.0) << "\n";
+    CHECK(parallel_page.query_seconds < serial_page.query_seconds);
+
+    const StreetActionValues cached = parallel.action_values(root);
+    CHECK(cached.query_seconds == 0.0);
+    expect_same_defined_values(cached, parallel_page);
+
+    // Cold parallel walk under cancel after a profile revision.
+    parallel.bind_training_algorithm(Algorithm::CfrPlus);
+    parallel.continue_frozen_iterations(1, Algorithm::CfrPlus);
+    std::atomic<bool> cancel{true};
+    bool cancelled = false;
+    try
+    {
+        (void)parallel.action_values(root, &cancel);
+    }
+    catch (const StreetValueCancelled&)
+    {
+        cancelled = true;
+    }
+    CHECK(cancelled);
+}
+
 void run_action_value_tests()
 {
     test_turn_bluff_fixture();
@@ -1487,4 +1551,5 @@ void run_action_value_tests()
     test_tiny_compatible_mass();
     test_river_bluff_fixture();
     test_local_offset_includes_street_contrib_after_call();
+    test_parallel_flop_action_ev_matches_serial();
 }

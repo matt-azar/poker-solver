@@ -186,7 +186,7 @@ StreetBatchSolver::Engine::Continuation StreetBatchSolver::Engine::player_contin
                 hand_supported(1, hand, turn, river) ? 1.0 : 0.0;
         }
     }
-    average_value_walk(workspace, node_index, turn, river, 0, false, cancel);
+    average_value_walk(workspace, node_index, turn, river, 0, false, false, cancel);
     std::vector<double> amount(static_cast<std::size_t>(opp_hands), 0.0);
     double total = 0.0;
     double by_card[52] = {};

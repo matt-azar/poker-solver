@@ -556,6 +556,9 @@ struct StreetBatchSolver::Engine
 
     mutable const double* task_pi1_ = nullptr;
 
+    // Cancel flag for AverageValue first-card chunks; null when unchecked.
+    mutable const std::atomic<bool>* task_cancel_ = nullptr;
+
     std::thread workers_[kMaxThreads];
 
     int worker_count_ = 0;
@@ -583,6 +586,7 @@ struct StreetBatchSolver::Engine
         Chance = 0,
         Slots = 1,
         Response = 2,
+        AverageValue = 3,
     };
 
     enum class SlotPass : unsigned char
@@ -1077,6 +1081,9 @@ struct StreetBatchSolver::Engine
     void run_response_chunk(int worker_index, int begin, int end);
 
 
+    void run_average_chunk(int worker_index, int begin, int end);
+
+
     void worker_main(int worker_index);
 
 
@@ -1287,6 +1294,19 @@ struct StreetBatchSolver::Engine
     // taken with probability 1, and every later decision mixes the sigma.
     // Hero values are not multiplied by hero reach. Opponent reach is, so an
     // opponent's mixed value is the sum of the already-scaled action values.
+    // serial_chance mirrors BR/train: the first eligible future-card deal may
+    // steal across workers; nested deals stay serial on the claiming worker.
+    void parallel_average_chance(
+        WorkerContext& ctx,
+        const Node& node,
+        int turn,
+        int river,
+        int depth,
+        const double* pi0,
+        const double* pi1,
+        const std::atomic<bool>* cancel) const;
+
+
     void average_value_walk(
         WorkerContext& ctx,
         int node_index,
@@ -1294,6 +1314,7 @@ struct StreetBatchSolver::Engine
         int river,
         int depth,
         bool force,
+        bool serial_chance,
         const std::atomic<bool>* cancel) const;
 
 

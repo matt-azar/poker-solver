@@ -215,6 +215,60 @@ void StreetBatchSolver::Engine::run_response_chunk(int worker_index, int begin, 
 
 
 
+void StreetBatchSolver::Engine::run_average_chunk(int worker_index, int begin, int end)
+{
+    if (worker_index > 0 && fail_tickets_.exchange(0) > 0)
+    {
+        throw std::runtime_error("injected worker failure");
+    }
+    if (begin == end)
+    {
+        return;
+    }
+    WorkerContext& ctx = context_for(worker_index);
+    Scratch& child = ctx.scratch[static_cast<std::size_t>(task_depth_)];
+    // Steal remaining first-future-card indexes. Nested chance stays serial;
+    // seed reaches with hand_supported (same as the serial average walk).
+    for (;;)
+    {
+        throw_if_cancelled(task_cancel_);
+        const int index = next_active_.fetch_add(1, std::memory_order_relaxed);
+        if (index >= active_count_)
+        {
+            break;
+        }
+        const int card = active_cards_[index];
+        int next_turn = task_turn_;
+        int next_river = task_river_;
+        if (task_deal_ == 1)
+        {
+            next_turn = card;
+        }
+        else
+        {
+            next_river = card;
+        }
+        for (int hand = 0; hand < n0; ++hand)
+        {
+            child.pi0[static_cast<std::size_t>(hand)] =
+                hand_supported(0, hand, next_turn, next_river) ? task_pi0_[hand] : 0.0;
+        }
+        for (int hand = 0; hand < n1; ++hand)
+        {
+            child.pi1[static_cast<std::size_t>(hand)] =
+                hand_supported(1, hand, next_turn, next_river) ? task_pi1_[hand] : 0.0;
+        }
+        average_value_walk(
+            ctx, task_node_, next_turn, next_river, task_depth_, false, true, task_cancel_);
+        const std::size_t ev0_at = static_cast<std::size_t>(card) * static_cast<std::size_t>(n0);
+        const std::size_t ev1_at = static_cast<std::size_t>(card) * static_cast<std::size_t>(n1);
+        std::copy(child.ev0.begin(), child.ev0.end(), result0_.begin() + static_cast<std::ptrdiff_t>(ev0_at));
+        std::copy(child.ev1.begin(), child.ev1.end(), result1_.begin() + static_cast<std::ptrdiff_t>(ev1_at));
+    }
+}
+
+
+
 void StreetBatchSolver::Engine::worker_main(int worker_index)
 {
     std::uint64_t seen = 0;
@@ -245,6 +299,10 @@ void StreetBatchSolver::Engine::worker_main(int worker_index)
             else if (job == PoolJob::Response)
             {
                 run_response_chunk(worker_index, begin, end);
+            }
+            else if (job == PoolJob::AverageValue)
+            {
+                run_average_chunk(worker_index, begin, end);
             }
             else
             {
@@ -289,6 +347,10 @@ void StreetBatchSolver::Engine::dispatch_workers(PoolJob job)
         else if (job == PoolJob::Response)
         {
             run_response_chunk(0, chunk_begin_[0], chunk_end_[0]);
+        }
+        else if (job == PoolJob::AverageValue)
+        {
+            run_average_chunk(0, chunk_begin_[0], chunk_end_[0]);
         }
         else
         {
