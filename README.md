@@ -154,5 +154,3 @@ Index: [docs/README.md](docs/README.md). Primary docs stay at `docs/`; supportin
 ## License
 
 No public license is granted for this version. See [LICENSE](LICENSE).
-
-Earlier commits keep the license text they were written with.
