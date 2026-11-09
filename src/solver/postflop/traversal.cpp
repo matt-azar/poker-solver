@@ -845,6 +845,102 @@ void StreetBatchSolver::Engine::frozen_walk(
 // taken with probability 1, and every later decision mixes the sigma.
 // Hero values are not multiplied by hero reach. Opponent reach is, so an
 // opponent's mixed value is the sum of the already-scaled action values.
+void StreetBatchSolver::Engine::parallel_average_chance(
+    WorkerContext& ctx,
+    const Node& node,
+    int turn,
+    int river,
+    int depth,
+    const double* pi0,
+    const double* pi1,
+    const std::atomic<bool>* cancel) const
+{
+    // Same first-future-card steal as train/BR. Average-value walks write only
+    // per-worker scratch and card-indexed result buffers; reduce in ascending
+    // card order for float-policy parity with the serial walk.
+    Scratch& here = ctx.scratch[static_cast<std::size_t>(depth)];
+    std::fill(here.ev0.begin(), here.ev0.end(), 0.0);
+    std::fill(here.ev1.begin(), here.ev1.end(), 0.0);
+    int denom = 52 - static_cast<int>(config.board.size()) - 4;
+    std::uint64_t dead = board_mask;
+    if (turn >= 0)
+    {
+        --denom;
+        dead |= std::uint64_t{1} << turn;
+    }
+    if (river >= 0)
+    {
+        --denom;
+        dead |= std::uint64_t{1} << river;
+    }
+    const double probability = 1.0 / static_cast<double>(denom);
+    bool active[52] = {};
+    active_count_ = 0;
+    for (int card = 0; card < 52; ++card)
+    {
+        if (((dead >> card) & 1u) != 0)
+        {
+            continue;
+        }
+        int next_turn = turn;
+        int next_river = river;
+        if (node.deal_which == 1)
+        {
+            next_turn = card;
+        }
+        else
+        {
+            next_river = card;
+        }
+        if (!card_reaches_pair(&ctx, next_turn, next_river, pi0, pi1))
+        {
+            continue;
+        }
+        active[card] = true;
+        active_cards_[active_count_++] = card;
+    }
+    next_active_.store(0, std::memory_order_relaxed);
+    const int workers = config.threads;
+    for (int worker = 0; worker < workers; ++worker)
+    {
+        chunk_begin_[worker] = 0;
+        chunk_end_[worker] = active_count_;
+    }
+    task_node_ = node.child[0];
+    task_turn_ = turn;
+    task_river_ = river;
+    task_depth_ = depth + 1;
+    task_pi0_ = pi0;
+    task_pi1_ = pi1;
+    task_deal_ = node.deal_which;
+    task_cancel_ = cancel;
+    const_cast<Engine*>(this)->dispatch_workers(PoolJob::AverageValue);
+    task_cancel_ = nullptr;
+    for (int card = 0; card < 52; ++card)
+    {
+        if (!active[card])
+        {
+            continue;
+        }
+        const double* child_ev0 = result0_.data()
+            + static_cast<std::size_t>(card) * static_cast<std::size_t>(n0);
+        const double* child_ev1 = result1_.data()
+            + static_cast<std::size_t>(card) * static_cast<std::size_t>(n1);
+        for (int hand = 0; hand < n0; ++hand)
+        {
+            here.ev0[static_cast<std::size_t>(hand)] +=
+                probability * child_ev0[hand];
+        }
+        for (int hand = 0; hand < n1; ++hand)
+        {
+            here.ev1[static_cast<std::size_t>(hand)] +=
+                probability * child_ev1[hand];
+        }
+    }
+}
+
+
+
 void StreetBatchSolver::Engine::average_value_walk(
     WorkerContext& ctx,
     int node_index,
@@ -852,6 +948,7 @@ void StreetBatchSolver::Engine::average_value_walk(
     int river,
     int depth,
     bool force,
+    bool serial_chance,
     const std::atomic<bool>* cancel) const
 {
     throw_if_cancelled(cancel);
@@ -870,6 +967,11 @@ void StreetBatchSolver::Engine::average_value_walk(
     }
     if (node.chance)
     {
+        if (!serial_chance && config.threads > 1 && worker_count_ > 0)
+        {
+            parallel_average_chance(ctx, node, turn, river, depth, pi0, pi1, cancel);
+            return;
+        }
         std::fill(here.ev0.begin(), here.ev0.end(), 0.0);
         std::fill(here.ev1.begin(), here.ev1.end(), 0.0);
         int denom = 52 - static_cast<int>(config.board.size()) - 4;
@@ -917,7 +1019,7 @@ void StreetBatchSolver::Engine::average_value_walk(
                     ? pi1[h1] : 0.0;
             }
             average_value_walk(
-                ctx, node.child[0], next_turn, next_river, depth + 1, false, cancel);
+                ctx, node.child[0], next_turn, next_river, depth + 1, false, true, cancel);
             for (int h0 = 0; h0 < n0; ++h0)
             {
                 here.ev0[static_cast<std::size_t>(h0)] +=
@@ -953,7 +1055,8 @@ void StreetBatchSolver::Engine::average_value_walk(
                     ? pi1[h1] : 0.0;
             }
         }
-        average_value_walk(ctx, node.child[0], turn, river, depth + 1, false, cancel);
+        average_value_walk(
+            ctx, node.child[0], turn, river, depth + 1, false, serial_chance, cancel);
         std::copy(child.ev0.begin(), child.ev0.end(), here.ev0.begin());
         std::copy(child.ev1.begin(), child.ev1.end(), here.ev1.begin());
         // Force at a one-action node still records the sole child under aev.
@@ -1025,7 +1128,7 @@ void StreetBatchSolver::Engine::average_value_walk(
             }
         }
         average_value_walk(
-            ctx, node.child[action], turn, river, depth + 1, false, cancel);
+            ctx, node.child[action], turn, river, depth + 1, false, serial_chance, cancel);
         std::copy(
             child.ev0.begin(), child.ev0.end(),
             here.aev0.begin() + static_cast<std::size_t>(action * n0));
