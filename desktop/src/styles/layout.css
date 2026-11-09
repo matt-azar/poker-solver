@@ -1656,18 +1656,20 @@
   font-size: 12px;
 }
 
-/* Value / Bluffs toolbar: Refresh + settings only (no panel title). */
-.value-bluffs-toolbar {
-  justify-content: flex-end;
-}
-
-/* Value / Bluffs tab: threshold + mode chrome above the list. */
+/* Value / Bluffs tab: filters + Refresh/settings on one row. */
 .value-bluffs-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin: 0 0 8px;
+}
+
+.value-bluffs-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .value-bluffs-control {

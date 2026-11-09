@@ -414,8 +414,62 @@ export function ValueBluffsPanel() {
 
   return (
     <div className="range-explorer">
-      <div className="panel-title-row value-bluffs-toolbar">
-        <div className="panel-title-actions">
+      <div className="value-bluffs-controls">
+        <label className="value-bluffs-control">
+          <span className="muted">Equity</span>
+          <button
+            type="button"
+            className="toolbar-btn value-bluffs-compare-toggle"
+            aria-label={`Equity comparison ${compareSymbol}; click to switch`}
+            title={
+              equityCompare === "lt"
+                ? "Bluffs: equity < threshold. Click for value bets (>)"
+                : "Value bets: equity > threshold. Click for bluffs (<)"
+            }
+            onClick={() =>
+              setEquityCompare((value) => (value === "lt" ? "gt" : "lt"))
+            }
+          >
+            {compareSymbol}
+          </button>
+          <input
+            type="number"
+            className="value-bluffs-threshold"
+            min={0}
+            max={100}
+            step={1}
+            value={thresholdPct}
+            aria-label="Equity threshold percent"
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              if (!Number.isFinite(next)) {
+                return;
+              }
+              setThresholdPct(Math.min(100, Math.max(0, Math.round(next))));
+            }}
+          />
+          <span className="muted">%</span>
+        </label>
+        <div className="seat-toggle" role="group" aria-label="Value / Bluffs equity mode">
+          <button
+            type="button"
+            className="toolbar-btn"
+            aria-pressed={equityMode === "node"}
+            onClick={() => setEquityMode("node")}
+          >
+            At this node
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
+            aria-pressed={equityMode === "after_call"}
+            title="Check-down equity on the Call child after the dominant bet/raise"
+            onClick={() => setEquityMode("after_call")}
+          >
+            After call
+          </button>
+        </div>
+        <div className="value-bluffs-actions">
           <button
             type="button"
             className="toolbar-btn"
@@ -476,7 +530,7 @@ export function ValueBluffsPanel() {
                 </label>
                 <p className="value-bluffs-settings-hint muted">
                   Click column headers to sort ascending/descending. Equity
-                  threshold stays in the toolbar above.
+                  threshold stays in the toolbar.
                 </p>
                 <button
                   type="button"
@@ -492,63 +546,6 @@ export function ValueBluffsPanel() {
               </div>
             ) : null}
           </div>
-        </div>
-      </div>
-
-      <div className="value-bluffs-controls">
-        <label className="value-bluffs-control">
-          <span className="muted">Equity</span>
-          <button
-            type="button"
-            className="toolbar-btn value-bluffs-compare-toggle"
-            aria-label={`Equity comparison ${compareSymbol}; click to switch`}
-            title={
-              equityCompare === "lt"
-                ? "Bluffs: equity < threshold. Click for value bets (>)"
-                : "Value bets: equity > threshold. Click for bluffs (<)"
-            }
-            onClick={() =>
-              setEquityCompare((value) => (value === "lt" ? "gt" : "lt"))
-            }
-          >
-            {compareSymbol}
-          </button>
-          <input
-            type="number"
-            className="value-bluffs-threshold"
-            min={0}
-            max={100}
-            step={1}
-            value={thresholdPct}
-            aria-label="Equity threshold percent"
-            onChange={(event) => {
-              const next = Number(event.target.value);
-              if (!Number.isFinite(next)) {
-                return;
-              }
-              setThresholdPct(Math.min(100, Math.max(0, Math.round(next))));
-            }}
-          />
-          <span className="muted">%</span>
-        </label>
-        <div className="seat-toggle" role="group" aria-label="Value / Bluffs equity mode">
-          <button
-            type="button"
-            className="toolbar-btn"
-            aria-pressed={equityMode === "node"}
-            onClick={() => setEquityMode("node")}
-          >
-            At this node
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            aria-pressed={equityMode === "after_call"}
-            title="Check-down equity on the Call child after the dominant bet/raise"
-            onClick={() => setEquityMode("after_call")}
-          >
-            After call
-          </button>
         </div>
       </div>
 
