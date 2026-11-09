@@ -63,7 +63,8 @@ export function analysisPayloadMatchesNode(
 
 /**
  * True when a finished successful payload belongs to the live node.
- * Settled failures (`error`) are not ready — auto-load must retry them.
+ * Settled failures (`error`) are not ready — auto-load may retry them unless
+ * {@link analysisErrorIsPermanent}.
  */
 export function analysisPayloadReady(
   payload:
@@ -77,6 +78,44 @@ export function analysisPayloadReady(
     return false;
   }
   return analysisPayloadMatchesNode(payload, solutionId, nodeId);
+}
+
+/** Work-limit (and similar) failures stay settled for the current inputs. */
+export function analysisErrorIsPermanent(error: string | undefined | null): boolean {
+  return Boolean(error && /work limit/i.test(error));
+}
+
+/**
+ * True when auto-load should kick off a request for this payload.
+ * Skips ready pages, in-flight pending for the live node, and permanent errors.
+ */
+export function analysisPayloadNeedsAutoload(
+  payload:
+    | { node_id?: string; solution_id?: string; pending?: boolean; error?: string }
+    | null
+    | undefined,
+  solutionId: string | null | undefined,
+  nodeId: string | null | undefined,
+): boolean {
+  if (!solutionId || !nodeId) {
+    return false;
+  }
+  if (analysisPayloadReady(payload, solutionId, nodeId)) {
+    return false;
+  }
+  if (payload?.pending) {
+    if (payload.node_id != null && payload.node_id !== nodeId) {
+      return true;
+    }
+    if (payload.solution_id != null && payload.solution_id !== solutionId) {
+      return true;
+    }
+    return false;
+  }
+  if (payload?.error && analysisErrorIsPermanent(payload.error)) {
+    return analysisPayloadMatchesNode(payload, solutionId, nodeId) ? false : true;
+  }
+  return true;
 }
 
 /**

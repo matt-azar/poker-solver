@@ -538,12 +538,14 @@ std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
 {
     // Build outside install_completed: draft_for reads g_app.session.generation(),
     // and the install callback already holds the session mutex.
+    sync_held_analysis_revision(*held);
     StatusDraft base = draft_for(
         held->job, 0, held->iterations, held->runtime_seconds, true,
         held->value, held->p1_best_response, held->p2_best_response, held->nash_gap,
         held->sample_iterations, held->sample_values, held->sample_gaps,
         held->has_memory ? &held->memory : nullptr);
     base.root_id = held->root_id;
+    base.analysis_revision = held->analysis_revision;
     std::uint64_t solution_id = 0;
     std::string status;
     const bool installed = g_app.session.install_completed(held, solution_id, [&](std::uint64_t generation, std::uint64_t id)
@@ -552,6 +554,7 @@ std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
         StatusDraft draft = base;
         draft.solution_id = id;
         draft.root_id = held->root_id;
+        draft.analysis_revision = held->analysis_revision;
         draft.generation = generation;
         status = build_status(draft);
         return status;
@@ -1937,6 +1940,74 @@ void handle_client(socket_t client)
         }
         return;
     }
+    if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/analysis") != std::string::npos)
+    {
+        const std::string prefix = "POST /api/solutions/";
+        const std::string rest = line.substr(prefix.size());
+        const std::size_t slash = rest.find('/');
+        const std::size_t space = rest.find(' ');
+        std::uint64_t id = 0;
+        if (slash == std::string::npos || space == std::string::npos || slash > space
+            || !parse_prefixed_id(rest.substr(0, slash), 's', id))
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
+            return;
+        }
+        const std::string tail = rest.substr(slash + 1, space - slash - 1);
+        if (tail.rfind("nodes/", 0) != 0 || !tail.ends_with("/analysis") || tail.size() < 15)
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"bad analysis path\"}");
+            return;
+        }
+        std::string node_path = tail.substr(6, tail.size() - 6 - 9);
+        poker::explorer::ReaderLease lease(g_app.session, g_app.session.borrow(id));
+        if (!lease)
+        {
+            send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+            return;
+        }
+        try
+        {
+            std::shared_ptr<HeldSolution> held = std::static_pointer_cast<HeldSolution>(lease.resource());
+            if (!held->street && !held->river)
+            {
+                send_response(client, 400, "application/json", "{\"error\":\"this solution has no nodes\"}");
+                return;
+            }
+            const auto query_started = std::chrono::steady_clock::now();
+            if (held->street)
+            {
+                held->street->inspect_node(node_path);
+            }
+            else
+            {
+                held->river->inspect_node(node_path);
+            }
+            const std::uint64_t solution_id = held->id;
+            const std::uint64_t job_id = held->job_id;
+            sync_held_analysis_revision(*held);
+            const std::uint64_t analysis_revision = held->analysis_revision;
+            held.reset();
+            lease.release();
+            respond_node_analysis(
+                client,
+                "POST",
+                solution_id,
+                job_id,
+                node_path,
+                analysis_revision,
+                body,
+                query_started);
+        }
+        catch (const std::exception& error)
+        {
+            std::string payload = "{\"error\":";
+            append_escaped(payload, error.what());
+            payload += '}';
+            send_response(client, 400, "application/json", payload);
+        }
+        return;
+    }
     if (line.rfind("GET /api/solutions/", 0) == 0)
     {
         const std::string rest = line.substr(std::string("GET /api/solutions/").size());
@@ -2009,6 +2080,11 @@ void handle_client(socket_t client)
                     query_kind = "actions";
                     node_path.resize(node_path.size() - 7);
                 }
+                else if (node_path.size() >= 9 && node_path.ends_with("/analysis"))
+                {
+                    query_kind = "analysis";
+                    node_path.resize(node_path.size() - 9);
+                }
                 const auto query_started = std::chrono::steady_clock::now();
                 const auto inspect = [&](const std::string& id) -> poker::solver::StreetInspection
                 {
@@ -2061,6 +2137,26 @@ void handle_client(socket_t client)
                 }
                 if (!query_kind.empty())
                 {
+                    if (query_kind == "analysis")
+                    {
+                        inspect(node_path);
+                        const std::uint64_t solution_id = held->id;
+                        const std::uint64_t job_id = held->job_id;
+                        sync_held_analysis_revision(*held);
+                        const std::uint64_t analysis_revision = held->analysis_revision;
+                        held.reset();
+                        lease.release();
+                        respond_node_analysis(
+                            client,
+                            "GET",
+                            solution_id,
+                            job_id,
+                            node_path,
+                            analysis_revision,
+                            body,
+                            query_started);
+                        return;
+                    }
                     if (query_kind == "runout" && held->river)
                     {
                         send_response(
@@ -2091,9 +2187,18 @@ void handle_client(socket_t client)
                     }
                     const std::uint64_t solution_id = held->id;
                     const std::uint64_t job_id = held->job_id;
+                    sync_held_analysis_revision(*held);
+                    const std::uint64_t analysis_revision = held->analysis_revision;
                     held.reset();
                     lease.release();
-                    respond_value_query(client, solution_id, job_id, node_path, query_started, query_kind);
+                    respond_value_query(
+                        client,
+                        solution_id,
+                        job_id,
+                        node_path,
+                        query_started,
+                        query_kind,
+                        analysis_revision);
                     return;
                 }
                 const poker::solver::StreetInspection view = inspect(node_path);
@@ -2121,6 +2226,8 @@ void handle_client(socket_t client)
                 }
                 const std::uint64_t solution_id = held->id;
                 const std::uint64_t job_id = held->job_id;
+                sync_held_analysis_revision(*held);
+                const std::uint64_t analysis_revision = held->analysis_revision;
                 held.reset();
                 lease.release();
                 respond_value_query(
@@ -2129,7 +2236,8 @@ void handle_client(socket_t client)
                     job_id,
                     "root",
                     std::chrono::steady_clock::now(),
-                    "equity");
+                    "equity",
+                    analysis_revision);
                 return;
             }
             if (tail == "categories")

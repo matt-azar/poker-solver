@@ -166,6 +166,9 @@ struct HeldSolution
     poker::solver::LockSet locks;
     // Session-scoped free-form average overlays. Not written to PSOL v2.
     poker::solver::StrategyEditSet strategy_edits;
+    // Snapshot of solver profile_epoch for Study analysis identity. Status and
+    // value handlers read this without taking the solver value mutex.
+    std::uint64_t analysis_revision = 0;
 };
 struct HandLine
 {
@@ -198,6 +201,7 @@ struct StatusDraft
     std::uint64_t solution_id = 0;
     std::uint64_t baseline_solution_id = 0;
     std::uint64_t generation = 0;
+    std::uint64_t analysis_revision = 0;
     std::string root_id;
     const poker::solver::StreetMemoryReport* memory = nullptr;
     bool include_strategy = false;
@@ -289,6 +293,9 @@ void reapply_strategy_edits(HeldSolution& held);
 
 void clear_strategy_edits(HeldSolution& held);
 
+// Refresh HeldSolution::analysis_revision from the live solver profile epoch.
+void sync_held_analysis_revision(HeldSolution& held);
+
 std::shared_ptr<HeldSolution> clone_held_baseline(const HeldSolution& source);
 
 std::string json_inspection(
@@ -301,32 +308,37 @@ std::string value_identity(
     std::uint64_t solution_id,
     std::uint64_t job_id,
     const std::string& node_id,
-    std::uint64_t generation);
+    std::uint64_t generation,
+    std::uint64_t analysis_revision = 0);
 
 std::string json_value_pending(
     std::uint64_t solution_id,
     std::uint64_t job_id,
     const std::string& node_id,
-    std::uint64_t generation);
+    std::uint64_t generation,
+    std::uint64_t analysis_revision = 0);
 
 std::string json_value_error(
     const std::string& message,
     std::uint64_t solution_id,
     std::uint64_t job_id,
     const std::string& node_id,
-    std::uint64_t generation);
+    std::uint64_t generation,
+    std::uint64_t analysis_revision = 0);
 
 std::string json_action_values(
     const poker::solver::StreetActionValues& page,
     std::uint64_t solution_id,
     std::uint64_t job_id,
-    std::uint64_t generation);
+    std::uint64_t generation,
+    std::uint64_t analysis_revision = 0);
 
 std::string json_runout_values(
     const poker::solver::StreetRunoutValues& page,
     std::uint64_t solution_id,
     std::uint64_t job_id,
-    std::uint64_t generation);
+    std::uint64_t generation,
+    std::uint64_t analysis_revision = 0);
 
 void append_equity_distribution(
     std::string& out,
@@ -340,7 +352,8 @@ std::string json_node_equity(
     const std::vector<poker::holdem::EquityDistributionBucket>& oop_distribution = {},
     const std::vector<poker::holdem::EquityDistributionBucket>& ip_distribution = {},
     const std::vector<poker::holdem::EquityHandRow>& oop_hands = {},
-    const std::vector<poker::holdem::EquityHandRow>& ip_hands = {});
+    const std::vector<poker::holdem::EquityHandRow>& ip_hands = {},
+    std::uint64_t analysis_revision = 0);
 
 std::string json_categories(
     const poker::holdem::CategoryComposition& report,
@@ -356,7 +369,19 @@ void respond_value_query(
     std::uint64_t job_id,
     const std::string& node_id,
     std::chrono::steady_clock::time_point started,
-    const std::string& kind);
+    const std::string& kind,
+    std::uint64_t analysis_revision = 0,
+    poker::explorer::ValuePriority priority = poker::explorer::ValuePriority::Auto);
+
+void respond_node_analysis(
+    socket_t client,
+    const std::string& method,
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    const std::string& node_id,
+    std::uint64_t analysis_revision,
+    const std::string& body,
+    std::chrono::steady_clock::time_point started);
 
 StatusDraft draft_for(
     const Job& job,

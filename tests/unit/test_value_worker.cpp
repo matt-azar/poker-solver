@@ -170,6 +170,7 @@ void test_newer_node_supersedes_paused_walk()
     first.solution_id = solution;
     first.job_id = 1;
     first.node_id = "A";
+    first.priority = poker::explorer::ValuePriority::Foreground;
     const ValueReply pending = worker.submit(first);
     CHECK(!pending.ready);
     for (int attempt = 0; attempt < 2000 && !entered.load(); ++attempt)
@@ -180,6 +181,7 @@ void test_newer_node_supersedes_paused_walk()
     ValueRequest second = first;
     second.node_id = "B";
     second.job_id = 2;
+    second.priority = poker::explorer::ValuePriority::Foreground;
     CHECK(!worker.submit(second).ready);
     const ValueReply ready = wait_ready(worker, second);
     CHECK(ready.ok);
@@ -376,6 +378,135 @@ void test_cancel_and_drain_releases_reader()
     CHECK(!worker.live());
 }
 
+void test_dual_metrics_run_once_with_safe_status_reads()
+{
+    Session session;
+    const std::uint64_t solution = publish(session, std::make_shared<int>(1));
+    std::atomic<int> action_calls{0};
+    std::atomic<int> equity_calls{0};
+    ValueWorker worker(
+        session,
+        [&](const std::shared_ptr<void>&, const ValueRequest& request, const std::atomic<bool>&) {
+            if (request.kind == "actions")
+            {
+                ++action_calls;
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                return std::string("{\"pending\":false,\"kind\":\"actions\"}");
+            }
+            ++equity_calls;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            return std::string("{\"pending\":false,\"kind\":\"equity\"}");
+        },
+        [](const std::string& what, const ValueRequest&) { return what; });
+
+    ValueRequest actions;
+    actions.solution_id = solution;
+    actions.job_id = 1;
+    actions.node_id = "root";
+    actions.kind = "actions";
+    actions.priority = poker::explorer::ValuePriority::Foreground;
+    ValueRequest equity = actions;
+    equity.job_id = 2;
+    equity.kind = "equity";
+
+    CHECK(!worker.enqueue(actions).ready);
+    CHECK(!worker.enqueue(equity).ready);
+    // Interleaved status reads must not restart or replace either job.
+    for (int attempt = 0; attempt < 50; ++attempt)
+    {
+        const ValueReply action_status = worker.lookup(actions);
+        const ValueReply equity_status = worker.lookup(equity);
+        CHECK(action_status.known || action_status.ready);
+        CHECK(equity_status.known || equity_status.ready);
+        if (action_status.ready && equity_status.ready)
+        {
+            CHECK(action_status.ok);
+            CHECK(equity_status.ok);
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    const ValueReply action_ready = wait_ready(worker, actions);
+    const ValueReply equity_ready = wait_ready(worker, equity);
+    CHECK(action_ready.ok);
+    CHECK(equity_ready.ok);
+    CHECK(action_calls.load() == 1);
+    CHECK(equity_calls.load() == 1);
+    worker.shutdown();
+}
+
+void test_cache_hit_while_busy()
+{
+    Session session;
+    const std::uint64_t solution = publish(session, std::make_shared<int>(1));
+    std::atomic<int> calls{0};
+    std::atomic<bool> hold_child{true};
+    ValueWorker worker(
+        session,
+        [&](const std::shared_ptr<void>&, const ValueRequest& request, const std::atomic<bool>&) {
+            ++calls;
+            if (request.node_id == "child")
+            {
+                while (hold_child.load())
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            }
+            return request.kind + ":" + request.node_id;
+        },
+        [](const std::string& what, const ValueRequest&) { return what; });
+
+    ValueRequest root_actions;
+    root_actions.solution_id = solution;
+    root_actions.job_id = 1;
+    root_actions.node_id = "root";
+    root_actions.kind = "actions";
+    CHECK(wait_ready(worker, root_actions).body == "actions:root");
+    const int after_root = calls.load();
+
+    ValueRequest child = root_actions;
+    child.node_id = "child";
+    child.job_id = 2;
+    child.priority = poker::explorer::ValuePriority::Prefetch;
+    CHECK(!worker.enqueue(child).ready);
+    for (int attempt = 0; attempt < 2000 && calls.load() == after_root; ++attempt)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(calls.load() > after_root);
+    const ValueReply cached = worker.lookup(root_actions);
+    CHECK(cached.ready);
+    CHECK(cached.ok);
+    CHECK(cached.body == "actions:root");
+    CHECK(calls.load() == after_root + 1);
+    hold_child.store(false);
+    CHECK(wait_ready(worker, child).body == "actions:child");
+    worker.shutdown();
+}
+
+void test_lookup_does_not_start_work()
+{
+    Session session;
+    const std::uint64_t solution = publish(session, std::make_shared<int>(1));
+    int calls = 0;
+    ValueWorker worker(
+        session,
+        [&](const std::shared_ptr<void>&, const ValueRequest& request, const std::atomic<bool>&) {
+            ++calls;
+            return request.node_id;
+        },
+        [](const std::string& what, const ValueRequest&) { return what; });
+    ValueRequest request;
+    request.solution_id = solution;
+    request.job_id = 1;
+    request.node_id = "root";
+    const ValueReply absent = worker.lookup(request);
+    CHECK(!absent.ready);
+    CHECK(!absent.known);
+    CHECK(calls == 0);
+    worker.shutdown();
+}
+
 } // namespace
 
 void run_value_worker_tests()
@@ -388,4 +519,7 @@ void run_value_worker_tests()
     test_shutdown_during_query_and_pending_work();
     test_destructor_releases_readers_without_shutdown();
     test_cancel_and_drain_releases_reader();
+    test_dual_metrics_run_once_with_safe_status_reads();
+    test_cache_hit_while_busy();
+    test_lookup_does_not_start_work();
 }

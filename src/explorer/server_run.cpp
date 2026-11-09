@@ -76,7 +76,8 @@ int run(int argc, char** argv)
                     oop_distribution,
                     ip_distribution,
                     oop_hands,
-                    ip_hands);
+                    ip_hands,
+                    request.profile_revision);
             }
             if (held->river)
             {
@@ -94,7 +95,12 @@ int run(int argc, char** argv)
                 {
                     throw poker::solver::StreetValueCancelled();
                 }
-                return json_action_values(page, request.solution_id, request.job_id, g_app.session.generation());
+                return json_action_values(
+                    page,
+                    request.solution_id,
+                    request.job_id,
+                    g_app.session.generation(),
+                    request.profile_revision);
             }
             if (!held->street)
             {
@@ -107,7 +113,12 @@ int run(int argc, char** argv)
                 {
                     throw poker::solver::StreetValueCancelled();
                 }
-                return json_runout_values(page, request.solution_id, request.job_id, g_app.session.generation());
+                return json_runout_values(
+                    page,
+                    request.solution_id,
+                    request.job_id,
+                    g_app.session.generation(),
+                    request.profile_revision);
             }
             if (request.kind == "equity")
             {
@@ -156,19 +167,30 @@ int run(int argc, char** argv)
                     oop_distribution,
                     ip_distribution,
                     oop_hands,
-                    ip_hands);
+                    ip_hands,
+                    request.profile_revision);
             }
             const poker::solver::StreetActionValues page = held->street->action_values(request.node_id, &cancel);
             if (cancel.load() || g_app.session.current_solution() != request.solution_id)
             {
                 throw poker::solver::StreetValueCancelled();
             }
-            return json_action_values(page, request.solution_id, request.job_id, g_app.session.generation());
+            return json_action_values(
+                page,
+                request.solution_id,
+                request.job_id,
+                g_app.session.generation(),
+                request.profile_revision);
         },
         [](const std::string& what, const poker::explorer::ValueRequest& request)
         {
             return json_value_error(
-                what, request.solution_id, request.job_id, request.node_id, g_app.session.generation());
+                what,
+                request.solution_id,
+                request.job_id,
+                request.node_id,
+                g_app.session.generation(),
+                request.profile_revision);
         });
     g_app.values = &values;
     struct Teardown

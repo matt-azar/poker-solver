@@ -370,12 +370,14 @@ void solve_job(std::uint64_t job_id, Job job)
             return;
         }
         held->id = permit.solution_id;
+        sync_held_analysis_revision(*held);
         StatusDraft success = draft_for(
             job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
             held->sample_iterations, held->sample_values, held->sample_gaps,
             held->has_memory ? &held->memory : nullptr);
         success.solution_id = permit.solution_id;
         success.root_id = held->root_id;
+        success.analysis_revision = held->analysis_revision;
         success.time_limit_reached = time_limit_reached;
         const bool published = g_app.session.commit_success(job_id, held, permit.solution_id, [&](std::uint64_t generation, bool accepted)
         {
@@ -699,9 +701,11 @@ void continue_job(std::uint64_t job_id, int extra, double time_limit)
             held->job, job_id, done, seconds, true, value, p1, p2, gap,
             held->sample_iterations, held->sample_values, held->sample_gaps,
             held->has_memory ? &held->memory : nullptr);
+        sync_held_analysis_revision(*held);
         success.solution_id = held->id;
         success.root_id = held->root_id;
         success.baseline_solution_id = held->baseline_solution_id;
+        success.analysis_revision = held->analysis_revision;
         success.paused = pause_after;
         success.time_limit_reached = time_limit_reached;
         const bool published = g_app.session.commit_continuation(job_id, [&](std::uint64_t generation)
@@ -989,6 +993,7 @@ void resolve_locked_job(
             return;
         }
         held->id = permit.solution_id;
+        sync_held_analysis_revision(*held);
         StatusDraft success = draft_for(
             held->job, job_id, done, held->runtime_seconds, true, value, p1, p2, gap,
             held->sample_iterations, held->sample_values, held->sample_gaps,
@@ -996,6 +1001,7 @@ void resolve_locked_job(
         success.solution_id = held->id;
         success.root_id = held->root_id;
         success.baseline_solution_id = held->baseline_solution_id;
+        success.analysis_revision = held->analysis_revision;
         success.time_limit_reached = time_limit_reached;
         const bool published = g_app.session.commit_success(
             job_id,

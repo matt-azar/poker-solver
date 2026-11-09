@@ -204,6 +204,14 @@ export function ComboInspector() {
     ) {
       return;
     }
+    // Permanent failures (e.g. work-limit) stay settled; Retry is explicit.
+    if (
+      nodeValues?.error &&
+      /work limit/i.test(String(nodeValues.error)) &&
+      (!nodeValues.node_id || nodeValues.node_id === currentNode.node_id)
+    ) {
+      return;
+    }
     void calculateEv();
   }, [showEv, solutionId, currentNode, nodeValues, calculateEv]);
 

@@ -1,11 +1,12 @@
 /**
  * Client-side analysis page cache + serialized ValueWorker queue.
  *
- * Explorer runs one ValueWorker: a new equity/values/runouts submit cancels the
- * in-flight walk. Study used to fire overlapping polls (matrix overlay, Value / Bluffs,
- * Hands, manual Calculate) which cancelled each other forever. This module:
+ * Explorer's ValueWorker accepts multiple queued metrics and serves cache hits
+ * while busy, but Study still serializes client polls so navigation/prefetch
+ * stay orderly. This module:
  *   1. Remembers ready pages by solution/node/revision/kind so navigation is free.
  *   2. Runs worker-bound kinds one at a time (user jobs before prefetch).
+ *   3. Requires each job's run() to await the full poll lifecycle (not the first 202).
  * Full-tree frontload after solve is intentionally not done — large trees make
  * that too expensive; we warm the live node and optionally its children.
  */

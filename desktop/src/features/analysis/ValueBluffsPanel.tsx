@@ -166,21 +166,13 @@ export function ValueBluffsPanel() {
   const equityPending = Boolean(equity?.pending);
   const equityReady = Boolean(equity && !equity.pending && !(equity as { error?: string }).error);
   const revision =
-    typeof currentNode?.status_generation === "number"
-      ? currentNode.status_generation
-      : typeof status?.status_generation === "number"
-        ? status.status_generation
-        : 0;
-
-  useEffect(() => {
-    if (!solutionId || !currentNode) {
-      return;
-    }
-    if (equityReady || equityPending) {
-      return;
-    }
-    void loadEquity();
-  }, [solutionId, currentNode, equityReady, equityPending, loadEquity]);
+    typeof status?.analysis_revision === "number"
+      ? status.analysis_revision
+      : typeof currentNode?.status_generation === "number"
+        ? currentNode.status_generation
+        : typeof status?.status_generation === "number"
+          ? status.status_generation
+          : 0;
 
   const valuesPending = Boolean(nodeValues?.pending);
   const valuesReady = Boolean(nodeValues && !nodeValues.pending && !nodeValues.error);
@@ -190,8 +182,7 @@ export function ValueBluffsPanel() {
       !currentNode?.node_id ||
       nodeValues.node_id === currentNode.node_id);
 
-  // Load /values only after node equity is ready — explorer has one analysis
-  // worker; concurrent equity+values polls can cancel each other forever.
+  // Selection-owned warm: EV and equity share the worker queue without cancelling.
   useEffect(() => {
     if (!solutionId || !currentNode) {
       return;
@@ -203,19 +194,20 @@ export function ValueBluffsPanel() {
     ) {
       return;
     }
-    if (!equityReady) {
-      return;
+    if (!equityReady && !equityPending) {
+      void loadEquity();
     }
-    if (valuesReady || valuesPending) {
-      return;
+    if (!valuesReady && !valuesPending) {
+      void calculateEv();
     }
-    void calculateEv();
   }, [
     solutionId,
     currentNode,
     equityReady,
+    equityPending,
     valuesReady,
     valuesPending,
+    loadEquity,
     calculateEv,
   ]);
 

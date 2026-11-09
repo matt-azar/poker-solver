@@ -20,6 +20,7 @@ Object.defineProperty(window, "matchMedia", {
 
 const loadEquity = vi.fn(async () => undefined);
 const calculateEv = vi.fn(async () => undefined);
+const ensureNodeAnalysis = vi.fn(async () => undefined);
 
 const { useStudyStore } = await import("../../state/studyStore");
 const { MatrixDisplayControls } = await import("./MatrixDisplayControls");
@@ -28,6 +29,7 @@ describe("MatrixDisplayControls", () => {
   beforeEach(() => {
     loadEquity.mockClear();
     calculateEv.mockClear();
+    ensureNodeAnalysis.mockClear();
     useMatrixDisplayStore.getState().resetPrefs();
     useStudyStore.setState({
       solutionId: "sol-1",
@@ -44,6 +46,7 @@ describe("MatrixDisplayControls", () => {
       nodeValues: null,
       loadEquity,
       calculateEv,
+      ensureNodeAnalysis,
     });
   });
 
@@ -72,6 +75,7 @@ describe("MatrixDisplayControls", () => {
       expect(loadEquity).toHaveBeenCalled();
     });
     expect(calculateEv).not.toHaveBeenCalled();
+    expect(ensureNodeAnalysis).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Load Eq" })).toBeNull();
   });
 
@@ -87,32 +91,34 @@ describe("MatrixDisplayControls", () => {
     expect(screen.queryByRole("button", { name: "Load EV" })).toBeNull();
   });
 
-  it("auto-loads equity first when EV+Eq overlay is selected", async () => {
+  it("uses the selection owner when EV+Eq overlay needs both metrics", async () => {
     render(<MatrixDisplayControls />);
     fireEvent.change(screen.getByLabelText("Overlay"), {
       target: { value: "both" },
     });
     await waitFor(() => {
-      expect(loadEquity).toHaveBeenCalled();
+      expect(ensureNodeAnalysis).toHaveBeenCalled();
     });
-    // Do not start /values until equity is ready — concurrent polls thrash the worker.
+    expect(loadEquity).not.toHaveBeenCalled();
     expect(calculateEv).not.toHaveBeenCalled();
   });
 
-  it("starts EV after equity is ready for EV+Eq overlay", async () => {
-    useMatrixDisplayStore.getState().setCellOverlay("both");
+  it("does not auto-resubmit a permanent equity work-limit error", async () => {
+    useStudyStore.setState({
+      equity: {
+        pending: false,
+        error: "equity work limit exceeded",
+        node_id: "n1",
+        solution_id: "sol-1",
+      },
+    });
+    useMatrixDisplayStore.getState().setCellOverlay("equity");
     render(<MatrixDisplayControls />);
     await waitFor(() => {
-      expect(loadEquity).toHaveBeenCalled();
+      expect(screen.getByLabelText("Overlay")).toBeTruthy();
     });
-    expect(calculateEv).not.toHaveBeenCalled();
-
-    useStudyStore.setState({
-      equity: { pending: false, node_id: "n1", solution_id: "sol-1" },
-    });
-    await waitFor(() => {
-      expect(calculateEv).toHaveBeenCalled();
-    });
+    expect(loadEquity).not.toHaveBeenCalled();
+    expect(ensureNodeAnalysis).not.toHaveBeenCalled();
   });
 
   it("auto-loads EV when matrix mode is EV", async () => {

@@ -629,6 +629,8 @@ std::string build_status(const StatusDraft& draft)
     }
     out += ",\"status_generation\":";
     out += std::to_string(draft.generation);
+    out += ",\"analysis_revision\":";
+    out += std::to_string(draft.analysis_revision);
     out += ",\"pot\":";
     out += poker::format_chips(job.pot);
     out += ",\"stack\":";
@@ -1424,6 +1426,7 @@ void reapply_strategy_edits(HeldSolution& held)
         const poker::solver::StreetInspection view = inspect_held_node(held, node_id);
         apply_strategy_edit_row(held, node_id, *edit, view);
     }
+    sync_held_analysis_revision(held);
 }
 
 void clear_strategy_edits(HeldSolution& held)
@@ -1431,10 +1434,27 @@ void clear_strategy_edits(HeldSolution& held)
     if (held.strategy_edits.empty())
     {
         invalidate_held_average(held);
+        sync_held_analysis_revision(held);
         return;
     }
     held.strategy_edits.clear();
     invalidate_held_average(held);
+    sync_held_analysis_revision(held);
+}
+
+void sync_held_analysis_revision(HeldSolution& held)
+{
+    if (held.street)
+    {
+        held.analysis_revision = held.street->profile_epoch();
+        return;
+    }
+    if (held.river)
+    {
+        held.analysis_revision = held.river->profile_epoch();
+        return;
+    }
+    held.analysis_revision = 0;
 }
 
 std::shared_ptr<HeldSolution> clone_held_baseline(const HeldSolution& source)
@@ -1458,6 +1478,7 @@ std::shared_ptr<HeldSolution> clone_held_baseline(const HeldSolution& source)
     copy->sample_values = source.sample_values;
     copy->sample_gaps = source.sample_gaps;
     copy->locks = source.locks;
+    copy->analysis_revision = source.analysis_revision;
     try
     {
         if (source.street)
@@ -1709,7 +1730,8 @@ std::string value_identity(
     std::uint64_t solution_id,
     std::uint64_t job_id,
     const std::string& node_id,
-    std::uint64_t generation)
+    std::uint64_t generation,
+    std::uint64_t analysis_revision)
 {
     std::string out = "\"solution_id\":";
     append_escaped(out, "s" + std::to_string(solution_id));
@@ -1719,6 +1741,8 @@ std::string value_identity(
     append_escaped(out, node_id);
     out += ",\"status_generation\":";
     out += std::to_string(generation);
+    out += ",\"analysis_revision\":";
+    out += std::to_string(analysis_revision);
     return out;
 }
 
@@ -1726,9 +1750,11 @@ std::string json_value_pending(
     std::uint64_t solution_id,
     std::uint64_t job_id,
     const std::string& node_id,
-    std::uint64_t generation)
+    std::uint64_t generation,
+    std::uint64_t analysis_revision)
 {
-    return "{\"pending\":true," + value_identity(solution_id, job_id, node_id, generation) + "}";
+    return "{\"pending\":true,"
+        + value_identity(solution_id, job_id, node_id, generation, analysis_revision) + "}";
 }
 
 std::string json_value_error(
@@ -1736,12 +1762,13 @@ std::string json_value_error(
     std::uint64_t solution_id,
     std::uint64_t job_id,
     const std::string& node_id,
-    std::uint64_t generation)
+    std::uint64_t generation,
+    std::uint64_t analysis_revision)
 {
     std::string out = "{\"pending\":false,\"error\":";
     append_escaped(out, message);
     out += ',';
-    out += value_identity(solution_id, job_id, node_id, generation);
+    out += value_identity(solution_id, job_id, node_id, generation, analysis_revision);
     out += '}';
     return out;
 }
@@ -1750,12 +1777,13 @@ std::string json_action_values(
     const poker::solver::StreetActionValues& page,
     std::uint64_t solution_id,
     std::uint64_t job_id,
-    std::uint64_t generation)
+    std::uint64_t generation,
+    std::uint64_t analysis_revision)
 {
     const std::size_t hands = page.combos.size();
     const std::size_t actions = page.actions.size();
     std::string out = "{\"pending\":false,";
-    out += value_identity(solution_id, job_id, page.node_id, generation);
+    out += value_identity(solution_id, job_id, page.node_id, generation, analysis_revision);
     out += ",\"player\":";
     out += std::to_string(page.player);
     out += ",\"units\":";
@@ -1858,10 +1886,11 @@ std::string json_runout_values(
     const poker::solver::StreetRunoutValues& page,
     std::uint64_t solution_id,
     std::uint64_t job_id,
-    std::uint64_t generation)
+    std::uint64_t generation,
+    std::uint64_t analysis_revision)
 {
     std::string out = "{\"pending\":false,\"kind\":\"runout\",";
-    out += value_identity(solution_id, job_id, page.node_id, generation);
+    out += value_identity(solution_id, job_id, page.node_id, generation, analysis_revision);
     out += ",\"units\":";
     append_escaped(out, page.units);
     out += ",\"utility_basis\":";
@@ -1933,10 +1962,11 @@ std::string json_node_equity(
     const std::vector<poker::holdem::EquityDistributionBucket>& oop_distribution,
     const std::vector<poker::holdem::EquityDistributionBucket>& ip_distribution,
     const std::vector<poker::holdem::EquityHandRow>& oop_hands,
-    const std::vector<poker::holdem::EquityHandRow>& ip_hands)
+    const std::vector<poker::holdem::EquityHandRow>& ip_hands,
+    std::uint64_t analysis_revision)
 {
     std::string out = "{\"pending\":false,\"kind\":\"equity\",";
-    out += value_identity(solution_id, job_id, page.node_id, generation);
+    out += value_identity(solution_id, job_id, page.node_id, generation, analysis_revision);
     out += ",\"units\":";
     append_escaped(out, page.units);
     out += ",\"model\":";
@@ -1993,19 +2023,25 @@ void respond_value_query(
     std::uint64_t job_id,
     const std::string& node_id,
     std::chrono::steady_clock::time_point started,
-    const std::string& kind)
+    const std::string& kind,
+    std::uint64_t analysis_revision,
+    poker::explorer::ValuePriority priority)
 {
     const std::uint64_t generation = g_app.session.generation();
     poker::explorer::ValueRequest request;
     request.solution_id = solution_id;
     request.job_id = job_id;
+    request.profile_revision = analysis_revision;
     request.node_id = node_id;
     request.kind = kind;
+    request.priority = priority;
+    // submit looks up first (safe while another job runs) and enqueues only when
+    // the identity is unknown — status polls no longer replace sibling metrics.
     const poker::explorer::ValueReply reply = g_app.values->submit(request);
     const int status = reply.ready ? (reply.ok ? 200 : 400) : 202;
     const std::string body = reply.ready
         ? reply.body
-        : json_value_pending(solution_id, reply.job_id, node_id, generation);
+        : json_value_pending(solution_id, reply.job_id, node_id, generation, analysis_revision);
     const double handler_seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - started).count();
     send_response(
@@ -2013,6 +2049,214 @@ void respond_value_query(
         status,
         "application/json",
         body,
+        "X-Query-Seconds: " + format_number(handler_seconds) + "\r\n");
+}
+
+namespace
+{
+
+std::string analysis_handle_for(
+    std::uint64_t solution_id,
+    std::uint64_t analysis_revision,
+    const std::string& node_id)
+{
+    return "a" + std::to_string(solution_id) + "." + std::to_string(analysis_revision) + "." + node_id;
+}
+
+const char* metric_state_name(const poker::explorer::ValueReply& reply)
+{
+    if (reply.ready)
+    {
+        return reply.ok ? "ready" : "failed";
+    }
+    if (reply.known)
+    {
+        return "pending";
+    }
+    return "absent";
+}
+
+std::string metric_kind_from_client(std::string_view text)
+{
+    if (text == "actions" || text == "values" || text == "ev")
+    {
+        return "actions";
+    }
+    if (text == "runouts" || text == "runout")
+    {
+        return "runout";
+    }
+    if (text == "equity")
+    {
+        return "equity";
+    }
+    return {};
+}
+
+std::string client_metric_name(const std::string& kind)
+{
+    if (kind == "actions")
+    {
+        return "values";
+    }
+    if (kind == "runout")
+    {
+        return "runouts";
+    }
+    return kind;
+}
+
+} // namespace
+
+void respond_node_analysis(
+    socket_t client,
+    const std::string& method,
+    std::uint64_t solution_id,
+    std::uint64_t job_id,
+    const std::string& node_id,
+    std::uint64_t analysis_revision,
+    const std::string& body,
+    std::chrono::steady_clock::time_point started)
+{
+    const std::uint64_t generation = g_app.session.generation();
+    const std::string handle = analysis_handle_for(solution_id, analysis_revision, node_id);
+    std::vector<std::string> kinds;
+    poker::explorer::ValuePriority priority = poker::explorer::ValuePriority::Foreground;
+    if (method == "POST")
+    {
+        const std::vector<std::string> requested = read_string_array(body, "metrics");
+        if (requested.empty())
+        {
+            // Default Study selection warm: action EV then equity.
+            kinds = {"actions", "equity"};
+        }
+        else
+        {
+            for (const std::string& item : requested)
+            {
+                const std::string kind = metric_kind_from_client(item);
+                if (kind.empty())
+                {
+                    send_response(
+                        client,
+                        400,
+                        "application/json",
+                        "{\"error\":\"metrics must be values, equity, and/or runouts\"}");
+                    return;
+                }
+                kinds.push_back(kind);
+            }
+        }
+        const std::string priority_text = read_string(body, "priority", "foreground");
+        if (priority_text == "prefetch")
+        {
+            priority = poker::explorer::ValuePriority::Prefetch;
+        }
+        else if (priority_text == "auto")
+        {
+            priority = poker::explorer::ValuePriority::Auto;
+        }
+        else
+        {
+            priority = poker::explorer::ValuePriority::Foreground;
+        }
+        // EV before equity for the selected decision node.
+        std::sort(kinds.begin(), kinds.end(), [](const std::string& left, const std::string& right) {
+            const auto rank = [](const std::string& kind) {
+                if (kind == "actions")
+                {
+                    return 0;
+                }
+                if (kind == "runout")
+                {
+                    return 1;
+                }
+                return 2;
+            };
+            return rank(left) < rank(right);
+        });
+        kinds.erase(std::unique(kinds.begin(), kinds.end()), kinds.end());
+        for (const std::string& kind : kinds)
+        {
+            poker::explorer::ValueRequest request;
+            request.solution_id = solution_id;
+            request.job_id = job_id;
+            request.profile_revision = analysis_revision;
+            request.node_id = node_id;
+            request.kind = kind;
+            request.priority = priority;
+            g_app.values->enqueue(request);
+        }
+    }
+    else
+    {
+        // Passive read of the common Study metrics for this node.
+        kinds = {"actions", "equity", "runout"};
+    }
+
+    std::string out = "{\"handle\":";
+    append_escaped(out, handle);
+    out += ",\"solution_id\":";
+    append_escaped(out, "s" + std::to_string(solution_id));
+    out += ",\"node_id\":";
+    append_escaped(out, node_id);
+    out += ",\"status_generation\":";
+    out += std::to_string(generation);
+    out += ",\"analysis_revision\":";
+    out += std::to_string(analysis_revision);
+    out += ",\"metrics\":{";
+    bool any_pending = false;
+    bool any_failed = false;
+    for (std::size_t index = 0; index < kinds.size(); ++index)
+    {
+        const std::string& kind = kinds[index];
+        poker::explorer::ValueRequest request;
+        request.solution_id = solution_id;
+        request.job_id = job_id;
+        request.profile_revision = analysis_revision;
+        request.node_id = node_id;
+        request.kind = kind;
+        const poker::explorer::ValueReply reply = method == "POST"
+            ? g_app.values->lookup(request)
+            : g_app.values->lookup(request);
+        if (index > 0)
+        {
+            out += ',';
+        }
+        out += '"';
+        out += client_metric_name(kind);
+        out += "\":{\"state\":";
+        append_escaped(out, metric_state_name(reply));
+        out += ",\"pending\":";
+        out += (!reply.ready && reply.known) ? "true" : "false";
+        if (reply.ready)
+        {
+            out += ",\"ok\":";
+            out += reply.ok ? "true" : "false";
+            out += ",\"body\":";
+            out += reply.body.empty() ? "null" : reply.body;
+            if (!reply.ok)
+            {
+                any_failed = true;
+            }
+        }
+        else if (reply.known)
+        {
+            any_pending = true;
+        }
+        out += '}';
+    }
+    out += "}}";
+    const int status = method == "POST"
+        ? (any_pending ? 202 : (any_failed ? 400 : 200))
+        : (any_pending ? 202 : 200);
+    const double handler_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - started).count();
+    send_response(
+        client,
+        status,
+        "application/json",
+        out,
         "X-Query-Seconds: " + format_number(handler_seconds) + "\r\n");
 }
 

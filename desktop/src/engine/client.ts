@@ -218,6 +218,39 @@ export class EngineClient {
     return data;
   }
 
+  /** Start Study metrics for a node (idempotent enqueue). */
+  async startNodeAnalysis(
+    solutionId: string,
+    nodeId: string,
+    metrics: Array<"values" | "equity" | "runouts"> = ["values", "equity"],
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const { response, data } = await this.request(
+      "POST",
+      `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/analysis`,
+      { metrics, priority: "foreground" },
+      { signal },
+    );
+    this.ensureOk(response, data, true);
+    return data;
+  }
+
+  /** Passive read of Study analysis handle state (never starts work). */
+  async getNodeAnalysis(
+    solutionId: string,
+    nodeId: string,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const { response, data } = await this.request(
+      "GET",
+      `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/analysis`,
+      undefined,
+      { signal },
+    );
+    this.ensureOk(response, data, true);
+    return data;
+  }
+
   async getCategories(solutionId: string, nodeId?: string, signal?: AbortSignal): Promise<unknown> {
     const path = nodeId
       ? `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/categories`

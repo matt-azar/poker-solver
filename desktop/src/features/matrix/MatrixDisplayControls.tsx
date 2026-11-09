@@ -3,7 +3,7 @@ import {
   type MatrixCellOverlay,
   useMatrixDisplayStore,
 } from "../../domain/matrixDisplay";
-import { analysisPayloadReady } from "../../domain/setup/identity";
+import { analysisPayloadNeedsAutoload } from "../../domain/setup/identity";
 import { useStudyStore } from "../../state/studyStore";
 
 const OVERLAYS: Array<{ id: MatrixCellOverlay; label: string }> = [
@@ -20,33 +20,6 @@ type AnalysisPayload = {
   error?: string;
 } | null;
 
-/** True when a finished successful payload belongs to the live node. */
-function analysisReady(
-  payload: AnalysisPayload,
-  solutionId: string | null | undefined,
-  nodeId: string | null | undefined,
-): boolean {
-  return analysisPayloadReady(payload, solutionId, nodeId);
-}
-
-/** True when an in-flight pending payload is for the live node. */
-function analysisPendingForNode(
-  payload: AnalysisPayload,
-  solutionId: string | null | undefined,
-  nodeId: string | null | undefined,
-): boolean {
-  if (!payload?.pending || !solutionId || !nodeId) {
-    return false;
-  }
-  if (payload.node_id != null && payload.node_id !== nodeId) {
-    return false;
-  }
-  if (payload.solution_id != null && payload.solution_id !== solutionId) {
-    return false;
-  }
-  return true;
-}
-
 /** Toggles for range-weight height fill and EV/equity cell overlays. */
 export function MatrixDisplayControls() {
   const prefs = useMatrixDisplayStore((s) => s.prefs);
@@ -56,6 +29,7 @@ export function MatrixDisplayControls() {
   const setCellOverlay = useMatrixDisplayStore((s) => s.setCellOverlay);
   const setColorByOverlay = useMatrixDisplayStore((s) => s.setColorByOverlay);
   const equity = useStudyStore((s) => s.equity) as AnalysisPayload;
+  const ensureNodeAnalysis = useStudyStore((s) => s.ensureNodeAnalysis);
   const loadEquity = useStudyStore((s) => s.loadEquity);
   const calculateEv = useStudyStore((s) => s.calculateEv);
   const nodeValues = useStudyStore((s) => s.nodeValues);
@@ -80,35 +54,43 @@ export function MatrixDisplayControls() {
       prefs.cellOverlay === "both" ||
       matrixMode === "ev" ||
       matrixMode === "strategy-ev");
-  const equityReady = analysisReady(equity, solutionId, nodeId);
-  const equityPending = analysisPendingForNode(equity, solutionId, nodeId);
-  const evReady = analysisReady(nodeValues, solutionId, nodeId);
-  const evPending = analysisPendingForNode(nodeValues, solutionId, nodeId);
+  const needEquity = wantEquity && analysisPayloadNeedsAutoload(equity, solutionId, nodeId);
+  const needEv = wantEv && analysisPayloadNeedsAutoload(nodeValues, solutionId, nodeId);
+  const equityPending = Boolean(
+    equity?.pending &&
+      (!equity.node_id || equity.node_id === nodeId) &&
+      (!equity.solution_id || equity.solution_id === solutionId),
+  );
+  const evPending = Boolean(
+    nodeValues?.pending &&
+      (!nodeValues.node_id || nodeValues.node_id === nodeId) &&
+      (!nodeValues.solution_id || nodeValues.solution_id === solutionId),
+  );
 
-  // Auto-compute when the overlay / EV mode needs analysis for the live node.
-  // Explorer has one value worker: equity and /values cancel each other, so when
-  // both are needed load equity first and only then request EV (ValueBluffsPanel same).
+  // Overlay / EV mode requests funnel through the Study selection owner. Always-on
+  // warm already covers decision nodes; this catches overlay toggles and retries
+  // without sequencing equity ahead of EV (the worker queue accepts both).
   useEffect(() => {
     if (!currentNode || !solutionId || !decisionNode) {
       return;
     }
-    if (wantEquity && !equityReady && !equityPending) {
+    if (needEquity && needEv) {
+      void ensureNodeAnalysis();
+      return;
+    }
+    if (needEquity) {
       void loadEquity();
     }
-    const equityBlocking = wantEquity && !equityReady;
-    if (wantEv && !evReady && !evPending && !equityBlocking) {
+    if (needEv) {
       void calculateEv();
     }
   }, [
     currentNode,
     solutionId,
     decisionNode,
-    wantEquity,
-    wantEv,
-    equityReady,
-    equityPending,
-    evReady,
-    evPending,
+    needEquity,
+    needEv,
+    ensureNodeAnalysis,
     loadEquity,
     calculateEv,
   ]);
