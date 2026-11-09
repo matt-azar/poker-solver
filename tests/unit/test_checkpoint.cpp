@@ -477,19 +477,31 @@ void test_checkpoint_pcfr_prediction_exact_continue()
     std::filesystem::remove(path);
 }
 
-void test_runout_and_equity()
+void expect_checkdown_matches_enumerator(StreetBatchSolver& solver, const std::string& node_id)
 {
-    StreetBatchSolver solver(turn_config());
-    solver.continue_iterations(2, Algorithm::CfrPlus);
-    const poker::solver::StreetReachWeights weights = solver.reaching_weights(solver.root_node_id());
+    const poker::solver::StreetReachWeights weights = solver.reaching_weights(node_id);
     const poker::holdem::ShowdownEquity equity = poker::holdem::showdown_equity(
         weights.board,
         poker::holdem::Range::parse(weights.oop),
         poker::holdem::Range::parse(weights.ip));
-    CHECK(equity.joint_defined);
-    CHECK(equity.player0.defined);
-    CHECK(equity.player1.defined);
-    CHECK_NEAR(equity.player0.equity + equity.player1.equity, 1.0, 1e-9);
+    const poker::holdem::ShowdownEquity native = solver.checkdown_equity(node_id, nullptr);
+    CHECK(equity.joint_defined == native.joint_defined);
+    if (!equity.joint_defined)
+    {
+        return;
+    }
+    CHECK(native.player0.defined);
+    CHECK(native.player1.defined);
+    CHECK_NEAR(native.player0.equity, equity.player0.equity, 1e-9);
+    CHECK_NEAR(native.player1.equity, equity.player1.equity, 1e-9);
+    CHECK_NEAR(native.player0.equity + native.player1.equity, 1.0, 1e-9);
+}
+
+void test_runout_and_equity()
+{
+    StreetBatchSolver solver(turn_config());
+    solver.continue_iterations(2, Algorithm::CfrPlus);
+    expect_checkdown_matches_enumerator(solver, solver.root_node_id());
     const std::string chance = chance_after_checks(solver);
     const poker::solver::StreetRunoutValues runout = solver.runout_values(chance, nullptr);
     CHECK(!runout.cards.empty());
@@ -524,6 +536,42 @@ void test_runout_and_equity()
     CHECK(runout.utility_basis == "root_centered");
 }
 
+void test_checkdown_equity_parity_flop_and_river()
+{
+    {
+        poker::streets::StreetConfig config;
+        config.board = {card("Ah"), card("Kd"), card("7c")};
+        config.pot = 100;
+        config.stack = 100;
+        config.oop = poker::holdem::Range::parse("QcQd,JcJd");
+        config.ip = poker::holdem::Range::parse("TcTd,9c9d");
+        config.oop_bet_sizes = {};
+        config.ip_bet_sizes = {};
+        config.max_raises = 0;
+        config.allow_all_in = false;
+        config.memory_mib = 64;
+        StreetBatchSolver solver(config);
+        solver.continue_iterations(1, Algorithm::CfrPlus);
+        expect_checkdown_matches_enumerator(solver, solver.root_node_id());
+    }
+    {
+        poker::streets::StreetConfig config;
+        config.board = {card("Ah"), card("Kd"), card("7c"), card("4s"), card("2h")};
+        config.pot = 100;
+        config.stack = 100;
+        config.oop = poker::holdem::Range::parse("AcAd:1,KsKc:0.5");
+        config.ip = poker::holdem::Range::parse("QsQc:1,JsJc:0.25");
+        config.oop_bet_sizes = {};
+        config.ip_bet_sizes = {};
+        config.max_raises = 0;
+        config.allow_all_in = false;
+        config.memory_mib = 64;
+        StreetBatchSolver solver(config);
+        solver.continue_iterations(1, Algorithm::CfrPlus);
+        expect_checkdown_matches_enumerator(solver, solver.root_node_id());
+    }
+}
+
 } // namespace
 
 void run_checkpoint_tests()
@@ -537,4 +585,5 @@ void run_checkpoint_tests()
     test_checkpoint_dcfr_params_round_trip();
     test_checkpoint_pcfr_prediction_exact_continue();
     test_runout_and_equity();
+    test_checkdown_equity_parity_flop_and_river();
 }
