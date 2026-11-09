@@ -130,10 +130,11 @@ describe("overlay labels and weight fill", () => {
   it("formats overlay sub labels", () => {
     expect(overlaySubLabel("none", 1.2, 0.55)).toBe("");
     expect(overlaySubLabel("ev", 1.25, 0.55)).toBe("1.3");
-    expect(overlaySubLabel("equity", 1.25, 0.55)).toBe("55");
-    expect(overlaySubLabel("both", 1.25, 0.55)).toBe("1.3/55");
+    expect(overlaySubLabel("equity", 1.25, 0.55)).toBe("55.0");
+    expect(overlaySubLabel("both", 1.25, 0.55)).toBe("1.3/55.0");
     expect(overlaySubLabel("equity", null, null)).toBe("—");
-    expect(formatEquityPct(0.555)).toBe("56");
+    expect(formatEquityPct(0.555)).toBe("55.5");
+    expect(formatEquityPct(0.5555)).toBe("55.6");
     expect(formatEvChip(null)).toBe("—");
   });
 

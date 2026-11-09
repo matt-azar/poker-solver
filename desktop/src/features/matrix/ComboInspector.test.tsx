@@ -219,9 +219,9 @@ describe("ComboInspector", () => {
     render(<ComboInspector />);
     const eqRows = document.querySelectorAll(".hands-combo__metric-row--eq");
     expect(eqRows.length).toBeGreaterThan(0);
-    expect(screen.getByText("82")).toBeTruthy();
-    expect(screen.getByText("71")).toBeTruthy();
-    expect(screen.getByText("64")).toBeTruthy();
+    expect(screen.getByText("82.0")).toBeTruthy();
+    expect(screen.getByText("71.0")).toBeTruthy();
+    expect(screen.getByText("64.0")).toBeTruthy();
     // Action metrics stay on frequency when overlay is equity-only.
     expect(screen.getAllByText("Freq").length).toBeGreaterThan(0);
   });
