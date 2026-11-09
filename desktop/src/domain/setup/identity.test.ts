@@ -5,6 +5,8 @@ import {
   analysisIdentitiesEqual,
   analysisIdentityKey,
   analysisPayloadMatchesNode,
+  analysisErrorIsPermanent,
+  analysisPayloadNeedsAutoload,
   analysisPayloadReady,
   compareNoteIsValid,
   draftFromOpenedSolution,
@@ -62,6 +64,30 @@ describe("analysis identity", () => {
     expect(
       analysisPayloadReady(
         { pending: false, node_id: "root", oop_equity: 0.5 },
+        "s1",
+        "root",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps work-limit errors settled without auto-resubmit", () => {
+    expect(analysisErrorIsPermanent("equity work limit exceeded")).toBe(true);
+    expect(analysisErrorIsPermanent("temporary failure")).toBe(false);
+    expect(
+      analysisPayloadNeedsAutoload(
+        {
+          pending: false,
+          error: "equity work limit exceeded",
+          node_id: "root",
+          solution_id: "s1",
+        },
+        "s1",
+        "root",
+      ),
+    ).toBe(false);
+    expect(
+      analysisPayloadNeedsAutoload(
+        { pending: false, error: "temporary failure", node_id: "root", solution_id: "s1" },
         "s1",
         "root",
       ),

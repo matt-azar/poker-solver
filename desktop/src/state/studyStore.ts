@@ -647,7 +647,18 @@ function analysisRequestIsCurrent(kind: AnalysisKind, token: number): boolean {
   return token === analysisTokens[kind];
 }
 
-/** Poll async analysis endpoints that may return `{ pending: true }` / HTTP 202. */
+/** Sleep helper for the sequential analysis poll loop. */
+function sleepAnalysis(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * Poll async analysis endpoints that may return `{ pending: true }` / HTTP 202.
+ * The returned promise represents the full lifecycle through ready/failed/abort —
+ * the request queue must not release its slot on the first 202.
+ */
 async function pollAnalysis<T extends { pending?: boolean }>(
   kind: AnalysisKind,
   token: number,
@@ -655,31 +666,28 @@ async function pollAnalysis<T extends { pending?: boolean }>(
   onReady: (body: T) => void,
   onError: (message: string) => void,
 ): Promise<void> {
-  const tick = async () => {
+  clearAnalysisPoll(kind);
+  // At most one outstanding request: await each tick before the next.
+  while (analysisRequestIsCurrent(kind, token)) {
     try {
       const body = await fetchOnce();
       if (!analysisRequestIsCurrent(kind, token)) {
         return;
       }
       if (body && body.pending) {
-        if (!analysisPollTimers[kind]) {
-          analysisPollTimers[kind] = setInterval(() => {
-            void tick();
-          }, 250);
-        }
-        return;
+        await sleepAnalysis(250);
+        continue;
       }
-      clearAnalysisPoll(kind);
       onReady(body);
+      return;
     } catch (error) {
       if (!analysisRequestIsCurrent(kind, token)) {
         return;
       }
-      clearAnalysisPoll(kind);
       onError(error instanceof EngineError ? error.message : "Analysis request failed");
+      return;
     }
-  };
-  await tick();
+  }
 }
 
 function emptyAnalysisState() {
@@ -695,6 +703,16 @@ function analysisRevision(
   node: NodePayload | null | undefined,
   status: StatusPayload | null | undefined,
 ): number {
+  // Prefer the published profile revision so continue / strategy edits invalidate
+  // cached EV/equity under the same solution id without waiting on generation.
+  if (typeof status?.analysis_revision === "number") {
+    return status.analysis_revision;
+  }
+  const nodeRevision = (node as { analysis_revision?: number } | null | undefined)
+    ?.analysis_revision;
+  if (typeof nodeRevision === "number") {
+    return nodeRevision;
+  }
   if (typeof node?.status_generation === "number") {
     return node.status_generation;
   }
@@ -702,6 +720,11 @@ function analysisRevision(
     return status.status_generation;
   }
   return 0;
+}
+
+/** Work-limit failures stay settled for the current inputs; no auto-resubmit. */
+function analysisErrorIsPermanent(message: string | undefined | null): boolean {
+  return Boolean(message && /work limit/i.test(message));
 }
 
 function cachedAnalysisForNode(
@@ -2504,9 +2527,16 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!solutionId || !isDecisionNodeForAnalysis(node)) {
       return;
     }
-    // Equity first, then EV — the shared ValueWorker serializes via the queue.
-    void get().loadEquity();
+    // Server accepts both metrics under one selection identity (EV then equity).
+    try {
+      await engineClient.startNodeAnalysis(solutionId, node.node_id, ["values", "equity"]);
+    } catch {
+      // Fall through to per-metric paths; they still enqueue safely.
+    }
+    // Action EV ahead of equity — cheaper on measured spots; both stay independently
+    // observable and the worker queue now keeps the slot until each settles.
     void get().calculateEv();
+    void get().loadEquity();
   },
 
   async calculateEv() {
@@ -2538,10 +2568,18 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       });
       return;
     }
+    const liveValues = get().nodeValues;
     if (
-      get().nodeValues?.pending &&
-      get().nodeValues?.node_id === nodeId &&
-      get().nodeValues?.solution_id === solutionId
+      liveValues?.pending &&
+      liveValues.node_id === nodeId &&
+      liveValues.solution_id === solutionId
+    ) {
+      return;
+    }
+    if (
+      analysisErrorIsPermanent(liveValues?.error) &&
+      liveValues?.node_id === nodeId &&
+      liveValues?.solution_id === solutionId
     ) {
       return;
     }
@@ -2745,6 +2783,13 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     if (
       liveEquity?.pending &&
+      liveEquity.node_id === nodeId &&
+      liveEquity.solution_id === solutionId
+    ) {
+      return;
+    }
+    if (
+      analysisErrorIsPermanent(liveEquity?.error) &&
       liveEquity.node_id === nodeId &&
       liveEquity.solution_id === solutionId
     ) {
