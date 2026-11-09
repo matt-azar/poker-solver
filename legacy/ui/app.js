@@ -2236,13 +2236,13 @@ function calculateEquity() {
   const path = currentNode
     ? "/api/solutions/" + solution + "/nodes/" + nodeId + "/equity"
     : "/api/solutions/" + solution + "/equity";
-  $("equity-note").textContent = "Calculating check-down equity…";
+  $("equity-note").textContent = "Calculating equity…";
   pollStudy(path, token, solution, nodeId, (body) => {
     if (!body.defined) {
-      $("equity-note").textContent = "Check-down equity is undefined for this node.";
+      $("equity-note").textContent = "Equity is undefined for this node.";
       return;
     }
-    $("equity-note").textContent = "Check-down equity, fraction of the pot. OOP "
+    $("equity-note").textContent = "Equity, fraction of the pot. OOP "
       + Number(body.oop_equity).toFixed(4) + " · IP " + Number(body.ip_equity).toFixed(4)
       + ". This is not chip EV.";
   });

@@ -463,7 +463,7 @@ export function ValueBluffsPanel() {
             type="button"
             className="toolbar-btn"
             aria-pressed={equityMode === "after_call"}
-            title="Check-down equity on the Call child after the dominant bet/raise"
+            title="Equity on the Call child after the dominant bet/raise"
             onClick={() => setEquityMode("after_call")}
           >
             After call
@@ -550,7 +550,7 @@ export function ValueBluffsPanel() {
       </div>
 
       <p className="equity-note muted">
-        Check-down equity {compareSymbol} {thresholdLabel} ({modeLabel});{" "}
+        Equity {compareSymbol} {thresholdLabel} ({modeLabel});{" "}
         bet/raise/all-in ≥ {betFloorLabel}; reach ≥ {reachFloorLabel}
         {equityMode === "after_call"
           ? "; each hand uses its highest-frequency bet/raise size"
