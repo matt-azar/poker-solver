@@ -6,7 +6,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   canExecuteSolve,
-  executeSolveAndOpenStudy,
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
 import { useStudyStore } from "../../state/studyStore";
@@ -154,7 +153,6 @@ export function BuildWorkspace() {
   const canRedoRange = useStudyStore((s) => s.canRedoRange);
   const setupMeta = useStudyStore((s) => s.setupMeta);
   const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
-  const solve = useStudyStore((s) => s.solve);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
   const phase = useStudyStore((s) => s.phase);
   const solutionId = useStudyStore((s) => s.solutionId);
@@ -249,26 +247,6 @@ export function BuildWorkspace() {
           >
             Open ranges in Equity
           </button>
-          <button
-            type="button"
-            className="toolbar-btn primary"
-            disabled={solveBlocked}
-            title={
-              solveBlocked
-                ? solveErrors[0] || "Finish missing setup fields before solving"
-                : "Solve uses the current Build draft"
-            }
-            onClick={() => {
-              void executeSolveAndOpenStudy({
-                getContext: () =>
-                  studyCommandContextFromStore(useStudyStore.getState()),
-                solve,
-                setWorkspace,
-              });
-            }}
-          >
-            Solve &amp; open Study
-          </button>
         </div>
       </header>
 
@@ -326,7 +304,6 @@ export function BuildWorkspace() {
 
       <div className="build-grid">
         <section className="build-section" data-span="2">
-          <h2>Spot</h2>
           <label>
             Board
             <input
@@ -365,19 +342,11 @@ export function BuildWorkspace() {
           </div>
 
           <h3 className="build-subhead">Betting tree</h3>
-          <p className="field-hint">
-            Blank bet = check only. Blank raise = no pot-fraction raises (same
-            as -); list sizes or 2.5x explicitly — raises never copy bets.
-            Max raises 1 allows one raise and no 3-bet;
-            0 removes raises. Sizes: 75 (75% pot), 0.5%, 20c, e, 2e, 3e, a, 2.5x.
-            Add e or a on each street where you want geometric or all-in.
-          </p>
           <div className="build-inline">
             <label>
               Flop OOP bets
               <input
                 value={draft.oopFlop}
-                placeholder="e.g. 50, 100"
                 onChange={(event) => updateDraft({ oopFlop: event.target.value })}
               />
             </label>
@@ -385,7 +354,6 @@ export function BuildWorkspace() {
               Flop IP bets
               <input
                 value={draft.ipFlop}
-                placeholder="e.g. 50, 100"
                 onChange={(event) => updateDraft({ ipFlop: event.target.value })}
               />
             </label>
@@ -393,7 +361,6 @@ export function BuildWorkspace() {
               Flop OOP raises
               <input
                 value={draft.oopFlopRaises}
-                placeholder="blank = flop bets"
                 onChange={(event) => updateDraft({ oopFlopRaises: event.target.value })}
               />
             </label>
@@ -401,16 +368,7 @@ export function BuildWorkspace() {
               Flop IP raises
               <input
                 value={draft.ipFlopRaises}
-                placeholder="blank = flop bets"
                 onChange={(event) => updateDraft({ ipFlopRaises: event.target.value })}
-              />
-            </label>
-            <label>
-              Flop donk
-              <input
-                value={draft.oopFlopDonk}
-                placeholder="blank = no lead"
-                onChange={(event) => updateDraft({ oopFlopDonk: event.target.value })}
               />
             </label>
           </div>
@@ -419,7 +377,6 @@ export function BuildWorkspace() {
               Turn OOP bets
               <input
                 value={draft.oopTurn}
-                placeholder="e.g. 33, 75, e"
                 onChange={(event) => updateDraft({ oopTurn: event.target.value })}
               />
             </label>
@@ -427,7 +384,6 @@ export function BuildWorkspace() {
               Turn IP bets
               <input
                 value={draft.ipTurn}
-                placeholder="e.g. 33, 75, e"
                 onChange={(event) => updateDraft({ ipTurn: event.target.value })}
               />
             </label>
@@ -435,7 +391,6 @@ export function BuildWorkspace() {
               Turn OOP raises
               <input
                 value={draft.oopTurnRaises}
-                placeholder="blank = turn bets"
                 onChange={(event) => updateDraft({ oopTurnRaises: event.target.value })}
               />
             </label>
@@ -443,7 +398,6 @@ export function BuildWorkspace() {
               Turn IP raises
               <input
                 value={draft.ipTurnRaises}
-                placeholder="blank = turn bets"
                 onChange={(event) => updateDraft({ ipTurnRaises: event.target.value })}
               />
             </label>
@@ -451,7 +405,6 @@ export function BuildWorkspace() {
               Turn donk
               <input
                 value={draft.oopTurnDonk}
-                placeholder="blank = no lead"
                 onChange={(event) => updateDraft({ oopTurnDonk: event.target.value })}
               />
             </label>
@@ -461,7 +414,6 @@ export function BuildWorkspace() {
               River OOP bets
               <input
                 value={draft.oopRiver}
-                placeholder="e.g. 50, 100, a"
                 onChange={(event) => updateDraft({ oopRiver: event.target.value })}
               />
             </label>
@@ -469,7 +421,6 @@ export function BuildWorkspace() {
               River IP bets
               <input
                 value={draft.ipRiver}
-                placeholder="e.g. 50, 100, a"
                 onChange={(event) => updateDraft({ ipRiver: event.target.value })}
               />
             </label>
@@ -477,7 +428,6 @@ export function BuildWorkspace() {
               River OOP raises
               <input
                 value={draft.oopRiverRaises}
-                placeholder="blank = river bets"
                 onChange={(event) => updateDraft({ oopRiverRaises: event.target.value })}
               />
             </label>
@@ -485,7 +435,6 @@ export function BuildWorkspace() {
               River IP raises
               <input
                 value={draft.ipRiverRaises}
-                placeholder="blank = river bets"
                 onChange={(event) => updateDraft({ ipRiverRaises: event.target.value })}
               />
             </label>
@@ -493,7 +442,6 @@ export function BuildWorkspace() {
               River donk
               <input
                 value={draft.oopRiverDonk}
-                placeholder="blank = no lead"
                 onChange={(event) => updateDraft({ oopRiverDonk: event.target.value })}
               />
             </label>

@@ -255,11 +255,14 @@ export function groupEquity(
   return null;
 }
 
+/** 0–100 equity percent, rounded to the nearest thousandth of equity (0.1%). */
 export function formatEquityPct(equity: number | null | undefined): string {
   if (equity == null || !Number.isFinite(equity)) {
     return "—";
   }
-  return `${(equity * 100).toFixed(0)}`;
+  // Round in thousandths first. (equity * 100).toFixed(1) mis-rounds exact halves.
+  const percent = Math.round(equity * 1000) / 10;
+  return percent.toFixed(1);
 }
 
 export function formatEvChip(ev: number | null | undefined): string {

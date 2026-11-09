@@ -92,19 +92,29 @@ describe("TreeLineEditor", () => {
     cleanup();
   });
 
+  async function expandPreview() {
+    const user = userEvent.setup();
+    const toggle = screen.getByRole("button", { name: "Preview tree" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await user.click(toggle);
+    return user;
+  }
+
   it("previews with the same buildJob body Solve uses", async () => {
     render(<TreeLineEditor />);
     await waitFor(() => expect(treePreview).toHaveBeenCalled());
     const body = treePreview.mock.calls[0]?.[0];
     expect(body).toEqual(buildJob(useStudyStore.getState().draft));
+    expect(screen.queryByText("Check")).toBeNull();
+    await expandPreview();
     expect(await screen.findByText("Check")).toBeTruthy();
     expect(screen.getByText(/Plan peak/i)).toBeTruthy();
     expect(screen.getByText(/2\.0 MiB/)).toBeTruthy();
   });
 
   it("writes Force edits into the draft consumed by Solve", async () => {
-    const user = userEvent.setup();
     render(<TreeLineEditor />);
+    const user = await expandPreview();
     await screen.findByText("Check");
     await user.click(screen.getAllByRole("button", { name: "Force" })[0]!);
     expect(useStudyStore.getState().draft.treeEdits).toContain("force - c");
@@ -112,6 +122,7 @@ describe("TreeLineEditor", () => {
 
   it("clears a stale preview when the draft changes", async () => {
     render(<TreeLineEditor />);
+    await expandPreview();
     await screen.findByText("Check");
     treePreview.mockClear();
     treePreview.mockImplementation(
