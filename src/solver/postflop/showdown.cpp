@@ -1486,4 +1486,325 @@ void StreetBatchSolver::Engine::marginals_of(
 }
 
 
+
+namespace
+{
+
+void check_equity_cancel(const std::atomic<bool>* cancel)
+{
+    if (cancel != nullptr && cancel->load())
+    {
+        throw StreetValueCancelled();
+    }
+}
+
+bool board_has_card(std::span<const int> board, int card)
+{
+    for (int seen : board)
+    {
+        if (seen == card)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+holdem::PlayerShowdown finish_checkdown_player(
+    int player,
+    std::span<const double> reach,
+    std::span<const double> win_mass,
+    std::span<const double> tie_mass,
+    std::span<const double> compatible_mass,
+    std::span<const int> combo_ids)
+{
+    holdem::PlayerShowdown out;
+    double weight_compat = 0.0;
+    double weighted_equity = 0.0;
+    double weighted_win = 0.0;
+    double weighted_tie = 0.0;
+    double weighted_loss = 0.0;
+    for (int hand = 0; hand < static_cast<int>(reach.size()); ++hand)
+    {
+        const double weight = reach[static_cast<std::size_t>(hand)];
+        if (!(weight > 0.0) || !std::isfinite(weight))
+        {
+            continue;
+        }
+        const double compatible = compatible_mass[static_cast<std::size_t>(hand)];
+        holdem::ComboShowdown row;
+        row.index = combo_ids[static_cast<std::size_t>(hand)];
+        row.combo = holdem::Range::combo_text(row.index);
+        row.input_weight = weight;
+        if (!(compatible > 0.0) || !std::isfinite(compatible))
+        {
+            row.defined = false;
+            out.combos.push_back(std::move(row));
+            continue;
+        }
+        const double wins = win_mass[static_cast<std::size_t>(hand)];
+        const double ties = tie_mass[static_cast<std::size_t>(hand)];
+        const double losses = compatible - wins - ties;
+        row.defined = true;
+        row.compatible_mass = compatible;
+        row.marginal = weight * compatible;
+        row.win = wins / compatible;
+        row.tie = ties / compatible;
+        row.loss = losses / compatible;
+        row.equity = (wins + 0.5 * ties) / compatible;
+        weight_compat += row.marginal;
+        weighted_equity += row.marginal * row.equity;
+        weighted_win += row.marginal * row.win;
+        weighted_tie += row.marginal * row.tie;
+        weighted_loss += row.marginal * row.loss;
+        out.combos.push_back(std::move(row));
+        (void)player;
+    }
+    if (weight_compat > 0.0 && std::isfinite(weight_compat))
+    {
+        out.defined = true;
+        out.equity = weighted_equity / weight_compat;
+        out.win = weighted_win / weight_compat;
+        out.tie = weighted_tie / weight_compat;
+        out.loss = weighted_loss / weight_compat;
+    }
+    return out;
+}
+
+} // namespace
+
+holdem::ShowdownEquity StreetBatchSolver::Engine::compute_checkdown_equity(
+    const std::string& text,
+    const std::atomic<bool>* cancel) const
+{
+    ensure_average();
+    ensure_ranks();
+    check_equity_cancel(cancel);
+    int node_index = 0;
+    int node_turn = -1;
+    int node_river = -1;
+    locate_node(text, node_index, node_turn, node_river);
+    std::vector<double> q0;
+    std::vector<double> q1;
+    replay_weights(node_index, node_turn, node_river, q0, q1);
+
+    std::vector<int> board = config.board;
+    if (node_turn >= 0)
+    {
+        board.push_back(node_turn);
+    }
+    if (node_river >= 0)
+    {
+        board.push_back(node_river);
+    }
+
+    holdem::ShowdownEquity result;
+    result.work.completions_per_pair = board.size() >= 5 ? 1
+        : (board.size() == 4 ? 44 : 990);
+    // Solver path cost tracks completions × indexed hands, not pair-runouts.
+    result.work.legal_pairs = 0;
+    result.work.pair_runouts = 0;
+
+    std::vector<double> win0(static_cast<std::size_t>(n0), 0.0);
+    std::vector<double> tie0(static_cast<std::size_t>(n0), 0.0);
+    std::vector<double> compat0(static_cast<std::size_t>(n0), 0.0);
+    std::vector<double> win1(static_cast<std::size_t>(n1), 0.0);
+    std::vector<double> tie1(static_cast<std::size_t>(n1), 0.0);
+    std::vector<double> compat1(static_cast<std::size_t>(n1), 0.0);
+    std::vector<double> amount0(static_cast<std::size_t>(n0), 0.0);
+    std::vector<double> amount1(static_cast<std::size_t>(n1), 0.0);
+
+    const auto accumulate_side = [&](
+        int hero,
+        int turn,
+        int river,
+        std::span<const double> hero_reach,
+        std::span<const double> opp_amount,
+        std::vector<double>& win_acc,
+        std::vector<double>& tie_acc,
+        std::vector<double>& compat_acc)
+    {
+        const int opp = 1 - hero;
+        const RunoutRanks& table = runout_for(turn, river);
+        order_reach(workspace, opp, opp_amount, table);
+        const int opp_hands = static_cast<int>(opp_amount.size());
+        double amount_total = 0.0;
+        for (double piece : opp_amount)
+        {
+            if (piece > 0.0)
+            {
+                amount_total += piece;
+            }
+        }
+        const BoardSupport& masks = board_support_for(turn, river);
+        const std::pmr::vector<std::uint16_t>& live_idx = hero == 0 ? masks.idx0 : masks.idx1;
+        const double* prefix = workspace.prefix_buf.data();
+        const double* block = workspace.block_buf.data();
+        const std::uint32_t* block_base = workspace.block_base;
+        const std::uint16_t* worse_end = table.worse_end[hero].data();
+        const std::uint16_t* better_begin = table.better_begin[hero].data();
+        const std::uint16_t* card_cut = table.card_cut[hero].data();
+        const std::uint32_t* card_off = table.card_off[opp].data();
+        const std::uint16_t* pos = table.pos[opp].data();
+        const int* hole0 = hole_a[hero].data();
+        const int* hole1 = hole_b[hero].data();
+        const int* twins = twin_hand[hero].data();
+        const double prefix_end = prefix[static_cast<std::size_t>(opp_hands)];
+        for (std::uint16_t hand_u : live_idx)
+        {
+            const int hand = static_cast<int>(hand_u);
+            if (!(hero_reach[static_cast<std::size_t>(hand)] > 0.0))
+            {
+                continue;
+            }
+            const int worse = worse_end[static_cast<std::size_t>(hand)];
+            const int after_tie = better_begin[static_cast<std::size_t>(hand)];
+            const int c0 = hole0[static_cast<std::size_t>(hand)];
+            const int c1 = hole1[static_cast<std::size_t>(hand)];
+            const std::size_t cut_at = static_cast<std::size_t>(hand) * 4;
+            const int cut0_worse = card_cut[cut_at];
+            const int cut1_worse = card_cut[cut_at + 1];
+            const int cut0_better = card_cut[cut_at + 2];
+            const int cut1_better = card_cut[cut_at + 3];
+            const std::uint32_t base0 = block_base[static_cast<std::size_t>(c0)];
+            const std::uint32_t base1 = block_base[static_cast<std::size_t>(c1)];
+            const int len0 = static_cast<int>(
+                card_off[static_cast<std::size_t>(c0 + 1)] - card_off[static_cast<std::size_t>(c0)]);
+            const int len1 = static_cast<int>(
+                card_off[static_cast<std::size_t>(c1 + 1)] - card_off[static_cast<std::size_t>(c1)]);
+            const double b0_0 = block[static_cast<std::size_t>(base0)];
+            const double b0_w = block[static_cast<std::size_t>(base0 + static_cast<std::uint32_t>(cut0_worse))];
+            const double b0_b = block[static_cast<std::size_t>(base0 + static_cast<std::uint32_t>(cut0_better))];
+            const double b0_l = block[static_cast<std::size_t>(base0 + static_cast<std::uint32_t>(len0))];
+            const double b1_0 = block[static_cast<std::size_t>(base1)];
+            const double b1_w = block[static_cast<std::size_t>(base1 + static_cast<std::uint32_t>(cut1_worse))];
+            const double b1_b = block[static_cast<std::size_t>(base1 + static_cast<std::uint32_t>(cut1_better))];
+            const double b1_l = block[static_cast<std::size_t>(base1 + static_cast<std::uint32_t>(len1))];
+            const int twin = twins[static_cast<std::size_t>(hand)];
+            const int add_hand = twin >= 0 && opp_amount[static_cast<std::size_t>(twin)] != 0.0
+                ? twin : -1;
+            const int add_at = add_hand >= 0 ? static_cast<int>(pos[static_cast<std::size_t>(add_hand)]) : -1;
+            const double add_piece = add_hand >= 0 ? opp_amount[static_cast<std::size_t>(add_hand)] : 0.0;
+            double worse_mass = prefix[static_cast<std::size_t>(worse)]
+                - (b0_w - b0_0) - (b1_w - b1_0);
+            if (add_at >= 0 && add_at < worse)
+            {
+                worse_mass += add_piece;
+            }
+            double better_mass = prefix_end - prefix[static_cast<std::size_t>(after_tie)]
+                - (b0_l - b0_b) - (b1_l - b1_b);
+            if (add_at >= after_tie && add_at < opp_hands)
+            {
+                better_mass += add_piece;
+            }
+            double tie_mass = prefix[static_cast<std::size_t>(after_tie)] - prefix[static_cast<std::size_t>(worse)]
+                - (b0_b - b0_w) - (b1_b - b1_w);
+            if (add_at >= worse && add_at < after_tie)
+            {
+                tie_mass += add_piece;
+            }
+            const bool worse_ok = difference_is_stable(amount_total, amount_total - worse_mass, worse_mass);
+            const bool better_ok = difference_is_stable(amount_total, amount_total - better_mass, better_mass);
+            const bool tie_ok = difference_is_stable(amount_total, amount_total - tie_mass, tie_mass);
+            if (!worse_ok || !better_ok || !tie_ok)
+            {
+                direct_rank_masses(table, hero, hand, opp_amount, worse_mass, better_mass, &tie_mass);
+            }
+            // worse_end is opponents with lower pack_rank than hero → hero wins.
+            // Chip-EV showdown_side remaps pays by seat; equity does not.
+            const double hero_win = worse_mass;
+            const double hero_loss = better_mass;
+            const double compatible = hero_win + hero_loss + tie_mass;
+            if (!(compatible > 0.0))
+            {
+                continue;
+            }
+            win_acc[static_cast<std::size_t>(hand)] += hero_win;
+            tie_acc[static_cast<std::size_t>(hand)] += tie_mass;
+            compat_acc[static_cast<std::size_t>(hand)] += compatible;
+        }
+    };
+
+    const auto accumulate_runout = [&](int turn, int river)
+    {
+        check_equity_cancel(cancel);
+        for (int hand = 0; hand < n0; ++hand)
+        {
+            amount0[static_cast<std::size_t>(hand)] =
+                hand_live(0, hand, turn, river) ? q0[static_cast<std::size_t>(hand)] : 0.0;
+        }
+        for (int hand = 0; hand < n1; ++hand)
+        {
+            amount1[static_cast<std::size_t>(hand)] =
+                hand_live(1, hand, turn, river) ? q1[static_cast<std::size_t>(hand)] : 0.0;
+        }
+        accumulate_side(0, turn, river, q0, amount1, win0, tie0, compat0);
+        accumulate_side(1, turn, river, q1, amount0, win1, tie1, compat1);
+    };
+
+    if (board.size() >= 5)
+    {
+        // River configs use the reserved (-1,-1) key; flop/turn solutions that
+        // already dealt both cards use the node's (turn, river).
+        if (config.board.size() == 5)
+        {
+            accumulate_runout(-1, -1);
+        }
+        else
+        {
+            accumulate_runout(node_turn, node_river);
+        }
+        result.work.completions_per_pair = 1;
+    }
+    else if (board.size() == 4)
+    {
+        result.work.completions_per_pair = 0;
+        for (int river = 0; river < 52; ++river)
+        {
+            if (board_has_card(board, river))
+            {
+                continue;
+            }
+            ++result.work.completions_per_pair;
+            if (config.board.size() == 4)
+            {
+                accumulate_runout(-1, river);
+            }
+            else
+            {
+                accumulate_runout(node_turn, river);
+            }
+        }
+    }
+    else
+    {
+        // Flop root: one representative per unordered completion (turn < river).
+        result.work.completions_per_pair = 0;
+        for (int turn = 0; turn < 52; ++turn)
+        {
+            if (board_has_card(board, turn))
+            {
+                continue;
+            }
+            for (int river = turn + 1; river < 52; ++river)
+            {
+                if (board_has_card(board, river))
+                {
+                    continue;
+                }
+                ++result.work.completions_per_pair;
+                accumulate_runout(turn, river);
+            }
+        }
+    }
+
+    std::vector<int> combos0(combos[0].begin(), combos[0].end());
+    std::vector<int> combos1(combos[1].begin(), combos[1].end());
+    result.player0 = finish_checkdown_player(0, q0, win0, tie0, compat0, combos0);
+    result.player1 = finish_checkdown_player(1, q1, win1, tie1, compat1, combos1);
+    result.joint_defined = result.player0.defined && result.player1.defined;
+    return result;
+}
+
+
 } // namespace poker::solver

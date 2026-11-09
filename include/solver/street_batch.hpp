@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/street_config.hpp"
+#include "poker/equity.hpp"
 #include "poker/hand_categories.hpp"
 #include "solver/budget_resource.hpp"
 #include "solver/table_scalar.hpp"
@@ -396,6 +397,12 @@ public:
         const std::string& node_id,
         const std::atomic<bool>* cancel = nullptr) const;
     StreetReachWeights reaching_weights(const std::string& node_id) const;
+    // Check-down equity at a node using typed reaches and the solver's showdown
+    // rank tables. Same quantity as poker::holdem::showdown_equity on those
+    // reaches, without the pair-by-pair enumerator. Study uses this path.
+    holdem::ShowdownEquity checkdown_equity(
+        const std::string& node_id,
+        const std::atomic<bool>* cancel = nullptr) const;
     // Made-hand category fractions from strategy-weighted reaches. Available
     // only when the node's board has five cards. Incomplete boards are omitted.
     holdem::CategoryComposition category_composition(const std::string& node_id) const;

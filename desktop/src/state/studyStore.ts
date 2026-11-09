@@ -2743,12 +2743,13 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   async ensureNodeAnalysis() {
     const solutionId = get().solutionId;
     const node = get().currentNode;
-    if (!solutionId || !isDecisionNodeForAnalysis(node)) {
+    if (!solutionId || !node || !isDecisionNodeForAnalysis(node)) {
       return;
     }
+    const nodeId = node.node_id;
     // Server accepts both metrics under one selection identity (EV then equity).
     try {
-      await engineClient.startNodeAnalysis(solutionId, node.node_id, ["values", "equity"]);
+      await engineClient.startNodeAnalysis(solutionId, nodeId, ["values", "equity"]);
     } catch {
       // Fall through to per-metric paths; they still enqueue safely.
     }
@@ -3008,10 +3009,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return;
     }
     if (
-      liveEquity &&
-      analysisErrorIsPermanent(liveEquity.error) &&
-      liveEquity.node_id === nodeId &&
-      liveEquity.solution_id === solutionId
+      analysisErrorIsPermanent(liveEquity?.error) &&
+      liveEquity?.node_id === nodeId &&
+      liveEquity?.solution_id === solutionId
     ) {
       return;
     }
