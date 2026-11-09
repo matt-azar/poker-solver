@@ -130,7 +130,7 @@ function DecisionRow({
 export function TreeLineEditor() {
   const draft = useStudyStore((s) => s.draft);
   const updateDraft = useStudyStore((s) => s.updateDraft);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<TreePreviewPayload | null>(null);
   const [plan, setPlan] = useState<MemoryPlanPayload | null>(null);
   const [error, setError] = useState("");

@@ -104,11 +104,16 @@ describe("BuildWorkspace range tools", () => {
     cleanup();
   });
 
-  it("mounts the collapsible Preview tree section", () => {
+  it("starts with Preview tree collapsed and omits removed Build chrome", () => {
     render(<BuildWorkspace />);
-    expect(
-      screen.getByRole("button", { name: "Preview tree" }),
-    ).toBeTruthy();
+    const preview = screen.getByRole("button", { name: "Preview tree" });
+    expect(preview.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("heading", { name: "Spot" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Solve & open Study" })).toBeNull();
+    expect(screen.queryByText("Flop donk")).toBeNull();
+    expect(screen.queryByText(/Blank bet = check only/)).toBeNull();
+    expect(screen.getByLabelText(/Flop OOP bets/).getAttribute("placeholder")).toBeNull();
+    expect(screen.getByLabelText(/Turn donk/).getAttribute("placeholder")).toBeNull();
   });
 
   it("lets the user type a paint weight into a number field", async () => {
