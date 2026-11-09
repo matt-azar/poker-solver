@@ -159,7 +159,7 @@ export function AnalysisDockPanel() {
     return (
       <div className="range-explorer">
         <div className="panel-title-row">
-          <h2 className="panel-title">Check-down equity</h2>
+          <h2 className="panel-title">Equity</h2>
           <div className="panel-title-actions">
             <div className="seat-toggle" role="group" aria-label="Equity seat">
               <button
@@ -206,7 +206,7 @@ export function AnalysisDockPanel() {
           </div>
         </div>
         <p className="equity-note muted">
-          Check-down showdown equity (fraction of pot). Not chip EV.
+          Equity (fraction of pot). Not chip EV.
         </p>
         {transferMessage ? <p className="equity-note">{transferMessage}</p> : null}
         {!equity ? (
