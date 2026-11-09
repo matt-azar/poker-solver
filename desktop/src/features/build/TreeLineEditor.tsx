@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { encodeBettingJob } from "../../domain/betSizes";
 import { engineClient, EngineError } from "../../engine/client";
 import type {
   MemoryPlanPayload,
@@ -7,6 +6,7 @@ import type {
   TreePreviewNode,
   TreePreviewPayload,
 } from "../../domain/types";
+import { buildJob } from "../../state/studyDraft";
 import { useStudyStore } from "../../state/studyStore";
 
 /** Display labels → compact TreeEdit tokens (no spaces) for street-config text. */
@@ -51,30 +51,9 @@ function addSizeLine(path: string, sizeText: string): string {
   return `add-size ${pathToken(path)} ${sizeText}`;
 }
 
+/** Same serializer Solve uses — preview and solve share board, ranges, sizes, edits, stop. */
 function draftPreviewBody(draft: SpotDraft) {
-  const board = draft.boardText
-    .trim()
-    .split(/[\s,]+/)
-    .filter(Boolean);
-  const sizes = encodeBettingJob(draft);
-  return {
-    board,
-    oop_range: draft.oopRange,
-    ip_range: draft.ipRange,
-    pot: draft.pot,
-    stack: draft.stack,
-    ...sizes,
-    pot_cap: draft.potCap || 0,
-    allow_three_bet: draft.noThreeBet ? 0 : 1,
-    all_in_threshold: draft.allInThreshold || 0,
-    // List `a` per street for all-in; blank does not invent it (STREETS.md).
-    allow_all_in: 0,
-    max_raises: draft.maxRaises,
-    iterations: 1,
-    memory_mib: draft.memoryMib,
-    threads: draft.threads,
-    tree_edits: draft.treeEdits.length > 0 ? draft.treeEdits : undefined,
-  };
+  return buildJob(draft);
 }
 
 function formatBytes(bytes: number): string {
@@ -151,6 +130,7 @@ function DecisionRow({
 export function TreeLineEditor() {
   const draft = useStudyStore((s) => s.draft);
   const updateDraft = useStudyStore((s) => s.updateDraft);
+  const [open, setOpen] = useState(true);
   const [preview, setPreview] = useState<TreePreviewPayload | null>(null);
   const [plan, setPlan] = useState<MemoryPlanPayload | null>(null);
   const [error, setError] = useState("");
@@ -158,24 +138,32 @@ export function TreeLineEditor() {
   const [addSizePath, setAddSizePath] = useState<string | null>(null);
   const [addSizeValue, setAddSizeValue] = useState("0.33");
   const requestId = useRef(0);
+  /** Bumps when the draft that shapes the tree changes — clears stale preview. */
+  const draftRevision = useRef(0);
+
+  const clearStalePreview = () => {
+    draftRevision.current += 1;
+    setPreview(null);
+    setPlan(null);
+    setError("");
+  };
 
   const refresh = async () => {
     const id = ++requestId.current;
+    const revision = draftRevision.current;
     setBusy(true);
     setError("");
     try {
       const body = draftPreviewBody(draft);
-      const [tree, memory] = await Promise.all([
-        engineClient.treePreview(body),
-        engineClient.planMemory(body),
-      ]);
-      if (id !== requestId.current) {
+      // One plan-only construction returns nodes + labeled memory plan.
+      const tree = await engineClient.treePreview(body);
+      if (id !== requestId.current || revision !== draftRevision.current) {
         return;
       }
       setPreview(tree);
-      setPlan(memory);
+      setPlan(tree.plan ?? null);
     } catch (err) {
-      if (id !== requestId.current) {
+      if (id !== requestId.current || revision !== draftRevision.current) {
         return;
       }
       const message =
@@ -184,7 +172,10 @@ export function TreeLineEditor() {
           : err instanceof Error
             ? err.message
             : "Tree preview failed";
+      // Failed preview must not touch the live Study solution — only local UI.
       setError(message);
+      setPreview(null);
+      setPlan(null);
     } finally {
       if (id === requestId.current) {
         setBusy(false);
@@ -193,11 +184,12 @@ export function TreeLineEditor() {
   };
 
   useEffect(() => {
+    clearStalePreview();
     const handle = window.setTimeout(() => {
       void refresh();
     }, 350);
     return () => window.clearTimeout(handle);
-    // Spot + bet + edit fields that reshape the public tree.
+    // Spot + bet + edit fields that reshape the public tree / memory plan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     draft.boardText,
@@ -236,6 +228,18 @@ export function TreeLineEditor() {
     draft.memoryMib,
     draft.threads,
     draft.treeEdits,
+    draft.iterations,
+    draft.accuracy,
+    draft.timeLimit,
+    draft.algorithm,
+    draft.samples,
+    draft.rakeRate,
+    draft.rakeCap,
+    draft.useIcm,
+    draft.icmStacks,
+    draft.icmPayouts,
+    draft.incentives,
+    draft.edgeTags,
   ]);
 
   const appendEdit = (line: string) => {
@@ -255,101 +259,136 @@ export function TreeLineEditor() {
   return (
     <section className="build-section tree-editor" data-span="2">
       <div className="panel-title-row">
-        <h2>Line editor</h2>
-        <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void refresh()}>
-          {busy ? "Refreshing…" : "Refresh preview"}
-        </button>
+        <h2>
+          <button
+            type="button"
+            className="tree-editor-toggle"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            Preview tree
+          </button>
+        </h2>
+        {open ? (
+          <button
+            type="button"
+            className="toolbar-btn"
+            disabled={busy}
+            onClick={() => void refresh()}
+          >
+            {busy ? "Refreshing…" : "Refresh preview"}
+          </button>
+        ) : null}
       </div>
-      <p className="tree-editor-help">
-        Preview uses canonical action labels. Force / Remove / Add size write{" "}
-        <code>tree-edit</code> lines into the draft; Solve rebuilds the tree from them.
-      </p>
-      {error ? <p className="tree-editor-error">{error}</p> : null}
-      {plan ? (
-        <div className="memory-plan" title="estimated_peak_bytes is a labeled plan, not RSS">
-          <span>
-            Plan peak {formatBytes(plan.estimated_peak_bytes)}
-            {plan.fits_budget ? "" : " (over budget)"}
-          </span>
-          <span>
-            Budget {formatBytes(plan.memory_budget_bytes)} · {plan.public_decisions} decisions ·{" "}
-            {plan.deals} deals
-          </span>
-          <span className="tree-meta">
-            {plan.dry_run ? "dry-run plan" : "plan"} · not process RSS
-          </span>
-        </div>
-      ) : null}
-      {draft.treeEdits.length > 0 ? (
-        <div className="tree-edits-list">
-          <div className="panel-title-row">
-            <h3>Applied edits</h3>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => updateDraft({ treeEdits: [] })}
+      {open ? (
+        <>
+          <p className="tree-editor-help">
+            Shows effective legal actions after chip rounding, capping, and merging,
+            plus the labeled engine heap plan against the budget. Force / Remove / Add
+            size write <code>tree-edit</code> lines into the draft; Solve rebuilds from
+            the same draft serializer.
+          </p>
+          {error ? <p className="tree-editor-error">{error}</p> : null}
+          {plan ? (
+            <div
+              className="memory-plan"
+              data-over-budget={plan.fits_budget ? undefined : "true"}
+              title="estimated_peak_bytes is a labeled plan, not RSS"
             >
-              Clear edits
-            </button>
-          </div>
-          <ul>
-            {draft.treeEdits.map((line, index) => (
-              <li key={`${line}-${index}`}>
-                <code>{line}</code>
+              <span>
+                Plan peak {formatBytes(plan.estimated_peak_bytes)}
+                {plan.fits_budget ? "" : " (over budget)"}
+              </span>
+              <span>
+                Budget {formatBytes(plan.memory_budget_bytes)} · {plan.public_decisions}{" "}
+                decisions · {plan.deals} deals
+              </span>
+              <span className="tree-meta">
+                pot {draft.pot} · stack {draft.stack} ·{" "}
+                {plan.dry_run ? "dry-run plan" : "plan"} · not process RSS
+              </span>
+            </div>
+          ) : null}
+          {draft.treeEdits.length > 0 ? (
+            <div className="tree-edits-list">
+              <div className="panel-title-row">
+                <h3>Applied edits</h3>
                 <button
                   type="button"
                   className="toolbar-btn"
-                  onClick={() => removeEditAt(index)}
+                  onClick={() => updateDraft({ treeEdits: [] })}
                 >
-                  Drop
+                  Clear edits
                 </button>
-              </li>
+              </div>
+              <ul>
+                {draft.treeEdits.map((line, index) => (
+                  <li key={`${line}-${index}`}>
+                    <code>{line}</code>
+                    <button
+                      type="button"
+                      className="toolbar-btn"
+                      onClick={() => removeEditAt(index)}
+                    >
+                      Drop
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <ul className="tree-preview">
+            {decisions.map((node) => (
+              <DecisionRow
+                key={node.index}
+                node={node}
+                onForce={(path, compact) => appendEdit(forceLine(path, compact))}
+                onRemove={(path, compact) => appendEdit(removeLine(path, compact))}
+                onAddSize={(path) => {
+                  setAddSizePath(path);
+                  setAddSizeValue("0.33");
+                }}
+              />
             ))}
           </ul>
-        </div>
-      ) : null}
-      <ul className="tree-preview">
-        {decisions.map((node) => (
-          <DecisionRow
-            key={node.index}
-            node={node}
-            onForce={(path, compact) => appendEdit(forceLine(path, compact))}
-            onRemove={(path, compact) => appendEdit(removeLine(path, compact))}
-            onAddSize={(path) => {
-              setAddSizePath(path);
-              setAddSizeValue("0.33");
-            }}
-          />
-        ))}
-      </ul>
-      {addSizePath !== null ? (
-        <div className="tree-add-dialog">
-          <label>
-            Size at {addSizePath === "" ? "root" : addSizePath}
-            <input
-              value={addSizeValue}
-              onChange={(event) => setAddSizeValue(event.target.value)}
-              placeholder="0.33 or 20c"
-            />
-          </label>
-          <button
-            type="button"
-            className="toolbar-btn primary"
-            onClick={() => {
-              const trimmed = addSizeValue.trim();
-              if (trimmed) {
-                appendEdit(addSizeLine(addSizePath, trimmed));
-              }
-              setAddSizePath(null);
-            }}
-          >
-            Add size
-          </button>
-          <button type="button" className="toolbar-btn" onClick={() => setAddSizePath(null)}>
-            Cancel
-          </button>
-        </div>
-      ) : null}
+          {addSizePath !== null ? (
+            <div className="tree-add-dialog">
+              <label>
+                Size at {addSizePath === "" ? "root" : addSizePath}
+                <input
+                  value={addSizeValue}
+                  onChange={(event) => setAddSizeValue(event.target.value)}
+                  placeholder="0.33 or 20c"
+                />
+              </label>
+              <button
+                type="button"
+                className="toolbar-btn primary"
+                onClick={() => {
+                  const trimmed = addSizeValue.trim();
+                  if (trimmed) {
+                    appendEdit(addSizeLine(addSizePath, trimmed));
+                  }
+                  setAddSizePath(null);
+                }}
+              >
+                Add size
+              </button>
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={() => setAddSizePath(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <p className="tree-editor-help">
+          Expand to preview legal actions, memory plan, and line edits before Solve.
+        </p>
+      )}
     </section>
   );
 }

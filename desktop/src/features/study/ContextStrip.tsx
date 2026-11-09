@@ -52,6 +52,7 @@ export function ContextStrip() {
   const solutionId = useStudyStore((s) => s.solutionId);
   const prepareBoardCardChange = useStudyStore((s) => s.prepareBoardCardChange);
   const clearBoardCardChange = useStudyStore((s) => s.clearBoardCardChange);
+  const loadLineCardReport = useStudyStore((s) => s.loadLineCardReport);
   const boardChangeStreet = useStudyStore((s) => s.boardChangeStreet);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerStreet, setPickerStreet] = useState<DealStreet | null>(null);
@@ -220,6 +221,19 @@ export function ContextStrip() {
           {line}
         </span>
       </div>
+      {currentNode &&
+      currentNode.kind !== "chance" &&
+      currentNode.kind !== "terminal" &&
+      cards.length >= 4 ? (
+        <button
+          type="button"
+          className="toolbar-btn"
+          title="Compare this decision's action mix across turn or river cards"
+          onClick={() => void loadLineCardReport()}
+        >
+          Compare cards
+        </button>
+      ) : null}
       <div className="context-strip__grow" />
       <div className="context-strip__engine" title={activity}>
         <span className="phase-pill" data-phase={phase} data-live={live ? "true" : "false"}>

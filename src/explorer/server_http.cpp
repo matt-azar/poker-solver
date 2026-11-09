@@ -1658,12 +1658,25 @@ void handle_client(socket_t client)
             {
                 config = street_config(parse_job(body));
             }
+            // One plan-only construction supplies both the public tree and the
+            // labeled memory plan (same peak as POST /api/plan-memory).
             poker::solver::StreetBatchSolver preview(std::move(config), poker::solver::kPlanOnly);
+            const poker::solver::StreetMemoryReport report = preview.memory_report();
+            poker::solver::StreetMemoryPlan plan;
+            plan.estimated_peak_bytes = report.estimated_peak_bytes;
+            plan.memory_budget_bytes = report.memory_budget_bytes;
+            plan.deals = preview.deal_count();
+            plan.infosets = preview.infoset_count();
+            plan.decision_nodes = preview.decision_node_count();
+            plan.terminals = preview.terminal_count();
+            plan.public_decisions = preview.public_decisions();
+            plan.thread_count = preview.thread_count();
+            plan.dry_run = true;
             send_response(
                 client,
                 200,
                 "application/json",
-                public_tree_json(preview.public_tree(), preview.config().tree_edits));
+                public_tree_json(preview.public_tree(), preview.config().tree_edits, &plan));
         }
         catch (const std::exception& error)
         {

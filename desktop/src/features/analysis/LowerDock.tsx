@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent,
 import { clampDockHeight } from "../../state/layoutStore";
 import { useStudyStore } from "../../state/studyStore";
 import { AnalysisDockPanel } from "./AnalysisDockPanel";
+import { LineCardReport } from "./LineCardReport";
 import { ValueBluffsPanel } from "./ValueBluffsPanel";
 import { RunoutTable } from "./RunoutTable";
 
 const TABS = [
   { id: "runouts", label: "Runouts" },
+  { id: "line-cards", label: "Compare cards" },
   { id: "equity", label: "Equity" },
   { id: "categories", label: "Categories" },
   { id: "value-bluffs", label: "Value / Bluffs" },
@@ -75,6 +77,7 @@ export function LowerDock() {
 
   const activeTab: DockTabId =
     analysisTab === "runouts" ||
+    analysisTab === "line-cards" ||
     analysisTab === "equity" ||
     analysisTab === "categories" ||
     analysisTab === "value-bluffs"
@@ -105,6 +108,8 @@ export function LowerDock() {
   let body: ReactNode;
   if (activeTab === "runouts") {
     body = <RunoutTable />;
+  } else if (activeTab === "line-cards") {
+    body = <LineCardReport />;
   } else if (activeTab === "value-bluffs") {
     body = <ValueBluffsPanel />;
   } else {

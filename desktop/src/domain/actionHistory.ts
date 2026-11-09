@@ -387,7 +387,8 @@ function childNodeId(
   return child.node_id ?? null;
 }
 
-function strategyFrequencies(node: NodePayload): number[] {
+/** Posterior-marginal action mix at a decision (same math as ActionSummary). */
+export function strategyFrequencies(node: NodePayload): number[] {
   const labels = node.actions ?? [];
   if (!labels.length) {
     return [];

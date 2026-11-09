@@ -1123,7 +1123,8 @@ std::string memory_plan_json(const poker::solver::StreetMemoryPlan& plan)
 
 std::string public_tree_json(
     const std::vector<poker::solver::StreetPublicNode>& nodes,
-    const poker::solver::TreeEditSet& edits)
+    const poker::solver::TreeEditSet& edits,
+    const poker::solver::StreetMemoryPlan* plan)
 {
     std::string out = "{\"nodes\":[";
     for (std::size_t i = 0; i < nodes.size(); ++i)
@@ -1175,6 +1176,11 @@ std::string public_tree_json(
     }
     out += "],";
     append_tree_edits_json(out, edits);
+    if (plan != nullptr)
+    {
+        out += ",\"plan\":";
+        out += memory_plan_json(*plan);
+    }
     out += '}';
     return out;
 }

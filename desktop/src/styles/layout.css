@@ -2526,12 +2526,38 @@
   color: #fff;
 }
 
+/* Collapsible Preview tree heading control. */
+.tree-editor-toggle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tree-editor-toggle::before {
+  content: "▾ ";
+  color: var(--muted);
+}
+
+.tree-editor-toggle[aria-expanded="false"]::before {
+  content: "▸ ";
+}
+
 /* Help text for the betting-tree editor. */
 .tree-editor-help,
 .tree-editor-error {
   margin: 0;
   font-size: 12px;
   color: var(--muted);
+}
+
+.memory-plan[data-over-budget="true"] {
+  color: var(--danger, #b33);
 }
 
 /* Validation error for the tree editor. */

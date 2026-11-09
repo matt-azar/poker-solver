@@ -15,6 +15,7 @@ import { draftFromBuild } from "../../domain/equity/transfer";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
 import { SeatActionCatalogueTree } from "./SeatActionCatalogueTree";
+import { TreeLineEditor } from "./TreeLineEditor";
 
 function provenanceHint(
   setupMeta: ReturnType<typeof useStudyStore.getState>["setupMeta"],
@@ -554,6 +555,8 @@ export function BuildWorkspace() {
             </label>
           </div>
         </section>
+
+        <TreeLineEditor />
 
         <section className="build-section" data-span="2">
           <h2>Ranges</h2>
