@@ -181,8 +181,8 @@ export function ComboInspector() {
   // Action rows show EV or frequency; equity always has its own labeled row.
   const metricLabel = showEv ? "EV" : "Freq";
 
-  // Hands EV rows need /values; kick a load when the overlay asks for EV and
-  // nothing is in flight (MatrixDisplayControls also loads — same store gate).
+  // Hands EV rows need /values; Study always-on warm usually provides them.
+  // Retry only when a settled failure is left for this node.
   useEffect(() => {
     if (!showEv || !solutionId || !currentNode) {
       return;
@@ -199,12 +199,21 @@ export function ComboInspector() {
     if (
       nodeValues &&
       !nodeValues.pending &&
+      !nodeValues.error &&
       (!nodeValues.node_id || nodeValues.node_id === currentNode.node_id)
     ) {
       return;
     }
     void calculateEv();
   }, [showEv, solutionId, currentNode, nodeValues, calculateEv]);
+
+  const valuesError =
+    nodeValues &&
+    !nodeValues.pending &&
+    nodeValues.error &&
+    (!nodeValues.node_id || nodeValues.node_id === currentNode?.node_id)
+      ? String(nodeValues.error)
+      : null;
 
   return (
     <section className="combo-inspector" aria-label="Hands">
@@ -223,9 +232,11 @@ export function ComboInspector() {
         <p className="empty-hint">Hover a hand in the grid.</p>
       ) : (
         <>
-          {!nodeValues || nodeValues.pending ? (
+          {nodeValues?.pending ? (
+            <p className="muted">Calculating action EVs…</p>
+          ) : valuesError ? (
             <button type="button" className="toolbar-btn" onClick={() => void calculateEv()}>
-              Calculate action EVs
+              Retry action EVs
             </button>
           ) : null}
           <div

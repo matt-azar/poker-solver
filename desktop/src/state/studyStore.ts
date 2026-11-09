@@ -398,6 +398,11 @@ interface StudyState {
   loadRunouts: () => Promise<void>;
   loadEquity: () => Promise<void>;
   loadCategories: () => Promise<void>;
+  /**
+   * Always-on Study warm: enqueue equity then action EVs for the live decision
+   * node. Safe to call on every navigate — cache hits and in-flight jobs no-op.
+   */
+  ensureNodeAnalysis: () => Promise<void>;
   saveSolution: () => Promise<void>;
   openSolution: (path?: string) => Promise<OpenSolutionResult>;
   loadCompare: (nodeId?: string) => Promise<void>;
@@ -757,6 +762,47 @@ function enqueueWorkerAnalysis(args: {
     priority: args.priority,
     run: args.run,
   });
+}
+
+/** Decision nodes get always-on EV/equity; chance/terminal do not. */
+function isDecisionNodeForAnalysis(node: NodePayload | null | undefined): boolean {
+  if (!node) {
+    return false;
+  }
+  if (node.kind === "chance" || node.kind === "terminal") {
+    return false;
+  }
+  return (
+    node.kind === "decision" ||
+    node.kind == null ||
+    (node.actions?.length ?? 0) > 0
+  );
+}
+
+function analysisHasError(payload: unknown): boolean {
+  return Boolean(
+    payload &&
+      typeof payload === "object" &&
+      "error" in payload &&
+      (payload as { error?: unknown }).error,
+  );
+}
+
+function analysisIsReadyForNode(
+  payload: { pending?: boolean; node_id?: string; solution_id?: string; error?: string } | null,
+  solutionId: string,
+  nodeId: string,
+): boolean {
+  if (!payload || payload.pending || analysisHasError(payload)) {
+    return false;
+  }
+  if (payload.node_id != null && payload.node_id !== nodeId) {
+    return false;
+  }
+  if (payload.solution_id != null && payload.solution_id !== solutionId) {
+    return false;
+  }
+  return true;
 }
 
 /** Resolve a child node id from a decision node's `children` entry. */
@@ -2314,6 +2360,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               }),
       });
       void get().refreshLocks();
+      // Always warm EV + equity for decision nodes (cache / queue make this cheap).
+      void get().ensureNodeAnalysis();
     } catch (error) {
       if (token !== nodeToken) {
         return;
@@ -2450,21 +2498,31 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     await get().navigateTo(target, { history: "push" });
   },
 
+  async ensureNodeAnalysis() {
+    const solutionId = get().solutionId;
+    const node = get().currentNode;
+    if (!solutionId || !isDecisionNodeForAnalysis(node)) {
+      return;
+    }
+    // Equity first, then EV — the shared ValueWorker serializes via the queue.
+    void get().loadEquity();
+    void get().calculateEv();
+  },
+
   async calculateEv() {
     const solutionId = get().solutionId;
     const node = get().currentNode;
     if (!solutionId || !node) {
       return;
     }
-    if (
-      node.kind === "chance" ||
-      node.kind === "terminal" ||
-      (node.kind != null && node.kind !== "decision" && !(node.actions?.length ?? 0))
-    ) {
+    if (!isDecisionNodeForAnalysis(node)) {
       return;
     }
     const revision = analysisRevision(node, get().status);
     const nodeId = node.node_id;
+    if (analysisIsReadyForNode(get().nodeValues, solutionId, nodeId)) {
+      return;
+    }
     const cached = analysisPageCache.get<ActionValuesPayload>({
       solutionId,
       nodeId,
@@ -2666,6 +2724,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const revision = analysisRevision(node, get().status);
     const nodeId = node.node_id;
+    const liveEquity = get().equity as {
+      pending?: boolean;
+      node_id?: string;
+      solution_id?: string;
+      error?: string;
+    } | null;
+    if (analysisIsReadyForNode(liveEquity, solutionId, nodeId)) {
+      return;
+    }
     const cached = analysisPageCache.get({
       solutionId,
       nodeId,
@@ -2677,12 +2744,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return;
     }
     if (
-      get().equity &&
-      typeof get().equity === "object" &&
-      (get().equity as { pending?: boolean; node_id?: string; solution_id?: string })
-        .pending &&
-      (get().equity as { node_id?: string }).node_id === nodeId &&
-      (get().equity as { solution_id?: string }).solution_id === solutionId
+      liveEquity?.pending &&
+      liveEquity.node_id === nodeId &&
+      liveEquity.solution_id === solutionId
     ) {
       return;
     }
