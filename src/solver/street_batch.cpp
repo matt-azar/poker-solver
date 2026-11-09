@@ -612,6 +612,14 @@ StreetReachWeights StreetBatchSolver::reaching_weights(const std::string& node_i
     return engine_->compute_reaching_weights(node_id);
 }
 
+holdem::ShowdownEquity StreetBatchSolver::checkdown_equity(
+    const std::string& node_id,
+    const std::atomic<bool>* cancel) const
+{
+    std::lock_guard<std::mutex> lock(value_mu_);
+    return engine_->compute_checkdown_equity(node_id, cancel);
+}
+
 holdem::CategoryComposition StreetBatchSolver::category_composition(
     const std::string& node_id) const
 {

@@ -1363,6 +1363,12 @@ struct StreetBatchSolver::Engine
 
     StreetReachWeights compute_reaching_weights(const std::string& text) const;
 
+    // Check-down equity from typed reaching weights and cached runout ranks.
+    // Distinct from chip EV (showdown_side). Cancels between board completions.
+    holdem::ShowdownEquity compute_checkdown_equity(
+        const std::string& text,
+        const std::atomic<bool>* cancel) const;
+
 };
 
 } // namespace poker::solver

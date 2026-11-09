@@ -123,7 +123,6 @@ int run(int argc, char** argv)
             if (request.kind == "equity")
             {
                 const auto started = std::chrono::steady_clock::now();
-                const poker::solver::StreetReachWeights weights = held->street->reaching_weights(request.node_id);
                 poker::solver::StreetNodeEquity page;
                 page.node_id = request.node_id;
                 page.units = poker::holdem::kEquityUnits;
@@ -134,24 +133,25 @@ int run(int argc, char** argv)
                 std::vector<poker::holdem::EquityDistributionBucket> ip_distribution = oop_distribution;
                 std::vector<poker::holdem::EquityHandRow> oop_hands;
                 std::vector<poker::holdem::EquityHandRow> ip_hands;
-                if (!weights.oop.empty() && !weights.ip.empty())
+                // Solver-native check-down equity: typed reaches + rank tables.
+                // Keeps the standalone pair enumerator for Equity Calculator / CLI.
+                const poker::holdem::ShowdownEquity equity =
+                    held->street->checkdown_equity(request.node_id, &cancel);
+                page.defined = equity.joint_defined && equity.player0.defined && equity.player1.defined;
+                if (page.defined)
                 {
-                    const poker::holdem::ShowdownEquityOptions options = equity_options(cancel);
-                    const poker::holdem::ShowdownEquity equity = poker::holdem::showdown_equity(
-                        weights.board,
-                        poker::holdem::Range::parse(weights.oop),
-                        poker::holdem::Range::parse(weights.ip),
-                        options);
-                    page.defined = equity.joint_defined && equity.player0.defined && equity.player1.defined;
-                    if (page.defined)
-                    {
-                        page.oop_equity = equity.player0.equity;
-                        page.ip_equity = equity.player1.equity;
-                        oop_distribution = poker::holdem::equity_distribution(equity.player0);
-                        ip_distribution = poker::holdem::equity_distribution(equity.player1);
-                        oop_hands = poker::holdem::equity_hand_rows(equity.player0);
-                        ip_hands = poker::holdem::equity_hand_rows(equity.player1);
-                    }
+                    page.oop_equity = equity.player0.equity;
+                    page.ip_equity = equity.player1.equity;
+                    oop_distribution = poker::holdem::equity_distribution(equity.player0);
+                    ip_distribution = poker::holdem::equity_distribution(equity.player1);
+                    oop_hands = poker::holdem::equity_hand_rows(equity.player0);
+                    ip_hands = poker::holdem::equity_hand_rows(equity.player1);
+                }
+                else
+                {
+                    oop_distribution = poker::holdem::equity_distribution(
+                        std::span<const double>{}, std::span<const double>{});
+                    ip_distribution = oop_distribution;
                 }
                 page.query_seconds = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - started).count();
