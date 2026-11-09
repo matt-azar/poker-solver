@@ -1349,6 +1349,13 @@ void run_explorer_http_tests()
         CHECK(preview.status == 200);
         CHECK(preview.body.find("\"nodes\":[") != std::string::npos);
         CHECK(preview.body.find("\"compact\"") != std::string::npos);
+        // Same construction also returns the labeled memory plan.
+        CHECK(preview.body.find("\"plan\":{") != std::string::npos);
+        CHECK(preview.body.find("\"dry_run\":true") != std::string::npos);
+        double preview_peak = 0.0;
+        CHECK(json_number(preview.body, "estimated_peak_bytes", preview_peak));
+        CHECK(preview_peak > 0.0);
+        CHECK(preview_peak == peak);
 
         const std::string forced =
             "{\"board\":[\"Kh\",\"Kd\",\"7c\",\"4s\"],\"oop_range\":\"AhAd\",\"ip_range\":\"2c3d\","

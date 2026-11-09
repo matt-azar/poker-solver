@@ -256,7 +256,8 @@ std::string memory_plan_json(const poker::solver::StreetMemoryPlan& plan);
 
 std::string public_tree_json(
     const std::vector<poker::solver::StreetPublicNode>& nodes,
-    const poker::solver::TreeEditSet& edits);
+    const poker::solver::TreeEditSet& edits,
+    const poker::solver::StreetMemoryPlan* plan = nullptr);
 
 std::vector<poker::solver::RiverStrategyEntry> street_entries(
     const std::vector<poker::solver::StreetStrategyEntry>& source);

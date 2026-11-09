@@ -8,6 +8,15 @@ import {
   type DealStreet,
 } from "../domain/cards";
 import {
+  lineCardOptionsFromChance,
+  lineCardReportStreet,
+  lineCardTargetId,
+  rowFromResolvedNode,
+  unavailableRow,
+  type LineCardReportModel,
+  type LineCardReportRow,
+} from "../domain/lineCardReport";
+import {
   applyPaintAtPreservingExact,
   blankGrid,
   createExactRangeHistory,
@@ -293,6 +302,7 @@ interface StudyState {
   runouts: unknown | null;
   equity: unknown | null;
   categories: unknown | null;
+  lineCardReport: LineCardReportModel | null;
   /** Client-side solve gate errors (empty when valid / after a successful launch). */
   solveValidationErrors: string[];
   compareNote: ComparePayload | null;
@@ -312,7 +322,13 @@ interface StudyState {
   setEvDisplayBasis: (basis: "local" | "root_centered") => void;
   actionFilter: number | null;
   setActionFilter: (index: number | null) => void;
-  analysisTab: "explorer" | "runouts" | "equity" | "categories" | "value-bluffs";
+  analysisTab:
+    | "explorer"
+    | "runouts"
+    | "equity"
+    | "categories"
+    | "value-bluffs"
+    | "line-cards";
   setAnalysisTab: (tab: StudyState["analysisTab"]) => void;
   warmStart: boolean;
   setWarmStart: (value: boolean) => void;
@@ -376,9 +392,20 @@ interface StudyState {
   stop: () => Promise<void>;
   navigateTo: (
     nodeId: string,
-    opts?: { history?: "push" | "replace" | "none" },
+    opts?: {
+      history?: "push" | "replace" | "none";
+      /** Keep selected hand, action filter, and display modes across card hops. */
+      preserveStudySelection?: boolean;
+    },
   ) => Promise<void>;
   followAction: (nodeId: string) => Promise<void>;
+  /**
+   * Build a same-line card report for the current decision (vary turn or river).
+   * Opens the Line cards analysis tab.
+   */
+  loadLineCardReport: () => Promise<void>;
+  /** Navigate to a report row's resolved node while preserving Study selection. */
+  openLineCardRow: (resolvedNodeId: string) => Promise<void>;
   /**
    * Open-path gate for turn/river card changes from the board strip.
    * Resolves the matching deal-chance ancestor via `pathTrail` (preferred) or
@@ -696,8 +723,11 @@ function emptyAnalysisState() {
     runouts: null as unknown | null,
     equity: null as unknown | null,
     categories: null as unknown | null,
+    lineCardReport: null as LineCardReportModel | null,
   };
 }
+
+let lineCardReportToken = 0;
 
 function analysisRevision(
   node: NodePayload | null | undefined,
@@ -788,7 +818,9 @@ function enqueueWorkerAnalysis(args: {
 }
 
 /** Decision nodes get always-on EV/equity; chance/terminal do not. */
-function isDecisionNodeForAnalysis(node: NodePayload | null | undefined): boolean {
+function isDecisionNodeForAnalysis(
+  node: NodePayload | null | undefined,
+): node is NodePayload {
   if (!node) {
     return false;
   }
@@ -1278,6 +1310,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   runouts: null,
   equity: null,
   categories: null,
+  lineCardReport: null,
   solveValidationErrors: [],
   compareNote: null,
   strategyEditScope: null,
@@ -2269,7 +2302,13 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
   },
 
-  async navigateTo(nodeId: string, opts?: { history?: "push" | "replace" | "none" }) {
+  async navigateTo(
+    nodeId: string,
+    opts?: {
+      history?: "push" | "replace" | "none";
+      preserveStudySelection?: boolean;
+    },
+  ) {
     // Bind to the live published solution only — do not fall back to a stale
     // status.solution_id while Solve/Open has cleared lifecycle identity.
     const solutionId = get().solutionId;
@@ -2277,8 +2316,18 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return;
     }
     const historyMode = opts?.history ?? "push";
+    const preserveStudySelection = Boolean(opts?.preserveStudySelection);
     const token = bumpNodeToken();
     const previous = get().currentNode;
+    const preserved = preserveStudySelection
+      ? {
+          selectedCell: get().selectedCell,
+          actionFilter: get().actionFilter,
+          frequencyMode: get().frequencyMode,
+          matrixMode: get().matrixMode,
+          lineCardReport: get().lineCardReport,
+        }
+      : null;
     // Cancel in-flight polls and drop queued auto/prefetch work for other nodes.
     // Keep the page cache so returning to a node restores EV/equity instantly.
     invalidateAllAnalysisRequests();
@@ -2288,7 +2337,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     set({
       solutionId,
       ...emptyAnalysisState(),
-      selectedCell: null,
+      ...(preserved
+        ? { selectedCell: preserved.selectedCell, lineCardReport: preserved.lineCardReport }
+        : { selectedCell: null }),
       phase: get().status?.running ? get().phase : get().phase,
     });
     try {
@@ -2355,8 +2406,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       set({
         currentNode: node,
         solutionId: nextSolutionId,
-        frequencyMode: "aggression",
-        actionFilter: null,
+        frequencyMode: preserved?.frequencyMode ?? "aggression",
+        actionFilter: preserved?.actionFilter ?? null,
+        matrixMode: preserved?.matrixMode ?? get().matrixMode,
+        selectedCell: preserved?.selectedCell ?? null,
         lockDraft: defaultLockDraft(node.actions?.length ?? 0),
         lockDraftBaseline: defaultLockDraft(node.actions?.length ?? 0),
         pathTrail,
@@ -2365,6 +2418,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         canNavBack: navHistoryIndex > 0,
         canNavForward: navHistoryIndex >= 0 && navHistoryIndex < navHistory.length - 1,
         ...cached,
+        ...(preserved?.lineCardReport
+          ? { lineCardReport: preserved.lineCardReport }
+          : {}),
         ...(strategyScopeChanged
           ? {
               strategyEditScope: null,
@@ -2397,6 +2453,169 @@ export const useStudyStore = create<StudyState>((set, get) => ({
 
   async followAction(nodeId: string) {
     await get().navigateTo(nodeId, { history: "push" });
+  },
+
+  async openLineCardRow(resolvedNodeId: string) {
+    if (!resolvedNodeId) {
+      return;
+    }
+    await get().navigateTo(resolvedNodeId, {
+      history: "push",
+      preserveStudySelection: true,
+    });
+  },
+
+  async loadLineCardReport() {
+    const solutionId = get().solutionId;
+    const node = get().currentNode;
+    if (!solutionId || !node) {
+      set({ message: "Solve a spot before comparing cards on a line." });
+      return;
+    }
+    if (node.kind === "chance" || node.kind === "terminal") {
+      set({
+        message: "Open a decision node to compare action frequencies across cards.",
+      });
+      return;
+    }
+    const street = lineCardReportStreet(node.board);
+    if (!street) {
+      set({
+        message: "Compare cards needs a turn or river board (flop-only spots have no card to vary).",
+      });
+      return;
+    }
+
+    const token = ++lineCardReportToken;
+    const reportNodeId = node.node_id;
+    const actionLabels = [...(node.actions ?? [])];
+    const pending: LineCardReportModel = {
+      pending: true,
+      reportNodeId,
+      line: String(node.line || reportNodeId),
+      street,
+      chanceNodeId: "",
+      actionLabels,
+      rows: [],
+      solutionId,
+    };
+    set({
+      lineCardReport: pending,
+      analysisTab: "line-cards",
+      message: `Comparing ${street} cards on this line…`,
+    });
+    useLayoutStore.getState().setLayout({
+      lowerDock: true,
+      lowerDockHeight: Math.max(
+        useLayoutStore.getState().layout.lowerDockHeight,
+        220,
+      ),
+    });
+
+    try {
+      const gate = await get().prepareBoardCardChange(street);
+      if (token !== lineCardReportToken) {
+        return;
+      }
+      if (!gate.ok) {
+        set({
+          lineCardReport: {
+            ...pending,
+            pending: false,
+            error: gate.reason,
+          },
+          message: gate.reason,
+        });
+        return;
+      }
+      const chance = get().boardChangeChanceNode;
+      if (!chance) {
+        set({
+          lineCardReport: {
+            ...pending,
+            pending: false,
+            error: `Could not load the ${street} deal node.`,
+          },
+          message: `Could not load the ${street} deal node.`,
+        });
+        return;
+      }
+      // Picker arming is only for the report; clear so the strip stays idle.
+      get().clearBoardCardChange();
+
+      const options = lineCardOptionsFromChance(chance);
+      const rows: LineCardReportRow[] = [];
+      for (const option of options) {
+        if (token !== lineCardReportToken) {
+          return;
+        }
+        const target = lineCardTargetId(
+          reportNodeId,
+          chance.node_id,
+          option.nodeId,
+        );
+        try {
+          const resolved = await engineClient.getNode(solutionId, target);
+          if (token !== lineCardReportToken) {
+            return;
+          }
+          if (
+            resolved.kind === "chance" ||
+            resolved.kind === "terminal" ||
+            !(resolved.actions?.length)
+          ) {
+            rows.push(
+              unavailableRow(option, "Decision not present on this card"),
+            );
+            continue;
+          }
+          rows.push(rowFromResolvedNode(option, resolved, actionLabels));
+        } catch (error) {
+          const status = error instanceof EngineError ? error.status : 0;
+          if (status === 400 || status === 404) {
+            rows.push(unavailableRow(option, "Line unavailable on this card"));
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      if (token !== lineCardReportToken) {
+        return;
+      }
+      set({
+        lineCardReport: {
+          pending: false,
+          reportNodeId,
+          line: String(node.line || reportNodeId),
+          street,
+          chanceNodeId: chance.node_id,
+          actionLabels,
+          rows,
+          solutionId,
+        },
+        analysisTab: "line-cards",
+        message: `Line card report ready (${rows.length} ${street}s).`,
+      });
+    } catch (error) {
+      if (token !== lineCardReportToken) {
+        return;
+      }
+      const message =
+        error instanceof EngineError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Line card report failed";
+      set({
+        lineCardReport: {
+          ...pending,
+          pending: false,
+          error: message,
+        },
+        message,
+      });
+    }
   },
 
   clearBoardCardChange() {

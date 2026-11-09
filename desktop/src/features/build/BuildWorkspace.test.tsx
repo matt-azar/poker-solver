@@ -41,6 +41,34 @@ vi.mock("../../domain/profiles", async () => {
   };
 });
 
+vi.mock("../../engine/client", () => ({
+  EngineError: class EngineError extends Error {
+    status: number;
+    constructor(message: string, status = 400) {
+      super(message);
+      this.status = status;
+    }
+  },
+  engineClient: {
+    treePreview: vi.fn(async () => ({
+      nodes: [],
+      tree_edits: [],
+      plan: {
+        estimated_peak_bytes: 1024,
+        memory_budget_bytes: 1024 * 1024,
+        deals: 0,
+        infosets: 0,
+        decision_nodes: 0,
+        terminals: 0,
+        public_decisions: 0,
+        threads: 1,
+        fits_budget: true,
+        dry_run: true,
+      },
+    })),
+  },
+}));
+
 const { resetSeatActionCatalogueForTests } = await import("../../domain/profiles");
 const { useStudyStore } = await import("../../state/studyStore");
 const { BuildWorkspace } = await import("./BuildWorkspace");
@@ -74,6 +102,13 @@ describe("BuildWorkspace range tools", () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  it("mounts the collapsible Preview tree section", () => {
+    render(<BuildWorkspace />);
+    expect(
+      screen.getByRole("button", { name: "Preview tree" }),
+    ).toBeTruthy();
   });
 
   it("lets the user type a paint weight into a number field", async () => {

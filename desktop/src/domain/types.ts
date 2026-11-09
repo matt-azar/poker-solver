@@ -120,6 +120,8 @@ export interface TreePreviewNode {
 export interface TreePreviewPayload {
   nodes: TreePreviewNode[];
   tree_edits: string[];
+  /** Labeled mid-construction plan from the same plan-only build. */
+  plan?: MemoryPlanPayload;
 }
 
 export interface GapSeriesPoint {
@@ -220,6 +222,11 @@ export interface NodePayload {
   opponent_reach?: number[];
   opponent_marginal?: number[] | null;
   locked_hands?: number[] | boolean[] | null;
+  /**
+   * Acting-seat joint / reach mass at this node (engine inspection `joint`).
+   * Keep distinct from a legitimate 0% action frequency.
+   */
+  joint?: number | null;
   [key: string]: unknown;
 }
 

@@ -211,4 +211,130 @@ describe("studyStore board card change", () => {
     expect(useStudyStore.getState().currentNode?.node_id).toBe("p4.t40.r-1");
     expect(useStudyStore.getState().boardChangeChanceNode).toBeNull();
   });
+
+  it("builds a same-line card report and preserves selection on row open", async () => {
+    engineMocks.setGetNodeImpl(async (solutionId, nodeId) => {
+      if (nodeId === "p2.t-1.r-1") {
+        return {
+          ...turnDeal,
+          solution_id: solutionId,
+          cards: [
+            { card: "2s", child_id: "p4.t15.r-1", weight: 0.02 },
+            { card: "As", child_id: "p4.t40.r-1", weight: 0.02 },
+          ],
+        };
+      }
+      if (nodeId === "p8.t15.r-1" || nodeId === "p8.t40.r-1") {
+        return {
+          node_id: nodeId,
+          solution_id: solutionId,
+          kind: "decision",
+          board:
+            nodeId === "p8.t40.r-1"
+              ? ["Ah", "Kd", "7c", "As"]
+              : ["Ah", "Kd", "7c", "2s"],
+          actions: ["Check", "Bet 50"],
+          strategy: [
+            [0.7, 0.3],
+            [0.7, 0.3],
+          ],
+          marginal: [1, 0],
+          combos: ["AhAd", "KhKd"],
+          reach: [1, 0],
+          reach_defined: true,
+          joint: nodeId === "p8.t40.r-1" ? 0.1 : 0.4,
+          status_generation: 1,
+        };
+      }
+      return {
+        node_id: nodeId,
+        solution_id: solutionId,
+        kind: "decision",
+        board: ["Ah", "Kd", "7c", "2s"],
+        actions: ["Check", "Bet 50"],
+        status_generation: 1,
+      };
+    });
+
+    useStudyStore.setState({
+      currentNode: {
+        node_id: "p8.t15.r-1",
+        solution_id: "s1",
+        kind: "decision",
+        board: ["Ah", "Kd", "7c", "2s"],
+        parent_id: "p4.t15.r-1",
+        line: "Check/Check",
+        actions: ["Check", "Bet 50"],
+        strategy: [
+          [0.7, 0.3],
+          [0.7, 0.3],
+        ],
+        marginal: [1, 0],
+        combos: ["AhAd", "KhKd"],
+        reach: [1, 0],
+        joint: 0.4,
+      },
+      selectedCell: { row: 0, col: 0, text: "AA" },
+      actionFilter: 1,
+      frequencyMode: "aggression",
+      matrixMode: "strategy",
+      pathTrail: [
+        {
+          kind: "root",
+          nodeId: "p0.t-1.r-1",
+          label: "Root",
+          rawLabel: "Root",
+          street: "flop",
+          actor: null,
+        },
+        {
+          kind: "action",
+          nodeId: "p2.t-1.r-1",
+          label: "Check",
+          rawLabel: "Check",
+          street: "flop",
+          actor: "OOP",
+        },
+        {
+          kind: "card",
+          nodeId: "p4.t15.r-1",
+          label: "2s",
+          rawLabel: "2s",
+          street: "turn",
+          actor: null,
+          card: "2s",
+          parentId: "p2.t-1.r-1",
+        },
+        {
+          kind: "action",
+          nodeId: "p8.t15.r-1",
+          label: "Check",
+          rawLabel: "Check",
+          street: "turn",
+          actor: "OOP",
+        },
+      ],
+    });
+
+    await useStudyStore.getState().loadLineCardReport();
+    const report = useStudyStore.getState().lineCardReport;
+    expect(report?.pending).toBe(false);
+    expect(report?.street).toBe("turn");
+    expect(report?.rows.length).toBe(2);
+    expect(report?.rows.every((row) => row.available)).toBe(true);
+    expect(useStudyStore.getState().analysisTab).toBe("line-cards");
+    expect(useStudyStore.getState().boardChangeChanceNode).toBeNull();
+
+    const asRow = report?.rows.find((row) => row.card === "As");
+    expect(asRow?.resolvedNodeId).toBe("p8.t40.r-1");
+    await useStudyStore.getState().openLineCardRow(asRow!.resolvedNodeId!);
+    expect(useStudyStore.getState().currentNode?.node_id).toBe("p8.t40.r-1");
+    expect(useStudyStore.getState().selectedCell).toEqual({
+      row: 0,
+      col: 0,
+      text: "AA",
+    });
+    expect(useStudyStore.getState().actionFilter).toBe(1);
+    expect(useStudyStore.getState().lineCardReport?.rows.length).toBe(2);
+  });
 });
