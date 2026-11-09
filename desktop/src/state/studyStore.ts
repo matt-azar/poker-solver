@@ -818,7 +818,9 @@ function enqueueWorkerAnalysis(args: {
 }
 
 /** Decision nodes get always-on EV/equity; chance/terminal do not. */
-function isDecisionNodeForAnalysis(node: NodePayload | null | undefined): boolean {
+function isDecisionNodeForAnalysis(
+  node: NodePayload | null | undefined,
+): node is NodePayload {
   if (!node) {
     return false;
   }
@@ -3006,7 +3008,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return;
     }
     if (
-      analysisErrorIsPermanent(liveEquity?.error) &&
+      liveEquity &&
+      analysisErrorIsPermanent(liveEquity.error) &&
       liveEquity.node_id === nodeId &&
       liveEquity.solution_id === solutionId
     ) {
