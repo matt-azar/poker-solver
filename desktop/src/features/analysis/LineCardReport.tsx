@@ -124,9 +124,9 @@ export function LineCardReport() {
   const evDisplayBasis =
     (useStudyStore((s) => s.evDisplayBasis) as EvDisplayBasis | undefined) ?? "local";
   const pathTrail = useStudyStore((s) => s.pathTrail);
-  const rootPot = Number(
-    useStudyStore((s) => s.draft?.pot) ?? useStudyStore((s) => s.status?.pot) ?? 0,
-  );
+  const draftPot = useStudyStore((s) => s.draft?.pot);
+  const statusPot = useStudyStore((s) => s.status?.pot);
+  const rootPot = Number(draftPot ?? statusPot ?? 0);
   const [metric, setMetric] = useState<LineCardMetric>("frequencies");
   const [extras, setExtras] = useState<Record<string, CellExtra>>({});
   const reportRef = useRef(report);
