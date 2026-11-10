@@ -22,8 +22,8 @@ alwaysApply: true
 - Pin production batch changes against `CfrTrainer<*Game>` / `--reference`. Kuhn/Leduc stay on `CfrTrainer` only. `include/` must not depend on `legacy/ui/` or `desktop/`.
 - Nash gap is NashConv (sum of BR gains). Accuracy / stop criterion is Pio’s average (NashConv/2); default unit is pot fraction.
 - Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; Equity (UI label) is check-down pot fraction ≠ chip EV.
-- Study `/values` are root-centered; Local EV uses `local_offset` (include street `contrib`, not half pot alone). Serialize EV/equity analysis jobs; identity includes `analysis_revision`.
-- Default node lock keeps turn/river cards; `scope:"line"` is explicit line-wide. Study `/equity` uses solver rank tables; Calculator stays on pair enumerator.
+- Study `/values` are root-centered; Local EV uses `local_offset` (include street `contrib`, not half pot alone). Index Fold from `values.actions`, not `node.actions`. Serialize EV/equity analysis jobs; identity includes `analysis_revision`. Do not full-tree frontload analysis.
+- Default node lock keeps turn/river cards; `scope:"line"` is explicit line-wide (flop root needs an explicit scope field). Study `/equity` uses solver rank tables; Calculator stays on pair enumerator. Keep Study pair-runout C++ + Tauri constants aligned.
 - Street config is `street-config 1` text; river CLI defaults are often JSON — do not mix formats. Empty bet arrays mean check-only; absent keys mean defaults. No Flop donk control.
 - AI packs: edit `docs/ai-context/source/` then `npm run sync:ai-context` / CI `check:ai-context`. Do not hand-edit generated packs.
 - Do not change `LICENSE`. Update `docs/auxiliary/planning/FEATURE_PARITY.md` only with the commit that demonstrates the row.

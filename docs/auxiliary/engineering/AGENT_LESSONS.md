@@ -146,13 +146,17 @@ Explorer used to have a **single-slot** ValueWorker. Overlapping `/equity` + `/v
 `/values` utilities are **root-centered chips**. Study defaults to **local decision EV**: Fold → 0 for the acting seat by adding `local_offset` (= `-U_i(fold-now)`).
 
 - Decision and chance nodes must store `state.contrib` so `local_offset` includes chips already invested on prior streets — half the starting pot alone is wrong after bet/call (#184).
-- Display components must honor `settings.evDisplayBasis`; with Local, prefer `values.actions` + offset for the Fold column.
+- **Fold column:** index Fold from `values.actions` (same order as `action_ev`), then `+ local_offset`. Indexing Fold from `node.actions` or using `row[foldIdx] ?? 0` turns a miss into baseline 0 and makes Local conversion a **silent no-op** (Settings say Local, UI still looks Global) (#182).
+- Prefer the Settings store for `evDisplayBasis` over a stale study-store copy.
+- Fixtures that only face a bet with actor `contrib = 0` can mask a zero-contrib bug (offset looks like “half pot” and tests still pass).
 
-**Pointers:** PRs #182, #184; `docs/EXPLORER.md`, `docs/DESKTOP_UI.md`.
+**Pointers:** PRs #182, #184; `desktop/src/domain/browse.ts`; `docs/EXPLORER.md`.
 
 ### Node lock vs line lock
 
 Default lock scope is **`node`** (Pio `lock_node`): keep turn/river cards from `node_id` so locking one river does **not** silently lock every runout on that betting line (#201). Explicit `scope: "line"` stores `pN.t-1.r-1` (Pio `lock_line`). Engine lookup: exact runout first, then line fallback. PSOL: `lock N at T R …` vs `lock N line …`; legacy lines without `at`/`line` open as line locks.
+
+At a flop root, `t-1.r-1` is both the node id and the line key — **do not infer scope from cards alone**; keep an explicit `LockScope` / `scope` field. A node lock must not overwrite a line lock for the same infoset.
 
 **Don't:** Strip turn/river from lock keys “for infoset convenience.”
 
@@ -161,18 +165,22 @@ Default lock scope is **`node`** (Pio `lock_node`): keep turn/river cards from `
 - Study node `/equity` uses `StreetBatchSolver::checkdown_equity` (cached rank tables / blocker masses) — same check-down math, much faster than pair enumeration (#191).
 - Equity Calculator / CLI stay on `showdown_equity` + `kDefaultMaxPairRunouts` (~1.1M).
 - Packaged Study raises `--max-pair-runouts` to `kStudyExplorerMaxPairRunouts` (= full-range turn, ~51.4M). Dense flop check-downs can still exceed that. **Never silently sample** when over the limit.
+- Study ceiling is a **packaging knob**: keep C++ `kStudyExplorerMaxPairRunouts` and Tauri `STUDY_EXPLORER_MAX_PAIR_RUNOUTS` aligned; raising only an env var does nothing for the packaged desktop spawn (#188).
+- Warm the **current** decision (queue + identity-keyed cache). Do **not** full-tree frontload EV/equity into the save — commercial “always ready” is kernel speed + non-thrashing plumbing (#184, #190, #191).
 
 User-facing Study copy says **Equity** (not “Check-down equity”); the quantity is still check-down pot fraction, not chip EV (#189).
+
+Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via normalized `comboKey` (suit-order variants); gate ready/pending with solution+node id so navigate does not show another node’s Eq (#170).
 
 ### Frozen parallel + cold action EV
 
 - Train/BR and cold average-value walks may steal **first future public card** tasks across workers; nested chance stays serial on the claiming worker (#177, #194).
-- Wall-clock “parallel must beat serial” asserts are flaky on cold/shared CI VMs and under sanitizers — pin **numerical parity**; soften or skip timing gates (#201).
+- Wall-clock “parallel must beat serial” asserts are flaky on cold/shared CI VMs and under sanitizers — pin **numerical parity**; soften or skip timing gates (#201). Avoid `__has_feature` guards that break MSVC.
 
 ### Solve progress / Accuracy stop
 
 - Progress: iteration counter every train step; EV / gap / Accuracy refresh about every 10 iters (or denser if Samples is raised) (#180). `time_limit: 0` stops after the first completed iteration.
-- Early-stop uses **Pio Accuracy** (`NashConv / 2`), default unit pot fraction (#179).
+- Early-stop uses **Pio Accuracy** (`NashConv / 2`). Compare the threshold to **Accuracy chips**, not raw NashConv (off-by-2 early/late stop). Default CLI/UI **unit** is pot fraction (`--accuracy 0.05` or `5 chips`); Pio UPI’s chips-default unit is not our product default (#179). Keep `nash_gap` as NashConv for reporting.
 
 ---
 
@@ -218,8 +226,9 @@ Matrix, Hands, and Node Locking strategy bars paint **aggressive → passive** l
 
 - Packs under `docs/ai-context/{help,setup-assistant,unified}.md` are **generated**. Edit `docs/ai-context/source/`, then `cd desktop && npm run sync:ai-context`. CI `npm run check:ai-context` fails on drift or forbidden stale UI phrases (#196).
 - Assistant entry is menu-bar **Assistant** (not Help → Study assistant). No Build-page Setup assistant. Workspaces include **Equity**.
-- Bounded Study evidence tools (`query_node_strategy`, `list_bluff_candidates`, `query_selected_hand_analysis`) may hop ≤2 nodes and wait on the analysis scheduler; they must **not** start solves or open filesystem/HTTP beyond the engine client. Prefer honest absences over invented mixes (#197).
+- Bounded Study evidence tools (`query_node_strategy`, `list_bluff_candidates`, `query_selected_hand_analysis`) may hop ≤2 nodes (e.g. `fetchNode` BFS) and wait on the analysis scheduler; they must **not** start solves, open filesystem/HTTP beyond the engine client, or **navigate the Study tree** just to discover nodes. Prefer honest absences over invented mixes (#197).
 - `contextSnapshot` v2 carries published-solution identity, node path/seat/board, strategy, selected-hand analysis, and readiness — including equity + NashConv/Accuracy gaps.
+- Build Preview and Solve must share one `buildJob` serializer with `/api/tree-preview` (#192).
 
 **Pointers:** `docs/ai-context/README.md`, `docs/STUDY_SETUP_ASSISTANT.md`.
 
@@ -237,6 +246,7 @@ Matrix, Hands, and Node Locking strategy bars paint **aggressive → passive** l
 - Assertion totals differ by compiler; fail missing parity checkpoints instead of skipping (`cc12bc8`).
 - **Desktop `tsc -b`:** Study store nullability (`node` / `liveEquity` unnarrowed) fails `desktop` and `windows-installer` CI even when vitest is green (#190/#191). After lifecycle/analysis changes, run `cd desktop && npx tsc -b`.
 - **CI path gate:** `dorny/paths-filter` needs `pull-requests: read` under restricted `GITHUB_TOKEN` scopes; fail the aggregate `ci` job if the path gate itself fails (#200).
+- **NSIS / installer hooks:** wait for **`windows-installer`** green before merge. A green non-installer subset is not enough — #158/#159 landed broken PREINSTALL arity / duplicate `kill:` labels and needed follow-ups (#161).
 - **Tauri sidecar spawn:** `bundle.externalBin` may be `binaries/holdem-explorer`, but the installed file is `<exe_dir>/holdem-explorer.exe`. `shell().sidecar("binaries/holdem-explorer")` looks under a non-existent `binaries/` folder (os error 3). Spawn the absolute path beside the app (or `sidecar("holdem-explorer")`). Packaged UI must also **statically import** `@tauri-apps/api/core` — `@vite-ignore` dynamic imports leave a bare specifier that fails at runtime.
 - **NSIS upgrade + sidecar lock:** A running/orphaned `holdem-explorer.exe` keeps the file locked → "Error opening file for writing: …\holdem-explorer.exe" (Ignore leaves a stale engine). PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning` — its `kill:` labels collide with the template's insert), then `taskkill /F /T /IM holdem-explorer.exe`, Sleep, and `Delete` the old sidecar. Never `taskkill` `explorer.exe`.
 
