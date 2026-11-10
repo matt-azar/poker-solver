@@ -4594,6 +4594,117 @@
   gap: var(--space-2);
 }
 
+/* Narrower shell for the flat betting-tree catalogue. */
+.catalogue-modal--tree {
+  width: min(440px, 100%);
+  max-height: min(640px, 92vh);
+}
+
+/* One-level betting-tree catalogue (localStorage; no OS file dialog). */
+.tree-catalogue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow: auto;
+}
+
+.tree-catalogue__help {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.tree-catalogue__title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tree-catalogue__items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tree-catalogue__row,
+.tree-catalogue__save-form,
+.tree-catalogue__row-actions,
+.tree-catalogue__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tree-catalogue__row {
+  justify-content: space-between;
+}
+
+.tree-catalogue__open {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.tree-catalogue__open:hover {
+  color: var(--accent);
+}
+
+.tree-catalogue__save {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+
+.tree-catalogue__save--focus {
+  outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+
+.tree-catalogue__save-form label,
+.tree-catalogue__edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  flex: 1 1 160px;
+}
+
+.tree-catalogue__save-form input,
+.tree-catalogue__edit input {
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  font: inherit;
+}
+
+.tree-catalogue__error {
+  margin: 0;
+  color: var(--danger, #b42318);
+  font-size: 12px;
+}
+
+.tree-catalogue__footer {
+  justify-content: flex-end;
+}
+
 /* Status bar solve controls + settings */
 
 /* Optional status-bar action buttons. */
