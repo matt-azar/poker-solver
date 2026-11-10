@@ -446,7 +446,10 @@ void StreetBatchSolver::Engine::apply_freeze_range(std::size_t begin, std::size_
         }
         if (locks_ != nullptr)
         {
-            const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
+            const NodeLock* lock = locks_->find_for_runout(
+                static_cast<std::size_t>(slot.node),
+                static_cast<int>(slot.turn),
+                static_cast<int>(slot.river));
             apply_lock_to_strategy(
                 std::span<TableScalar>(
                     sigma.data() + slot.base,
@@ -538,7 +541,10 @@ void StreetBatchSolver::Engine::apply_floor_and_freeze_range(std::size_t begin, 
         }
         if (locks_ != nullptr)
         {
-            const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
+            const NodeLock* lock = locks_->find_for_runout(
+                static_cast<std::size_t>(slot.node),
+                static_cast<int>(slot.turn),
+                static_cast<int>(slot.river));
             apply_lock_to_strategy(
                 std::span<TableScalar>(
                     sigma.data() + slot.base,
@@ -684,7 +690,10 @@ void StreetBatchSolver::Engine::apply_discount_and_freeze_range(std::size_t begi
             slot_action_count(slot));
         if (locks_ != nullptr)
         {
-            const NodeLock* lock = locks_->find(static_cast<std::size_t>(slot.node));
+            const NodeLock* lock = locks_->find_for_runout(
+                static_cast<std::size_t>(slot.node),
+                static_cast<int>(slot.turn),
+                static_cast<int>(slot.river));
             apply_lock_to_strategy(
                 std::span<TableScalar>(
                     sigma.data() + slot.base,
@@ -760,10 +769,12 @@ void StreetBatchSolver::Engine::run_slot_pass(SlotPass pass, int player)
 
 
 // When locks_ is set, locked rows replace RM for matching public nodes.
-// Lock infoset_id is the public-node index (slot.node). SelectedCombos
-// uses the acting player's hand index (slot.hand). Slots are independent:
-// each writes only its own sigma / regret span, so threads > 1
-// partition the slot vector with the same worker pool as chance splits.
+// Lookup is find_for_runout(slot.node, slot.turn, slot.river): an exact
+// runout lock wins, otherwise a line lock (turn=river=-1) applies.
+// SelectedCombos uses the acting player's hand index (slot.hand). Slots
+// are independent: each writes only its own sigma / regret span, so
+// threads > 1 partition the slot vector with the same worker pool as
+// chance splits.
 void StreetBatchSolver::Engine::freeze_sigma()
 {
     const auto started = profile_

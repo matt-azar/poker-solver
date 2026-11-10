@@ -1,8 +1,14 @@
 /** Pure helpers for node-lock editing. Zero probability is a real constraint; unlock is separate. */
 
+import { formatPublicNodeId, parsePublicNodeId } from "./cards";
+
+export type LockScope = "node" | "line";
+
 export interface LockRecord {
   node_id: string;
   infoset_id?: number;
+  /** Exact board vs every runout of the betting line. Omitted on older payloads. */
+  scope?: LockScope;
   kind: "full" | "selected";
   hand_indices: number[];
   probs: number[];
@@ -97,8 +103,29 @@ export function handIndexForCombo(combos: string[] | undefined, combo: string): 
   return combos.indexOf(combo);
 }
 
+/** Line-scoped lock id for the same public betting index (pN.t-1.r-1). */
+export function lineLockNodeId(nodeId: string): string | null {
+  const parts = parsePublicNodeId(nodeId);
+  if (!parts) {
+    return null;
+  }
+  return formatPublicNodeId({ index: parts.index, turn: -1, river: -1 });
+}
+
+/**
+ * Active lock for a browsed node: exact runout first, then line lock for the
+ * same public index (engine find_for_runout semantics).
+ */
 export function lockForNode(locks: LockRecord[], nodeId: string): LockRecord | null {
-  return locks.find((entry) => entry.node_id === nodeId) ?? null;
+  const exact = locks.find((entry) => entry.node_id === nodeId);
+  if (exact) {
+    return exact;
+  }
+  const lineId = lineLockNodeId(nodeId);
+  if (!lineId || lineId === nodeId) {
+    return null;
+  }
+  return locks.find((entry) => entry.node_id === lineId) ?? null;
 }
 
 export function isHandLocked(lock: LockRecord | null, handIndex: number): boolean {

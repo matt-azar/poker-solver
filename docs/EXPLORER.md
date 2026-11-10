@@ -53,14 +53,16 @@ Stop and publication share one state machine. `POST /api/stop` accepts an option
 
 `POST /api/solutions/{id}/continue` with `{"iterations":N}` trains N more iterations on that published solution, including a paused one. An optional `time_limit` (non-negative seconds) arms a wall-clock stop for that continuation only; omit it to leave continue unlimited. There is no separate `/api/resume`. The solution id stays. Regrets, average weights, and the iteration count continue from the stored state. The same algorithm and frozen setting are used. Held node locks (if any) are applied for those iterations. The request cancels an in-flight value query and waits until no reader holds the engine, then browsing is suspended until the continuation is published. A stop during the continuation keeps the chunks that finished and leaves that same solution completed. A pause during the continuation leaves it paused again. A time-limit stop keeps the finished chunks, leaves the solution completed, and sets `time_limit_reached`. An exception leaves the engine queryable. Status, export, history, and the next continuation use the iterations the engine actually completed, including the job id for that training. A missing solution is 404. An iteration count that is missing, non-finite, or not an integer from 1 through 1000000000 is 400, and that rejection does not stop the process. A negative or non-finite `time_limit` is 400. A continuation while a solve is running is 409. The page drops the node on screen when the continuation is accepted and loads it again when the run finishes, including when the solution id is unchanged.
 
-Node locks (street solutions; public-node id `pN.t-1.r-1` maps to infoset `N`):
+Node locks (street solutions; public-node id `pN.tT.rR`):
 
-- `GET /api/solutions/{id}/locks` lists held locks
-- `PUT /api/solutions/{id}/locks` with `{"node_id","kind":"full"|"selected","hand_indices","probs"}` upserts a lock after validating action arity via `inspect_node`
-- `DELETE /api/solutions/{id}/locks?node_id=...` (or `/locks/{node}`) removes one lock; omit the node to clear all
+- Scope is explicit. Default `scope:"node"` keeps the turn/river cards from `node_id` so a river lock constrains only that board (Pio `lock_node`). `scope:"line"` stores `pN.t-1.r-1` and applies across every runout of that betting line (Pio `lock_line`). Engine lookup prefers an exact runout lock, then falls back to a line lock.
+- `GET /api/solutions/{id}/locks` lists held locks with `node_id`, `scope` (`node`|`line`), kind, hands, and probs
+- `PUT /api/solutions/{id}/locks` with `{"node_id","scope":"node"|"line","kind":"full"|"selected","hand_indices","probs"}` upserts a lock after validating action arity via `inspect_node` (`scope` defaults to `node`)
+- `DELETE /api/solutions/{id}/locks?node_id=...` (or `/locks/{node}`) removes the exact key for that `node_id`; omit the node to clear all
 - `POST /api/solutions/{id}/resolve-locked` with `{"iterations":N}` and optional `accuracy` / `samples` / `time_limit` / `warm_start` retains the current revision as a Session baseline. Default rebuilds and re-solves from zero with locks. `warm_start:1` keeps regrets/strategy-sums and continues N more iterations under locks. Publishes a new solution id; status exposes `baseline_solution_id`. Baseline export/nodes stay queryable
 - `DELETE /api/solutions/{id}/locks?node_id=…&hand_index=K` removes one combo from a SelectedCombos lock (erases the node lock when none remain). Full-node locks unlock with `node_id` only
 - `GET /api/compare?baseline=sA&scenario=sB&node_id=...` returns root EV/gap for both revisions plus per-hand strategy vectors, deltas, and locked-hand marks
+- PSOL `locks_text`: node locks use `lock N at T R full …`; line locks use `lock N line full …`. Legacy lines without `at`/`line` open as line locks
 
 Free-form strategy edits (distinct from locks — rewrite the prepared average profile for browse/EV; do not constrain CFR):
 

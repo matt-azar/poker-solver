@@ -268,7 +268,16 @@ const poker::solver::LockSet* locks_arg(const HeldSolution& held);
 
 bool parse_public_node_index(std::string_view text, std::size_t& infoset_id);
 
+// Full explorer id pN.tT.rR → public index plus encoded turn/river cards.
+bool parse_public_node_id(
+    std::string_view text,
+    std::size_t& infoset_id,
+    int& turn,
+    int& river);
+
 std::string node_id_for_infoset(std::size_t infoset_id);
+
+std::string node_id_for_lock(const poker::solver::NodeLock& lock);
 
 std::string json_locks(const poker::solver::LockSet& locks);
 

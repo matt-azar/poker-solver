@@ -627,6 +627,7 @@ void check_lock_resolve_compare_workflow()
     CHECK(locked.status == 200);
     CHECK(locked.body.find("\"probs\"") != std::string::npos);
     CHECK(locked.body.find(root) != std::string::npos);
+    CHECK(locked.body.find("\"scope\":\"node\"") != std::string::npos);
 
     HttpResult resolve_accepted;
     CHECK(http_exchange(
@@ -709,6 +710,65 @@ void check_lock_resolve_compare_workflow()
     double after_warm = 0.0;
     CHECK(json_number(warmed.body, "iterations", after_warm));
     CHECK(after_warm >= before_warm + 2.0 - 1e-9);
+
+    // Node vs line scope: locking one river must echo that river card, not
+    // silently rewrite to pN.t-1.r-1. Line scope is the explicit cross-runout form.
+    HttpResult walk_root;
+    CHECK(http_exchange("GET", "/api/solutions/" + reopened + "/nodes/" + root, "", walk_root));
+    CHECK(walk_root.status == 200);
+    std::string walk = json_array_string(walk_root.body, "children");
+    std::string river_child;
+    for (int depth = 0; depth < 8 && !walk.empty(); ++depth)
+    {
+        HttpResult page;
+        CHECK(http_exchange("GET", "/api/solutions/" + reopened + "/nodes/" + walk, "", page));
+        CHECK(page.status == 200);
+        if (page.body.find("\"kind\":\"chance\"") != std::string::npos)
+        {
+            // Chance nodes put runouts under cards[].child_id, not children[].
+            const std::size_t child_key = page.body.find("\"child_id\":\"");
+            CHECK(child_key != std::string::npos);
+            const std::size_t start = child_key + std::string("\"child_id\":\"").size();
+            const std::size_t end = page.body.find('"', start);
+            CHECK(end != std::string::npos);
+            river_child = page.body.substr(start, end - start);
+            break;
+        }
+        walk = json_array_string(page.body, "children");
+    }
+    CHECK(!river_child.empty());
+    CHECK(river_child.find(".r-1") == std::string::npos);
+    HttpResult river_page;
+    CHECK(http_exchange(
+        "GET", "/api/solutions/" + reopened + "/nodes/" + river_child, "", river_page));
+    CHECK(river_page.status == 200);
+    CHECK(river_page.body.find("\"kind\":\"decision\"") != std::string::npos);
+    HttpResult node_lock;
+    CHECK(http_exchange(
+        "PUT",
+        "/api/solutions/" + reopened + "/locks",
+        "{\"node_id\":\"" + river_child
+            + "\",\"scope\":\"node\",\"kind\":\"full\",\"probs\":[1,0]}",
+        node_lock));
+    CHECK(node_lock.status == 200);
+    CHECK(node_lock.body.find(river_child) != std::string::npos);
+    CHECK(node_lock.body.find("\"scope\":\"node\"") != std::string::npos);
+    const std::size_t t_at = river_child.find(".t");
+    CHECK(t_at != std::string::npos);
+    const std::string line_id = river_child.substr(0, t_at) + ".t-1.r-1";
+    HttpResult line_lock;
+    CHECK(http_exchange(
+        "PUT",
+        "/api/solutions/" + reopened + "/locks",
+        "{\"node_id\":\"" + river_child
+            + "\",\"scope\":\"line\",\"kind\":\"full\",\"probs\":[0,1]}",
+        line_lock));
+    CHECK(line_lock.status == 200);
+    CHECK(line_lock.body.find(line_id) != std::string::npos);
+    CHECK(line_lock.body.find("\"scope\":\"line\"") != std::string::npos);
+    // Exact node lock and line lock coexist.
+    CHECK(line_lock.body.find(river_child) != std::string::npos);
+
     std::remove(checkpoint.c_str());
 }
 

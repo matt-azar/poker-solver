@@ -13,6 +13,7 @@ namespace
 
 using poker::solver::ActionLockRow;
 using poker::solver::LockKind;
+using poker::solver::LockScope;
 using poker::solver::LockSet;
 using poker::solver::NodeLock;
 using poker::solver::format_node_lock;
@@ -171,6 +172,48 @@ void test_lock_set_upsert_erase()
     CHECK(locks.size() == 0);
 }
 
+void test_lock_set_runout_vs_line_lookup()
+{
+    LockSet locks;
+    NodeLock node;
+    node.infoset_id = 12;
+    node.turn = -1;
+    node.river = 7;
+    node.scope = LockScope::Node;
+    node.kind = LockKind::FullNode;
+    const double node_probs[] = {1.0, 0.0};
+    node.actions = make_action_lock_row(node_probs, 2);
+    locks.upsert(node);
+
+    NodeLock line;
+    line.infoset_id = 12;
+    line.scope = LockScope::Line;
+    line.kind = LockKind::FullNode;
+    const double line_probs[] = {0.0, 1.0};
+    line.actions = make_action_lock_row(line_probs, 2);
+    locks.upsert(line);
+
+    CHECK(locks.size() == 2);
+    CHECK(locks.find(12) != nullptr);
+    CHECK(locks.find(12)->actions.probs[0] == 0.0);
+    CHECK(locks.find_exact(12, -1, 7) != nullptr);
+    CHECK(locks.find_exact(12, -1, 7)->actions.probs[0] == 1.0);
+
+    // Exact runout wins over the line lock.
+    const NodeLock* on_seven = locks.find_for_runout(12, -1, 7);
+    CHECK(on_seven != nullptr);
+    CHECK(on_seven->actions.probs[0] == 1.0);
+
+    // Other rivers fall back to the line lock.
+    const NodeLock* on_nine = locks.find_for_runout(12, -1, 9);
+    CHECK(on_nine != nullptr);
+    CHECK(on_nine->actions.probs[0] == 0.0);
+
+    CHECK(locks.erase(12, -1, 7));
+    CHECK(locks.size() == 1);
+    CHECK(locks.find_for_runout(12, -1, 7)->actions.probs[0] == 0.0);
+}
+
 void test_text_round_trip()
 {
     NodeLock full;
@@ -182,6 +225,10 @@ void test_text_round_trip()
     const NodeLock full_back = parse_node_lock(full_line);
     CHECK(full_back.infoset_id == 42);
     CHECK(full_back.kind == LockKind::FullNode);
+    CHECK(full_back.scope == LockScope::Node);
+    CHECK(!full_back.is_line());
+    CHECK(full_back.turn == -1);
+    CHECK(full_back.river == -1);
     CHECK(full_back.actions.size() == 3);
     CHECK_NEAR(full_back.actions.probs[0], 0.2, 1e-15);
     CHECK_NEAR(full_back.actions.probs[1], 0.3, 1e-15);
@@ -206,14 +253,46 @@ void test_text_round_trip()
     const NodeLock unlocked_back = parse_node_lock(format_node_lock(unlocked));
     CHECK(unlocked_back.actions.unlocked());
 
+    NodeLock runout;
+    runout.infoset_id = 12;
+    runout.turn = -1;
+    runout.river = 7;
+    runout.scope = LockScope::Node;
+    runout.kind = LockKind::FullNode;
+    runout.actions = make_action_lock_row(probs, 3);
+    const std::string runout_line = format_node_lock(runout);
+    CHECK(runout_line.find(" at -1 7 ") != std::string::npos);
+    const NodeLock runout_back = parse_node_lock(runout_line);
+    CHECK(runout_back.infoset_id == 12);
+    CHECK(runout_back.turn == -1);
+    CHECK(runout_back.river == 7);
+    CHECK(runout_back.scope == LockScope::Node);
+    CHECK(!runout_back.is_line());
+
+    NodeLock explicit_line;
+    explicit_line.infoset_id = 8;
+    explicit_line.scope = LockScope::Line;
+    explicit_line.kind = LockKind::FullNode;
+    explicit_line.actions = make_action_lock_row(probs, 3);
+    const NodeLock line_back = parse_node_lock(format_node_lock(explicit_line));
+    CHECK(line_back.is_line());
+    CHECK(line_back.scope == LockScope::Line);
+
+    // Legacy line without `at`/`line` stays a line lock.
+    const NodeLock legacy = parse_node_lock("lock 5 full probs 1 0");
+    CHECK(legacy.is_line());
+    CHECK(legacy.infoset_id == 5);
+
     LockSet set;
     set.upsert(full);
     set.upsert(selected);
-    const std::string text = format_node_lock(full) + "\n" + format_node_lock(selected) + "\n";
+    set.upsert(runout);
+    const std::string text = format_lock_set(set);
     const LockSet round = parse_lock_set(text);
-    CHECK(round.size() == 2);
+    CHECK(round.size() == 3);
     CHECK(round.find(42) != nullptr);
     CHECK(round.find(9) != nullptr);
+    CHECK(round.find_exact(12, -1, 7) != nullptr);
     CHECK(locked_probability(*round.find(9), 4, 2).value() == 0.5);
     CHECK(!locked_probability(*round.find(9), 1, 2).has_value());
 }
@@ -256,6 +335,7 @@ void run_node_lock_tests()
     test_full_node_vs_selected_combos();
     test_unlocked_distinct_from_zero_lock();
     test_lock_set_upsert_erase();
+    test_lock_set_runout_vs_line_lookup();
     test_text_round_trip();
     test_erase_combo();
 }

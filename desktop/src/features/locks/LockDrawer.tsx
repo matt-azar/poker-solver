@@ -440,10 +440,20 @@ export function LockDrawer() {
               <button
                 type="button"
                 className="toolbar-btn primary"
-                onClick={() => void applyLock()}
+                onClick={() => void applyLock("node")}
                 disabled={!canApply}
+                title="Lock selected hands on this board only"
               >
                 Lock selected
+              </button>
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={() => void applyLock("line")}
+                disabled={!canApply}
+                title="Lock selected hands on every runout of this betting line"
+              >
+                Lock selected on line
               </button>
               <button
                 type="button"
@@ -474,11 +484,24 @@ export function LockDrawer() {
                   className="toolbar-btn"
                   onClick={() => {
                     setLockKind("full");
-                    void applyLock();
+                    void applyLock("node");
                   }}
                   disabled={!currentNode || currentNode.kind !== "decision" || !normalized.valid}
+                  title="Lock only the selected board (this runout)"
                 >
                   Lock all hands
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  onClick={() => {
+                    setLockKind("full");
+                    void applyLock("line");
+                  }}
+                  disabled={!currentNode || currentNode.kind !== "decision" || !normalized.valid}
+                  title="Lock this betting line on every runout (Pio lock_line)"
+                >
+                  Lock line across runouts
                 </button>
                 <button type="button" className="toolbar-btn" onClick={() => void unlockNode()}>
                   Unlock node
@@ -539,21 +562,28 @@ export function LockDrawer() {
                 <ul className="lock-record-list">
                   {locks.map((entry) => {
                     const atCurrent =
-                      currentNode && entry.node_id === currentNode.node_id;
+                      !!currentNode && nodeLock?.node_id === entry.node_id;
                     const handCount =
                       entry.kind === "full"
                         ? "all"
                         : String(entry.hand_indices?.length ?? 0);
+                    const scopeLabel =
+                      entry.scope === "line"
+                        ? "line"
+                        : entry.scope === "node"
+                          ? "node"
+                          : null;
                     return (
                       <li
-                        key={`${entry.node_id}-${entry.kind}-${handCount}`}
+                        key={`${entry.node_id}-${entry.kind}-${handCount}-${scopeLabel ?? ""}`}
                         className="lock-record-row"
                         data-current={atCurrent ? "true" : "false"}
                       >
                         <code>{entry.node_id}</code>
+                        {scopeLabel ? <span>{scopeLabel}</span> : null}
                         <span>{entry.kind}</span>
                         <span className="tabular muted">{handCount} hands</span>
-                        {atCurrent && nodeLock ? (
+                        {atCurrent ? (
                           <span className="lock-hand-row__badge">here</span>
                         ) : null}
                       </li>

@@ -11,6 +11,7 @@
 #include "solver/trainer.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,7 @@ using poker::river::RiverConfig;
 using poker::solver::Algorithm;
 using poker::solver::CfrTrainer;
 using poker::solver::LockKind;
+using poker::solver::LockScope;
 using poker::solver::LockSet;
 using poker::solver::NodeLock;
 using poker::solver::RiverBatchSolver;
@@ -56,6 +58,15 @@ StreetConfig tiny_turn_lock_config(const char* oop, const char* ip)
     config.allow_all_in = false;
     config.max_raises = 1;
     config.memory_mib = 64;
+    return config;
+}
+
+// Turn board with river betting so sibling river decisions have arity ≥ 2.
+StreetConfig tiny_turn_river_lock_config(const char* oop, const char* ip)
+{
+    StreetConfig config = tiny_turn_lock_config(oop, ip);
+    config.oop_river_bets = {1.0};
+    config.ip_river_bets = {1.0};
     return config;
 }
 
@@ -643,6 +654,193 @@ void test_river_batch_cfr_plus_solve_honors_locks()
     CHECK_NEAR(river_open_action_prob(entries, air, "Bet"), 0.0, 1e-12);
 }
 
+// Reproduce the Explorer bug: locking one river must not force the same
+// mixture on a sibling river that shares the betting line.
+void test_street_batch_node_lock_does_not_cross_rivers()
+{
+    StreetConfig config = tiny_turn_river_lock_config("2c3d", "AhAd");
+    StreetBatchSolver probe(config);
+    SolveConfig warm;
+    warm.max_iterations = 4;
+    probe.solve(warm, Algorithm::VanillaCfr);
+    probe.prepare_inspection();
+
+    const auto root = probe.inspect_node(probe.root_node_id());
+    CHECK(root.kind == "decision");
+    CHECK(!root.actions.empty());
+    // Walk Check (or first action) toward the river deal.
+    std::string cursor = root.actions[0].child_id;
+    std::string river_chance;
+    for (int depth = 0; depth < 8; ++depth)
+    {
+        const auto view = probe.inspect_node(cursor);
+        if (view.kind == "chance" && !view.cards.empty())
+        {
+            river_chance = cursor;
+            break;
+        }
+        if (view.kind != "decision" || view.actions.empty())
+        {
+            break;
+        }
+        cursor = view.actions[0].child_id;
+    }
+    CHECK(!river_chance.empty());
+    const auto chance = probe.inspect_node(river_chance);
+    CHECK(chance.cards.size() >= 2);
+
+    const std::string locked_node = chance.cards[0].child_id;
+    const std::string sibling_node = chance.cards[1].child_id;
+    CHECK(locked_node != sibling_node);
+
+    auto locked_view = probe.inspect_node(locked_node);
+    CHECK(locked_view.kind == "decision");
+    CHECK(locked_view.actions.size() >= 2);
+
+    // Parse public index + river from the selected child id.
+    const auto parse_parts = [](const std::string& text, std::size_t& infoset, int& turn, int& river)
+    {
+        CHECK(text.size() > 2 && text[0] == 'p');
+        const std::size_t t_at = text.find(".t");
+        const std::size_t r_at = text.find(".r");
+        CHECK(t_at != std::string::npos && r_at != std::string::npos && r_at > t_at);
+        infoset = static_cast<std::size_t>(std::stoull(text.substr(1, t_at - 1)));
+        turn = std::stoi(text.substr(t_at + 2, r_at - (t_at + 2)));
+        river = std::stoi(text.substr(r_at + 2));
+    };
+    std::size_t infoset = 0;
+    int turn = -1;
+    int river = -1;
+    parse_parts(locked_node, infoset, turn, river);
+    CHECK(river >= 0);
+
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = infoset;
+    lock.turn = static_cast<std::int8_t>(turn);
+    lock.river = static_cast<std::int8_t>(river);
+    lock.scope = LockScope::Node;
+    lock.kind = LockKind::FullNode;
+    // Force pure fold/check on the first action (index 0).
+    std::vector<double> pure(locked_view.actions.size(), 0.0);
+    pure[0] = 1.0;
+    lock.actions = make_action_lock_row(pure, static_cast<int>(pure.size()));
+    locks.upsert(lock);
+
+    StreetBatchSolver locked_solver(config);
+    SolveConfig solve;
+    solve.max_iterations = 12;
+    solve.locks = &locks;
+    locked_solver.solve(solve, Algorithm::VanillaCfr);
+    locked_solver.prepare_inspection();
+
+    const auto locked_after = locked_solver.inspect_node(locked_node);
+    const auto sibling_after = locked_solver.inspect_node(sibling_node);
+    CHECK(locked_after.kind == "decision");
+    CHECK(sibling_after.kind == "decision");
+    CHECK(!locked_after.hands.empty());
+    CHECK(!sibling_after.hands.empty());
+
+    // Locked river: every structural hand is pure on action 0.
+    for (const auto& hand : locked_after.hands)
+    {
+        if (!hand.structural || hand.strategy.empty())
+        {
+            continue;
+        }
+        CHECK_NEAR(hand.strategy[0], 1.0, 1e-9);
+        for (std::size_t a = 1; a < hand.strategy.size(); ++a)
+        {
+            CHECK_NEAR(hand.strategy[a], 0.0, 1e-9);
+        }
+    }
+
+    // Sibling river must not be forced to the same pure row.
+    bool sibling_differs = false;
+    for (const auto& hand : sibling_after.hands)
+    {
+        if (!hand.structural || hand.strategy.size() < 2)
+        {
+            continue;
+        }
+        if (hand.strategy[0] < 0.999)
+        {
+            sibling_differs = true;
+            break;
+        }
+    }
+    CHECK(sibling_differs);
+}
+
+void test_street_batch_line_lock_applies_across_rivers()
+{
+    StreetConfig config = tiny_turn_river_lock_config("2c3d", "AhAd");
+    StreetBatchSolver probe(config);
+    SolveConfig warm;
+    warm.max_iterations = 3;
+    probe.solve(warm, Algorithm::VanillaCfr);
+    probe.prepare_inspection();
+
+    const auto root = probe.inspect_node(probe.root_node_id());
+    std::string cursor = root.actions[0].child_id;
+    std::string river_chance;
+    for (int depth = 0; depth < 8; ++depth)
+    {
+        const auto view = probe.inspect_node(cursor);
+        if (view.kind == "chance" && !view.cards.empty())
+        {
+            river_chance = cursor;
+            break;
+        }
+        if (view.kind != "decision" || view.actions.empty())
+        {
+            break;
+        }
+        cursor = view.actions[0].child_id;
+    }
+    CHECK(!river_chance.empty());
+    const auto chance = probe.inspect_node(river_chance);
+    CHECK(chance.cards.size() >= 2);
+    const std::string first = chance.cards[0].child_id;
+    const std::string second = chance.cards[1].child_id;
+    const auto first_view = probe.inspect_node(first);
+    CHECK(first_view.actions.size() >= 2);
+
+    const std::size_t t_at = first.find(".t");
+    CHECK(t_at != std::string::npos);
+    const std::size_t infoset = static_cast<std::size_t>(std::stoull(first.substr(1, t_at - 1)));
+
+    LockSet locks;
+    NodeLock lock;
+    lock.infoset_id = infoset; // line scope: turn=river=-1
+    lock.scope = LockScope::Line;
+    lock.kind = LockKind::FullNode;
+    std::vector<double> pure(first_view.actions.size(), 0.0);
+    pure[0] = 1.0;
+    lock.actions = make_action_lock_row(pure, static_cast<int>(pure.size()));
+    locks.upsert(lock);
+
+    StreetBatchSolver locked_solver(config);
+    SolveConfig solve;
+    solve.max_iterations = 10;
+    solve.locks = &locks;
+    locked_solver.solve(solve, Algorithm::VanillaCfr);
+    locked_solver.prepare_inspection();
+
+    for (const std::string& node_id : {first, second})
+    {
+        const auto view = locked_solver.inspect_node(node_id);
+        for (const auto& hand : view.hands)
+        {
+            if (!hand.structural || hand.strategy.empty())
+            {
+                continue;
+            }
+            CHECK_NEAR(hand.strategy[0], 1.0, 1e-9);
+        }
+    }
+}
+
 } // namespace
 
 void run_lock_apply_tests()
@@ -666,4 +864,6 @@ void run_lock_apply_tests()
     test_river_batch_continue_iterations_honors_locks();
     test_river_batch_continue_null_locks_bit_identical();
     test_river_batch_cfr_plus_solve_honors_locks();
+    test_street_batch_node_lock_does_not_cross_rivers();
+    test_street_batch_line_lock_applies_across_rivers();
 }
