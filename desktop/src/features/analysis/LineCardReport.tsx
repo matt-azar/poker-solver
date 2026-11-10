@@ -408,7 +408,7 @@ export function LineCardReport() {
         {metric === "ev" ? (
           <span className="line-card-summary__metric">EV in chips</span>
         ) : metric === "equity" ? (
-          <span className="line-card-summary__metric">check-down equity</span>
+          <span className="line-card-summary__metric">equity</span>
         ) : metric === "deal" ? (
           <span className="line-card-summary__metric">chance of dealing the card</span>
         ) : null}
