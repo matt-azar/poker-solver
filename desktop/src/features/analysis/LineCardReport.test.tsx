@@ -195,7 +195,7 @@ describe("LineCardReport", () => {
     expect(await screen.findByText("42.0%")).toBeTruthy();
     expect(getEquity).toHaveBeenCalled();
     expect(ace.getAttribute("data-heat")).toBe("true");
-    expect(screen.getByTestId("line-card-line").textContent).toContain("equity");
+    expect(screen.getByTestId("line-card-line").textContent).toContain("Equity");
     expect(screen.getByTestId("line-card-line").textContent).not.toContain(
       "check-down",
     );
