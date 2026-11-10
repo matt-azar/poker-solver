@@ -206,7 +206,7 @@ describe("LineCardReport", () => {
     expect(ace.getAttribute("data-heat")).toBe("false");
     expect(king.getAttribute("data-heat")).toBe("false");
     expect(screen.getByTestId("line-card-line").textContent).toContain(
-      "Chance of dealing the card",
+      "Probability of the card being dealt",
     );
   });
 });

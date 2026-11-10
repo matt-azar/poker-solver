@@ -410,7 +410,7 @@ export function LineCardReport() {
         ) : metric === "equity" ? (
           <span className="line-card-summary__metric">Equity</span>
         ) : metric === "deal" ? (
-          <span className="line-card-summary__metric">Chance of dealing the card</span>
+          <span className="line-card-summary__metric">Probability of the card being dealt</span>
         ) : null}
       </p>
       {metric === "frequencies" && colors.legend.length ? (
