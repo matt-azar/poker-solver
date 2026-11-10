@@ -1458,22 +1458,16 @@
   opacity: 0.4;
 }
 
-/* Frequency-weighted action bands under the badge.
-   Height tracks --mass-fill when range weight-fill is on (combo reach). */
+/* Host for frequency-weighted action bands under the badge.
+   Takes remaining tile height so row flex-grow can partition by frequency.
+   --mass-fill clips the band stack (combo reach) when Weight fill is on. */
 .hands-combo__weight-fill {
   flex: 1 1 auto;
   min-height: 0;
-  height: calc(var(--mass-fill, 1) * 100%);
-  max-height: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-}
-
-/* Weight-fill off: bands fill the remaining tile height below the badge. */
-.hands-combo[data-weight-fill="false"] .hands-combo__weight-fill {
-  height: auto;
-  flex: 1 1 auto;
+  justify-content: flex-end;
 }
 
 /* Badge chrome + frequency bands; silver tile shows around the header. */
@@ -1562,15 +1556,16 @@
   color: rgba(0, 0, 0, 0.55);
 }
 
-/* Stack of action bands; each row's flex-grow = action frequency. */
+/* Stack of action bands; each row's flex-grow = action frequency.
+   Explicit height (via --mass-fill) so flex-grow partitions space correctly. */
 .hands-combo__metrics {
   display: flex;
   flex-direction: column;
   gap: 1px;
   width: 100%;
-  height: 100%;
+  height: calc(var(--mass-fill, 1) * 100%);
   min-height: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
 }
 
 /* One frequency-weighted action band: label left, EV/freq right. */
