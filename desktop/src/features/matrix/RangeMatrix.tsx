@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 import { mapActionColors } from "../../domain/actionColors";
@@ -169,11 +170,36 @@ export function RangeMatrix() {
   const equity = useStudyStore((s) => s.equity);
   const displayPrefs = useMatrixDisplayStore((s) => s.prefs);
   const dualRange = useStudyStore((s) => s.layout.dualRange);
+  const matrixWidth = useStudyStore((s) => s.layout.matrixWidth);
+  const setLayout = useStudyStore((s) => s.setLayout);
+  const userWidth =
+    typeof matrixWidth === "number" && matrixWidth > 0 ? matrixWidth : null;
   const stageRef = useRef<HTMLDivElement>(null);
   const size = useMeasuredAspectSize(
     stageRef,
     dualRange ? 1 : SINGLE_MATRIX_WIDTH_OVER_HEIGHT,
   );
+
+  const onResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const wrap = event.currentTarget.parentElement;
+    const stage = wrap?.closest(".matrix-stage");
+    const startX = event.clientX;
+    const measured = wrap?.getBoundingClientRect().width ?? 0;
+    const startW = measured > 0 ? measured : (userWidth ?? 0);
+    const stageWidth = stage?.getBoundingClientRect().width ?? 0;
+    const max = stageWidth > 480 ? Math.max(180, stageWidth - 280) : 1400;
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.min(max, Math.max(180, startW + (ev.clientX - startX)));
+      setLayout({ matrixWidth: Math.round(next) });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   const cells = useMemo(
     () => (currentNode ? groupHands(currentNode) : []),
@@ -212,23 +238,34 @@ export function RangeMatrix() {
       : "Hand range matrix";
 
   return (
-    <div className="range-matrix-wrap">
+    <div
+      className="range-matrix-wrap"
+      style={
+        userWidth
+          ? {
+              width: userWidth,
+              maxWidth: "100%",
+              flex: "0 0 auto",
+              aspectRatio: "auto",
+              height: "100%",
+            }
+          : undefined
+      }
+    >
       <div className="range-matrix-stage" ref={stageRef}>
         <div
-          className="range-matrix matrix-density"
+          className="range-matrix matrix-density range-matrix--no-axis"
           role="grid"
           aria-label={matrixAria}
           style={
-            size.width > 0 ? { width: size.width, height: size.height } : undefined
+            userWidth
+              ? { width: "100%", height: "100%" }
+              : size.width > 0
+                ? { width: size.width, height: size.height }
+                : undefined
           }
           onMouseLeave={() => setHoverCell(null)}
         >
-          <div className="matrix-corner" />
-          {RANKS.map((rank) => (
-            <div key={`c-${rank}`} className="matrix-axis">
-              {rank}
-            </div>
-          ))}
           {RANKS.map((rowRank, row) => (
             <MatrixRow
               key={`r-${rowRank}`}
@@ -251,6 +288,14 @@ export function RangeMatrix() {
           ))}
         </div>
       </div>
+      <div
+        className="resize-handle resize-handle--vertical range-matrix__resize"
+        onPointerDown={onResizePointerDown}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize range matrix"
+        title="Drag to resize the range grid"
+      />
     </div>
   );
 }
@@ -304,7 +349,6 @@ function MatrixRow({
 }: RowProps) {
   return (
     <>
-      <div className="matrix-axis">{RANKS[row]}</div>
       {RANKS.map((_, col) => {
         const cell = byKey.get(cellKey(row, col));
         const text =

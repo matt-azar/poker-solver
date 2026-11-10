@@ -141,6 +141,18 @@
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
 }
 
+button.path-nav__card {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.path-nav__card:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
 /* Four-color deck: same --suit-* tokens as board / PlayingCard / picker. */
 .path-nav__card[data-suit="h"],
 .path-nav__step[data-suit="h"] {

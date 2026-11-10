@@ -2498,7 +2498,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const street = lineCardReportStreet(node.board);
     if (!street) {
       set({
-        message: "Compare cards needs a turn or river board (flop-only spots have no card to vary).",
+        message: "Compare runouts needs a turn or river board (flop-only spots have no card to vary).",
       });
       return;
     }
@@ -2987,12 +2987,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       kind: "runouts",
     });
     if (cached) {
-      set({ runouts: cached, analysisTab: "runouts", message: "Runouts ready." });
+      set({ runouts: cached, message: "Runouts ready." });
       return;
     }
     set({
       message: "Loading runouts…",
-      analysisTab: "runouts",
       runouts: { pending: true, node_id: nodeId, solution_id: solutionId },
     });
     enqueueWorkerAnalysis({

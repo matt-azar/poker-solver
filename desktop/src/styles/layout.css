@@ -663,6 +663,25 @@
   cursor: ew-resize;
 }
 
+/* Right edge of the main 13×13. A later one-class .resize-handle rule sets a
+   short ns-resize bar, so this selector has to win on height and cursor. */
+.range-matrix-wrap > .resize-handle.resize-handle--vertical.range-matrix__resize {
+  top: 0;
+  bottom: 0;
+  left: auto;
+  right: 0;
+  width: 10px;
+  height: auto;
+  cursor: ew-resize;
+  z-index: 8;
+  background: color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.range-matrix-wrap > .resize-handle.resize-handle--vertical.range-matrix__resize:hover,
+.range-matrix-wrap > .resize-handle.resize-handle--vertical.range-matrix__resize:active {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
 /* Study center grid: optional nav + matrix pane. */
 .study-main {
   display: grid;
@@ -869,6 +888,12 @@
   border: 0;
   user-select: none;
   container-type: size;
+}
+
+/* Main study grid: ranks live inside the cells, so the axis tracks go away. */
+.range-matrix.range-matrix--no-axis {
+  grid-template-columns: repeat(13, minmax(0, 1fr));
+  grid-template-rows: repeat(13, minmax(0, 1fr));
 }
 
 /* Empty top-left corner cell of the matrix axes. */
@@ -1733,32 +1758,82 @@
   font: inherit;
 }
 
-.line-card-cell[data-suit="h"] .line-card-cell__card {
-  color: var(--suit-heart);
-}
-
-.line-card-cell[data-suit="d"] .line-card-cell__card {
-  color: var(--suit-diamond);
-}
-
-.line-card-cell[data-suit="c"] .line-card-cell__card {
-  color: var(--suit-club);
-}
-
-.line-card-cell[data-suit="s"] .line-card-cell__card {
-  color: var(--suit-spade);
-}
-
 .line-card-cell[data-available="false"],
 .line-card-cell:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-.line-card-cell__card {
+/* White card chip, same idea as the Hands combo badge, so the tag stays
+   readable on a red-to-green EV/equity fill. Suit colors are the light-theme
+   deck values because the chip face is always white. */
+.line-card-cell__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: #fff;
+  color: #111;
   font-family: var(--font-mono);
+  font-size: 12px;
   font-weight: 700;
-  font-size: 13px;
+  line-height: 1.2;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.line-card-cell__badge-card {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.line-card-cell__badge-card[data-suit="h"] {
+  color: #a33b32;
+}
+
+.line-card-cell__badge-card[data-suit="d"] {
+  color: #1f5fbf;
+}
+
+.line-card-cell__badge-card[data-suit="c"] {
+  color: #2f7a52;
+}
+
+.line-card-cell__badge-card[data-suit="s"] {
+  color: #1c2530;
+}
+
+.line-card-cell__badge-suit {
+  font-size: 11px;
+}
+
+.line-card-cell[data-heat="true"] .line-card-cell__value {
+  align-self: stretch;
+  margin-top: 6px;
+  text-align: center;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.line-card-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.line-card-seat {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .line-card-cell__freqs,

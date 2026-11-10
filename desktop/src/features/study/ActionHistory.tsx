@@ -59,6 +59,80 @@ function stepsFromTrailOrCrumbs(
   return groupCrumbsByStreet(crumbs, board, place);
 }
 
+function stepCardCode(step: Pick<PathStep, "card" | "label">): string {
+  return (step.card || step.label || "").trim().toLowerCase();
+}
+
+function boardShowsCard(cards: string[], step: Pick<PathStep, "card" | "label">): boolean {
+  const code = stepCardCode(step);
+  if (!code) {
+    return false;
+  }
+  return cards.some((card) => card.trim().toLowerCase() === code);
+}
+
+function PathStepAlternatives({
+  flatIndex,
+  step,
+  shown,
+  isCurrent,
+  open,
+  onToggle,
+  onPick,
+  pot,
+}: {
+  flatIndex: number;
+  step: PathStep;
+  shown: string;
+  isCurrent: boolean;
+  open: boolean;
+  onToggle: (flatIndex: number) => void;
+  onPick: (flatIndex: number, alternative: PathAlternative) => void;
+  pot: number;
+}) {
+  const alts = step.alternatives?.filter((alt) => alt.nodeId) ?? [];
+  if (!alts.length || isCurrent) {
+    return null;
+  }
+  return (
+    <>
+      <button
+        type="button"
+        className="path-nav__alt-toggle"
+        aria-label={`Alternatives to ${shown}`}
+        aria-expanded={open}
+        title="Change prior action"
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle(flatIndex);
+        }}
+      >
+        ▾
+      </button>
+      {open ? (
+        <div className="path-nav__alts" role="menu">
+          {alts.map((alt) => (
+            <button
+              key={`${alt.nodeId}-${alt.label}`}
+              type="button"
+              className="path-nav__alt"
+              role="menuitem"
+              disabled={!alt.nodeId}
+              onClick={() => onPick(flatIndex, alt)}
+            >
+              {abbreviatePathAction(
+                alt.rawLabel || alt.label,
+                step.sizePot != null && step.sizePot > 0 ? step.sizePot : pot,
+                step.toCall ?? 0,
+              )}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function ActionHistory() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const status = useStudyStore((s) => s.status);
@@ -306,16 +380,56 @@ export function ActionHistory() {
                     className="path-nav__board"
                     aria-label={`${streetLabel(group.street)} board`}
                   >
-                    {group.boardCards.map((card) => (
-                      <span
-                        key={`${group.street}-${card}`}
-                        className="path-nav__card"
-                        data-suit={suitOf(card)}
-                        title={card}
-                      >
-                        {card}
-                      </span>
-                    ))}
+                    {group.boardCards.map((card) => {
+                      const dealt = renderedSteps.find(
+                        (row) =>
+                          row.groupIndex === groupIndex &&
+                          row.step.kind === "card" &&
+                          stepCardCode(row.step) === card.trim().toLowerCase(),
+                      );
+                      const clickable = Boolean(dealt?.step.nodeId) && !dealt?.isCurrent;
+                      const chip = clickable && dealt ? (
+                        <button
+                          type="button"
+                          className="path-nav__card"
+                          data-suit={suitOf(card)}
+                          title={card}
+                          onClick={() => onStepClick(dealt.flatIndex, dealt.step, false)}
+                        >
+                          {card}
+                        </button>
+                      ) : (
+                        <span
+                          className="path-nav__card"
+                          data-suit={suitOf(card)}
+                          title={card}
+                        >
+                          {card}
+                        </span>
+                      );
+                      return (
+                        <span
+                          key={`${group.street}-${card}`}
+                          className="path-nav__step-wrap"
+                        >
+                          {chip}
+                          {dealt ? (
+                            <PathStepAlternatives
+                              flatIndex={dealt.flatIndex}
+                              step={dealt.step}
+                              shown={card}
+                              isCurrent={dealt.isCurrent}
+                              open={openAlts === dealt.flatIndex}
+                              onToggle={(index) =>
+                                setOpenAlts((prev) => (prev === index ? null : index))
+                              }
+                              onPick={onPickAlternative}
+                              pot={pot}
+                            />
+                          ) : null}
+                        </span>
+                      );
+                    })}
                   </span>
                 ) : null}
                 <span className="path-nav__steps">
@@ -323,8 +437,11 @@ export function ActionHistory() {
                     .filter((row) => row.groupIndex === groupIndex)
                     .map((row) => {
                       const { step, stepIndex, flatIndex, isCurrent } = row;
-                      const alts =
-                        step.alternatives?.filter((alt) => alt.nodeId) ?? [];
+                      // Board chips already show the dealt card. A card step
+                      // with the same code would paint a second Td/2s.
+                      if (step.kind === "card" && boardShowsCard(group.boardCards, step)) {
+                        return null;
+                      }
                       const clickable = Boolean(step.nodeId) && !isCurrent;
                       const shown = pathStepDisplayLabel(step, pot);
                       const prev = group.steps[stepIndex - 1];
@@ -360,49 +477,18 @@ export function ActionHistory() {
                           >
                             {shown}
                           </button>
-                          {alts.length && !isCurrent ? (
-                            <>
-                              <button
-                                type="button"
-                                className="path-nav__alt-toggle"
-                                aria-label={`Alternatives to ${shown}`}
-                                aria-expanded={openAlts === flatIndex}
-                                title="Change prior action"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setOpenAlts((prev) =>
-                                    prev === flatIndex ? null : flatIndex,
-                                  );
-                                }}
-                              >
-                                ▾
-                              </button>
-                              {openAlts === flatIndex ? (
-                                <div className="path-nav__alts" role="menu">
-                                  {alts.map((alt) => (
-                                    <button
-                                      key={`${alt.nodeId}-${alt.label}`}
-                                      type="button"
-                                      className="path-nav__alt"
-                                      role="menuitem"
-                                      disabled={!alt.nodeId}
-                                      onClick={() =>
-                                        onPickAlternative(flatIndex, alt)
-                                      }
-                                    >
-                                      {abbreviatePathAction(
-                                        alt.rawLabel || alt.label,
-                                        step.sizePot != null && step.sizePot > 0
-                                          ? step.sizePot
-                                          : pot,
-                                        step.toCall ?? 0,
-                                      )}
-                                    </button>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </>
-                          ) : null}
+                          <PathStepAlternatives
+                            flatIndex={flatIndex}
+                            step={step}
+                            shown={shown}
+                            isCurrent={isCurrent}
+                            open={openAlts === flatIndex}
+                            onToggle={(index) =>
+                              setOpenAlts((prev) => (prev === index ? null : index))
+                            }
+                            onPick={onPickAlternative}
+                            pot={pot}
+                          />
                         </span>
                       );
                     })}
