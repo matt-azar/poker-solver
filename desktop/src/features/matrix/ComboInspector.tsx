@@ -1,9 +1,9 @@
 /**
  * Hands panel — per-combo tiles for the hovered/selected hand class.
  *
- * Paint is vertical side-by-side action bands (width ∝ frequency), clipped by
- * --mass-fill from the bottom. Action/EV text is a separate bottom-locked
- * overlay — not tied to band geometry. Type sizes live in layout.css.
+ * Paint matches the main grid: vertical bands (width ∝ action frequency;
+ * passive → left), bottom-anchored height ∝ combo weight (--mass-fill).
+ * Action/EV text is a separate bottom-locked overlay. Type sizes in layout.css.
  */
 import { useEffect, useMemo } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
@@ -85,7 +85,7 @@ function shapeColumns(shape: ReturnType<typeof cellShape>): number {
 
 function squareMass(square: ComboBreakdownSquare): number | null {
   if (square.reach != null && Number.isFinite(square.reach)) {
-    return Math.max(0, square.reach);
+    return Math.max(0, Math.min(1, square.reach));
   }
   if (square.marginal != null && Number.isFinite(square.marginal)) {
     // Posterior mass can exceed 1 across a node; clamp for height fill.
@@ -162,9 +162,14 @@ export function ComboInspector() {
 
   const pinned = Boolean(selectedCell);
   const actions = currentNode?.actions ?? [];
+  // Metrics list: aggressive first (top → bottom). Paint: reverse → passive left.
   const actionOrder = useMemo(
     () => orderActionIndicesByAggression(actions),
     [actions],
+  );
+  const paintOrder = useMemo(
+    () => [...actionOrder].reverse(),
+    [actionOrder],
   );
   const pot = actionSizePotBasis(
     currentNode,
@@ -175,7 +180,6 @@ export function ComboInspector() {
   const showEv = overlay === "ev" || overlay === "both";
   const showEq = overlay === "equity" || overlay === "both";
   const showFreq = overlay === "none" || overlay === "equity";
-  const weightFillOn = displayPrefs.rangeWeightHeightFill;
   const shape = cell ? cellShape(cell.row, cell.col) : "pair";
   const cols = shapeColumns(shape);
   // Action rows show EV or frequency; equity always has its own labeled row.
@@ -250,7 +254,7 @@ export function ComboInspector() {
           <div
             className="inspector-combos hands-combo-grid"
             data-shape={shape}
-            data-weight-fill={weightFillOn ? "true" : "false"}
+            data-weight-fill="true"
             style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
           >
             {squares.map((square) => {
@@ -264,8 +268,9 @@ export function ComboInspector() {
                   )
                 : null;
               const mass = squareMass(square);
+              // Same visual as matrix weight-fill: paint grows from the bottom by combo weight.
               const massFill = weightFillFraction(
-                weightFillOn,
+                true,
                 square.present ? (mass ?? 1) : 0,
               );
               const freqByLabel = new Map(
@@ -274,7 +279,7 @@ export function ComboInspector() {
                   entry.probability,
                 ]),
               );
-              const segments = actionOrder
+              const segments = paintOrder
                 .map((index) => {
                   const label = actions[index]!;
                   const probability =
@@ -293,11 +298,11 @@ export function ComboInspector() {
                   key={square.combo}
                   className="inspector-combo hands-combo"
                   data-present={square.present ? "true" : "false"}
-                  data-weight-fill={weightFillOn ? "true" : "false"}
+                  data-weight-fill="true"
                   style={{ ["--mass-fill" as string]: String(massFill) }}
                   title={square.combo}
                 >
-                  {/* Vertical action bands: width ∝ frequency; height from --mass-fill. */}
+                  {/* Vertical bands: width ∝ freq (passive left); height ∝ weight. */}
                   <div className="hands-combo__weight-fill">
                     {segments.length > 0 ? (
                       <div className="hands-combo__segments">

@@ -1458,8 +1458,8 @@
   opacity: 0.4;
 }
 
-/* Bottom-anchored vertical action bands (width ∝ frequency).
-   Height tracks --mass-fill when range weight-fill is on. */
+/* Bottom-anchored vertical action bands — same idea as .matrix-cell__weight-fill.
+   Width of each segment ∝ action frequency; height of the stack ∝ combo weight. */
 .hands-combo__weight-fill {
   position: absolute;
   left: 0;
@@ -1468,11 +1468,6 @@
   height: calc(var(--mass-fill, 1) * 100%);
   overflow: hidden;
   pointer-events: none;
-}
-
-/* Weight-fill off: paint vertical bands through the full tile height. */
-.hands-combo[data-weight-fill="false"] .hands-combo__weight-fill {
-  height: 100%;
 }
 
 /* Side-by-side vertical action segments inside the weight-fill. */
