@@ -1,6 +1,8 @@
 import {
   formatActionDisplay,
+  parseSizedAction,
   potTagFromLabel,
+  sizeChipsForPotTag,
   type BetSizeDisplayMode,
 } from "./betSizes";
 import { groupHands } from "./browse";
@@ -323,6 +325,77 @@ export function formatAbbreviatedPath(
     }
   }
   return streets.join(" - ");
+}
+
+/**
+ * Abbreviate an engine `line` (`Check/Bet 10/Call`) by walking the pot.
+ * Each bet uses the pot before that bet. Streets are not split here — the
+ * trail knows where a street ends; {@link studyLineLabel} inserts ` - `.
+ */
+export function abbreviateActionLine(
+  line: string | null | undefined,
+  rootPot = 0,
+): string {
+  const parts = splitActionLine(line);
+  if (!parts.length) {
+    return "";
+  }
+  let pot = rootPot > 0 ? rootPot : 0;
+  let toCall = 0;
+  const tags: string[] = [];
+  for (const label of parts) {
+    tags.push(abbreviatePathAction(label, pot, toCall));
+    const parsed = parseSizedAction(label);
+    if (parsed?.kind === "call") {
+      pot += parsed.chips > 0 ? parsed.chips : Math.max(0, toCall);
+      toCall = 0;
+      continue;
+    }
+    if (parsed) {
+      const chips = Math.max(0, sizeChipsForPotTag(parsed, toCall));
+      pot += chips;
+      toCall = chips;
+      continue;
+    }
+    if (/^call$/i.test(label)) {
+      pot += Math.max(0, toCall);
+      toCall = 0;
+    }
+  }
+  return tags.join("/");
+}
+
+/**
+ * Line column text. Prefer the navigation trail so streets split with ` - `
+ * and each bet uses the pot captured when it was taken. Otherwise walk the
+ * engine line from the root pot.
+ */
+export function studyLineLabel(options: {
+  trail: PathStep[] | null | undefined;
+  line: string | null | undefined;
+  currentNodeId?: string | null;
+  rootPot?: number;
+}): string {
+  const trail = options.trail ?? [];
+  const matches =
+    trail.length > 0 &&
+    (!options.currentNodeId ||
+      trail[trail.length - 1]?.nodeId === options.currentNodeId);
+  if (matches) {
+    const grouped = formatAbbreviatedPath(groupPathByStreet(trail));
+    if (grouped) {
+      return grouped;
+    }
+  }
+  const walked = abbreviateActionLine(options.line, options.rootPot ?? 0);
+  if (walked) {
+    return walked;
+  }
+  const raw = options.line?.trim();
+  if (!raw || raw === "open" || raw === "root") {
+    return "root";
+  }
+  return raw;
 }
 
 export function lineCrumbs(

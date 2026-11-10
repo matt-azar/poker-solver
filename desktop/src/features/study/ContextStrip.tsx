@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   nodeEffectiveStack,
   nodePot,
+  studyLineLabel,
 } from "../../domain/actionHistory";
 import {
   boardGroups,
@@ -46,6 +47,7 @@ export function ContextStrip() {
   const draft = useStudyStore((s) => s.draft);
   const status = useStudyStore((s) => s.status);
   const currentNode = useStudyStore((s) => s.currentNode);
+  const pathTrail = useStudyStore((s) => s.pathTrail);
   const prepareBoardCardChange = useStudyStore((s) => s.prepareBoardCardChange);
   const clearBoardCardChange = useStudyStore((s) => s.clearBoardCardChange);
   const loadLineCardReport = useStudyStore((s) => s.loadLineCardReport);
@@ -66,7 +68,17 @@ export function ContextStrip() {
   const toAct = dealNode
     ? "Deal"
     : toActLabel(currentNode?.to_act, currentNode?.player ?? null);
-  const line = currentNode?.line || currentNode?.node_id || "root";
+  const rawLine = currentNode?.line || currentNode?.node_id || "root";
+  const line = useMemo(
+    () =>
+      studyLineLabel({
+        trail: pathTrail,
+        line: currentNode?.line,
+        currentNodeId: currentNode?.node_id,
+        rootPot: Number(draft.pot ?? status?.pot ?? 0),
+      }),
+    [pathTrail, currentNode?.line, currentNode?.node_id, draft.pot, status?.pot],
+  );
   const showRootConfig =
     currentNode != null &&
     (Number(currentNode.pot) !== rootPot ||
@@ -234,7 +246,7 @@ export function ContextStrip() {
       </div>
       <div className="context-strip__group">
         <span className="context-strip__label">Line</span>
-        <span className="context-strip__value" title={line}>
+        <span className="context-strip__value" title={rawLine}>
           {line}
         </span>
       </div>

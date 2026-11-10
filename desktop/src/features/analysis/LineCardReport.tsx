@@ -92,7 +92,9 @@ export function LineCardReport() {
   const [metric, setMetric] = useState<LineCardMetric>("frequencies");
   const [extras, setExtras] = useState<Record<string, CellExtra>>({});
   const reportRef = useRef(report);
-  reportRef.current = report;
+  useEffect(() => {
+    reportRef.current = report;
+  });
 
   const byCard = useMemo(() => {
     const map = new Map<string, LineCardReportRow>();
