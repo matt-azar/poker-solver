@@ -127,12 +127,14 @@ describe("ComboInspector", () => {
     const present = document.querySelector(
       '.hands-combo[data-present="true"]',
     ) as HTMLElement;
-    const segs = [
-      ...present.querySelectorAll(".hands-combo__weight-fill .hands-combo__seg"),
+    const rows = [
+      ...present.querySelectorAll(
+        ".hands-combo__weight-fill .hands-combo__metric-row:not(.hands-combo__metric-row--eq)",
+      ),
     ] as HTMLElement[];
-    expect(segs.length).toBeGreaterThan(0);
-    // Bet (aggressive) should be the left-most segment (#C9843F → rgb).
-    expect(segs[0]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
+    expect(rows.length).toBeGreaterThan(0);
+    // Bet (aggressive) should be the topmost frequency row (#C9843F → rgb).
+    expect(rows[0]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
     expect(present.querySelector(".hands-combo__metric-action")?.textContent).toMatch(
       /b50|Bet/i,
     );
@@ -196,6 +198,54 @@ describe("ComboInspector", () => {
     expect(
       document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
     ).toBe("offsuit");
+  });
+
+  it("sets data-shape suited/pair/offsuit for 4/6/12 combo grids", () => {
+    const { unmount: unmountPair } = render(<ComboInspector />);
+    expect(
+      document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
+    ).toBe("pair");
+    expect(document.querySelectorAll(".hands-combo")).toHaveLength(6);
+    unmountPair();
+
+    useStudyStore.setState({
+      currentNode: {
+        node_id: "p0",
+        reach_defined: true,
+        actions: ["Check", "Bet 50"],
+        combos: ["AsKs", "AhKh"],
+        marginal: [1, 1],
+        strategy: [
+          [0.5, 0.5],
+          [0.4, 0.6],
+        ],
+      },
+      selectedCell: { row: 0, col: 1, text: "AKs" },
+      nodeValues: null,
+    });
+    const { unmount: unmountSuited } = render(<ComboInspector />);
+    expect(
+      document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
+    ).toBe("suited");
+    expect(document.querySelectorAll(".hands-combo")).toHaveLength(4);
+    unmountSuited();
+
+    useStudyStore.setState({
+      selectedCell: { row: 1, col: 0, text: "AKo" },
+      currentNode: {
+        node_id: "p0",
+        reach_defined: true,
+        actions: ["Check", "Bet 50"],
+        combos: ["AcKd"],
+        marginal: [1],
+        strategy: [[0.5, 0.5]],
+      },
+    });
+    render(<ComboInspector />);
+    expect(
+      document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
+    ).toBe("offsuit");
+    expect(document.querySelectorAll(".hands-combo")).toHaveLength(12);
   });
 
   it("shows check-down equity in Hands when equity overlay is on", () => {
