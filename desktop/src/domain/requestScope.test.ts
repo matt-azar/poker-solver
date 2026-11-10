@@ -7,6 +7,7 @@ import {
   createTimeoutSignal,
   isAbortError,
   nextStatusPollDelay,
+  statusPollFailureDetail,
   STATUS_POLL_BACKOFF_INITIAL_MS,
   STATUS_POLL_BACKOFF_MAX_MS,
   STATUS_POLL_INTERVAL_MS,
@@ -149,5 +150,17 @@ describe("status poll scheduling", () => {
     expect(signal.aborted).toBe(true);
     dispose();
     vi.useRealTimers();
+  });
+
+  it("statusPollFailureDetail hides raw AbortError wording", () => {
+    const abort = new DOMException("signal is aborted without reason", "AbortError");
+    expect(statusPollFailureDetail(abort, { timedOut: true })).toBe(
+      "status request timed out",
+    );
+    expect(statusPollFailureDetail(abort)).toBe("status request was cancelled");
+    expect(statusPollFailureDetail(new Error("connection refused"))).toBe(
+      "connection refused",
+    );
+    expect(statusPollFailureDetail(null)).toBe("engine unreachable");
   });
 });
