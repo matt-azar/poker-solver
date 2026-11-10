@@ -1,11 +1,9 @@
 /**
  * Hands panel — per-combo tiles for the hovered/selected hand class.
  *
- * Markup classes (.hands-combo*) are styled in styles/layout.css.
- * Type scale and silver tile fill are driven by data-shape (suited=4,
- * pair=6, offsuit=12) via --hands-*-size custom properties there —
- * edit those CSS rules for font/size/background, not this file,
- * unless you need different content or structure.
+ * Each present tile paints action rows as horizontal bands whose height is
+ * proportional to that action's frequency (GTO Wizard Hands). Silver fill +
+ * per-shape type sizes (suited/pair/offsuit) live in styles/layout.css.
  */
 import { useEffect, useMemo } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
