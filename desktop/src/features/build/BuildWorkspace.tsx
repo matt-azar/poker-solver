@@ -51,6 +51,17 @@ function cellFromPoint(
   return { row, col };
 }
 
+/**
+ * Build paint-grid cell weight label. Only fractional weights strictly between
+ * 0 and 1 get a number; empty and full-weight cells stay unlabeled.
+ */
+export function formatPaintCellWeight(weight: number): string | null {
+  if (!(weight > 0 && weight < 1)) {
+    return null;
+  }
+  return weight.toFixed(2);
+}
+
 function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
   const weights = useStudyStore((s) => s.weights[player]);
   const beginPaintStroke = useStudyStore((s) => s.beginPaintStroke);
@@ -109,6 +120,7 @@ function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
               : row < col
                 ? `${rowRank}${colRank}s`
                 : `${colRank}${rowRank}o`;
+          const weightLabel = formatPaintCellWeight(weight);
           return (
             <button
               key={`${player}-${row}-${col}`}
@@ -124,7 +136,7 @@ function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
                     }
                   : undefined
               }
-              title={label}
+              title={weightLabel ? `${label} · ${weightLabel}` : label}
               onClick={(event) => {
                 // Pointer strokes paint on pointerdown (preventDefault suppresses the
                 // mouse click). Keyboard activation still synthesizes click.
@@ -135,7 +147,10 @@ function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
                 endPaintStroke();
               }}
             >
-              {label}
+              <span className="paint-cell__hand">{label}</span>
+              {weightLabel ? (
+                <span className="paint-cell__weight">{weightLabel}</span>
+              ) : null}
             </button>
           );
         }),

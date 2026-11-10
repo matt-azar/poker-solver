@@ -71,7 +71,17 @@ vi.mock("../../engine/client", () => ({
 
 const { resetSeatActionCatalogueForTests } = await import("../../domain/profiles");
 const { useStudyStore } = await import("../../state/studyStore");
-const { BuildWorkspace } = await import("./BuildWorkspace");
+const { BuildWorkspace, formatPaintCellWeight } = await import("./BuildWorkspace");
+
+describe("formatPaintCellWeight", () => {
+  it("shows two decimals only for weights strictly between 0 and 1", () => {
+    expect(formatPaintCellWeight(0)).toBeNull();
+    expect(formatPaintCellWeight(1)).toBeNull();
+    expect(formatPaintCellWeight(0.4)).toBe("0.40");
+    expect(formatPaintCellWeight(0.01)).toBe("0.01");
+    expect(formatPaintCellWeight(0.75)).toBe("0.75");
+  });
+});
 
 describe("BuildWorkspace range tools", () => {
   beforeEach(() => {
@@ -169,6 +179,21 @@ describe("BuildWorkspace range tools", () => {
     await user.tab();
     expect(useStudyStore.getState().paintWeight).toBeCloseTo(0.75, 5);
     expect(input.value).toBe("0.75");
+  });
+
+  it("shows cell weights under hand ids only for fractional weights", () => {
+    useStudyStore.getState().setPaintWeight(0.4);
+    useStudyStore.getState().setRangeText("oop", "AA,KK:0.5");
+    render(<BuildWorkspace />);
+    const oopGrid = screen.getByRole("grid", { name: "oop range" });
+    const aa = oopGrid.querySelector('[data-row="0"][data-col="0"]');
+    const kk = oopGrid.querySelector('[data-row="1"][data-col="1"]');
+    const ak = oopGrid.querySelector('[data-row="0"][data-col="1"]');
+    expect(aa?.querySelector(".paint-cell__hand")?.textContent).toBe("AA");
+    expect(aa?.querySelector(".paint-cell__weight")).toBeNull();
+    expect(kk?.querySelector(".paint-cell__hand")?.textContent).toBe("KK");
+    expect(kk?.querySelector(".paint-cell__weight")?.textContent).toBe("0.50");
+    expect(ak?.querySelector(".paint-cell__weight")).toBeNull();
   });
 
   it("swaps OOP and IP range text without flipping layout labels", async () => {
