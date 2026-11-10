@@ -1,16 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   nodeEffectiveStack,
   nodePot,
 } from "../../domain/actionHistory";
-import { evaluateBuildSpotEligibility } from "../../domain/build/transferFromStudy";
 import {
   boardGroups,
   dealStreetFromBoard,
   normalizeBoardCards,
   type DealStreet,
 } from "../../domain/cards";
-import { engineActivityMessage, phaseLabel } from "../../domain/solveActivity";
 import { useStudyStore } from "../../state/studyStore";
 import { PlayingCard } from "../cards/PlayingCard";
 import { CardPicker } from "../tree/CardPicker";
@@ -48,22 +46,13 @@ export function ContextStrip() {
   const draft = useStudyStore((s) => s.draft);
   const status = useStudyStore((s) => s.status);
   const currentNode = useStudyStore((s) => s.currentNode);
-  const phase = useStudyStore((s) => s.phase);
-  const message = useStudyStore((s) => s.message);
-  const solutionId = useStudyStore((s) => s.solutionId);
   const prepareBoardCardChange = useStudyStore((s) => s.prepareBoardCardChange);
   const clearBoardCardChange = useStudyStore((s) => s.clearBoardCardChange);
   const loadLineCardReport = useStudyStore((s) => s.loadLineCardReport);
-  const createBuildSpotFromHere = useStudyStore((s) => s.createBuildSpotFromHere);
   const boardChangeStreet = useStudyStore((s) => s.boardChangeStreet);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerStreet, setPickerStreet] = useState<DealStreet | null>(null);
-  const activity = engineActivityMessage(phase, status, message);
-  const live =
-    phase === "solving" ||
-    phase === "building" ||
-    phase === "pause_requested" ||
-    phase === "stop_requested";
+  const arrivedNodeId = useRef<string | null | undefined>(undefined);
 
   const cards = boardList(currentNode?.board ?? status?.board, draft.boardText);
   const groups = boardGroups(cards);
@@ -78,7 +67,6 @@ export function ContextStrip() {
     ? "Deal"
     : toActLabel(currentNode?.to_act, currentNode?.player ?? null);
   const line = currentNode?.line || currentNode?.node_id || "root";
-  const buildSpotGate = evaluateBuildSpotEligibility(currentNode);
   const showRootConfig =
     currentNode != null &&
     (Number(currentNode.pot) !== rootPot ||
@@ -106,6 +94,40 @@ export function ContextStrip() {
     setPickerStreet(null);
     clearBoardCardChange();
   };
+
+  // Flop or turn just closed: the next board card has to be chosen, so open
+  // the selector once per arrival. Closing it stays closed until the node changes.
+  useEffect(() => {
+    const nodeId = currentNode?.node_id ?? null;
+    if (arrivedNodeId.current === nodeId) {
+      return;
+    }
+    setPickerOpen(false);
+    setPickerStreet(null);
+    let cancelled = false;
+    void (async () => {
+      await Promise.resolve();
+      if (cancelled) {
+        return;
+      }
+      arrivedNodeId.current = nodeId;
+      if (currentNode?.kind !== "chance" || (dealing !== "turn" && dealing !== "river")) {
+        return;
+      }
+      const result = await prepareBoardCardChange(dealing);
+      if (cancelled || !result.ok) {
+        return;
+      }
+      if (useStudyStore.getState().currentNode?.node_id !== nodeId) {
+        return;
+      }
+      setPickerStreet(dealing);
+      setPickerOpen(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentNode, dealing, prepareBoardCardChange]);
 
   return (
     <div className="context-strip">
@@ -143,18 +165,13 @@ export function ContextStrip() {
               >
                 <PlayingCard
                   card={groups.turn}
-                  emptyLabel="T"
+                  emptyLabel=""
                   size="sm"
                   layout="inline"
                   interactive
                   selected={activeStreet === "turn" && pickerOpen}
-                  title={
-                    groups.turn
-                      ? "Change turn card"
-                      : dealNode
-                        ? "Deal turn card"
-                        : "Turn"
-                  }
+                  aria-label={groups.turn ? "Change turn card" : "Select a turn card"}
+                  title={groups.turn ? "Change turn card" : "Select a turn card"}
                   onClick={() => openPickerFor("turn")}
                 />
               </div>
@@ -174,18 +191,15 @@ export function ContextStrip() {
               >
                 <PlayingCard
                   card={groups.river}
-                  emptyLabel="R"
+                  emptyLabel=""
                   size="sm"
                   layout="inline"
                   interactive
                   selected={activeStreet === "river" && pickerOpen}
-                  title={
-                    groups.river
-                      ? "Change river card"
-                      : dealNode
-                        ? "Deal river card"
-                        : "River"
+                  aria-label={
+                    groups.river ? "Change river card" : "Select a river card"
                   }
+                  title={groups.river ? "Change river card" : "Select a river card"}
                   onClick={() => openPickerFor("river")}
                 />
               </div>
@@ -237,33 +251,7 @@ export function ContextStrip() {
           Compare cards
         </button>
       ) : null}
-      <button
-        type="button"
-        className="toolbar-btn"
-        disabled={!buildSpotGate.ok}
-        title={
-          buildSpotGate.ok
-            ? "Create a Build draft from this street-start decision (reaching ranges, pot, stack)"
-            : buildSpotGate.reason
-        }
-        onClick={() => void createBuildSpotFromHere()}
-      >
-        Create Build spot
-      </button>
       <div className="context-strip__grow" />
-      <div className="context-strip__engine" title={activity}>
-        <span className="phase-pill" data-phase={phase} data-live={live ? "true" : "false"}>
-          {phaseLabel(phase)}
-          {live && status?.iterations != null
-            ? ` · ${status.iterations}${
-                status.iterations_requested
-                  ? `/${status.iterations_requested}`
-                  : ""
-              }`
-            : ""}
-          {!live && solutionId ? ` · ${solutionId.slice(0, 8)}` : ""}
-        </span>
-      </div>
       <SolveControls />
     </div>
   );

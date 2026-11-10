@@ -8,19 +8,19 @@ import {
 } from "react";
 import {
   actionSizePotBasis,
-  displayPathStepLabel,
+  abbreviatePathAction,
+  formatAbbreviatedPath,
   groupCrumbsByStreet,
   groupPathByStreet,
   isTerminalFold,
   nodeStatusLabel,
   pathCrumbsFromTrail,
+  pathStepDisplayLabel,
   streetLabel,
   type PathAlternative,
   type PathStep,
   type PathStreetGroup,
 } from "../../domain/actionHistory";
-import { type BetSizeDisplayMode } from "../../domain/betSizes";
-import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/path-nav.css";
 
@@ -37,34 +37,15 @@ function stepsFromTrailOrCrumbs(
   pot: number,
   board: string[] | string | null | undefined,
   place: string | null | undefined,
-  mode: BetSizeDisplayMode,
   toCall = 0,
 ): PathStreetGroup[] {
   if (
     trail.length > 0 &&
     (!currentNodeId || trail[trail.length - 1]?.nodeId === currentNodeId)
   ) {
-    // Reformat size tags under the live Bet size labels setting while keeping
-    // each step's captured source pot/to_call (not the arrived node pot).
-    const relabeled = trail.map((step) => ({
-      ...step,
-      label: displayPathStepLabel(step, mode, pot),
-      alternatives: step.alternatives?.map((alt) => ({
-        ...alt,
-        label: displayPathStepLabel(
-          {
-            label: alt.label,
-            rawLabel: alt.rawLabel || alt.label,
-            kind: alt.kind === "card" ? "card" : "action",
-            sizePot: step.sizePot,
-            toCall: step.toCall,
-          },
-          mode,
-          pot,
-        ),
-      })),
-    }));
-    return groupPathByStreet(relabeled, board);
+    // Abbreviations are applied at render from each step's raw label and the
+    // pot captured when the action was taken.
+    return groupPathByStreet(trail, board);
   }
   const crumbs = pathCrumbsFromTrail(
     trail,
@@ -72,7 +53,7 @@ function stepsFromTrailOrCrumbs(
     rootId,
     currentNodeId,
     pot,
-    mode,
+    "pot",
     toCall,
   );
   return groupCrumbsByStreet(crumbs, board, place);
@@ -89,7 +70,6 @@ export function ActionHistory() {
   const goNavForward = useStudyStore((s) => s.goNavForward);
   const jumpTrailIndex = useStudyStore((s) => s.jumpTrailIndex);
   const takeTrailAlternative = useStudyStore((s) => s.takeTrailAlternative);
-  const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
   const layout = useStudyStore((s) => s.layout);
   const setLayout = useStudyStore((s) => s.setLayout);
 
@@ -208,11 +188,15 @@ export function ActionHistory() {
             pot,
             currentNode.board,
             place,
-            betSizeDisplay,
             toCall,
           )
         : [],
-    [currentNode, pathTrail, pot, rootId, place, betSizeDisplay, toCall],
+    [currentNode, pathTrail, pot, rootId, place, toCall],
+  );
+
+  const abbreviatedPath = useMemo(
+    () => formatAbbreviatedPath(streetGroups, pot),
+    [streetGroups, pot],
   );
 
   const terminal = currentNode?.kind === "terminal";
@@ -302,13 +286,20 @@ export function ActionHistory() {
         </div>
         <span className="path-nav__label">Path</span>
         {currentNode ? (
-          <nav className="path-nav__streets" aria-label="Betting path by street">
+          <nav
+            className="path-nav__streets"
+            aria-label="Betting path by street"
+            data-path={abbreviatedPath}
+          >
             {streetGroups.map((group, groupIndex) => (
               <div
                 key={`${group.street}-${groupIndex}`}
                 className="path-nav__street"
                 data-street={group.street}
               >
+                {groupIndex > 0 ? (
+                  <span className="path-nav__street-sep">{" - "}</span>
+                ) : null}
                 <span className="path-nav__street-name">{streetLabel(group.street)}</span>
                 {group.boardCards.length ? (
                   <span
@@ -331,25 +322,24 @@ export function ActionHistory() {
                   {renderedSteps
                     .filter((row) => row.groupIndex === groupIndex)
                     .map((row) => {
-                      const { step, flatIndex, showStepSep, isCurrent } = row;
+                      const { step, stepIndex, flatIndex, isCurrent } = row;
                       const alts =
                         step.alternatives?.filter((alt) => alt.nodeId) ?? [];
                       const clickable = Boolean(step.nodeId) && !isCurrent;
+                      const shown = pathStepDisplayLabel(step, pot);
+                      const prev = group.steps[stepIndex - 1];
+                      const slash =
+                        prev != null &&
+                        (prev.kind === "action" || prev.kind === "terminal") &&
+                        (step.kind === "action" || step.kind === "terminal");
                       return (
                         <span
                           key={`${step.label}-${flatIndex}-${step.nodeId || flatIndex}`}
                           className="path-nav__step-wrap"
                         >
-                          {showStepSep ? (
+                          {slash ? (
                             <span className="path-nav__sep" aria-hidden>
-                              ›
-                            </span>
-                          ) : null}
-                          {step.actor &&
-                          step.kind !== "root" &&
-                          step.kind !== "card" ? (
-                            <span className="path-nav__actor" title="Acting player">
-                              {step.actor}
+                              /
                             </span>
                           ) : null}
                           <button
@@ -368,14 +358,14 @@ export function ActionHistory() {
                             }
                             onClick={() => onStepClick(flatIndex, step, isCurrent)}
                           >
-                            {step.label}
+                            {shown}
                           </button>
                           {alts.length && !isCurrent ? (
                             <>
                               <button
                                 type="button"
                                 className="path-nav__alt-toggle"
-                                aria-label={`Alternatives to ${step.label}`}
+                                aria-label={`Alternatives to ${shown}`}
                                 aria-expanded={openAlts === flatIndex}
                                 title="Change prior action"
                                 onClick={(event) => {
@@ -400,7 +390,13 @@ export function ActionHistory() {
                                         onPickAlternative(flatIndex, alt)
                                       }
                                     >
-                                      {alt.label}
+                                      {abbreviatePathAction(
+                                        alt.rawLabel || alt.label,
+                                        step.sizePot != null && step.sizePot > 0
+                                          ? step.sizePot
+                                          : pot,
+                                        step.toCall ?? 0,
+                                      )}
                                     </button>
                                   ))}
                                 </div>

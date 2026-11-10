@@ -26,9 +26,10 @@ const HISTORY_MIN = 56;
 
 function dockMaxPx(): number {
   if (typeof window === "undefined") {
-    return 720;
+    return 1200;
   }
-  return Math.max(DOCK_MIN, Math.floor(window.innerHeight * 0.34));
+  // The open dock overlays the chart, so it may cover most of the study page.
+  return Math.max(DOCK_MIN, window.innerHeight - 96);
 }
 
 function historyMaxPx(): number {

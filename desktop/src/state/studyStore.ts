@@ -2525,7 +2525,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       lowerDock: true,
       lowerDockHeight: Math.max(
         useLayoutStore.getState().layout.lowerDockHeight,
-        220,
+        480,
       ),
     });
 

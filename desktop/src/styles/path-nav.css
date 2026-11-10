@@ -94,9 +94,16 @@
   display: flex;
   align-items: flex-start;
   flex-wrap: wrap;
-  gap: 6px 10px;
+  gap: 2px 0;
   min-width: 0;
   flex: 1;
+}
+
+.path-nav__street-sep {
+  color: var(--muted);
+  font-weight: 650;
+  white-space: pre;
+  align-self: center;
 }
 
 .path-nav__street {
@@ -159,20 +166,21 @@
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 2px;
+  gap: 0;
 }
 
 .path-nav__step-wrap {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   position: relative;
 }
 
 .path-nav__sep {
   color: var(--muted);
-  padding: 0 1px;
+  padding: 0;
   font-size: 12px;
+  font-weight: 650;
 }
 
 .path-nav__actor {
@@ -190,12 +198,17 @@
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  padding: 1px 5px;
+  padding: 1px 0;
   border-radius: var(--radius-sm);
   max-width: 10rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.path-nav__step[data-kind="root"],
+.path-nav__step[data-kind="card"] {
+  margin-right: 6px;
 }
 
 .path-nav__step:hover:not(:disabled) {

@@ -21,7 +21,7 @@ export function LowerDock() {
   const setLayout = useStudyStore((s) => s.setLayout);
   const analysisTab = useStudyStore((s) => s.analysisTab);
   const setAnalysisTab = useStudyStore((s) => s.setAnalysisTab);
-  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const dragRef = useRef<{ startY: number; startH: number; cap: number } | null>(null);
 
   useEffect(() => {
     // Repair a corrupted height without forcing the dock open over the matrix.
@@ -46,13 +46,20 @@ export function LowerDock() {
     (event: ReactPointerEvent) => {
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
-      dragRef.current = { startY: event.clientY, startH: layout.lowerDockHeight };
+      const workspace = event.currentTarget.closest(".study-workspace");
+      const cap = workspace
+        ? Math.max(160, workspace.clientHeight - 96)
+        : Number.POSITIVE_INFINITY;
+      dragRef.current = { startY: event.clientY, startH: layout.lowerDockHeight, cap };
       const onMove = (ev: PointerEvent) => {
         if (!dragRef.current) {
           return;
         }
-        const next = clampDockHeight(
-          dragRef.current.startH - (ev.clientY - dragRef.current.startY),
+        const next = Math.min(
+          dragRef.current.cap,
+          clampDockHeight(
+            dragRef.current.startH - (ev.clientY - dragRef.current.startY),
+          ),
         );
         setLayout({ lowerDockHeight: next, lowerDock: true });
       };
@@ -71,7 +78,7 @@ export function LowerDock() {
     setAnalysisTab(id);
     setLayout({
       lowerDock: true,
-      lowerDockHeight: Math.max(layout.lowerDockHeight, 200),
+      lowerDockHeight: Math.max(layout.lowerDockHeight, 400),
     });
   };
 

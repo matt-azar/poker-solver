@@ -75,7 +75,7 @@ export function CardPicker({
     dealStreetFromBoard(dealNode?.board) ??
     ("turn" as DealStreet);
   const title =
-    activeStreet === "river" ? "Change river" : "Change turn";
+    activeStreet === "river" ? "Select a river card" : "Select a turn card";
 
   useEffect(() => {
     if (!open) {

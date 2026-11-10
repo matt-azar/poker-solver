@@ -4,8 +4,10 @@ import {
   advancePathTrail,
   canNavBack,
   canNavForward,
+  abbreviatePathAction,
   compactActionLabel,
   displayPathStepLabel,
+  formatAbbreviatedPath,
   edgeStepFromNode,
   formatChoiceFrequency,
   groupCrumbsByStreet,
@@ -64,6 +66,52 @@ describe("actionHistory helpers", () => {
     expect(compactActionLabel("Bet 50", 100)).not.toMatch(/Bet 50%/i);
     expect(compactActionLabel("Check", 100)).toBe("Check");
     expect(compactActionLabel("As", 100)).toBe("As");
+  });
+
+  it("abbreviates a multi-street line as x / pot-fraction / c", () => {
+    expect(abbreviatePathAction("Check", 50)).toBe("x");
+    expect(abbreviatePathAction("Call", 50)).toBe("c");
+    expect(abbreviatePathAction("Fold", 50)).toBe("f");
+    expect(abbreviatePathAction("Bet 10", 50)).toBe("b20");
+    expect(abbreviatePathAction("Bet 35", 70)).toBe("b50");
+    expect(
+      formatAbbreviatedPath([
+        {
+          steps: [
+            { kind: "root", label: "Root", rawLabel: "Root" },
+            { kind: "action", label: "Check", rawLabel: "Check" },
+            {
+              kind: "action",
+              label: "Bet 10",
+              rawLabel: "Bet 10",
+              sizePot: 50,
+              toCall: 0,
+            },
+            { kind: "action", label: "Call", rawLabel: "Call" },
+          ],
+        },
+        {
+          steps: [
+            { kind: "card", label: "2s", rawLabel: "2s" },
+            { kind: "action", label: "Check", rawLabel: "Check" },
+            {
+              kind: "action",
+              label: "Bet 35",
+              rawLabel: "Bet 35",
+              sizePot: 70,
+              toCall: 0,
+            },
+            { kind: "action", label: "Call", rawLabel: "Call" },
+          ],
+        },
+        {
+          steps: [
+            { kind: "action", label: "Check", rawLabel: "Check" },
+            { kind: "action", label: "Check", rawLabel: "Check" },
+          ],
+        },
+      ]),
+    ).toBe("x/b20/c - x/b50/c - x/x");
   });
 
   it("respects betSizeDisplay mode for path compact labels", () => {

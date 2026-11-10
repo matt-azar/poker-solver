@@ -37,7 +37,7 @@ describe("CardPicker", () => {
   it("renders a suits×ranks grid from armed chance cards[] without requiring current deal", () => {
     render(<CardPicker open street="river" onClose={() => undefined} />);
     expect(screen.getByRole("dialog", { name: /river card picker/i })).toBeTruthy();
-    expect(screen.getByText("Change river")).toBeTruthy();
+    expect(screen.getByText("Select a river card")).toBeTruthy();
     expect(screen.queryByLabelText(/four-color suits/i)).toBeNull();
     expect(screen.getAllByText("♠").length).toBeGreaterThan(0);
     expect(screen.getAllByText("♥").length).toBeGreaterThan(0);
