@@ -1,16 +1,6 @@
 import {
-  canExecuteCalculateEv,
-  canExecuteContinue,
-  canExecutePause,
   canExecuteSave,
-  canExecuteSolve,
-  canExecuteStop,
-  executeCalculateEv,
-  executeContinue,
-  executePause,
   executeSave,
-  executeSolve,
-  executeStop,
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
 import { openSolutionFile, saveSolutionFile } from "../../commands/solutionFiles";
@@ -23,11 +13,6 @@ export function SolveControls() {
   const workspace = useStudyStore((s) => s.workspace);
   const currentNode = useStudyStore((s) => s.currentNode);
   const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
-  const solve = useStudyStore((s) => s.solve);
-  const continueSolve = useStudyStore((s) => s.continueSolve);
-  const pause = useStudyStore((s) => s.pause);
-  const stop = useStudyStore((s) => s.stop);
-  const calculateEv = useStudyStore((s) => s.calculateEv);
   const saveSolution = useStudyStore((s) => s.saveSolution);
   const openSolution = useStudyStore((s) => s.openSolution);
   const updateDraft = useStudyStore((s) => s.updateDraft);
@@ -40,11 +25,6 @@ export function SolveControls() {
     currentNode,
     solveValidationErrors,
   });
-  const solveGate = canExecuteSolve(ctx);
-  const continueGate = canExecuteContinue(ctx);
-  const pauseGate = canExecutePause(ctx);
-  const stopGate = canExecuteStop(ctx);
-  const evGate = canExecuteCalculateEv(ctx);
   const saveGate = canExecuteSave(ctx);
 
   function commandDeps() {
@@ -63,77 +43,7 @@ export function SolveControls() {
   }
 
   return (
-    <div className="solve-controls" role="group" aria-label="Solve controls">
-      <button
-        type="button"
-        className="toolbar-btn primary"
-        disabled={!solveGate.ok}
-        title={solveGate.reason}
-        onClick={() =>
-          void executeSolve({
-            ...commandDeps(),
-            solve,
-          })
-        }
-      >
-        Solve
-      </button>
-      <button
-        type="button"
-        className="toolbar-btn"
-        disabled={!continueGate.ok}
-        title={continueGate.reason}
-        onClick={() =>
-          void executeContinue({
-            ...commandDeps(),
-            continueSolve,
-          })
-        }
-      >
-        Continue
-      </button>
-      <button
-        type="button"
-        className="toolbar-btn"
-        disabled={!pauseGate.ok}
-        title={pauseGate.reason}
-        onClick={() =>
-          void executePause({
-            ...commandDeps(),
-            pause,
-          })
-        }
-      >
-        Pause
-      </button>
-      <button
-        type="button"
-        className="toolbar-btn danger"
-        disabled={!stopGate.ok}
-        title={stopGate.reason}
-        onClick={() =>
-          void executeStop({
-            ...commandDeps(),
-            stop,
-          })
-        }
-      >
-        Stop
-      </button>
-      <button
-        type="button"
-        className="toolbar-btn"
-        disabled={!evGate.ok}
-        title={evGate.reason}
-        onClick={() =>
-          void executeCalculateEv({
-            ...commandDeps(),
-            calculateEv,
-          })
-        }
-      >
-        EV
-      </button>
+    <div className="solve-controls" role="group" aria-label="Solution files">
       <button
         type="button"
         className="toolbar-btn"

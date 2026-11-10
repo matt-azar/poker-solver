@@ -23,7 +23,6 @@ import {
   executeStop,
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
-import type { ThemePreference } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -37,7 +36,7 @@ interface Props {
   onAssistantToggle: () => void;
 }
 
-type MenuId = "file" | "solve" | "tree" | "view" | "settings" | null;
+type MenuId = "file" | "solve" | "tree" | "view" | null;
 
 export function MenuBar({
   workspace,
@@ -58,8 +57,6 @@ export function MenuBar({
   const openSolution = useStudyStore((s) => s.openSolution);
   const updateDraft = useStudyStore((s) => s.updateDraft);
   const toggleTheme = useStudyStore((s) => s.toggleTheme);
-  const themePreference = useStudyStore((s) => s.themePreference);
-  const setThemePreference = useStudyStore((s) => s.setThemePreference);
   const resetLayout = useStudyStore((s) => s.resetLayout);
   const layout = useStudyStore((s) => s.layout);
   const setLayout = useStudyStore((s) => s.setLayout);
@@ -83,7 +80,6 @@ export function MenuBar({
   const strategyEditDrawerOpen = useStudyStore((s) => s.strategyEditDrawerOpen);
   const settingsOpen = useSettingsStore((s) => s.settingsOpen);
   const setSettingsOpen = useSettingsStore((s) => s.setSettingsOpen);
-  const updateSettings = useSettingsStore((s) => s.updateSettings);
 
   function commandDeps() {
     return {
@@ -181,7 +177,6 @@ export function MenuBar({
 
   return (
     <header className="menu-bar" ref={rootRef}>
-      <div className="menu-bar__brand">Hold&apos;em Study</div>
       <nav className="menu-bar__menus" aria-label="Application">
         <Menu
           id="file"
@@ -321,37 +316,8 @@ export function MenuBar({
             { label: "Reset layout", onClick: () => resetLayout() },
           ]}
         />
-        <Menu
-          id="settings"
-          label="Settings"
-          open={openMenu}
-          setOpen={setOpenMenu}
-          items={[
-            {
-              label: "Open settings…",
-              onClick: () => setSettingsOpen(true),
-            },
-            { sep: true },
-            {
-              label: `Theme: ${themePreference}`,
-              onClick: () => {
-                const order: ThemePreference[] = ["system", "light", "dark"];
-                const current = (["system", "light", "dark"] as const).includes(
-                  themePreference as ThemePreference,
-                )
-                  ? (themePreference as ThemePreference)
-                  : "system";
-                const next = order[(order.indexOf(current) + 1) % order.length];
-                setThemePreference(next);
-                updateSettings({ themePreference: next });
-              },
-            },
-            {
-              label: "Toggle light/dark",
-              onClick: () => toggleTheme(),
-            },
-          ]}
-        />
+      </nav>
+      <div className="menu-bar__center">
         <button
           type="button"
           className="menu-bar__assistant"
@@ -360,15 +326,37 @@ export function MenuBar({
         >
           Assistant
         </button>
-      </nav>
-      <WorkspaceSwitcher workspace={workspace} onChange={onWorkspace} />
-      <div className="menu-bar__spacer" />
+        <WorkspaceSwitcher workspace={workspace} onChange={onWorkspace} />
+        <span className="menu-bar__assistant menu-bar__center-balance" aria-hidden="true">
+          Assistant
+        </span>
+      </div>
       <div className="menu-bar__actions">
         <button type="button" className="icon-btn" onClick={() => toggleTheme()} title="Theme">
           Theme
         </button>
+        <button
+          type="button"
+          className="icon-btn menu-bar__gear"
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <GearIcon />
+        </button>
       </div>
     </header>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.2 7.2 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.22-1.14.54-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.49.4 1.04.72 1.63.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.59-.22 1.14-.54 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
+      />
+    </svg>
   );
 }
 

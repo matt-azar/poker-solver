@@ -24,7 +24,8 @@
 
 /* Top application menu bar (File/Edit/… + workspace switcher). */
 .menu-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-2);
   padding: 0 var(--space-2);
@@ -47,8 +48,18 @@
 .menu-bar__menus {
   display: flex;
   align-items: stretch;
+  justify-self: start;
   height: 100%;
+  min-width: 0;
   gap: 0;
+}
+
+.menu-bar__center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 /* One top-level menu (button + dropdown). */
@@ -205,27 +216,49 @@
   flex: 1;
 }
 
-/* Study Assistant toggle on the menu bar. */
+/* Study Assistant toggle, outlined so it sits apart from the centered nav. */
 .menu-bar__assistant {
-  height: 100%;
-  border: 0;
+  border: 1px solid var(--accent);
   background: transparent;
-  padding: 0 10px;
   color: var(--text);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
+  padding: 2px 10px;
+  min-height: 22px;
+  height: auto;
+  font: inherit;
+  font-weight: 600;
+}
+
+.menu-bar__center-balance {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* Study Assistant toggle on the menu bar. (hover). */
 .menu-bar__assistant:hover,
 .menu-bar__assistant[aria-pressed="true"] {
-  background: var(--secondary);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 /* Right-side menu-bar icon/tool buttons. */
 .menu-bar__actions {
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: var(--space-1);
+}
+
+.menu-bar__gear {
+  width: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.menu-bar__gear svg {
+  display: block;
 }
 
 /* Compact bordered toolbar/icon button (shared with toolbar-btn). */
@@ -1090,19 +1123,24 @@
   color: var(--muted);
 }
 
-/* Bottom analysis dock (reports / charts / tables). */
+/* Bottom analysis dock. Open dock overlays the range chart so the chart keeps
+   its size while the panel is dragged up over it. */
 .lower-dock {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   height: var(--dock-h);
   min-height: 96px;
-  max-height: min(34vh, 320px);
+  max-height: none;
   background: var(--panel);
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  position: relative;
-  z-index: 2;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
   overflow: hidden;
+  box-shadow: 0 -10px 28px color-mix(in srgb, #000 28%, transparent);
 }
 
 /* Tab strip for lower-dock panels. */
@@ -1599,6 +1637,134 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* Compare-cards suit × rank grid (2 on the left, ace on the right). */
+.line-card-grid-scroll {
+  overflow: auto;
+  min-height: 0;
+  padding: 4px 8px 8px;
+}
+
+.line-card-grid {
+  display: grid;
+  gap: 4px;
+  min-width: 980px;
+}
+
+.line-card-grid__row {
+  display: grid;
+  grid-template-columns: 28px repeat(13, minmax(68px, 1fr));
+  gap: 4px;
+  align-items: stretch;
+}
+
+.line-card-grid__rank,
+.line-card-grid__suit,
+.line-card-grid__corner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.line-card-grid__suit[data-suit="h"] {
+  color: var(--suit-heart);
+}
+
+.line-card-grid__suit[data-suit="d"] {
+  color: var(--suit-diamond);
+}
+
+.line-card-grid__suit[data-suit="c"] {
+  color: var(--suit-club);
+}
+
+.line-card-grid__suit[data-suit="s"] {
+  color: var(--suit-spade);
+}
+
+.line-card-cell {
+  min-height: 78px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  color: var(--text);
+  padding: 4px 5px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2px;
+  text-align: left;
+  font: inherit;
+}
+
+.line-card-cell[data-suit="h"] .line-card-cell__card {
+  color: var(--suit-heart);
+}
+
+.line-card-cell[data-suit="d"] .line-card-cell__card {
+  color: var(--suit-diamond);
+}
+
+.line-card-cell[data-suit="c"] .line-card-cell__card {
+  color: var(--suit-club);
+}
+
+.line-card-cell[data-suit="s"] .line-card-cell__card {
+  color: var(--suit-spade);
+}
+
+.line-card-cell[data-available="false"],
+.line-card-cell:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.line-card-cell__card {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.line-card-cell__freqs,
+.line-card-cell__value {
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+.line-card-cell__bar {
+  display: block;
+  width: 100%;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.line-card-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.line-card-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.line-card-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
 }
 
 /* OOP / IP seat toggle button group. */
@@ -3891,9 +4057,8 @@
     max-height: 40vh;
   }
 
-  /* Bottom analysis dock (reports / charts / tables). */
   .lower-dock {
-    max-height: 60vh;
+    max-height: none;
   }
 }
 
@@ -4197,8 +4362,12 @@
   font-size: 11px;
 }
 
-/* Collapsed lower-dock height/state. */
+/* Collapsed lower-dock height/state. Stays in flow as a tab strip. */
 .lower-dock--collapsed {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
   flex: 0 0 auto;
   min-height: 0;
   height: auto;
@@ -4208,6 +4377,8 @@
   padding: 0;
   border-top: 1px solid var(--border);
   background: var(--secondary);
+  box-shadow: none;
+  z-index: 2;
 }
 
 /* Control that collapses the lower dock. */

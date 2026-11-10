@@ -1,5 +1,8 @@
 import {
   formatActionDisplay,
+  parseSizedAction,
+  potTagFromLabel,
+  sizeChipsForPotTag,
   type BetSizeDisplayMode,
 } from "./betSizes";
 import { groupHands } from "./browse";
@@ -242,6 +245,157 @@ export function displayPathStepLabel(
   const toCall =
     step.toCall != null && Number.isFinite(step.toCall) ? step.toCall : 0;
   return compactActionLabel(raw, pot, mode, toCall);
+}
+
+/**
+ * Path-line abbreviation. Check/Call/Fold are single letters. Bets and raises
+ * stay pot-fraction tags (`b20` = 20% of the pot before the bet), never chips.
+ */
+export function abbreviatePathAction(
+  label: string,
+  pot = 0,
+  toCall = 0,
+): string {
+  const trimmed = label.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (/^check$/i.test(trimmed)) {
+    return "x";
+  }
+  if (/^call\b/i.test(trimmed)) {
+    return "c";
+  }
+  if (/^fold$/i.test(trimmed)) {
+    return "f";
+  }
+  if (/^[2-9TJQKA][cdhs]$/i.test(trimmed)) {
+    return trimmed.length === 2
+      ? trimmed[0]!.toUpperCase() + trimmed[1]!.toLowerCase()
+      : trimmed;
+  }
+  const tag = potTagFromLabel(trimmed, pot, toCall);
+  if (tag) {
+    return tag;
+  }
+  if (/^[br]\d+$/i.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  return trimmed;
+}
+
+/** Visible path-step text. Root and dealt cards stay literal; actions abbreviate. */
+export function pathStepDisplayLabel(
+  step: Pick<PathStep, "kind" | "label" | "rawLabel" | "sizePot" | "toCall">,
+  potFallback = 0,
+): string {
+  if (step.kind === "root" || step.kind === "card") {
+    return step.label;
+  }
+  const pot =
+    step.sizePot != null && Number.isFinite(step.sizePot) && step.sizePot > 0
+      ? step.sizePot
+      : potFallback;
+  const toCall =
+    step.toCall != null && Number.isFinite(step.toCall) ? step.toCall : 0;
+  return abbreviatePathAction(step.rawLabel || step.label, pot, toCall);
+}
+
+/**
+ * One street's actions joined by `/`, streets joined by ` - `.
+ * Root crumbs and dealt cards are omitted — board chips already show the card.
+ */
+export function formatAbbreviatedPath(
+  groups: Array<{
+    steps: Array<Pick<PathStep, "kind" | "label" | "rawLabel" | "sizePot" | "toCall">>;
+  }>,
+  potFallback = 0,
+): string {
+  const streets: string[] = [];
+  for (const group of groups) {
+    const actions: string[] = [];
+    for (const step of group.steps) {
+      if (step.kind !== "action" && step.kind !== "terminal") {
+        continue;
+      }
+      actions.push(pathStepDisplayLabel(step, potFallback));
+    }
+    if (actions.length) {
+      streets.push(actions.join("/"));
+    }
+  }
+  return streets.join(" - ");
+}
+
+/**
+ * Abbreviate an engine `line` (`Check/Bet 10/Call`) by walking the pot.
+ * Each bet uses the pot before that bet. Streets are not split here — the
+ * trail knows where a street ends; {@link studyLineLabel} inserts ` - `.
+ */
+export function abbreviateActionLine(
+  line: string | null | undefined,
+  rootPot = 0,
+): string {
+  const parts = splitActionLine(line);
+  if (!parts.length) {
+    return "";
+  }
+  let pot = rootPot > 0 ? rootPot : 0;
+  let toCall = 0;
+  const tags: string[] = [];
+  for (const label of parts) {
+    tags.push(abbreviatePathAction(label, pot, toCall));
+    const parsed = parseSizedAction(label);
+    if (parsed?.kind === "call") {
+      pot += parsed.chips > 0 ? parsed.chips : Math.max(0, toCall);
+      toCall = 0;
+      continue;
+    }
+    if (parsed) {
+      const chips = Math.max(0, sizeChipsForPotTag(parsed, toCall));
+      pot += chips;
+      toCall = chips;
+      continue;
+    }
+    if (/^call$/i.test(label)) {
+      pot += Math.max(0, toCall);
+      toCall = 0;
+    }
+  }
+  return tags.join("/");
+}
+
+/**
+ * Line column text. Prefer the navigation trail so streets split with ` - `
+ * and each bet uses the pot captured when it was taken. Otherwise walk the
+ * engine line from the root pot.
+ */
+export function studyLineLabel(options: {
+  trail: PathStep[] | null | undefined;
+  line: string | null | undefined;
+  currentNodeId?: string | null;
+  rootPot?: number;
+}): string {
+  const trail = options.trail ?? [];
+  const matches =
+    trail.length > 0 &&
+    (!options.currentNodeId ||
+      trail[trail.length - 1]?.nodeId === options.currentNodeId);
+  if (matches) {
+    const grouped = formatAbbreviatedPath(groupPathByStreet(trail));
+    if (grouped) {
+      return grouped;
+    }
+  }
+  const walked = abbreviateActionLine(options.line, options.rootPot ?? 0);
+  if (walked) {
+    return walked;
+  }
+  const raw = options.line?.trim();
+  if (!raw || raw === "open" || raw === "root") {
+    return "root";
+  }
+  return raw;
 }
 
 export function lineCrumbs(

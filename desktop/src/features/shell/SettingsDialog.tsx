@@ -185,7 +185,7 @@ export function SettingsDialog() {
             <option value="chips">Chips only (75.0 chips)</option>
           </select>
           <span className="settings-hint">
-            Updates Study action blocks and path size tags immediately.
+            Updates Study action blocks immediately. The betting path stays pot-fraction abbreviations (x, c, b20).
           </span>
         </label>
 

@@ -53,12 +53,18 @@ export function PlayingCard({
   const classes = ["playing-card", className].filter(Boolean).join(" ");
 
   const body: ReactNode = empty ? (
-    <>
-      <span className="playing-card__rank">{emptyLabel}</span>
-      <span className="playing-card__suit" aria-hidden>
-        {symbol || "·"}
+    emptyLabel ? (
+      <>
+        <span className="playing-card__rank">{emptyLabel}</span>
+        <span className="playing-card__suit" aria-hidden>
+          {symbol || "·"}
+        </span>
+      </>
+    ) : (
+      <span className="playing-card__rank" aria-hidden>
+        {"\u00a0"}
       </span>
-    </>
+    )
   ) : (
     <>
       <span className="playing-card__rank">{rank}</span>

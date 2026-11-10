@@ -4,8 +4,12 @@ import {
   advancePathTrail,
   canNavBack,
   canNavForward,
+  abbreviateActionLine,
+  abbreviatePathAction,
   compactActionLabel,
   displayPathStepLabel,
+  formatAbbreviatedPath,
+  studyLineLabel,
   edgeStepFromNode,
   formatChoiceFrequency,
   groupCrumbsByStreet,
@@ -64,6 +68,155 @@ describe("actionHistory helpers", () => {
     expect(compactActionLabel("Bet 50", 100)).not.toMatch(/Bet 50%/i);
     expect(compactActionLabel("Check", 100)).toBe("Check");
     expect(compactActionLabel("As", 100)).toBe("As");
+  });
+
+  it("abbreviates a multi-street line as x / pot-fraction / c", () => {
+    expect(abbreviatePathAction("Check", 50)).toBe("x");
+    expect(abbreviatePathAction("Call", 50)).toBe("c");
+    expect(abbreviatePathAction("Fold", 50)).toBe("f");
+    expect(abbreviatePathAction("Bet 10", 50)).toBe("b20");
+    expect(abbreviatePathAction("Bet 35", 70)).toBe("b50");
+    expect(
+      formatAbbreviatedPath([
+        {
+          steps: [
+            { kind: "root", label: "Root", rawLabel: "Root" },
+            { kind: "action", label: "Check", rawLabel: "Check" },
+            {
+              kind: "action",
+              label: "Bet 10",
+              rawLabel: "Bet 10",
+              sizePot: 50,
+              toCall: 0,
+            },
+            { kind: "action", label: "Call", rawLabel: "Call" },
+          ],
+        },
+        {
+          steps: [
+            { kind: "card", label: "2s", rawLabel: "2s" },
+            { kind: "action", label: "Check", rawLabel: "Check" },
+            {
+              kind: "action",
+              label: "Bet 35",
+              rawLabel: "Bet 35",
+              sizePot: 70,
+              toCall: 0,
+            },
+            { kind: "action", label: "Call", rawLabel: "Call" },
+          ],
+        },
+        {
+          steps: [
+            { kind: "action", label: "Check", rawLabel: "Check" },
+            { kind: "action", label: "Check", rawLabel: "Check" },
+          ],
+        },
+      ]),
+    ).toBe("x/b20/c - x/b50/c - x/x");
+    expect(
+      abbreviateActionLine(
+        "Check/Bet 10/Call/Check/Bet 35/Call/Check/Check",
+        50,
+      ),
+    ).toBe("x/b20/c/x/b50/c/x/x");
+  });
+
+  it("splits the study line on street boundaries from the trail", () => {
+    expect(
+      studyLineLabel({
+        line: "Check/Bet 10/Call/Check/Bet 35/Call/Check/Check",
+        currentNodeId: "n-river-check",
+        rootPot: 50,
+        trail: [
+          {
+            nodeId: "root",
+            label: "Root",
+            rawLabel: "Root",
+            kind: "root",
+            street: "flop",
+            actor: null,
+          },
+          {
+            nodeId: "n-x",
+            label: "Check",
+            rawLabel: "Check",
+            kind: "action",
+            street: "flop",
+            actor: "OOP",
+          },
+          {
+            nodeId: "n-b",
+            label: "Bet 10",
+            rawLabel: "Bet 10",
+            kind: "action",
+            street: "flop",
+            actor: "IP",
+            sizePot: 50,
+            toCall: 0,
+          },
+          {
+            nodeId: "n-c",
+            label: "Call",
+            rawLabel: "Call",
+            kind: "action",
+            street: "flop",
+            actor: "OOP",
+          },
+          {
+            nodeId: "n-turn",
+            label: "2s",
+            rawLabel: "2s",
+            kind: "card",
+            street: "turn",
+            actor: null,
+            card: "2s",
+          },
+          {
+            nodeId: "n-tx",
+            label: "Check",
+            rawLabel: "Check",
+            kind: "action",
+            street: "turn",
+            actor: "OOP",
+          },
+          {
+            nodeId: "n-tb",
+            label: "Bet 35",
+            rawLabel: "Bet 35",
+            kind: "action",
+            street: "turn",
+            actor: "IP",
+            sizePot: 70,
+            toCall: 0,
+          },
+          {
+            nodeId: "n-tc",
+            label: "Call",
+            rawLabel: "Call",
+            kind: "action",
+            street: "turn",
+            actor: "OOP",
+          },
+          {
+            nodeId: "n-rx",
+            label: "Check",
+            rawLabel: "Check",
+            kind: "action",
+            street: "river",
+            actor: "OOP",
+          },
+          {
+            nodeId: "n-river-check",
+            label: "Check",
+            rawLabel: "Check",
+            kind: "action",
+            street: "river",
+            actor: "IP",
+          },
+        ],
+      }),
+    ).toBe("x/b20/c - x/b50/c - x/x");
   });
 
   it("respects betSizeDisplay mode for path compact labels", () => {

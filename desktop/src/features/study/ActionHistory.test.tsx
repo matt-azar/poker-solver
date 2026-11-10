@@ -139,7 +139,117 @@ describe("ActionHistory path chrome", () => {
     expect(goNavBack).toHaveBeenCalledTimes(1);
   });
 
-  it("updates path size tags when betSizeDisplay changes", () => {
+  it("abbreviates the path and separates streets with a spaced dash", () => {
+    useStudyStore.setState({
+      currentNode: {
+        ...rootNode,
+        node_id: "n-river-check",
+        board: ["Ah", "Kd", "7c", "2s", "3h"],
+        place: "river",
+        player: 1,
+        line: "Check/Bet 10/Call/Check/Bet 35/Call/Check/Check",
+      },
+      pathTrail: [
+        {
+          nodeId: "root",
+          label: "Root",
+          rawLabel: "Root",
+          kind: "root",
+          street: "flop",
+          actor: null,
+        },
+        {
+          nodeId: "n-x",
+          label: "Check",
+          rawLabel: "Check",
+          kind: "action",
+          street: "flop",
+          actor: "OOP",
+        },
+        {
+          nodeId: "n-b",
+          label: "Bet 10",
+          rawLabel: "Bet 10",
+          kind: "action",
+          street: "flop",
+          actor: "IP",
+          sizePot: 50,
+          toCall: 0,
+        },
+        {
+          nodeId: "n-c",
+          label: "Call",
+          rawLabel: "Call",
+          kind: "action",
+          street: "flop",
+          actor: "OOP",
+        },
+        {
+          nodeId: "n-turn",
+          label: "2s",
+          rawLabel: "2s",
+          kind: "card",
+          street: "turn",
+          actor: null,
+          card: "2s",
+        },
+        {
+          nodeId: "n-tx",
+          label: "Check",
+          rawLabel: "Check",
+          kind: "action",
+          street: "turn",
+          actor: "OOP",
+        },
+        {
+          nodeId: "n-tb",
+          label: "Bet 35",
+          rawLabel: "Bet 35",
+          kind: "action",
+          street: "turn",
+          actor: "IP",
+          sizePot: 70,
+          toCall: 0,
+        },
+        {
+          nodeId: "n-tc",
+          label: "Call",
+          rawLabel: "Call",
+          kind: "action",
+          street: "turn",
+          actor: "OOP",
+        },
+        {
+          nodeId: "n-rx",
+          label: "Check",
+          rawLabel: "Check",
+          kind: "action",
+          street: "river",
+          actor: "OOP",
+        },
+        {
+          nodeId: "n-river-check",
+          label: "Check",
+          rawLabel: "Check",
+          kind: "action",
+          street: "river",
+          actor: "IP",
+        },
+      ],
+    });
+    render(<ActionHistory />);
+    expect(
+      screen.getByLabelText("Betting path by street").getAttribute("data-path"),
+    ).toBe("x/b20/c - x/b50/c - x/x");
+    const path = screen.getByLabelText("Betting path by street");
+    expect(path.textContent).toContain(" - ");
+    expect(path.textContent).toContain("/");
+    expect(screen.getByText("b20")).toBeTruthy();
+    expect(screen.getByText("b50")).toBeTruthy();
+    expect(screen.getAllByText("x").length).toBeGreaterThan(0);
+  });
+
+  it("keeps pot-fraction path tags when bet size display is chips", () => {
     useStudyStore.setState({
       pathTrail: [
         {
@@ -184,7 +294,7 @@ describe("ActionHistory path chrome", () => {
       },
     });
     rerender(<ActionHistory />);
-    expect(screen.queryByText("b100")).toBeNull();
-    expect(screen.getByText("100.0 chips")).toBeTruthy();
+    expect(screen.getByText("b100")).toBeTruthy();
+    expect(screen.queryByText("100.0 chips")).toBeNull();
   });
 });

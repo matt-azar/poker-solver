@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateActionFrequency,
+  LINE_CARD_GRID_RANKS,
+  lineCardEquityFromPayload,
+  lineCardEvFromValues,
   lineCardReportStreet,
   lineCardTargetId,
   readNodeJoint,
@@ -36,6 +39,35 @@ function decisionNode(partial: Partial<NodePayload>): NodePayload {
     ...partial,
   };
 }
+
+describe("line card grid", () => {
+  it("orders ranks from deuce on the left to ace on the right", () => {
+    expect(LINE_CARD_GRID_RANKS[0]).toBe("2");
+    expect(LINE_CARD_GRID_RANKS[LINE_CARD_GRID_RANKS.length - 1]).toBe("A");
+    expect(LINE_CARD_GRID_RANKS).toHaveLength(13);
+  });
+
+  it("reads acting-player EV and equity", () => {
+    expect(
+      lineCardEvFromValues(
+        {
+          node_ev: 3,
+          node_ev_defined: true,
+          utility_basis: "local",
+          local_offset: 0,
+        },
+        "local",
+        ["Check"],
+      ),
+    ).toBe(3);
+    expect(
+      lineCardEquityFromPayload({ oop_equity: 0.25, ip_equity: 0.75 }, 1),
+    ).toBe(0.75);
+    expect(lineCardEquityFromPayload({ pending: true, oop_equity: 0.25 }, 0)).toBe(
+      null,
+    );
+  });
+});
 
 describe("lineCardReportStreet", () => {
   it("varies turn on a four-card board and river on five", () => {

@@ -62,6 +62,15 @@ describe("SolveControls open/save pickers (R14)", () => {
     cleanup();
   });
 
+  it("keeps Save and Open and drops the footer-duplicated solve buttons", () => {
+    render(<SolveControls />);
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
+    for (const name of ["Solve", "Continue", "Pause", "Stop", "EV"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+  });
+
   it("Open uses the platform picker and skips open on cancel", async () => {
     const user = userEvent.setup();
     render(<SolveControls />);
