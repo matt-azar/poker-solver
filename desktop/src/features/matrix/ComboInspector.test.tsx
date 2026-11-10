@@ -87,7 +87,7 @@ describe("ComboInspector", () => {
     expect(screen.getByText("Hover a hand in the grid.")).toBeTruthy();
   });
 
-  it("renders GTOWizard-style badge, black metrics, and aggressive-left paint", () => {
+  it("renders GTOWizard-style badge, black metrics, and passive-left paint", () => {
     useStudyStore.setState({
       nodeValues: {
         node_id: "p0",
@@ -131,8 +131,11 @@ describe("ComboInspector", () => {
       ...present.querySelectorAll(".hands-combo__weight-fill .hands-combo__seg"),
     ] as HTMLElement[];
     expect(segs.length).toBeGreaterThan(0);
-    // Bet (aggressive) should be the left-most vertical band (#C9843F → rgb).
-    expect(segs[0]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
+    // Check (passive) is left-most; Bet (aggressive) is right (#C9843F → rgb).
+    expect(segs[0]?.style.background).not.toMatch(/201,\s*132,\s*63|#C9843F/i);
+    expect(segs[segs.length - 1]?.style.background).toMatch(
+      /201,\s*132,\s*63|#C9843F/i,
+    );
     expect(Number(segs[0]?.style.flexGrow)).toBeGreaterThan(0);
     // Metrics stay bottom-locked overlay — not painted onto segments.
     expect(present.querySelector(".hands-combo__body .hands-combo__metrics")).toBeTruthy();
@@ -141,8 +144,7 @@ describe("ComboInspector", () => {
     );
   });
 
-  it("uses absolute reach for --mass-fill when Weight fill is on", () => {
-    useMatrixDisplayStore.getState().setRangeWeightHeightFill(true);
+  it("sets --mass-fill from combo reach (paint height ∝ weight)", () => {
     useStudyStore.setState({
       currentNode: {
         ...aaNode,
@@ -151,28 +153,18 @@ describe("ComboInspector", () => {
       },
     });
     render(<ComboInspector />);
-    const fills = [
+    const present = [
       ...document.querySelectorAll('.hands-combo[data-present="true"]'),
-    ].map((el) => Number((el as HTMLElement).style.getPropertyValue("--mass-fill")));
+    ] as HTMLElement[];
+    const fills = present.map((el) =>
+      Number(el.style.getPropertyValue("--mass-fill")),
+    );
     expect(fills).toContain(1);
     expect(fills).toContain(0.5);
     expect(fills).toContain(0.25);
-  });
-
-  it("keeps full-height fill when Weight fill is off", () => {
-    useMatrixDisplayStore.getState().setRangeWeightHeightFill(false);
-    useStudyStore.setState({
-      currentNode: {
-        ...aaNode,
-        reach: [1, 0.5, 0.25],
-        marginal: [1, 0.5, 0.25],
-      },
-    });
-    render(<ComboInspector />);
-    const fills = [
-      ...document.querySelectorAll('.hands-combo[data-present="true"]'),
-    ].map((el) => Number((el as HTMLElement).style.getPropertyValue("--mass-fill")));
-    expect(fills.every((value) => value === 1)).toBe(true);
+    expect(
+      present.every((el) => el.getAttribute("data-weight-fill") === "true"),
+    ).toBe(true);
   });
 
   it("shows 12 offsuit suit slots for an unpaired offsuit cell", () => {
@@ -256,10 +248,10 @@ describe("ComboInspector", () => {
         '.hands-combo[data-present="true"] .hands-combo__seg',
       ),
     ] as HTMLElement[];
-    // Aggression order: Bet left, then Check.
+    // Passive left: Check (0.25) then Bet (0.75).
     expect(segs).toHaveLength(2);
-    expect(Number(segs[0]?.style.flexGrow)).toBeCloseTo(0.75);
-    expect(Number(segs[1]?.style.flexGrow)).toBeCloseTo(0.25);
+    expect(Number(segs[0]?.style.flexGrow)).toBeCloseTo(0.25);
+    expect(Number(segs[1]?.style.flexGrow)).toBeCloseTo(0.75);
     // Text list stays in the body overlay, not inside segments.
     expect(
       document.querySelectorAll(
