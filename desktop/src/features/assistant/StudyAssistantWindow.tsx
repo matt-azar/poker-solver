@@ -58,6 +58,15 @@ function readPrefs(): StudySetupPreferences {
   }
 }
 
+/** Apple platforms use ⌘↩; elsewhere Ctrl+Enter (both work in the key handler). */
+function assistantComposePlaceholder(): string {
+  const apple =
+    typeof navigator !== "undefined" &&
+    /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
+  const sendShortcut = apple ? "⌘↩" : "Ctrl+Enter";
+  return `Type your question or request here. Press ${sendShortcut} to send.`;
+}
+
 export function StudyAssistantWindow() {
   const layout = useHelpChatStore((s) => s.layout);
   const setVisible = useHelpChatStore((s) => s.setVisible);
@@ -577,7 +586,7 @@ export function StudyAssistantWindow() {
           <textarea
             rows={2}
             value={draftText}
-            placeholder="Ask anything, or e.g. Set up CO vs BB SRP with 100NL ranges"
+            placeholder={assistantComposePlaceholder()}
             disabled={busy || !credPresent}
             onChange={(event) => setDraftText(event.target.value)}
             onKeyDown={(event) => {
