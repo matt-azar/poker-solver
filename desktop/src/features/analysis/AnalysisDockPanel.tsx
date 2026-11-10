@@ -318,7 +318,7 @@ export function AnalysisDockPanel() {
   const model = categories?.model ?? "made-hand";
   const exclusive = categories?.exclusive !== false;
   const title =
-    model === "draws" ? "Draw / backdoor categories" : "Made-hand categories";
+    model === "draws" ? "Draw / Backdoor Categories" : "Made-hand Categories";
 
   return (
     <div className="range-explorer">

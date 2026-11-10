@@ -55,6 +55,10 @@ const FORBIDDEN = [
     re: /Import JSON…/i,
     why: "Build catalogue is seat×action tree; do not advertise Import JSON on Build",
   },
+  {
+    re: /check-down equity/i,
+    why: "Product copy calls it equity only; there is no other kind of equity in the UI",
+  },
 ];
 
 /** Must appear in assembled packs (product-accurate anchors). */

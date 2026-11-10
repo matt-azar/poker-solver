@@ -195,12 +195,19 @@ describe("LineCardReport", () => {
     expect(await screen.findByText("42.0%")).toBeTruthy();
     expect(getEquity).toHaveBeenCalled();
     expect(ace.getAttribute("data-heat")).toBe("true");
+    expect(screen.getByTestId("line-card-line").textContent).toContain("Equity");
+    expect(screen.getByTestId("line-card-line").textContent).not.toContain(
+      "check-down",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Deal probability" }));
     expect(screen.getAllByText("2.0%").length).toBeGreaterThan(0);
     expect(screen.queryByText("25.0%")).toBeNull();
     expect(ace.getAttribute("data-heat")).toBe("false");
     expect(king.getAttribute("data-heat")).toBe("false");
+    expect(screen.getByTestId("line-card-line").textContent).toContain(
+      "Probability of the card being dealt",
+    );
   });
 });
 

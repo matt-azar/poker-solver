@@ -91,7 +91,7 @@ river_solver --iterations 2000 --algorithm cfr_plus
 explorer
 ```
 
-`explorer` listens on `http://127.0.0.1:8765`. Save/Open a `.psol` file to resume the same regrets and strategy sums. In Study, Compare runouts shows one betting line across turn and river cards. Check-down equity is a fraction of the pot and is separate from chip EV.
+`explorer` listens on `http://127.0.0.1:8765`. Save/Open a `.psol` file to resume the same regrets and strategy sums. In Study, Compare runouts shows one betting line across turn and river cards. Equity is a fraction of the pot and is separate from chip EV.
 
 `street_solver` and `river_solver` both solve on `StreetBatchSolver` (or `StreetGame` with `--reference`). `river_solver` maps a fixed five-card board into that shared tree. `--memory-mib` is the engine allocation budget in mebibytes (default 1024). `--threads N` is the frozen-pass thread count including the caller (default 1; `N > 1` requires `--frozen`). No solver uses an RNG.
 
