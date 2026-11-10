@@ -63,6 +63,8 @@ export function buildUnifiedAssistantSystemPrompt(
     "--- Setup section ---",
     loadAssistantContextPack("setup-assistant"),
     "",
-    "Call exactly one tool: answer_user OR emit_study_setup_proposal.",
+    "For Build mutations call emit_study_setup_proposal once.",
+    "For Study strategy/bluff/hand questions you may call bounded evidence tools first (query_node_strategy, list_bluff_candidates, query_selected_hand_analysis), then answer_user with the evidence.",
+    "Do not invent frequencies, EVs, or equities missing from contextSnapshot or tool results.",
   ].join("\n");
 }

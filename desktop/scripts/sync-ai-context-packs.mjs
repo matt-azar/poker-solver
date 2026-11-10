@@ -70,6 +70,9 @@ const REQUIRED_IN_PACKS = [
   { pack: "unified.md", re: /application receipt/i },
   { pack: "unified.md", re: /\*\*Equity\*\*/ },
   { pack: "unified.md", re: /Apply to Build/ },
+  { pack: "unified.md", re: /list_bluff_candidates/ },
+  { pack: "unified.md", re: /query_node_strategy/ },
+  { pack: "unified.md", re: /query_selected_hand_analysis/ },
 ];
 
 /** Labels that surface.md claims are mounted on Build — must exist in BuildWorkspace.tsx. */

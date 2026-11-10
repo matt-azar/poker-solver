@@ -105,7 +105,9 @@ describe("context packs", () => {
     expect(unified).toContain("menu bar **Assistant**");
     expect(unified).not.toContain("Flop donk");
     expect(unified).not.toMatch(/Help\s*→\s*Study assistant/i);
-    expect(buildUnifiedAssistantSystemPrompt()).toContain("Call exactly one tool");
+    expect(unified).toContain("list_bluff_candidates");
+    expect(unified).toContain("query_node_strategy");
+    expect(buildUnifiedAssistantSystemPrompt()).toContain("list_bluff_candidates");
   });
 });
 
@@ -217,10 +219,17 @@ describe("OpenAiUnifiedChatClient", () => {
     expect(body.messages[0]?.content).toContain("unified Study assistant");
     const userPayload = JSON.parse(body.messages[body.messages.length - 1]?.content ?? "{}") as {
       contextSnapshot?: { version?: number };
-      analysisTools?: { deferred?: string[] };
+      analysisTools?: { deferred?: string[]; available?: string[] };
     };
-    expect(userPayload.contextSnapshot?.version).toBe(1);
+    expect(userPayload.contextSnapshot?.version).toBe(2);
     expect(userPayload.analysisTools?.deferred).toContain("compare_runouts");
+    expect(userPayload.analysisTools?.available).toEqual(
+      expect.arrayContaining([
+        "query_node_strategy",
+        "list_bluff_candidates",
+        "query_selected_hand_analysis",
+      ]),
+    );
   });
 
   it("keeps the send-time revision when the draft changes during a delayed provider response", async () => {
@@ -331,5 +340,137 @@ describe("OpenAiUnifiedChatClient", () => {
 
     expect(draft.pot).toBe(999);
     expect(revision).toBe(1);
+  });
+
+  it("runs list_bluff_candidates then answers from tool evidence", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  tool_calls: [
+                    {
+                      id: "call_bluffs",
+                      function: {
+                        name: "list_bluff_candidates",
+                        arguments: JSON.stringify({ seat: "IP" }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  tool_calls: [
+                    {
+                      id: "call_answer",
+                      function: {
+                        name: "answer_user",
+                        arguments: JSON.stringify({
+                          message: "IP bluffs include 7h2d at high bet frequency.",
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+
+    const evidenceHost = {
+      read: () => ({
+        solutionId: "sol-1",
+        currentNode: {
+          node_id: "ip-1",
+          kind: "decision" as const,
+          player: 1,
+          to_act: "IP",
+          line: "root/Check",
+          actions: ["Check", "Bet 50"],
+          combos: ["7h2d"],
+          reach: [1],
+          marginal: [1],
+          reach_defined: true,
+          strategy: [[0.2, 0.8]],
+        },
+        nodeValues: {
+          pending: false,
+          node_id: "ip-1",
+          solution_id: "sol-1",
+          combos: ["7h2d"],
+          value: [0.1],
+          action_ev: [[0, 0.2]],
+          ev_defined: [true],
+          utility_basis: "root_centered",
+          local_offset: 0,
+        },
+        equity: {
+          pending: false,
+          node_id: "ip-1",
+          solution_id: "sol-1",
+          ip_hands: [{ combo: "7h2d", equity: 0.1, weight: 1 }],
+        },
+        pathTrail: [],
+        selectedCell: null,
+        evDisplayBasis: "local" as const,
+        status: { solution_id: "sol-1" },
+      }),
+      ensureNodeAnalysis: vi.fn(async () => undefined),
+      navigateTo: vi.fn(async () => undefined),
+      fetchNode: vi.fn(async () => {
+        throw new Error("unused");
+      }),
+    };
+
+    const client = createOpenAiUnifiedChatClient({
+      getCredential: async () => "sk-test",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const catalogue = createRangeProfileCatalogue();
+    const outcome = await client.turn(
+      {
+        text: "What are the bluffs for IP in the current node?",
+        setupSummary: "test",
+        availableProfiles: [],
+        draftRevision: 1,
+        contextSnapshot: buildAssistantContextSnapshot({
+          draft: emptyDraft(),
+          draftRevision: 1,
+          solutionId: "sol-1",
+        }),
+      },
+      {
+        catalogue,
+        getDraft: emptyDraft,
+        getRevision: () => 1,
+        preferences: emptyStudySetupPreferences(),
+        evidenceHost,
+      },
+    );
+
+    expect(outcome.kind).toBe("answer");
+    if (outcome.kind === "answer") {
+      expect(outcome.message).toContain("7h2d");
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const secondBody = JSON.parse(
+      String((fetchImpl.mock.calls[1]?.[1] as RequestInit).body),
+    ) as { messages: Array<{ role: string }> };
+    expect(secondBody.messages.some((m) => m.role === "tool")).toBe(true);
   });
 });
