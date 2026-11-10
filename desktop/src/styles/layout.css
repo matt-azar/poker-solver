@@ -4376,14 +4376,23 @@
 
 /* Modal shell for the range catalogue. */
 .catalogue-modal {
-  width: min(420px, 100%);
+  width: min(560px, 100%);
   max-height: min(860px, 92vh);
-  overflow: auto;
+  overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-soft);
   padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.catalogue-modal .seat-tree {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -4571,20 +4580,50 @@
 
 /* Section title in the seat-action catalogue tree. */
 .seat-tree__section-title {
-  margin: 0 0 8px;
-  font-size: 13px;
+  margin: 0;
+  font-size: 12px;
   font-weight: 650;
   color: var(--text);
 }
 
+.seat-tree__section-title--inline {
+  display: inline;
+  font: inherit;
+  font-weight: 650;
+}
+
 /* Folder management controls above the seat tree. */
 .seat-tree__toolbar {
-  margin-bottom: 12px;
-  padding-bottom: 10px;
+  flex: 0 0 auto;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+}
+
+/* Scrollable file-tree browser pane. */
+.seat-tree__browser {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--secondary) 55%, var(--panel));
+  padding: 6px 4px 8px;
+}
+
+.seat-tree__browser-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 8px 8px;
+}
+
+.seat-tree__browser-hint {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 /* Inline save-into-folder form. */
@@ -4609,88 +4648,237 @@
   min-height: 26px;
 }
 
-/* One leaf or folder row with trailing actions. */
-.seat-tree__item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 4px;
-}
-
-.seat-tree__row-actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-left: 8px;
-  vertical-align: middle;
-}
-
-.seat-tree__branch > summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+/* Nested folder/leaf list in the seat tree. */
+.seat-tree__list {
   list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.seat-tree__node {
+  margin: 0;
+  padding: 0;
+}
+
+/* One compact file-tree row (folder or chart). */
+.seat-tree__row {
+  --seat-tree-depth: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+  padding-left: calc(4px + (var(--seat-tree-depth) * 14px));
+  padding-right: 4px;
+  border-radius: var(--radius-sm);
+  list-style: none;
+}
+
+.seat-tree__branch > summary.seat-tree__row {
+  cursor: pointer;
 }
 
 .seat-tree__branch > summary::-webkit-details-marker {
   display: none;
 }
 
+.seat-tree__branch > summary {
+  list-style: none;
+}
+
+.seat-tree__row:hover,
+.seat-tree__row:focus-within {
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+}
+
+.seat-tree__row-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: calc(100% - 28px);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 2px 4px 2px 0;
+  margin: 0;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+
+.seat-tree__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .seat-tree__branch-label {
   font-weight: 650;
 }
 
-.seat-tree__branch-label::before {
-  content: "▸ ";
+.seat-tree__twist {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  display: inline-block;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  opacity: 0.85;
+  margin: 0 1px 0 2px;
+  transition: transform 0.12s ease;
+}
+
+.seat-tree__branch[open] > summary .seat-tree__twist {
+  transform: rotate(45deg);
+  margin-top: -2px;
+}
+
+.seat-tree__twist--leaf {
+  visibility: hidden;
+}
+
+.seat-tree__glyph {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
   color: var(--muted);
 }
 
-.seat-tree__branch[open] > summary .seat-tree__branch-label::before {
-  content: "▾ ";
+.seat-tree__node--branch > .seat-tree__branch > summary .seat-tree__glyph {
+  color: color-mix(in srgb, var(--accent) 55%, var(--muted));
+}
+
+.seat-tree__node--leaf .seat-tree__glyph {
+  color: color-mix(in srgb, var(--text) 35%, var(--muted));
+}
+
+/* Compact ⋯ menu — keeps tree rows clean like a file browser. */
+.seat-tree__menu {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: 2px;
+}
+
+.seat-tree__menu-trigger {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  opacity: 0.35;
+}
+
+.seat-tree__row:hover .seat-tree__menu-trigger,
+.seat-tree__row:focus-within .seat-tree__menu-trigger,
+.seat-tree__menu-trigger[aria-expanded="true"] {
+  opacity: 1;
+  background: color-mix(in srgb, var(--panel) 75%, transparent);
+  color: var(--text);
+}
+
+.seat-tree__menu-trigger:hover {
+  color: var(--accent);
+}
+
+.seat-tree__menu-panel {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 30;
+  min-width: 132px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--border) 70%, transparent),
+    0 8px 20px color-mix(in srgb, #000 18%, transparent);
+}
+
+.seat-tree__menu-item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.seat-tree__menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.seat-tree__menu-item--danger:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 .seat-tree__badge {
-  margin-left: 6px;
-  font-size: 10px;
-  font-weight: 650;
+  flex: 0 0 auto;
+  margin-left: 2px;
+  font-size: 9px;
+  font-weight: 700;
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .seat-tree__empty-folder {
-  margin: 4px 0 8px 12px;
+  margin: 2px 0 6px;
+  padding-left: calc(28px + ((var(--seat-tree-depth, 0) + 1) * 14px));
+  font-size: 11px;
 }
 
 .seat-tree__edit--dock {
-  margin-top: 12px;
+  flex: 0 0 auto;
+  margin-top: 0;
   padding-top: 10px;
   border-top: 1px solid var(--border);
 }
 
 /* User-saved ranges block in the seat tree. */
 .seat-tree__saved {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
 }
 
-/* List of saved user ranges. */
-.seat-tree__saved-list {
-  list-style: none;
-  margin: 0 0 10px;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.seat-tree__unfiled > summary.seat-tree__row {
+  padding-left: 4px;
 }
 
-/* One saved user range row. */
-.seat-tree__saved-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.seat-tree__unfiled-hint {
+  margin: 0 8px 6px;
+  padding-left: 18px;
+  font-size: 11px;
+}
+
+.seat-tree__save-form--footer {
+  margin-top: 8px;
+  padding: 0 8px;
 }
 
 /* Edit/delete actions on a saved range. */
@@ -4748,47 +4936,20 @@
 
 /* Validation error in the seat tree. */
 .seat-tree__error {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   color: #c45c3a;
   font-size: 12px;
 }
 
-/* Nested folder/leaf list in the seat tree. */
-.seat-tree__list {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0 12px;
-}
-
-/* Nested folder/leaf list in the seat tree. */
-.seat-tree > .seat-tree__list {
-  padding-left: 0;
-}
-
-/* seat-tree__branch — disclosure summary padding (layout above). */
-.seat-tree__branch > summary {
-  cursor: pointer;
-  padding: 3px 0;
-}
-
 /* Clickable leaf range in the catalogue tree. */
 .seat-tree__leaf {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
-  font: inherit;
-  font-size: 13px;
+  width: auto;
 }
 
-/* Clickable leaf range in the catalogue tree. (hover). */
-.seat-tree__leaf:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
+@media (hover: none) {
+  .seat-tree__menu-trigger {
+    opacity: 0.7;
+  }
 }
 
 /* Equity calculator workspace */

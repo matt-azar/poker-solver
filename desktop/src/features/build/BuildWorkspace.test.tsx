@@ -221,7 +221,10 @@ describe("BuildWorkspace range tools", () => {
     await user.click(screen.getByRole("button", { name: "Save unfiled" }));
     expect(screen.getByRole("button", { name: "My BTN open" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(
+      screen.getByRole("button", { name: "Actions for My BTN open" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Edit" }));
     fireEvent.change(screen.getByLabelText("Saved range name"), {
       target: { value: "Renamed open" },
     });
