@@ -110,28 +110,161 @@ type ChatMessage =
     }
   | { role: "tool"; tool_call_id: string; content: string };
 
-/** Heuristic: likely a Build mutation vs a product question. */
-export function looksLikeSetupRequest(text: string): boolean {
+/** Explicit request to mutate Build vs product/Study Q&A vs ambiguous wording. */
+export type AssistantTurnIntent = "setup" | "qa" | "clarify";
+
+const HELP_QUESTION_START =
+  /^(how|what|where|why|when|who|which|can i|do i|does|is there|explain|tell me)\b/;
+
+const EXPLICIT_MUTATION_VERB =
+  /\b(set up|setup|prepare|duplicate|change|update|set|use|make|add|apply|generate|interpolate)\b/;
+
+const DRAFT_FIELD_MUTATION =
+  /\b(set|change|update|use|make)\b[\s\S]{0,48}\b(the\s+)?(pot|stack|iterations|iters|accuracy|time limit|threads|memory|samples|algorithm|max raises|board|flop|turn|river|range|ranges)\b/i;
+
+const NUMERIC_FIELD_ASSIGNMENT =
+  /\b(pot|stack|iterations|iters|accuracy|threads|memory|samples|max raises)\s*(to|=|:)?\s*\d/i;
+
+const EXPLICIT_SETUP_COMMAND =
+  /\b(set up|setup|prepare|duplicate)\b.+\b(study|spot|setup|board|range|ranges|srp|3bet|3bp|4bp|co|btn|bb|sb|utg|mp|hj|\d+\s*bb)\b|\b(change the (board|flop|turn|river)|board to|flop to)\b|\b(generate (a )?range|interpolate)\b/i;
+
+/**
+ * Classify whether the player wants a Build write, product/Study Q&A, or a
+ * short clarification. Poker terms (3BP, 100NL, bet size) alone never imply
+ * mutation; "How do I set up…" is help; "Can you set the stack to 150?" is setup.
+ */
+export function classifyAssistantTurnIntent(text: string): AssistantTurnIntent {
   const lower = text.trim().toLowerCase();
-  if (!lower) return false;
-  if (
-    /^(how|what|where|why|when|who|which|can i|do i|does|is there|explain|tell me)\b/.test(
-      lower,
-    ) &&
-    !/\b(set up|setup|prepare|change the|duplicate|use \d|board to|flop to)\b/.test(lower)
-  ) {
-    return false;
+  if (!lower) return "qa";
+
+  // "Can you set/change…" is an explicit edit request (not a how-to).
+  if (/^can you\b/.test(lower) && EXPLICIT_MUTATION_VERB.test(lower)) {
+    return "setup";
   }
-  return (
-    /\b(set up|setup|prepare|duplicate|change the (board|flop|turn|river)|board to|flop to|use \d|bet size|calling range|opening range|vs bb|vs btn|vs co|srp|3bet|3bp|4bp|100nl|generate (a )?range|interpolate)\b/i.test(
-      lower,
-    ) ||
-    /\b(oop|ip)\b.*\brange\b/i.test(lower) ||
-    /\b(set|change|update|use|make)\b[\s\S]{0,48}\b(the\s+)?(pot|stack|iterations|iters|accuracy|time limit|threads|memory|samples|algorithm|max raises)\b/i.test(
-      lower,
-    ) ||
-    /\b(pot|stack|iterations|iters)\s*(to|=|:)?\s*\d/i.test(lower)
-  );
+
+  // Help / question framing stays on the Q&A path even when "set up" appears.
+  if (HELP_QUESTION_START.test(lower)) {
+    return "qa";
+  }
+
+  // Imperative / clear mutation commands.
+  if (
+    EXPLICIT_SETUP_COMMAND.test(lower) ||
+    DRAFT_FIELD_MUTATION.test(lower) ||
+    NUMERIC_FIELD_ASSIGNMENT.test(lower)
+  ) {
+    return "setup";
+  }
+
+  // Mutation-ish verbs without a clear imperative or help frame.
+  if (
+    EXPLICIT_MUTATION_VERB.test(lower) &&
+    /\b(board|flop|range|ranges|stack|pot|study|spot|setup|set up)\b/.test(lower)
+  ) {
+    return "clarify";
+  }
+
+  return "qa";
+}
+
+/** True only for explicit Build-mutation requests (not help questions). */
+export function looksLikeSetupRequest(text: string): boolean {
+  return classifyAssistantTurnIntent(text) === "setup";
+}
+
+const CLARIFY_MUTATION_MESSAGE =
+  "Do you want me to change the Build draft, or explain how to do it in the app?";
+
+/**
+ * Serialize Study evidence for the model. Shrink bluff/strategy row payloads
+ * before JSON so the result stays valid within ASSISTANT_MAX_TEXT_LENGTH.
+ */
+export function serializeEvidenceToolResult(
+  result: unknown,
+  maxLen = ASSISTANT_MAX_TEXT_LENGTH,
+): string {
+  const asObject =
+    result && typeof result === "object"
+      ? ({ ...(result as Record<string, unknown>) } as Record<string, unknown>)
+      : result;
+
+  const tryStringify = (value: unknown): string => JSON.stringify(value);
+
+  let payload = asObject;
+  let encoded = tryStringify(payload);
+  if (encoded.length <= maxLen) {
+    return encoded;
+  }
+
+  if (
+    payload &&
+    typeof payload === "object" &&
+    Array.isArray((payload as { rows?: unknown }).rows)
+  ) {
+    const rows = [...((payload as { rows: unknown[] }).rows)];
+    let lo = 0;
+    let hi = rows.length;
+    let best = 0;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const candidate = {
+        ...(payload as Record<string, unknown>),
+        rows: rows.slice(0, mid),
+        truncated: true,
+      };
+      const text = tryStringify(candidate);
+      if (text.length <= maxLen) {
+        best = mid;
+        payload = candidate;
+        encoded = text;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (encoded.length <= maxLen) {
+      if (best < rows.length && payload && typeof payload === "object") {
+        (payload as { truncated?: boolean }).truncated = true;
+      }
+      return encoded;
+    }
+  }
+
+  // Last resort: drop bulky arrays but keep identity / filters / absences.
+  if (payload && typeof payload === "object") {
+    const slim: Record<string, unknown> = {
+      ...(payload as Record<string, unknown>),
+    };
+    if (Array.isArray(slim.rows)) {
+      slim.rows = [];
+      slim.truncated = true;
+    }
+    if (Array.isArray(slim.actions)) {
+      slim.actions = [];
+    }
+    if (Array.isArray(slim.strategy)) {
+      slim.strategy = null;
+    }
+    if (Array.isArray(slim.actionEv)) {
+      slim.actionEv = null;
+    }
+    const absences = Array.isArray(slim.absences) ? [...slim.absences] : [];
+    absences.push(
+      "Evidence payload exceeded the assistant size budget; open the Study panel for the full list.",
+    );
+    slim.absences = absences;
+    encoded = tryStringify(slim);
+    if (encoded.length <= maxLen) {
+      return encoded;
+    }
+  }
+
+  return tryStringify({
+    ok: false,
+    absences: [
+      "Evidence payload exceeded the assistant size budget; retry on the intended decision or open the Study panel.",
+    ],
+  }).slice(0, maxLen);
 }
 
 /**
@@ -190,14 +323,17 @@ function formatBluffAnswer(evidence: BluffCandidatesEvidence): string {
     const size = row.topBetAction ? ` · ${row.topBetAction}` : "";
     return `${row.combo}: bet ${(row.betFreq * 100).toFixed(1)}% · ${ev} · ${eq}${size}`;
   });
-  const nav = evidence.navigated
-    ? ` Opened ${evidence.seat} node ${evidence.nodeId} (${evidence.hops} hop${evidence.hops === 1 ? "" : "s"}).`
-    : "";
   const more = evidence.truncated ? " (truncated)" : "";
   const caveat = evidence.absences.length ? ` ${evidence.absences.join(" ")}` : "";
+  const minBet =
+    evidence.minBetFreq != null
+      ? `, min bet ≥ ${(evidence.minBetFreq * 100).toFixed(0)}%`
+      : "";
+  const minReach =
+    evidence.minReach != null ? `, min reach ≥ ${evidence.minReach}` : "";
   return (
-    `${evidence.seat} bluffs at ${evidence.line ?? evidence.nodeId}` +
-    ` (equity < ${(evidence.equityThreshold * 100).toFixed(0)}%)${nav}${more}:\n` +
+    `${evidence.seat} bluff candidates at ${evidence.line ?? evidence.nodeId}` +
+    ` (node equity < ${(evidence.equityThreshold * 100).toFixed(0)}%${minBet}${minReach})${more}:\n` +
     `${lines.join("\n")}${caveat}`
   );
 }
@@ -233,8 +369,17 @@ export class FakeUnifiedChatClient implements UnifiedChatClient {
     // Freeze freshness before any async help/setup work.
     const requestRevision = request.draftRevision;
     const baseDraft = deps.getDraft();
+    const intent = classifyAssistantTurnIntent(text);
 
-    if (!looksLikeSetupRequest(text)) {
+    if (intent === "clarify") {
+      return {
+        kind: "answer",
+        provider: "fake",
+        message: CLARIFY_MUTATION_MESSAGE,
+      };
+    }
+
+    if (intent !== "setup") {
       if (deps.evidenceHost && looksLikeStudyEvidenceRequest(text)) {
         const seat = inferEvidenceSeat(text);
         if (/\bbluffs?\b/i.test(text)) {
@@ -249,7 +394,7 @@ export class FakeUnifiedChatClient implements UnifiedChatClient {
             message: formatBluffAnswer(evidence),
           };
         }
-        if (/\b(strateg|frequenc|action\s+mix|how\s+often)\b/i.test(text)) {
+        if (/\b(strateg|frequenc|action\s+mix|how\s+often|what\s+does)\b/i.test(text)) {
           const evidence = (await executeStudyEvidenceTool(
             deps.evidenceHost,
             QUERY_NODE_STRATEGY_TOOL.name,
@@ -261,7 +406,7 @@ export class FakeUnifiedChatClient implements UnifiedChatClient {
             message: formatNodeStrategyAnswer(evidence),
           };
         }
-        if (/\b(selected\s+hand|this\s+hand|combo)\b/i.test(text)) {
+        if (/\b(selected\s+hand|this\s+hand|combo|a5s|why\s+is)\b/i.test(text)) {
           const evidence = await executeStudyEvidenceTool(
             deps.evidenceHost,
             QUERY_SELECTED_HAND_TOOL.name,
@@ -317,49 +462,64 @@ export class FakeUnifiedChatClient implements UnifiedChatClient {
   }
 }
 
-function openaiToolDefinitions() {
-  return [
-    {
-      type: "function" as const,
-      function: {
-        name: ANSWER_TOOL,
-        description:
-          "Answer a product/help or Study-evidence question without changing the Build draft. Call after any needed evidence tools.",
-        parameters: {
-          type: "object",
-          additionalProperties: false,
-          required: ["message"],
-          properties: {
-            message: { type: "string" },
-          },
+function answerToolDefinition() {
+  return {
+    type: "function" as const,
+    function: {
+      name: ANSWER_TOOL,
+      description:
+        "Answer a product/help, general poker, or Study-evidence question without changing the Build draft. Call after any needed evidence tools.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["message"],
+        properties: {
+          message: { type: "string" },
         },
       },
     },
-    {
-      type: "function" as const,
-      function: {
-        name: SETUP_TOOL,
-        description:
-          "Emit a structured study-setup proposal. Never include range weight strings except in generatedRanges.",
-        parameters: {
-          type: "object",
-          additionalProperties: true,
-          required: ["kind"],
-          properties: {
-            kind: { type: "string" },
-          },
+  };
+}
+
+function setupToolDefinition() {
+  return {
+    type: "function" as const,
+    function: {
+      name: SETUP_TOOL,
+      description:
+        "Emit a structured study-setup proposal. Never include range weight strings except in generatedRanges.",
+      parameters: {
+        type: "object",
+        additionalProperties: true,
+        required: ["kind"],
+        properties: {
+          kind: { type: "string" },
         },
       },
     },
-    ...STUDY_EVIDENCE_TOOL_SCHEMAS.map((tool) => ({
-      type: "function" as const,
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters,
-      },
-    })),
-  ];
+  };
+}
+
+function evidenceToolDefinitions() {
+  return STUDY_EVIDENCE_TOOL_SCHEMAS.map((tool) => ({
+    type: "function" as const,
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    },
+  }));
+}
+
+/** Tools exposed for a classified turn — Q&A never receives the setup tool. */
+export function openaiToolsForIntent(intent: AssistantTurnIntent) {
+  if (intent === "setup") {
+    return [setupToolDefinition(), answerToolDefinition()];
+  }
+  if (intent === "clarify") {
+    return [answerToolDefinition()];
+  }
+  return [answerToolDefinition(), ...evidenceToolDefinitions()];
 }
 
 /**
@@ -422,7 +582,7 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
       analysisTools: {
         available: [...STUDY_NODE_EVIDENCE_TOOL_NAMES],
         note:
-          "Use query_node_strategy / list_bluff_candidates / query_selected_hand_analysis for live Study evidence. They may hop ≤2 nodes and wait on the Study analysis scheduler. Runout/compare tools are not available. Never start a solve.",
+          "Use query_node_strategy / list_bluff_candidates / query_selected_hand_analysis for live Study evidence at the current decision only. They wait on the Study analysis scheduler and do not change Study selection. Runout/compare tools are not available. Never start a solve.",
         deferred: [...STUDY_EVIDENCE_DEFERRED_TOOLS],
         selectedHandSchemaStatus: SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.status,
       },
@@ -437,13 +597,23 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
       { role: "user", content: userPayload },
     ];
 
-    const setupForced = looksLikeSetupRequest(text);
+    const intent = classifyAssistantTurnIntent(text);
+    if (intent === "clarify") {
+      return {
+        kind: "answer",
+        provider: "openai",
+        message: CLARIFY_MUTATION_MESSAGE,
+      };
+    }
+    const setupForced = intent === "setup";
+    const tools = openaiToolsForIntent(intent);
     let evidenceRounds = 0;
 
     while (evidenceRounds <= ASSISTANT_EVIDENCE_TOOL_MAX_ROUNDS) {
       const payload = await this.providerRequest({
         credential,
         messages,
+        tools,
         toolChoice: setupForced
           ? { type: "function", function: { name: SETUP_TOOL } }
           : "auto",
@@ -461,6 +631,14 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
       }
 
       if (tool.name === SETUP_TOOL) {
+        if (!setupForced) {
+          // Q&A turns must never reach the setup resolver / Build writes.
+          return {
+            kind: "answer",
+            provider: "openai",
+            message: CLARIFY_MUTATION_MESSAGE,
+          };
+        }
         return this.resolveSetupTool({
           text,
           toolArgs: tool.args,
@@ -529,7 +707,7 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
         messages.push({
           role: "tool",
           tool_call_id: tool.id,
-          content: JSON.stringify(result).slice(0, ASSISTANT_MAX_TEXT_LENGTH),
+          content: serializeEvidenceToolResult(result),
         });
         evidenceRounds += 1;
         continue;
@@ -556,6 +734,7 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
   private async providerRequest(args: {
     credential: string;
     messages: ChatMessage[];
+    tools: ReturnType<typeof openaiToolsForIntent>;
     toolChoice: "auto" | { type: "function"; function: { name: string } };
     signal?: AbortSignal;
   }): Promise<unknown> {
@@ -571,7 +750,7 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
           model: this.model,
           temperature: 0,
           messages: args.messages,
-          tools: openaiToolDefinitions(),
+          tools: args.tools,
           // Setup-shaped requests must emit the setup tool — plain-text
           // "I proposed a change" answers leave Build untouched with no Apply UI.
           tool_choice: args.toolChoice,

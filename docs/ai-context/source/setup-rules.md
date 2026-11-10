@@ -15,7 +15,7 @@
 - `update_study` — patch board, tree, stack, or `fieldEdits` on the current draft. Conflict-free patches auto-write immediately.
 - `duplicate_study` — copy setup at a new stack (etc.).
 - `clarify` — ask questions; include candidates when useful.
-- `unsupported` — strategy explanations, preflop solves, research-only asks.
+- `unsupported` — preflop solves, autonomous research, or asks that cannot be answered from product help / this solution's evidence. General poker concepts and solution-backed strategy Q&A belong on `answer_user` (with evidence tools when quoting this solve).
 - `unrelated` — non-poker / off-topic (prefer `answer_user` in the unified assistant instead).
 
 ## Ranges

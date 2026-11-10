@@ -5,6 +5,7 @@ import {
   listBluffCandidates,
   looksLikeStudyEvidenceRequest,
   queryNodeStrategy,
+  querySelectedHandAnalysis,
   type StudyEvidenceHost,
   type StudyEvidenceLiveState,
 } from "./studyEvidence";
@@ -43,11 +44,16 @@ function oopRoot(): NodePayload {
     line: "root",
     actions: ["Check", "Bet 33"],
     children: ["ip-1", "ip-face-bet"],
-    combos: ["AsAh"],
-    reach: [1],
-    marginal: [1],
+    combos: ["AsAh", "AhAs", "AdAs", "AcAs"],
+    reach: [1, 1, 1, 1],
+    marginal: [1, 1, 1, 1],
     reach_defined: true,
-    strategy: [[0.6, 0.4]],
+    strategy: [
+      [0.6, 0.4],
+      [0.5, 0.5],
+      [0.55, 0.45],
+      [0.4, 0.6],
+    ],
   };
 }
 
@@ -69,6 +75,7 @@ function makeHost(initial: {
   node: NodePayload;
   nodes?: Record<string, NodePayload>;
   equityReady?: boolean;
+  selectedCell?: { text: string } | null;
 }): { host: StudyEvidenceHost; state: StudyEvidenceLiveState } {
   const nodes = {
     [initial.node.node_id]: initial.node,
@@ -88,7 +95,12 @@ function makeHost(initial: {
             { combo: "7h2d", equity: 0.12, weight: 1 },
             { combo: "KhKd", equity: 0.55, weight: 1 },
           ],
-          oop_hands: [{ combo: "AsAh", equity: 0.4, weight: 1 }],
+          oop_hands: [
+            { combo: "AsAh", equity: 0.4, weight: 1 },
+            { combo: "AhAs", equity: 0.41, weight: 1 },
+            { combo: "AdAs", equity: 0.39, weight: 1 },
+            { combo: "AcAs", equity: 0.38, weight: 1 },
+          ],
         }
       : {
           pending: false,
@@ -104,7 +116,7 @@ function makeHost(initial: {
     pathTrail: [
       { nodeId: "root", label: "Root", rawLabel: "Root", kind: "root", street: "flop", actor: null },
     ],
-    selectedCell: null,
+    selectedCell: initial.selectedCell ?? null,
     evDisplayBasis: "local",
     status: { solution_id: "sol-1", nash_gap: 0.01 },
   };
@@ -142,6 +154,7 @@ describe("looksLikeStudyEvidenceRequest", () => {
     expect(looksLikeStudyEvidenceRequest("What are the bluffs for IP in the current node?")).toBe(
       true,
     );
+    expect(looksLikeStudyEvidenceRequest("At this 3BP node, which hands bluff?")).toBe(true);
     expect(looksLikeStudyEvidenceRequest("How often does OOP bet here?")).toBe(true);
     expect(looksLikeStudyEvidenceRequest("Set pot to 55")).toBe(false);
   });
@@ -157,24 +170,43 @@ describe("queryNodeStrategy", () => {
     expect(evidence.navigated).toBe(false);
   });
 
-  it("hops from OOP root to IP child when asked for IP", async () => {
+  it("does not navigate when asked for the other seat — preserves selection", async () => {
     const ip = ipNode();
-    const { host } = makeHost({
+    const { host, state } = makeHost({
       node: oopRoot(),
       nodes: { "ip-1": ip, "ip-face-bet": ipNode({ node_id: "ip-face-bet" }) },
     });
     const found = await findSeatDecisionNodeId(host, "IP");
-    expect(found).toEqual({ nodeId: "ip-1", hops: 1 });
+    expect(found).toEqual(
+      expect.objectContaining({ nodeId: "ip-1", hops: 1 }),
+    );
     const evidence = await queryNodeStrategy(host, { seat: "IP" });
-    expect(evidence.ok).toBe(true);
-    expect(evidence.navigated).toBe(true);
-    expect(evidence.nodeId).toBe("ip-1");
-    expect(host.navigateTo).toHaveBeenCalledWith("ip-1");
+    expect(evidence.ok).toBe(false);
+    expect(evidence.navigated).toBe(false);
+    expect(evidence.absences.join(" ")).toMatch(/Open the intended IP decision/i);
+    expect(host.navigateTo).not.toHaveBeenCalled();
+    expect(state.currentNode?.node_id).toBe("root");
+  });
+
+  it("asks the player to open a mismatched bet-size branch instead of hopping", async () => {
+    const { host, state } = makeHost({
+      node: ipNode({
+        node_id: "ip-33",
+        line: "root/Bet 33",
+        to_call: 18,
+        actions: ["Fold", "Call", "Raise 75"],
+      }),
+    });
+    const evidence = await queryNodeStrategy(host, { seat: "OOP" });
+    expect(evidence.ok).toBe(false);
+    expect(state.currentNode?.node_id).toBe("ip-33");
+    expect(host.navigateTo).not.toHaveBeenCalled();
+    expect(evidence.absences.join(" ")).toMatch(/not OOP/i);
   });
 });
 
 describe("listBluffCandidates", () => {
-  it("lists low-equity betting hands for IP", async () => {
+  it("lists low-equity betting hands for IP with filter metadata", async () => {
     const { host } = makeHost({ node: ipNode(), equityReady: true });
     const evidence = await listBluffCandidates(host, {
       seat: "IP",
@@ -185,5 +217,41 @@ describe("listBluffCandidates", () => {
     expect(evidence.rows.length).toBeGreaterThan(0);
     expect(evidence.rows.every((row) => row.equity < 0.3)).toBe(true);
     expect(evidence.rows[0]?.combo).toBe("7h2d");
+    expect(evidence.equityMode).toBe("node");
+    expect(evidence.minBetFreq).toBeGreaterThan(0);
+    expect(evidence.minReach).toBeGreaterThan(0);
+    expect(evidence.absences.join(" ")).toMatch(/After-call/i);
+  });
+});
+
+describe("querySelectedHandAnalysis", () => {
+  it("returns action-level EV for the selected matrix class", async () => {
+    const { host } = makeHost({
+      node: oopRoot(),
+      equityReady: true,
+      selectedCell: { text: "AA" },
+    });
+    const evidence = await querySelectedHandAnalysis(host);
+    expect(evidence.label).toBe("AA");
+    expect(evidence.strategy?.length).toBe(2);
+    expect(evidence.mixedEv).not.toBeNull();
+    expect(evidence.actionEv?.map((row) => row.action)).toEqual(["Check", "Bet 33"]);
+    expect(evidence.actionEv?.every((row) => Number.isFinite(row.ev))).toBe(true);
+  });
+
+  it("discards numbers when the player navigates during the evidence wait", async () => {
+    const { host, state } = makeHost({
+      node: ipNode(),
+      equityReady: true,
+      selectedCell: { text: "AA" },
+    });
+    host.ensureNodeAnalysis = vi.fn(async () => {
+      state.currentNode = ipNode({ node_id: "other-node" });
+    });
+    const evidence = await querySelectedHandAnalysis(host);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.mixedEv).toBeNull();
+    expect(evidence.actionEv).toBeNull();
+    expect(evidence.absences.join(" ")).toMatch(/Retry on the intended decision/i);
   });
 });
