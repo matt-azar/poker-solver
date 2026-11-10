@@ -45,6 +45,7 @@ jobs:
               - 'desktop/**'
               - 'configs/range-profiles/**'
               - 'docs/ai-context/**'
+              - 'docs/STUDY_SETUP_ASSISTANT.md'
               - '.github/workflows/ci.yml'
       # workflow_dispatch has no useful changed-files base; force both gates on.
       - id: gate
@@ -190,6 +191,9 @@ jobs:
               exit 1
             fi
           done
+      - name: Check AI context packs
+        working-directory: ${{ github.workspace }}
+        run: node desktop/scripts/sync-ai-context-packs.mjs --check
       - name: Lint
         run: npm run lint
       - name: Test

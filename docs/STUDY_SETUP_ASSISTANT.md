@@ -2,15 +2,15 @@
 
 Natural-language study creation and setup edits for Hold'em Study. The assistant interprets a request, resolves standard/GTO catalogue ranges and derived quantities in application code, then applies a draft through the same `SpotDraft` path as manual edits.
 
-The primary UX is the floating **Study assistant** (**Help → Study assistant…**): a hideable, movable, resizable chat available on every workspace. It answers product questions and proposes Build mutations (parameters, ranges, board, tree). Model-facing packs live under [`docs/ai-context/`](ai-context/README.md). The Build panel **Setup assistant** remains as an alternate entry for setup-only flows.
+The primary UX is the floating **Study assistant** (menu bar **Assistant** toggle): a hideable, movable, resizable chat available on every workspace. It answers product questions and writes Build mutations (parameters, ranges, board, tree). Model-facing packs live under [`docs/ai-context/`](ai-context/README.md) and are **generated** from [`docs/ai-context/source/`](ai-context/source/) — see that README for how packs stay fresh. There is no separate Build-page Setup assistant.
 
 ## What players can do
 
-From **Help → Study assistant…** (or **Build → Setup assistant**):
+From the menu bar **Assistant** window:
 
 - Prepare a CO vs BB SRP (and similar) study from a matching catalogue entry keyed by pot type, rake structure, positions, and stacks
 - Change the board, flop bet sizes, or duplicate a setup at another stack
-- Review provenance, conflicts, and missing fields before applying
+- See provenance and conflicts in chat; conflict-free proposals auto-write to Build
 - Undo one applied assistant transaction
 - Keep using manual Build controls if the provider fails
 
@@ -23,7 +23,7 @@ Supported example phrasing (demo/fake adapter and structured OpenAI tools):
 - `Duplicate this setup at 150bb`
 - `Use my alternative BB calling range`
 
-"Prepare / Apply" updates Build only. **Solve** still uses the existing solve controls after validation.
+Successful proposals **auto-write** to Build. An **Apply to Build** / **Apply anyway** control appears only when auto-commit is blocked (conflicts / validation). **Solve** still uses the existing solve controls after validation.
 
 ## Range semantics (product rules)
 
@@ -41,7 +41,7 @@ Matching prefers standard/GTO catalogue entries keyed by rake + action + positio
 
 ## Range catalogue
 
-Versioned paired entries live under `configs/range-profiles/` (import format) and ship as bundled synthetic fixtures for demos/tests under `desktop/src/domain/profiles/fixtures/`.
+Versioned paired entries and synthetic demo fixtures live under `configs/range-profiles/` (loaded by `desktop/src/domain/profiles/bundledFixtures.ts` — do not duplicate assets under `desktop/`).
 
 | Field | Role |
 | --- | --- |
@@ -66,11 +66,11 @@ Bundled fixtures are **synthetic** and labelled as such — not verified product
 
 Conflicts between explicit values and a catalogue entry surface for the player; they are not silently overridden. Pot/stack for SRP examples are derived in `derivePostflopPotAndStacks` (e.g. 100bb / 2.5bb open → 5.5bb pot, 97.5bb stack before rake).
 
-## Range catalogue import
+## Range catalogue (Build UI)
 
 Preferred catalogue grain is **seat×action** atoms from Matt’s `Ranges.zip` (61 charts under `configs/range-profiles/packs/seat-action/`, e.g. `CO.txt`, `BBvCOcall.txt`). The assistant **composes** OOP/IP for a spot (SRP/3BP) from those atoms.
 
-**Build → Range catalogue** also lists paired profiles and synthetic demos. Use **Import JSON…** for schema-v1 pair files; fixtures remain plumbing-only.
+**Build → Catalogue** opens `SeatActionCatalogueTree` (save/edit user ranges). Equity workspace also exposes catalogue import for calculator ranges.
 
 ## Generated ranges & interpolation
 
@@ -92,7 +92,7 @@ Exact catalogue match still preferred when a reliable pack exists.
 | Browser prototype credential | Optional `localStorage` key `holdem-study-openai-key`, or paste in the OpenAI provider UI |
 | Authenticated backend proxy | **Not built** — required for a distributed product so clients do not hold long-lived vendor keys |
 
-Credential lookup prefers Tauri storage when running inside the shell, then the browser prototype key. Solving remains local via `explorer`.
+Credential lookup prefers Tauri storage when running inside the shell, then the browser prototype key. Solving remains local via `explorer`. Product UI requires an OpenAI key for the Study assistant (fake provider retained for tests only).
 
 External processing disclosure: the OpenAI path sends setup summaries, preference summaries, and catalogue **metadata** (ids, labels, stacks, pot type) — not full private range strings when identifiers suffice.
 
@@ -117,10 +117,11 @@ Without a key the script exits 0 and reports `skipped`. Ordinary `npm test` / CI
 | Provider + resolve + session | `desktop/src/domain/assistant/` |
 | Live eval cases + scoring | `desktop/src/domain/assistant/liveEvalCases.ts` |
 | Live eval runner | `desktop/scripts/run-assistant-live-eval.mjs` |
+| Context pack sync / freshness | `desktop/scripts/sync-ai-context-packs.mjs` (`npm run sync:ai-context` / `check:ai-context`) |
 | Credential lookup | `desktop/src/platform/credentials.ts` + Tauri `assistant_secret_*` |
 | Apply transaction + revision | `studyStore.applySetupDraft` |
-| UI | Floating `StudyAssistantWindow` (shell), `RangeCataloguePanel.tsx` |
-| Model context packs | `docs/ai-context/` (`unified.md`, `help.md`, `setup-assistant.md`) |
+| UI | Floating `StudyAssistantWindow` (shell), `SeatActionCatalogueTree.tsx` |
+| Model context packs | `docs/ai-context/` (generated from `docs/ai-context/source/`) |
 | Unified chat router | `desktop/src/domain/assistant/unifiedChat.ts` |
 
 ## Limits / unresolved
@@ -131,3 +132,4 @@ Without a key the script exits 0 and reports `skipped`. Ordinary `npm test` / CI
 - Tauri credential store is an app-config file, not OS keychain; distributed products should proxy through an authenticated backend
 - Full-draft undo covers assistant transactions; ordinary Build field edits still use range-only undo plus revision bumps
 - Strategy explanations and autonomous research remain out of scope for truthful GTO claims
+- Build mounts Turn/River donk size fields only (no flop donk size control). Solve rake (`rakeRate` / `rakeCap`) has no dedicated Build control — assistant `fieldEdits` only when the player asks to change engine rake.

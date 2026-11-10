@@ -16,8 +16,13 @@ describe("ai context packs", () => {
     const setup = loadAssistantContextPack("setup-assistant");
     expect(help).toContain("Hold'em Study");
     expect(help).toContain("Study assistant");
+    expect(help).toContain("Equity");
+    expect(help).toContain("menu bar **Assistant**");
     expect(setup).toContain("emit_study_setup_proposal");
     expect(setup).toContain("Pot type");
+    expect(setup).toMatch(/no separate Build-page assistant/i);
+    expect(setup).toContain("Turn donk");
+    expect(setup).not.toContain("Flop donk");
     expect(buildHelpSystemPrompt()).toContain("Reply format");
     expect(buildSetupAssistantSystemPrompt()).toContain("Context pack");
   });

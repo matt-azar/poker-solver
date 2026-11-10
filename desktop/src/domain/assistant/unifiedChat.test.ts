@@ -95,12 +95,16 @@ describe("looksLikeSetupRequest", () => {
 });
 
 describe("context packs", () => {
-  it("loads the unified pack", () => {
+  it("loads the unified pack with current product surface", () => {
     const unified = loadAssistantContextPack("unified");
     expect(unified).toContain("unified Study assistant");
     expect(unified).toContain("answer_user");
     expect(unified).toContain("emit_study_setup_proposal");
     expect(unified).toContain("contextSnapshot");
+    expect(unified).toContain("Equity");
+    expect(unified).toContain("menu bar **Assistant**");
+    expect(unified).not.toContain("Flop donk");
+    expect(unified).not.toMatch(/Help\s*→\s*Study assistant/i);
     expect(buildUnifiedAssistantSystemPrompt()).toContain("Call exactly one tool");
   });
 });
