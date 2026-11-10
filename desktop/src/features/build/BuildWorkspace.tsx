@@ -10,6 +10,12 @@ import {
 } from "../../commands/studyCommands";
 import { useStudyStore } from "../../state/studyStore";
 import { useEquityStore } from "../../state/equityStore";
+import {
+  bettingTreeFileName,
+  bettingTreeFromDraft,
+  parseBettingTree,
+  serializeBettingTree,
+} from "../../domain/bettingTreeFile";
 import { draftFromBuild } from "../../domain/equity/transfer";
 import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
@@ -43,6 +49,17 @@ function cellFromPoint(
     return null;
   }
   return { row, col };
+}
+
+/**
+ * Build paint-grid cell weight label. Only fractional weights strictly between
+ * 0 and 1 get a number; empty and full-weight cells stay unlabeled.
+ */
+export function formatPaintCellWeight(weight: number): string | null {
+  if (!(weight > 0 && weight < 1)) {
+    return null;
+  }
+  return weight.toFixed(2);
 }
 
 function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
@@ -103,6 +120,7 @@ function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
               : row < col
                 ? `${rowRank}${colRank}s`
                 : `${colRank}${rowRank}o`;
+          const weightLabel = formatPaintCellWeight(weight);
           return (
             <button
               key={`${player}-${row}-${col}`}
@@ -118,7 +136,7 @@ function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
                     }
                   : undefined
               }
-              title={label}
+              title={weightLabel ? `${label} · ${weightLabel}` : label}
               onClick={(event) => {
                 // Pointer strokes paint on pointerdown (preventDefault suppresses the
                 // mouse click). Keyboard activation still synthesizes click.
@@ -129,7 +147,10 @@ function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
                 endPaintStroke();
               }}
             >
-              {label}
+              <span className="paint-cell__hand">{label}</span>
+              {weightLabel ? (
+                <span className="paint-cell__weight">{weightLabel}</span>
+              ) : null}
             </button>
           );
         }),
@@ -181,9 +202,36 @@ export function BuildWorkspace() {
   const [showTextOop, setShowTextOop] = useState(false);
   const [showTextIp, setShowTextIp] = useState(false);
   const [catalogueOpen, setCatalogueOpen] = useState<"oop" | "ip" | null>(null);
+  const [treeFileError, setTreeFileError] = useState<string | null>(null);
   const [paintWeightDraft, setPaintWeightDraft] = useState(
     paintWeight.toFixed(2),
   );
+  const treeOpenInputRef = useRef<HTMLInputElement>(null);
+
+  const saveBettingTree = () => {
+    setTreeFileError(null);
+    const treeDocument = bettingTreeFromDraft(draft);
+    const blob = new Blob([serializeBettingTree(treeDocument)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = window.document.createElement("a");
+    anchor.href = url;
+    anchor.download = bettingTreeFileName();
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const openBettingTreeFile = async (file: File) => {
+    const text = await file.text();
+    const parsed = parseBettingTree(text);
+    if (!parsed.ok) {
+      setTreeFileError(parsed.error);
+      return;
+    }
+    updateDraft(parsed.patch);
+    setTreeFileError(null);
+  };
 
   useEffect(() => {
     setPaintWeightDraft(paintWeight.toFixed(2));
@@ -341,7 +389,44 @@ export function BuildWorkspace() {
             </label>
           </div>
 
-          <h3 className="build-subhead">Betting tree</h3>
+          <div className="build-subhead-row">
+            <h3 className="build-subhead">Betting tree</h3>
+            <div className="build-subhead-actions">
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={saveBettingTree}
+              >
+                Save tree
+              </button>
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={() => treeOpenInputRef.current?.click()}
+              >
+                Open tree
+              </button>
+              <input
+                ref={treeOpenInputRef}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                aria-label="Open betting tree file"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    void openBettingTreeFile(file);
+                  }
+                  event.target.value = "";
+                }}
+              />
+            </div>
+          </div>
+          {treeFileError ? (
+            <p className="tree-editor-error" role="alert">
+              {treeFileError}
+            </p>
+          ) : null}
           <div className="build-inline">
             <label>
               Flop OOP bets

@@ -71,7 +71,17 @@ vi.mock("../../engine/client", () => ({
 
 const { resetSeatActionCatalogueForTests } = await import("../../domain/profiles");
 const { useStudyStore } = await import("../../state/studyStore");
-const { BuildWorkspace } = await import("./BuildWorkspace");
+const { BuildWorkspace, formatPaintCellWeight } = await import("./BuildWorkspace");
+
+describe("formatPaintCellWeight", () => {
+  it("shows two decimals only for weights strictly between 0 and 1", () => {
+    expect(formatPaintCellWeight(0)).toBeNull();
+    expect(formatPaintCellWeight(1)).toBeNull();
+    expect(formatPaintCellWeight(0.4)).toBe("0.40");
+    expect(formatPaintCellWeight(0.01)).toBe("0.01");
+    expect(formatPaintCellWeight(0.75)).toBe("0.75");
+  });
+});
 
 describe("BuildWorkspace range tools", () => {
   beforeEach(() => {
@@ -114,6 +124,49 @@ describe("BuildWorkspace range tools", () => {
     expect(screen.queryByText(/Blank bet = check only/)).toBeNull();
     expect(screen.getByLabelText(/Flop OOP bets/).getAttribute("placeholder")).toBeNull();
     expect(screen.getByLabelText(/Turn donk/).getAttribute("placeholder")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save tree" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open tree" })).toBeTruthy();
+  });
+
+  it("opens a saved betting tree into sizes and edits without touching board or ranges", async () => {
+    const user = userEvent.setup();
+    useStudyStore.setState({
+      draft: {
+        ...useStudyStore.getState().draft,
+        boardText: "Ah Kd 2c",
+        oopRange: "AA,KK",
+        ipRange: "QQ+",
+        oopFlop: "25",
+        treeEdits: [],
+      },
+    });
+    render(<BuildWorkspace />);
+    const file = new File(
+      [
+        JSON.stringify({
+          format: "holdem-study-betting-tree",
+          version: 1,
+          name: "test tree",
+          tree: {
+            oopFlop: "33, 75",
+            ipFlop: "50",
+            potCap: 3,
+            treeEdits: ["force - c"],
+          },
+        }),
+      ],
+      "tree.json",
+      { type: "application/json" },
+    );
+    await user.upload(screen.getByLabelText("Open betting tree file"), file);
+    const draft = useStudyStore.getState().draft;
+    expect(draft.oopFlop).toBe("33, 75");
+    expect(draft.ipFlop).toBe("50");
+    expect(draft.potCap).toBe(3);
+    expect(draft.treeEdits).toEqual(["force - c"]);
+    expect(draft.boardText).toBe("Ah Kd 2c");
+    expect(draft.oopRange).toBe("AA,KK");
+    expect(draft.ipRange).toBe("QQ+");
   });
 
   it("lets the user type a paint weight into a number field", async () => {
@@ -126,6 +179,21 @@ describe("BuildWorkspace range tools", () => {
     await user.tab();
     expect(useStudyStore.getState().paintWeight).toBeCloseTo(0.75, 5);
     expect(input.value).toBe("0.75");
+  });
+
+  it("shows cell weights under hand ids only for fractional weights", () => {
+    useStudyStore.getState().setPaintWeight(0.4);
+    useStudyStore.getState().setRangeText("oop", "AA,KK:0.5");
+    render(<BuildWorkspace />);
+    const oopGrid = screen.getByRole("grid", { name: "oop range" });
+    const aa = oopGrid.querySelector('[data-row="0"][data-col="0"]');
+    const kk = oopGrid.querySelector('[data-row="1"][data-col="1"]');
+    const ak = oopGrid.querySelector('[data-row="0"][data-col="1"]');
+    expect(aa?.querySelector(".paint-cell__hand")?.textContent).toBe("AA");
+    expect(aa?.querySelector(".paint-cell__weight")).toBeNull();
+    expect(kk?.querySelector(".paint-cell__hand")?.textContent).toBe("KK");
+    expect(kk?.querySelector(".paint-cell__weight")?.textContent).toBe("0.50");
+    expect(ak?.querySelector(".paint-cell__weight")).toBeNull();
   });
 
   it("swaps OOP and IP range text without flipping layout labels", async () => {
@@ -153,7 +221,10 @@ describe("BuildWorkspace range tools", () => {
     await user.click(screen.getByRole("button", { name: "Save unfiled" }));
     expect(screen.getByRole("button", { name: "My BTN open" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(
+      screen.getByRole("button", { name: "Actions for My BTN open" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Edit" }));
     fireEvent.change(screen.getByLabelText("Saved range name"), {
       target: { value: "Renamed open" },
     });

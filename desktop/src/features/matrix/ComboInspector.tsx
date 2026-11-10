@@ -2,7 +2,9 @@
  * Hands panel — per-combo tiles for the hovered/selected hand class.
  *
  * Markup classes (.hands-combo*) are styled in styles/layout.css.
- * To change badge / metric type size, edit those CSS rules — not this file —
+ * Type scale and silver tile fill are driven by data-shape (suited=4,
+ * pair=6, offsuit=12) via --hands-*-size custom properties there —
+ * edit those CSS rules for font/size/background, not this file,
  * unless you need different content or structure.
  */
 import { useEffect, useMemo } from "react";
@@ -297,24 +299,6 @@ export function ComboInspector() {
                   style={{ ["--mass-fill" as string]: String(massFill) }}
                   title={square.combo}
                 >
-                  <div className="hands-combo__weight-fill">
-                    {segments.length > 0 ? (
-                      <div className="hands-combo__segments">
-                        {segments.map((entry) => (
-                          <span
-                            key={entry.label}
-                            className="hands-combo__seg"
-                            title={`${entry.label} ${(entry.probability * 100).toFixed(0)}%`}
-                            style={{
-                              flexGrow: entry.probability,
-                              flexBasis: 0,
-                              background: entry.color,
-                            }}
-                          />
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
                   <div className="hands-combo__body">
                     <div className="hands-combo__top">
                       <span className="hands-combo__badge" title={square.combo}>
@@ -338,44 +322,53 @@ export function ComboInspector() {
                       <span className="hands-combo__metric-tag">{metricLabel}</span>
                     </div>
                     {square.present ? (
-                      <div className="hands-combo__metrics">
-                        {actionOrder.map((index) => {
-                          const label = actions[index]!;
-                          const display = formatActionDisplay(
-                            label,
-                            pot,
-                            betSizeDisplay === "chips" ? "chips" : "pot",
-                            { toCall },
-                          );
-                          const freq = freqByLabel.get(label) ?? 0;
-                          let valueText = "—";
-                          if (showEv) {
-                            valueText = formatEvChip(actionEvs?.[index] ?? null);
-                          } else if (showFreq) {
-                            valueText = formatFrequencyPct(freq, 0) ?? "—";
-                          }
-                          return (
-                            <div
-                              key={`${square.combo}-metric-${index}`}
-                              className="hands-combo__metric-row"
-                            >
-                              <span className="hands-combo__metric-action">
-                                {display.primary}
-                              </span>
+                      <div className="hands-combo__weight-fill">
+                        <div className="hands-combo__metrics">
+                          {segments.map((entry) => {
+                            const display = formatActionDisplay(
+                              entry.label,
+                              pot,
+                              betSizeDisplay === "chips" ? "chips" : "pot",
+                              { toCall },
+                            );
+                            let valueText = "—";
+                            if (showEv) {
+                              valueText = formatEvChip(
+                                actionEvs?.[entry.index] ?? null,
+                              );
+                            } else if (showFreq) {
+                              valueText =
+                                formatFrequencyPct(entry.probability, 0) ?? "—";
+                            }
+                            return (
+                              <div
+                                key={`${square.combo}-metric-${entry.index}`}
+                                className="hands-combo__metric-row"
+                                title={`${entry.label} ${(entry.probability * 100).toFixed(0)}%`}
+                                style={{
+                                  flexGrow: entry.probability,
+                                  flexBasis: 0,
+                                  background: entry.color,
+                                }}
+                              >
+                                <span className="hands-combo__metric-action">
+                                  {display.primary}
+                                </span>
+                                <span className="hands-combo__metric-value tabular">
+                                  {valueText}
+                                </span>
+                              </div>
+                            );
+                          })}
+                          {showEq ? (
+                            <div className="hands-combo__metric-row hands-combo__metric-row--eq">
+                              <span className="hands-combo__metric-action">Eq</span>
                               <span className="hands-combo__metric-value tabular">
-                                {valueText}
+                                {formatEquityPct(square.equity)}
                               </span>
                             </div>
-                          );
-                        })}
-                        {showEq ? (
-                          <div className="hands-combo__metric-row hands-combo__metric-row--eq">
-                            <span className="hands-combo__metric-action">Eq</span>
-                            <span className="hands-combo__metric-value tabular">
-                              {formatEquityPct(square.equity)}
-                            </span>
-                          </div>
-                        ) : null}
+                          ) : null}
+                        </div>
                       </div>
                     ) : null}
                   </div>

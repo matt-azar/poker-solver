@@ -106,9 +106,14 @@ function leavesOrFolder(
   if (sorted.length === 1) {
     const only = sorted[0]!;
     const overridden = overriddenIds.has(only.id);
+    const userSaved = only.id.startsWith("user-saved-") || only.id.startsWith("user-");
     // Keep folder labels (Open / vs CO open) for bundled singles; show the
-    // custom name when a user chart replaced that slot.
-    return leaf(only, overridden ? only.displayName : label, overridden);
+    // custom name for user charts (including first save into an empty folder).
+    return leaf(
+      only,
+      overridden || userSaved ? only.displayName : label,
+      overridden,
+    );
   }
   return {
     kind: "branch",
