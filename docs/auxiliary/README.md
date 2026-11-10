@@ -23,6 +23,7 @@ Supporting material outside the main CFR+ workflow and Study UI docs. Prefer the
 - [TESTING.md](engineering/TESTING.md)
 - [BENCHMARKS.md](engineering/BENCHMARKS.md)
 - [AGENT_LESSONS.md](engineering/AGENT_LESSONS.md)
+- [AGENT_LESSONS_REFRESH.md](engineering/AGENT_LESSONS_REFRESH.md)
 
 ### Payoffs
 
