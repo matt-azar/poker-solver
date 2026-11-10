@@ -8,6 +8,8 @@ export interface StudyLayout {
   inspectorWidth: number;
   historyHeight: number;
   lowerDockHeight: number;
+  /** User-dragged width of the main 13×13. Null keeps the automatic aspect fit. */
+  matrixWidth: number | null;
   density: "comfortable" | "compact";
 }
 
@@ -18,6 +20,7 @@ export const DEFAULT_LAYOUT: StudyLayout = {
   inspectorWidth: 280,
   historyHeight: 72,
   lowerDockHeight: 200,
+  matrixWidth: null,
   density: "comfortable",
 };
 
@@ -47,6 +50,18 @@ export function clampHistoryHeight(height: number): number {
   return Math.min(historyMaxPx(), Math.max(HISTORY_MIN, Math.round(height)));
 }
 
+/** Pixel width for a user-resized range matrix. Null or non-positive means auto. */
+export function clampMatrixWidth(value: unknown): number | null {
+  if (value == null || value === "") {
+    return null;
+  }
+  const width = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(width) || width <= 0) {
+    return null;
+  }
+  return Math.min(1600, Math.max(180, Math.round(width)));
+}
+
 function sanitizeLayout(raw: Partial<StudyLayout> & { leftNav?: unknown }): StudyLayout {
   const { leftNav: _removed, ...rest } = raw;
   const merged = { ...DEFAULT_LAYOUT, ...rest };
@@ -63,6 +78,7 @@ function sanitizeLayout(raw: Partial<StudyLayout> & { leftNav?: unknown }): Stud
       520,
       Math.max(220, Number(merged.inspectorWidth) || DEFAULT_LAYOUT.inspectorWidth),
     ),
+    matrixWidth: clampMatrixWidth(merged.matrixWidth),
     density: merged.density === "compact" ? "compact" : "comfortable",
   };
 }
@@ -102,6 +118,9 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     }
     if (next.historyHeight != null) {
       next.historyHeight = clampHistoryHeight(next.historyHeight);
+    }
+    if ("matrixWidth" in next) {
+      next.matrixWidth = clampMatrixWidth(next.matrixWidth);
     }
     // Turning the dock back on with a tiny height restores a usable size.
     if (next.lowerDock === true && (get().layout.lowerDockHeight ?? 0) < DOCK_MIN) {

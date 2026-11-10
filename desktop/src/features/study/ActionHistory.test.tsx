@@ -247,6 +247,8 @@ describe("ActionHistory path chrome", () => {
     expect(screen.getByText("b20")).toBeTruthy();
     expect(screen.getByText("b50")).toBeTruthy();
     expect(screen.getAllByText("x").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("2s")).toHaveLength(1);
+    expect(screen.getAllByText("3h")).toHaveLength(1);
   });
 
   it("keeps pot-fraction path tags when bet size display is chips", () => {

@@ -250,20 +250,20 @@ export function ContextStrip() {
           {line}
         </span>
       </div>
+      <div className="context-strip__grow" />
       {currentNode &&
       currentNode.kind !== "chance" &&
       currentNode.kind !== "terminal" &&
       cards.length >= 4 ? (
         <button
           type="button"
-          className="toolbar-btn"
+          className="toolbar-btn context-strip__compare"
           title="Compare this decision's action mix across turn or river cards"
           onClick={() => void loadLineCardReport()}
         >
-          Compare cards
+          Compare runouts
         </button>
       ) : null}
-      <div className="context-strip__grow" />
       <SolveControls />
     </div>
   );

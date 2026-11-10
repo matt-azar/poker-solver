@@ -35,6 +35,25 @@ vi.mock("../../state/studyStore", () => ({
             resolvedNodeId: "p12.t40.r-1",
             actions: ["Check", "Bet 50"],
             frequencies: [0.25, 0.75],
+            player: 0,
+          },
+          {
+            card: "Kd",
+            dealProbability: 0.02,
+            dealProbabilityDefined: true,
+            reach: 0.4,
+            reachDefined: true,
+            zeroReach: false,
+            available: true,
+            reason: null,
+            resolvedNodeId: "p12.t40.r-1",
+            actions: ["Check", "Bet 50"],
+            frequencies: [0.5, 0.5],
+            player: 0,
+            ev: -20,
+            evDefined: true,
+            equity: 0.1,
+            equityDefined: true,
           },
           {
             card: "2c",
@@ -54,10 +73,57 @@ vi.mock("../../state/studyStore", () => ({
       },
       loadLineCardReport: vi.fn(),
       openLineCardRow: openRow,
+      pathTrail: [
+        {
+          nodeId: "root",
+          label: "Root",
+          rawLabel: "Root",
+          kind: "root",
+          street: "turn",
+          actor: null,
+        },
+        {
+          nodeId: "n-x",
+          label: "Check",
+          rawLabel: "Check",
+          kind: "action",
+          street: "turn",
+          actor: "OOP",
+        },
+        {
+          nodeId: "n-b",
+          label: "Bet 50",
+          rawLabel: "Bet 50",
+          kind: "action",
+          street: "turn",
+          actor: "IP",
+          sizePot: 100,
+          toCall: 0,
+        },
+        {
+          nodeId: "n-c",
+          label: "Call",
+          rawLabel: "Call",
+          kind: "action",
+          street: "turn",
+          actor: "OOP",
+        },
+        {
+          nodeId: "p12.t40.r-1",
+          label: "Check",
+          rawLabel: "Check",
+          kind: "action",
+          street: "turn",
+          actor: "OOP",
+        },
+      ],
+      draft: { pot: 100 },
+      status: { pot: 100 },
+      evDisplayBasis: "local",
     }),
 }));
 
-const { LineCardReport } = await import("./LineCardReport");
+const { LineCardReport, lineCardHeatColor } = await import("./LineCardReport");
 
 describe("LineCardReport", () => {
   beforeEach(() => {
@@ -84,13 +150,21 @@ describe("LineCardReport", () => {
 
   it("shows deal P, reach, and action mix, and opens a resolved row", () => {
     render(<LineCardReport />);
-    expect(screen.getByText("Compare cards")).toBeTruthy();
-    expect(screen.getByTestId("line-card-line").textContent).toContain("turn");
-    expect(screen.getByText("As")).toBeTruthy();
+    expect(screen.getByText("Compare runouts")).toBeTruthy();
+    const line = screen.getByTestId("line-card-line");
+    expect(line.textContent).toContain("x/b50/c/x");
+    expect(line.textContent).not.toContain("Check/Bet");
+    expect(screen.getByTestId("line-card-seat").textContent).toBe("OOP");
+    const ace = document.querySelector('[data-card="As"]');
+    expect(ace?.querySelector(".line-card-cell__badge")?.textContent).toBe("A♠");
+    expect(ace?.textContent).not.toContain("As");
+    expect(document.querySelector('[data-card="Kd"] .line-card-cell__badge')?.textContent).toBe(
+      "K♦",
+    );
     expect(screen.getAllByText("25.0%").length).toBeGreaterThan(0);
     expect(screen.getAllByText("75.0%").length).toBeGreaterThan(0);
     expect(screen.getByText("Line unavailable on this card")).toBeTruthy();
-    fireEvent.click(screen.getByText("As"));
+    fireEvent.click(screen.getByTitle("As"));
     expect(openRow).toHaveBeenCalledWith("p12.t40.r-1");
     const headers = screen.getAllByRole("columnheader");
     expect(headers[0]?.textContent).toBe("2");
@@ -104,13 +178,41 @@ describe("LineCardReport", () => {
     fireEvent.click(screen.getByRole("button", { name: "EV" }));
     expect(await screen.findByText("12.5")).toBeTruthy();
     expect(getValues).toHaveBeenCalled();
+    const ace = document.querySelector('[data-card="As"]') as HTMLElement;
+    const king = document.querySelector('[data-card="Kd"]') as HTMLElement;
+    const deuce = document.querySelector('[data-card="2c"]') as HTMLElement;
+    expect(ace.getAttribute("data-heat")).toBe("true");
+    expect(king.getAttribute("data-heat")).toBe("true");
+    expect(deuce.getAttribute("data-heat")).toBe("false");
+    expect(hueOf(ace.getAttribute("data-heat-color"))).toBeGreaterThan(
+      hueOf(king.getAttribute("data-heat-color")),
+    );
+    expect(ace.style.backgroundColor).not.toBe("");
+    expect(king.style.backgroundColor).not.toBe(ace.style.backgroundColor);
+    expect(king.querySelector(".line-card-cell__badge")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Equity" }));
     expect(await screen.findByText("42.0%")).toBeTruthy();
     expect(getEquity).toHaveBeenCalled();
+    expect(ace.getAttribute("data-heat")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "Deal probability" }));
     expect(screen.getAllByText("2.0%").length).toBeGreaterThan(0);
     expect(screen.queryByText("25.0%")).toBeNull();
+    expect(ace.getAttribute("data-heat")).toBe("false");
+    expect(king.getAttribute("data-heat")).toBe("false");
+  });
+});
+
+function hueOf(color: string | null): number {
+  const match = color?.match(/hsl\((\d+)/);
+  return match ? Number(match[1]) : -1;
+}
+
+describe("lineCardHeatColor", () => {
+  it("paints low values red and high values green", () => {
+    expect(hueOf(lineCardHeatColor(-10, -10, 10))).toBe(0);
+    expect(hueOf(lineCardHeatColor(10, -10, 10))).toBe(120);
+    expect(hueOf(lineCardHeatColor(4, 4, 4))).toBe(60);
   });
 });

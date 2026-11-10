@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 Object.defineProperty(window, "matchMedia", {
@@ -90,6 +90,13 @@ describe("fitAspectSize", () => {
 describe("RangeMatrix single-layout size", () => {
   afterEach(() => {
     cleanup();
+    useStudyStore.setState({
+      layout: {
+        ...useStudyStore.getState().layout,
+        dualRange: false,
+        matrixWidth: null,
+      },
+    });
   });
 
   it("draws the main grid 1.5× as wide as it is tall when the stage is wide enough", () => {
@@ -138,5 +145,36 @@ describe("RangeMatrix single-layout size", () => {
     } finally {
       restore();
     }
+  });
+
+  it("drops the A–2 axis labels and still shows ranks inside cells", () => {
+    useStudyStore.setState({
+      layout: { ...useStudyStore.getState().layout, dualRange: false, matrixWidth: null },
+      currentNode: null,
+    });
+    render(<RangeMatrix />);
+    expect(document.querySelectorAll(".range-matrix .matrix-axis")).toHaveLength(0);
+    expect(document.querySelector(".matrix-corner")).toBeNull();
+    expect(screen.getByText("AA")).toBeTruthy();
+    expect(screen.getByText("AKs")).toBeTruthy();
+    expect(screen.getByRole("separator", { name: "Resize range matrix" })).toBeTruthy();
+  });
+
+  it("resizes the main grid when the handle is dragged", () => {
+    useStudyStore.setState({
+      layout: { ...useStudyStore.getState().layout, dualRange: false, matrixWidth: null },
+      currentNode: null,
+    });
+    render(<RangeMatrix />);
+    const handle = screen.getByRole("separator", { name: "Resize range matrix" });
+    fireEvent.pointerDown(handle, { clientX: 0, pointerId: 1 });
+    fireEvent.pointerMove(window, { clientX: 420 });
+    fireEvent.pointerUp(window);
+    expect(useStudyStore.getState().layout.matrixWidth).toBe(420);
+    const wrap = document.querySelector(".range-matrix-wrap") as HTMLElement;
+    expect(wrap.style.width).toBe("420px");
+    const grid = screen.getByRole("grid", { name: /Hand range matrix/ });
+    expect(grid.style.width).toBe("100%");
+    expect(grid.style.height).toBe("100%");
   });
 });

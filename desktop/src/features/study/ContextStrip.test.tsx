@@ -197,5 +197,15 @@ describe("ContextStrip board card selector", () => {
     expect(
       screen.queryByText("Check/Bet 10/Call/Check/Bet 35/Call/Check/Check"),
     ).toBeNull();
+    const compare = screen.getByRole("button", { name: "Compare runouts" });
+    const line = screen.getByText("x/b20/c - x/b50/c - x/x");
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(
+      line.compareDocumentPosition(compare) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      compare.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(compare.classList.contains("context-strip__compare")).toBe(true);
   });
 });

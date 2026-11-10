@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SUIT_SYMBOLS } from "../../domain/cards";
+import { studyLineLabel } from "../../domain/actionHistory";
+import { parseCardCode, SUIT_SYMBOLS, suitSymbol } from "../../domain/cards";
 import { mapActionColors } from "../../domain/actionColors";
 import {
   LINE_CARD_GRID_RANKS,
@@ -41,6 +42,39 @@ function formatEv(value: number | null | undefined): string {
     return "—";
   }
   return value.toFixed(1);
+}
+
+/** Red (low) → green (high) fill for compare-runout EV and equity cells. */
+export function lineCardHeatColor(value: number, min: number, max: number): string {
+  const span = max - min;
+  const t = span === 0 ? 0.5 : (value - min) / span;
+  const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0.5));
+  const hue = Math.round(clamped * 120);
+  return `hsl(${hue} 62% 34%)`;
+}
+
+function cardFace(code: string): { rank: string; suit: string; symbol: string } | null {
+  const parsed = parseCardCode(code);
+  if (!parsed?.rank || !parsed.suit) {
+    return null;
+  }
+  return {
+    rank: parsed.rank,
+    suit: parsed.suit,
+    symbol: suitSymbol(parsed.suit) || parsed.suit,
+  };
+}
+
+function actingSeat(rows: LineCardReportRow[]): "OOP" | "IP" | null {
+  for (const row of rows) {
+    if (row.player === 0) {
+      return "OOP";
+    }
+    if (row.player === 1) {
+      return "IP";
+    }
+  }
+  return null;
 }
 
 async function loadSettled<T extends { pending?: boolean }>(
@@ -89,6 +123,10 @@ export function LineCardReport() {
   const openLineCardRow = useStudyStore((s) => s.openLineCardRow);
   const evDisplayBasis =
     (useStudyStore((s) => s.evDisplayBasis) as EvDisplayBasis | undefined) ?? "local";
+  const pathTrail = useStudyStore((s) => s.pathTrail);
+  const rootPot = Number(
+    useStudyStore((s) => s.draft?.pot) ?? useStudyStore((s) => s.status?.pot) ?? 0,
+  );
   const [metric, setMetric] = useState<LineCardMetric>("frequencies");
   const [extras, setExtras] = useState<Record<string, CellExtra>>({});
   const reportRef = useRef(report);
@@ -108,6 +146,68 @@ export function LineCardReport() {
     () => mapActionColors(report?.actionLabels ?? []),
     [report?.actionLabels],
   );
+
+  const lineText = useMemo(
+    () =>
+      studyLineLabel({
+        trail: pathTrail,
+        line: report?.line,
+        currentNodeId: report?.reportNodeId,
+        rootPot,
+      }),
+    [pathTrail, report?.line, report?.reportNodeId, rootPot],
+  );
+
+  const seat = useMemo(() => actingSeat(report?.rows ?? []), [report?.rows]);
+
+  const heatByCard = useMemo(() => {
+    const map = new Map<string, string>();
+    if (metric !== "ev" && metric !== "equity") {
+      return map;
+    }
+    const values: Array<{ card: string; value: number }> = [];
+    for (const row of report?.rows ?? []) {
+      if (!row.available) {
+        continue;
+      }
+      let value: number | null = null;
+      if (metric === "ev") {
+        if (row.evDefined && row.ev != null && Number.isFinite(row.ev)) {
+          value = row.ev;
+        } else if (
+          extras[row.card]?.evSettled &&
+          extras[row.card]?.ev != null &&
+          Number.isFinite(extras[row.card]?.ev)
+        ) {
+          value = extras[row.card]!.ev;
+        }
+      } else if (row.equityDefined && row.equity != null && Number.isFinite(row.equity)) {
+        value = row.equity;
+      } else if (
+        extras[row.card]?.equitySettled &&
+        extras[row.card]?.equity != null &&
+        Number.isFinite(extras[row.card]?.equity)
+      ) {
+        value = extras[row.card]!.equity;
+      }
+      if (value != null) {
+        values.push({ card: row.card, value });
+      }
+    }
+    if (!values.length) {
+      return map;
+    }
+    let min = values[0]!.value;
+    let max = min;
+    for (const entry of values) {
+      min = Math.min(min, entry.value);
+      max = Math.max(max, entry.value);
+    }
+    for (const entry of values) {
+      map.set(entry.card, lineCardHeatColor(entry.value, min, max));
+    }
+    return map;
+  }, [extras, metric, report?.rows]);
 
   useEffect(() => {
     setExtras({});
@@ -219,7 +319,7 @@ export function LineCardReport() {
     return (
       <div className="runout-table line-card-report">
         <div className="panel-title-row">
-          <h2 className="panel-title">Compare cards</h2>
+          <h2 className="panel-title">Compare runouts</h2>
           <button
             type="button"
             className="toolbar-btn"
@@ -274,7 +374,7 @@ export function LineCardReport() {
   return (
     <div className="runout-table line-card-report">
       <div className="panel-title-row">
-        <h2 className="panel-title">Compare cards</h2>
+        <h2 className="panel-title">Compare runouts</h2>
         <div className="panel-title-actions">
           <div className="seat-toggle" role="group" aria-label="Card values">
             {METRICS.map((entry) => (
@@ -298,15 +398,20 @@ export function LineCardReport() {
           </button>
         </div>
       </div>
-      <p className="empty-hint" data-testid="line-card-line">
-        {report.street} · {report.line}
-        {metric === "ev"
-          ? " · EV in chips"
-          : metric === "equity"
-            ? " · check-down equity"
-            : metric === "deal"
-              ? " · chance of dealing the card"
-              : ""}
+      <p className="empty-hint line-card-summary" data-testid="line-card-line">
+        <span className="line-card-summary__line">{lineText}</span>
+        {seat ? (
+          <span className="line-card-seat" data-testid="line-card-seat">
+            {seat}
+          </span>
+        ) : null}
+        {metric === "ev" ? (
+          <span className="line-card-summary__metric">EV in chips</span>
+        ) : metric === "equity" ? (
+          <span className="line-card-summary__metric">check-down equity</span>
+        ) : metric === "deal" ? (
+          <span className="line-card-summary__metric">chance of dealing the card</span>
+        ) : null}
       </p>
       {metric === "frequencies" && colors.legend.length ? (
         <div className="line-card-legend" aria-label="Actions">
@@ -328,7 +433,7 @@ export function LineCardReport() {
         <div
           className="line-card-grid"
           role="grid"
-          aria-label="Compare cards by suit and rank"
+          aria-label="Compare runouts by suit and rank"
           data-metric={metric}
         >
           <div className="line-card-grid__row" role="row">
@@ -352,6 +457,8 @@ export function LineCardReport() {
                 const code = `${rank}${suit}`;
                 const row = byCard.get(code);
                 const value = cellValue(row);
+                const face = cardFace(code);
+                const heat = row?.available ? heatByCard.get(code) : undefined;
                 const bar =
                   metric === "frequencies" && row?.available
                     ? frequencyBar(row.frequencies, colors.byIndex)
@@ -362,21 +469,34 @@ export function LineCardReport() {
                     type="button"
                     role="gridcell"
                     className="line-card-cell"
+                    data-card={code}
                     data-suit={suit}
                     data-available={row?.available ? "true" : "false"}
+                    data-heat={heat ? "true" : "false"}
+                    data-heat-color={heat ?? ""}
                     disabled={!row?.resolvedNodeId}
                     title={
                       row
                         ? `${code}${row.reason ? ` · ${row.reason}` : ""}`
                         : `${code} not in this deal`
                     }
+                    style={heat ? { backgroundColor: heat } : undefined}
                     onClick={() => {
                       if (row?.resolvedNodeId) {
                         void openLineCardRow(row.resolvedNodeId);
                       }
                     }}
                   >
-                    <span className="line-card-cell__card">{code}</span>
+                    <span className="line-card-cell__badge">
+                      {face ? (
+                        <span className="line-card-cell__badge-card" data-suit={face.suit}>
+                          <span className="line-card-cell__badge-rank">{face.rank}</span>
+                          <span className="line-card-cell__badge-suit">{face.symbol}</span>
+                        </span>
+                      ) : (
+                        code
+                      )}
+                    </span>
                     {metric === "frequencies" && row?.available ? (
                       <span className="line-card-cell__freqs">
                         {row.frequencies.map((freq, index) => (
