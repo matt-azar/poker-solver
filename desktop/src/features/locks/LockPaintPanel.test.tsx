@@ -131,7 +131,7 @@ describe("Node Locking workspace", () => {
     expect(useStudyStore.getState().lockDraft.handIndices).toEqual([0, 1, 2]);
   });
 
-  it("paints strategy segments aggressive-left in cells and overall bar", () => {
+  it("paints strategy segments passive-left in cells and overall bar", () => {
     useStudyStore.setState({
       currentNode: {
         ...aaNode,
@@ -151,20 +151,20 @@ describe("Node Locking workspace", () => {
       ...aa.querySelectorAll(".lock-paint-cell__seg"),
     ] as HTMLElement[];
     expect(cellSegs.length).toBe(3);
-    // Bet 100 (most aggressive) left, then Bet 50, then Check.
-    expect(cellSegs[0]?.style.background).toMatch(/196,\s*92,\s*58|#C45C3A/i);
+    // Check (passive) left, then Bet 50, then Bet 100.
+    expect(cellSegs[0]?.style.background).toMatch(/63,\s*143,\s*107|#3F8F6B/i);
     expect(cellSegs[1]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
-    expect(cellSegs[2]?.style.background).toMatch(/63,\s*143,\s*107|#3F8F6B/i);
+    expect(cellSegs[2]?.style.background).toMatch(/196,\s*92,\s*58|#C45C3A/i);
 
     const overall = screen.getByLabelText("Overall range");
     const barSegs = [
       ...overall.querySelectorAll(".node-lock-bar__seg"),
     ] as HTMLElement[];
     expect(barSegs.length).toBe(3);
-    expect(barSegs[0]?.style.background).toMatch(/196,\s*92,\s*58|#C45C3A/i);
-    expect(barSegs[2]?.style.background).toMatch(/63,\s*143,\s*107|#3F8F6B/i);
+    expect(barSegs[0]?.style.background).toMatch(/63,\s*143,\s*107|#3F8F6B/i);
+    expect(barSegs[2]?.style.background).toMatch(/196,\s*92,\s*58|#C45C3A/i);
     expect(overall.querySelector(".node-lock-bar__legend")?.textContent).toMatch(
-      /^Bet 100 .* · Bet 50 .* · Check /,
+      /^Check .* · Bet 50 .* · Bet 100 /,
     );
   });
 });

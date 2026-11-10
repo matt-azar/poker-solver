@@ -220,7 +220,7 @@ Eligible only at **street-start** turn/river OOP decisions (#193). Copy **raw** 
 
 ### Study UI paint order
 
-Matrix, Hands, and Node Locking strategy bars paint **aggressive → passive** left-to-right (`orderActionIndicesByAggression`). Frequency sliders and Action filter blocks stay in **engine action order** (index-bound) (#185).
+Matrix, Hands, and Node Locking strategy bars paint **passive → aggressive** left-to-right (`orderActionIndicesByAggression`). Frequency sliders and Action filter blocks stay in **engine action order** (index-bound) (#185).
 
 ### AI context packs / Study assistant
 

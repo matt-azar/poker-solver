@@ -38,9 +38,9 @@ describe("actionAggressionScore", () => {
 });
 
 describe("orderActionIndicesByAggression", () => {
-  it("puts most aggressive actions first for left-to-right paint", () => {
+  it("puts passive actions first for left-to-right paint", () => {
     const actions = ["Check", "b36", "b137"];
-    expect(orderActionIndicesByAggression(actions)).toEqual([2, 1, 0]);
+    expect(orderActionIndicesByAggression(actions)).toEqual([0, 1, 2]);
   });
 
   it("is stable for the comparator used by sort", () => {
