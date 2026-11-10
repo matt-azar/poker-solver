@@ -1,25 +1,29 @@
 ---
-description: Agent lessons — parallel work, architecture, solver pitfalls
+description: Agent lessons — always read full doc; short digest always on
 alwaysApply: true
 ---
 
 # Agent lessons
 
-Before spawning sibling agents, changing solvers, or claiming a milestone is done, read [docs/auxiliary/engineering/AGENT_LESSONS.md](../../docs/auxiliary/engineering/AGENT_LESSONS.md).
+**First action on every coding task:** `Read` [`docs/auxiliary/engineering/AGENT_LESSONS.md`](../../docs/auxiliary/engineering/AGENT_LESSONS.md) before editing solvers, Study/desktop, explorer, CMake/tests, or docs that claim product behavior. Do not skip. Root [`AGENTS.md`](../../AGENTS.md) repeats this requirement. Refresh playbook: [`docs/auxiliary/engineering/AGENT_LESSONS_REFRESH.md`](../../docs/auxiliary/engineering/AGENT_LESSONS_REFRESH.md).
 
 **Parallel work**
 
 - Assume siblings may write into `/workspace` even when asked to use a worktree. Do not checkout/commit there while they run unless ownership is proven disjoint.
 - Give each agent a disjoint path list. Serialize `CMakeLists.txt`, `tests/harness.hpp`, and `tests/unit/test_main.cpp`, or have only the parent touch them.
 - Subagents often cannot `ManagePullRequest`; the parent opens PRs after push and subscribes CI.
-- If the tree is interleaved: WIP snapshot branch, then path-checkout onto clean `cursor/<feature>-c006` branches from the correct base. Trim CMake/docs per branch before build.
+- If the tree is interleaved: WIP snapshot branch, then path-checkout onto clean `cursor/<feature>-<run-suffix>` branches from the correct base. Trim CMake/docs per branch before build.
 - Re-run `git status` immediately before every commit; restore unexpected paths.
+- Follow-ups committed on an already-merged PR head never reach `main` — rebase onto `origin/main` as a new PR.
 
-**Architecture / correctness (short)**
+**Architecture / Study correctness (short)**
 
 - On `main`, flop/turn/river (3/4/5 cards) use `StreetBatchSolver`. `river_solver` is a thin CLI onto that path. `RiverGame` stays the five-card oracle; `RiverBatchSolver` is oracle/legacy only.
 - Pin production batch changes against `CfrTrainer<*Game>` / `--reference`. Kuhn/Leduc stay on `CfrTrainer` only. `include/` must not depend on `legacy/ui/` or `desktop/`.
 - Nash gap is NashConv (sum of BR gains). Accuracy / stop criterion is Pio’s average (NashConv/2); default unit is pot fraction.
-- Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; equity ≠ chip EV.
-- Street config is `street-config 1` text; river CLI defaults are often JSON — do not mix formats. Empty bet arrays mean check-only; absent keys mean defaults.
+- Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; Equity (UI label) is check-down pot fraction ≠ chip EV.
+- Study `/values` are root-centered; Local EV uses `local_offset` (include street `contrib`, not half pot alone). Index Fold from `values.actions`, not `node.actions`. Serialize EV/equity analysis jobs; identity includes `analysis_revision`. Do not full-tree frontload analysis.
+- Default node lock keeps turn/river cards; `scope:"line"` is explicit line-wide (flop root needs an explicit scope field). Study `/equity` uses solver rank tables; Calculator stays on pair enumerator. Keep Study pair-runout C++ + Tauri constants aligned.
+- Street config is `street-config 1` text; river CLI defaults are often JSON — do not mix formats. Empty bet arrays mean check-only; absent keys mean defaults. No Flop donk control.
+- AI packs: edit `docs/ai-context/source/` then `npm run sync:ai-context` / CI `check:ai-context`. Do not hand-edit generated packs.
 - Do not change `LICENSE`. Update `docs/auxiliary/planning/FEATURE_PARITY.md` only with the commit that demonstrates the row.

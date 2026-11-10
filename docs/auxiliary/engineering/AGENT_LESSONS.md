@@ -1,8 +1,8 @@
 # Lessons for future agents
 
-Mistakes, friction, and correctness traps observed in this repository’s history and in multi-agent cloud runs. Read before changing solvers, spawning sibling agents, or claiming a milestone is done.
+Mistakes, friction, and correctness traps observed in this repository’s history and in multi-agent cloud runs. **Read this file at the start of every coding task** (not only when spawning siblings or touching solvers). Root `AGENTS.md` and `.cursor/rules/parallel-agents.mdc` point here; keep them in sync when the short digest changes.
 
-Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor/rules/licensing.mdc`.
+Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor/rules/licensing.mdc`. Refresh playbook: [`AGENT_LESSONS_REFRESH.md`](AGENT_LESSONS_REFRESH.md).
 
 ---
 
@@ -36,7 +36,8 @@ Do not modify /workspace.
 Touch only these paths: <list>.
 Do not edit CMakeLists.txt, tests/harness.hpp, or tests/unit/test_main.cpp
   unless listed; if you must, add only your targets.
-Branch: cursor/<name>-c006 from <exact base ref>.
+Branch: cursor/<name>-<run-suffix> from <exact base ref>
+  (use the suffix required by this cloud run, e.g. -ce85 / -c006).
 Push with git push -u origin <branch>.
 Do not open a PR (parent will ManagePullRequest).
 Do not change LICENSE.
@@ -46,13 +47,18 @@ Report: tip SHA, files touched, test command + counts, compare URL.
 ### Recovery checklist (interleaved tree)
 
 1. Inventory with `git status` / `git diff --stat`.
-2. Commit all dirty + untracked onto `cursor/wip-<topic>-c006`.
+2. Commit all dirty + untracked onto `cursor/wip-<topic>-<run-suffix>`.
 3. For each feature: branch from `origin/main` (or dependency base).
 4. `git checkout wip -- <only that feature’s files>`.
 5. Trim CMake, harness, `test_main`, and docs.
 6. `CXX=g++` build; run `poker_solver_tests`; fix.
 7. Push; parent opens PR; subscribe CI.
 8. Keep WIP for archaeology until splits are pushed.
+
+### Post-merge / branch hygiene
+
+- **Follow-ups on a merged head never reach `main`.** If more work lands on a branch after its PR merged (#208), rebase onto `origin/main` as a **new** PR. Do not assume the old head is still mergeable.
+- Closed/merged PR heads and orphan `cursor/*` branches are pruned daily (`.github/workflows/prune-stale-branches.yml`, #199). Finish and open the PR before assuming the remote branch will stay.
 
 ---
 
@@ -120,6 +126,62 @@ Engine and session types live under `include/game`, `include/solver`, `include/e
 
 **Pointers:** commits `8ab3503`, `27236ac`, `40e81d6`, `docs/EXPLORER.md`, ROADMAP M0/M4.
 
+### Study analysis scheduling (EV / equity / runouts)
+
+Explorer used to have a **single-slot** ValueWorker. Overlapping `/equity` + `/values` (and status polls that re-enqueued) cancelled each other → blinking footers, stuck “Calculating…”, lost overlays (#181–#190).
+
+**Do:**
+
+- Prefer `POST/GET …/nodes/{id}/analysis` (multi-metric) or **lookup-first** enqueue so status reads never replace sibling work.
+- Client: serialize ValueWorker-bound jobs; `pollAnalysis` must await the full ready/failed lifecycle (do not release the queue on the first `202`).
+- Cache pages by solution / node / `analysis_revision` (profile epoch); restore on navigate instead of recomputing.
+- Settled permanent failures (e.g. work-limit) must not thrash auto-resubmit; transient/settled errors must not stick forever when the node/revision changed.
+
+**Don't:** Fire equity and values in parallel against a single analysis worker. Don't clear a failed payload to `null` in a way that creates an infinite auto-retry loop.
+
+**Pointers:** PRs #181, #182, #184, #188, #190; `docs/EXPLORER.md`.
+
+### Local EV vs Global / root-centered
+
+`/values` utilities are **root-centered chips**. Study defaults to **local decision EV**: Fold → 0 for the acting seat by adding `local_offset` (= `-U_i(fold-now)`).
+
+- Decision and chance nodes must store `state.contrib` so `local_offset` includes chips already invested on prior streets — half the starting pot alone is wrong after bet/call (#184).
+- **Fold column:** index Fold from `values.actions` (same order as `action_ev`), then `+ local_offset`. Indexing Fold from `node.actions` or using `row[foldIdx] ?? 0` turns a miss into baseline 0 and makes Local conversion a **silent no-op** (Settings say Local, UI still looks Global) (#182).
+- Prefer the Settings store for `evDisplayBasis` over a stale study-store copy.
+- Fixtures that only face a bet with actor `contrib = 0` can mask a zero-contrib bug (offset looks like “half pot” and tests still pass).
+
+**Pointers:** PRs #182, #184; `desktop/src/domain/browse.ts`; `docs/EXPLORER.md`.
+
+### Node lock vs line lock
+
+Default lock scope is **`node`** (Pio `lock_node`): keep turn/river cards from `node_id` so locking one river does **not** silently lock every runout on that betting line (#201). Explicit `scope: "line"` stores `pN.t-1.r-1` (Pio `lock_line`). Engine lookup: exact runout first, then line fallback. PSOL: `lock N at T R …` vs `lock N line …`; legacy lines without `at`/`line` open as line locks.
+
+At a flop root, `t-1.r-1` is both the node id and the line key — **do not infer scope from cards alone**; keep an explicit `LockScope` / `scope` field. A node lock must not overwrite a line lock for the same infoset.
+
+**Don't:** Strip turn/river from lock keys “for infoset convenience.”
+
+### Study equity path vs Equity Calculator
+
+- Study node `/equity` uses `StreetBatchSolver::checkdown_equity` (cached rank tables / blocker masses) — same check-down math, much faster than pair enumeration (#191).
+- Equity Calculator / CLI stay on `showdown_equity` + `kDefaultMaxPairRunouts` (~1.1M).
+- Packaged Study raises `--max-pair-runouts` to `kStudyExplorerMaxPairRunouts` (= full-range turn, ~51.4M). Dense flop check-downs can still exceed that. **Never silently sample** when over the limit.
+- Study ceiling is a **packaging knob**: keep C++ `kStudyExplorerMaxPairRunouts` and Tauri `STUDY_EXPLORER_MAX_PAIR_RUNOUTS` aligned; raising only an env var does nothing for the packaged desktop spawn (#188).
+- Warm the **current** decision (queue + identity-keyed cache). Do **not** full-tree frontload EV/equity into the save — commercial “always ready” is kernel speed + non-thrashing plumbing (#184, #190, #191).
+
+User-facing Study copy says **Equity** (not “Check-down equity”); the quantity is still check-down pot fraction, not chip EV (#189).
+
+Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via normalized `comboKey` (suit-order variants); gate ready/pending with solution+node id so navigate does not show another node’s Eq (#170).
+
+### Frozen parallel + cold action EV
+
+- Train/BR and cold average-value walks may steal **first future public card** tasks across workers; nested chance stays serial on the claiming worker (#177, #194).
+- Wall-clock “parallel must beat serial” asserts are flaky on cold/shared CI VMs and under sanitizers — pin **numerical parity**; soften or skip timing gates (#201). Avoid `__has_feature` guards that break MSVC.
+
+### Solve progress / Accuracy stop
+
+- Progress: iteration counter every train step; EV / gap / Accuracy refresh about every 10 iters (or denser if Samples is raised) (#180). `time_limit: 0` stops after the first completed iteration.
+- Early-stop uses **Pio Accuracy** (`NashConv / 2`). Compare the threshold to **Accuracy chips**, not raw NashConv (off-by-2 early/late stop). Default CLI/UI **unit** is pot fraction (`--accuracy 0.05` or `5 chips`); Pio UPI’s chips-default unit is not our product default (#179). Keep `nash_gap` as NashConv for reporting.
+
 ---
 
 ## 3. Codebase layout and conventions
@@ -144,8 +206,31 @@ Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fract
 - Raise lists are separate from bets: absent `oop_raises` / `ip_raises` copies bets when multiples are also empty; present empty stays empty. The engine does not copy bets into an empty C++ raise vector. Study copies a blank raise box into that street's raise list before sending.
 - A zero-length per-street list still falls back to the shared list. A one-element explicit-empty sentinel (`-`, stored as `-4e9`) does not. `e` / `2e` / `3e` / `a` / `Nx` stay sentinels until the decision node. Study Build blank bet = check-only; on import, empty street lists are resolved into shared sizes so rebuild keeps the same tree.
 - `max_raises` counts facing raises only (opening street bets do not consume the cap). All-in is added only when that situation already lists a size, or the token `a` put one there. There is no `geometric` config/CLI/job flag — list `e` / `a` per street.
+- **Build donk UI:** Turn/River donk size fields only — there is no Flop donk control (#195). AI context packs CI-reject stale “Flop donk” claims.
 
 **Don't:** “Normalize” empty arrays back to defaults (`docs/EXPLORER.md`).
+
+### Betting-tree files vs spot drafts
+
+Build **Save tree / Open tree** uses client JSON `holdem-study-betting-tree` v1 (`desktop/src/domain/bettingTreeFile.ts`): sizes, caps, `tree_edits` only. It must **not** rewrite board, ranges, or stop criteria (#203).
+
+### Create Build spot from Study
+
+Eligible only at **street-start** turn/river OOP decisions (#193). Copy **raw** strategy-conditioned reaches (not posterior marginals), node pot, and effective remaining stack; reuse source sizing via `GET …/config`; clear path-scoped tree edits / incentives / ICM. When IP aggressed on the prior street, **bake donk sizes** into OOP’s starting-street bets (new trees have no prior aggressor). Verify root legal actions with `tree-preview`; open Build for review — do **not** auto-solve. Midstreet extraction (facing bet / street contrib) stays out of scope until `StreetConfig` carries initial betting state.
+
+### Study UI paint order
+
+Matrix, Hands, and Node Locking strategy bars paint **aggressive → passive** left-to-right (`orderActionIndicesByAggression`). Frequency sliders and Action filter blocks stay in **engine action order** (index-bound) (#185).
+
+### AI context packs / Study assistant
+
+- Packs under `docs/ai-context/{help,setup-assistant,unified}.md` are **generated**. Edit `docs/ai-context/source/`, then `cd desktop && npm run sync:ai-context`. CI `npm run check:ai-context` fails on drift or forbidden stale UI phrases (#196).
+- Assistant entry is menu-bar **Assistant** (not Help → Study assistant). No Build-page Setup assistant. Workspaces include **Equity**.
+- Bounded Study evidence tools (`query_node_strategy`, `list_bluff_candidates`, `query_selected_hand_analysis`) may hop ≤2 nodes (e.g. `fetchNode` BFS) and wait on the analysis scheduler; they must **not** start solves, open filesystem/HTTP beyond the engine client, or **navigate the Study tree** just to discover nodes. Prefer honest absences over invented mixes (#197).
+- `contextSnapshot` v2 carries published-solution identity, node path/seat/board, strategy, selected-hand analysis, and readiness — including equity + NashConv/Accuracy gaps.
+- Build Preview and Solve must share one `buildJob` serializer with `/api/tree-preview` (#192).
+
+**Pointers:** `docs/ai-context/README.md`, `docs/STUDY_SETUP_ASSISTANT.md`.
 
 ### CMake and tests
 
@@ -159,6 +244,9 @@ Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fract
 - On **`main`**, `tests/unit/test_explorer_http.cpp` still **SKIPs on non-Windows**. A green Linux CTest alone is not HTTP coverage. (Linux HTTP port may live on a separate PR — check before claiming the gap is closed.)
 - Some working-set / card-delay asserts are Windows-only (`#ifdef _WIN32`).
 - Assertion totals differ by compiler; fail missing parity checkpoints instead of skipping (`cc12bc8`).
+- **Desktop `tsc -b`:** Study store nullability (`node` / `liveEquity` unnarrowed) fails `desktop` and `windows-installer` CI even when vitest is green (#190/#191). After lifecycle/analysis changes, run `cd desktop && npx tsc -b`.
+- **CI path gate:** `dorny/paths-filter` needs `pull-requests: read` under restricted `GITHUB_TOKEN` scopes; fail the aggregate `ci` job if the path gate itself fails (#200).
+- **NSIS / installer hooks:** wait for **`windows-installer`** green before merge. A green non-installer subset is not enough — #158/#159 landed broken PREINSTALL arity / duplicate `kill:` labels and needed follow-ups (#161).
 - **Tauri sidecar spawn:** `bundle.externalBin` may be `binaries/holdem-explorer`, but the installed file is `<exe_dir>/holdem-explorer.exe`. `shell().sidecar("binaries/holdem-explorer")` looks under a non-existent `binaries/` folder (os error 3). Spawn the absolute path beside the app (or `sidecar("holdem-explorer")`). Packaged UI must also **statically import** `@tauri-apps/api/core` — `@vite-ignore` dynamic imports leave a bare specifier that fails at runtime.
 - **NSIS upgrade + sidecar lock:** A running/orphaned `holdem-explorer.exe` keeps the file locked → "Error opening file for writing: …\holdem-explorer.exe" (Ignore leaves a stale engine). PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning` — its `kill:` labels collide with the template's insert), then `taskkill /F /T /IM holdem-explorer.exe`, Sleep, and `Delete` the old sidecar. Never `taskkill` `explorer.exe`.
 
@@ -168,9 +256,10 @@ Do not change `LICENSE`, SPDX, or license metadata. `UNLICENSED` ≠ Unlicense. 
 
 ### Branch / PR hygiene (cloud)
 
-- Branches: `cursor/<descriptive-name>-c006`, lowercase.
+- Branches: `cursor/<descriptive-name>-<run-suffix>`, lowercase (suffix comes from the cloud-run instructions).
 - Prefer `base_branch=main` unless stacking on an unmerged dependency; say so in the PR body.
 - Update `docs/auxiliary/planning/FEATURE_PARITY.md` **only** in the commit that demonstrates the row change.
+- When UI chrome moves, update `docs/ai-context/source/` + `sync:ai-context` and player docs in the **same** change when packs claim those labels.
 
 ---
 
@@ -227,7 +316,8 @@ Made-hand **categories** (when present) are category mass on a **five-card** boa
 | --- | --- | --- |
 | ≤ 8 legal actions at a decision | `kMaxStreetActions` / trainer scratch | Large size lists without merging |
 | `StreetGame` ≤ ~200k terminals | reference enumerator | “Fix” big spots by raising the cap instead of using batch |
-| Equity work limit ~1e6 pair-runouts | equity calculator | Full-range river rejected; don't silently sample |
+| Equity work limit ~1.1e6 pair-runouts | library / Equity Calculator default | Full-range turn rejected; don't silently sample |
+| Study equity ceiling ~51.4e6 | packaged Study `--max-pair-runouts` | Dense flop check-down can still exceed; raise explicitly |
 | Public tree depth / history caps | street index | Pathological trees |
 
 ### Labels and HTTP ids
@@ -276,13 +366,23 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 
 - Oracle pins: batch vs `CfrTrainer<*Game>` on tiny fixtures before scaling.
 - Flush solver phase lines so interrupted study runs still show construction/cache/last eval (`381c9a5`).
-- Explicit units in UI/API (`chips` / `root_centered` vs `fraction of the pot` / `check-down`).
+- Explicit units in UI/API (`chips` / `root_centered` vs `fraction of the pot` / Equity).
 - Parent-integrated parallel tracks with disjoint paths and immediate PR open after push.
 - Full `poker_solver_tests` locally before push; watch for unexpected SKIP lines.
+- After Study client/analysis changes: desktop vitest **and** `npx tsc -b`; after assistant/UI label moves: `npm run check:ai-context`.
+- Pin numerical parity for parallel EV/BR; treat wall-clock speed asserts as soft.
 
 ---
 
-## 7. Quick pointers
+## 7. Keeping this doc fresh
+
+- Durable scheduled refresh: Cursor Automation prompt in [`AGENT_LESSONS_REFRESH.md`](AGENT_LESSONS_REFRESH.md) (create/activate at [cursor.com/automations](https://cursor.com/automations) against `matt-azar/poker-solver`).
+- When a PR fixes an agent-rediscovered trap, add a short **Do/Don't** here in the same PR when practical.
+- Update the short digest in `.cursor/rules/parallel-agents.mdc` and root `AGENTS.md` whenever a new trap belongs in every agent’s always-on context.
+
+---
+
+## 8. Quick pointers
 
 | Topic | Start here |
 | --- | --- |
@@ -293,5 +393,7 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 | Math / EV / NashConv | `docs/MATHEMATICS.md` |
 | Explorer HTTP / Study UI | `docs/EXPLORER.md`, `docs/DESKTOP_UI.md` |
 | Equity | `docs/EQUITY.md` |
+| Assistant / AI packs | `docs/STUDY_SETUP_ASSISTANT.md`, `docs/ai-context/README.md` |
 | Milestones / gates | `docs/auxiliary/planning/ROADMAP.md`, `docs/auxiliary/planning/FEATURE_PARITY.md` |
 | Testing / benches | `docs/auxiliary/engineering/TESTING.md`, `benchmarks/study/README.md` |
+| Lessons refresh automation | `docs/auxiliary/engineering/AGENT_LESSONS_REFRESH.md` |
