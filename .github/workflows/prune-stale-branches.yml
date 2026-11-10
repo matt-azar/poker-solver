@@ -1,0 +1,102 @@
+name: Prune stale branches
+
+# Delete remote heads GitHub would prompt to tidy up after a PR closes/merges,
+# plus orphan cursor/* agent branches that never opened a PR.
+# Schedule runs only from the default branch after this workflow is on main.
+on:
+  schedule:
+    # Daily 09:00 UTC (04:00 America/New_York)
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete closed-PR heads and orphan cursor branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          protected='^(main|master)$'
+
+          mapfile -t open_heads < <(
+            gh pr list -R "$REPO" --state open --limit 500 \
+              --json headRefName --jq '.[].headRefName' | sort -u
+          )
+
+          is_open_head() {
+            local branch="$1"
+            local open
+            for open in "${open_heads[@]+"${open_heads[@]}"}"; do
+              if [[ "$open" == "$branch" ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          mapfile -t branches < <(
+            gh api --paginate "repos/${REPO}/branches" --jq '.[].name' | sort -u
+          )
+
+          deleted=0
+          kept=0
+          failed=0
+
+          for branch in "${branches[@]}"; do
+            if [[ "$branch" =~ $protected ]]; then
+              echo "keep protected: ${branch}"
+              kept=$((kept + 1))
+              continue
+            fi
+
+            if is_open_head "$branch"; then
+              echo "keep open PR: ${branch}"
+              kept=$((kept + 1))
+              continue
+            fi
+
+            pr_json="$(
+              gh pr list -R "$REPO" --head "$branch" --state all --limit 50 \
+                --json number,state,mergedAt
+            )"
+            pr_count="$(jq 'length' <<<"$pr_json")"
+            open_count="$(jq '[.[] | select(.state == "OPEN")] | length' <<<"$pr_json")"
+
+            if [[ "$open_count" -gt 0 ]]; then
+              echo "keep open PR: ${branch}"
+              kept=$((kept + 1))
+              continue
+            fi
+
+            reason=""
+            if [[ "$pr_count" -gt 0 ]]; then
+              reason="closed/merged PR head"
+            elif [[ "$branch" == cursor/* ]]; then
+              reason="orphan cursor branch"
+            else
+              echo "keep no-PR non-cursor: ${branch}"
+              kept=$((kept + 1))
+              continue
+            fi
+
+            echo "delete (${reason}): ${branch}"
+            if gh api -X DELETE "repos/${REPO}/git/refs/heads/${branch}"; then
+              deleted=$((deleted + 1))
+            else
+              echo "failed: ${branch}"
+              failed=$((failed + 1))
+            fi
+          done
+
+          echo "summary: deleted=${deleted} kept=${kept} failed=${failed}"
+          if [[ "$failed" -gt 0 ]]; then
+            exit 1
+          fi
