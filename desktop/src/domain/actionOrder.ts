@@ -1,5 +1,5 @@
 /**
- * Order Study action segments most-aggressive → least-aggressive (left → right).
+ * Order Study action segments least-aggressive → most-aggressive (left → right).
  * Shared by the main matrix, Hands combo breakdowns, Node Locking bars/cells,
  * and the Actions panel frequency mix bar.
  */
@@ -18,7 +18,7 @@ function isAllIn(label: string): boolean {
   );
 }
 
-/** Numeric aggression score — higher paints further left. */
+/** Numeric aggression score — higher paints further right. */
 export function actionAggressionScore(label: string): number {
   const normalized = normalizeLabel(label);
   if (!normalized) {
@@ -62,11 +62,12 @@ export function compareActionsAggressiveFirst(left: string, right: string): numb
   return normalizeLabel(left).localeCompare(normalizeLabel(right));
 }
 
-/** Indices into `actions` ordered most-aggressive → least-aggressive. */
+/** Indices into `actions` ordered passive → aggressive (left → right). */
 export function orderActionIndicesByAggression(actions: string[]): number[] {
   return actions
     .map((_, index) => index)
     .sort((left, right) =>
       compareActionsAggressiveFirst(actions[left] ?? "", actions[right] ?? ""),
-    );
+    )
+    .reverse();
 }

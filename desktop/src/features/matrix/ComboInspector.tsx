@@ -162,14 +162,15 @@ export function ComboInspector() {
 
   const pinned = Boolean(selectedCell);
   const actions = currentNode?.actions ?? [];
-  // Metrics list: aggressive first (top → bottom). Paint: reverse → passive left.
-  const actionOrder = useMemo(
+  // Paint is passive → aggressive (left → right). The metric list stays
+  // aggressive first (top → bottom), so it uses the reverse of that order.
+  const paintOrder = useMemo(
     () => orderActionIndicesByAggression(actions),
     [actions],
   );
-  const paintOrder = useMemo(
-    () => [...actionOrder].reverse(),
-    [actionOrder],
+  const actionOrder = useMemo(
+    () => [...paintOrder].reverse(),
+    [paintOrder],
   );
   const pot = actionSizePotBasis(
     currentNode,

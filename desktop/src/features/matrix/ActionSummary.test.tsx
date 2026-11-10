@@ -115,15 +115,15 @@ describe("ActionSummary", () => {
     expect(screen.queryByRole("group", { name: "Matrix mode" })).toBeNull();
   });
 
-  it("paints the frequency mix bar aggressive-left", () => {
+  it("paints the frequency mix bar passive-left", () => {
     render(<ActionSummary />);
     const mix = screen.getByLabelText("Action frequency mix");
     const segs = [...mix.querySelectorAll(".action-summary__mix-seg")] as HTMLElement[];
     expect(segs.length).toBe(3);
-    // Bet 100, Bet 50, Check — same left-to-right order as the main matrix.
-    expect(segs[0]?.style.background).toMatch(/196,\s*92,\s*58|#C45C3A/i);
+    // Check, Bet 50, Bet 100 — same left-to-right order as the main matrix.
+    expect(segs[0]?.style.background).toMatch(/63,\s*143,\s*107|#3F8F6B/i);
     expect(segs[1]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
-    expect(segs[2]?.style.background).toMatch(/63,\s*143,\s*107|#3F8F6B/i);
+    expect(segs[2]?.style.background).toMatch(/196,\s*92,\s*58|#C45C3A/i);
   });
 
   it("reacts immediately when Settings betSizeDisplay changes", () => {

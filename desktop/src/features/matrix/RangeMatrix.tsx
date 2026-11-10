@@ -108,6 +108,7 @@ export function useMeasuredSquareSide(
   return useMeasuredAspectSize(wrapRef, 1).width;
 }
 
+/** Inclusion weight 0–1 → dark green (empty) to bright green (full range). */
 function rangeFill(weight: number): string {
   const t = Math.max(0, Math.min(1, weight));
   const r = Math.round(36 + (46 - 36) * t);
@@ -116,6 +117,10 @@ function rangeFill(weight: number): string {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+/**
+ * EV relative to `scale` (the grid's max |EV|): green when positive, red when
+ * negative. `scale` keeps one extreme cell at full saturation.
+ */
 function evFill(value: number, scale: number): string {
   if (!(scale > 0)) {
     return "var(--secondary)";
@@ -129,6 +134,7 @@ function evFill(value: number, scale: number): string {
   return `rgb(${160 + a}, ${70}, ${65})`;
 }
 
+/** Equity 0–1 → dull blue to bright blue. */
 function equityFill(equity: number): string {
   const t = Math.max(0, Math.min(1, equity));
   const r = Math.round(40 + (36 - 40) * t);
@@ -137,6 +143,7 @@ function equityFill(equity: number): string {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+/** Largest |mixed EV| on this grid. Feeds `evFill` so colors use the full range. */
 function maxAbsEv(
   cells: AggregatedHandCell[],
   node: NodePayload,
@@ -153,6 +160,10 @@ function maxAbsEv(
   return max || 1;
 }
 
+/**
+ * Partial-inclusion outline is only meaningful on a solid range fill.
+ * Strategy modes paint action bars instead, so the outline stays off.
+ */
 function usesRangeWeightFill(mode: MatrixMode): boolean {
   return mode === "range";
 }
@@ -375,6 +386,9 @@ function MatrixRow({
         const selected = selectedCell?.row === row && selectedCell?.col === col;
         const hovered = hoverCell?.row === row && hoverCell?.col === col;
 
+        // Paint outputs. `segments` = one horizontal strategy bar per action.
+        // `solid` = a single background (range weight, EV, or equity).
+        // Empty / excluded cells leave both unset and render the empty-cell color.
         let sub = "";
         let segments: Array<{ color: string; weight: number }> = [];
         let solid: string | null = null;
@@ -388,6 +402,8 @@ function MatrixRow({
         let cellEquity: number | null = null;
 
         if (!empty && cell) {
+          // Strategy modes: bar width is the mix, color is the action palette,
+          // ordered passive → aggressive so the same action sits in the same slot.
           const showStrategy =
             matrixMode === "strategy" || matrixMode === "strategy-ev";
           if (showStrategy) {
@@ -403,6 +419,8 @@ function MatrixRow({
             actionMixing = hasWithinHandActionMixing(cell);
           }
 
+          // Range: brightness is inclusion. EV: one red/green fill plus a chip.
+          // strategy-ev keeps the bars above and only adds the EV as `sub`.
           if (matrixMode === "range") {
             const weight = inclusion ?? 0;
             solid = rangeFill(weight);
@@ -428,6 +446,8 @@ function MatrixRow({
             }
           }
 
+          // Overlay text. EV is filled here only when the mode didn't set it
+          // (strategy, range). Equity is separate so "both" can show both.
           if (
             displayPrefs.cellOverlay !== "none" &&
             (displayPrefs.cellOverlay === "ev" ||
@@ -462,6 +482,8 @@ function MatrixRow({
             }
           }
 
+          // Recolor a solid cell from the overlay. Strategy bars win: if
+          // `segments` is set, action colors stay and the overlay is text only.
           if (
             displayPrefs.colorByOverlay &&
             displayPrefs.cellOverlay !== "none" &&
@@ -481,6 +503,8 @@ function MatrixRow({
             }
           }
 
+          // Selected action: dim cells that barely use it, outline the rest.
+          // With no overlay, the sublabel becomes that action's share of the cell.
           if (actionFilter != null && cell.actionMass.length) {
             const share =
               cell.marginalSum > 0
@@ -499,6 +523,9 @@ function MatrixRow({
           partialInclusion = false;
         }
 
+        // Height fill anchors color to the bottom of the cell. The button stays
+        // the empty-cell color; `--weight-fill` is the inclusion fraction (0–1).
+        // EV mode is excluded: its color is the full-cell background, not a bar.
         const useHeightFill =
           displayPrefs.rangeWeightHeightFill &&
           !empty &&
@@ -528,6 +555,9 @@ function MatrixRow({
             data-weight-fill={useHeightFill ? "true" : "false"}
             data-measure={measure}
             style={
+              // Height fill: CSS reads --weight-fill as the filled fraction.
+              // Otherwise a solid color paints the whole button (EV / equity /
+              // range with height fill off). Strategy-only cells have no solid.
               useHeightFill
                 ? ({
                     ["--weight-fill" as string]: String(fillFrac),
@@ -541,6 +571,9 @@ function MatrixRow({
             onClick={() => setSelectedCell({ row, col, text })}
             title={title}
           >
+            {/* Height fill: bars or the solid tint sit in a bottom-anchored box
+                (.matrix-cell__weight-fill). Otherwise strategy bars fill the cell.
+                EV with height fill off has neither child — color is the button. */}
             {useHeightFill ? (
               <div className="matrix-cell__weight-fill">
                 {segments.length > 0 ? (
