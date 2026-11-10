@@ -151,12 +151,18 @@ describe("StudyAssistantWindow apply UX", () => {
   });
 
   async function sendPrompt(user: ReturnType<typeof userEvent.setup>, text: string) {
-    const box = screen.getByPlaceholderText(/Ask anything/i);
+    const box = screen.getByPlaceholderText(/Type your question or request here/i);
     await user.click(box);
     await user.clear(box);
     await user.paste(text);
     await user.click(screen.getByRole("button", { name: /^Send$/i }));
   }
+
+  it("shows a professional compose placeholder with the send shortcut", () => {
+    render(<StudyAssistantWindow />);
+    const box = screen.getByPlaceholderText(/Type your question or request here/i);
+    expect(box.getAttribute("placeholder")).toMatch(/Press (⌘↩|Ctrl\+Enter) to send\./);
+  });
 
   it("auto-applies a scalar pot edit with a receipt and Undo", async () => {
     turnMock.mockResolvedValue(scalarPotOutcome(0));
