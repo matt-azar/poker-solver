@@ -23,6 +23,33 @@ export interface CategorySeatView {
   rows: Array<{ name: string; fraction: number; mass: number | null }>;
 }
 
+const CATEGORY_LABEL_ACRONYMS: Record<string, string> = {
+  oesd: "OESD",
+};
+
+const CATEGORY_LABEL_SMALL = new Set(["a", "an", "and", "of", "the"]);
+
+/** Title-case explorer category ids for Study display (OESD stays an acronym). */
+export function formatCategoryLabel(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return name;
+  }
+  const lower = trimmed.toLowerCase();
+  if (CATEGORY_LABEL_ACRONYMS[lower]) {
+    return CATEGORY_LABEL_ACRONYMS[lower]!;
+  }
+  return lower
+    .split(/\s+/)
+    .map((word, index) => {
+      if (index > 0 && CATEGORY_LABEL_SMALL.has(word)) {
+        return word;
+      }
+      return word.replace(/^[a-z]/, (ch) => ch.toUpperCase());
+    })
+    .join(" ");
+}
+
 /** Map explorer categories payload (parallel arrays or legacy record) to rows. */
 export function categorySeatView(
   names: string[] | null | undefined,
@@ -53,7 +80,7 @@ export function categorySeatView(
       defined,
       totalMass,
       rows: list.map((name, index) => ({
-        name,
+        name: formatCategoryLabel(name),
         fraction: Number(fractionList[index] ?? 0) || 0,
         mass: masses ? Number(masses[index] ?? 0) || 0 : null,
       })),
@@ -65,7 +92,7 @@ export function categorySeatView(
       defined,
       totalMass,
       rows: Object.entries(seat.fractions).map(([name, fraction]) => ({
-        name,
+        name: formatCategoryLabel(name),
         fraction: Number(fraction) || 0,
         mass: null,
       })),
@@ -188,6 +215,54 @@ export function filteredEquityComposition(
     shapes,
     topHands,
   };
+}
+
+/** One point on a weight-sorted equity distribution curve (GTO Wizard style). */
+export interface EquityChartPoint {
+  /** Range percentile from weakest (0) to strongest (100). */
+  percentile: number;
+  /** Hand equity as a fraction in [0, 1]. */
+  equity: number;
+}
+
+/**
+ * Build a stepped equity-vs-percentile curve from check-down hands.
+ * Hands are sorted by equity ascending; x advances by weight mass.
+ */
+export function buildEquityChartCurve(
+  hands: EquityHandRow[] | null | undefined,
+): EquityChartPoint[] {
+  if (!hands?.length) {
+    return [];
+  }
+  const rows = hands
+    .map((hand) => ({
+      equity: Number(hand.equity),
+      weight: Math.max(0, Number(hand.weight) || 0),
+    }))
+    .filter((row) => row.weight > 0 && Number.isFinite(row.equity));
+  if (!rows.length) {
+    return [];
+  }
+  rows.sort((left, right) => left.equity - right.equity);
+  const totalWeight = rows.reduce((sum, row) => sum + row.weight, 0);
+  if (!(totalWeight > 0)) {
+    return [];
+  }
+  const points: EquityChartPoint[] = [];
+  let cumulative = 0;
+  for (const row of rows) {
+    const start = (cumulative / totalWeight) * 100;
+    if (!points.length || points[points.length - 1]!.percentile !== start) {
+      points.push({ percentile: start, equity: row.equity });
+    } else {
+      points[points.length - 1]!.equity = row.equity;
+    }
+    cumulative += row.weight;
+    const end = (cumulative / totalWeight) * 100;
+    points.push({ percentile: end, equity: row.equity });
+  }
+  return points;
 }
 
 export interface LibraryRangeEntry {
