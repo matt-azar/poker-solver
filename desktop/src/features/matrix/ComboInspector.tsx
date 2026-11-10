@@ -1,9 +1,9 @@
 /**
  * Hands panel — per-combo tiles for the hovered/selected hand class.
  *
- * Each present tile paints action rows as horizontal bands whose height is
- * proportional to that action's frequency (GTO Wizard Hands). Silver fill +
- * per-shape type sizes (suited/pair/offsuit) live in styles/layout.css.
+ * Paint is vertical side-by-side action bands (width ∝ frequency), clipped by
+ * --mass-fill from the bottom. Action/EV text is a separate bottom-locked
+ * overlay — not tied to band geometry. Type sizes live in layout.css.
  */
 import { useEffect, useMemo } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
@@ -297,6 +297,25 @@ export function ComboInspector() {
                   style={{ ["--mass-fill" as string]: String(massFill) }}
                   title={square.combo}
                 >
+                  {/* Vertical action bands: width ∝ frequency; height from --mass-fill. */}
+                  <div className="hands-combo__weight-fill">
+                    {segments.length > 0 ? (
+                      <div className="hands-combo__segments">
+                        {segments.map((entry) => (
+                          <span
+                            key={entry.label}
+                            className="hands-combo__seg"
+                            title={`${entry.label} ${(entry.probability * 100).toFixed(0)}%`}
+                            style={{
+                              flexGrow: entry.probability,
+                              flexBasis: 0,
+                              background: entry.color,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                   <div className="hands-combo__body">
                     <div className="hands-combo__top">
                       <span className="hands-combo__badge" title={square.combo}>
@@ -320,53 +339,44 @@ export function ComboInspector() {
                       <span className="hands-combo__metric-tag">{metricLabel}</span>
                     </div>
                     {square.present ? (
-                      <div className="hands-combo__weight-fill">
-                        <div className="hands-combo__metrics">
-                          {segments.map((entry) => {
-                            const display = formatActionDisplay(
-                              entry.label,
-                              pot,
-                              betSizeDisplay === "chips" ? "chips" : "pot",
-                              { toCall },
-                            );
-                            let valueText = "—";
-                            if (showEv) {
-                              valueText = formatEvChip(
-                                actionEvs?.[entry.index] ?? null,
-                              );
-                            } else if (showFreq) {
-                              valueText =
-                                formatFrequencyPct(entry.probability, 0) ?? "—";
-                            }
-                            return (
-                              <div
-                                key={`${square.combo}-metric-${entry.index}`}
-                                className="hands-combo__metric-row"
-                                title={`${entry.label} ${(entry.probability * 100).toFixed(0)}%`}
-                                style={{
-                                  flexGrow: entry.probability,
-                                  flexBasis: 0,
-                                  background: entry.color,
-                                }}
-                              >
-                                <span className="hands-combo__metric-action">
-                                  {display.primary}
-                                </span>
-                                <span className="hands-combo__metric-value tabular">
-                                  {valueText}
-                                </span>
-                              </div>
-                            );
-                          })}
-                          {showEq ? (
-                            <div className="hands-combo__metric-row hands-combo__metric-row--eq">
-                              <span className="hands-combo__metric-action">Eq</span>
+                      <div className="hands-combo__metrics">
+                        {actionOrder.map((index) => {
+                          const label = actions[index]!;
+                          const display = formatActionDisplay(
+                            label,
+                            pot,
+                            betSizeDisplay === "chips" ? "chips" : "pot",
+                            { toCall },
+                          );
+                          const freq = freqByLabel.get(label) ?? 0;
+                          let valueText = "—";
+                          if (showEv) {
+                            valueText = formatEvChip(actionEvs?.[index] ?? null);
+                          } else if (showFreq) {
+                            valueText = formatFrequencyPct(freq, 0) ?? "—";
+                          }
+                          return (
+                            <div
+                              key={`${square.combo}-metric-${index}`}
+                              className="hands-combo__metric-row"
+                            >
+                              <span className="hands-combo__metric-action">
+                                {display.primary}
+                              </span>
                               <span className="hands-combo__metric-value tabular">
-                                {formatEquityPct(square.equity)}
+                                {valueText}
                               </span>
                             </div>
-                          ) : null}
-                        </div>
+                          );
+                        })}
+                        {showEq ? (
+                          <div className="hands-combo__metric-row hands-combo__metric-row--eq">
+                            <span className="hands-combo__metric-action">Eq</span>
+                            <span className="hands-combo__metric-value tabular">
+                              {formatEquityPct(square.equity)}
+                            </span>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>

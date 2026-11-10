@@ -127,15 +127,15 @@ describe("ComboInspector", () => {
     const present = document.querySelector(
       '.hands-combo[data-present="true"]',
     ) as HTMLElement;
-    const rows = [
-      ...present.querySelectorAll(
-        ".hands-combo__weight-fill .hands-combo__metric-row:not(.hands-combo__metric-row--eq)",
-      ),
+    const segs = [
+      ...present.querySelectorAll(".hands-combo__weight-fill .hands-combo__seg"),
     ] as HTMLElement[];
-    expect(rows.length).toBeGreaterThan(0);
-    // Bet (aggressive) should be the topmost frequency-weighted band (#C9843F → rgb).
-    expect(rows[0]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
-    expect(Number(rows[0]?.style.flexGrow)).toBeGreaterThan(0);
+    expect(segs.length).toBeGreaterThan(0);
+    // Bet (aggressive) should be the left-most vertical band (#C9843F → rgb).
+    expect(segs[0]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
+    expect(Number(segs[0]?.style.flexGrow)).toBeGreaterThan(0);
+    // Metrics stay bottom-locked overlay — not painted onto segments.
+    expect(present.querySelector(".hands-combo__body .hands-combo__metrics")).toBeTruthy();
     expect(present.querySelector(".hands-combo__metric-action")?.textContent).toMatch(
       /b50|Bet/i,
     );
@@ -201,18 +201,18 @@ describe("ComboInspector", () => {
     ).toBe("offsuit");
   });
 
-  it("sizes action bands by frequency and sets data-shape for 4/6/12 grids", () => {
+  it("uses vertical bands by width and sets data-shape for 4/6/12 grids", () => {
     render(<ComboInspector />);
     expect(
       document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
     ).toBe("pair");
-    const pairRows = [
+    const segs = [
       ...document.querySelectorAll(
-        '.hands-combo[data-present="true"] .hands-combo__metric-row:not(.hands-combo__metric-row--eq)',
+        '.hands-combo[data-present="true"] .hands-combo__seg',
       ),
     ] as HTMLElement[];
-    expect(pairRows.length).toBeGreaterThan(0);
-    expect(pairRows.every((row) => Number(row.style.flexGrow) > 0)).toBe(true);
+    expect(segs.length).toBeGreaterThan(0);
+    expect(segs.every((seg) => Number(seg.style.flexGrow) > 0)).toBe(true);
     cleanup();
 
     useStudyStore.setState({
@@ -237,7 +237,7 @@ describe("ComboInspector", () => {
     expect(document.querySelectorAll(".hands-combo")).toHaveLength(4);
   });
 
-  it("gives taller bands to higher-frequency actions", () => {
+  it("gives wider vertical bands to higher-frequency actions", () => {
     useStudyStore.setState({
       currentNode: {
         node_id: "p0",
@@ -251,15 +251,21 @@ describe("ComboInspector", () => {
       nodeValues: null,
     });
     render(<ComboInspector />);
-    const rows = [
+    const segs = [
       ...document.querySelectorAll(
-        '.hands-combo[data-present="true"] .hands-combo__metric-row:not(.hands-combo__metric-row--eq)',
+        '.hands-combo[data-present="true"] .hands-combo__seg',
       ),
     ] as HTMLElement[];
-    // Aggression order: Bet first, then Check.
-    expect(rows).toHaveLength(2);
-    expect(Number(rows[0]?.style.flexGrow)).toBeCloseTo(0.75);
-    expect(Number(rows[1]?.style.flexGrow)).toBeCloseTo(0.25);
+    // Aggression order: Bet left, then Check.
+    expect(segs).toHaveLength(2);
+    expect(Number(segs[0]?.style.flexGrow)).toBeCloseTo(0.75);
+    expect(Number(segs[1]?.style.flexGrow)).toBeCloseTo(0.25);
+    // Text list stays in the body overlay, not inside segments.
+    expect(
+      document.querySelectorAll(
+        ".hands-combo__body .hands-combo__metric-row:not(.hands-combo__metric-row--eq)",
+      ),
+    ).toHaveLength(2);
   });
 
   it("shows check-down equity in Hands when equity overlay is on", () => {
