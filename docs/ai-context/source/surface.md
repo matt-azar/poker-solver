@@ -19,6 +19,7 @@ Visible on Build today:
 - Board, pot, stack, max raises
 - Betting tree: flop/turn/river OOP & IP **bets** and **raises**
 - **Turn donk** and **River donk** size fields only (Build has no donk size control on the flop)
+- **Save tree** / **Open tree** for betting sizes, caps, and `tree_edits` (JSON download / file picker; leaves board, ranges, and stop alone)
 - Pot cap, merge threshold (%), No 3-bet
 - Stop: iterations, accuracy (pot fraction), time limit (s)
 - Ranges: paint grids, Catalogue (seat×action tree), range text, Swap / Undo / Redo / Clear

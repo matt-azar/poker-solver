@@ -2581,6 +2581,26 @@
   color: var(--muted);
 }
 
+/* Betting-tree heading with Save tree / Open tree actions. */
+.build-subhead-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.build-subhead-row .build-subhead {
+  margin: 0;
+}
+
+.build-subhead-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* Header above one seat's range editor. */
 .range-editor__head {
   display: flex;

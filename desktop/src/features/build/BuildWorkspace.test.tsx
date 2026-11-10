@@ -114,6 +114,49 @@ describe("BuildWorkspace range tools", () => {
     expect(screen.queryByText(/Blank bet = check only/)).toBeNull();
     expect(screen.getByLabelText(/Flop OOP bets/).getAttribute("placeholder")).toBeNull();
     expect(screen.getByLabelText(/Turn donk/).getAttribute("placeholder")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save tree" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open tree" })).toBeTruthy();
+  });
+
+  it("opens a saved betting tree into sizes and edits without touching board or ranges", async () => {
+    const user = userEvent.setup();
+    useStudyStore.setState({
+      draft: {
+        ...useStudyStore.getState().draft,
+        boardText: "Ah Kd 2c",
+        oopRange: "AA,KK",
+        ipRange: "QQ+",
+        oopFlop: "25",
+        treeEdits: [],
+      },
+    });
+    render(<BuildWorkspace />);
+    const file = new File(
+      [
+        JSON.stringify({
+          format: "holdem-study-betting-tree",
+          version: 1,
+          name: "test tree",
+          tree: {
+            oopFlop: "33, 75",
+            ipFlop: "50",
+            potCap: 3,
+            treeEdits: ["force - c"],
+          },
+        }),
+      ],
+      "tree.json",
+      { type: "application/json" },
+    );
+    await user.upload(screen.getByLabelText("Open betting tree file"), file);
+    const draft = useStudyStore.getState().draft;
+    expect(draft.oopFlop).toBe("33, 75");
+    expect(draft.ipFlop).toBe("50");
+    expect(draft.potCap).toBe(3);
+    expect(draft.treeEdits).toEqual(["force - c"]);
+    expect(draft.boardText).toBe("Ah Kd 2c");
+    expect(draft.oopRange).toBe("AA,KK");
+    expect(draft.ipRange).toBe("QQ+");
   });
 
   it("lets the user type a paint weight into a number field", async () => {
