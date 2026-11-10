@@ -26,6 +26,7 @@ class ResizeObserverMock {
 vi.stubGlobal("ResizeObserver", ResizeObserverMock);
 
 const { useStudyStore } = await import("../../state/studyStore");
+const { clampDockHeight } = await import("../../state/layoutStore");
 const { RangeMatrix, fitAspectSize, SINGLE_MATRIX_WIDTH_OVER_HEIGHT } = await import(
   "./RangeMatrix"
 );
@@ -176,5 +177,33 @@ describe("RangeMatrix single-layout size", () => {
     const grid = screen.getByRole("grid", { name: /Hand range matrix/ });
     expect(grid.style.width).toBe("100%");
     expect(grid.style.height).toBe("100%");
+  });
+
+  it("stops the column split at the top of the open analysis dock", () => {
+    useStudyStore.setState({
+      layout: {
+        ...useStudyStore.getState().layout,
+        dualRange: false,
+        lowerDock: true,
+        lowerDockHeight: 240,
+      },
+    });
+    render(<RangeMatrix />);
+    const handle = screen.getByRole("separator", { name: "Resize range matrix" });
+    expect(handle.style.bottom).toBe(`${clampDockHeight(240)}px`);
+  });
+
+  it("lets the column split fill the upper pane when the dock is closed", () => {
+    useStudyStore.setState({
+      layout: {
+        ...useStudyStore.getState().layout,
+        dualRange: false,
+        lowerDock: false,
+        lowerDockHeight: 240,
+      },
+    });
+    render(<RangeMatrix />);
+    const handle = screen.getByRole("separator", { name: "Resize range matrix" });
+    expect(handle.style.bottom).toBe("");
   });
 });
