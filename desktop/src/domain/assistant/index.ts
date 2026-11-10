@@ -13,12 +13,35 @@ export {
 export {
   ASSISTANT_CONTEXT_SNAPSHOT_VERSION,
   SELECTED_HAND_ANALYSIS_TOOL_SCHEMA,
+  STUDY_NODE_EVIDENCE_TOOL_NAMES,
   buildAssistantContextSnapshot,
   formatContextIndicator,
   summarizeContextSnapshot,
   type AssistantContextSnapshot,
   type BuildAssistantContextSnapshotInput,
 } from "./contextSnapshot";
+
+export {
+  ASSISTANT_EVIDENCE_LIMITS,
+  LIST_BLUFF_CANDIDATES_TOOL,
+  QUERY_NODE_STRATEGY_TOOL,
+  QUERY_SELECTED_HAND_TOOL,
+  STUDY_EVIDENCE_DEFERRED_TOOLS,
+  STUDY_EVIDENCE_TOOL_SCHEMAS,
+  executeStudyEvidenceTool,
+  findSeatDecisionNodeId,
+  isStudyEvidenceToolName,
+  listBluffCandidates,
+  looksLikeStudyEvidenceRequest,
+  queryNodeStrategy,
+  querySelectedHandAnalysis,
+  type BluffCandidatesEvidence,
+  type NodeStrategyEvidence,
+  type SelectedHandEvidence,
+  type StudyEvidenceHost,
+  type StudyEvidenceLiveState,
+  type StudyEvidenceSeat,
+} from "./studyEvidence";
 
 export {
   buildApplicationReceipt,
@@ -56,6 +79,7 @@ export {
 } from "./contextPacks";
 
 export {
+  ASSISTANT_EVIDENCE_TOOL_MAX_ROUNDS,
   FakeUnifiedChatClient,
   OpenAiUnifiedChatClient,
   createFakeUnifiedChatClient,

@@ -13,6 +13,8 @@ import {
   setupResultHasApplyablePatch,
   setupResultIsBroad,
   summarizeContextSnapshot,
+  type StudyEvidenceHost,
+  type StudyEvidenceLiveState,
 } from "../../domain/assistant";
 import { AssistantProviderError } from "../../domain/assistant/provider";
 import {
@@ -21,6 +23,7 @@ import {
   type SetupDraftResult,
   type StudySetupPreferences,
 } from "../../domain/setup";
+import { engineClient } from "../../engine/client";
 import {
   clearAssistantOpenAiCredential,
   describeCredentialSource,
@@ -68,7 +71,9 @@ export function StudyAssistantWindow() {
   const status = useStudyStore((s) => s.status);
   const phase = useStudyStore((s) => s.phase);
   const currentNode = useStudyStore((s) => s.currentNode);
+  const pathTrail = useStudyStore((s) => s.pathTrail);
   const nodeValues = useStudyStore((s) => s.nodeValues);
+  const equity = useStudyStore((s) => s.equity);
   const selectedCell = useStudyStore((s) => s.selectedCell);
   const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
   const applySetupDraft = useStudyStore((s) => s.applySetupDraft);
@@ -91,11 +96,45 @@ export function StudyAssistantWindow() {
     status,
     phase,
     currentNode,
+    pathTrail,
     nodeValues,
+    equity: (equity ?? null) as StudyEvidenceLiveState["equity"],
     selectedCell,
     evDisplayBasis,
   });
   const contextIndicator = formatContextIndicator(contextSnapshot);
+
+  function evidenceHost(): StudyEvidenceHost {
+    return {
+      read: (): StudyEvidenceLiveState => {
+        const state = useStudyStore.getState();
+        return {
+          solutionId: state.solutionId,
+          currentNode: state.currentNode,
+          nodeValues: state.nodeValues,
+          equity: (state.equity ?? null) as StudyEvidenceLiveState["equity"],
+          pathTrail: state.pathTrail,
+          selectedCell: state.selectedCell,
+          evDisplayBasis: state.evDisplayBasis,
+          status: state.status,
+        };
+      },
+      ensureNodeAnalysis: async () => {
+        await useStudyStore.getState().ensureNodeAnalysis();
+      },
+      navigateTo: async (nodeId: string) => {
+        // Behind-the-scenes: do not push Back/Forward history for assistant hops.
+        await useStudyStore.getState().navigateTo(nodeId, { history: "none" });
+      },
+      fetchNode: async (nodeId: string) => {
+        const sid = useStudyStore.getState().solutionId;
+        if (!sid) {
+          throw new Error("No published solution");
+        }
+        return engineClient.getNode(sid, nodeId);
+      },
+    };
+  }
 
   const [messages, setMessages] = useState<ChatLine[]>([]);
   const [draftText, setDraftText] = useState("");
@@ -216,6 +255,7 @@ export function StudyAssistantWindow() {
           getDraft: () => useStudyStore.getState().draft,
           getRevision: () => useStudyStore.getState().draftRevision,
           preferences: readPrefs(),
+          evidenceHost: evidenceHost(),
         },
       );
       let line = outcomeToLine(outcome);

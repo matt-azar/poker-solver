@@ -3,6 +3,7 @@ import { DEFAULT_SPOT, type NodePayload, type SpotDraft } from "../types";
 import {
   ASSISTANT_CONTEXT_SNAPSHOT_VERSION,
   SELECTED_HAND_ANALYSIS_TOOL_SCHEMA,
+  STUDY_NODE_EVIDENCE_TOOL_NAMES,
   buildAssistantContextSnapshot,
   formatContextIndicator,
   summarizeContextSnapshot,
@@ -21,6 +22,7 @@ describe("buildAssistantContextSnapshot", () => {
     });
 
     expect(snapshot.version).toBe(ASSISTANT_CONTEXT_SNAPSHOT_VERSION);
+    expect(snapshot.version).toBe(2);
     expect(snapshot.units).toBe("bb");
     expect(snapshot.build.kind).toBe("build_draft");
     expect(snapshot.build.draftRevision).toBe(4);
@@ -43,6 +45,8 @@ describe("buildAssistantContextSnapshot", () => {
       kind: "decision",
       line: "root/Check",
       to_act: "IP",
+      player: 1,
+      board: ["As", "7d", "2c"],
       actions: ["Check", "Bet 50"],
       to_call: 0,
       pot: 55,
@@ -72,6 +76,24 @@ describe("buildAssistantContextSnapshot", () => {
       },
       phase: "complete",
       currentNode: node,
+      pathTrail: [
+        {
+          nodeId: "root",
+          label: "Root",
+          rawLabel: "Root",
+          kind: "root",
+          street: "flop",
+          actor: null,
+        },
+        {
+          nodeId: "n1",
+          label: "c",
+          rawLabel: "Check",
+          kind: "action",
+          street: "flop",
+          actor: "OOP",
+        },
+      ],
       selectedCell: { text: "AA" },
       nodeValues: {
         pending: false,
@@ -86,6 +108,13 @@ describe("buildAssistantContextSnapshot", () => {
         utility_basis: "root_centered",
         local_offset: 0,
       },
+      equity: {
+        pending: false,
+        ip_hands: [
+          { combo: "AsAh", equity: 0.61, weight: 1 },
+          { combo: "AsAd", equity: 0.59, weight: 1 },
+        ],
+      },
       evDisplayBasis: "local",
     });
 
@@ -94,20 +123,27 @@ describe("buildAssistantContextSnapshot", () => {
     expect(snapshot.publishedSolution.nashGap).toBe(0.012);
     expect(snapshot.studyNode.present).toBe(true);
     expect(snapshot.studyNode.nodeId).toBe("n1");
+    expect(snapshot.studyNode.seat).toBe("IP");
+    expect(snapshot.studyNode.board).toBe("As7d2c");
+    expect(snapshot.studyNode.path).toEqual(["Root", "c"]);
     expect(snapshot.studyNode.actions).toEqual(["Check", "Bet 50"]);
+    expect(snapshot.studyNode.strategy).not.toBeNull();
     expect(snapshot.selectedHand.present).toBe(true);
     expect(snapshot.selectedHand.label).toBe("AA");
     expect(snapshot.selectedHand.strategy).not.toBeNull();
     expect(snapshot.selectedHand.mixedEv).not.toBeNull();
+    expect(snapshot.selectedHand.equity).not.toBeNull();
     expect(snapshot.readiness.hasPublishedSolution).toBe(true);
     expect(snapshot.readiness.hasDecisionNode).toBe(true);
     expect(snapshot.readiness.strategyLoaded).toBe(true);
+    expect(snapshot.readiness.equityReady).toBe(true);
     expect(snapshot.readiness.convergenceAvailable).toBe(true);
     expect(formatContextIndicator(snapshot)).toBe(
       "Context: Build draft / Study node / selected hand",
     );
     expect(summarizeContextSnapshot(snapshot)).toContain("hand=AA");
     expect(summarizeContextSnapshot(snapshot)).toContain("solution=sol-9");
+    expect(summarizeContextSnapshot(snapshot)).toContain("seat=IP");
   });
 
   it("states missing EV evidence honestly when values are pending", () => {
@@ -138,9 +174,11 @@ describe("buildAssistantContextSnapshot", () => {
     ).toBe(true);
   });
 
-  it("exposes a snapshot-only selected-hand tool schema without solve/filesystem tools", () => {
+  it("exposes bounded Study evidence tools without solve/filesystem tools", () => {
     expect(SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.name).toBe("query_selected_hand_analysis");
-    expect(SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.status).toBe("snapshot_only");
+    expect(SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.status).toBe("bounded_read");
     expect(SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.deferredTools).toContain("compare_runouts");
+    expect(STUDY_NODE_EVIDENCE_TOOL_NAMES).toContain("query_node_strategy");
+    expect(STUDY_NODE_EVIDENCE_TOOL_NAMES).toContain("list_bluff_candidates");
   });
 });
