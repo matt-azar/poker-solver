@@ -2678,7 +2678,12 @@
   border: 0;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   font-size: clamp(8px, 2.3cqmin, 14px);
+  line-height: 1.05;
   padding: 0;
   background: var(--empty-cell);
   color: var(--text);
@@ -2687,9 +2692,28 @@
   cursor: crosshair;
 }
 
+/* Hand class id inside a Build paint cell. */
+.paint-cell__hand {
+  pointer-events: none;
+}
+
+/* Fractional cell weight under the hand id (strictly between 0 and 1). */
+.paint-cell__weight {
+  font-size: 0.72em;
+  font-weight: 500;
+  color: var(--muted);
+  line-height: 1;
+  pointer-events: none;
+}
+
 /* One paintable hand-class cell in Build. (active). */
 .paint-cell[data-on="true"] {
   color: #fff;
+}
+
+/* Keep the weight gray even when the hand id turns white. */
+.paint-cell[data-on="true"] .paint-cell__weight {
+  color: var(--muted);
 }
 
 /* Collapsible Preview tree heading control. */
