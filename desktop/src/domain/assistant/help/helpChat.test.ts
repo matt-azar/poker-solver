@@ -29,13 +29,22 @@ describe("ai context packs", () => {
 });
 
 describe("FakeHelpChatClient", () => {
-  it("points setup-style questions at the Study assistant", async () => {
+  it("answers how-to setup questions without forcing a Build write", async () => {
     const client = createFakeHelpChatClient();
     const reply = await client.ask({
       question: "How do I set up CO vs BB SRP with 100NL ranges?",
     });
     expect(reply.provider).toBe("fake");
-    expect(reply.message).toMatch(/Study assistant/i);
+    expect(reply.message).toMatch(/Build/i);
+    expect(reply.message).toMatch(/Set up CO vs BB SRP/i);
+  });
+
+  it("points players to Compare runouts for river-card questions", async () => {
+    const client = createFakeHelpChatClient();
+    const reply = await client.ask({
+      question: "Where can I compare river cards?",
+    });
+    expect(reply.message).toMatch(/Compare runouts/i);
   });
 
   it("answers solve-control questions", async () => {

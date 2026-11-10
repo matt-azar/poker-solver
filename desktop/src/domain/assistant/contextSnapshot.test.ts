@@ -146,6 +146,29 @@ describe("buildAssistantContextSnapshot", () => {
     expect(summarizeContextSnapshot(snapshot)).toContain("seat=IP");
   });
 
+  it("does not fill published or node boards from the Build draft", () => {
+    const node: NodePayload = {
+      node_id: "n-board",
+      kind: "decision",
+      actions: ["Check"],
+      combos: ["AsAh"],
+      reach: [1],
+      marginal: [1],
+      reach_defined: true,
+      strategy: [[1]],
+    };
+    const snapshot = buildAssistantContextSnapshot({
+      draft: draft({ boardText: "Kh9d2c" }),
+      draftRevision: 1,
+      solutionId: "sol-board",
+      status: { solution_id: "sol-board" },
+      currentNode: node,
+    });
+    expect(snapshot.build.board).toBe("Kh9d2c");
+    expect(snapshot.publishedSolution.board).toBeNull();
+    expect(snapshot.studyNode.board).toBeNull();
+  });
+
   it("states missing EV evidence honestly when values are pending", () => {
     const node: NodePayload = {
       node_id: "n2",

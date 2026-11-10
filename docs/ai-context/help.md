@@ -34,6 +34,27 @@ For the full unified role (Q&A + mutating setup), see `unified.md`.
 - **Equity**: fraction of pot — **not** chip EV. Study shows equity to a tenth of a percent.
 - Locks: 0% inside a row that sums to 1 is a constraint; unlock is DELETE; all-zero rows rejected.
 
+## Short how-to workflows (exact UI labels)
+
+| Player question | Minimum steps |
+| --- | --- |
+| “Why does folding show 0 EV?” | Local EV uses folding now as the zero point. Open the **Settings** gear → **EV display** → **Global EV (root-centered)** to show EV on the root basis. |
+| “Where do I see hand EV and equity?” | In **Study**, open a decision, choose **Overlay → EV+Eq**, and select a hand for details. Study starts loading EV and equity automatically on decision nodes. If a number is pending, say so. |
+| “Which river cards are best for IP on this line?” | Open a river decision on that line and use **Compare runouts**. The report varies the river card while holding the betting line fixed. Check the displayed seat before interpreting the numbers. Give the navigation; leave ranking to the report. |
+| “What does Accuracy mean?” | Accuracy is the average of the two best-response gains, or NashConv divided by two. The Build target is a fraction of the pot in ordinary chip-EV solves. Enter `0.005` for 0.5% of pot. |
+| “Why is equity higher than EV?” | Equity is a share of the pot. EV measures expected utility in the solve, with future actions and the displayed reference point. Explain the different units before comparing the hand's figures. |
+| “Where can I compare river cards?” | From a river decision in **Study**, open **Compare runouts**. |
+
+## When analysis is unavailable
+
+Give the applicable reason and one next action:
+
+- Build draft only → Study evidence appears after solving or opening a solution.
+- Deal / chance node → open a decision for action EV.
+- Specific missing hand → select its matrix cell.
+- Permanent analysis error → surface the tool's actual reason (work/memory limit, etc.).
+- Product and general poker help still work without a published solution.
+
 ## Credentials / AI
 
 - OpenAI required in the product UI for the Study assistant. Keys may live in Tauri app-config secrets or browser `localStorage` demos — never bundled.
@@ -74,12 +95,14 @@ Not mounted as Build form controls (but still draft fields the assistant may wri
 
 ### Settings (Solve section)
 
-Settings dialog (menu **Settings → Open settings…**): algorithm (`cfr_plus` | `cfr` | `dcfr`), samples, threads, memory MiB, solution path, incentives, edge tags, ICM stacks/payouts, display prefs (theme, EV local/global, bet-size labels).
+Settings dialog (menu **Settings → Open settings…**): algorithm (`cfr_plus` | `cfr` | `dcfr`), samples, threads, memory MiB, solution path, incentives, edge tags, ICM stacks/payouts, display prefs (theme, **EV display** Local / **Global EV (root-centered)**, bet-size labels).
 
 ### Study / other
 
-- Study: action history, range matrix, combo inspector, lower analysis dock (runouts, equity hist, categories, Value / Bluffs).
-- The floating Study assistant can read the live Study node (path, seat, strategy, selected hand) and list Value / Bluffs-style bluff candidates for IP/OOP via bounded read-only tools; it may hop a couple of nodes and reuse the analysis scheduler, but it does not Solve.
+- Study: action history, range matrix (**Overlay → EV+Eq** among overlays), combo inspector, lower analysis dock (**Compare runouts**, equity hist, categories, **Value / Bluffs**).
+- **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers.
+- **Value / Bluffs** lists betting candidates; equity mode includes node equity and **After call** (panel-only; assistant bluff candidates use node equity).
+- The floating Study assistant reads the **current** Study decision (path, seat, strategy, selected hand) and list Value / Bluffs-style **bluff candidates** for IP/OOP via bounded read-only tools. It reuses the analysis scheduler and does **not** change Study selection or Solve.
 - Solve / Pause / Continue / Stop from Solve menu or shortcuts (`S` solve when connected + draft valid).
 - File → Save / Open — PSOL solutions; Library lists recent solutions and templates.
 - Locks: Tree → Node locking… . Strategy edits: separate drawer.

@@ -33,12 +33,14 @@ Not mounted as Build form controls (but still draft fields the assistant may wri
 
 ### Settings (Solve section)
 
-Settings dialog (menu **Settings → Open settings…**): algorithm (`cfr_plus` | `cfr` | `dcfr`), samples, threads, memory MiB, solution path, incentives, edge tags, ICM stacks/payouts, display prefs (theme, EV local/global, bet-size labels).
+Settings dialog (menu **Settings → Open settings…**): algorithm (`cfr_plus` | `cfr` | `dcfr`), samples, threads, memory MiB, solution path, incentives, edge tags, ICM stacks/payouts, display prefs (theme, **EV display** Local / **Global EV (root-centered)**, bet-size labels).
 
 ### Study / other
 
-- Study: action history, range matrix, combo inspector, lower analysis dock (runouts, equity hist, categories, Value / Bluffs).
-- The floating Study assistant can read the live Study node (path, seat, strategy, selected hand) and list Value / Bluffs-style bluff candidates for IP/OOP via bounded read-only tools; it may hop a couple of nodes and reuse the analysis scheduler, but it does not Solve.
+- Study: action history, range matrix (**Overlay → EV+Eq** among overlays), combo inspector, lower analysis dock (**Compare runouts**, equity hist, categories, **Value / Bluffs**).
+- **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers.
+- **Value / Bluffs** lists betting candidates; equity mode includes node equity and **After call** (panel-only; assistant bluff candidates use node equity).
+- The floating Study assistant reads the **current** Study decision (path, seat, strategy, selected hand) and list Value / Bluffs-style **bluff candidates** for IP/OOP via bounded read-only tools. It reuses the analysis scheduler and does **not** change Study selection or Solve.
 - Solve / Pause / Continue / Stop from Solve menu or shortcuts (`S` solve when connected + draft valid).
 - File → Save / Open — PSOL solutions; Library lists recent solutions and templates.
 - Locks: Tree → Node locking… . Strategy edits: separate drawer.

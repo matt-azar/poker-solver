@@ -1,9 +1,10 @@
 /**
  * Bounded Study-page evidence tools for the floating assistant.
  *
- * Read-only: strategy / bluff listing / selected-hand summary. May navigate a
- * few hops and wait on the existing analysis scheduler. Never starts a solve,
- * opens the filesystem, or performs unrestricted HTTP.
+ * Read-only: strategy / bluff listing / selected-hand summary at the **current**
+ * Study decision. May wait on the existing analysis scheduler. Never starts a
+ * solve, opens the filesystem, performs unrestricted HTTP, or changes Study
+ * selection to discover another seat/branch.
  */
 import {
   actorLabel,
@@ -22,6 +23,8 @@ import {
 import {
   DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD,
   listValueBluffs,
+  MIN_VALUE_BLUFFS_BET_FREQ,
+  MIN_VALUE_BLUFFS_REACH_MASS,
   type ValueBluffsSortKey,
 } from "../valueBluffs";
 import type {
@@ -64,8 +67,8 @@ export interface StudyEvidenceHost {
   /** Warm EV + equity via Study's analysis scheduler (user/auto priority). */
   ensureNodeAnalysis: () => Promise<void>;
   /**
-   * Bounded behind-the-scenes navigation. Prefer history:"none" in the store
-   * wrapper so assistant hops do not spam Back/Forward.
+   * Optional navigation hook kept for callers/tests. Evidence tools in this
+   * pass do **not** call it — the player chooses branches in Study.
    */
   navigateTo: (nodeId: string) => Promise<void>;
   /** Optional peek without changing Study selection (engine getNode). */
@@ -75,7 +78,7 @@ export interface StudyEvidenceHost {
 export const QUERY_NODE_STRATEGY_TOOL = {
   name: "query_node_strategy",
   description:
-    "Read-only posterior action mix for IP or OOP at the current Study decision (or a nearby decision after at most 2 behind-the-scenes hops). Does not start a solve.",
+    "Read-only posterior action mix for IP or OOP at the **current** Study decision. Does not navigate Study or start a solve. If the selected node is not that seat to act, returns an absence (and a short path hint when peek is available).",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -92,7 +95,7 @@ export const QUERY_NODE_STRATEGY_TOOL = {
 export const LIST_BLUFF_CANDIDATES_TOOL = {
   name: "list_bluff_candidates",
   description:
-    "List betting bluff candidates for IP or OOP at the current (or nearby) decision: combo, bet frequency, EV when loaded, equity when loaded. Uses the Value/Bluffs join (strategy + equity + values). Fetches missing EV/equity only through the Study analysis scheduler. Does not start a solve.",
+    "List betting **bluff candidates** for IP or OOP at the **current** Study decision: combo, bet frequency, EV when loaded, node equity when loaded. Default filter matches Study Value/Bluffs (node equity < 30%, min bet freq / reach). Does not navigate Study or start a solve. For After-call equity, point the player to the Study Value/Bluffs panel.",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -100,7 +103,7 @@ export const LIST_BLUFF_CANDIDATES_TOOL = {
       seat: {
         type: "string",
         enum: ["IP", "OOP"],
-        description: "Seat to list bluffs for. Defaults to the acting seat.",
+        description: "Seat to list bluff candidates for. Defaults to the acting seat.",
       },
       limit: {
         type: "integer",
@@ -113,7 +116,7 @@ export const LIST_BLUFF_CANDIDATES_TOOL = {
         minimum: 0,
         maximum: 1,
         description:
-          "Exclusive equity upper bound for bluffs (default 0.30, same as Study Value/Bluffs).",
+          "Exclusive node-equity upper bound for bluff candidates (default 0.30, same as Study Value/Bluffs).",
       },
       sortBy: {
         type: "string",
@@ -127,7 +130,7 @@ export const LIST_BLUFF_CANDIDATES_TOOL = {
 export const QUERY_SELECTED_HAND_TOOL = {
   name: "query_selected_hand_analysis",
   description:
-    "Read-only summary of the currently selected matrix hand: strategy frequencies, mixed EV, and equity when already loaded or after a bounded scheduler wait. Does not start a solve, fetch runouts, or compare scenarios.",
+    "Read-only summary of the currently selected matrix hand at the current decision: strategy frequencies, mixed EV, per-action EV when loaded, and equity when loaded. Does not start a solve, fetch runouts, or compare scenarios.",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -161,9 +164,12 @@ export interface NodeStrategyEvidence {
   line: string | null;
   path: string[];
   actions: Array<{ action: string; frequency: number }>;
+  /** Always false in this pass — evidence never mutates Study selection. */
   navigated: boolean;
   hops: number;
   absences: string[];
+  /** Optional peeked path tip when the current node is the wrong seat. */
+  pathHint?: string | null;
 }
 
 export interface BluffCandidateRow {
@@ -182,12 +188,17 @@ export interface BluffCandidatesEvidence {
   line: string | null;
   path: string[];
   equityThreshold: number;
+  minBetFreq: number;
+  minReach: number;
+  /** Assistant bluffs use node equity — not Study "After call". */
+  equityMode: "node";
   sortBy: ValueBluffsSortKey;
   rows: BluffCandidateRow[];
   truncated: boolean;
   navigated: boolean;
   hops: number;
   absences: string[];
+  pathHint?: string | null;
 }
 
 export interface SelectedHandEvidence {
@@ -196,6 +207,8 @@ export interface SelectedHandEvidence {
   nodeId: string | null;
   strategy: Array<{ action: string; frequency: number }> | null;
   mixedEv: number | null;
+  /** Per-action EV for comparing two actions (same units / basis as mixedEv). */
+  actionEv: Array<{ action: string; ev: number }> | null;
   equity: number | null;
   evBasis: EvDisplayBasis | null;
   absences: string[];
@@ -237,8 +250,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Prefer passive lines (Check, then Call) when hopping toward the other seat,
- * matching common “after check, IP…” study questions.
+ * Prefer passive lines (Check, then Call) when suggesting a nearby seat decision.
+ * Used only for path hints — never navigates Study.
  */
 function preferredChildIds(node: NodePayload): string[] {
   const choices = nextChoicesFromNode(node);
@@ -251,7 +264,7 @@ function preferredChildIds(node: NodePayload): string[] {
       else if (choice.kind === "action" && /^call\b/.test(label)) rank = 1;
       else if (choice.kind === "card") rank = 10;
       else if (choice.kind === "action" && /^(bet|raise|all)/.test(label)) rank = 20;
-      return { nodeId: choice.nodeId as string, rank };
+      return { nodeId: choice.nodeId as string, rank, label: choice.label };
     });
   scored.sort((left, right) => left.rank - right.rank);
   const seen = new Set<string>();
@@ -284,34 +297,36 @@ async function peekNode(
 
 /**
  * Find a decision node where `seat` acts, within maxNavHops of the live node.
- * Peeks via fetchNode when hopping; caller navigates once to the target.
+ * Peeks via fetchNode only — never changes Study selection.
  */
 export async function findSeatDecisionNodeId(
   host: StudyEvidenceHost,
   seat: StudyEvidenceSeat,
   maxHops = ASSISTANT_EVIDENCE_LIMITS.maxNavHops,
-): Promise<{ nodeId: string; hops: number } | { absence: string }> {
+): Promise<{ nodeId: string; hops: number; labels: string[] } | { absence: string }> {
   const start = host.read().currentNode;
   if (!start?.node_id) {
     return { absence: "No Study node selected — cannot read strategy." };
   }
   if (start.kind === "decision" && seatMatches(start, seat)) {
-    return { nodeId: start.node_id, hops: 0 };
+    return { nodeId: start.node_id, hops: 0, labels: [] };
   }
 
   if (!host.fetchNode) {
-    // Without peek, only try the first preferred child (one hop).
-    const childId = preferredChildIds(start)[0];
-    if (!childId || maxHops < 1) {
+    const choices = nextChoicesFromNode(start);
+    const preferred = preferredChildIds(start)[0];
+    if (!preferred || maxHops < 1) {
       return {
-        absence: `Current node is not ${seat} to act, and child peek is unavailable.`,
+        absence: `Current node is not ${seat} to act. Open a ${seat} decision in Study.`,
       };
     }
-    return { nodeId: childId, hops: 1 };
+    const label =
+      choices.find((choice) => choice.nodeId === preferred)?.label ?? preferred;
+    return { nodeId: preferred, hops: 1, labels: [label] };
   }
 
-  type QueueEntry = { nodeId: string; hops: number };
-  const queue: QueueEntry[] = [{ nodeId: start.node_id, hops: 0 }];
+  type QueueEntry = { nodeId: string; hops: number; labels: string[] };
+  const queue: QueueEntry[] = [{ nodeId: start.node_id, hops: 0, labels: [] }];
   const visited = new Set<string>([start.node_id]);
   const byId = new Map<string, NodePayload>([[start.node_id, start]]);
 
@@ -332,83 +347,119 @@ export async function findSeatDecisionNodeId(
       node.kind === "decision" &&
       seatMatches(node, seat)
     ) {
-      return { nodeId: node.node_id, hops: current.hops };
+      return { nodeId: node.node_id, hops: current.hops, labels: current.labels };
     }
     if (current.hops >= maxHops) {
       continue;
     }
+    const choices = nextChoicesFromNode(node);
     for (const childId of preferredChildIds(node)) {
       if (visited.has(childId)) continue;
       visited.add(childId);
-      queue.push({ nodeId: childId, hops: current.hops + 1 });
+      const label =
+        choices.find((choice) => choice.nodeId === childId)?.label ?? childId;
+      queue.push({
+        nodeId: childId,
+        hops: current.hops + 1,
+        labels: [...current.labels, label],
+      });
     }
   }
 
   return {
-    absence: `No ${seat} decision node within ${maxHops} hops of the current Study node.`,
+    absence: `No ${seat} decision node within ${maxHops} hops of the current Study node. Open that decision in Study.`,
   };
 }
 
-async function ensureSeatNode(
+/**
+ * Resolve evidence against the **current** decision only. Never navigates.
+ * When the seat does not match, return absences (+ optional path hint).
+ */
+async function resolveCurrentSeatNode(
   host: StudyEvidenceHost,
   seat: StudyEvidenceSeat,
 ): Promise<{
   node: NodePayload;
-  navigated: boolean;
-  hops: number;
   path: string[];
-} | { absences: string[] }> {
-  const found = await findSeatDecisionNodeId(host, seat);
-  if ("absence" in found) {
-    return { absences: [found.absence] };
-  }
+  pathHint: string | null;
+} | { absences: string[]; pathHint: string | null }> {
   const live = host.read();
-  let navigated = false;
-  if (live.currentNode?.node_id !== found.nodeId) {
-    await host.navigateTo(found.nodeId);
-    navigated = true;
-  }
-  const after = host.read();
-  const node = after.currentNode;
-  if (!node?.node_id || node.node_id !== found.nodeId) {
+  const node = live.currentNode;
+  const path = pathLabels(live.pathTrail);
+  if (!node?.node_id) {
     return {
-      absences: [`Failed to open Study node ${found.nodeId} for ${seat}.`],
+      absences: ["No Study node selected — open a decision in Study."],
+      pathHint: null,
     };
   }
-  if (node.kind !== "decision" || !seatMatches(node, seat)) {
+  if (node.kind !== "decision") {
     return {
       absences: [
-        `Node ${node.node_id} is not a ${seat} decision (to_act=${actorLabel(node.to_act, node.player)}).`,
+        `Current Study node ${node.node_id} is a ${node.kind ?? "non-decision"} node. Open a decision for action evidence.`,
       ],
+      pathHint: null,
     };
   }
+  if (seatMatches(node, seat)) {
+    return { node, path, pathHint: null };
+  }
+
+  const found = await findSeatDecisionNodeId(host, seat);
+  let pathHint: string | null = null;
+  if ("nodeId" in found) {
+    const via =
+      found.labels.length > 0 ? found.labels.join(" → ") : found.nodeId;
+    pathHint = `Nearest ${seat} decision within ${found.hops} hop${found.hops === 1 ? "" : "s"}: ${via}. Open it in Study (assistant does not change selection).`;
+  }
   return {
-    node,
-    navigated,
-    hops: found.hops,
-    path: pathLabels(after.pathTrail),
+    absences: [
+      `Current Study node is ${actorLabel(node.to_act, node.player)} to act, not ${seat}. Open the intended ${seat} decision in Study.`,
+      ...(pathHint ? [pathHint] : []),
+    ],
+    pathHint,
   };
 }
 
 async function waitForAnalysis(
   host: StudyEvidenceHost,
   needs: { values?: boolean; equity?: boolean },
-): Promise<string[]> {
+): Promise<{ absences: string[]; stale: boolean }> {
   const absences: string[] = [];
   const state0 = host.read();
   if (!state0.solutionId || !state0.currentNode?.node_id) {
-    return ["No published solution/node — analysis cannot be fetched."];
+    return {
+      absences: ["No published solution/node — analysis cannot be fetched."],
+      stale: false,
+    };
   }
-  await host.ensureNodeAnalysis();
   const nodeId = state0.currentNode.node_id;
   const solutionId = state0.solutionId;
+  await host.ensureNodeAnalysis();
+  {
+    const afterEnsure = host.read();
+    if (
+      afterEnsure.currentNode?.node_id !== nodeId ||
+      afterEnsure.solutionId !== solutionId
+    ) {
+      return {
+        absences: [
+          "Study solution or decision changed while waiting for analysis. Retry on the intended decision.",
+        ],
+        stale: true,
+      };
+    }
+  }
   const deadline = Date.now() + ASSISTANT_EVIDENCE_LIMITS.analysisWaitMs;
 
   while (Date.now() < deadline) {
     const live = host.read();
     if (live.currentNode?.node_id !== nodeId || live.solutionId !== solutionId) {
-      absences.push("Study node changed while waiting for analysis.");
-      return absences;
+      return {
+        absences: [
+          "Study solution or decision changed while waiting for analysis. Retry on the intended decision.",
+        ],
+        stale: true,
+      };
     }
     const valuesOk =
       !needs.values ||
@@ -431,22 +482,39 @@ async function waitForAnalysis(
       }
     }
     if (absences.length) {
-      return absences;
+      return { absences, stale: false };
     }
     if (valuesOk && equityOk) {
-      return [];
+      return { absences: [], stale: false };
     }
     await sleep(ASSISTANT_EVIDENCE_LIMITS.pollIntervalMs);
   }
 
   const live = host.read();
+  if (live.currentNode?.node_id !== nodeId || live.solutionId !== solutionId) {
+    return {
+      absences: [
+        "Study solution or decision changed while waiting for analysis. Retry on the intended decision.",
+      ],
+      stale: true,
+    };
+  }
   if (needs.values && !analysisPayloadReady(live.nodeValues, solutionId, nodeId)) {
     absences.push("Action EV did not become ready within the assistant wait budget.");
   }
   if (needs.equity && !analysisPayloadReady(live.equity, solutionId, nodeId)) {
     absences.push("Equity did not become ready within the assistant wait budget.");
   }
-  return absences;
+  return { absences, stale: false };
+}
+
+function identityStillMatches(
+  host: StudyEvidenceHost,
+  solutionId: string,
+  nodeId: string,
+): boolean {
+  const live = host.read();
+  return live.solutionId === solutionId && live.currentNode?.node_id === nodeId;
 }
 
 export async function queryNodeStrategy(
@@ -484,7 +552,7 @@ export async function queryNodeStrategy(
     };
   }
 
-  const resolved = await ensureSeatNode(host, seat);
+  const resolved = await resolveCurrentSeatNode(host, seat);
   if ("absences" in resolved) {
     return {
       ok: false,
@@ -496,10 +564,11 @@ export async function queryNodeStrategy(
       navigated: false,
       hops: 0,
       absences: resolved.absences,
+      pathHint: resolved.pathHint,
     };
   }
 
-  const { node, navigated, hops, path } = resolved;
+  const { node, path, pathHint } = resolved;
   const absences: string[] = [];
   if (!node.strategy || !node.reach_defined) {
     absences.push(`Strategy frequencies are not loaded for node ${node.node_id}.`);
@@ -510,9 +579,10 @@ export async function queryNodeStrategy(
       line: node.line ?? node.node_id,
       path,
       actions: [],
-      navigated,
-      hops,
+      navigated: false,
+      hops: 0,
       absences,
+      pathHint,
     };
   }
 
@@ -528,9 +598,10 @@ export async function queryNodeStrategy(
       action,
       frequency: freqs[index] ?? 0,
     })),
-    navigated,
-    hops,
+    navigated: false,
+    hops: 0,
     absences,
+    pathHint,
   };
 }
 
@@ -557,6 +628,8 @@ export async function listBluffCandidates(
     ASSISTANT_EVIDENCE_LIMITS.maxBluffRows,
     Math.max(1, limitRaw),
   );
+  const minBetFreq = MIN_VALUE_BLUFFS_BET_FREQ;
+  const minReach = MIN_VALUE_BLUFFS_REACH_MASS;
 
   const empty = (
     absences: string[],
@@ -568,6 +641,9 @@ export async function listBluffCandidates(
     line: live.currentNode?.line ?? null,
     path: pathLabels(host.read().pathTrail),
     equityThreshold,
+    minBetFreq,
+    minReach,
+    equityMode: "node",
     sortBy,
     rows: [],
     truncated: false,
@@ -586,33 +662,47 @@ export async function listBluffCandidates(
     return empty(["No published solution — bluff evidence is unavailable."]);
   }
 
-  const resolved = await ensureSeatNode(host, seat);
+  const resolved = await resolveCurrentSeatNode(host, seat);
   if ("absences" in resolved) {
-    return empty(resolved.absences);
+    return empty(resolved.absences, { pathHint: resolved.pathHint });
   }
 
-  const { node, navigated, hops, path } = resolved;
+  const { node, path, pathHint } = resolved;
+  const solutionId = live.solutionId;
+  const nodeId = node.node_id;
   if (!node.strategy || !node.reach_defined) {
     return empty(
       [`Strategy frequencies are not loaded for node ${node.node_id}.`],
-      { nodeId: node.node_id, line: node.line ?? node.node_id, path, navigated, hops },
+      { nodeId: node.node_id, line: node.line ?? node.node_id, path, pathHint },
     );
   }
 
-  const waitAbsences = await waitForAnalysis(host, { values: true, equity: true });
+  const waited = await waitForAnalysis(host, { values: true, equity: true });
+  if (waited.stale || !identityStillMatches(host, solutionId, nodeId)) {
+    return empty([
+      "Study solution or decision changed while gathering bluff candidates. Retry on the intended decision.",
+    ]);
+  }
+
   const after = host.read();
-  const equityHandsRaw = equityHandsForNode(after.equity, node.player);
-  const absences = [...waitAbsences];
+  const liveNode = after.currentNode;
+  if (!liveNode?.node_id || liveNode.node_id !== nodeId) {
+    return empty([
+      "Study decision changed while gathering bluff candidates. Retry on the intended decision.",
+    ]);
+  }
+
+  const equityHandsRaw = equityHandsForNode(after.equity, liveNode.player);
+  const absences = [...waited.absences];
   if (!equityHandsRaw?.length) {
     absences.push(
-      "Equity hands are missing for the acting seat — cannot classify bluffs vs the equity threshold.",
+      "Equity hands are missing for the acting seat — cannot classify bluff candidates vs the equity threshold.",
     );
     return empty(absences, {
-      nodeId: node.node_id,
-      line: node.line ?? node.node_id,
+      nodeId: liveNode.node_id,
+      line: liveNode.line ?? liveNode.node_id,
       path,
-      navigated,
-      hops,
+      pathHint,
     });
   }
   const equityHands = equityHandsRaw.map((hand) => ({
@@ -622,15 +712,22 @@ export async function listBluffCandidates(
   }));
 
   const listed = listValueBluffs({
-    node: after.currentNode ?? node,
+    node: liveNode,
     equityHands,
     threshold: equityThreshold,
     equityCompare: "lt",
+    minBetFreq,
+    minReachMass: minReach,
     nodeValues: after.nodeValues,
     evDisplayBasis: after.evDisplayBasis,
   });
 
-  // Re-sort if caller asked for EV/equity (listValueBluffs defaults to betFreq).
+  if (!identityStillMatches(host, solutionId, nodeId)) {
+    return empty([
+      "Study solution or decision changed while gathering bluff candidates. Retry on the intended decision.",
+    ]);
+  }
+
   const sorted =
     sortBy === "betFreq"
       ? listed
@@ -655,30 +752,38 @@ export async function listBluffCandidates(
     reach: row.reach,
   }));
 
-  if (!analysisPayloadReady(after.nodeValues, after.solutionId, node.node_id)) {
+  if (!analysisPayloadReady(after.nodeValues, after.solutionId, liveNode.node_id)) {
     if (!absences.some((line) => /Action EV/i.test(line))) {
       absences.push("Action EV missing — EV column is null for listed hands.");
     }
   }
 
+  absences.push(
+    "Bluff candidates use node equity. For After-call equity, open Study → Value / Bluffs and switch the equity mode.",
+  );
+
   return {
     ok: rows.length > 0,
     seat,
-    nodeId: node.node_id,
-    line: node.line ?? node.node_id,
+    nodeId: liveNode.node_id,
+    line: liveNode.line ?? liveNode.node_id,
     path,
     equityThreshold,
+    minBetFreq,
+    minReach,
+    equityMode: "node",
     sortBy,
     rows,
     truncated: sorted.length > rows.length,
-    navigated,
-    hops,
+    navigated: false,
+    hops: 0,
+    pathHint,
     absences:
       rows.length > 0
         ? absences
         : [
             ...absences,
-            `No bluff candidates for ${seat} at this node (equity < ${equityThreshold}, min bet freq / reach filters).`,
+            `No bluff candidates for ${seat} at this node (node equity < ${equityThreshold}, min bet freq ${minBetFreq}, min reach ${minReach}).`,
           ],
   };
 }
@@ -697,9 +802,10 @@ export async function querySelectedHandAnalysis(
       nodeId: live.currentNode?.node_id ?? null,
       strategy: null,
       mixedEv: null,
+      actionEv: null,
       equity: null,
       evBasis: null,
-      absences: ["No hand selected in the Study matrix."],
+      absences: ["No hand selected in the Study matrix. Select the matrix cell first."],
     };
   }
   const node = live.currentNode;
@@ -710,16 +816,81 @@ export async function querySelectedHandAnalysis(
       nodeId: null,
       strategy: null,
       mixedEv: null,
+      actionEv: null,
       equity: null,
       evBasis: live.evDisplayBasis,
       absences: [`Selected hand ${label}: no Study node — strategy frequencies are missing.`],
     };
   }
+  if (node.kind !== "decision") {
+    return {
+      ok: false,
+      label,
+      nodeId: node.node_id,
+      strategy: null,
+      mixedEv: null,
+      actionEv: null,
+      equity: null,
+      evBasis: live.evDisplayBasis,
+      absences: [
+        `Selected hand ${label}: current node is a ${node.kind ?? "non-decision"} node. Open a decision for action EV.`,
+      ],
+    };
+  }
 
-  const waitAbsences = await waitForAnalysis(host, { values: true, equity: true });
-  absences.push(...waitAbsences);
+  const solutionId = live.solutionId;
+  const nodeId = node.node_id;
+  if (!solutionId) {
+    return {
+      ok: false,
+      label,
+      nodeId,
+      strategy: null,
+      mixedEv: null,
+      actionEv: null,
+      equity: null,
+      evBasis: live.evDisplayBasis,
+      absences: [
+        "No published solution — selected-hand evidence is unavailable. Solve or open a solution first.",
+      ],
+    };
+  }
+
+  const waited = await waitForAnalysis(host, { values: true, equity: true });
+  if (waited.stale || !identityStillMatches(host, solutionId, nodeId)) {
+    return {
+      ok: false,
+      label,
+      nodeId,
+      strategy: null,
+      mixedEv: null,
+      actionEv: null,
+      equity: null,
+      evBasis: live.evDisplayBasis,
+      absences: [
+        "Study solution or decision changed while reading the selected hand. Retry on the intended decision.",
+      ],
+    };
+  }
+  absences.push(...waited.absences);
   const after = host.read();
-  const liveNode = after.currentNode ?? node;
+  const liveNode = after.currentNode;
+  if (!liveNode?.node_id || liveNode.node_id !== nodeId) {
+    return {
+      ok: false,
+      label,
+      nodeId,
+      strategy: null,
+      mixedEv: null,
+      actionEv: null,
+      equity: null,
+      evBasis: after.evDisplayBasis,
+      absences: [
+        "Study decision changed while reading the selected hand. Retry on the intended decision.",
+      ],
+    };
+  }
+
   let strategy: SelectedHandEvidence["strategy"] = null;
   if (!liveNode.strategy || !liveNode.reach_defined) {
     absences.push(
@@ -728,7 +899,9 @@ export async function querySelectedHandAnalysis(
   } else {
     const cell = groupHands(liveNode).find((entry) => entry.text === label);
     if (!cell || !cell.defined || cell.marginalSum <= 0) {
-      absences.push(`Selected hand ${label}: no matching strategy mass at this node.`);
+      absences.push(
+        `Selected hand ${label}: no matching strategy mass at this node. Select its matrix cell.`,
+      );
     } else {
       const actions = liveNode.actions ?? [];
       strategy = actions.map((action, index) => ({
@@ -739,12 +912,19 @@ export async function querySelectedHandAnalysis(
   }
 
   let mixedEv: number | null = null;
+  let actionEv: SelectedHandEvidence["actionEv"] = null;
   if (analysisPayloadReady(after.nodeValues, after.solutionId, liveNode.node_id)) {
     const cell = groupHands(liveNode).find((entry) => entry.text === label);
     const ev = cell
       ? groupEv(liveNode, after.nodeValues, cell, after.evDisplayBasis)
       : null;
     mixedEv = ev?.mixed ?? null;
+    if (ev?.action?.length && liveNode.actions?.length) {
+      actionEv = liveNode.actions.map((action, index) => ({
+        action,
+        ev: ev.action[index] ?? 0,
+      }));
+    }
     if (mixedEv == null) {
       absences.push(`Selected hand ${label}: action EV evidence is missing for this node.`);
     }
@@ -768,12 +948,29 @@ export async function querySelectedHandAnalysis(
     absences.push(`Selected hand ${label}: equity evidence is missing.`);
   }
 
+  if (!identityStillMatches(host, solutionId, nodeId)) {
+    return {
+      ok: false,
+      label,
+      nodeId,
+      strategy: null,
+      mixedEv: null,
+      actionEv: null,
+      equity: null,
+      evBasis: after.evDisplayBasis,
+      absences: [
+        "Study solution or decision changed while reading the selected hand. Retry on the intended decision.",
+      ],
+    };
+  }
+
   return {
     ok: strategy != null || mixedEv != null || equity != null,
     label,
     nodeId: liveNode.node_id,
     strategy,
     mixedEv,
+    actionEv,
     equity,
     evBasis: after.evDisplayBasis,
     absences,
@@ -810,6 +1007,7 @@ export function looksLikeStudyEvidenceRequest(text: string): boolean {
     /\b(action\s+)?(mix|frequenc(?:y|ies)|strategy)\b/.test(lower) ||
     /\b(how\s+often|what\s+does\s+\w+\s+do)\b/.test(lower) ||
     /\b(selected\s+hand|this\s+hand|combo)\b.*\b(ev|equity|strateg)/.test(lower) ||
+    /\b(why\s+is\s+\w+|a[2-9tjqka]s?\b.*\b(bet|betting|here))\b/.test(lower) ||
     /\b(nash|convergence|nashconv|accuracy)\b/.test(lower) ||
     /\b(current\s+node|to[\s-]?act|to[\s-]?call)\b/.test(lower)
   );

@@ -50,21 +50,13 @@ export function buildSetupAssistantSystemPrompt(
   ].join("\n");
 }
 
-/** System prompt for the floating unified Study assistant (multi-tool). */
+/**
+ * System prompt for the floating unified Study assistant (multi-tool).
+ * The unified pack already includes help, surface, setup rules, and Q&A
+ * guidance once — do not re-inject the standalone help/setup packs here.
+ */
 export function buildUnifiedAssistantSystemPrompt(
   pack = loadAssistantContextPack("unified"),
 ): string {
-  return [
-    pack,
-    "",
-    "--- Help section ---",
-    loadAssistantContextPack("help"),
-    "",
-    "--- Setup section ---",
-    loadAssistantContextPack("setup-assistant"),
-    "",
-    "For Build mutations call emit_study_setup_proposal once.",
-    "For Study strategy/bluff/hand questions you may call bounded evidence tools first (query_node_strategy, list_bluff_candidates, query_selected_hand_analysis), then answer_user with the evidence.",
-    "Do not invent frequencies, EVs, or equities missing from contextSnapshot or tool results.",
-  ].join("\n");
+  return pack;
 }

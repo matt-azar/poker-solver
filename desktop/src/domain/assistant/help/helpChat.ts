@@ -154,11 +154,39 @@ export class FakeHelpChatClient implements HelpChatClient {
       throw new AssistantProviderError("invalid_response", "Empty help question");
     }
 
-    if (/setup|catalogue|100nl|range profile|prepare a study/.test(q)) {
+    if (/compare runouts|compare river|river cards/.test(q)) {
       return {
         provider: "fake",
         message:
-          "Describe the study in this Study assistant (e.g. Set up CO vs BB SRP with 100NL ranges). Conflict-free changes are written onto the Build fields. Undo is available in the assistant.",
+          "Open a river decision on that line in Study, then use Compare runouts. The report varies the river card while holding the betting line fixed — check the displayed seat before reading the numbers.",
+      };
+    }
+    if (/folding|0 ev|fold.*ev|ev display|global ev/.test(q)) {
+      return {
+        provider: "fake",
+        message:
+          "Local EV uses folding now as the zero point, so Fold shows 0. Open the Settings gear → EV display → Global EV (root-centered) to show EV on the root basis.",
+      };
+    }
+    if (/hand ev|ev\+eq|overlay|where.*equity|see.*equity/.test(q)) {
+      return {
+        provider: "fake",
+        message:
+          "In Study, open a decision, choose Overlay → EV+Eq, and select a hand for details. Study starts loading EV and equity automatically on decision nodes.",
+      };
+    }
+    if (/how (do i|to) set( up)?|how (do i|to) prepare/.test(q)) {
+      return {
+        provider: "fake",
+        message:
+          "On Build, set board, pot type (SRP/3BP/4BP), stacks, and ranges (Catalogue seat×action tree or paint grids), then Solve. You can also ask this Study assistant to change Build with an explicit command such as “Set up CO vs BB SRP with 100NL ranges.”",
+      };
+    }
+    if (/catalogue|100nl|range profile|prepare a study/.test(q)) {
+      return {
+        provider: "fake",
+        message:
+          "Describe the study in this Study assistant (e.g. Set up CO vs BB SRP with 100NL ranges). Conflict-free changes are written onto the Build fields. Undo is available in the assistant. Pot type is required; 100NL is a rake structure, not stack depth.",
       };
     }
     if (/\b(shortcuts?|hotkeys?|keyboard)\b/.test(q)) {
@@ -186,7 +214,7 @@ export class FakeHelpChatClient implements HelpChatClient {
       return {
         provider: "fake",
         message:
-          "Action EV defaults to local decision EV (Fold = 0). Chip EV is root-centered. Accuracy is Pio exploitability (average of BR gains = NashConv/2), reported as Accuracy/pot by default. Equity is pot fraction — not chip EV.",
+          "Action EV defaults to local decision EV (Fold = 0). Chip EV is root-centered. Accuracy is Pio exploitability (average of BR gains = NashConv/2), reported as Accuracy/pot by default — enter 0.005 on Build for 0.5% of pot. Equity is pot fraction — not chip EV; different units, so do not compare them directly.",
       };
     }
 

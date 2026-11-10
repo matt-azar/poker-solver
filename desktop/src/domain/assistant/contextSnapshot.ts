@@ -145,9 +145,9 @@ function previewRange(text: string, max = 48): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max)}…`;
 }
 
-function boardLabel(
+/** Published / node boards only — never fall back to the Build draft. */
+function publishedBoardLabel(
   board: string[] | string | null | undefined,
-  draftBoard: string,
 ): string | null {
   if (Array.isArray(board) && board.length > 0) {
     return board.join("");
@@ -155,8 +155,7 @@ function boardLabel(
   if (typeof board === "string" && board.trim()) {
     return board.trim();
   }
-  const draft = draftBoard.trim();
-  return draft || null;
+  return null;
 }
 
 function toActLabel(node: NodePayload): string | null {
@@ -228,7 +227,7 @@ export function buildAssistantContextSnapshot(
       present: true,
       solutionId,
       statusGeneration: input.status?.status_generation ?? null,
-      board: boardLabel(input.status?.board ?? node?.board, draft.boardText),
+      board: publishedBoardLabel(input.status?.board ?? node?.board),
       pot: input.status?.pot ?? null,
       stack: input.status?.stack ?? null,
       nashGap:
@@ -269,7 +268,7 @@ export function buildAssistantContextSnapshot(
       kind: node.kind ?? null,
       line: node.line ?? node.node_id,
       path: pathTrail.map((step) => step.label).filter(Boolean),
-      board: boardLabel(node.board, draft.boardText),
+      board: publishedBoardLabel(node.board),
       seat: toActLabel(node),
       toAct: toActLabel(node),
       actions: [...(node.actions ?? [])],

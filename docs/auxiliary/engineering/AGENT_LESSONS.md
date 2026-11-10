@@ -226,8 +226,9 @@ Matrix, Hands, and Node Locking strategy bars paint **aggressive → passive** l
 
 - Packs under `docs/ai-context/{help,setup-assistant,unified}.md` are **generated**. Edit `docs/ai-context/source/`, then `cd desktop && npm run sync:ai-context`. CI `npm run check:ai-context` fails on drift or forbidden stale UI phrases (#196).
 - Assistant entry is menu-bar **Assistant** (not Help → Study assistant). No Build-page Setup assistant. Workspaces include **Equity**.
-- Bounded Study evidence tools (`query_node_strategy`, `list_bluff_candidates`, `query_selected_hand_analysis`) may hop ≤2 nodes (e.g. `fetchNode` BFS) and wait on the analysis scheduler; they must **not** start solves, open filesystem/HTTP beyond the engine client, or **navigate the Study tree** just to discover nodes. Prefer honest absences over invented mixes (#197).
-- `contextSnapshot` v2 carries published-solution identity, node path/seat/board, strategy, selected-hand analysis, and readiness — including equity + NashConv/Accuracy gaps.
+- Bounded Study evidence tools (`query_node_strategy`, `list_bluff_candidates`, `query_selected_hand_analysis`) read the **current** Study decision only; they may peek ≤2 hops for a path hint and wait on the analysis scheduler, but must **not** start solves, open filesystem/HTTP beyond the engine client, or **navigate the Study tree**. Prefer honest absences over invented mixes (#197).
+- Unified chat: help/how-to stays on `answer_user` + evidence tools; poker terms (3BP, 100NL) alone never force setup. Assemble `unified.md` once (no re-injecting help+setup wholes). Serialize evidence by trimming rows **before** JSON so tool results stay valid.
+- `contextSnapshot` v2 carries published-solution identity, node path/seat/board, strategy, selected-hand analysis, and readiness — including equity + NashConv/Accuracy gaps. Published/node boards must **not** fall back to the Build draft board.
 - Build Preview and Solve must share one `buildJob` serializer with `/api/tree-preview` (#192).
 
 **Pointers:** `docs/ai-context/README.md`, `docs/STUDY_SETUP_ASSISTANT.md`.

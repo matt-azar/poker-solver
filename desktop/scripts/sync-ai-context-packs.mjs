@@ -77,6 +77,13 @@ const REQUIRED_IN_PACKS = [
   { pack: "unified.md", re: /list_bluff_candidates/ },
   { pack: "unified.md", re: /query_node_strategy/ },
   { pack: "unified.md", re: /query_selected_hand_analysis/ },
+  { pack: "unified.md", re: /Compare runouts/ },
+  { pack: "unified.md", re: /Overlay → EV\+Eq/ },
+  { pack: "unified.md", re: /Global EV \(root-centered\)/ },
+  { pack: "unified.md", re: /Q&A vs setup/ },
+  { pack: "unified.md", re: /bluff candidates/i },
+  { pack: "help.md", re: /Compare runouts/ },
+  { pack: "help.md", re: /Overlay → EV\+Eq/ },
 ];
 
 /** Labels that surface.md claims are mounted on Build — must exist in BuildWorkspace.tsx. */
@@ -144,7 +151,7 @@ function assembleSetup(surface, setupRules) {
   ].join("\n");
 }
 
-function assembleUnified(surface, setupRules, unifiedExtra) {
+function assembleUnified(surface, setupRules, unifiedExtra, helpBody) {
   return [
     GENERATED_BANNER.trimEnd(),
     "",
@@ -153,6 +160,12 @@ function assembleUnified(surface, setupRules, unifiedExtra) {
     "You are the **in-app Study assistant**: a persistent chat that is deeply integrated into Hold'em Study. Players talk to you from a floating window available on every workspace. You both **answer questions** and **change the study** when asked.",
     "",
     unifiedExtra,
+    "",
+    "## Product help",
+    "",
+    "Use this when answering **how-to / product** questions via `answer_user`. Numerical definitions and short workflows live here once — do not redefine them.",
+    "",
+    helpBody,
     "",
     surface,
     "",
@@ -262,10 +275,32 @@ function main() {
   const packs = {
     "docs/ai-context/help.md": assembleHelp(surface, helpBody),
     "docs/ai-context/setup-assistant.md": assembleSetup(surface, setupRules),
-    "docs/ai-context/unified.md": assembleUnified(surface, setupRules, unifiedExtra),
+    "docs/ai-context/unified.md": assembleUnified(
+      surface,
+      setupRules,
+      unifiedExtra,
+      helpBody,
+    ),
   };
 
   const errors = [];
+
+  // Unified prompt must include surface/setup/help once (not re-injected by the client).
+  const unifiedText = packs["docs/ai-context/unified.md"];
+  const surfaceHeadingCount = (unifiedText.match(/## Product surface \(mounted UI\)/g) || [])
+    .length;
+  if (surfaceHeadingCount !== 1) {
+    errors.push(
+      `unified.md: expected exactly one Product surface section, found ${surfaceHeadingCount}`,
+    );
+  }
+  const setupRulesCount = (unifiedText.match(/## Hard product rules/g) || []).length;
+  if (setupRulesCount !== 1) {
+    errors.push(
+      `unified.md: expected exactly one Hard product rules section, found ${setupRulesCount}`,
+    );
+  }
+
   for (const [rel, content] of Object.entries(packs)) {
     writeOrCheck(rel, content, check);
     const base = path.basename(rel);

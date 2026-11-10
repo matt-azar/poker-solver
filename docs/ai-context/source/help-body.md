@@ -27,6 +27,27 @@
 - **Equity**: fraction of pot — **not** chip EV. Study shows equity to a tenth of a percent.
 - Locks: 0% inside a row that sums to 1 is a constraint; unlock is DELETE; all-zero rows rejected.
 
+## Short how-to workflows (exact UI labels)
+
+| Player question | Minimum steps |
+| --- | --- |
+| “Why does folding show 0 EV?” | Local EV uses folding now as the zero point. Open the **Settings** gear → **EV display** → **Global EV (root-centered)** to show EV on the root basis. |
+| “Where do I see hand EV and equity?” | In **Study**, open a decision, choose **Overlay → EV+Eq**, and select a hand for details. Study starts loading EV and equity automatically on decision nodes. If a number is pending, say so. |
+| “Which river cards are best for IP on this line?” | Open a river decision on that line and use **Compare runouts**. The report varies the river card while holding the betting line fixed. Check the displayed seat before interpreting the numbers. Give the navigation; leave ranking to the report. |
+| “What does Accuracy mean?” | Accuracy is the average of the two best-response gains, or NashConv divided by two. The Build target is a fraction of the pot in ordinary chip-EV solves. Enter `0.005` for 0.5% of pot. |
+| “Why is equity higher than EV?” | Equity is a share of the pot. EV measures expected utility in the solve, with future actions and the displayed reference point. Explain the different units before comparing the hand's figures. |
+| “Where can I compare river cards?” | From a river decision in **Study**, open **Compare runouts**. |
+
+## When analysis is unavailable
+
+Give the applicable reason and one next action:
+
+- Build draft only → Study evidence appears after solving or opening a solution.
+- Deal / chance node → open a decision for action EV.
+- Specific missing hand → select its matrix cell.
+- Permanent analysis error → surface the tool's actual reason (work/memory limit, etc.).
+- Product and general poker help still work without a published solution.
+
 ## Credentials / AI
 
 - OpenAI required in the product UI for the Study assistant. Keys may live in Tauri app-config secrets or browser `localStorage` demos — never bundled.
