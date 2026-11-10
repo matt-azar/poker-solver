@@ -133,8 +133,9 @@ describe("ComboInspector", () => {
       ),
     ] as HTMLElement[];
     expect(rows.length).toBeGreaterThan(0);
-    // Bet (aggressive) should be the topmost frequency row (#C9843F → rgb).
+    // Bet (aggressive) should be the topmost frequency-weighted band (#C9843F → rgb).
     expect(rows[0]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
+    expect(Number(rows[0]?.style.flexGrow)).toBeGreaterThan(0);
     expect(present.querySelector(".hands-combo__metric-action")?.textContent).toMatch(
       /b50|Bet/i,
     );
@@ -200,13 +201,19 @@ describe("ComboInspector", () => {
     ).toBe("offsuit");
   });
 
-  it("sets data-shape suited/pair/offsuit for 4/6/12 combo grids", () => {
-    const { unmount: unmountPair } = render(<ComboInspector />);
+  it("sizes action bands by frequency and sets data-shape for 4/6/12 grids", () => {
+    render(<ComboInspector />);
     expect(
       document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
     ).toBe("pair");
-    expect(document.querySelectorAll(".hands-combo")).toHaveLength(6);
-    unmountPair();
+    const pairRows = [
+      ...document.querySelectorAll(
+        '.hands-combo[data-present="true"] .hands-combo__metric-row:not(.hands-combo__metric-row--eq)',
+      ),
+    ] as HTMLElement[];
+    expect(pairRows.length).toBeGreaterThan(0);
+    expect(pairRows.every((row) => Number(row.style.flexGrow) > 0)).toBe(true);
+    cleanup();
 
     useStudyStore.setState({
       currentNode: {
@@ -223,29 +230,36 @@ describe("ComboInspector", () => {
       selectedCell: { row: 0, col: 1, text: "AKs" },
       nodeValues: null,
     });
-    const { unmount: unmountSuited } = render(<ComboInspector />);
+    render(<ComboInspector />);
     expect(
       document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
     ).toBe("suited");
     expect(document.querySelectorAll(".hands-combo")).toHaveLength(4);
-    unmountSuited();
+  });
 
+  it("gives taller bands to higher-frequency actions", () => {
     useStudyStore.setState({
-      selectedCell: { row: 1, col: 0, text: "AKo" },
       currentNode: {
         node_id: "p0",
         reach_defined: true,
         actions: ["Check", "Bet 50"],
-        combos: ["AcKd"],
+        combos: ["AhAd"],
         marginal: [1],
-        strategy: [[0.5, 0.5]],
+        strategy: [[0.25, 0.75]],
       },
+      selectedCell: { row: 0, col: 0, text: "AA" },
+      nodeValues: null,
     });
     render(<ComboInspector />);
-    expect(
-      document.querySelector(".hands-combo-grid")?.getAttribute("data-shape"),
-    ).toBe("offsuit");
-    expect(document.querySelectorAll(".hands-combo")).toHaveLength(12);
+    const rows = [
+      ...document.querySelectorAll(
+        '.hands-combo[data-present="true"] .hands-combo__metric-row:not(.hands-combo__metric-row--eq)',
+      ),
+    ] as HTMLElement[];
+    // Aggression order: Bet first, then Check.
+    expect(rows).toHaveLength(2);
+    expect(Number(rows[0]?.style.flexGrow)).toBeCloseTo(0.75);
+    expect(Number(rows[1]?.style.flexGrow)).toBeCloseTo(0.25);
   });
 
   it("shows check-down equity in Hands when equity overlay is on", () => {
