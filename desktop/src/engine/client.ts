@@ -353,6 +353,8 @@ export class EngineClient {
     body: {
       node_id: string;
       kind: "full" | "selected";
+      /** Default on the engine is "node" (selected board only). */
+      scope?: "node" | "line";
       hand_indices?: number[];
       probs: number[];
     },

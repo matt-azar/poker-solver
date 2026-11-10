@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   isHandLocked,
+  lineLockNodeId,
+  lockForNode,
   lockMutationCompletion,
   normalizeProbs,
   seedProbsFromStrategy,
@@ -53,6 +55,28 @@ describe("lock helpers", () => {
         2,
       ),
     ).toBe(false);
+  });
+
+  it("prefers an exact runout lock over a line lock for the same index", () => {
+    expect(lineLockNodeId("p12.t-1.r7")).toBe("p12.t-1.r-1");
+    const locks = [
+      {
+        node_id: "p12.t-1.r-1",
+        scope: "line" as const,
+        kind: "full" as const,
+        hand_indices: [],
+        probs: [0, 1],
+      },
+      {
+        node_id: "p12.t-1.r7",
+        scope: "node" as const,
+        kind: "full" as const,
+        hand_indices: [],
+        probs: [1, 0],
+      },
+    ];
+    expect(lockForNode(locks, "p12.t-1.r7")?.node_id).toBe("p12.t-1.r7");
+    expect(lockForNode(locks, "p12.t-1.r9")?.node_id).toBe("p12.t-1.r-1");
   });
 
   it("weights strategy mixes by marginal and links slider edits", () => {

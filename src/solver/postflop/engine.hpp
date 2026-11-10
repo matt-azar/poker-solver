@@ -1163,10 +1163,12 @@ struct StreetBatchSolver::Engine
 
 
     // When locks_ is set, locked rows replace RM for matching public nodes.
-    // Lock infoset_id is the public-node index (slot.node). SelectedCombos
-    // uses the acting player's hand index (slot.hand). Slots are independent:
-    // each writes only its own sigma / regret span, so threads > 1
-    // partition the slot vector with the same worker pool as chance splits.
+    // Lookup is find_for_runout(slot.node, slot.turn, slot.river): an exact
+    // runout lock wins, otherwise a line lock (turn=river=-1) applies.
+    // SelectedCombos uses the acting player's hand index (slot.hand). Slots
+    // are independent: each writes only its own sigma / regret span, so
+    // threads > 1 partition the slot vector with the same worker pool as
+    // chance splits.
     void freeze_sigma();
 
 

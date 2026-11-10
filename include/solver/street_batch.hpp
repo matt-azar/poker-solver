@@ -331,8 +331,9 @@ public:
     using SolveProgress = void (*)(int iterations, const SolveStats& stats, void* context);
 
     // Honors SolveConfig::locks: after regret matching, locked rows replace the
-    // current strategy for matching public nodes (infoset_id == node index) and
-    // SelectedCombos hand indices. Null locks keep today's unlocked path.
+    // current strategy for matching public nodes. Exact runout locks
+    // (infoset + turn/river) take precedence over line locks (turn=river=-1).
+    // SelectedCombos uses acting-player hand indices. Null locks keep today's unlocked path.
     SolveStats solve(
         const SolveConfig& config,
         Algorithm algorithm,

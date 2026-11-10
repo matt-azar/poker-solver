@@ -354,7 +354,7 @@ interface StudyState {
   seedLockFromStrategy: () => void;
   revertLockDraft: () => void;
   refreshLocks: () => Promise<void>;
-  applyLock: () => Promise<boolean>;
+  applyLock: (scope?: "node" | "line") => Promise<boolean>;
   unlockHands: (handIndices?: number[]) => Promise<void>;
   unlockNode: () => Promise<void>;
   clearAllLocks: () => Promise<void>;
@@ -1490,7 +1490,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     return isHandLocked(lockForNode(get().locks, node.node_id), handIndex);
   },
-  async applyLock() {
+  async applyLock(scope: "node" | "line" = "node") {
     const solutionId = get().solutionId;
     const node = get().currentNode;
     if (!solutionId || !node || node.kind !== "decision") {
@@ -1515,11 +1515,13 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           ? {
               node_id: node.node_id,
               kind: "full" as const,
+              scope,
               probs: normalized.probs,
             }
           : {
               node_id: node.node_id,
               kind: "selected" as const,
+              scope,
               hand_indices: draft.handIndices,
               probs: normalized.probs,
             };
@@ -1534,6 +1536,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (!completion.applyLocksList) {
         return false;
       }
+      const scopeLabel = scope === "line" ? "line (all runouts)" : "node";
       if (completion.applyDraft) {
         set({
           locks: payload.locks || [],
@@ -1541,8 +1544,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           lockDraftBaseline: structuredClone({ ...draft, probs: normalized.probs }),
           message:
             draft.kind === "full"
-              ? `Full-node lock applied at ${node.node_id}`
-              : `Locked ${draft.handIndices.length} combo(s) at ${node.node_id}`,
+              ? `Full ${scopeLabel} lock applied at ${node.node_id}`
+              : `Locked ${draft.handIndices.length} combo(s) on ${scopeLabel} at ${node.node_id}`,
         });
       } else {
         // Same solution, different node — keep locks list, discard draft write.
@@ -1569,6 +1572,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return;
     }
     const requestNodeId = node.node_id;
+    const active = lockForNode(get().locks, requestNodeId);
+    const deleteNodeId = active?.node_id ?? requestNodeId;
     const targets = handIndices ?? get().lockDraft.handIndices;
     if (!targets.length) {
       set({ message: "No combo selected to unlock." });
@@ -1576,7 +1581,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     try {
       for (const handIndex of targets) {
-        await engineClient.deleteLock(solutionId, requestNodeId, handIndex);
+        await engineClient.deleteLock(solutionId, deleteNodeId, handIndex);
       }
       if (get().solutionId !== solutionId) {
         return;
@@ -1610,8 +1615,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return;
     }
     const requestNodeId = node.node_id;
+    // Prefer deleting the active lock record (exact runout or line fallback).
+    const active = lockForNode(get().locks, requestNodeId);
+    const deleteNodeId = active?.node_id ?? requestNodeId;
     try {
-      await engineClient.deleteLock(solutionId, requestNodeId);
+      await engineClient.deleteLock(solutionId, deleteNodeId);
       if (get().solutionId !== solutionId) {
         return;
       }
@@ -1619,7 +1627,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (get().currentNode?.node_id !== requestNodeId) {
         return;
       }
-      set({ message: `Cleared locks at ${requestNodeId}` });
+      set({ message: `Cleared locks at ${deleteNodeId}` });
     } catch (error) {
       if (get().solutionId !== solutionId) {
         return;

@@ -838,8 +838,11 @@ void handle_client(socket_t client)
                 throw std::invalid_argument("solutions disagree on action arity at node");
             }
             std::size_t infoset_id = 0;
-            parse_public_node_index(node_token, infoset_id);
-            const poker::solver::NodeLock* lock = scenario->locks.find(infoset_id);
+            int turn = -1;
+            int river = -1;
+            parse_public_node_id(node_token, infoset_id, turn, river);
+            const poker::solver::NodeLock* lock =
+                scenario->locks.find_for_runout(infoset_id, turn, river);
             std::string out = "{\"baseline_id\":";
             append_escaped(out, "s" + std::to_string(baseline_id));
             out += ",\"scenario_id\":";
@@ -1092,10 +1095,20 @@ void handle_client(socket_t client)
             auto held = std::static_pointer_cast<HeldSolution>(lease.resource());
             const std::string node_id = read_string(body, "node_id", "");
             const std::string kind = read_string(body, "kind", "full");
+            // Default scope is "node": keep turn/river from node_id so a river
+            // lock does not silently constrain every runout of that line.
+            // "line" stores turn=river=-1 (Pio lock_line).
+            const std::string scope = read_string(body, "scope", "node");
             std::size_t infoset_id = 0;
-            if (!parse_public_node_index(node_id, infoset_id))
+            int turn = -1;
+            int river = -1;
+            if (!parse_public_node_id(node_id, infoset_id, turn, river))
             {
                 throw std::invalid_argument("bad node_id");
+            }
+            if (scope != "node" && scope != "line")
+            {
+                throw std::invalid_argument("scope must be node or line");
             }
             poker::solver::StreetInspection view;
             if (held->street)
@@ -1122,6 +1135,18 @@ void handle_client(socket_t client)
             }
             poker::solver::NodeLock lock;
             lock.infoset_id = infoset_id;
+            if (scope == "line")
+            {
+                lock.scope = poker::solver::LockScope::Line;
+                lock.turn = -1;
+                lock.river = -1;
+            }
+            else
+            {
+                lock.scope = poker::solver::LockScope::Node;
+                lock.turn = static_cast<std::int8_t>(turn);
+                lock.river = static_cast<std::int8_t>(river);
+            }
             if (kind == "full")
             {
                 lock.kind = poker::solver::LockKind::FullNode;
@@ -1242,23 +1267,27 @@ void handle_client(socket_t client)
             else
             {
                 std::size_t infoset_id = 0;
-                if (!parse_public_node_index(node_id, infoset_id))
+                int turn = -1;
+                int river = -1;
+                if (!parse_public_node_id(node_id, infoset_id, turn, river))
                 {
                     throw std::invalid_argument("bad node_id");
                 }
+                const poker::solver::LockKey key =
+                    poker::solver::make_lock_key(infoset_id, turn, river);
                 if (have_hand_index)
                 {
-                    const poker::solver::NodeLock* existing = held->locks.find(infoset_id);
+                    const poker::solver::NodeLock* existing = held->locks.find_exact(key);
                     if (existing != nullptr && existing->kind == poker::solver::LockKind::FullNode)
                     {
                         throw std::invalid_argument(
                             "full-node locks unlock with node_id only; omit hand_index");
                     }
-                    held->locks.erase_combo(infoset_id, hand_index);
+                    held->locks.erase_combo(key, hand_index);
                 }
                 else
                 {
-                    held->locks.erase(infoset_id);
+                    held->locks.erase(key);
                 }
             }
             send_response(client, 200, "application/json", json_locks(held->locks));

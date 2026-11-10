@@ -1225,23 +1225,66 @@ const poker::solver::LockSet* locks_arg(const HeldSolution& held)
 // Public node index from explorer ids like p0.t-1.r-1 (infoset_id for street locks).
 bool parse_public_node_index(std::string_view text, std::size_t& infoset_id)
 {
+    int turn = -1;
+    int river = -1;
+    return parse_public_node_id(text, infoset_id, turn, river);
+}
+
+bool parse_public_node_id(
+    std::string_view text,
+    std::size_t& infoset_id,
+    int& turn,
+    int& river)
+{
     if (text.empty() || text[0] != 'p')
     {
         return false;
     }
-    const char* first = text.data() + 1;
-    const char* last = text.data() + text.size();
-    if (first >= last || *first == '+' || *first == '-')
+    const char* cursor = text.data() + 1;
+    const char* const last = text.data() + text.size();
+    if (cursor >= last || *cursor == '+' || *cursor == '-')
     {
         return false;
     }
     unsigned long long value = 0;
-    const std::from_chars_result parsed = std::from_chars(first, last, value);
-    if (parsed.ec != std::errc() || parsed.ptr == first || parsed.ptr >= last || *parsed.ptr != '.')
+    const std::from_chars_result parsed_node = std::from_chars(cursor, last, value);
+    if (parsed_node.ec != std::errc() || parsed_node.ptr == cursor || parsed_node.ptr >= last
+        || *parsed_node.ptr != '.')
+    {
+        return false;
+    }
+    cursor = parsed_node.ptr + 1;
+    if (cursor >= last || *cursor != 't')
+    {
+        return false;
+    }
+    ++cursor;
+    long turn_value = 0;
+    const std::from_chars_result parsed_turn = std::from_chars(cursor, last, turn_value);
+    if (parsed_turn.ec != std::errc() || parsed_turn.ptr == cursor || parsed_turn.ptr >= last
+        || *parsed_turn.ptr != '.')
+    {
+        return false;
+    }
+    cursor = parsed_turn.ptr + 1;
+    if (cursor >= last || *cursor != 'r')
+    {
+        return false;
+    }
+    ++cursor;
+    long river_value = 0;
+    const std::from_chars_result parsed_river = std::from_chars(cursor, last, river_value);
+    if (parsed_river.ec != std::errc() || parsed_river.ptr == cursor || parsed_river.ptr != last)
+    {
+        return false;
+    }
+    if (turn_value < -1 || turn_value > 51 || river_value < -1 || river_value > 51)
     {
         return false;
     }
     infoset_id = static_cast<std::size_t>(value);
+    turn = static_cast<int>(turn_value);
+    river = static_cast<int>(river_value);
     return true;
 }
 
@@ -1250,13 +1293,19 @@ std::string node_id_for_infoset(std::size_t infoset_id)
     return "p" + std::to_string(infoset_id) + ".t-1.r-1";
 }
 
+std::string node_id_for_lock(const poker::solver::NodeLock& lock)
+{
+    return "p" + std::to_string(lock.infoset_id) + ".t" + std::to_string(static_cast<int>(lock.turn))
+        + ".r" + std::to_string(static_cast<int>(lock.river));
+}
+
 std::string json_locks(const poker::solver::LockSet& locks)
 {
     std::string out = "{\"locks\":[";
-    const std::vector<std::size_t> ids = locks.infoset_ids();
-    for (std::size_t i = 0; i < ids.size(); ++i)
+    const std::vector<poker::solver::LockKey> keys = locks.keys();
+    for (std::size_t i = 0; i < keys.size(); ++i)
     {
-        const poker::solver::NodeLock* lock = locks.find(ids[i]);
+        const poker::solver::NodeLock* lock = locks.find_exact(keys[i]);
         if (lock == nullptr)
         {
             continue;
@@ -1266,9 +1315,11 @@ std::string json_locks(const poker::solver::LockSet& locks)
             out += ',';
         }
         out += "{\"node_id\":";
-        append_escaped(out, node_id_for_infoset(lock->infoset_id));
+        append_escaped(out, node_id_for_lock(*lock));
         out += ",\"infoset_id\":";
         out += std::to_string(lock->infoset_id);
+        out += ",\"scope\":";
+        append_escaped(out, lock->is_line() ? "line" : "node");
         out += ",\"kind\":";
         append_escaped(out, lock->kind == poker::solver::LockKind::FullNode ? "full" : "selected");
         out += ",\"hand_indices\":[";
