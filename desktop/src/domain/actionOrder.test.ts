@@ -19,6 +19,12 @@ describe("actionAggressionScore", () => {
     expect(actionAggressionScore("Check")).toBeGreaterThan(
       actionAggressionScore("Fold"),
     );
+    expect(actionAggressionScore("Call all-in")).toBe(
+      actionAggressionScore("Call"),
+    );
+    expect(actionAggressionScore("All-in")).toBeGreaterThan(
+      actionAggressionScore("Call all-in"),
+    );
   });
 
   it("orders larger pot tags as more aggressive", () => {
