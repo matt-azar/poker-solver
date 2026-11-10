@@ -1363,7 +1363,8 @@
   min-height: 0;
 }
 
-/* Hands panel: N-column grid of specific combos for the hovered hand class. */
+/* Hands panel: N-column grid of specific combos for the hovered hand class.
+   Type scale mirrors GTO Wizard density: suited=4, pair=6, offsuit=12. */
 .inspector-combos.hands-combo-grid {
   display: grid;
   gap: 3px;
@@ -1371,6 +1372,32 @@
   grid-auto-rows: minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
+  /* Default = pair (6); overridden per data-shape below. */
+  --hands-metric-size: 12px;
+  --hands-badge-size: 11px;
+  --hands-suit-size: 10px;
+  --hands-tag-size: 9px;
+}
+
+.inspector-combos.hands-combo-grid[data-shape="suited"] {
+  --hands-metric-size: 14px;
+  --hands-badge-size: 12px;
+  --hands-suit-size: 11px;
+  --hands-tag-size: 10px;
+}
+
+.inspector-combos.hands-combo-grid[data-shape="pair"] {
+  --hands-metric-size: 12px;
+  --hands-badge-size: 11px;
+  --hands-suit-size: 10px;
+  --hands-tag-size: 9px;
+}
+
+.inspector-combos.hands-combo-grid[data-shape="offsuit"] {
+  --hands-metric-size: 10px;
+  --hands-badge-size: 9px;
+  --hands-suit-size: 8px;
+  --hands-tag-size: 8px;
 }
 
 /* Legacy multi-column combo row layout. */
@@ -1382,17 +1409,19 @@
   font-size: 12px;
 }
 
-/* One combo tile in the Hands panel (e.g. AsKs). */
+/* One combo tile in the Hands panel (e.g. AsKs).
+   Light silver fill (GTO Wizard Hands tiles) for contrast against strategy paint. */
 .hands-combo {
   position: relative;
   display: block;
   min-height: 72px;
   height: 100%;
   padding: 0;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border: 1px solid color-mix(in srgb, #9a9a9a 55%, transparent);
   border-radius: 0;
-  background: var(--empty-cell);
+  background: #d1d1d1;
   overflow: hidden;
+  font-family: var(--font-sans);
 }
 
 /* One combo tile in the Hands panel (e.g. AsKs). (absent). */
@@ -1400,56 +1429,44 @@
   opacity: 0.4;
 }
 
-/* Colored strategy bars (and optional mass clip) behind the tile text.
-   Height tracks --mass-fill when range weight-fill is on; mirrors .matrix-cell__weight-fill. */
+/* Mass-clipped stack of action-frequency rows under the badge.
+   Height tracks --mass-fill when range weight-fill is on. */
 .hands-combo__weight-fill {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  flex: 1 1 auto;
+  min-height: 0;
   height: calc(var(--mass-fill, 1) * 100%);
+  max-height: 100%;
   overflow: hidden;
-  pointer-events: none;
-}
-
-/* Weight-fill off: paint strategy bars through the full tile height. */
-.hands-combo[data-weight-fill="false"] .hands-combo__weight-fill {
-  height: 100%;
-}
-
-/* Horizontal stack of action-colored strategy segments inside the weight-fill. */
-.hands-combo__segments {
-  position: absolute;
-  inset: 0;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
 }
 
-/* One action's share of the strategy mix bar. */
-.hands-combo__seg {
-  height: 100%;
-  min-width: 0;
+/* Weight-fill off: action rows fill the remaining tile height. */
+.hands-combo[data-weight-fill="false"] .hands-combo__weight-fill {
+  height: auto;
+  flex: 1 1 auto;
 }
 
-/* Foreground content over the strategy paint: badge row + metric rows. */
+/* Badge + frequency rows; silver tile chrome stays visible around the bars. */
 .hands-combo__body {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  justify-content: space-between;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 3px;
   height: 100%;
   min-height: 72px;
-  padding: 5px 6px 6px;
+  padding: 3px 3px 3px;
   color: #111;
   box-sizing: border-box;
+  font-family: var(--font-sans);
 }
 
-/* Foreground content over the strategy paint: badge row + metric rows. (absent). */
+/* Badge + frequency rows; silver tile chrome stays visible around the bars. (absent). */
 .hands-combo[data-present="false"] .hands-combo__body {
-  color: var(--muted);
+  color: #555;
 }
 
 /* Top row of a tile: card badge on the left, metric mode tag on the right. */
@@ -1458,22 +1475,24 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 4px;
+  flex: 0 0 auto;
+  padding: 1px 2px 0;
 }
 
-/* White chip showing the two hole cards (rank + suit). */
+/* Hole-card label on the silver chrome (no opaque chip). */
 .hands-combo__badge {
   display: inline-flex;
   align-items: center;
   gap: 1px;
-  padding: 1px 4px;
-  border-radius: 2px;
-  background: #fff;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
   color: #111;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: var(--hands-badge-size, 11px);
   font-weight: 700;
   line-height: 1.2;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+  box-shadow: none;
 }
 
 /* One card inside the badge (rank glyph + suit symbol). */
@@ -1483,7 +1502,7 @@
   gap: 0;
 }
 
-/* Four-color deck on the always-white badge face (light --suit-* values). */
+/* Four-color deck on the silver tile face (light --suit-* values). */
 .hands-combo__badge-card[data-suit="h"] {
   color: #a33b32;
 }
@@ -1502,44 +1521,51 @@
 
 /* Suit symbol next to the rank in the badge. */
 .hands-combo__badge-suit {
-  font-size: 10px;
+  font-size: var(--hands-suit-size, 10px);
   margin-left: 0;
 }
 
 /* Small corner label for the metric mode: EV, Eq, or Freq. */
 .hands-combo__metric-tag {
-  font-size: 10px;
+  font-family: var(--font-sans);
+  font-size: var(--hands-tag-size, 9px);
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.55);
-  text-shadow: 0 0 2px rgba(255, 255, 255, 0.35);
+  color: rgba(0, 0, 0, 0.45);
 }
 
-/* Stack of per-action rows (and optional equity row) at the bottom of the tile. */
+/* Stack of action-frequency rows; row height ∝ frequency (GTO Wizard Hands). */
 .hands-combo__metrics {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   width: 100%;
-  margin-top: auto;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
-/* One action line: label on the left, EV/freq value on the right. */
+/* One action line painted with that action's color; height from flex-grow. */
 .hands-combo__metric-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
+  min-height: 0;
+  padding: 0 4px;
+  box-sizing: border-box;
 }
 
 /* Shared type for action names and their EV/frequency numbers. */
 .hands-combo__metric-action,
 .hands-combo__metric-value {
+  position: relative;
+  z-index: 1;
   color: #111;
-  font-weight: 700;
-  font-size: 16px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--hands-metric-size, 12px);
   line-height: 1.15;
-  text-shadow: 0 0 2px rgba(255, 255, 255, 0.45);
 }
 
 /* Action name / pot tag on the left of a metric row (may ellipsize). */
@@ -1554,14 +1580,19 @@
 .hands-combo__metric-value {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
-  font-family: var(--font-mono);
 }
 
-/* Equity (“Eq”) row under the action metrics — same type size as EV/freq. */
+/* Equity (“Eq”) row under the action metrics — fixed short strip on silver. */
+.hands-combo__metric-row--eq {
+  flex: 0 0 auto;
+  background: transparent;
+  min-height: calc(var(--hands-metric-size, 12px) * 1.3);
+}
+
 .hands-combo__metric-row--eq .hands-combo__metric-action,
 .hands-combo__metric-row--eq .hands-combo__metric-value {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: var(--hands-metric-size, 12px);
+  font-weight: 600;
   color: #111;
 }
 
