@@ -3,6 +3,7 @@ import {
   categorySeatView,
   filterHandsByEquityBands,
   filteredEquityComposition,
+  formatCategoryLabel,
   groupRangesByFolder,
   handShape,
   normalizeBucketWeights,
@@ -26,9 +27,19 @@ describe("analysis helpers", () => {
       mass: [1, 3],
     });
     expect(view.rows).toEqual([
-      { name: "pair", fraction: 0.25, mass: 1 },
-      { name: "flush", fraction: 0.75, mass: 3 },
+      { name: "Pair", fraction: 0.25, mass: 1 },
+      { name: "Flush", fraction: 0.75, mass: 3 },
     ]);
+  });
+
+  it("title-cases category labels and keeps OESD as an acronym", () => {
+    expect(formatCategoryLabel("flush draw")).toBe("Flush Draw");
+    expect(formatCategoryLabel("oesd")).toBe("OESD");
+    expect(formatCategoryLabel("gutshot")).toBe("Gutshot");
+    expect(formatCategoryLabel("backdoor flush")).toBe("Backdoor Flush");
+    expect(formatCategoryLabel("backdoor straight")).toBe("Backdoor Straight");
+    expect(formatCategoryLabel("three of a kind")).toBe("Three of a Kind");
+    expect(formatCategoryLabel("high card")).toBe("High Card");
   });
 
   it("classifies combo shapes", () => {
