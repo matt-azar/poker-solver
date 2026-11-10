@@ -48,6 +48,13 @@ vi.mock("../../domain/profiles", async () => {
 const profiles = await import("../../domain/profiles");
 const { SeatActionCatalogueTree } = await import("./SeatActionCatalogueTree");
 
+async function openRowMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+) {
+  await user.click(screen.getByRole("button", { name: `Actions for ${label}` }));
+}
+
 describe("SeatActionCatalogueTree folder edits", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -72,16 +79,17 @@ describe("SeatActionCatalogueTree folder edits", () => {
     await user.click(screen.getByRole("button", { name: "Add position" }));
     expect(screen.getByText("EP")).toBeTruthy();
 
-    // EP empty Open folder's Save here is the last one after HJ's Save here.
-    const saveHereButtons = screen.getAllByRole("button", { name: "Save here" });
-    await user.click(saveHereButtons[saveHereButtons.length - 1]!);
+    // EP's empty Open folder is the first "Open" row (EP sorts before HJ).
+    const openMenus = screen.getAllByRole("button", { name: "Actions for Open" });
+    await user.click(openMenus[0]!);
+    await user.click(screen.getByRole("menuitem", { name: "Save here" }));
     await user.type(
       screen.getByLabelText("Name for range saved into folder"),
       "EP open",
     );
     await user.click(screen.getByRole("button", { name: "Save into folder" }));
 
-    expect(screen.getByRole("button", { name: /EP open/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^EP open$/i })).toBeTruthy();
   });
 
   it("renames a position folder via the layout overlay", async () => {
@@ -96,7 +104,8 @@ describe("SeatActionCatalogueTree folder edits", () => {
         saveSource={{ label: "OOP", rangeText: "AA" }}
       />,
     );
-    await user.click(screen.getAllByRole("button", { name: "Rename" })[0]!);
+    await openRowMenu(user, "HJ");
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     expect(screen.getByText("Hijack")).toBeTruthy();
   });
 
@@ -112,8 +121,10 @@ describe("SeatActionCatalogueTree folder edits", () => {
         saveSource={{ label: "OOP", rangeText: "ATs+" }}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Replace" }));
-    expect(screen.getByRole("button", { name: /My HJ open/i })).toBeTruthy();
-    expect(screen.getByText("custom")).toBeTruthy();
+    await openRowMenu(user, "Open");
+    await user.click(screen.getByRole("menuitem", { name: "Replace" }));
+    expect(
+      screen.getByRole("button", { name: /My HJ open.*custom/i }),
+    ).toBeTruthy();
   });
 });

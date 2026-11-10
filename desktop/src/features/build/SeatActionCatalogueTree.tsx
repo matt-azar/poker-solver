@@ -1,4 +1,11 @@
-import { useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   addCatalogueLine,
   addCataloguePosition,
@@ -74,10 +81,135 @@ function promptLabel(message: string, initial: string): string | null {
   return trimmed || null;
 }
 
+function FolderIcon() {
+  return (
+    <svg className="seat-tree__glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M1.5 3.25A1.75 1.75 0 0 1 3.25 1.5h3.1c.4 0 .78.16 1.06.44l.8.8c.14.14.33.22.53.22h4.01A1.75 1.75 0 0 1 14.5 4.7v7.05A1.75 1.75 0 0 1 12.75 13.5h-9.5A1.75 1.75 0 0 1 1.5 11.75V3.25Z"
+        opacity="0.92"
+      />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg className="seat-tree__glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M3.5 1.5h5.3L12.5 5.2V14a.75.75 0 0 1-.75.75h-8.5A.75.75 0 0 1 2.5 14V2.25c0-.41.34-.75.75-.75Zm5 .7V5h2.7L8.5 2.2Z"
+        opacity="0.88"
+      />
+    </svg>
+  );
+}
+
+function depthStyle(depth: number): CSSProperties {
+  return { ["--seat-tree-depth" as string]: String(depth) };
+}
+
+function RowMenu({
+  label,
+  open,
+  onOpenChange,
+  children,
+}: {
+  label: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onPointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        onOpenChange(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onOpenChange(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, onOpenChange]);
+
+  return (
+    <div className="seat-tree__menu" ref={rootRef}>
+      <button
+        type="button"
+        className="seat-tree__menu-trigger"
+        aria-label={`Actions for ${label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenChange(!open);
+        }}
+      >
+        ⋯
+      </button>
+      {open ? (
+        <div
+          className="seat-tree__menu-panel"
+          role="menu"
+          aria-label={`Actions for ${label}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function menuItem(
+  label: string,
+  onClick: () => void,
+  options?: { danger?: boolean; title?: string },
+) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={
+        options?.danger
+          ? "seat-tree__menu-item seat-tree__menu-item--danger"
+          : "seat-tree__menu-item"
+      }
+      title={options?.title}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 function TreeNodes({
   nodes,
+  depth,
   onPick,
   editable,
+  openMenuId,
+  setOpenMenuId,
   onRename,
   onAddLine,
   onSaveInto,
@@ -87,8 +219,11 @@ function TreeNodes({
   isUserImport,
 }: {
   nodes: SeatActionTreeNode[];
+  depth: number;
   onPick: (atom: SeatActionRange) => void;
   editable: boolean;
+  openMenuId: string | null;
+  setOpenMenuId: (id: string | null) => void;
   onRename: (branchId: string, currentLabel: string) => void;
   onAddLine: (position: string) => void;
   onSaveInto: (placement: SeatPlacement, folderLabel: string) => void;
@@ -98,89 +233,99 @@ function TreeNodes({
   isUserImport: (id: string) => boolean;
 }) {
   return (
-    <ul className="seat-tree__list">
+    <ul className="seat-tree__list" role={depth === 0 ? undefined : "group"}>
       {nodes.map((node) =>
         node.kind === "leaf" ? (
-          <li key={node.id} className="seat-tree__item">
-            <button
-              type="button"
-              className="seat-tree__leaf"
-              onClick={() => onPick(node.atom)}
-            >
-              {node.label}
-              {node.overridden ? (
-                <span className="seat-tree__badge">custom</span>
-              ) : null}
-            </button>
-            {editable ? (
-              <div className="seat-tree__row-actions">
-                <button
-                  type="button"
-                  className="toolbar-btn"
-                  onClick={() => onReplaceLeaf(node.atom)}
-                  title="Replace this chart with the current Build range"
-                >
-                  Replace
-                </button>
-                {isUserImport(node.atom.id) ? (
-                  <>
-                    <button
-                      type="button"
-                      className="toolbar-btn"
-                      onClick={() => onEditLeaf(node.atom)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="toolbar-btn"
-                      onClick={() => onDeleteLeaf(node.atom)}
-                    >
-                      Delete
-                    </button>
-                  </>
+          <li
+            key={node.id}
+            className="seat-tree__node seat-tree__node--leaf"
+            style={depthStyle(depth)}
+            role="treeitem"
+          >
+            <div className="seat-tree__row">
+              <button
+                type="button"
+                className="seat-tree__row-main seat-tree__leaf"
+                onClick={() => onPick(node.atom)}
+              >
+                <span className="seat-tree__twist seat-tree__twist--leaf" aria-hidden="true" />
+                <FileIcon />
+                <span className="seat-tree__name">{node.label}</span>
+                {node.overridden ? (
+                  <span className="seat-tree__badge">custom</span>
                 ) : null}
-              </div>
-            ) : null}
+              </button>
+              {editable ? (
+                <RowMenu
+                  label={node.label}
+                  open={openMenuId === node.id}
+                  onOpenChange={(next) => setOpenMenuId(next ? node.id : null)}
+                >
+                  {menuItem("Replace", () => {
+                    setOpenMenuId(null);
+                    onReplaceLeaf(node.atom);
+                  }, {
+                    title: "Replace this chart with the current Build range",
+                  })}
+                  {isUserImport(node.atom.id) ? (
+                    <>
+                      {menuItem("Edit", () => {
+                        setOpenMenuId(null);
+                        onEditLeaf(node.atom);
+                      })}
+                      {menuItem(
+                        "Delete",
+                        () => {
+                          setOpenMenuId(null);
+                          onDeleteLeaf(node.atom);
+                        },
+                        { danger: true },
+                      )}
+                    </>
+                  ) : null}
+                </RowMenu>
+              ) : null}
+            </div>
           </li>
         ) : (
-          <li key={node.id}>
-            <details className="seat-tree__branch" open={node.children.length === 0}>
-              <summary>
-                <span className="seat-tree__branch-label">{node.label}</span>
+          <li
+            key={node.id}
+            className="seat-tree__node seat-tree__node--branch"
+            style={depthStyle(depth)}
+            role="treeitem"
+            aria-expanded={node.children.length === 0 ? true : undefined}
+          >
+            <details
+              className="seat-tree__branch"
+              open={node.children.length === 0}
+            >
+              <summary className="seat-tree__row">
+                <span className="seat-tree__row-main">
+                  <span className="seat-tree__twist" aria-hidden="true" />
+                  <FolderIcon />
+                  <span className="seat-tree__name seat-tree__branch-label">
+                    {node.label}
+                  </span>
+                </span>
                 {editable ? (
-                  <span className="seat-tree__row-actions">
-                    <button
-                      type="button"
-                      className="toolbar-btn"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onRename(node.id, node.label);
-                      }}
-                    >
-                      Rename
-                    </button>
-                    {node.position && node.lineLabel === undefined ? (
-                      <button
-                        type="button"
-                        className="toolbar-btn"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
+                  <RowMenu
+                    label={node.label}
+                    open={openMenuId === node.id}
+                    onOpenChange={(next) => setOpenMenuId(next ? node.id : null)}
+                  >
+                    {menuItem("Rename", () => {
+                      setOpenMenuId(null);
+                      onRename(node.id, node.label);
+                    })}
+                    {node.position && node.lineLabel === undefined
+                      ? menuItem("Add line", () => {
+                          setOpenMenuId(null);
                           onAddLine(node.position!);
-                        }}
-                      >
-                        Add line
-                      </button>
-                    ) : null}
-                    {node.position ? (
-                      <button
-                        type="button"
-                        className="toolbar-btn"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
+                        })
+                      : null}
+                    {node.position
+                      ? menuItem("Save here", () => {
+                          setOpenMenuId(null);
                           const placement =
                             node.lineLabel == null || node.lineLabel === undefined
                               ? openPlacement(node.position!)
@@ -193,19 +338,19 @@ function TreeNodes({
                             return;
                           }
                           onSaveInto(placement, node.label);
-                        }}
-                      >
-                        Save here
-                      </button>
-                    ) : null}
-                  </span>
+                        })
+                      : null}
+                  </RowMenu>
                 ) : null}
               </summary>
               {node.children.length ? (
                 <TreeNodes
                   nodes={node.children}
+                  depth={depth + 1}
                   onPick={onPick}
                   editable={editable}
+                  openMenuId={openMenuId}
+                  setOpenMenuId={setOpenMenuId}
                   onRename={onRename}
                   onAddLine={onAddLine}
                   onSaveInto={onSaveInto}
@@ -239,6 +384,7 @@ export function SeatActionCatalogueTree({ onPick, saveSource }: Props) {
     folderLabel: string;
   } | null>(null);
   const [saveAction, setSaveAction] = useState<SeatActionKind>("call");
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const refresh = () => setVersion((value) => value + 1);
 
@@ -457,7 +603,7 @@ export function SeatActionCatalogueTree({ onPick, saveSource }: Props) {
         <section className="seat-tree__toolbar" aria-label="Catalogue folders">
           <div className="seat-tree__save-form">
             <label>
-              Add position folder
+              New folder
               <input
                 value={newPosition}
                 placeholder="e.g. EP"
@@ -475,7 +621,8 @@ export function SeatActionCatalogueTree({ onPick, saveSource }: Props) {
           {saveTarget ? (
             <div className="seat-tree__save-into" aria-label="Save into folder">
               <p className="seat-tree__save-into-label">
-                Save current {saveSource.label} into <strong>{saveTarget.folderLabel}</strong>
+                Save current {saveSource.label} into{" "}
+                <strong>{saveTarget.folderLabel}</strong>
               </p>
               <div className="seat-tree__save-form">
                 <label>
@@ -530,88 +677,124 @@ export function SeatActionCatalogueTree({ onPick, saveSource }: Props) {
         </section>
       ) : null}
 
-      <h3 className="seat-tree__section-title">Seat × action</h3>
-      {!tree.length ? (
-        <p className="empty-hint">No seat×action ranges are loaded.</p>
-      ) : (
-        <TreeNodes
-          nodes={tree}
-          onPick={onPick}
-          editable={Boolean(saveSource)}
-          onRename={renameBranch}
-          onAddLine={addLine}
-          onSaveInto={startSaveInto}
-          onReplaceLeaf={replaceLeaf}
-          onEditLeaf={beginEdit}
-          onDeleteLeaf={removeSaved}
-          isUserImport={(id) => catalogue().isUserImport(id)}
-        />
-      )}
+      <div className="seat-tree__browser">
+        <div className="seat-tree__browser-head">
+          <h3 className="seat-tree__section-title">Seat × action</h3>
+        </div>
+        {!tree.length ? (
+          <p className="empty-hint">No seat×action ranges are loaded.</p>
+        ) : (
+          <TreeNodes
+            nodes={tree}
+            depth={0}
+            onPick={onPick}
+            editable={Boolean(saveSource)}
+            openMenuId={openMenuId}
+            setOpenMenuId={setOpenMenuId}
+            onRename={renameBranch}
+            onAddLine={addLine}
+            onSaveInto={startSaveInto}
+            onReplaceLeaf={replaceLeaf}
+            onEditLeaf={beginEdit}
+            onDeleteLeaf={removeSaved}
+            isUserImport={(id) => catalogue().isUserImport(id)}
+          />
+        )}
 
-      {saveSource ? (
-        <section className="seat-tree__saved" aria-label="Unfiled saved ranges">
-          <h3 className="seat-tree__section-title">Unfiled saves</h3>
-          <p className="empty-hint">
-            Saves without a seat folder. Use Save here / Replace on a folder to file them.
-          </p>
-          {unfiledSaved.length === 0 ? (
-            <p className="empty-hint">No unfiled saves.</p>
-          ) : (
-            <ul className="seat-tree__saved-list">
-              {unfiledSaved.map((atom) => (
-                <li key={atom.id} className="seat-tree__saved-item">
-                  <button
-                    type="button"
-                    className="seat-tree__leaf"
-                    onClick={() => onPick(atom)}
-                  >
-                    {atom.displayName}
-                  </button>
-                  <div className="seat-tree__saved-actions">
-                    <button
-                      type="button"
-                      className="toolbar-btn"
-                      onClick={() => beginEdit(atom)}
+        {saveSource ? (
+          <section className="seat-tree__saved" aria-label="Unfiled saved ranges">
+            <details className="seat-tree__branch seat-tree__unfiled" open>
+              <summary className="seat-tree__row" style={depthStyle(0)}>
+                <span className="seat-tree__row-main">
+                  <span className="seat-tree__twist" aria-hidden="true" />
+                  <FolderIcon />
+                  <span className="seat-tree__name seat-tree__branch-label">
+                    <h3 className="seat-tree__section-title seat-tree__section-title--inline">
+                      Unfiled saves
+                    </h3>
+                  </span>
+                </span>
+              </summary>
+              <p className="empty-hint seat-tree__unfiled-hint">
+                Saves without a seat folder. Use Save here / Replace on a folder to file
+                them.
+              </p>
+              {unfiledSaved.length === 0 ? (
+                <p className="empty-hint seat-tree__empty-folder">No unfiled saves.</p>
+              ) : (
+                <ul className="seat-tree__list" role="group">
+                  {unfiledSaved.map((atom) => (
+                    <li
+                      key={atom.id}
+                      className="seat-tree__node seat-tree__node--leaf"
+                      style={depthStyle(1)}
+                      role="treeitem"
                     >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="toolbar-btn"
-                      onClick={() => removeSaved(atom)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="seat-tree__save-form">
-            <label>
-              Save current {saveSource.label} range (unfiled)
-              <input
-                value={saveTarget ? "" : saveName}
-                placeholder="e.g. Scratch pad"
+                      <div className="seat-tree__row">
+                        <button
+                          type="button"
+                          className="seat-tree__row-main seat-tree__leaf"
+                          onClick={() => onPick(atom)}
+                        >
+                          <span
+                            className="seat-tree__twist seat-tree__twist--leaf"
+                            aria-hidden="true"
+                          />
+                          <FileIcon />
+                          <span className="seat-tree__name">{atom.displayName}</span>
+                        </button>
+                        <RowMenu
+                          label={atom.displayName}
+                          open={openMenuId === atom.id}
+                          onOpenChange={(next) =>
+                            setOpenMenuId(next ? atom.id : null)
+                          }
+                        >
+                          {menuItem("Edit", () => {
+                            setOpenMenuId(null);
+                            beginEdit(atom);
+                          })}
+                          {menuItem(
+                            "Delete",
+                            () => {
+                              setOpenMenuId(null);
+                              removeSaved(atom);
+                            },
+                            { danger: true },
+                          )}
+                        </RowMenu>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
+            <div className="seat-tree__save-form seat-tree__save-form--footer">
+              <label>
+                Save current {saveSource.label} range (unfiled)
+                <input
+                  value={saveTarget ? "" : saveName}
+                  placeholder="e.g. Scratch pad"
+                  disabled={Boolean(saveTarget)}
+                  onChange={(event) => {
+                    setSaveName(event.target.value);
+                    setSaveError(null);
+                  }}
+                  aria-label={`Name for unfiled ${saveSource.label} range`}
+                />
+              </label>
+              <button
+                type="button"
+                className="toolbar-btn"
                 disabled={Boolean(saveTarget)}
-                onChange={(event) => {
-                  setSaveName(event.target.value);
-                  setSaveError(null);
-                }}
-                aria-label={`Name for unfiled ${saveSource.label} range`}
-              />
-            </label>
-            <button
-              type="button"
-              className="toolbar-btn"
-              disabled={Boolean(saveTarget)}
-              onClick={saveUnfiled}
-            >
-              Save unfiled
-            </button>
-          </div>
-        </section>
-      ) : null}
+                onClick={saveUnfiled}
+              >
+                Save unfiled
+              </button>
+            </div>
+          </section>
+        ) : null}
+      </div>
 
       {editingId && saveSource ? (
         <div className="seat-tree__edit seat-tree__edit--dock">
