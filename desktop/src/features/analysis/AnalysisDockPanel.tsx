@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import {
+  buildEquityChartCurve,
   categorySeatView,
   filterHandsByEquityBands,
   filteredEquityComposition,
   normalizeBucketWeights,
+  type EquityChartPoint,
   type EquityHandRow,
 } from "../../domain/analysis";
 import { draftFromStudyNode } from "../../domain/equity/transfer";
@@ -94,6 +96,106 @@ function EquityHistogram({
   );
 }
 
+function stepPath(
+  points: EquityChartPoint[],
+  toX: (percentile: number) => number,
+  toY: (equity: number) => number,
+): string {
+  if (!points.length) {
+    return "";
+  }
+  let d = `M ${toX(points[0]!.percentile)} ${toY(points[0]!.equity)}`;
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = points[i - 1]!;
+    const cur = points[i]!;
+    // Horizontal then vertical step (stair plot).
+    d += ` L ${toX(cur.percentile)} ${toY(prev.equity)} L ${toX(cur.percentile)} ${toY(cur.equity)}`;
+  }
+  return d;
+}
+
+/** GTO Wizard–style OOP vs IP equity distribution chart. */
+function EquityDistributionChart({
+  oopPoints,
+  ipPoints,
+}: {
+  oopPoints: EquityChartPoint[];
+  ipPoints: EquityChartPoint[];
+}) {
+  const width = 360;
+  const height = 220;
+  const pad = { top: 12, right: 12, bottom: 28, left: 36 };
+  const innerW = width - pad.left - pad.right;
+  const innerH = height - pad.top - pad.bottom;
+  const toX = (percentile: number) => pad.left + (percentile / 100) * innerW;
+  const toY = (equity: number) => pad.top + (1 - equity) * innerH;
+  const ticks = [0, 25, 50, 75, 100];
+  const oopPath = stepPath(oopPoints, toX, toY);
+  const ipPath = stepPath(ipPoints, toX, toY);
+  const empty = !oopPath && !ipPath;
+
+  return (
+    <div className="equity-chart">
+      <h3 className="panel-subtitle">Equity chart</h3>
+      <div className="equity-chart-legend" aria-hidden="true">
+        <span className="equity-chart-legend__item">
+          <span className="equity-chart-swatch equity-chart-swatch--ip" />
+          IP
+        </span>
+        <span className="equity-chart-legend__item">
+          <span className="equity-chart-swatch equity-chart-swatch--oop" />
+          OOP
+        </span>
+      </div>
+      {empty ? (
+        <p className="empty-hint">No equity hands.</p>
+      ) : (
+        <svg
+          className="equity-chart-svg"
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label="OOP versus IP equity distribution chart"
+        >
+          {ticks.map((tick) => (
+            <g key={`grid-${tick}`}>
+              <line
+                className="equity-chart-grid"
+                x1={pad.left}
+                y1={toY(tick / 100)}
+                x2={width - pad.right}
+                y2={toY(tick / 100)}
+              />
+              <text
+                className="equity-chart-label"
+                x={pad.left - 6}
+                y={toY(tick / 100)}
+                textAnchor="end"
+                dominantBaseline="middle"
+              >
+                {tick === 100 ? "00" : tick === 0 ? "0" : String(tick)}
+              </text>
+              <text
+                className="equity-chart-label"
+                x={toX(tick)}
+                y={height - 8}
+                textAnchor="middle"
+              >
+                {tick === 0 ? "" : String(tick)}
+              </text>
+            </g>
+          ))}
+          {oopPath ? (
+            <path className="equity-chart-line equity-chart-line--oop" d={oopPath} fill="none" />
+          ) : null}
+          {ipPath ? (
+            <path className="equity-chart-line equity-chart-line--ip" d={ipPath} fill="none" />
+          ) : null}
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function bandKey(lo: number, hi: number): string {
   return `${lo}:${hi}`;
 }
@@ -141,6 +243,15 @@ export function AnalysisDockPanel() {
     const hands = filterHandsByEquityBands(equityHands, bands.length ? bands : null);
     return filteredEquityComposition(hands);
   }, [equityHands, selectedBands]);
+
+  const oopChartPoints = useMemo(
+    () => buildEquityChartCurve(equity?.oop_hands),
+    [equity?.oop_hands],
+  );
+  const ipChartPoints = useMemo(
+    () => buildEquityChartCurve(equity?.ip_hands),
+    [equity?.ip_hands],
+  );
 
   const toggleBand = (lo: number, hi: number) => {
     const key = bandKey(lo, hi);
@@ -205,9 +316,7 @@ export function AnalysisDockPanel() {
             </button>
           </div>
         </div>
-        <p className="equity-note muted">
-          Equity (fraction of pot). Not chip EV.
-        </p>
+        <p className="equity-note muted">Equity (fraction of pot).</p>
         {transferMessage ? <p className="equity-note">{transferMessage}</p> : null}
         {!equity ? (
           <p className="empty-hint">Click Refresh to load equity.</p>
@@ -227,10 +336,6 @@ export function AnalysisDockPanel() {
                 <strong className="tabular">
                   {equity.ip_equity == null ? "—" : equity.ip_equity.toFixed(4)}
                 </strong>
-              </div>
-              <div>
-                <span className="muted">Filter mass</span>
-                <strong className="tabular">{filteredView.totalWeight.toFixed(3)}</strong>
               </div>
               <div>
                 <span className="muted">Filter avg</span>
@@ -264,50 +369,7 @@ export function AnalysisDockPanel() {
                 selected={selectedBands}
                 onToggle={toggleBand}
               />
-              <div className="equity-composition">
-                <h3 className="panel-subtitle">Range composition</h3>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Shape</th>
-                      <th>Mass</th>
-                      <th>%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredView.shapes.map((row) => (
-                      <tr key={row.name}>
-                        <td>{row.name}</td>
-                        <td className="tabular">{row.mass.toFixed(3)}</td>
-                        <td className="tabular">{(row.fraction * 100).toFixed(1)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <h3 className="panel-subtitle">Top hands in filter</h3>
-                {!filteredView.topHands.length ? (
-                  <p className="empty-hint">No hands in the selected bands.</p>
-                ) : (
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Hand</th>
-                        <th>Eq</th>
-                        <th>Wt</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredView.topHands.map((hand) => (
-                        <tr key={hand.combo}>
-                          <td>{hand.combo}</td>
-                          <td className="tabular">{Number(hand.equity).toFixed(3)}</td>
-                          <td className="tabular">{Number(hand.weight).toFixed(3)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+              <EquityDistributionChart oopPoints={oopChartPoints} ipPoints={ipChartPoints} />
             </div>
           </>
         )}

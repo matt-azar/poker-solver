@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildEquityChartCurve,
   categorySeatView,
   filterHandsByEquityBands,
   filteredEquityComposition,
@@ -72,6 +73,19 @@ describe("analysis helpers", () => {
     expect(view.shapes.find((row) => row.name === "pair")?.fraction).toBeCloseTo(0.25, 12);
     expect(view.shapes.find((row) => row.name === "suited")?.fraction).toBeCloseTo(0.25, 12);
     expect(view.shapes.find((row) => row.name === "offsuit")?.fraction).toBeCloseTo(0.5, 12);
+  });
+
+  it("builds a weight-sorted equity chart curve", () => {
+    const points = buildEquityChartCurve([
+      { combo: "AhAd", equity: 0.9, weight: 1 },
+      { combo: "2c3d", equity: 0.1, weight: 1 },
+      { combo: "KcKd", equity: 0.5, weight: 2 },
+    ]);
+    expect(points[0]).toEqual({ percentile: 0, equity: 0.1 });
+    // Boundary percentile keeps the next hand's equity (step renderer draws the rise).
+    expect(points.find((point) => point.percentile === 25)?.equity).toBeCloseTo(0.5, 12);
+    expect(points.find((point) => point.percentile === 75)?.equity).toBeCloseTo(0.9, 12);
+    expect(points[points.length - 1]).toEqual({ percentile: 100, equity: 0.9 });
   });
 
   it("groups nested range presets by folder", () => {
