@@ -362,7 +362,7 @@ export function BuildWorkspace() {
               <span className="field-hint">Required for a postflop solve</span>
             ) : null}
           </label>
-          <div className="build-inline">
+          <div className="build-inline build-inline--scalar">
             <label>
               Pot{potProvenance ? ` · ${potProvenance}` : ""}
               <input
@@ -531,7 +531,7 @@ export function BuildWorkspace() {
               />
             </label>
           </div>
-          <div className="build-inline">
+          <div className="build-inline build-inline--scalar">
             <label>
               Pot cap
               <input
@@ -561,7 +561,7 @@ export function BuildWorkspace() {
           </div>
 
           <h3 className="build-subhead">Stop</h3>
-          <div className="build-inline">
+          <div className="build-inline build-inline--scalar">
             <label>
               Iterations
               <input
