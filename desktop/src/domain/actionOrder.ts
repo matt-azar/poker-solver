@@ -71,3 +71,11 @@ export function orderActionIndicesByAggression(actions: string[]): number[] {
     )
     .reverse();
 }
+
+/**
+ * Aggressive → passive (top → bottom for Hands metric lists).
+ * Paint bars use `orderActionIndicesByAggression` instead — never reverse ad-hoc.
+ */
+export function orderActionIndicesAggressiveFirst(actions: string[]): number[] {
+  return [...orderActionIndicesByAggression(actions)].reverse();
+}

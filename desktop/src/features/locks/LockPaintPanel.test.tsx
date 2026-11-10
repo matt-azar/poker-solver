@@ -148,7 +148,7 @@ describe("Node Locking workspace", () => {
 
     const aa = screen.getByRole("button", { name: "AA" });
     const cellSegs = [
-      ...aa.querySelectorAll(".lock-paint-cell__seg"),
+      ...aa.querySelectorAll(".strategy-paint__seg"),
     ] as HTMLElement[];
     expect(cellSegs.length).toBe(3);
     // Check (passive) left, then Bet 50, then Bet 100.

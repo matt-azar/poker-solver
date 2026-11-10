@@ -128,7 +128,7 @@ describe("ComboInspector", () => {
       '.hands-combo[data-present="true"]',
     ) as HTMLElement;
     const segs = [
-      ...present.querySelectorAll(".hands-combo__weight-fill .hands-combo__seg"),
+      ...present.querySelectorAll(".hands-combo__weight-fill .strategy-paint__seg"),
     ] as HTMLElement[];
     expect(segs.length).toBeGreaterThan(0);
     // Check (passive) is left-most; Bet (aggressive) is right (#C9843F → rgb).
@@ -144,7 +144,7 @@ describe("ComboInspector", () => {
     );
   });
 
-  it("sets --mass-fill from combo reach (paint height ∝ weight)", () => {
+  it("sets --weight-fill from combo reach (paint height ∝ weight)", () => {
     useStudyStore.setState({
       currentNode: {
         ...aaNode,
@@ -157,7 +157,7 @@ describe("ComboInspector", () => {
       ...document.querySelectorAll('.hands-combo[data-present="true"]'),
     ] as HTMLElement[];
     const fills = present.map((el) =>
-      Number(el.style.getPropertyValue("--mass-fill")),
+      Number(el.style.getPropertyValue("--weight-fill")),
     );
     expect(fills).toContain(1);
     expect(fills).toContain(0.5);
@@ -200,7 +200,7 @@ describe("ComboInspector", () => {
     ).toBe("pair");
     const segs = [
       ...document.querySelectorAll(
-        '.hands-combo[data-present="true"] .hands-combo__seg',
+        '.hands-combo[data-present="true"] .strategy-paint__seg',
       ),
     ] as HTMLElement[];
     expect(segs.length).toBeGreaterThan(0);
@@ -245,7 +245,7 @@ describe("ComboInspector", () => {
     render(<ComboInspector />);
     const segs = [
       ...document.querySelectorAll(
-        '.hands-combo[data-present="true"] .hands-combo__seg',
+        '.hands-combo[data-present="true"] .strategy-paint__seg',
       ),
     ] as HTMLElement[];
     // Passive left: Check (0.25) then Bet (0.75).

@@ -923,18 +923,22 @@
   display: block;
 }
 
-/* Strategy color bars filling a matrix cell. */
-.matrix-cell__segments {
+/*
+ * Shared strategy paint bars (passive → left, width ∝ frequency).
+ * Matrix, Hands, and Node Locking all render StrategyPaintBars with this class
+ * so flex layout cannot drift across surfaces.
+ */
+.strategy-paint {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: row;
 }
 
-/* One action segment inside a matrix cell. */
-.matrix-cell__seg {
+.strategy-paint__seg {
   height: 100%;
   min-width: 0;
+  display: block;
 }
 
 /* Bottom-anchored range-weight fill inside a cell. */
@@ -1459,29 +1463,16 @@
 }
 
 /* Bottom-anchored vertical action bands — same idea as .matrix-cell__weight-fill.
-   Width of each segment ∝ action frequency; height of the stack ∝ combo weight. */
+   Width of each segment ∝ action frequency; height of the stack ∝ combo weight.
+   --weight-fill is the shared CSS var (Hands also accepts legacy --mass-fill). */
 .hands-combo__weight-fill {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: calc(var(--mass-fill, 1) * 100%);
+  height: calc(var(--weight-fill, var(--mass-fill, 1)) * 100%);
   overflow: hidden;
   pointer-events: none;
-}
-
-/* Side-by-side vertical action segments inside the weight-fill. */
-.hands-combo__segments {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: row;
-}
-
-/* One action's share of the strategy mix (width from flex-grow). */
-.hands-combo__seg {
-  height: 100%;
-  min-width: 0;
 }
 
 /* Foreground overlay: badge on top, metrics locked to the bottom. */
@@ -3313,11 +3304,15 @@
 
 .node-lock-bar__track {
   display: flex;
+  flex-direction: row;
   height: 14px;
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--empty-cell);
+  /* StrategyPaintBars override: not absolutely positioned like matrix cells. */
+  position: relative;
+  inset: auto;
 }
 
 .node-lock-bar__seg {
@@ -3486,16 +3481,9 @@
   overflow: hidden;
 }
 
-.lock-paint-cell__segments {
-  position: absolute;
-  inset: 0;
-  display: flex;
+/* Lock paint uses shared .strategy-paint; keep z-index under the label. */
+.lock-paint-cell .strategy-paint {
   z-index: 0;
-}
-
-.lock-paint-cell__seg {
-  min-width: 0;
-  display: block;
 }
 
 .lock-paint-cell__label {

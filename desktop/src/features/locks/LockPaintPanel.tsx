@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from "react";
 import { mapActionColors } from "../../domain/actionColors";
-import { orderActionIndicesByAggression } from "../../domain/actionOrder";
 import {
   isHandLocked,
   lockForNode,
@@ -8,8 +7,13 @@ import {
 } from "../../domain/locks";
 import { comboKey } from "../../domain/matrixDisplay";
 import { combosForCell, pairName } from "../../domain/range";
+import {
+  buildStrategyPaintSegments,
+  type StrategyPaintSegment,
+} from "../../domain/strategyPaint";
 import { RANKS } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
+import { StrategyPaintBars } from "../matrix/StrategyPaintBars";
 
 type PaintMode = "add" | "remove";
 
@@ -106,7 +110,7 @@ export function LockPaintPanel({
         selected: boolean;
         locked: boolean;
         available: boolean;
-        segments: Array<{ color: string; weight: number }>;
+        segments: StrategyPaintSegment[];
       }>
     > = [];
     for (let row = 0; row < 13; row++) {
@@ -119,14 +123,11 @@ export function LockPaintPanel({
           indices.length > 0 && indices.every((index) => isHandLocked(nodeLock, index));
         const mix = weightedStrategyMix(strategy, indices, actionCount, marginal);
         const actionLabels = currentNode?.actions ?? [];
-        const order = orderActionIndicesByAggression(actionLabels);
-        const segments =
-          mix == null
-            ? []
-            : order.map((actionIndex) => ({
-                weight: mix[actionIndex] ?? 0,
-                color: colors.byIndex[actionIndex] || "#666",
-              }));
+        const segments = buildStrategyPaintSegments(
+          actionLabels,
+          mix,
+          colors.byIndex,
+        );
         rowMeta.push({
           label: pairName(row, col),
           indices,
@@ -297,23 +298,10 @@ export function LockPaintPanel({
                   visitedRef.current.clear();
                 }}
               >
-                {meta.segments.length > 0 ? (
-                  <span className="lock-paint-cell__segments" aria-hidden>
-                    {meta.segments.map((seg, index) =>
-                      seg.weight > 0.001 ? (
-                        <span
-                          key={index}
-                          className="lock-paint-cell__seg"
-                          style={{
-                            flexGrow: seg.weight,
-                            flexBasis: 0,
-                            background: seg.color,
-                          }}
-                        />
-                      ) : null,
-                    )}
-                  </span>
-                ) : null}
+                <StrategyPaintBars
+                  segments={meta.segments}
+                  aria-hidden
+                />
                 <span className="lock-paint-cell__label">{meta.label}</span>
               </button>
             );

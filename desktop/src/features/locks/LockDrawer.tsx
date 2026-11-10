@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { mapActionColors } from "../../domain/actionColors";
-import { orderActionIndicesByAggression } from "../../domain/actionOrder";
 import {
   formatProbPct,
   isHandLocked,
@@ -9,8 +8,10 @@ import {
   weightedStrategyMix,
 } from "../../domain/locks";
 import { comboKey, expectedComboSlots } from "../../domain/matrixDisplay";
+import { buildStrategyPaintSegments } from "../../domain/strategyPaint";
 import { RANKS } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
+import { StrategyPaintBars } from "../matrix/StrategyPaintBars";
 import {
   LockPaintPanel,
   nodeIndicesForCell,
@@ -41,35 +42,23 @@ function StrategyBar({
   actions: string[];
   colors: string[];
 }) {
-  const order = useMemo(
-    () => orderActionIndicesByAggression(actions),
-    [actions],
+  const segments = useMemo(
+    () => buildStrategyPaintSegments(actions, mix, colors),
+    [actions, mix, colors],
   );
   return (
     <div className="node-lock-bar" aria-label={label}>
       <div className="node-lock-bar__label muted">{label}</div>
       {mix && actions.length > 0 ? (
         <>
-          <div className="node-lock-bar__track">
-            {order.map((index) => {
-              const weight = mix[index] ?? 0;
-              return weight > 0.001 ? (
-                <span
-                  key={`${actions[index]}-${index}`}
-                  className="node-lock-bar__seg"
-                  title={`${actions[index]} ${formatProbPct(weight)}`}
-                  style={{
-                    flexGrow: weight,
-                    flexBasis: 0,
-                    background: colors[index] || "#666",
-                  }}
-                />
-              ) : null;
-            })}
-          </div>
+          <StrategyPaintBars
+            segments={segments}
+            className="node-lock-bar__track"
+            segClassName="node-lock-bar__seg"
+          />
           <div className="node-lock-bar__legend tabular">
-            {order
-              .map((index) => `${actions[index]} ${formatProbPct(mix[index] ?? 0)}`)
+            {segments
+              .map((seg) => `${seg.label} ${formatProbPct(seg.weight)}`)
               .join(" · ")}
           </div>
         </>

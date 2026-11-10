@@ -8,7 +8,6 @@ import {
   type RefObject,
 } from "react";
 import { mapActionColors } from "../../domain/actionColors";
-import { orderActionIndicesByAggression } from "../../domain/actionOrder";
 import {
   type AggregatedHandCell,
   formatRangeInclusion,
@@ -30,6 +29,10 @@ import {
   weightFillFraction,
 } from "../../domain/matrixDisplay";
 import {
+  buildStrategyPaintSegments,
+  type StrategyPaintSegment,
+} from "../../domain/strategyPaint";
+import {
   RANKS,
   type ActionValuesPayload,
   type EvDisplayBasis,
@@ -39,6 +42,7 @@ import {
 import { clampDockHeight } from "../../state/layoutStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
+import { StrategyPaintBars } from "./StrategyPaintBars";
 import "../../styles/matrix-density.css";
 
 function cellKey(row: number, col: number): string {
@@ -386,11 +390,11 @@ function MatrixRow({
         const selected = selectedCell?.row === row && selectedCell?.col === col;
         const hovered = hoverCell?.row === row && hoverCell?.col === col;
 
-        // Paint outputs. `segments` = one horizontal strategy bar per action.
+        // Paint outputs. `segments` = shared strategy bars (passive → left).
         // `solid` = a single background (range weight, EV, or equity).
         // Empty / excluded cells leave both unset and render the empty-cell color.
         let sub = "";
-        let segments: Array<{ color: string; weight: number }> = [];
+        let segments: StrategyPaintSegment[] = [];
         let solid: string | null = null;
         let dimmed = false;
         let filtered = false;
@@ -402,20 +406,16 @@ function MatrixRow({
         let cellEquity: number | null = null;
 
         if (!empty && cell) {
-          // Strategy modes: bar width is the mix, color is the action palette,
-          // ordered passive → aggressive so the same action sits in the same slot.
+          // Strategy modes: one shared paint path with Hands / locks / Actions mix.
           const showStrategy =
             matrixMode === "strategy" || matrixMode === "strategy-ev";
           if (showStrategy) {
             const mix = strategyMix(cell);
-            if (mix) {
-              const actionLabels = currentNode?.actions ?? [];
-              const order = orderActionIndicesByAggression(actionLabels);
-              segments = order.map((index) => ({
-                color: colors[index] || "#666",
-                weight: mix[index] ?? 0,
-              }));
-            }
+            segments = buildStrategyPaintSegments(
+              currentNode?.actions ?? [],
+              mix,
+              colors,
+            );
             actionMixing = hasWithinHandActionMixing(cell);
           }
 
@@ -577,21 +577,7 @@ function MatrixRow({
             {useHeightFill ? (
               <div className="matrix-cell__weight-fill">
                 {segments.length > 0 ? (
-                  <div className="matrix-cell__segments">
-                    {segments.map((seg, index) =>
-                      seg.weight > 0.001 ? (
-                        <span
-                          key={index}
-                          className="matrix-cell__seg"
-                          style={{
-                            flexGrow: seg.weight,
-                            flexBasis: 0,
-                            background: seg.color,
-                          }}
-                        />
-                      ) : null,
-                    )}
-                  </div>
+                  <StrategyPaintBars segments={segments} />
                 ) : solid ? (
                   <div
                     className="matrix-cell__solid"
@@ -600,21 +586,7 @@ function MatrixRow({
                 ) : null}
               </div>
             ) : segments.length > 0 ? (
-              <div className="matrix-cell__segments">
-                {segments.map((seg, index) =>
-                  seg.weight > 0.001 ? (
-                    <span
-                      key={index}
-                      className="matrix-cell__seg"
-                      style={{
-                        flexGrow: seg.weight,
-                        flexBasis: 0,
-                        background: seg.color,
-                      }}
-                    />
-                  ) : null,
-                )}
-              </div>
+              <StrategyPaintBars segments={segments} />
             ) : null}
             <span className="matrix-cell__label">
               <span>{text}</span>

@@ -230,7 +230,7 @@ Eligible only at **street-start** turn/river OOP decisions (#193). Copy **raw** 
 
 ### Study UI paint order
 
-Matrix, Hands, and Node Locking strategy bars paint **passive → aggressive** left-to-right (`orderActionIndicesByAggression`). Frequency sliders and Action filter blocks stay in **engine action order** (index-bound) (#185).
+Matrix, Hands, Node Locking, and the Actions mix bar paint **passive → aggressive** left-to-right through one shared path: `buildStrategyPaintSegments` + `StrategyPaintBars` (order from `orderActionIndicesByAggression`). Do **not** rebuild flex segment markup or reverse paint order in a feature component — that is how Hands and the matrix drifted apart. Frequency sliders and Action filter blocks stay in **engine action order** (index-bound) (#185). Hands metric lists may use `orderActionIndicesAggressiveFirst` (text only).
 
 ### AI context packs / Study assistant
 
