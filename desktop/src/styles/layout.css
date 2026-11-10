@@ -2655,6 +2655,33 @@
   gap: var(--space-2);
 }
 
+/*
+ * Single-value Build fields (pot, stack, caps, stop). Size-list rows keep the
+ * wider .build-inline track so comma-separated bets/raises stay readable.
+ */
+.build-inline.build-inline--scalar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 16px;
+}
+
+.build-inline.build-inline--scalar > label:not(.check) {
+  width: max-content;
+  min-width: 4.75rem;
+}
+
+.build-inline.build-inline--scalar > label:not(.check) input {
+  width: 5.25rem;
+  max-width: 5.25rem;
+  box-sizing: border-box;
+}
+
+.build-inline.build-inline--scalar > label.check {
+  width: max-content;
+  min-width: 0;
+}
+
 /* One Build card/section (ranges, tree, hardware, …). — form label. */
 .build-section label {
   display: flex;
