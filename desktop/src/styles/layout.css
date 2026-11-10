@@ -1458,36 +1458,56 @@
   opacity: 0.4;
 }
 
-/* Host for frequency-weighted action bands under the badge.
-   Takes remaining tile height so row flex-grow can partition by frequency.
-   --mass-fill clips the band stack (combo reach) when Weight fill is on. */
+/* Bottom-anchored vertical action bands (width ∝ frequency).
+   Height tracks --mass-fill when range weight-fill is on. */
 .hands-combo__weight-fill {
-  flex: 1 1 auto;
-  min-height: 0;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--mass-fill, 1) * 100%);
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  pointer-events: none;
 }
 
-/* Badge chrome + frequency bands; silver tile shows around the header. */
+/* Weight-fill off: paint vertical bands through the full tile height. */
+.hands-combo[data-weight-fill="false"] .hands-combo__weight-fill {
+  height: 100%;
+}
+
+/* Side-by-side vertical action segments inside the weight-fill. */
+.hands-combo__segments {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: row;
+}
+
+/* One action's share of the strategy mix (width from flex-grow). */
+.hands-combo__seg {
+  height: 100%;
+  min-width: 0;
+}
+
+/* Foreground overlay: badge on top, metrics locked to the bottom. */
 .hands-combo__body {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  justify-content: flex-start;
-  gap: 2px;
+  justify-content: space-between;
+  gap: 4px;
   height: 100%;
   min-height: 72px;
-  padding: 3px;
+  padding: 4px 5px 5px;
   color: #111;
   box-sizing: border-box;
   font-family: var(--font-sans);
+  pointer-events: none;
 }
 
-/* Badge chrome + frequency bands; silver tile shows around the header. (absent). */
+/* Foreground overlay: badge on top, metrics locked to the bottom. (absent). */
 .hands-combo[data-present="false"] .hands-combo__body {
   color: #555;
 }
@@ -1499,10 +1519,9 @@
   justify-content: space-between;
   gap: 4px;
   flex: 0 0 auto;
-  padding: 1px 2px 0;
 }
 
-/* Hole cards on the silver header strip. */
+/* Hole cards on the silver header (white chip). */
 .hands-combo__badge {
   display: inline-flex;
   align-items: center;
@@ -1556,28 +1575,23 @@
   color: rgba(0, 0, 0, 0.55);
 }
 
-/* Stack of action bands; each row's flex-grow = action frequency.
-   Explicit height (via --mass-fill) so flex-grow partitions space correctly. */
+/* Bottom-locked action/EV list — independent of vertical band widths. */
 .hands-combo__metrics {
   display: flex;
   flex-direction: column;
   gap: 1px;
   width: 100%;
-  height: calc(var(--mass-fill, 1) * 100%);
-  min-height: 0;
+  margin-top: auto;
   flex: 0 0 auto;
 }
 
-/* One frequency-weighted action band: label left, EV/freq right. */
+/* One action line over the paint: label left, EV/freq right. */
 .hands-combo__metric-row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 4px;
   min-width: 0;
-  min-height: 0;
-  padding: 0 4px;
-  box-sizing: border-box;
 }
 
 /* Shared type for action names and their EV/frequency numbers. */
@@ -1588,6 +1602,7 @@
   font-weight: 700;
   font-size: var(--hands-metric-size, 11px);
   line-height: 1.15;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.65);
 }
 
 /* Action name / pot tag on the left of a metric row (may ellipsize). */
@@ -1604,13 +1619,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Equity (“Eq”) row — fixed short strip on silver, not frequency-weighted. */
-.hands-combo__metric-row--eq {
-  flex: 0 0 auto;
-  background: transparent;
-  min-height: calc(var(--hands-metric-size, 11px) * 1.35);
-}
-
+/* Equity (“Eq”) row under the action metrics. */
 .hands-combo__metric-row--eq .hands-combo__metric-action,
 .hands-combo__metric-row--eq .hands-combo__metric-value {
   font-size: var(--hands-metric-size, 11px);
