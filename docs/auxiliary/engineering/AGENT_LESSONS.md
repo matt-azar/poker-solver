@@ -126,6 +126,16 @@ Engine and session types live under `include/game`, `include/solver`, `include/e
 
 **Pointers:** commits `8ab3503`, `27236ac`, `40e81d6`, `docs/EXPLORER.md`, ROADMAP M0/M4.
 
+### Explorer HTTP is single-threaded (open/save vs status)
+
+The explorer accept loop handles **one client at a time** (`accept` → `handle_client` → close). `POST /api/open` / save load or write the checkpoint on that thread. Status polls every 250ms with a 4s abort timeout; when open takes longer, concurrent `/api/status` fetches abort as browser `AbortError` ("signal is aborted without reason") and the Study UI paints **Engine unreachable** even though the shell is fine.
+
+**Do:** `stopPolling()` before sync open/save on the desktop client; `startPolling()` after (success and failure). Treat `stopPolling` aborts as shutdown cancel, not unreachable. Never surface raw AbortError text in the status bar.
+
+**Don't:** Leave status polling running across a long `/api/open` and treat timeout aborts as a dead engine.
+
+**Pointers:** `src/explorer/server_run.cpp`, `desktop/src/state/studyStore.ts` (`openSolution` / `saveSolution`), `desktop/src/domain/requestScope.ts`.
+
 ### Study analysis scheduling (EV / equity / runouts)
 
 Explorer used to have a **single-slot** ValueWorker. Overlapping `/equity` + `/values` (and status polls that re-enqueued) cancelled each other → blinking footers, stuck “Calculating…”, lost overlays (#181–#190).

@@ -178,6 +178,26 @@ export function classifyStatusPollError(
 }
 
 /**
+ * Human-readable detail for a failed status poll.
+ * Browsers surface AbortError as "signal is aborted without reason" — never paint that.
+ */
+export function statusPollFailureDetail(
+  error: unknown,
+  options?: { timedOut?: boolean },
+): string {
+  if (options?.timedOut) {
+    return "status request timed out";
+  }
+  if (isAbortError(error)) {
+    return "status request was cancelled";
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return "engine unreachable";
+}
+
+/**
  * Delay until the next status poll. Success uses the base interval; failures
  * use exponential backoff capped at backoffMaxMs.
  */

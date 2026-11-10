@@ -18,11 +18,12 @@ Object.defineProperty(window, "matchMedia", {
 });
 
 const engineMocks = vi.hoisted(() => {
-  let statusImpl: () => Promise<Record<string, unknown>> = async () => ({
-    running: false,
-    solution_id: null,
-    status_generation: 0,
-  });
+  let statusImpl: (signal?: AbortSignal) => Promise<Record<string, unknown>> =
+    async () => ({
+      running: false,
+      solution_id: null,
+      status_generation: 0,
+    });
   let getNodeImpl: (
     solutionId: string,
     nodeId: string,
@@ -54,7 +55,7 @@ const engineMocks = vi.hoisted(() => {
       continueSolve: vi.fn(async () => undefined),
       resolveLocked: vi.fn(async () => undefined),
       open: vi.fn(async () => undefined),
-      status: vi.fn(async () => statusImpl()),
+      status: vi.fn(async (signal?: AbortSignal) => statusImpl(signal)),
       getNode: vi.fn(async (solutionId: string, nodeId: string) =>
         getNodeImpl(solutionId, nodeId),
       ),
@@ -63,6 +64,7 @@ const engineMocks = vi.hoisted(() => {
       parseConfig: vi.fn(async () => ({})),
       pause: vi.fn(async () => undefined),
       stop: vi.fn(async () => undefined),
+      save: vi.fn(async () => undefined),
     },
   };
 });
@@ -347,6 +349,59 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     expect(state.solutionId).toBe("s1");
     expect(state.currentNode?.node_id).toBe("p0.child");
     expect(state.phase).toBe("failed");
+  });
+
+  it("openSolution pauses status polling so abort does not paint unreachable", async () => {
+    let releaseOpen: (() => void) | null = null;
+    const openGate = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    let statusAborted = false;
+
+    engineMocks.engineClient.status.mockImplementation(async (signal?: AbortSignal) => {
+      await new Promise<never>((_resolve, reject) => {
+        if (!signal) {
+          return;
+        }
+        const fail = () => {
+          statusAborted = true;
+          reject(new DOMException("signal is aborted without reason", "AbortError"));
+        };
+        if (signal.aborted) {
+          fail();
+          return;
+        }
+        signal.addEventListener("abort", fail, { once: true });
+      });
+    });
+    engineMocks.engineClient.open.mockImplementationOnce(async () => {
+      await openGate;
+      throw new engineMocks.EngineError("checkpoint not found", 404);
+    });
+
+    useStudyStore.setState({
+      connection: "connected",
+      message: "ready",
+      phase: "complete",
+    });
+    useStudyStore.getState().startPolling();
+    await Promise.resolve();
+
+    const pending = useStudyStore.getState().openSolution("/slow.psol");
+    // Let stopPolling abort the in-flight status and open reach its gate.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(statusAborted).toBe(true);
+    expect(useStudyStore.getState().connection).toBe("connected");
+    expect(useStudyStore.getState().message).toMatch(/Opening \/slow\.psol/);
+    expect(useStudyStore.getState().message).not.toMatch(/Engine unreachable/);
+
+    releaseOpen?.();
+    const result = await pending;
+    expect(result).toEqual({ ok: false, error: "checkpoint not found" });
+    expect(useStudyStore.getState().message).not.toMatch(/Engine unreachable/);
+    expect(useStudyStore.getState().connection).toBe("connected");
   });
 
   it("zero-rake full template resets a 5% rake draft for the next job", async () => {

@@ -75,6 +75,7 @@ import {
   compareRequestIsCurrent,
   createTimeoutSignal,
   nextStatusPollDelay,
+  statusPollFailureDetail,
   STATUS_POLL_TIMEOUT_MS,
   studyMutationScopeIsCurrent,
 } from "../domain/requestScope";
@@ -2110,8 +2111,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
             continue;
           }
           statusConsecutiveFailures += 1;
-          const detail =
-            error instanceof Error ? error.message : "Engine unreachable";
+          const detail = statusPollFailureDetail(error, {
+            timedOut: timed.timedOut(),
+          });
           let shellHint = "";
           if (isTauriRuntime()) {
             const shellStatus = await readEngineStatus();
@@ -3261,6 +3263,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return;
     }
     set({ phase: "saving", message: `Saving ${path}…` });
+    // Explorer HTTP is single-threaded; pause status so a slow save cannot
+    // starve /api/status into AbortError "unreachable" flicker.
+    get().stopPolling();
     try {
       await engineClient.save(solutionId, path);
       set({
@@ -3272,6 +3277,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         phase: phaseFromStatus(get().status, "complete"),
         message: error instanceof EngineError ? error.message : "Save failed",
       });
+    } finally {
+      get().startPolling();
     }
   },
 
@@ -3288,6 +3295,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       phase: "loading",
       message: `Opening ${target}…`,
     });
+    // Explorer accept loop handles one client at a time. Checkpoint open can
+    // take longer than STATUS_POLL_TIMEOUT_MS; concurrent status polls then
+    // abort as "signal is aborted without reason" and paint Engine unreachable.
+    get().stopPolling();
     try {
       await engineClient.open(target);
     } catch (error) {
@@ -3298,6 +3309,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         phase: "failed",
         message,
       });
+      get().startPolling();
       return { ok: false, error: message };
     }
 
