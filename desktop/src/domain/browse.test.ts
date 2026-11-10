@@ -355,4 +355,13 @@ describe("action colors", () => {
     expect(actionIdentity("Bet 50%")).toBe(actionIdentity("Bet 50%"));
     expect(first.byLabel["All-in"]).not.toBe(first.byLabel["Bet 50"]);
   });
+
+  it("colors Call all-in green like Call, not red like All-in", () => {
+    const colors = mapActionColors(["Fold", "Call all-in", "All-in", "Call"]);
+    expect(actionIdentity("Call all-in")).toBe("call");
+    expect(colors.byLabel["Call all-in"]).toBe(colors.byLabel["Call"]);
+    expect(colors.byLabel["Call all-in"]).toBe("#3F8F6B");
+    expect(colors.byLabel["Call all-in"]).not.toBe(colors.byLabel["All-in"]);
+    expect(colors.byLabel["All-in"]).toBe("#5A0F18");
+  });
 });

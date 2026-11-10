@@ -24,9 +24,6 @@ export function actionAggressionScore(label: string): number {
   if (!normalized) {
     return Number.NEGATIVE_INFINITY;
   }
-  if (isAllIn(normalized)) {
-    return 1_000_000;
-  }
   const id = actionIdentity(normalized);
   if (id === "fold") {
     return -200;
@@ -34,8 +31,12 @@ export function actionAggressionScore(label: string): number {
   if (id === "check") {
     return -100;
   }
+  // Calling an all-in ranks with Call, not with aggressive All-in.
   if (id === "call") {
     return -50;
+  }
+  if (id === "all-in" || isAllIn(normalized)) {
+    return 1_000_000;
   }
   const sized = id.match(/^(?:bet|raise):([\d.]+)/i);
   if (sized) {

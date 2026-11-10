@@ -27,9 +27,6 @@ function isFold(label: string): boolean {
 /** Parse a rough size key so "Bet 50" and "Bet 50%" share an identity bucket. */
 export function actionIdentity(label: string): string {
   const normalized = normalizeLabel(label);
-  if (isAllIn(normalized)) {
-    return "all-in";
-  }
   if (isFold(normalized)) {
     return "fold";
   }
@@ -37,8 +34,12 @@ export function actionIdentity(label: string): string {
   if (lower.startsWith("check")) {
     return "check";
   }
+  // Calling an all-in is passive — share check/call green, not the all-in red.
   if (lower.startsWith("call")) {
     return "call";
+  }
+  if (isAllIn(normalized)) {
+    return "all-in";
   }
   const match = normalized.match(/^(Bet|Raise)\s+(.+)$/i);
   if (match) {
