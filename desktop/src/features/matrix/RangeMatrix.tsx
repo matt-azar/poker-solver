@@ -36,6 +36,7 @@ import {
   type MatrixMode,
   type NodePayload,
 } from "../../domain/types";
+import { clampDockHeight } from "../../state/layoutStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/matrix-density.css";
@@ -171,6 +172,8 @@ export function RangeMatrix() {
   const displayPrefs = useMatrixDisplayStore((s) => s.prefs);
   const dualRange = useStudyStore((s) => s.layout.dualRange);
   const matrixWidth = useStudyStore((s) => s.layout.matrixWidth);
+  const lowerDockOpen = useStudyStore((s) => s.layout.lowerDock);
+  const lowerDockHeight = useStudyStore((s) => s.layout.lowerDockHeight);
   const setLayout = useStudyStore((s) => s.setLayout);
   const userWidth =
     typeof matrixWidth === "number" && matrixWidth > 0 ? matrixWidth : null;
@@ -290,6 +293,11 @@ export function RangeMatrix() {
       </div>
       <div
         className="resize-handle resize-handle--vertical range-matrix__resize"
+        style={
+          lowerDockOpen
+            ? { bottom: clampDockHeight(lowerDockHeight) }
+            : undefined
+        }
         onPointerDown={onResizePointerDown}
         role="separator"
         aria-orientation="vertical"
