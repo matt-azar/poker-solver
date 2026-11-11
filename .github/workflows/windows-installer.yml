@@ -135,7 +135,7 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
         run: npm run tauri build
 
-      - name: Verify release payload includes holdem-explorer sidecar
+      - name: Verify release payload includes sidecar and Library assets
         shell: pwsh
         run: |
           $sidecar = Get-ChildItem -Recurse desktop/src-tauri/target/release `
@@ -145,6 +145,42 @@ jobs:
           if (-not $sidecar) {
             throw "holdem-explorer sidecar missing from Tauri release output"
           }
+
+          $releaseRoot = "desktop/src-tauri/target/release"
+          $requiredTemplates = @(
+            "flop-check-down.txt",
+            "flop-small-bet.txt",
+            "turn-probe.txt"
+          )
+          $requiredRanges = @(
+            "broadway.txt",
+            "value-heavy.txt",
+            (Join-Path "open" "utg-open.txt")
+          )
+
+          function Find-ResourceFile([string]$LeafPath) {
+            $matches = Get-ChildItem -Recurse $releaseRoot -File -ErrorAction SilentlyContinue |
+              Where-Object {
+                $_.FullName -replace '\\','/' -like "*/configs/$($LeafPath -replace '\\','/')"
+              }
+            return $matches | Select-Object -First 1
+          }
+
+          foreach ($name in $requiredTemplates) {
+            $hit = Find-ResourceFile ("templates/" + $name)
+            if (-not $hit) {
+              throw "bundled template missing from Tauri release output: configs/templates/$name"
+            }
+            Write-Host "template: $($hit.FullName)"
+          }
+          foreach ($name in $requiredRanges) {
+            $hit = Find-ResourceFile ("ranges/" + ($name -replace '\\','/'))
+            if (-not $hit) {
+              throw "bundled range missing from Tauri release output: configs/ranges/$name"
+            }
+            Write-Host "range: $($hit.FullName)"
+          }
+
           $nsis = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis -Filter "*.exe" `
             -ErrorAction SilentlyContinue
           if (-not $nsis) {

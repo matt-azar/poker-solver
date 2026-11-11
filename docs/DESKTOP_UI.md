@@ -54,7 +54,7 @@ explorer   # serves desktop/dist when present
 | Compare | `GET /api/compare` | Note | Compare workspace | Decision node | HTTP |
 | Save / Open | `POST …/save`, `/open` | File fields | File menu / Build | PSOL v2 + locks; browser path fields | checkpoint HTTP |
 | Recent | `GET /api/recent-solutions` | Dropdown | Library + File menu | Cap 10 | recent_files |
-| Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Build + Library (ranges grouped by folder); Build Catalogue can save/edit user ranges (localStorage) and Swap OOP↔IP | Nested `configs/ranges` folders; template dirs still flat | templates/range lib; BuildWorkspace tests |
+| Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Library (ranges grouped by folder). Build Catalogue uses Vite-bundled seat×action packs (`configs/range-profiles`), not these APIs | Nested `configs/ranges` folders; flat `configs/templates`; packaged Study stages both via Tauri `bundle.resources` and sets `POKER_SOLVER_TEMPLATES` / `POKER_SOLVER_RANGES` on the sidecar | templates/range lib; `check:library-assets` |
 | Config parse | `POST /api/config` | Load config | Build | street/river text only; street echoes `tree_edits` | indirect |
 | Memory plan dry-run | `POST /api/plan-memory` (also nested `plan` on tree-preview) | Build Preview tree | Collapsible Build preflight shows labeled peak vs budget | Labeled `estimated_peak_bytes`; not RSS | explorer HTTP + TreeLineEditor |
 | Tree preview / line edits | `POST /api/tree-preview` | Build Preview tree | Mounted collapsible Preview tree; Force/Remove/Add size → draft `tree_edits`; same `buildJob` serializer as Solve | Canonical labels; stale preview clears on draft change; failed preview leaves Study solution | explorer HTTP + tree_edit |
@@ -93,7 +93,7 @@ explorer   # serves desktop/dist when present
 | `explorer` serving `desktop/dist` | Supported |
 | Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns installed `holdem-explorer` beside the app (absolute path; not `binaries/…`) on port 8765, waits until the port accepts connections, exposes `ensure_engine` for Reconnect; webview loads Vite `dist`. Explorer responses include CORS (`Access-Control-Allow-Origin: *` + OPTIONS preflight) so the webview origin (`https://tauri.localhost`) can `fetch` `http://127.0.0.1:8765` |
 | Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer`. Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe` (plus the versioned Tauri NSIS name). PREINSTALL stops the UI then force-kills/deletes `holdem-explorer.exe` so upgrades are not blocked by a locked sidecar; POSTINSTALL requires `holdem-explorer.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. Packaged explorer uses the static MSVC CRT |
-| Native Open/Save dialogs | Browser prompts; Tauri adapter uses `@tauri-apps/plugin-dialog` when present (prompt fallback) |
+| Native Open/Save dialogs | Browser prompts; Windows Tauri build wires `tauri-plugin-dialog` + `dialog:default` capability; adapter keeps a prompt fallback if the plugin invoke fails |
 | Code-signed official release | Not yet — CI artifact is unsigned |
 
 ### Windows installer (end users)

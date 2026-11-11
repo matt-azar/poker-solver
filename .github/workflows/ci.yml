@@ -51,6 +51,8 @@ jobs:
             desktop:
               - 'desktop/**'
               - 'configs/range-profiles/**'
+              - 'configs/templates/**'
+              - 'configs/ranges/**'
               - 'docs/ai-context/**'
               - 'docs/STUDY_SETUP_ASSISTANT.md'
               - '.github/workflows/ci.yml'
@@ -293,6 +295,9 @@ jobs:
       - name: Check AI context packs
         working-directory: ${{ github.workspace }}
         run: node desktop/scripts/sync-ai-context-packs.mjs --check
+      - name: Validate Library catalogue assets
+        working-directory: ${{ github.workspace }}
+        run: node desktop/scripts/validate-library-assets.mjs
       - name: Lint
         run: npm run lint
       - name: Test

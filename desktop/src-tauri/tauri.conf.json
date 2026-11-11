@@ -33,6 +33,10 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/holdem-explorer"],
+    "resources": {
+      "../../configs/templates": "configs/templates",
+      "../../configs/ranges": "configs/ranges"
+    },
     "createUpdaterArtifacts": false,
     "windows": {
       "nsis": {
