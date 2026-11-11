@@ -70,7 +70,7 @@ Conflicts between explicit values and a catalogue entry surface for the player; 
 
 Preferred catalogue grain is **seat×action** atoms from Matt’s `Ranges.zip` (61 charts under `configs/range-profiles/packs/seat-action/`, e.g. `CO.txt`, `BBvCOcall.txt`). The assistant **composes** OOP/IP for a spot (SRP/3BP) from those atoms.
 
-**Build → Catalogue** opens `SeatActionCatalogueTree` (save/edit user ranges). Equity workspace also exposes catalogue import for calculator ranges.
+**Build → Catalogue** opens `SeatActionCatalogueTree` (save/edit user ranges). Equity → **Import JSON** loads an equity scenario file, not a range profile.
 
 ## Generated ranges & interpolation
 

@@ -22,20 +22,18 @@ duplicate tree reappears under `desktop/src/domain/profiles/{fixtures,packs}`.
 
 | Kind | Location | Use |
 | --- | --- | --- |
-| **Reliable packs** | `packs/` (your imports) + Build → Import JSON | Study-quality; set classification to `equilibrium_model` / `population_estimate` |
+| **Reliable packs** | `packs/` plus user charts saved in Build → Catalogue | Study-quality; set classification to `equilibrium_model` / `population_estimate` |
 | **Synthetic fixtures** | `fixture-*.json` | Matcher / assistant plumbing tests only |
 
 Fixtures deliberately use different OOP vs IP placeholder shapes but remain **wrong vs real GTO**. Do not study from them. See `packs/README.md`.
 
-## Documented import path (Study desktop)
+## How profiles are loaded
 
-1. Open **Build → Range catalogue**.
-2. Click **Import JSON…** and choose a schema-v1 file.
-3. Match filters cover pot type and rake; nearest-neighbor ranking surfaces close rows when exact match fails.
-4. **Apply** loads ranges through `prepareStudyFromProfile`.
-5. User imports persist under `holdem-study-range-profiles`.
+Build → **Catalogue** opens the seat×action tree. User charts saved there stay in localStorage. There is no Build **Import JSON** button.
 
-Programmatic: `catalogue.importProfile(rawJson)`.
+`catalogue.importProfile(rawJson)` still accepts one schema-v1 object and stores it under `holdem-study-range-profiles`. The Study UI does not call that function. Matching still prefers an exact catalogue row and can rank neighbors when exact match fails.
+
+Equity → **Import JSON** loads an equity scenario file (`version` 1 plus a draft). It does not import a range profile.
 
 ## Import format
 

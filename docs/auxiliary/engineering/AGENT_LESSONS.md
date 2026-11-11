@@ -36,6 +36,7 @@ Do not modify /workspace.
 Touch only these paths: <list>.
 Do not edit CMakeLists.txt, tests/harness.hpp, or suite mains
   (engine_main / study_main / http_main) unless listed; if you must, add only your targets.
+  tests/unit/test_main.cpp is a historical stub and is not linked.
 Branch: cursor/<name>-<run-suffix> from <exact base ref>
   (use the suffix required by this cloud run, e.g. -ce85 / -c006).
 Push with git push -u origin <branch>.
@@ -51,7 +52,7 @@ Report: tip SHA, files touched, test command + counts, compare URL.
 3. For each feature: branch from `origin/main` (or dependency base).
 4. `git checkout wip -- <only that feature’s files>`.
 5. Trim CMake, harness, suite mains, and docs.
-6. `CXX=g++` build; run `poker_solver_tests` (engine + study + HTTP); fix.
+6. `CXX=g++` build; run `ctest` (`poker_engine_tests`, `poker_study_tests`, `poker_http_tests`); fix.
 7. Push; parent opens PR; subscribe CI.
 8. Keep WIP for archaeology until splits are pushed.
 
@@ -125,7 +126,7 @@ The explorer accept loop handles **one client at a time** (`accept` → `handle_
 
 **Do:** Keep Study status polling running across Open/Save; let `engineClient.open/save` wait on status until `running` clears. Treat `stopPolling` aborts as shutdown cancel, not unreachable. Never surface raw AbortError text in the status bar. Failed Open must leave the prior `solution_id` intact (`finish_file_job`, not `begin()`).
 
-**Don't:** Leave status polling running across a long `/api/open` and treat timeout aborts as a dead engine.
+**Don't:** Stop status polling for Open/Save, or treat a timeout abort during a file job as a dead engine. A failed Open must not call `begin()`.
 
 **Pointers:** `src/explorer/server_run.cpp`, `desktop/src/state/studyStore.ts` (`openSolution` / `saveSolution`), `desktop/src/domain/requestScope.ts`.
 
@@ -238,7 +239,7 @@ Matrix, Hands, Node Locking, and the Actions mix bar paint **passive → aggress
 
 ### CMake and tests
 
-- Prefer explicit targets (`street_solver`, `river_solver`, `explorer`, `poker_solver_tests`).
+- Prefer explicit targets (`street_solver`, `river_solver`, `explorer`, `poker_engine_tests`, `poker_study_tests`, `poker_http_tests`). `poker_solver_tests` is a CMake target that builds those three test binaries. It is not an executable. Run the binaries or `ctest`.
 - Full bare `cmake --build` also builds long optional benches that are **not** CTest.
 - MSVC tests need a larger stack (`/STACK:8388608` in CMake).
 - On Linux cloud images, prefer `CXX=g++` if `clang++` lacks libstdc++.
@@ -371,7 +372,7 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 - Flush solver phase lines so interrupted study runs still show construction/cache/last eval (`381c9a5`).
 - Explicit units in UI/API (`chips` / `root_centered` vs `fraction of the pot` / Equity).
 - Parent-integrated parallel tracks with disjoint paths and immediate PR open after push.
-- Full `poker_solver_tests` locally before push; watch for unexpected SKIP lines.
+- Full `ctest` locally before push (`poker_engine_tests`, `poker_study_tests`, `poker_http_tests`); watch for unexpected SKIP lines.
 - After Study client/analysis changes: desktop vitest **and** `npx tsc -b`; after assistant/UI label moves: `npm run check:ai-context`.
 - Pin numerical parity for parallel EV/BR; treat wall-clock speed asserts as soft.
 

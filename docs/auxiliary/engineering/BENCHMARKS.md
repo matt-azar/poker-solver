@@ -4,7 +4,7 @@ Primary production measurements are the **Street** and **River** sections below 
 
 ## Five-card evaluator
 
-Same machine and compiler. `poker_solver_tests` evaluates all `C(52, 5) = 2,598,960` five-card hands in two card orders, which is 5,197,920 calls to `evaluate`. Measured time: 0.5565473 seconds, about 9.340e6 evaluations per second. The check confirms that reordering a hand keeps the same value. The timed work is those 5,197,920 five-card calls.
+Same machine and compiler. The unit suite (then one binary, `poker_solver_tests`; now `poker_engine_tests`) evaluates all `C(52, 5) = 2,598,960` five-card hands in two card orders, which is 5,197,920 calls to `evaluate`. Measured time: 0.5565473 seconds, about 9.340e6 evaluations per second. The check confirms that reordering a hand keeps the same value. The timed work is those 5,197,920 five-card calls.
 
 ## River
 
@@ -19,7 +19,7 @@ The unit-test toy (aces or fives versus kings, one all-in) is smaller: 4 informa
 
 ## Public-tree river traversal
 
-Same machine and compiler, measured after `RiverBatchSolver` became the default. `runtime_seconds` is the regret loop. Wall time is the process from start to exit, so it includes tree construction and the final best-response pass. The reference rows use `river_solver --reference`. The public-tree rows use the default traversal. Strategies on the unit-test trees matched the reference with a maximum absolute difference of 0. The values below are from these CLI runs.
+Same machine and compiler, measured when `RiverBatchSolver` was the river product path. Current `river_solver` uses `StreetBatchSolver`. The numbers below are from that earlier run. `runtime_seconds` is the regret loop. Wall time is the process from start to exit, so it includes tree construction and the final best-response pass. The reference rows use `river_solver --reference`. The public-tree rows use the default traversal. Strategies on the unit-test trees matched the reference with a maximum absolute difference of 0. The values below are from these CLI runs.
 
 `22+` versus `22+`, same board, pot, stack, and sizes as the table above, 30 vanilla CFR iterations. 3,684 deals, 882 information sets, 51,576 decision nodes, 92,100 terminals.
 
@@ -104,7 +104,7 @@ street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in 
 street_solver --board Ah,Kd,7c,4s --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024
 ```
 
-`street_memory_bench` checks those two solves and is not part of the unit suite. There is no wall-time gate in `poker_solver_tests`.
+`street_memory_bench` checks those two solves and is not part of the unit suite. There is no wall-time gate in the unit suite.
 
 ## Betting convergence
 
