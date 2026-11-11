@@ -1,5 +1,7 @@
 #include "harness.hpp"
 
+#include "explorer/cors_policy.hpp"
+
 #include <cctype>
 #include <chrono>
 #include <cstdio>
@@ -7,6 +9,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -69,6 +72,28 @@ public:
         }
     }
 
+    ExplorerProcess(
+        const std::string& executable,
+        int port,
+        const std::vector<std::string>& extra_args = {})
+        : ExplorerProcess(build_command(executable, port, extra_args))
+    {
+    }
+
+    static std::string build_command(
+        const std::string& executable,
+        int port,
+        const std::vector<std::string>& extra_args)
+    {
+        std::string command = "\"" + executable + "\" --port " + std::to_string(port);
+        for (const std::string& arg : extra_args)
+        {
+            command.push_back(' ');
+            command += arg;
+        }
+        return command;
+    }
+
     ~ExplorerProcess()
     {
         if (process_.hProcess != nullptr)
@@ -88,7 +113,10 @@ public:
 private:
     PROCESS_INFORMATION process_{};
 #else
-    ExplorerProcess(const std::string& executable, int port)
+    ExplorerProcess(
+        const std::string& executable,
+        int port,
+        const std::vector<std::string>& extra_args = {})
     {
         const std::string port_text = std::to_string(port);
         pid_ = fork();
@@ -106,7 +134,16 @@ private:
                     ::close(null_fd);
                 }
             }
-            execl(executable.c_str(), executable.c_str(), "--port", port_text.c_str(), static_cast<char*>(nullptr));
+            std::vector<const char*> argv;
+            argv.push_back(executable.c_str());
+            argv.push_back("--port");
+            argv.push_back(port_text.c_str());
+            for (const std::string& arg : extra_args)
+            {
+                argv.push_back(arg.c_str());
+            }
+            argv.push_back(nullptr);
+            execv(executable.c_str(), const_cast<char* const*>(argv.data()));
             _exit(127);
         }
     }
@@ -1018,17 +1055,38 @@ void run_explorer_http_tests()
     CHECK(WSAStartup(MAKEWORD(2, 2), &data) == 0);
 #endif
 
+    // Pure CORS policy (no explorer process).
+    {
+        using poker::explorer::cors_origin_allowed;
+        using poker::explorer::cors_request_origin;
+        using poker::explorer::cors_response_headers;
+        CHECK(cors_origin_allowed("https://tauri.localhost"));
+        CHECK(cors_origin_allowed("http://localhost:1420"));
+        CHECK(cors_origin_allowed("http://127.0.0.1:8765"));
+        CHECK(!cors_origin_allowed("https://evil.example"));
+        CHECK(!cors_origin_allowed("http://localhost:99999"));
+        CHECK(!cors_origin_allowed("https://tauri.localhost\r\nX-Injected: 1"));
+        CHECK(cors_request_origin("GET /x HTTP/1.1\r\nOrigin: https://tauri.localhost\r\n\r\n")
+            == "https://tauri.localhost");
+        const std::string reflected =
+            cors_response_headers("https://tauri.localhost", true);
+        CHECK(reflected.find("Access-Control-Allow-Origin: https://tauri.localhost\r\n")
+            != std::string::npos);
+        CHECK(reflected.find("Vary: Origin\r\n") != std::string::npos);
+        const std::string packaged_reject =
+            cors_response_headers("https://evil.example", true);
+        CHECK(packaged_reject.find("Access-Control-Allow-Origin:") == std::string::npos);
+        const std::string dev_fallback = cors_response_headers("https://evil.example", false);
+        CHECK(dev_fallback.find("Access-Control-Allow-Origin: *\r\n") != std::string::npos);
+    }
+
     g_explorer_port = find_free_port();
     CHECK(g_explorer_port > 0);
 
     const std::string executable = explorer_executable_path();
     CHECK(!executable.empty());
 
-#ifdef _WIN32
-    ExplorerProcess server("\"" + executable + "\" --port " + std::to_string(g_explorer_port));
-#else
     ExplorerProcess server(executable, g_explorer_port);
-#endif
     CHECK(server.started());
     CHECK(wait_until_listening());
 
@@ -1058,7 +1116,7 @@ void run_explorer_http_tests()
         CHECK(cold.body.find("\"solution_id\":null") != std::string::npos);
     }
 
-    // Tauri Study webview is cross-origin; CORS must be present or fetch fails.
+    // Tauri Study webview is cross-origin; allowlisted Origin is reflected.
     {
         HttpResult cors_status;
         CHECK(http_exchange(
@@ -1068,7 +1126,9 @@ void run_explorer_http_tests()
             cors_status,
             "Origin: https://tauri.localhost\r\n"));
         CHECK(cors_status.status == 200);
-        CHECK(header_has_ci(cors_status.headers, "Access-Control-Allow-Origin: *"));
+        CHECK(header_has_ci(
+            cors_status.headers, "Access-Control-Allow-Origin: https://tauri.localhost"));
+        CHECK(header_has_ci(cors_status.headers, "Vary: Origin"));
         CHECK(header_has_ci(cors_status.headers, "Access-Control-Allow-Private-Network: true"));
 
         HttpResult preflight;
@@ -1082,10 +1142,58 @@ void run_explorer_http_tests()
             "Access-Control-Request-Headers: content-type\r\n"
             "Access-Control-Request-Private-Network: true\r\n"));
         CHECK(preflight.status == 204);
-        CHECK(header_has_ci(preflight.headers, "Access-Control-Allow-Origin: *"));
+        CHECK(header_has_ci(
+            preflight.headers, "Access-Control-Allow-Origin: https://tauri.localhost"));
         CHECK(header_has_ci(preflight.headers, "Access-Control-Allow-Methods:"));
         CHECK(header_has_ci(preflight.headers, "Access-Control-Allow-Headers:"));
         CHECK(header_has_ci(preflight.headers, "Access-Control-Allow-Private-Network: true"));
+
+        // Developer mode still falls back to * for unrecognized browser origins.
+        HttpResult foreign;
+        CHECK(http_exchange(
+            "GET",
+            "/api/status",
+            "",
+            foreign,
+            "Origin: https://evil.example\r\n"));
+        CHECK(foreign.status == 200);
+        CHECK(header_has_ci(foreign.headers, "Access-Control-Allow-Origin: *"));
+    }
+
+    // Packaged mode: allowlist only — foreign Origin gets no Allow-Origin.
+    {
+        const int packaged_port = find_free_port();
+        CHECK(packaged_port > 0);
+        ExplorerProcess packaged(
+            executable, packaged_port, {"--study-packaged", "--launch-id", "cors-test"});
+        CHECK(packaged.started());
+        const int previous_port = g_explorer_port;
+        g_explorer_port = packaged_port;
+        CHECK(wait_until_listening());
+
+        HttpResult allowed;
+        CHECK(http_exchange(
+            "GET",
+            "/api/ready",
+            "",
+            allowed,
+            "Origin: https://tauri.localhost\r\n"));
+        CHECK(allowed.status == 200);
+        CHECK(header_has_ci(
+            allowed.headers, "Access-Control-Allow-Origin: https://tauri.localhost"));
+        CHECK(!header_has_ci(allowed.headers, "Access-Control-Allow-Origin: *"));
+
+        HttpResult denied;
+        CHECK(http_exchange(
+            "GET",
+            "/api/ready",
+            "",
+            denied,
+            "Origin: https://evil.example\r\n"));
+        CHECK(denied.status == 200);
+        CHECK(!header_has_ci(denied.headers, "Access-Control-Allow-Origin:"));
+
+        g_explorer_port = previous_port;
     }
 
     // Five-card boards publish a street solution (shared tree), not RiverBatch.

@@ -222,7 +222,6 @@ int run(int argc, char** argv)
     } teardown;
 
     int port = 8765;
-    bool study_packaged = false;
     bool max_pair_explicit = false;
     if (const char* env_limit = std::getenv("POKER_EQUITY_MAX_PAIR_RUNOUTS"))
     {
@@ -269,10 +268,10 @@ int run(int argc, char** argv)
         }
         else if (arg == "--study-packaged")
         {
-            study_packaged = true;
+            g_app.study_packaged = true;
         }
     }
-    if (study_packaged && !max_pair_explicit)
+    if (g_app.study_packaged && !max_pair_explicit)
     {
         g_app.equity_max_pair_runouts = poker::holdem::kStudyExplorerMaxPairRunouts;
     }
