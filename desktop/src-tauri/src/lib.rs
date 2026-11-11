@@ -3,24 +3,19 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
-use std::net::TcpStream;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, RunEvent, State};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
-/// HTTP port the production UI uses for API calls (`http://127.0.0.1:8765`).
-const ENGINE_PORT: u16 = 8765;
-
-/// Study packaging equity work ceiling (`kStudyExplorerMaxPairRunouts` in
-/// `include/poker/equity.hpp`). Keeps the library default at 1.1M; passes
-/// `--max-pair-runouts` so Study admits a full-range turn (~51.4M pair-runouts).
-const STUDY_EXPLORER_MAX_PAIR_RUNOUTS: u64 = 51_369_120;
+/// Must match `kExplorerReadyProtocol` in `src/explorer/server_shared.hpp`.
+const ENGINE_READY_PROTOCOL: i32 = 1;
 
 /// Bundle key in `tauri.conf.json` `bundle.externalBin` (build-time path under
 /// `src-tauri/`). At install time Tauri places only the **basename** next to the
@@ -31,13 +26,34 @@ const EXPLORER_EXTERNAL_BIN: &str = "binaries/holdem-explorer";
 /// Runtime sidecar basename beside the app executable (and under target/debug).
 const EXPLORER_SIDECAR_BASENAME: &str = "holdem-explorer";
 
-/// How long to wait for the sidecar to accept TCP on ENGINE_PORT after spawn.
+/// How long to wait for the owned sidecar's `/api/ready` after spawn.
 const ENGINE_READY_TIMEOUT: Duration = Duration::from_secs(12);
 const ENGINE_READY_POLL: Duration = Duration::from_millis(100);
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngineEndpointInfo {
+    status: String,
+    port: u16,
+    base_url: String,
+    launch_id: String,
+    protocol: i32,
+    max_pair_runouts: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReadyPayload {
+    ok: Option<bool>,
+    protocol: i32,
+    port: Option<u16>,
+    launch_id: Option<String>,
+    max_pair_runouts: Option<u64>,
+}
 
 struct EngineState {
     child: Mutex<Option<CommandChild>>,
     status: Mutex<String>,
+    endpoint: Mutex<Option<EngineEndpointInfo>>,
 }
 
 impl EngineState {
@@ -45,7 +61,18 @@ impl EngineState {
         Self {
             child: Mutex::new(None),
             status: Mutex::new("not started".into()),
+            endpoint: Mutex::new(None),
         }
+    }
+
+    fn set_endpoint(&self, info: Option<EngineEndpointInfo>) {
+        if let Ok(mut slot) = self.endpoint.lock() {
+            *slot = info;
+        }
+    }
+
+    fn endpoint_info(&self) -> Option<EngineEndpointInfo> {
+        self.endpoint.lock().ok().and_then(|g| g.clone())
     }
 
     fn set_status(&self, msg: impl Into<String>) {
@@ -80,13 +107,18 @@ impl EngineState {
 }
 
 #[tauri::command]
-fn engine_port() -> u16 {
-    ENGINE_PORT
+fn engine_port(state: State<'_, EngineState>) -> Option<u16> {
+    state.endpoint_info().map(|info| info.port)
 }
 
 #[tauri::command]
 fn engine_status(state: State<'_, EngineState>) -> String {
     state.status_text()
+}
+
+#[tauri::command]
+fn engine_endpoint(state: State<'_, EngineState>) -> Option<EngineEndpointInfo> {
+    state.endpoint_info()
 }
 
 /// Filename under the app config dir for assistant secrets (prototype).
@@ -199,36 +231,132 @@ fn assistant_secret_has(app: AppHandle, service: String) -> Result<bool, String>
     Ok(file.secrets.contains_key(&key))
 }
 
-/// Ensure the explorer sidecar is running and accepting connections.
+/// Ensure the explorer sidecar is running and owned by this shell.
 /// Safe to call from the UI on startup and on Reconnect.
+///
+/// Packaged Study never attaches to a foreign TCP listener: it launches one
+/// child with a launch id, waits for a versioned `/api/ready` match, and
+/// returns the runtime base URL for the webview.
 #[tauri::command]
-fn ensure_engine(app: AppHandle, state: State<'_, EngineState>) -> Result<String, String> {
-    if engine_port_ready() {
-        let msg = format!("ready on port {ENGINE_PORT}");
-        state.set_status(msg.clone());
-        return Ok(msg);
+fn ensure_engine(
+    app: AppHandle,
+    state: State<'_, EngineState>,
+) -> Result<EngineEndpointInfo, String> {
+    if let Some(info) = state.endpoint_info() {
+        if state.has_child() {
+            match fetch_ready(info.port) {
+                Ok(ready) if ready_matches(&ready, &info.launch_id, info.port) => {
+                    state.set_status(info.status.clone());
+                    return Ok(info);
+                }
+                _ => {
+                    kill_stored_child(&state);
+                    state.set_endpoint(None);
+                }
+            }
+        } else {
+            // Remembered endpoint without a child — do not attach to a stranger.
+            state.set_endpoint(None);
+        }
+    } else {
+        kill_stored_child(&state);
     }
-    // Stale child handle without a listening port — restart.
-    kill_stored_child(&state);
     spawn_and_wait(&app, &state)
 }
 
-fn engine_port_ready() -> bool {
-    TcpStream::connect_timeout(
-        &([127, 0, 0, 1], ENGINE_PORT).into(),
-        Duration::from_millis(200),
-    )
-    .is_ok()
+fn new_launch_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("study-{nanos:x}-{}", std::process::id())
 }
 
-fn wait_until_engine_ready(deadline: Instant) -> bool {
+fn allocate_loopback_port() -> Result<u16, String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|err| format!("allocate loopback port: {err}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|err| format!("read allocated port: {err}"))?
+        .port();
+    drop(listener);
+    if port == 0 {
+        return Err("OS allocated port 0".into());
+    }
+    Ok(port)
+}
+
+fn fetch_ready(port: u16) -> Result<ReadyPayload, String> {
+    let mut stream = TcpStream::connect_timeout(
+        &([127, 0, 0, 1], port).into(),
+        Duration::from_millis(250),
+    )
+    .map_err(|err| format!("connect 127.0.0.1:{port}: {err}"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(750)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(750)));
+    let request = format!(
+        "GET /api/ready HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|err| format!("write /api/ready: {err}"))?;
+    let mut raw = Vec::new();
+    stream
+        .read_to_end(&mut raw)
+        .map_err(|err| format!("read /api/ready: {err}"))?;
+    let text = String::from_utf8_lossy(&raw);
+    let body = text
+        .split("\r\n\r\n")
+        .nth(1)
+        .or_else(|| text.split("\n\n").nth(1))
+        .unwrap_or("")
+        .trim();
+    if body.is_empty() {
+        return Err("empty /api/ready body".into());
+    }
+    serde_json::from_str(body).map_err(|err| format!("parse /api/ready: {err}; body={body}"))
+}
+
+fn ready_matches(ready: &ReadyPayload, launch_id: &str, port: u16) -> bool {
+    if ready.ok == Some(false) {
+        return false;
+    }
+    if ready.protocol != ENGINE_READY_PROTOCOL {
+        return false;
+    }
+    match ready.launch_id.as_deref() {
+        Some(id) if id == launch_id => {}
+        _ => return false,
+    }
+    if let Some(reported) = ready.port {
+        if reported != port {
+            return false;
+        }
+    }
+    true
+}
+
+fn wait_until_owned_ready(
+    port: u16,
+    launch_id: &str,
+    deadline: Instant,
+) -> Result<ReadyPayload, String> {
+    let mut last_err = format!("engine not ready on 127.0.0.1:{port}");
     while Instant::now() < deadline {
-        if engine_port_ready() {
-            return true;
+        match fetch_ready(port) {
+            Ok(ready) if ready_matches(&ready, launch_id, port) => return Ok(ready),
+            Ok(ready) => {
+                last_err = format!(
+                    "incompatible or foreign /api/ready on port {port} \
+                     (protocol={}, launch_id={:?})",
+                    ready.protocol, ready.launch_id
+                );
+            }
+            Err(err) => last_err = err,
         }
         std::thread::sleep(ENGINE_READY_POLL);
     }
-    engine_port_ready()
+    Err(last_err)
 }
 
 /// Remove Windows Mark-of-the-Web so SmartScreen does not block the sidecar.
@@ -332,14 +460,21 @@ fn spawn_once(
     app: &AppHandle,
     state: &EngineState,
     on_disk: Option<&Path>,
-    port: &str,
+    port: u16,
+    launch_id: &str,
 ) -> Result<(), String> {
     let (cmd, label) = explorer_command(app, on_disk).map_err(|err| {
         state.set_status(err.clone());
         err
     })?;
-    let max_pair = STUDY_EXPLORER_MAX_PAIR_RUNOUTS.to_string();
-    let mut cmd = cmd.args(["--port", port, "--max-pair-runouts", &max_pair]);
+    let port_text = port.to_string();
+    let mut cmd = cmd.args([
+        "--port",
+        &port_text,
+        "--launch-id",
+        launch_id,
+        "--study-packaged",
+    ]);
     if let Some(templates) = existing_library_dir(app, "templates") {
         eprintln!(
             "info: POKER_SOLVER_TEMPLATES={}",
@@ -353,18 +488,18 @@ fn spawn_once(
     }
     let (_rx, child) = cmd.spawn().map_err(|err| {
         let msg = format!(
-            "spawn failed for `{label}` on port {ENGINE_PORT}: {err}. \
-             Check Windows Defender quarantine and that port {ENGINE_PORT} is free."
+            "spawn failed for `{label}` on port {port}: {err}. \
+             Check Windows Defender quarantine and that the chosen loopback port is free."
         );
         state.set_status(msg.clone());
         msg
     })?;
     state.store_child(child);
-    state.set_status(format!("starting on port {ENGINE_PORT}…"));
+    state.set_status(format!("starting on port {port}…"));
     Ok(())
 }
 
-fn spawn_and_wait(app: &AppHandle, state: &EngineState) -> Result<String, String> {
+fn spawn_and_wait(app: &AppHandle, state: &EngineState) -> Result<EngineEndpointInfo, String> {
     let on_disk = sidecar_on_disk(app);
     if let Some(ref path) = on_disk {
         unblock_path(path);
@@ -377,50 +512,48 @@ fn spawn_and_wait(app: &AppHandle, state: &EngineState) -> Result<String, String
         );
     }
 
-    // Someone else already listening (manual explorer / previous instance).
-    if engine_port_ready() {
-        let msg = format!("ready on port {ENGINE_PORT} (existing process)");
-        state.set_status(msg.clone());
-        return Ok(msg);
-    }
-
-    let port = ENGINE_PORT.to_string();
     let path_ref = on_disk.as_deref();
-    spawn_once(app, state, path_ref, &port)?;
-
-    let deadline = Instant::now() + ENGINE_READY_TIMEOUT;
-    if wait_until_engine_ready(deadline) {
-        let msg = format!("ready on port {ENGINE_PORT}");
-        state.set_status(msg.clone());
-        return Ok(msg);
-    }
-
-    // First spawn did not become ready — kill and retry once.
-    kill_stored_child(state);
-    std::thread::sleep(Duration::from_millis(200));
-    if engine_port_ready() {
-        // Port taken by something else after we released — treat as ready.
-        let msg = format!("ready on port {ENGINE_PORT}");
-        state.set_status(msg.clone());
-        return Ok(msg);
-    }
-
-    spawn_once(app, state, path_ref, &port).map_err(|err| {
-        let msg = format!("spawn retry failed: {err}");
-        state.set_status(msg.clone());
-        msg
-    })?;
-
-    let deadline = Instant::now() + ENGINE_READY_TIMEOUT;
-    if wait_until_engine_ready(deadline) {
-        let msg = format!("ready on port {ENGINE_PORT}");
-        state.set_status(msg.clone());
-        return Ok(msg);
+    let mut last_err = String::new();
+    for attempt in 1..=2 {
+        let port = allocate_loopback_port()?;
+        let launch_id = new_launch_id();
+        if let Err(err) = spawn_once(app, state, path_ref, port, &launch_id) {
+            last_err = err;
+            kill_stored_child(state);
+            continue;
+        }
+        let deadline = Instant::now() + ENGINE_READY_TIMEOUT;
+        match wait_until_owned_ready(port, &launch_id, deadline) {
+            Ok(ready) => {
+                let info = EngineEndpointInfo {
+                    status: format!("ready on port {port}"),
+                    port,
+                    base_url: format!("http://127.0.0.1:{port}"),
+                    launch_id,
+                    protocol: ready.protocol,
+                    max_pair_runouts: ready.max_pair_runouts.unwrap_or(0),
+                };
+                state.set_endpoint(Some(info.clone()));
+                state.set_status(info.status.clone());
+                eprintln!(
+                    "info: owned explorer ready at {} (attempt {attempt}, \
+                     max_pair_runouts={})",
+                    info.base_url, info.max_pair_runouts
+                );
+                return Ok(info);
+            }
+            Err(err) => {
+                last_err = err;
+                kill_stored_child(state);
+                state.set_endpoint(None);
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
     }
 
     let msg = format!(
-        "engine did not accept connections on 127.0.0.1:{ENGINE_PORT} \
-         within {}s (child tracked={}). Port busy, blocked binary, or missing VC runtime.",
+        "owned engine did not become ready within {}s (child tracked={}): {last_err}. \
+         Blocked binary, missing VC runtime, or /api/ready mismatch.",
         ENGINE_READY_TIMEOUT.as_secs(),
         state.has_child()
     );
@@ -432,7 +565,7 @@ fn spawn_explorer_sidecar(app: &tauri::App) {
     let handle = app.handle().clone();
     let state = app.state::<EngineState>();
     match spawn_and_wait(&handle, &state) {
-        Ok(msg) => eprintln!("info: explorer sidecar {msg}"),
+        Ok(info) => eprintln!("info: explorer sidecar {}", info.status),
         Err(err) => {
             eprintln!("error: explorer sidecar setup failed: {err}. Window will still open.");
         }
@@ -442,6 +575,7 @@ fn spawn_explorer_sidecar(app: &tauri::App) {
 fn kill_explorer_sidecar(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<EngineState>() {
         kill_stored_child(&state);
+        state.set_endpoint(None);
         state.set_status("stopped");
     }
 }
@@ -462,6 +596,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             engine_port,
             engine_status,
+            engine_endpoint,
             ensure_engine,
             assistant_secret_get,
             assistant_secret_set,

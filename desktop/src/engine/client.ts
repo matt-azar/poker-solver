@@ -53,18 +53,36 @@ async function readBody(response: Response): Promise<unknown> {
 }
 
 export class EngineClient {
-  private readonly baseUrlOverride: string | undefined;
+  private readonly constructorBaseUrl: string | undefined;
+  private runtimeBaseUrl: string | undefined;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: EngineClientOptions = {}) {
-    this.baseUrlOverride =
+    this.constructorBaseUrl =
       options.baseUrl !== undefined ? options.baseUrl.replace(/\/$/, "") : undefined;
     this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
   }
 
+  /** Packaged Study sets this after `ensureEngine()` resolves the owned sidecar. */
+  setBaseUrl(baseUrl: string | null | undefined): void {
+    if (baseUrl == null || baseUrl.trim() === "") {
+      this.runtimeBaseUrl = undefined;
+      return;
+    }
+    this.runtimeBaseUrl = baseUrl.replace(/\/$/, "");
+  }
+
+  /** Resolved base URL (runtime override, constructor, or default). */
+  currentBaseUrl(): string {
+    return this.baseUrl();
+  }
+
   private baseUrl(): string {
-    if (this.baseUrlOverride !== undefined) {
-      return this.baseUrlOverride;
+    if (this.runtimeBaseUrl !== undefined) {
+      return this.runtimeBaseUrl;
+    }
+    if (this.constructorBaseUrl !== undefined) {
+      return this.constructorBaseUrl;
     }
     return defaultEngineBaseUrl().replace(/\/$/, "");
   }

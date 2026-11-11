@@ -15,7 +15,11 @@ async function bootEngineThenRender(): Promise<void> {
   // Packaged Tauri: wait for holdem-explorer before the Study UI polls /api/status.
   const result = await ensureEngine();
   if (result.ok) {
-    console.info("[tauri] ensure_engine", result.status);
+    console.info(
+      "[tauri] ensure_engine",
+      result.status,
+      result.endpoint?.baseUrl ?? "",
+    );
   } else {
     console.warn("[tauri] ensure_engine failed", result.error, result.status);
     useStudyStore.setState({
