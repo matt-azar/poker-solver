@@ -44,7 +44,7 @@ describe("SolveControls open/save pickers (R14)", () => {
       solutionId: "sol-1",
       draft: { ...useStudyStore.getState().draft, solutionPath: "" },
       openSolution: vi.fn(async () => undefined),
-      saveSolution: vi.fn(async () => undefined),
+      saveSolution: vi.fn(async (path: string) => ({ ok: true as const, path })),
       updateDraft: vi.fn((partial) => {
         useStudyStore.setState({
           draft: { ...useStudyStore.getState().draft, ...partial },
@@ -108,6 +108,8 @@ describe("SolveControls open/save pickers (R14)", () => {
     render(<SolveControls />);
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(pickSavePath).not.toHaveBeenCalled();
-    expect(useStudyStore.getState().saveSolution).toHaveBeenCalled();
+    expect(useStudyStore.getState().saveSolution).toHaveBeenCalledWith(
+      "/tmp/existing.psol",
+    );
   });
 });

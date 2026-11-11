@@ -137,6 +137,11 @@ export type OpenSolutionResult =
   | { ok: true; path: string }
   | { ok: false; error: string };
 
+/** Typed result for transactional Save — failure keeps the previous path. */
+export type SaveSolutionResult =
+  | { ok: true; path: string }
+  | { ok: false; error: string };
+
 const SETUP_HISTORY_LIMIT = 30;
 const setupHistoryPast: SetupUndoEntry[] = [];
 
@@ -448,7 +453,7 @@ interface StudyState {
    * node. Safe to call on every navigate — cache hits and in-flight jobs no-op.
    */
   ensureNodeAnalysis: () => Promise<void>;
-  saveSolution: () => Promise<void>;
+  saveSolution: (path?: string) => Promise<SaveSolutionResult>;
   openSolution: (path?: string) => Promise<OpenSolutionResult>;
   loadCompare: (nodeId?: string) => Promise<void>;
 
@@ -3320,31 +3325,39 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     );
   },
 
-  async saveSolution() {
+  async saveSolution(path) {
     const solutionId = get().solutionId;
-    const path = get().draft.solutionPath.trim();
-    if (!solutionId || !path) {
-      set({ message: "Set a solution path before saving." });
-      return;
+    const previous = get().draft.solutionPath;
+    const target = (path ?? previous).trim();
+    if (!solutionId || !target) {
+      const error = "Set a solution path before saving.";
+      set({ message: error });
+      return { ok: false, error };
     }
-    set({ phase: "saving", message: `Saving ${path}…` });
+    set({ phase: "saving", message: `Saving ${target}…` });
     // Explorer HTTP is single-threaded; pause status so a slow save cannot
     // starve /api/status into AbortError "unreachable" flicker.
     get().stopPolling();
     try {
-      await engineClient.save(solutionId, path);
-      set({
-        phase: phaseFromStatus(get().status, "complete"),
-        message: `Saved ${path}`,
-      });
+      await engineClient.save(solutionId, target);
     } catch (error) {
+      const message =
+        error instanceof EngineError ? error.message : "Save failed";
+      // Keep the previous displayed path on write failure.
       set({
         phase: phaseFromStatus(get().status, "complete"),
-        message: error instanceof EngineError ? error.message : "Save failed",
+        message,
       });
-    } finally {
       get().startPolling();
+      return { ok: false, error: message };
     }
+    set({
+      draft: { ...get().draft, solutionPath: target },
+      phase: phaseFromStatus(get().status, "complete"),
+      message: `Saved ${target}`,
+    });
+    get().startPolling();
+    return { ok: true, path: target };
   },
 
   async openSolution(path) {

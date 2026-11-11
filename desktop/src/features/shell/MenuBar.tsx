@@ -201,15 +201,18 @@ export function MenuBar({
               onClick: () => {
                 void executeSave({
                   ...commandDeps(),
-                  save: async () => {
-                    await saveSolutionFileAs({
+                  save: async () =>
+                    saveSolutionFileAs({
                       getSolutionPath: () =>
                         useStudyStore.getState().draft.solutionPath,
                       updateDraft,
                       openSolution,
                       saveSolution,
-                    });
-                  },
+                      confirmReplace: (path) =>
+                        window.confirm(
+                          `Save over "${path}"? An existing file at that path will be replaced.`,
+                        ),
+                    }),
                 });
               },
             },

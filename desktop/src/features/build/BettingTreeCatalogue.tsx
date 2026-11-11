@@ -39,21 +39,32 @@ export function BettingTreeCatalogue({
 
   const refresh = () => setRevision((value) => value + 1);
 
-  const commitSave = () => {
+  const commitSave = (replaceId?: string) => {
     const name = saveName.trim();
     if (!name) {
       setError("Enter a name for the saved tree.");
       return;
     }
-    try {
-      catalogue.save(name, bettingTreeFromDraft(draft, { name }));
-      setSaveName("");
-      setError(null);
-      setHighlightSave(false);
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
+    const result = catalogue.save(name, bettingTreeFromDraft(draft, { name }), {
+      replaceId,
+    });
+    if (!result.ok) {
+      if (result.reason === "name_collision" && result.collidingId && !replaceId) {
+        const replace = window.confirm(
+          `${result.error} Replace it with this tree?`,
+        );
+        if (replace) {
+          commitSave(result.collidingId);
+        }
+        return;
+      }
+      setError(result.error);
+      return;
     }
+    setSaveName("");
+    setError(null);
+    setHighlightSave(false);
+    refresh();
   };
 
   const beginRename = (entry: SavedBettingTree) => {
@@ -62,7 +73,7 @@ export function BettingTreeCatalogue({
     setError(null);
   };
 
-  const commitRename = () => {
+  const commitRename = (replaceId?: string) => {
     if (!editingId) {
       return;
     }
@@ -71,9 +82,18 @@ export function BettingTreeCatalogue({
       setError("Saved tree name cannot be empty.");
       return;
     }
-    const renamed = catalogue.rename(editingId, name);
-    if (!renamed) {
-      setError("Could not rename that tree.");
+    const result = catalogue.rename(editingId, name, { replaceId });
+    if (!result.ok) {
+      if (result.reason === "name_collision" && result.collidingId && !replaceId) {
+        const replace = window.confirm(
+          `${result.error} Replace the existing tree and keep this one?`,
+        );
+        if (replace) {
+          commitRename(result.collidingId);
+        }
+        return;
+      }
+      setError(result.error);
       return;
     }
     setEditingId(null);
@@ -83,7 +103,11 @@ export function BettingTreeCatalogue({
   };
 
   const removeEntry = (entry: SavedBettingTree) => {
-    catalogue.remove(entry.id);
+    const result = catalogue.remove(entry.id);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
     if (editingId === entry.id) {
       setEditingId(null);
       setEditName("");
@@ -121,7 +145,7 @@ export function BettingTreeCatalogue({
                       <button
                         type="button"
                         className="toolbar-btn primary"
-                        onClick={commitRename}
+                        onClick={() => commitRename()}
                       >
                         Save changes
                       </button>
@@ -193,7 +217,7 @@ export function BettingTreeCatalogue({
               autoFocus={initialMode === "save"}
             />
           </label>
-          <button type="button" className="toolbar-btn primary" onClick={commitSave}>
+          <button type="button" className="toolbar-btn primary" onClick={() => commitSave()}>
             Save
           </button>
         </div>
