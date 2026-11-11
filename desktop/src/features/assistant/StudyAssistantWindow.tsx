@@ -45,6 +45,8 @@ interface ChatLine {
   content: string;
   /** When set, this assistant line carries an applyable setup run. */
   setupRunId?: number;
+  /** Compare-runouts target using the same navigation as a manual report click. */
+  openInStudy?: { card: string; resolvedNodeId: string; line?: string | null };
 }
 
 function readPrefs(): StudySetupPreferences {
@@ -142,6 +144,16 @@ export function StudyAssistantWindow() {
         }
         return engineClient.getNode(sid, nodeId);
       },
+      loadLineCardReport: async (opts) => {
+        await useStudyStore.getState().loadLineCardReport(opts);
+      },
+      applyLineCardReportFilter: (filter) => {
+        useStudyStore.getState().applyLineCardReportFilter(filter);
+      },
+      openLineCardRow: async (resolvedNodeId: string) => {
+        await useStudyStore.getState().openLineCardRow(resolvedNodeId);
+      },
+      readLineCardReport: () => useStudyStore.getState().lineCardReport,
     };
   }
 
@@ -205,7 +217,11 @@ export function StudyAssistantWindow() {
 
   function outcomeToLine(outcome: UnifiedChatOutcome): ChatLine {
     if (outcome.kind === "answer") {
-      return { role: "assistant", content: outcome.message };
+      return {
+        role: "assistant",
+        content: outcome.message,
+        ...(outcome.openInStudy ? { openInStudy: outcome.openInStudy } : {}),
+      };
     }
     return {
       role: "assistant",
@@ -491,6 +507,23 @@ export function StudyAssistantWindow() {
                   {message.role === "user" ? "You" : "Assistant"}
                 </div>
                 <div className="help-chat-bubble__text">{message.content}</div>
+                {message.openInStudy ? (
+                  <div className="assistant-compose-actions">
+                    <button
+                      type="button"
+                      className="toolbar-btn"
+                      data-testid="assistant-open-in-study"
+                      disabled={busy}
+                      onClick={() => {
+                        void useStudyStore
+                          .getState()
+                          .openLineCardRow(message.openInStudy!.resolvedNodeId);
+                      }}
+                    >
+                      Open in Study ({message.openInStudy.card})
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))
           )}

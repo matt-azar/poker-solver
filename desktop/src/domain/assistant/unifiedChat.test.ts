@@ -116,6 +116,7 @@ describe("looksLikeSetupRequest / classifyAssistantTurnIntent", () => {
     const qaTools = openaiToolsForIntent("qa").map((tool) => tool.function.name);
     expect(qaTools).toContain("answer_user");
     expect(qaTools).toContain("list_bluff_candidates");
+    expect(qaTools).toContain("compare_runouts");
     expect(qaTools).not.toContain("emit_study_setup_proposal");
     const setupTools = openaiToolsForIntent("setup").map((tool) => tool.function.name);
     expect(setupTools).toContain("emit_study_setup_proposal");
@@ -266,6 +267,95 @@ describe("FakeUnifiedChatClient", () => {
       );
     }
   });
+
+  it("routes runout filter questions through compare_runouts", async () => {
+    const client = createFakeUnifiedChatClient();
+    const catalogue = createRangeProfileCatalogue();
+    let loaded = false;
+    const evidenceHost = {
+      read: () => ({
+        solutionId: "sol-1",
+        currentNode: {
+          node_id: "ip-river",
+          kind: "decision" as const,
+          player: 1,
+          to_act: "IP",
+          line: "root/Check",
+          board: ["Ah", "Kd", "7c", "2s", "3d"],
+          actions: ["Check", "Bet 75"],
+          combos: ["7h2d"],
+          reach: [1],
+          marginal: [1],
+          reach_defined: true,
+          strategy: [[0.2, 0.8]],
+        },
+        nodeValues: null,
+        equity: null,
+        pathTrail: [],
+        selectedCell: null,
+        evDisplayBasis: "local" as const,
+        status: { solution_id: "sol-1" },
+      }),
+      ensureNodeAnalysis: vi.fn(async () => undefined),
+      navigateTo: vi.fn(async () => undefined),
+      loadLineCardReport: vi.fn(async () => {
+        loaded = true;
+      }),
+      readLineCardReport: () =>
+        loaded
+          ? {
+              pending: false,
+              reportNodeId: "ip-river",
+              line: "root/Check",
+              street: "river" as const,
+              chanceNodeId: "chance",
+              actionLabels: ["Check", "Bet 75"],
+              solutionId: "sol-1",
+              rows: [
+                {
+                  card: "5h",
+                  dealProbability: 0.02,
+                  dealProbabilityDefined: true,
+                  reach: 0.1,
+                  reachDefined: true,
+                  zeroReach: false,
+                  available: true,
+                  reason: null,
+                  resolvedNodeId: "n-5h",
+                  actions: ["Check", "Bet 75"],
+                  frequencies: [0.2, 0.8],
+                  player: 1,
+                },
+              ],
+              activeFilter: null,
+              matchedCards: ["5h"],
+            }
+          : null,
+      openLineCardRow: vi.fn(async () => undefined),
+    };
+    const outcome = await client.turn(
+      {
+        text:
+          "On this line, show the heart rivers that don't pair the board, ranked by IP's 75% bet frequency.",
+        setupSummary: "test",
+        availableProfiles: [],
+        draftRevision: 1,
+      },
+      {
+        catalogue,
+        getDraft: emptyDraft,
+        getRevision: () => 1,
+        preferences: emptyStudySetupPreferences(),
+        evidenceHost,
+      },
+    );
+    expect(outcome.kind).toBe("answer");
+    if (outcome.kind === "answer") {
+      expect(outcome.message).toMatch(/5h/i);
+      expect(outcome.openInStudy?.card).toBe("5h");
+    }
+    expect(evidenceHost.loadLineCardReport).toHaveBeenCalled();
+  });
 });
 
 describe("OpenAiUnifiedChatClient", () => {
@@ -329,12 +419,14 @@ describe("OpenAiUnifiedChatClient", () => {
       analysisTools?: { deferred?: string[]; available?: string[] };
     };
     expect(userPayload.contextSnapshot?.version).toBe(2);
-    expect(userPayload.analysisTools?.deferred).toContain("compare_runouts");
+    expect(userPayload.analysisTools?.deferred).toContain("compare_baseline_scenario");
+    expect(userPayload.analysisTools?.deferred).not.toContain("compare_runouts");
     expect(userPayload.analysisTools?.available).toEqual(
       expect.arrayContaining([
         "query_node_strategy",
         "list_bluff_candidates",
         "query_selected_hand_analysis",
+        "compare_runouts",
       ]),
     );
   });

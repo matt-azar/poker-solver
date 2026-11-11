@@ -200,8 +200,12 @@ describe("buildAssistantContextSnapshot", () => {
   it("exposes bounded Study evidence tools without solve/filesystem tools", () => {
     expect(SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.name).toBe("query_selected_hand_analysis");
     expect(SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.status).toBe("bounded_read");
-    expect(SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.deferredTools).toContain("compare_runouts");
+    expect(SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.deferredTools).toContain(
+      "compare_baseline_scenario",
+    );
+    expect(SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.deferredTools).not.toContain("compare_runouts");
     expect(STUDY_NODE_EVIDENCE_TOOL_NAMES).toContain("query_node_strategy");
     expect(STUDY_NODE_EVIDENCE_TOOL_NAMES).toContain("list_bluff_candidates");
+    expect(STUDY_NODE_EVIDENCE_TOOL_NAMES).toContain("compare_runouts");
   });
 });

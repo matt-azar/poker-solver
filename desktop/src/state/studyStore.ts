@@ -17,6 +17,8 @@ import {
   lineCardTargetId,
   rowFromResolvedNode,
   unavailableRow,
+  withLineCardReportFilter,
+  type LineCardReportActiveFilter,
   type LineCardReportModel,
   type LineCardReportRow,
 } from "../domain/lineCardReport";
@@ -406,9 +408,15 @@ interface StudyState {
   followAction: (nodeId: string) => Promise<void>;
   /**
    * Build a same-line card report for the current decision (vary turn or river).
-   * Opens the Line cards analysis tab.
+   * Opens the Line cards analysis tab. Optional filter/sort is applied after load.
    */
-  loadLineCardReport: () => Promise<void>;
+  loadLineCardReport: (opts?: {
+    filter?: LineCardReportActiveFilter | null;
+  }) => Promise<void>;
+  /** Apply or clear filter/sort on the loaded Compare-runouts report. */
+  applyLineCardReportFilter: (
+    filter: LineCardReportActiveFilter | null,
+  ) => void;
   /** Navigate to a report row's resolved node while preserving Study selection. */
   openLineCardRow: (resolvedNodeId: string) => Promise<void>;
   /**
@@ -2484,7 +2492,17 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     });
   },
 
-  async loadLineCardReport() {
+  applyLineCardReportFilter(filter) {
+    const report = get().lineCardReport;
+    if (!report || report.pending) {
+      return;
+    }
+    set({
+      lineCardReport: withLineCardReportFilter(report, filter),
+    });
+  },
+
+  async loadLineCardReport(opts) {
     const solutionId = get().solutionId;
     const node = get().currentNode;
     if (!solutionId || !node) {
@@ -2508,6 +2526,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const token = ++lineCardReportToken;
     const reportNodeId = node.node_id;
     const actionLabels = [...(node.actions ?? [])];
+    const pendingFilter = opts?.filter ?? null;
     const pending: LineCardReportModel = {
       pending: true,
       reportNodeId,
@@ -2517,6 +2536,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       actionLabels,
       rows: [],
       solutionId,
+      activeFilter: pendingFilter,
     };
     set({
       lineCardReport: pending,
@@ -2562,10 +2582,38 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       // Picker arming is only for the report; clear so the strip stays idle.
       get().clearBoardCardChange();
 
+      // Re-check identity before publishing rows (solution may have changed).
+      if (get().solutionId !== solutionId || get().currentNode?.node_id !== reportNodeId) {
+        set({
+          lineCardReport: {
+            ...pending,
+            pending: false,
+            error:
+              "Study solution or decision changed while building Compare runouts. Retry on the intended decision.",
+          },
+          message:
+            "Study solution or decision changed while building Compare runouts. Retry on the intended decision.",
+        });
+        return;
+      }
+
       const options = lineCardOptionsFromChance(chance);
       const rows: LineCardReportRow[] = [];
       for (const option of options) {
         if (token !== lineCardReportToken) {
+          return;
+        }
+        if (get().solutionId !== solutionId || get().currentNode?.node_id !== reportNodeId) {
+          set({
+            lineCardReport: {
+              ...pending,
+              pending: false,
+              error:
+                "Study solution or decision changed while building Compare runouts. Retry on the intended decision.",
+            },
+            message:
+              "Study solution or decision changed while building Compare runouts. Retry on the intended decision.",
+          });
           return;
         }
         const target = lineCardTargetId(
@@ -2602,19 +2650,36 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (token !== lineCardReportToken) {
         return;
       }
+      if (get().solutionId !== solutionId || get().currentNode?.node_id !== reportNodeId) {
+        set({
+          lineCardReport: {
+            ...pending,
+            pending: false,
+            error:
+              "Study solution or decision changed while building Compare runouts. Retry on the intended decision.",
+          },
+          message:
+            "Study solution or decision changed while building Compare runouts. Retry on the intended decision.",
+        });
+        return;
+      }
+      const base: LineCardReportModel = {
+        pending: false,
+        reportNodeId,
+        line: String(node.line || reportNodeId),
+        street,
+        chanceNodeId: chance.node_id,
+        actionLabels,
+        rows,
+        solutionId,
+      };
+      const next = withLineCardReportFilter(base, pendingFilter);
       set({
-        lineCardReport: {
-          pending: false,
-          reportNodeId,
-          line: String(node.line || reportNodeId),
-          street,
-          chanceNodeId: chance.node_id,
-          actionLabels,
-          rows,
-          solutionId,
-        },
+        lineCardReport: next,
         analysisTab: "line-cards",
-        message: `Line card report ready (${rows.length} ${street}s).`,
+        message: next.matchedCards
+          ? `Line card report ready (${next.matchedCards.length} matched ${street}s).`
+          : `Line card report ready (${rows.length} ${street}s).`,
       });
     } catch (error) {
       if (token !== lineCardReportToken) {
