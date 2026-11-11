@@ -208,6 +208,12 @@ if(BUILD_TESTING)
     )
 endif()
 
+# Offline generator for tests/fixtures/psol (EXCLUDE_FROM_ALL — not part of CI build).
+add_executable(generate_psol_fixtures tools/generate_psol_fixtures.cpp)
+target_link_libraries(generate_psol_fixtures PRIVATE poker_study)
+poker_set_warnings(generate_psol_fixtures)
+set_target_properties(generate_psol_fixtures PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
 if(POKER_SOLVER_BUILD_BENCHMARKS)
     # Full-range check-down. Not part of ctest: it allocates hundreds of mebibytes.
     add_executable(street_memory_bench benchmarks/bin/street_memory_bench.cpp)
