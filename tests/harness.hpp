@@ -1,6 +1,10 @@
 #pragma once
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -23,6 +27,33 @@ inline int g_passed = 0;
     } while (0)
 
 #define CHECK_NEAR(a, b, eps) CHECK(std::abs(static_cast<double>(a) - static_cast<double>(b)) <= (eps))
+
+/** Unique path under the OS temp directory for this process/invocation. */
+inline std::filesystem::path unique_temp_path(const char* prefix)
+{
+    static std::atomic<unsigned> counter{0};
+    const unsigned n = ++counter;
+    const auto stamp = static_cast<unsigned long long>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const std::string name = std::string(prefix) + "-" + std::to_string(stamp) + "-"
+        + std::to_string(n);
+    return std::filesystem::temp_directory_path() / name;
+}
+
+/** Create a unique empty directory under the OS temp directory. */
+inline std::filesystem::path make_unique_temp_dir(const char* prefix)
+{
+    const std::filesystem::path root = unique_temp_path(prefix);
+    std::filesystem::create_directories(root);
+    return root;
+}
+
+#if defined(POKER_SOLVER_SOURCE_DIR)
+inline std::filesystem::path poker_source_dir()
+{
+    return std::filesystem::path(POKER_SOLVER_SOURCE_DIR);
+}
+#endif
 
 void run_smoke_tests();
 void run_cfr_tests();

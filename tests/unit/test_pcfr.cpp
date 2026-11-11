@@ -169,7 +169,7 @@ void expect_continuation_and_cold_prediction_on_load()
     cold.samples = 1;
     cold.config_text = poker::streets::format_street_config(config);
     cold.tables = part.training_tables();
-    const auto cold_path = std::filesystem::temp_directory_path() / "poker-solver-pcfr-cold.psol";
+    const auto cold_path = unique_temp_path("poker-solver-pcfr-cold.psol");
     poker::explorer::write_checkpoint(cold_path.string(), cold);
     const auto cold_loaded =
         poker::explorer::read_checkpoint(cold_path.string(), 64ull * 1024ull * 1024ull);
@@ -189,7 +189,7 @@ void expect_continuation_and_cold_prediction_on_load()
     full8.run_frozen_iterations(8, Algorithm::PcfrPlus);
     poker::explorer::CheckpointDocument warm = cold;
     warm.prediction.assign(part.prediction_table().begin(), part.prediction_table().end());
-    const auto warm_path = std::filesystem::temp_directory_path() / "poker-solver-pcfr-warm.psol";
+    const auto warm_path = unique_temp_path("poker-solver-pcfr-warm.psol");
     poker::explorer::write_checkpoint(warm_path.string(), warm);
     const auto warm_loaded =
         poker::explorer::read_checkpoint(warm_path.string(), 64ull * 1024ull * 1024ull);

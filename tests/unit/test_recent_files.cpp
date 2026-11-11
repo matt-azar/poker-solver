@@ -11,13 +11,9 @@
 namespace
 {
 
-std::filesystem::path make_temp_dir(const char* name)
+std::filesystem::path make_temp_dir(const char* prefix)
 {
-    const std::filesystem::path root =
-        std::filesystem::temp_directory_path() / name;
-    std::filesystem::remove_all(root);
-    std::filesystem::create_directories(root);
-    return root;
+    return make_unique_temp_dir(prefix);
 }
 
 void write_dummy(const std::filesystem::path& path)

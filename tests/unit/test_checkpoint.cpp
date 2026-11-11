@@ -62,9 +62,9 @@ bool same_tables(const TrainingTables& left, const TrainingTables& right)
         && left.strategy_sum == right.strategy_sum;
 }
 
-std::filesystem::path test_file(const char* name)
+std::filesystem::path test_file(const char* prefix)
 {
-    return std::filesystem::temp_directory_path() / name;
+    return unique_temp_path(prefix);
 }
 
 void test_resume_matches_uninterrupted_street()

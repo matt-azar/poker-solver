@@ -439,7 +439,7 @@ void expect_save_load_continue()
     document.tables = part.training_tables();
     document.value = part.expected_utility();
 
-    const auto path = std::filesystem::temp_directory_path() / "poker-solver-dcfr.psol";
+    const auto path = unique_temp_path("poker-solver-dcfr.psol");
     poker::explorer::write_checkpoint(path.string(), document);
     const auto loaded = poker::explorer::read_checkpoint(path.string(), 64ull * 1024ull * 1024ull);
     CHECK(loaded.algorithm == poker::solver::kAlgorithmTagDcfr);
@@ -490,7 +490,7 @@ void expect_algorithm_tags_and_rejection()
     try
     {
         poker::explorer::write_checkpoint(
-            (std::filesystem::temp_directory_path() / "poker-solver-dcfr-bad.psol").string(),
+            unique_temp_path("poker-solver-dcfr-bad.psol").string(),
             document);
     }
     catch (const std::invalid_argument&)
@@ -510,7 +510,7 @@ void expect_algorithm_tags_and_rejection()
     legacy.samples = 1;
     legacy.config_text = poker::streets::format_street_config(config);
     legacy.tables = solver.training_tables();
-    const auto path = std::filesystem::temp_directory_path() / "poker-solver-dcfr-legacy.psol";
+    const auto path = unique_temp_path("poker-solver-dcfr-legacy.psol");
     poker::explorer::write_checkpoint(path.string(), legacy);
     const auto loaded = poker::explorer::read_checkpoint(path.string(), 64ull * 1024ull * 1024ull);
     CHECK(loaded.algorithm == 1);

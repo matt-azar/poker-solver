@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:
@@ -78,6 +79,7 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DPOKER_SOLVER_BUILD_BENCHMARKS=ON
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
       - name: Build
@@ -112,6 +114,7 @@ jobs:
       - name: Configure
         run: >
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DPOKER_SOLVER_BUILD_BENCHMARKS=ON
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
@@ -237,10 +240,15 @@ jobs:
           if [[ "$code" == "true" ]]; then
             [[ "${{ needs.windows.result }}" == "success" ]]
             [[ "${{ needs.linux.result }}" == "success" ]]
-            case "${{ needs.linux-sanitizer.result }}" in
-              success|skipped) ;;
-              *) exit 1 ;;
-            esac
+            # Draft PRs may skip the sanitizer; ready/push/dispatch require success.
+            if [[ "${{ github.event.pull_request.draft }}" == "true" ]]; then
+              case "${{ needs.linux-sanitizer.result }}" in
+                success|skipped) ;;
+                *) exit 1 ;;
+              esac
+            else
+              [[ "${{ needs.linux-sanitizer.result }}" == "success" ]]
+            fi
           fi
           if [[ "$desk" == "true" ]]; then
             [[ "${{ needs.desktop.result }}" == "success" ]]

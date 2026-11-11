@@ -22,7 +22,7 @@ The explorer process boundary is the engine API. The Study client is a typed UI 
 explorer --port 8765
 
 # terminal 2 — Study client
-cd desktop && npm install && npm run dev
+cd desktop && npm ci && npm run dev
 ```
 
 Vite proxies `/api` to `http://127.0.0.1:8765`. Production:
