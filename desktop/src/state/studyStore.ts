@@ -45,12 +45,6 @@ import {
   type PathStep,
 } from "../domain/actionHistory";
 import {
-  AnalysisPageCache,
-  AnalysisRequestQueue,
-  type AnalysisPriority,
-  type WorkerAnalysisKind,
-} from "../domain/analysisCache";
-import {
   acceptStatusGeneration,
   shouldApply,
   shouldApplyStatus,
@@ -111,8 +105,6 @@ import {
   strategyEditScopesEqual,
   undoSetupTransactionGuarded,
   validateSetupForSolve,
-  type AnalysisIdentity,
-  type AnalysisKind,
   type SetupDraftResult,
   type SetupStudyMeta,
   type SetupUndoEntry,
@@ -125,6 +117,42 @@ import { isTauriRuntime } from "../platform";
 import { readEngineStatus } from "../platform/engine";
 import { useThemeStore } from "./themeStore";
 import { useLayoutStore } from "./layoutStore";
+import {
+  analysisErrorIsPermanent,
+  analysisRequestIsCurrent,
+  analysisRevision,
+  beginAnalysisRequest,
+  bumpAnalysisPrefetchEpoch,
+  bumpNodeToken,
+  bumpStatusToken,
+  cachedAnalysisForNode,
+  dropAnalysisCaches,
+  enqueueWorkerAnalysis,
+  invalidateAllAnalysisRequests,
+  getAnalysisPageCache,
+  getAnalysisPrefetchEpoch,
+  getAnalysisRequestQueue,
+  getNodeToken,
+  getSeenGeneration,
+  getStatusAbortController,
+  getStatusConsecutiveFailures,
+  getStatusInFlight,
+  getStatusToken,
+  invalidateLifecycleRequests,
+  isStatusPollActive,
+  isStatusRefreshQueued,
+  pollAnalysis,
+  resetAnalysisCacheForTests,
+  resetStatusPollingForTests,
+  scheduleStatusPoll,
+  setSeenGeneration,
+  setStatusAbortController,
+  setStatusConsecutiveFailures,
+  setStatusInFlight,
+  setStatusRefreshQueued,
+  startStatusPolling,
+  stopStatusPolling,
+} from "./studySessionController";
 
 import {
   phaseFromStatus,
@@ -497,64 +525,15 @@ export function resetRangeEditHistoryForTests() {
   rangeHistory.clear();
 }
 
-/** Test helper: reset status single-flight / backoff module state between cases. */
-export function resetStatusPollingForTests() {
-  statusPollActive = false;
-  statusRefreshQueued = false;
-  statusConsecutiveFailures = 0;
-  statusInFlight = null;
-  if (pollTimer) {
-    clearTimeout(pollTimer);
-    pollTimer = null;
-  }
-  statusAbortController?.abort();
-  statusAbortController = null;
-  seenGeneration = -1;
-  statusToken = 0;
-}
+/** Re-export session controller test hooks for existing test imports. */
+export { resetStatusPollingForTests, resetAnalysisCacheForTests };
 
-let pollTimer: ReturnType<typeof setTimeout> | null = null;
-/** True while AppShell (or solve/open) wants periodic status polls. */
-let statusPollActive = false;
-/** Coalesced in-flight status refresh; single-flight across poll + manual refresh. */
-let statusInFlight: Promise<void> | null = null;
-/** When true, another refresh was requested during the in-flight cycle. */
-let statusRefreshQueued = false;
-/** AbortController for the active status request (shutdown cancel vs timeout). */
-let statusAbortController: AbortController | null = null;
-let statusConsecutiveFailures = 0;
-let nodeToken = 0;
-let statusToken = 0;
-let seenGeneration = -1;
 let continuationPending = false;
 /**
  * Where the next successful solution reload should land.
  * `null` = root (new solve / open). `undefined` = no preference (use current/root).
  */
 let pendingReloadNodeId: string | null | undefined = undefined;
-
-/** Independent tokens so equity polling does not cancel runouts (and vice versa). */
-const analysisTokens: Record<AnalysisKind, number> = {
-  values: 0,
-  runouts: 0,
-  equity: 0,
-  categories: 0,
-};
-const analysisPollTimers: Partial<Record<AnalysisKind, ReturnType<typeof setInterval>>> = {};
-const analysisRequestIdentity: Partial<Record<AnalysisKind, AnalysisIdentity>> = {};
-/** Survives navigation so Study does not recompute EV/equity on every click. */
-const analysisPageCache = new AnalysisPageCache(64);
-/** One ValueWorker-bound job at a time (equity/values/runouts cancel each other). */
-const analysisRequestQueue = new AnalysisRequestQueue();
-/** Bumped on navigate so in-flight prefetch polls abandon promptly. */
-let analysisPrefetchEpoch = 0;
-
-/** Test helper: drop analysis cache/queue without resetting the whole store. */
-export function resetAnalysisCacheForTests() {
-  analysisPageCache.clear();
-  analysisRequestQueue.cancelQueued();
-  analysisPrefetchEpoch += 1;
-}
 
 type PublishedStudySnapshot = {
   solutionId: string | null;
@@ -582,50 +561,6 @@ type PublishedStudySnapshot = {
 
 function strokeWeightForCell(current: number, slider: number): number {
   return slider <= 0 || Math.abs(current - slider) < 0.001 ? 0 : slider;
-}
-
-function clearAnalysisPoll(kind: AnalysisKind) {
-  const timer = analysisPollTimers[kind];
-  if (timer) {
-    clearInterval(timer);
-    delete analysisPollTimers[kind];
-  }
-}
-
-function clearAllAnalysisPolls() {
-  (Object.keys(analysisTokens) as AnalysisKind[]).forEach((kind) => {
-    clearAnalysisPoll(kind);
-  });
-}
-
-function bumpAnalysisToken(kind: AnalysisKind): number {
-  analysisTokens[kind] += 1;
-  clearAnalysisPoll(kind);
-  delete analysisRequestIdentity[kind];
-  return analysisTokens[kind];
-}
-
-function invalidateAllAnalysisRequests() {
-  (Object.keys(analysisTokens) as AnalysisKind[]).forEach((kind) => {
-    bumpAnalysisToken(kind);
-  });
-}
-
-/** Invalidate in-flight node fetches so a delayed s1 payload cannot paint during s2. */
-function bumpNodeToken(): number {
-  nodeToken += 1;
-  return nodeToken;
-}
-
-function bumpStatusToken(): number {
-  statusToken += 1;
-  return statusToken;
-}
-
-function invalidateLifecycleRequests() {
-  bumpNodeToken();
-  bumpStatusToken();
-  invalidateAllAnalysisRequests();
 }
 
 function snapshotPublishedStudy(state: {
@@ -681,65 +616,6 @@ function snapshotPublishedStudy(state: {
   };
 }
 
-function beginAnalysisRequest(
-  kind: AnalysisKind,
-  solutionId: string,
-  nodeId: string,
-  revision: number,
-): { token: number; identity: AnalysisIdentity } {
-  const token = bumpAnalysisToken(kind);
-  const identity: AnalysisIdentity = { solutionId, nodeId, revision, kind };
-  analysisRequestIdentity[kind] = identity;
-  return { token, identity };
-}
-
-function analysisRequestIsCurrent(kind: AnalysisKind, token: number): boolean {
-  return token === analysisTokens[kind];
-}
-
-/** Sleep helper for the sequential analysis poll loop. */
-function sleepAnalysis(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-/**
- * Poll async analysis endpoints that may return `{ pending: true }` / HTTP 202.
- * The returned promise represents the full lifecycle through ready/failed/abort —
- * the request queue must not release its slot on the first 202.
- */
-async function pollAnalysis<T extends { pending?: boolean }>(
-  kind: AnalysisKind,
-  token: number,
-  fetchOnce: () => Promise<T>,
-  onReady: (body: T) => void,
-  onError: (message: string) => void,
-): Promise<void> {
-  clearAnalysisPoll(kind);
-  // At most one outstanding request: await each tick before the next.
-  while (analysisRequestIsCurrent(kind, token)) {
-    try {
-      const body = await fetchOnce();
-      if (!analysisRequestIsCurrent(kind, token)) {
-        return;
-      }
-      if (body && body.pending) {
-        await sleepAnalysis(250);
-        continue;
-      }
-      onReady(body);
-      return;
-    } catch (error) {
-      if (!analysisRequestIsCurrent(kind, token)) {
-        return;
-      }
-      onError(error instanceof EngineError ? error.message : "Analysis request failed");
-      return;
-    }
-  }
-}
-
 function emptyAnalysisState() {
   return {
     nodeValues: null as ActionValuesPayload | null,
@@ -751,94 +627,6 @@ function emptyAnalysisState() {
 }
 
 let lineCardReportToken = 0;
-
-function analysisRevision(
-  node: NodePayload | null | undefined,
-  status: StatusPayload | null | undefined,
-): number {
-  // Prefer the published profile revision so continue / strategy edits invalidate
-  // cached EV/equity under the same solution id without waiting on generation.
-  if (typeof status?.analysis_revision === "number") {
-    return status.analysis_revision;
-  }
-  const nodeRevision = (node as { analysis_revision?: number } | null | undefined)
-    ?.analysis_revision;
-  if (typeof nodeRevision === "number") {
-    return nodeRevision;
-  }
-  if (typeof node?.status_generation === "number") {
-    return node.status_generation;
-  }
-  if (typeof status?.status_generation === "number") {
-    return status.status_generation;
-  }
-  return 0;
-}
-
-/** Work-limit failures stay settled for the current inputs; no auto-resubmit. */
-function analysisErrorIsPermanent(message: string | undefined | null): boolean {
-  return Boolean(message && /work limit/i.test(message));
-}
-
-function cachedAnalysisForNode(
-  solutionId: string,
-  nodeId: string,
-  revision: number,
-) {
-  return {
-    nodeValues:
-      analysisPageCache.get<ActionValuesPayload>({
-        solutionId,
-        nodeId,
-        revision,
-        kind: "values",
-      }) ?? null,
-    equity:
-      analysisPageCache.get({
-        solutionId,
-        nodeId,
-        revision,
-        kind: "equity",
-      }) ?? null,
-    runouts:
-      analysisPageCache.get({
-        solutionId,
-        nodeId,
-        revision,
-        kind: "runouts",
-      }) ?? null,
-    categories:
-      analysisPageCache.get({
-        solutionId,
-        nodeId,
-        revision,
-        kind: "categories",
-      }) ?? null,
-  };
-}
-
-function dropAnalysisCaches() {
-  analysisPageCache.clear();
-  analysisRequestQueue.cancelQueued();
-}
-
-function enqueueWorkerAnalysis(args: {
-  kind: WorkerAnalysisKind;
-  solutionId: string;
-  nodeId: string;
-  revision: number;
-  priority: AnalysisPriority;
-  run: () => Promise<void>;
-}): void {
-  analysisRequestQueue.enqueue({
-    kind: args.kind,
-    solutionId: args.solutionId,
-    nodeId: args.nodeId,
-    revision: args.revision,
-    priority: args.priority,
-    run: args.run,
-  });
-}
 
 /** Decision nodes get always-on EV/equity; chance/terminal do not. */
 function isDecisionNodeForAnalysis(
@@ -923,7 +711,7 @@ function prefetchChildValues(
       continue;
     }
     if (
-      analysisPageCache.get({
+      getAnalysisPageCache().get({
         solutionId,
         nodeId: childId,
         revision,
@@ -932,7 +720,7 @@ function prefetchChildValues(
     ) {
       continue;
     }
-    const epoch = analysisPrefetchEpoch;
+    const epoch = getAnalysisPrefetchEpoch();
     enqueueWorkerAnalysis({
       kind: "values",
       solutionId,
@@ -941,13 +729,13 @@ function prefetchChildValues(
       priority: "prefetch",
       run: async () => {
         // Prefetch only fills the cache; navigateTo restores it onto the live node.
-        if (epoch !== analysisPrefetchEpoch) {
+        if (epoch !== getAnalysisPrefetchEpoch()) {
           return;
         }
         try {
           let body: ActionValuesPayload | null = null;
           for (let attempt = 0; attempt < 120 && !body; attempt += 1) {
-            if (epoch !== analysisPrefetchEpoch) {
+            if (epoch !== getAnalysisPrefetchEpoch()) {
               return;
             }
             const page = await engineClient.getValues(solutionId, childId);
@@ -957,8 +745,8 @@ function prefetchChildValues(
             }
             await new Promise((resolve) => setTimeout(resolve, 250));
           }
-          if (body && epoch === analysisPrefetchEpoch) {
-            analysisPageCache.set(
+          if (body && epoch === getAnalysisPrefetchEpoch()) {
+            getAnalysisPageCache().set(
               { solutionId, nodeId: childId, revision, kind: "values" },
               body,
             );
@@ -1832,8 +1620,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         body,
       )) as StrategyEditsPayload;
       // Profile changed under the same solution id — drop cached EV/equity pages.
-      analysisPageCache.clearSolution(solutionId);
-      analysisRequestQueue.cancelQueued(
+      getAnalysisPageCache().clearSolution(solutionId);
+      getAnalysisRequestQueue().cancelQueued(
         (job) => job.solutionId === solutionId && job.kind === "values",
       );
       const live = get();
@@ -2003,31 +1791,20 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   startPolling() {
-    if (statusPollActive) {
-      return;
-    }
-    statusPollActive = true;
-    void get().refresh();
+    startStatusPolling(() => {
+      void get().refresh();
+    });
   },
   stopPolling() {
-    statusPollActive = false;
-    statusRefreshQueued = false;
-    if (pollTimer) {
-      clearTimeout(pollTimer);
-      pollTimer = null;
-    }
-    // Shutdown cancel: abort in-flight status so it is not reported as failure.
-    statusAbortController?.abort();
-    statusAbortController = null;
-    clearAllAnalysisPolls();
+    stopStatusPolling();
   },
 
   async refresh() {
-    if (statusInFlight) {
-      statusRefreshQueued = true;
-      await statusInFlight;
+    if (getStatusInFlight()) {
+      setStatusRefreshQueued(true);
+      await getStatusInFlight();
       // If the owner finished before draining our queue, take ownership.
-      if (!statusInFlight && statusRefreshQueued) {
+      if (!getStatusInFlight() && isStatusRefreshQueued()) {
         return get().refresh();
       }
       return;
@@ -2036,18 +1813,18 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const runCycle = async () => {
       let outcome: "success" | "failure" | "shutdown_cancel" = "success";
       do {
-        statusRefreshQueued = false;
-        const token = ++statusToken;
+        setStatusRefreshQueued(false);
+        const token = bumpStatusToken();
         const abort = new AbortController();
-        statusAbortController = abort;
+        setStatusAbortController(abort);
         const timed = createTimeoutSignal(STATUS_POLL_TIMEOUT_MS, abort.signal);
         try {
           const status = await engineClient.status(timed.signal);
           // Drop superseded responses (invalidateLifecycleRequests bumped token).
-          if (!shouldApplyStatus(token, statusToken)) {
+          if (!shouldApplyStatus(token, getStatusToken())) {
             continue;
           }
-          const decision = acceptStatusGeneration(status, seenGeneration, {
+          const decision = acceptStatusGeneration(status, getSeenGeneration(), {
             // Token already proves this is the latest response; a lower generation
             // means the explorer process restarted and re-baselined the counter.
             allowRestart: true,
@@ -2055,8 +1832,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           if (!decision.apply) {
             continue;
           }
-          seenGeneration = decision.generation;
-          statusConsecutiveFailures = 0;
+          setSeenGeneration(decision.generation);
+          setStatusConsecutiveFailures(0);
           outcome = "success";
           const reload = solutionNeedsReload(
             status,
@@ -2113,24 +1890,24 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           }
         } catch (error) {
           const classified = classifyStatusPollError(error, {
-            pollActive: statusPollActive,
+            pollActive: isStatusPollActive(),
             timedOut: timed.timedOut(),
           });
           outcome = classified.kind;
           if (classified.kind === "shutdown_cancel") {
             return;
           }
-          if (!shouldApplyStatus(token, statusToken)) {
+          if (!shouldApplyStatus(token, getStatusToken())) {
             continue;
           }
-          statusConsecutiveFailures += 1;
+          setStatusConsecutiveFailures(getStatusConsecutiveFailures() + 1);
           const detail = statusPollFailureDetail(error, {
             timedOut: timed.timedOut(),
           });
           let shellHint = "";
           if (isTauriRuntime()) {
             const shellStatus = await readEngineStatus();
-            if (!shouldApplyStatus(token, statusToken) || !statusPollActive) {
+            if (!shouldApplyStatus(token, getStatusToken()) || !isStatusPollActive()) {
               continue;
             }
             if (shellStatus) {
@@ -2143,31 +1920,27 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           });
         } finally {
           timed.dispose();
-          if (statusAbortController === abort) {
-            statusAbortController = null;
+          if (getStatusAbortController() === abort) {
+            setStatusAbortController(null);
           }
         }
-      } while (statusRefreshQueued && statusPollActive);
+      } while (isStatusRefreshQueued() && isStatusPollActive());
 
-      if (statusPollActive) {
+            if (isStatusPollActive()) {
         const delay = nextStatusPollDelay({
           outcome,
-          consecutiveFailures: statusConsecutiveFailures,
+          consecutiveFailures: getStatusConsecutiveFailures(),
         });
-        if (pollTimer) {
-          clearTimeout(pollTimer);
-        }
-        pollTimer = setTimeout(() => {
-          pollTimer = null;
+        scheduleStatusPoll(delay, () => {
           void get().refresh();
-        }, delay);
+        });
       }
     };
 
-    statusInFlight = runCycle().finally(() => {
-      statusInFlight = null;
-    });
-    await statusInFlight;
+    setStatusInFlight(runCycle().finally(() => {
+      setStatusInFlight(null);
+    }));
+    await getStatusInFlight();
   },
 
   async solve() {
@@ -2363,8 +2136,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     // Cancel in-flight polls and drop queued auto/prefetch work for other nodes.
     // Keep the page cache so returning to a node restores EV/equity instantly.
     invalidateAllAnalysisRequests();
-    analysisPrefetchEpoch += 1;
-    analysisRequestQueue.cancelQueued((job) => job.priority !== "user");
+    bumpAnalysisPrefetchEpoch();
+    getAnalysisRequestQueue().cancelQueued((job) => job.priority !== "user");
     const priorScope = get().strategyEditScope;
     set({
       solutionId,
@@ -2377,10 +2150,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     try {
       const node = await engineClient.getNode(solutionId, nodeId);
       // Compare against the live store solutionId only (no request fallback).
-      if (!shouldApply(token, nodeToken, node.solution_id ?? solutionId, get().solutionId)) {
+      if (!shouldApply(token, getNodeToken(), node.solution_id ?? solutionId, get().solutionId)) {
         return;
       }
-      if (typeof node.status_generation === "number" && node.status_generation < seenGeneration) {
+      if (typeof node.status_generation === "number" && node.status_generation < getSeenGeneration()) {
         return;
       }
       const rootId = get().status?.root_node_id || rootNodeId(undefined);
@@ -2474,7 +2247,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       // Always warm EV + equity for decision nodes (cache / queue make this cheap).
       void get().ensureNodeAnalysis();
     } catch (error) {
-      if (token !== nodeToken) {
+      if (token !== getNodeToken()) {
         return;
       }
       set({
@@ -2930,7 +2703,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (analysisIsReadyForNode(get().nodeValues, solutionId, nodeId)) {
       return;
     }
-    const cached = analysisPageCache.get<ActionValuesPayload>({
+    const cached = getAnalysisPageCache().get<ActionValuesPayload>({
       solutionId,
       nodeId,
       revision,
@@ -3001,7 +2774,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               live.node_id !== identity.nodeId ||
               get().solutionId !== identity.solutionId
             ) {
-              analysisPageCache.set(
+              getAnalysisPageCache().set(
                 { solutionId, nodeId, revision, kind: "values" },
                 values,
               );
@@ -3010,7 +2783,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
             if (values.node_id && values.node_id !== identity.nodeId) {
               return;
             }
-            analysisPageCache.set(
+            getAnalysisPageCache().set(
               { solutionId, nodeId, revision, kind: "values" },
               values,
             );
@@ -3052,7 +2825,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const revision = analysisRevision(node, get().status);
     const nodeId = node.node_id;
-    const cached = analysisPageCache.get({
+    const cached = getAnalysisPageCache().get({
       solutionId,
       nodeId,
       revision,
@@ -3104,7 +2877,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               live.node_id !== identity.nodeId ||
               get().solutionId !== identity.solutionId
             ) {
-              analysisPageCache.set(
+              getAnalysisPageCache().set(
                 { solutionId, nodeId, revision, kind: "runouts" },
                 runouts,
               );
@@ -3113,7 +2886,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
             if (runouts.node_id && runouts.node_id !== identity.nodeId) {
               return;
             }
-            analysisPageCache.set(
+            getAnalysisPageCache().set(
               { solutionId, nodeId, revision, kind: "runouts" },
               runouts,
             );
@@ -3147,7 +2920,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (analysisIsReadyForNode(liveEquity, solutionId, nodeId)) {
       return;
     }
-    const cached = analysisPageCache.get({
+    const cached = getAnalysisPageCache().get({
       solutionId,
       nodeId,
       revision,
@@ -3214,7 +2987,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               live.node_id !== identity.nodeId ||
               get().solutionId !== identity.solutionId
             ) {
-              analysisPageCache.set(
+              getAnalysisPageCache().set(
                 { solutionId, nodeId, revision, kind: "equity" },
                 equity,
               );
@@ -3223,7 +2996,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
             if (equity.node_id && equity.node_id !== identity.nodeId) {
               return;
             }
-            analysisPageCache.set(
+            getAnalysisPageCache().set(
               { solutionId, nodeId, revision, kind: "equity" },
               equity,
             );
@@ -3257,7 +3030,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const revision = analysisRevision(node, get().status);
     const nodeId = node.node_id;
-    const cached = analysisPageCache.get({
+    const cached = getAnalysisPageCache().get({
       solutionId,
       nodeId,
       revision,
@@ -3301,7 +3074,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           live.node_id !== identity.nodeId ||
           get().solutionId !== identity.solutionId
         ) {
-          analysisPageCache.set(
+          getAnalysisPageCache().set(
             { solutionId, nodeId, revision, kind: "categories" },
             categories,
           );
@@ -3310,7 +3083,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         if (categories.node_id && categories.node_id !== identity.nodeId) {
           return;
         }
-        analysisPageCache.set(
+        getAnalysisPageCache().set(
           { solutionId, nodeId, revision, kind: "categories" },
           categories,
         );
