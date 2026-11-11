@@ -15,7 +15,7 @@ Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor
 3. **Parent owns forge writes.** Subagents often lack `ManagePullRequest` and must not use `gh` to create/update PRs. After a sibling pushes, the parent opens/updates the PR and subscribes CI.
 4. **Snapshot before splitting.** If the tree is interleaved, commit everything onto `cursor/wip-…-c006`, then path-checkout onto clean feature branches from the correct base.
 5. **Re-check `git status` before every commit.** Restore unexpected paths with `git checkout HEAD -- <path>`.
-6. **Scope CMake / harness edits.** A WIP snapshot’s `CMakeLists.txt` / `tests/unit/test_main.cpp` / `tests/harness.hpp` will list every agent’s sources. Trim to this branch only.
+6. **Scope CMake / harness edits.** A WIP snapshot’s `CMakeLists.txt`, suite mains (`tests/unit/engine_main.cpp`, `study_main.cpp`, `http_main.cpp`), and `tests/harness.hpp` will list every agent’s sources. Trim to this branch only. `tests/unit/test_main.cpp` is not linked.
 
 ### What went wrong (concrete)
 
@@ -34,8 +34,10 @@ Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor
 Work only under this worktree path: <absolute path>.
 Do not modify /workspace.
 Touch only these paths: <list>.
-Do not edit CMakeLists.txt, tests/harness.hpp, or tests/unit/test_main.cpp
+Do not edit CMakeLists.txt, tests/harness.hpp, or the suite mains
+  (engine_main.cpp, study_main.cpp, http_main.cpp)
   unless listed; if you must, add only your targets.
+  tests/unit/test_main.cpp is not linked.
 Branch: cursor/<name>-<run-suffix> from <exact base ref>
   (use the suffix required by this cloud run, e.g. -ce85 / -c006).
 Push with git push -u origin <branch>.
@@ -51,7 +53,7 @@ Report: tip SHA, files touched, test command + counts, compare URL.
 3. For each feature: branch from `origin/main` (or dependency base).
 4. `git checkout wip -- <only that feature’s files>`.
 5. Trim CMake, harness, `test_main`, and docs.
-6. `CXX=g++` build; run `poker_solver_tests`; fix.
+6. `CXX=g++` build; run `ctest` (`poker_engine_tests`, `poker_study_tests`, `poker_http_tests`); fix.
 7. Push; parent opens PR; subscribe CI.
 8. Keep WIP for archaeology until splits are pushed.
 
@@ -238,14 +240,14 @@ Matrix, Hands, Node Locking, and the Actions mix bar paint **passive → aggress
 
 ### CMake and tests
 
-- Prefer explicit targets (`street_solver`, `river_solver`, `explorer`, `poker_solver_tests`).
+- Prefer explicit targets (`street_solver`, `river_solver`, `explorer`, `poker_engine_tests`, `poker_study_tests`, `poker_http_tests`). `poker_solver_tests` is a CMake target that builds those three test binaries. It is not an executable. Run the binaries or `ctest`.
 - Full bare `cmake --build` also builds long optional benches that are **not** CTest.
 - MSVC tests need a larger stack (`/STACK:8388608` in CMake).
 - On Linux cloud images, prefer `CXX=g++` if `clang++` lacks libstdc++.
 
 ### Platform gaps
 
-- On **`main`**, `tests/unit/test_explorer_http.cpp` still **SKIPs on non-Windows**. A green Linux CTest alone is not HTTP coverage. (Linux HTTP port may live on a separate PR — check before claiming the gap is closed.)
+- Explorer HTTP tests run on Linux and Windows in `poker_http_tests` (`test_explorer_http.cpp`, `test_explorer_workflow.cpp`).
 - Some working-set / card-delay asserts are Windows-only (`#ifdef _WIN32`).
 - Assertion totals differ by compiler; fail missing parity checkpoints instead of skipping (`cc12bc8`).
 - **Desktop `tsc -b`:** Study store nullability (`node` / `liveEquity` unnarrowed) fails `desktop` and `windows-installer` CI even when vitest is green (#190/#191). After lifecycle/analysis changes, run `cd desktop && npx tsc -b`.
@@ -372,7 +374,7 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 - Flush solver phase lines so interrupted study runs still show construction/cache/last eval (`381c9a5`).
 - Explicit units in UI/API (`chips` / `root_centered` vs `fraction of the pot` / Equity).
 - Parent-integrated parallel tracks with disjoint paths and immediate PR open after push.
-- Full `poker_solver_tests` locally before push; watch for unexpected SKIP lines.
+- Full `ctest` locally before push (`poker_engine_tests`, `poker_study_tests`, `poker_http_tests`); watch for unexpected SKIP lines.
 - After Study client/analysis changes: desktop vitest **and** `npx tsc -b`; after assistant/UI label moves: `npm run check:ai-context`.
 - Pin numerical parity for parallel EV/BR; treat wall-clock speed asserts as soft.
 

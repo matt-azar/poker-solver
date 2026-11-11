@@ -20,7 +20,7 @@ Foundation in place: shared street/river public tree, pass-frozen CFR variants, 
 
 Flop, turn, and river are one betting tree (two, one, or zero cards left). `StreetGame` / `StreetBatchSolver` accept 3/4/5-card boards. Five-card pins match `RiverGame`. Explorer and `river_solver` both use that shared tree; `river_solver` is a thin CLI, not a separate `RiverBatchSolver` product path. `RiverGame` is the five-card oracle.
 
-Also landed: conditional action EV on flop/turn/river decisions; stop-and-keep / pause / continue; versioned PSOL; runout EV comparison; check-down equity (+ buckets); five-card made-hand categories; node locks + compare; pot rake / ICM / action-label incentives; Windows NSIS Study installer. Draws/backdoors, compact saves, durable batch queue, trainer packs, and preflop are still open. No head-to-head Pio performance or solution-quality equivalence.
+Also landed: conditional action EV on flop/turn/river decisions; stop-and-keep / pause / continue; versioned PSOL; runout EV comparison; check-down equity (+ buckets); five-card made-hand categories; node locks + compare; pot rake / ICM / action-label incentives; Windows NSIS Study installer; flop/turn draw and backdoor tags in Study. Compact saves, a durable batch queue, trainer packs, and preflop are still open. No head-to-head Pio performance or solution-quality equivalence.
 
 Full-range check-down measures whether a large tree fits. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them. Assertion counts and sanitizer notes: [TESTING.md](../engineering/TESTING.md), [BENCHMARKS.md](../engineering/BENCHMARKS.md).
 
@@ -32,8 +32,8 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 |---|---|---|
 | Heads-up postflop CFR, chance, blocker handling, best responses | Shared tree for 3/4/5 cards; pins against `RiverGame`; explorer and `river_solver` on that path | M0, M6 |
 | Conditional combo/action EV; both-player values | Flop, turn, and river decision nodes on the shared street tree | M1 |
-| Equity, action ranges, distributions, hand categories | Check-down equity + buckets; made-hand categories; draws/backdoors open | M2 |
-| Weighted range editing, range libraries, board input | 13×13 paint, presets; nested folders open | M2–M3 |
+| Equity, action ranges, distributions, hand categories | Check-down equity + buckets; made-hand categories; flop/turn draw and backdoor tags | M2 |
+| Weighted range editing, range libraries, board input | 13×13 paint, presets, nested folders under `configs/ranges` | M2–M3 |
 | Configurable betting trees and visual line editing | `street-config 1` + TreeEditSet; Study Build line editor + `plan-memory` dry-run | M3 |
 | Stop-and-keep, pause/continue, accuracy stopping | Present; construction-time stop/pause still publishes nothing | M4 |
 | Full saves, resumable checkpoints, compact saves, lazy load | Versioned PSOL + recent files; compact/lazy open | M5, M10 |
@@ -75,7 +75,7 @@ Preserve explicit player signs and the existing root-centered net-chip utility. 
 
 Create a shared range model/editor: 13×13 grid, exact combos, arbitrary nonnegative weights, brush/select controls, text import/export, copy/paste, undo/redo, and presets. Named presets under `configs/ranges` support nested folders via `GET /api/ranges` (`id` with `/`, `folder` field) and the Study Library UI. Clearly distinguish input weights, strategy-conditioned weights, compatible-pair marginals, and combo counts.
 
-Add exact showdown equity per combo and range, conditional on the current board and compatible opponent distribution. State whether an equity display assumes check-down, and keep that label separate from strategic EV. Check-down equity distributions are ten fixed buckets on the explorer equity JSON; the Study Equity tab draws histograms, band filters, and shape composition from compact hand rows. Made-hand categories cover five-card boards; flop/turn expose multi-label draw/backdoor tags. Support a standalone equity-calculator workflow.
+Add exact showdown equity per combo and range, conditional on the current board and compatible opponent distribution. State whether an equity display assumes check-down, and keep that label separate from strategic EV. Check-down equity distributions are ten fixed buckets on the explorer equity JSON; the Study Equity tab draws histograms, a band filter, and an OOP vs IP chart from compact hand rows. Made-hand categories cover five-card boards; flop/turn expose multi-label draw/backdoor tags. Support a standalone equity-calculator workflow.
 
 Build coordinated OOP/IP grids, selected-combo details, all-action strategy bars, equity/EV modes, range-after-action views, and runout switching that preserves the intended betting history where legal. Make missing/unsupported data visibly different from zero.
 
@@ -223,7 +223,7 @@ Choose explicit release service-level targets after measuring a representative c
 
 Main path: M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0; five-card production already shares the street tree — scale that one kernel. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after required features land.
 
-Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets with study filtering/composition, five-card made-hand categories, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, resumable PSOL, runout EV comparison, recent-files list, street-config templates, named range presets, street-first node locks. Still ahead: compact saves, reports/queue, trainer, preflop. M3 visual line editor + plan-memory dry-run, M7 free-form strategy editing, and M8 CategoryTag / dual-utility incentives landed on this track.
+Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets with study band filtering and an OOP vs IP chart, five-card made-hand categories, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, resumable PSOL, runout EV comparison, recent-files list, street-config templates, named range presets, street-first node locks. Still ahead: compact saves, reports/queue, trainer, preflop. M3 visual line editor + plan-memory dry-run, M7 free-form strategy editing, and M8 CategoryTag / dual-utility incentives landed on this track.
 
 Per milestone: small specification, invariants and failure modes, reviewable commits, relevant checks, user-workflow demo, ledger update with evidence. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 

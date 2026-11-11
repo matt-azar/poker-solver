@@ -44,7 +44,7 @@ explorer   # serves desktop/dist when present
 | Action EV | `GET …/values` | Calculate EVs | Inspector / Analysis | Decision only; may 202 | value worker |
 | Runouts | `GET …/runouts` | — | Engine endpoint remains; Study has no Runouts tab | Chance / street only | engine; sparse HTTP |
 | Next-card picker | chance `cards[]` (+ legacy `children`) | Card grid | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout (400/404 → child id); flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
-| Equity (node) | `GET …/equity` | Averages + hist | Study Equity tab: averages, clickable band filter, shape composition, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); buckets + `oop_hands`/`ip_hands` | equity tests; `analysis.test.ts` |
+| Equity (node) | `GET …/equity` | Averages + hist | Study Equity tab: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); buckets + `oop_hands`/`ip_hands` | equity tests; `analysis.test.ts` |
 | Equity calculator | `POST/GET /api/equity/jobs…` | — | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | `equity_calculator_tests`; desktop Equity UI |
 | Value / Bluffs | Client join of node `strategy` + `/equity` (node or Call-child) + `/values` for EV | — | Study **Value / Bluffs** tab: betting hands with equity vs user threshold (default 30%; toggle exclusive &lt; bluffs / &gt; value), bet freq ≥ 1% (settings), reach ≥ 0.005 (settings), sortable columns Hand / Bet % / EV / Eq / Reach / Size; gear settings menu; row selects matrix cell; **At this node** / **After call** toggle | After call = `/equity` on Call child of each hand’s max-prob bet/raise; EV is mixed chip EV via existing `/values` (`comboEv`, Study local/global basis); Reach is node reach mass (2 decimals); bare All-in counts; no new explorer API | `valueBluffs.test.ts` |
 | Categories | `GET …/categories` | Table | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | hand categories; `analysis.test.ts` |
@@ -79,7 +79,7 @@ explorer   # serves desktop/dist when present
 | --- | --- |
 | Contracts + `EngineClient` | Done |
 | Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
-| Analysis dock + Build + Library | Done — Equity hist + band filter + composition; Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
+| Analysis dock + Build + Library | Done — Equity hist + band filter + OOP vs IP chart; Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
 | Locks + Strategy edits + Compare | Done |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |
 | Visual / a11y / perf polish | Partial — focus-visible, reduced-motion, compact ≤1280, light/dark themes |
@@ -91,7 +91,7 @@ explorer   # serves desktop/dist when present
 | Browser Study client + localhost `explorer` | Supported |
 | Vite `/api` proxy in `npm run dev` | Supported |
 | `explorer` serving `desktop/dist` | Supported |
-| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns installed `holdem-explorer` beside the app (absolute path; not `binaries/…`) on port 8765, waits until the port accepts connections, exposes `ensure_engine` for Reconnect; webview loads Vite `dist`. Explorer responses include CORS (`Access-Control-Allow-Origin: *` + OPTIONS preflight) so the webview origin (`https://tauri.localhost`) can `fetch` `http://127.0.0.1:8765` |
+| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns installed `holdem-explorer` beside the app (absolute path; not `binaries/…`), waits for `GET /api/ready`, and exposes `ensure_engine` for Reconnect. The webview loads Vite `dist`. Explorer responses include CORS (`Access-Control-Allow-Origin: *` + OPTIONS preflight) so the webview origin (`https://tauri.localhost`) can call the engine. The port is not fixed at 8765; see the next row. |
 | Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer`. Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe` (plus the versioned Tauri NSIS name). PREINSTALL stops the UI then force-kills/deletes `holdem-explorer.exe` so upgrades are not blocked by a locked sidecar; POSTINSTALL requires `holdem-explorer.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. Packaged explorer uses the static MSVC CRT |
 | Native Open/Save dialogs | Browser prompts; Windows Tauri build wires `tauri-plugin-dialog` + `dialog:default` capability; adapter keeps a prompt fallback if the plugin invoke fails |
 | Packaged engine ownership | Tauri allocates a loopback port, spawns one `holdem-explorer` with `--launch-id` + `--study-packaged`, waits for `GET /api/ready` (protocol + launch id), and binds the webview client to that base URL. Foreign listeners on 8765 are not treated as ready. Browser/dev still uses Vite proxy / external explorer on 8765. |
@@ -102,14 +102,14 @@ explorer   # serves desktop/dist when present
 Prefer the [latest GitHub Release download](https://github.com/matt-azar/poker-solver/releases/latest/download/Holdem-Study-windows-x64-setup.exe), or Actions → **Windows Installer** → artifact `holdem-study-windows-installer`.
 
 1. Run `Holdem-Study-windows-x64-setup.exe` (current-user install; WebView2 may bootstrap if missing). Close Holdem Study if it is open (setup will offer to stop it). Setup stops any leftover `holdem-explorer` engine, fails loudly if the sidecar is missing after copy, and clears Mark-of-the-Web on the installed exes.
-2. Launch **Holdem Study** from the Start menu — the shell starts `holdem-explorer` on `127.0.0.1:8765` before the Study UI polls. No CMake/`npm` required.
+2. Launch **Holdem Study** from the Start menu. The shell picks a free `127.0.0.1` port, starts `holdem-explorer` with a launch id, and waits for `GET /api/ready` before the Study UI connects. No CMake or npm required.
 
 ### Cutting a Windows Release (maintainers)
 
 Do **not** publish on every `main` merge. When a desktop cut is ready:
 
-1. Ensure `desktop/package.json` / `desktop/src-tauri/tauri.conf.json` version matches the intended cut (e.g. `0.1.1`).
-2. On the commit to ship: `git tag -a v0.1.1-windows -m "Holdem Study 0.1.1 (Windows)"` then `git push origin v0.1.1-windows`.
+1. Ensure `desktop/package.json` / `desktop/src-tauri/tauri.conf.json` version matches the intended cut (current package version is `0.1.2`).
+2. On the commit to ship: `git tag -a v0.1.2-windows -m "Holdem Study 0.1.2 (Windows)"` then `git push origin v0.1.2-windows`. Use the version you are cutting, not this example, if it has moved on.
 3. Workflow **Windows Installer Release** builds NSIS and attaches assets to the GitHub Release for that tag (stable name + versioned Tauri name).
 4. README already points at `/releases/latest/download/Holdem-Study-windows-x64-setup.exe` — no README edit required when the new release is the latest.
 
@@ -140,5 +140,5 @@ npm run tauri:build
 - Build: `cd desktop && npm run build`
 - Live: solve against `explorer`; Status bar shows EV / NashConv / mem (`gap_series` in status payload, no Graphs UI)
 - Visual targets: 1440×900 dark/light, 1920×1080 dual-range, 1280×800 compact
-- Real-engine HTTP acceptance: `tests/unit/test_explorer_workflow.cpp` inside `poker_solver_tests` (Linux + Windows). Automates Build/solve/pause/inspect/save/open/continue/lock/compare against a spawned `explorer`. Does **not** cover Tauri webview lifecycle, native Open/Save dialogs, or the NSIS packaged install — re-validate those on Windows before a Study release.
-- Next study-productivity priorities (not gated by the acceptance suite): line-preserving turn/river card changes (`prepareBoardCardChange` only accepts the live deal node today; sibling-card swaps need parent/path APIs). Study packaging already admits full-range turn equity via `kStudyExplorerMaxPairRunouts`; dense flop check-downs may still need a higher `--max-pair-runouts` (see [EXPLORER.md](EXPLORER.md), [EQUITY.md](EQUITY.md)).
+- Real-engine HTTP acceptance: `tests/unit/test_explorer_workflow.cpp` inside `poker_http_tests` (Linux + Windows). Automates Build/solve/pause/inspect/save/open/continue/lock/compare against a spawned `explorer`. Does **not** cover Tauri webview lifecycle, native Open/Save dialogs, or the NSIS packaged install — re-validate those on Windows before a Study release.
+- Changing the flop, and changing an earlier street after a later card is dealt, are unsupported. Turn and river card changes keep the betting line when the deal-chance ancestor is known. Study packaging admits a full-range turn via `kStudyExplorerMaxPairRunouts`. A dense flop check-down can still need a higher `--max-pair-runouts` (see [EXPLORER.md](EXPLORER.md), [EQUITY.md](EQUITY.md)).

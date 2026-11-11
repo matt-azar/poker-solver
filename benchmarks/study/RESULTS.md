@@ -2,9 +2,11 @@
 
 NashConv is the sum of unilateral BR gains
 `(u0(BR0)-u0)+(u1(BR1)-u1)`. Under zero-sum chips that equals
-`player0_best_response_utility + player1_best_response_utility`. The target is
-NashConv/pot at most 0.001. Prefer the solver's printed
-`nash_gap_fraction_of_pot` when present. `wall_seconds` is cold process time.
+`player0_best_response_utility + player1_best_response_utility`. The runs
+recorded in this file used NashConv/pot at most 0.001 and preferred printed
+`nash_gap_fraction_of_pot`. The current study target is Pio Accuracy/pot at
+most 0.001 (Accuracy = NashConv/2). Do not read the tables below as
+Accuracy/pot. `wall_seconds` is cold process time.
 `train_seconds` is the solver's training clock, not the process wall time.
 Engine `allocated_bytes` / `peak_allocated_bytes` are distinct from process RSS.
 

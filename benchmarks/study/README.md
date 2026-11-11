@@ -55,13 +55,13 @@ Reference cases live in `benchmarks/study/cases/`. The executable content is the
 
 ### `river_competing_weights`
 
-Board `Th 9h 6d 4h 2c`, pot 100, effective stack 200. Three hearts, so flushes compete with the 87 straight, sets, and overpairs. OOP is a wider, weighted calling range. IP is more polarized: overpairs and nut flushes are heavier, and offsuit bluff-catchers are lighter. Bets are 0.5 and 1 pot. Raises are explicit and different (`0.75` OOP, `1` IP), so they are not copies of the bet list. All-in is on. `max-raises` is 2. OOP acts first. CFR+, iteration cap 2000. `--gap-threshold 0.1` is `0.001 * pot` in chips. `--eval-interval 20` matches the street cadence. There is no frozen pass and no thread flag on this binary.
+Board `Th 9h 6d 4h 2c`, pot 100, effective stack 200. Three hearts, so flushes compete with the 87 straight, sets, and overpairs. OOP is a wider, weighted calling range. IP is more polarized: overpairs and nut flushes are heavier, and offsuit bluff-catchers are lighter. Bets are 0.5 and 1 pot. Raises are explicit and different (`0.75` OOP, `1` IP), so they are not copies of the bet list. All-in is on. `max-raises` is 2. OOP acts first. CFR+, iteration cap 2000. `--gap-threshold 0.1` is 0.1 chips of Pio Accuracy, which is `0.001 * pot` when the pot is 100. `--eval-interval 20` is the river alias of `--eval-every`. This binary has no `--frozen` and no `--threads`.
 
 Useful because a river study is wide in deals rather than in future cards, and this tree is large enough to show betting and raising without being a one-combo lock.
 
 ### `turn_srp_river_betting`
 
-Board `Qc 9d 4h 2c` (two clubs), pot 100, effective stack 400. OOP continues with a wide pair-and-suited range. IP is tighter, and `ATo`, `KJo`, and `QJo` are weighted below 1. One bet size, half pot, is shared by the turn and the river. The raise size is an explicit 0.75 pot, not a copy of the bet. All-in is on. `max-raises` is 2, so a raise is legal and a re-raise is not (the opening bet counts toward the cap). CFR+, frozen pass, 1 thread, engine budget 2048 MiB, iteration cap 400. `--accuracy 0.001` sets the Nash gap threshold to `0.001 * pot` and hardcodes the evaluation cadence to 20. There is no flag for that cadence.
+Board `Qc 9d 4h 2c` (two clubs), pot 100, effective stack 400. OOP continues with a wide pair-and-suited range. IP is tighter, and `ATo`, `KJo`, and `QJo` are weighted below 1. One bet size, half pot, is shared by the turn and the river. The raise size is an explicit 0.75 pot, not a copy of the bet. All-in is on. `max-raises` is 2. The opening bet does not count. Two facing raises are allowed. CFR+, frozen pass, 1 thread, engine budget 2048 MiB, iteration cap 400. `--accuracy 0.001` stops when Pio Accuracy (NashConv/2) divided by the pot is at most 0.001. With `--eval-every` omitted, the check cadence is 20.
 
 A called half-pot turn bet leaves 350 behind and a pot of 200, so the river still has a half-pot bet, a raise, and an all-in. That is the future-river betting this case is for.
 
@@ -73,11 +73,11 @@ The same tree, ranges, sizes, frozen pass, thread count, and engine budget as `t
 
 ### `flop_srp_one_size`
 
-Board `Js 8h 3h`, pot 100, effective stack 500. OOP is `JJ+` plus suited broadways and connectors, with `AJo` at weight 0.5. IP is `TT+`, `AJs+`, `KQs`, a partial `QJs`, and weighted `KJo` / `ATs`. The ranges are not the same, and they are not `QQ,JJ,TT,99`. One half-pot bet is used on the flop, the turn, and the river. The raise is an explicit 0.75 pot. All-in is on. `max-raises` is 2. CFR+, frozen pass, 1 thread, engine budget 4096 MiB, iteration cap 400, accuracy 0.001, evaluation cadence 20.
+Board `Js 8h 3h`, pot 100, effective stack 500. OOP is `JJ+` plus suited broadways and connectors, with `AJo` at weight 0.5. IP is `TT+`, `AJs+`, `KQs`, a partial `QJs`, and weighted `KJo` / `ATs`. The ranges are not the same, and they are not `QQ,JJ,TT,99`. One half-pot bet is used on the flop, the turn, and the river. The raise is an explicit 0.75 pot. All-in is on. `max-raises` is 2. The opening bet does not count. Two facing raises are allowed. CFR+, frozen pass, 1 thread, engine budget 4096 MiB, iteration cap 400, accuracy 0.001, evaluation cadence 20.
 
 Useful because flop information sets are stored on later-card runouts. One size plus one raise is the first practical betting abstraction, and the two-tone jack flop makes flush completion part of the later streets.
 
-Per-street bet flags are intentionally absent on the turn and the flop. If a per-street bet list is set, that street's raises copy the bet list and the shared `--oop-raises` / `--ip-raises` flags do not apply there. The CLI has no per-street raise flag.
+The flop and turn reference configs set shared bet and raise lists. They do not set per-street bet or raise lists. An empty per-street raise list uses the shared raise list. It does not copy that street's bet list. Per-street raise flags are `--oop-flop-raises`, `--oop-turn-raises`, `--oop-river-raises`, and the IP twins.
 
 ## Diagnostics
 
@@ -131,18 +131,16 @@ Raw stdout, stderr, `results.json`, and `summary.md` are written to the output d
 
 `street_solver --reference` prints `start` and `final` only. The reference walk has no construction or cache split.
 
-## CLI gaps
+## CLI notes
 
-Follow-ups for the solver CLIs:
-
-- `street_solver --accuracy` hardcodes `eval_interval` to 20. The cadence cannot be changed.
-- `river_solver --gap-threshold` is absolute Pio Accuracy in chips; `--accuracy` defaults to pot fraction.
-- The river CLI does not print construction, cache, train, or evaluation splits, engine allocation, process peak working set, or a thread count. It has no `--frozen`, `--threads`, `--memory-mib`, or `--accuracy`.
+- When `street_solver --accuracy` is set and `--eval-every` is omitted, the check cadence is 20. `--eval-every N` changes it. `N` must be a positive integer.
+- `river_solver --gap-threshold` is Pio Accuracy in chips. `river_solver --accuracy` defaults to a pot fraction. Both accept `--eval-every` (alias `--eval-interval`).
+- `river_solver` does not print construction, cache, train, or evaluation splits, engine allocation, process peak working set, or a thread count. It has no `--frozen`, `--threads`, or `--memory-mib`.
 - Street `total_seconds` is not process wall time. `runtime_seconds` is not process wall time on either CLI.
-- Per-street raise lists exist on `StreetConfig` but have no command-line flags. A non-empty per-street bet list is reused as that street's raise list, which hides `--oop-raises` and `--ip-raises` for that street.
-- `street_solver` has no `--first` flag. Both street cases are OOP-first because that is the config default.
+- Per-street raise flags exist: `--oop-flop-raises`, `--oop-turn-raises`, `--oop-river-raises`, and the IP twins. An empty per-street raise list uses the shared raise list. It does not copy that street's bet list.
+- `street_solver` has no `--first` flag. `first-to-act` is a `street-config 1` field. Both street cases are OOP-first because that is the config default.
 - River cases still use flag argv. They do not load a `river-config` document.
-- Empty raise lists are copied from the bet lists when flags omit them. The street-config fixtures list raises explicitly.
+- If `street_solver` raise flags and raise multiples are both omitted, the CLI copies the shared bet sizes into the shared raise sizes. The street-config fixtures list raises explicitly. The engine does not perform that copy.
 
 ## Quiet-machine note
 

@@ -103,7 +103,7 @@ Under zero-sum chips this equals \(u_0(\mathrm{BR}_0)+u_1(\mathrm{BR}_1)\).
 
 `SolveConfig` sets a maximum iteration count and an optional Accuracy threshold
 (`accuracy_threshold`, absolute chips of Pio Accuracy). The threshold applies
-only when it is non-negative and `eval_interval` is positive. Runtime reported
+only when it is non-negative and `eval_every` is positive (`eval_interval` is a legacy alias for the same field). Runtime reported
 by `solve` is the regret-update loop, including Accuracy checks that end the
 run early.
 

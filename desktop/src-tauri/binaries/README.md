@@ -39,5 +39,7 @@ cp path/to/explorer.exe \
 ```
 
 Do not commit large binaries here; `.gitkeep` only reserves the folder.
-The Study UI talks to `http://127.0.0.1:8765` on this process. The Tauri shell
-command `ensure_engine` spawns the sidecar and waits until that port accepts TCP.
+The packaged Study UI does not assume port 8765. `ensure_engine` allocates a
+loopback port, spawns this sidecar with `--launch-id` and `--study-packaged`,
+and returns after `GET /api/ready` matches protocol 1 and that launch id.
+Browser development still uses an explorer on port 8765.

@@ -7,18 +7,17 @@ Product entry points: `explorer` + Study UI (`desktop/`), `street_solver`, and `
 ## In place
 
 - Shared flop/turn/river public tree (`StreetBatchSolver`); five-card pins against `RiverGame`
-- Conditional action EV, check-down equity (+ buckets), made-hand categories on five-card boards
+- Conditional action EV, check-down equity (+ buckets and an OOP vs IP chart), made-hand categories on five-card boards, flop/turn draw and backdoor tags
 - Stop-and-keep, pause/continue, accuracy and wall-clock stopping
-- Versioned PSOL save/open/continue; recent-files list; street-config templates; named range presets
-- Node locks, resolve-locked, baseline compare (street-first in explorer)
-- Pot rake, optional ICM, optional action-label incentives on street/river terminals
+- Versioned PSOL save/open/continue; recent-files list; street-config templates; named range presets; Build betting-tree catalogue
+- Node locks, resolve-locked, baseline compare, and session strategy edits (street-first in explorer)
+- Build preview tree with force/remove/add-size edits and a memory-plan dry run
+- Pot rake, optional ICM, optional action-label incentives on street/river terminals, including explorer job JSON
 - Windows NSIS installer for Holdem Study ([DESKTOP_UI.md](../../DESKTOP_UI.md))
 
 ## Still open
 
-- Visual tree editor; compact/lazy saves; runout aggregation and durable batch queue
-- Draw/backdoor categories; richer strategy editing beyond lock rows
-- Dual-utility best response under incentives; explorer incentive Job JSON
+- Compact/lazy saves; a dedicated runout-aggregation endpoint and a durable batch queue
 - Trainer packs/drills; preflop
 - Code-signed Windows release; Pio matched quality/timing runs
 
@@ -27,8 +26,10 @@ Product entry points: `explorer` + Study UI (`desktop/`), `street_solver`, and `
 ```sh
 CXX=g++ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-./build/poker_solver_tests
+ctest --test-dir build --output-on-failure
 ```
+
+`poker_solver_tests` is a CMake target that builds `poker_engine_tests`, `poker_study_tests`, and `poker_http_tests`. It is not an executable.
 
 Explorer HTTP tests spawn on Linux and Windows. Prefer the weighted multi-combo persistence case in `tests/unit/test_explorer_http.cpp` when changing Continue/Open/session. Desktop lifecycle acceptance (Build → solve → pause/inspect → save/open/continue → lock/compare) is `tests/unit/test_explorer_workflow.cpp`; Windows packaged Tauri/NSIS remains a manual release gate.
 
