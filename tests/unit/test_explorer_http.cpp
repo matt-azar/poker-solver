@@ -999,6 +999,18 @@ void run_explorer_http_tests()
         CHECK(ready.body.find("\"launch_id\":\"\"") != std::string::npos);
     }
 
+    // Cold status contract: required flags + generation for the TS decoder.
+    {
+        HttpResult cold;
+        CHECK(http_exchange("GET", "/api/status", "", cold));
+        CHECK(cold.status == 200);
+        CHECK(cold.body.find("\"running\":false") != std::string::npos);
+        CHECK(cold.body.find("\"paused\":false") != std::string::npos);
+        CHECK(cold.body.find("\"cancelled\":false") != std::string::npos);
+        CHECK(cold.body.find("\"status_generation\":") != std::string::npos);
+        CHECK(cold.body.find("\"solution_id\":null") != std::string::npos);
+    }
+
     // Tauri Study webview is cross-origin; CORS must be present or fetch fails.
     {
         HttpResult cors_status;
