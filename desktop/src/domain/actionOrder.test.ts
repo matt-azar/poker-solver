@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   actionAggressionScore,
   compareActionsAggressiveFirst,
+  orderActionIndicesAggressiveFirst,
   orderActionIndicesByAggression,
 } from "./actionOrder";
 
@@ -47,5 +48,12 @@ describe("orderActionIndicesByAggression", () => {
     const actions = ["Fold", "Call", "Bet 75", "All-in"];
     const ordered = [...actions].sort(compareActionsAggressiveFirst);
     expect(ordered).toEqual(["All-in", "Bet 75", "Call", "Fold"]);
+  });
+});
+
+describe("orderActionIndicesAggressiveFirst", () => {
+  it("mirrors paint order for Hands metric lists", () => {
+    const actions = ["Check", "b36", "b137"];
+    expect(orderActionIndicesAggressiveFirst(actions)).toEqual([2, 1, 0]);
   });
 });

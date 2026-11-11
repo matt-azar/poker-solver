@@ -1,16 +1,17 @@
 import { useMemo } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
 import { mapActionColors } from "../../domain/actionColors";
-import { orderActionIndicesByAggression } from "../../domain/actionOrder";
 import {
   formatActionDisplay,
   formatActionTooltip,
   formatFrequencyPct,
 } from "../../domain/betSizes";
 import { groupHands } from "../../domain/browse";
+import { buildStrategyPaintSegments } from "../../domain/strategyPaint";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import { ActionBlock } from "./ActionBlock";
+import { StrategyPaintBars } from "./StrategyPaintBars";
 import "../../styles/actions.css";
 
 /** Node-level Actions stack for the Study detail panel. */
@@ -76,9 +77,10 @@ export function ActionSummary() {
     [colors.legend, pot, betSizeDisplay, displayOpts],
   );
 
-  const mixOrder = useMemo(
-    () => orderActionIndicesByAggression(actions ?? []),
-    [actions],
+  const mixSegments = useMemo(
+    () =>
+      buildStrategyPaintSegments(actions ?? [], freqs, colors.byIndex),
+    [actions, freqs, colors.byIndex],
   );
 
   return (
@@ -119,27 +121,13 @@ export function ActionSummary() {
         ) : null}
       </div>
       {(actions?.length ?? 0) > 0 ? (
-        <div
+        <StrategyPaintBars
+          segments={mixSegments}
           className="action-summary__mix"
-          aria-label="Action frequency mix"
+          segClassName="action-summary__mix-seg"
           role="img"
-        >
-          {mixOrder.map((index) => {
-            const freq = freqs[index] ?? 0;
-            return freq > 0.001 ? (
-              <span
-                key={`mix-${index}`}
-                className="action-summary__mix-seg"
-                style={{
-                  flexGrow: freq,
-                  flexBasis: 0,
-                  background: colors.byIndex[index],
-                }}
-                title={`${actions?.[index] ?? ""} · ${formatFrequencyPct(freq)}`}
-              />
-            ) : null;
-          })}
-        </div>
+          aria-label="Action frequency mix"
+        />
       ) : null}
       {legend.length > 0 ? (
         <div className="action-summary__legend" aria-label="Action color legend">

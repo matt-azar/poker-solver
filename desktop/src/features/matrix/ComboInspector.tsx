@@ -8,7 +8,7 @@
 import { useEffect, useMemo } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
 import { mapActionColors } from "../../domain/actionColors";
-import { orderActionIndicesByAggression } from "../../domain/actionOrder";
+import { orderActionIndicesAggressiveFirst } from "../../domain/actionOrder";
 import {
   formatActionDisplay,
   formatFrequencyPct,
@@ -28,6 +28,7 @@ import {
   useMatrixDisplayStore,
   weightFillFraction,
 } from "../../domain/matrixDisplay";
+import { buildStrategyPaintSegments } from "../../domain/strategyPaint";
 import type {
   ActionValuesPayload,
   EvDisplayBasis,
@@ -36,6 +37,7 @@ import type {
 import { RANKS } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
+import { StrategyPaintBars } from "./StrategyPaintBars";
 
 function comboActionEvs(
   node: NodePayload,
@@ -162,15 +164,11 @@ export function ComboInspector() {
 
   const pinned = Boolean(selectedCell);
   const actions = currentNode?.actions ?? [];
-  // Paint is passive → aggressive (left → right). The metric list stays
-  // aggressive first (top → bottom), so it uses the reverse of that order.
-  const paintOrder = useMemo(
-    () => orderActionIndicesByAggression(actions),
-    [actions],
-  );
+  // Metric list: aggressive first (top → bottom). Paint order lives inside
+  // buildStrategyPaintSegments (passive → left) — do not reverse ad-hoc here.
   const actionOrder = useMemo(
-    () => [...paintOrder].reverse(),
-    [paintOrder],
+    () => orderActionIndicesAggressiveFirst(actions),
+    [actions],
   );
   const pot = actionSizePotBasis(
     currentNode,
@@ -280,19 +278,16 @@ export function ComboInspector() {
                   entry.probability,
                 ]),
               );
-              const segments = paintOrder
-                .map((index) => {
-                  const label = actions[index]!;
-                  const probability =
-                    square.strategy?.[index] ?? freqByLabel.get(label) ?? 0;
-                  return {
-                    index,
-                    label,
-                    probability,
-                    color: colors.byIndex[index] || "#666",
-                  };
-                })
-                .filter((entry) => entry.probability > 0.001);
+              const mix = actions.map(
+                (label, index) =>
+                  square.strategy?.[index] ?? freqByLabel.get(label) ?? 0,
+              );
+              // Shared paint path with matrix cells (passive left, width ∝ freq).
+              const segments = buildStrategyPaintSegments(
+                actions,
+                mix,
+                colors.byIndex,
+              );
               const badgeCards = comboBadgeCards(square.combo);
               return (
                 <div
@@ -300,27 +295,12 @@ export function ComboInspector() {
                   className="inspector-combo hands-combo"
                   data-present={square.present ? "true" : "false"}
                   data-weight-fill="true"
-                  style={{ ["--mass-fill" as string]: String(massFill) }}
+                  style={{ ["--weight-fill" as string]: String(massFill) }}
                   title={square.combo}
                 >
                   {/* Vertical bands: width ∝ freq (passive left); height ∝ weight. */}
                   <div className="hands-combo__weight-fill">
-                    {segments.length > 0 ? (
-                      <div className="hands-combo__segments">
-                        {segments.map((entry) => (
-                          <span
-                            key={entry.label}
-                            className="hands-combo__seg"
-                            title={`${entry.label} ${(entry.probability * 100).toFixed(0)}%`}
-                            style={{
-                              flexGrow: entry.probability,
-                              flexBasis: 0,
-                              background: entry.color,
-                            }}
-                          />
-                        ))}
-                      </div>
-                    ) : null}
+                    <StrategyPaintBars segments={segments} />
                   </div>
                   <div className="hands-combo__body">
                     <div className="hands-combo__top">

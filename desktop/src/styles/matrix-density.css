@@ -82,7 +82,7 @@
 }
 
 /* Mixing stays about the segment bars; no extra chrome */
-.range-matrix.matrix-density .matrix-cell[data-action-mixing="true"] .matrix-cell__segments {
+.range-matrix.matrix-density .matrix-cell[data-action-mixing="true"] .strategy-paint {
   opacity: 1;
 }
 
@@ -97,7 +97,7 @@
 
 .range-matrix.matrix-density
   .matrix-cell[data-weight-fill="true"]
-  .matrix-cell__segments {
+  .strategy-paint {
   position: absolute;
   inset: 0;
 }

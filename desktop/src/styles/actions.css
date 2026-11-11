@@ -220,13 +220,18 @@
   color: var(--text);
 }
 
+/* Actions mix strip — same StrategyPaintBars flex contract as matrix/Hands. */
 .action-summary__mix {
   display: flex;
+  flex-direction: row;
   height: 8px;
   border-radius: 2px;
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--border);
+  /* Override absolute positioning from the shared .strategy-paint default. */
+  position: relative;
+  inset: auto;
 }
 
 .action-summary__mix-seg {
