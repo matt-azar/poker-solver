@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "sync:ai-context": "node ./scripts/sync-ai-context-packs.mjs",
     "check:ai-context": "node ./scripts/sync-ai-context-packs.mjs --check",
+    "check:library-assets": "node ./scripts/validate-library-assets.mjs",
     "test:assistant-live": "node ./scripts/run-assistant-live-eval.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

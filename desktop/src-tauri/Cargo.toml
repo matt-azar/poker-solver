@@ -21,10 +21,13 @@ tauri-build = { version = "=2.2.0", features = [] }
 # Prefer 2.1–2.5; pin exact so Cargo does not float to 2.12+ (rustc 1.90).
 tauri = { version = "=2.5.1", features = [] }
 tauri-plugin-shell = "=2.2.0"
-# tauri-plugin-dialog (=2.2) can be added later for file pickers; omit for now to
-# keep the Linux resolve graph off zbus/ashpd crates that float past rustc 1.83.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Native Open/Save pickers for the Windows installer build. Keep Linux off this
+# crate so the resolve graph stays clear of zbus/ashpd floats past rustc 1.83.
+[target.'cfg(windows)'.dependencies]
+tauri-plugin-dialog = "=2.2.0"
 
 # Keep the Linux/webview transitive graph on rustc-1.83-friendly crates.
 # Newer tauri-runtime-wry (≥2.7) pulls tao 0.34.8 → dlopen2 0.8 (edition2024 / rustc 1.85+).

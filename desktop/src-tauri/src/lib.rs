@@ -270,6 +270,26 @@ fn sidecar_on_disk(app: &AppHandle) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// Resolve installed Library asset roots for the explorer sidecar.
+///
+/// Packaged Study stages `configs/templates` and `configs/ranges` via
+/// `bundle.resources`. Dev launches leave these unset so explorer keeps its
+/// cwd / exe-relative checkout search.
+fn existing_library_dir(app: &AppHandle, leaf: &str) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(resource) = app.path().resource_dir() {
+        candidates.push(resource.join("configs").join(leaf));
+        candidates.push(resource.join(leaf));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("configs").join(leaf));
+            candidates.push(dir.join("resources").join("configs").join(leaf));
+        }
+    }
+    candidates.into_iter().find(|path| path.is_dir())
+}
+
 fn kill_stored_child(state: &EngineState) {
     if let Some(child) = state.take_child() {
         if let Err(err) = child.kill() {
@@ -319,17 +339,26 @@ fn spawn_once(
         err
     })?;
     let max_pair = STUDY_EXPLORER_MAX_PAIR_RUNOUTS.to_string();
-    let (_rx, child) = cmd
-        .args(["--port", port, "--max-pair-runouts", &max_pair])
-        .spawn()
-        .map_err(|err| {
-            let msg = format!(
-                "spawn failed for `{label}` on port {ENGINE_PORT}: {err}. \
-                 Check Windows Defender quarantine and that port {ENGINE_PORT} is free."
-            );
-            state.set_status(msg.clone());
-            msg
-        })?;
+    let mut cmd = cmd.args(["--port", port, "--max-pair-runouts", &max_pair]);
+    if let Some(templates) = existing_library_dir(app, "templates") {
+        eprintln!(
+            "info: POKER_SOLVER_TEMPLATES={}",
+            templates.display()
+        );
+        cmd = cmd.env("POKER_SOLVER_TEMPLATES", templates.as_os_str());
+    }
+    if let Some(ranges) = existing_library_dir(app, "ranges") {
+        eprintln!("info: POKER_SOLVER_RANGES={}", ranges.display());
+        cmd = cmd.env("POKER_SOLVER_RANGES", ranges.as_os_str());
+    }
+    let (_rx, child) = cmd.spawn().map_err(|err| {
+        let msg = format!(
+            "spawn failed for `{label}` on port {ENGINE_PORT}: {err}. \
+             Check Windows Defender quarantine and that port {ENGINE_PORT} is free."
+        );
+        state.set_status(msg.clone());
+        msg
+    })?;
     state.store_child(child);
     state.set_status(format!("starting on port {ENGINE_PORT}…"));
     Ok(())
@@ -419,8 +448,12 @@ fn kill_explorer_sidecar(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_shell::init());
+    #[cfg(windows)]
+    {
+        builder = builder.plugin(tauri_plugin_dialog::init());
+    }
+    builder
         .manage(EngineState::new())
         .setup(|app| {
             spawn_explorer_sidecar(app);
