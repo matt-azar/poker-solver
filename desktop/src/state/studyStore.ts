@@ -3335,9 +3335,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return { ok: false, error };
     }
     set({ phase: "saving", message: `Saving ${target}…` });
-    // Explorer HTTP is single-threaded; pause status so a slow save cannot
-    // starve /api/status into AbortError "unreachable" flicker.
-    get().stopPolling();
+    // Open/Save run as explorer overlay jobs (202 + status). Keep polling so
+    // the accept loop stays free for `/api/status` during the write.
     try {
       await engineClient.save(solutionId, target);
     } catch (error) {
@@ -3348,7 +3347,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         phase: phaseFromStatus(get().status, "complete"),
         message,
       });
-      get().startPolling();
       return { ok: false, error: message };
     }
     set({
@@ -3356,7 +3354,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       phase: phaseFromStatus(get().status, "complete"),
       message: `Saved ${target}`,
     });
-    get().startPolling();
     return { ok: true, path: target };
   },
 
@@ -3373,10 +3370,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       phase: "loading",
       message: `Opening ${target}…`,
     });
-    // Explorer accept loop handles one client at a time. Checkpoint open can
-    // take longer than STATUS_POLL_TIMEOUT_MS; concurrent status polls then
-    // abort as "signal is aborted without reason" and paint Engine unreachable.
-    get().stopPolling();
+    // Open is accepted as 202; the client polls status until the file job
+    // settles. Leave Study polling running so progress stays live.
     try {
       await engineClient.open(target);
     } catch (error) {
@@ -3387,7 +3382,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         phase: "failed",
         message,
       });
-      get().startPolling();
       return { ok: false, error: message };
     }
 

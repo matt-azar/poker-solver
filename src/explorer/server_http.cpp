@@ -536,9 +536,9 @@ std::string solution_config_json(const HeldSolution& held)
     return payload;
 }
 
-std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
+std::string publish_loaded(const std::shared_ptr<HeldSolution>& held, std::uint64_t file_job_id)
 {
-    // Build outside install_completed: draft_for reads g_app.session.generation(),
+    // Build outside install_*: draft_for reads g_app.session.generation(),
     // and the install callback already holds the session mutex.
     sync_held_analysis_revision(*held);
     StatusDraft base = draft_for(
@@ -550,7 +550,7 @@ std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
     base.analysis_revision = held->analysis_revision;
     std::uint64_t solution_id = 0;
     std::string status;
-    const bool installed = g_app.session.install_completed(held, solution_id, [&](std::uint64_t generation, std::uint64_t id)
+    const auto make = [&](std::uint64_t generation, std::uint64_t id)
     {
         held->id = id;
         StatusDraft draft = base;
@@ -560,12 +560,158 @@ std::string publish_loaded(const std::shared_ptr<HeldSolution>& held)
         draft.generation = generation;
         status = build_status(draft);
         return status;
-    });
+    };
+    const bool installed = file_job_id == 0
+        ? g_app.session.install_completed(held, solution_id, make)
+        : g_app.session.install_from_file_job(file_job_id, held, solution_id, make);
     if (!installed)
     {
         throw std::runtime_error("a solve is already running");
     }
     return status;
+}
+
+namespace
+{
+
+std::string file_job_status_from_held(
+    const std::shared_ptr<HeldSolution>& held,
+    std::uint64_t job_id,
+    const char* file_op,
+    bool running,
+    const std::string& error = {})
+{
+    if (!held)
+    {
+        std::string out = "{\"running\":";
+        out += running ? "true" : "false";
+        out += ",\"paused\":false,\"cancelled\":false,\"time_limit_reached\":false,\"file_op\":";
+        if (file_op == nullptr || file_op[0] == '\0')
+        {
+            out += "null";
+        }
+        else
+        {
+            append_escaped(out, file_op);
+        }
+        out += ",\"error\":";
+        append_escaped(out, error);
+        out += ",\"job_id\":";
+        if (job_id == 0)
+        {
+            out += "null";
+        }
+        else
+        {
+            append_escaped(out, "j" + std::to_string(job_id));
+        }
+        out += ",\"status_generation\":";
+        out += std::to_string(g_app.session.generation());
+        out += ",\"solution_id\":null,\"root_node_id\":null,\"iterations\":0}";
+        return out;
+    }
+    StatusDraft draft = draft_for(
+        held->job,
+        running ? job_id : 0,
+        held->iterations,
+        held->runtime_seconds,
+        true,
+        held->value,
+        held->p1_best_response,
+        held->p2_best_response,
+        held->nash_gap,
+        held->sample_iterations,
+        held->sample_values,
+        held->sample_gaps,
+        held->has_memory ? &held->memory : nullptr);
+    draft.running = running;
+    draft.solution_id = held->id;
+    draft.root_id = held->root_id;
+    draft.baseline_solution_id = held->baseline_solution_id;
+    draft.analysis_revision = held->analysis_revision;
+    draft.generation = g_app.session.generation();
+    draft.error = error;
+    if (file_op != nullptr)
+    {
+        draft.file_op = file_op;
+    }
+    return build_status(draft);
+}
+
+} // namespace
+
+void open_job(std::uint64_t job_id, std::string path)
+{
+    std::shared_ptr<HeldSolution> prior =
+        std::static_pointer_cast<HeldSolution>(g_app.session.training_resource(job_id));
+    try
+    {
+        g_app.session.set_progress(
+            job_id, file_job_status_from_held(prior, job_id, "open", true));
+        const poker::explorer::CheckpointDocument document =
+            poker::explorer::read_checkpoint(path, poker::explorer::kMaxCheckpointBytes);
+        const std::shared_ptr<HeldSolution> held = solution_from_checkpoint(document);
+        if (g_app.values != nullptr)
+        {
+            g_app.values->cancel_and_drain();
+        }
+        publish_loaded(held, job_id);
+        poker::explorer::record_recent_file(path);
+    }
+    catch (const std::exception& error)
+    {
+        // Keep the previous engine; only cancel analysis after a successful install.
+        g_app.session.finish_file_job(
+            job_id, file_job_status_from_held(prior, 0, "", false, error.what()));
+    }
+}
+
+void save_job(std::uint64_t job_id, std::string path)
+{
+    std::shared_ptr<HeldSolution> held =
+        std::static_pointer_cast<HeldSolution>(g_app.session.training_resource(job_id));
+    if (!held)
+    {
+        g_app.session.finish_file_job(
+            job_id,
+            file_job_status_from_held(
+                {}, 0, "", false, "expired solution"));
+        return;
+    }
+    try
+    {
+        g_app.session.set_progress(
+            job_id, file_job_status_from_held(held, job_id, "save", true));
+        write_held_checkpoint(path, *held);
+        poker::explorer::record_recent_file(path);
+        StatusDraft draft = draft_for(
+            held->job,
+            0,
+            held->iterations,
+            held->runtime_seconds,
+            true,
+            held->value,
+            held->p1_best_response,
+            held->p2_best_response,
+            held->nash_gap,
+            held->sample_iterations,
+            held->sample_values,
+            held->sample_gaps,
+            held->has_memory ? &held->memory : nullptr);
+        draft.solution_id = held->id;
+        draft.root_id = held->root_id;
+        draft.baseline_solution_id = held->baseline_solution_id;
+        draft.analysis_revision = held->analysis_revision;
+        draft.generation = g_app.session.generation();
+        // Additive marker so clients can confirm the write finished.
+        draft.file_op = "saved";
+        g_app.session.finish_file_job(job_id, build_status(draft));
+    }
+    catch (const std::exception& error)
+    {
+        g_app.session.finish_file_job(
+            job_id, file_job_status_from_held(held, 0, "", false, error.what()));
+    }
 }
 
 void handle_client(socket_t client)
@@ -1935,35 +2081,44 @@ void handle_client(socket_t client)
     }
     if (line.rfind("POST /api/open", 0) == 0)
     {
+        const std::string path = read_string(body, "path", "");
+        if (path.empty())
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"path is required\"}");
+            return;
+        }
         if (g_app.session.running())
         {
             send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
             return;
         }
-        try
+        if (g_app.values != nullptr)
         {
-            const std::string path = read_string(body, "path", "");
-            if (path.empty())
-            {
-                throw std::invalid_argument("path is required");
-            }
-            if (g_app.values != nullptr)
-            {
-                g_app.values->cancel_and_drain();
-            }
-            const poker::explorer::CheckpointDocument document =
-                poker::explorer::read_checkpoint(path, poker::explorer::kMaxCheckpointBytes);
-            const std::shared_ptr<HeldSolution> held = solution_from_checkpoint(document);
-            poker::explorer::record_recent_file(path);
-            send_response(client, 200, "application/json", publish_loaded(held));
+            g_app.values->cancel();
         }
-        catch (const std::exception& error)
+        if (g_app.worker.joinable())
         {
-            std::string payload = "{\"error\":";
-            append_escaped(payload, error.what());
-            payload += "}";
-            send_response(client, 400, "application/json", payload);
+            g_app.worker.join();
         }
+        const poker::explorer::Session::Claim claim = g_app.session.begin_file_job();
+        if (!claim.allowed)
+        {
+            send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
+            return;
+        }
+        g_app.session.set_progress(
+            claim.job_id,
+            file_job_status_from_held(
+                std::static_pointer_cast<HeldSolution>(g_app.session.training_resource(claim.job_id)),
+                claim.job_id,
+                "open",
+                true));
+        g_app.worker = std::thread(
+            [job_id = claim.job_id, path]() { open_job(job_id, path); });
+        std::string accepted = "{\"running\":true,\"job_id\":";
+        append_escaped(accepted, "j" + std::to_string(claim.job_id));
+        accepted += ",\"file_op\":\"open\"}";
+        send_response(client, 202, "application/json", accepted);
         return;
     }
     if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/save ") != std::string::npos)
@@ -1977,32 +2132,55 @@ void handle_client(socket_t client)
             send_response(client, 400, "application/json", "{\"error\":\"bad solution id\"}");
             return;
         }
-        poker::explorer::ReaderLease lease(g_app.session, g_app.session.borrow(id));
-        if (!lease)
+        const std::string path = read_string(body, "path", "");
+        if (path.empty())
+        {
+            send_response(client, 400, "application/json", "{\"error\":\"path is required\"}");
+            return;
+        }
+        if (g_app.session.running())
+        {
+            send_response(client, 409, "application/json", "{\"error\":\"a solve is already running\"}");
+            return;
+        }
+        // Confirm the solution is still queryable before claiming the overlay job.
+        {
+            poker::explorer::ReaderLease lease(g_app.session, g_app.session.borrow(id));
+            if (!lease)
+            {
+                send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
+                return;
+            }
+        }
+        if (g_app.values != nullptr)
+        {
+            g_app.values->cancel();
+        }
+        if (g_app.worker.joinable())
+        {
+            g_app.worker.join();
+        }
+        const poker::explorer::Session::Claim claim = g_app.session.claim_completed(id);
+        if (!claim.allowed)
         {
             send_response(client, 404, "application/json", "{\"error\":\"expired solution\"}");
             return;
         }
-        try
-        {
-            const std::string path = read_string(body, "path", "");
-            if (path.empty())
-            {
-                throw std::invalid_argument("path is required");
-            }
-            const std::shared_ptr<HeldSolution> held =
-                std::static_pointer_cast<HeldSolution>(lease.resource());
-            write_held_checkpoint(path, *held);
-            poker::explorer::record_recent_file(path);
-            send_response(client, 200, "application/json", "{\"saved\":true}");
-        }
-        catch (const std::exception& error)
-        {
-            std::string payload = "{\"error\":";
-            append_escaped(payload, error.what());
-            payload += "}";
-            send_response(client, 400, "application/json", payload);
-        }
+        g_app.session.set_progress(
+            claim.job_id,
+            file_job_status_from_held(
+                std::static_pointer_cast<HeldSolution>(g_app.session.training_resource(claim.job_id)),
+                claim.job_id,
+                "save",
+                true));
+        g_app.worker = std::thread(
+            [job_id = claim.job_id, path]() { save_job(job_id, path); });
+        std::string accepted = "{\"running\":true,\"job_id\":";
+        append_escaped(accepted, "j" + std::to_string(claim.job_id));
+        accepted += ",\"file_op\":\"save\",\"solution_id\":";
+        append_escaped(accepted, "s" + std::to_string(id));
+        accepted += '}';
+        send_response(client, 202, "application/json", accepted);
         return;
     }
     if (line.rfind("POST /api/solutions/", 0) == 0 && line.find("/analysis") != std::string::npos)

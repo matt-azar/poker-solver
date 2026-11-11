@@ -374,28 +374,23 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     );
   });
 
-  it("openSolution pauses status polling so abort does not paint unreachable", async () => {
+  it("openSolution keeps polling while a slow open fails without painting unreachable", async () => {
     let releaseOpen: (() => void) | null = null;
     const openGate = new Promise<void>((resolve) => {
       releaseOpen = resolve;
     });
-    let statusAborted = false;
+    let statusCalls = 0;
 
-    engineMocks.engineClient.status.mockImplementation(async (signal?: AbortSignal) => {
-      await new Promise<never>((_resolve, reject) => {
-        if (!signal) {
-          return;
-        }
-        const fail = () => {
-          statusAborted = true;
-          reject(new DOMException("signal is aborted without reason", "AbortError"));
-        };
-        if (signal.aborted) {
-          fail();
-          return;
-        }
-        signal.addEventListener("abort", fail, { once: true });
-      });
+    engineMocks.engineClient.status.mockImplementation(async () => {
+      statusCalls += 1;
+      return {
+        running: true,
+        paused: false,
+        cancelled: false,
+        status_generation: statusCalls,
+        solution_id: "s1",
+        error: "",
+      };
     });
     engineMocks.engineClient.open.mockImplementationOnce(async () => {
       await openGate;
@@ -411,14 +406,13 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     await Promise.resolve();
 
     const pending = useStudyStore.getState().openSolution("/slow.psol");
-    // Let stopPolling abort the in-flight status and open reach its gate.
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(statusAborted).toBe(true);
     expect(useStudyStore.getState().connection).toBe("connected");
     expect(useStudyStore.getState().message).toMatch(/Opening \/slow\.psol/);
     expect(useStudyStore.getState().message).not.toMatch(/Engine unreachable/);
+    expect(statusCalls).toBeGreaterThan(0);
 
     releaseOpen?.();
     const result = await pending;

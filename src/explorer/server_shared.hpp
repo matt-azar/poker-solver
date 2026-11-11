@@ -213,6 +213,8 @@ struct StatusDraft
     const poker::solver::StreetMemoryReport* memory = nullptr;
     bool include_strategy = false;
     const std::vector<poker::solver::RiverStrategyEntry>* entries = nullptr;
+    // Additive overlay label for Open/Save jobs (`open` / `save`); empty otherwise.
+    std::string file_op;
 };
 
 bool parse_u64(std::string_view text, std::uint64_t& value);
@@ -476,7 +478,13 @@ void append_size_array_json(std::string& out, const char* key, const std::vector
 
 std::string solution_config_json(const HeldSolution& held);
 
-std::string publish_loaded(const std::shared_ptr<HeldSolution>& held);
+std::string publish_loaded(
+    const std::shared_ptr<HeldSolution>& held,
+    std::uint64_t file_job_id = 0);
+
+void open_job(std::uint64_t job_id, std::string path);
+
+void save_job(std::uint64_t job_id, std::string path);
 
 void handle_client(socket_t client);
 
