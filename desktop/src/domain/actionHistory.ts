@@ -250,6 +250,7 @@ export function displayPathStepLabel(
 /**
  * Path-line abbreviation. Check/Call/Fold are single letters. Bets and raises
  * stay pot-fraction tags (`b20` = 20% of the pot before the bet), never chips.
+ * Sized all-ins append `(a)` (`b137(a)` / `r137(a)`) via the shared pot-tag path.
  */
 export function abbreviatePathAction(
   label: string,
@@ -274,11 +275,17 @@ export function abbreviatePathAction(
       ? trimmed[0]!.toUpperCase() + trimmed[1]!.toLowerCase()
       : trimmed;
   }
-  const tag = potTagFromLabel(trimmed, pot, toCall);
+  const tag = potTagFromLabel(trimmed, pot, toCall, "line");
   if (tag) {
     return tag;
   }
-  if (/^[br]\d+$/i.test(trimmed)) {
+  // Already-compact display tags (`b150 Allin`) → line form.
+  const displayAllIn = trimmed.match(/^([br]\d+)\s+Allin$/i);
+  if (displayAllIn) {
+    return `${displayAllIn[1]!.toLowerCase()}(a)`;
+  }
+  // Already-compact line or base tags.
+  if (/^[br]\d+(\(a\))?$/i.test(trimmed)) {
     return trimmed.toLowerCase();
   }
   return trimmed;

@@ -108,6 +108,27 @@ describe("ActionSummary", () => {
     expect(within(legend).getByText("b100")).toBeTruthy();
   });
 
+  it("labels a sized all-in bet as bN Allin on action tags", () => {
+    useStudyStore.setState({
+      currentNode: {
+        ...useStudyStore.getState().currentNode!,
+        actions: ["Check", "Bet 50", "Bet 137 all-in"],
+        children: ["n-check", "n-b50", "n-allin"],
+        strategy: [
+          [0.2, 0.3, 0.5],
+          [0.2, 0.3, 0.5],
+        ],
+      },
+    });
+    render(<ActionSummary />);
+    const allIn = screen.getByRole("button", { name: /Filter b137 Allin/i });
+    expect(within(allIn).getByText("b137 Allin")).toBeTruthy();
+    expect(within(allIn).queryByText("b137")).toBeNull();
+    const legend = screen.getByLabelText("Action color legend");
+    expect(within(legend).getByText("b137 Allin")).toBeTruthy();
+    expect(within(legend).getByText("b50")).toBeTruthy();
+  });
+
   it("renders a panel Actions heading and frequency mix bar", () => {
     render(<ActionSummary />);
     expect(screen.getByRole("heading", { name: "Actions" })).toBeTruthy();
