@@ -2,7 +2,7 @@
  * Study-setup assistant credential lookup.
  *
  * Preference order for the desktop prototype:
- * 1. Tauri native secret commands (app-config file outside the webview bundle)
+ * 1. Tauri native secret commands (OS keyring; legacy app-config file migrate-on-read)
  * 2. Browser prototype localStorage (user-provided; never shipped in source)
  *
  * A distributed product should use an authenticated backend proxy so the
@@ -142,7 +142,7 @@ export async function hasAssistantOpenAiCredential(): Promise<boolean> {
 export function describeCredentialSource(source: CredentialSource): string {
   switch (source) {
     case "tauri":
-      return "Tauri native secret store (app config; outside the JS bundle)";
+      return "Tauri OS credential store (keyring; outside the JS bundle)";
     case "localStorage":
       return "Browser localStorage prototype key (user-provided; not for distribution)";
     case "none":
