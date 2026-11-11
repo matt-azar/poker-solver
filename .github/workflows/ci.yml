@@ -105,18 +105,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+  linux:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure Ninja
+        run: |
+          set -euo pipefail
+          if command -v ninja >/dev/null 2>&1; then
+            ninja --version
+            exit 0
+          fi
+          # Apt mirrors on ubuntu-latest occasionally fail DNS; retry, then
+          # fall back to the default Unix Makefiles generator.
+          for attempt in 1 2 3; do
+            if sudo apt-get update && sudo apt-get install -y ninja-build; then
+              ninja --version
+              exit 0
+            fi
+            echo "apt install ninja-build failed (attempt ${attempt}); retrying…" >&2
+            sleep $((attempt * 20))
+          done
+          echo "Ninja unavailable after apt retries; using Unix Makefiles" >&2
+          echo "USE_UNIX_MAKEFILES=1" >> "$GITHUB_ENV"
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: linux-release
       - name: Configure
-        run: >
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DPOKER_SOLVER_BUILD_BENCHMARKS=ON
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: |
+          set -euo pipefail
+          gen_args=()
+          if [[ "${USE_UNIX_MAKEFILES:-}" != "1" ]]; then
+            gen_args=(-G Ninja)
+          fi
+          cmake -S . -B build "${gen_args[@]}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPOKER_SOLVER_BUILD_BENCHMARKS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
         run: >
           cmake --build build --parallel
@@ -147,15 +176,35 @@ jobs:
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
       - uses: actions/checkout@v4
-      - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Ensure Ninja
+        run: |
+          set -euo pipefail
+          if command -v ninja >/dev/null 2>&1; then
+            ninja --version
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            if sudo apt-get update && sudo apt-get install -y ninja-build; then
+              ninja --version
+              exit 0
+            fi
+            echo "apt install ninja-build failed (attempt ${attempt}); retrying…" >&2
+            sleep $((attempt * 20))
+          done
+          echo "Ninja unavailable after apt retries; using Unix Makefiles" >&2
+          echo "USE_UNIX_MAKEFILES=1" >> "$GITHUB_ENV"
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: linux-sanitizer
       - name: Configure
         run: |
-          cmake -S . -B build-san -G Ninja \
+          set -euo pipefail
+          gen_args=()
+          if [[ "${USE_UNIX_MAKEFILES:-}" != "1" ]]; then
+            gen_args=(-G Ninja)
+          fi
+          cmake -S . -B build-san "${gen_args[@]}" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
