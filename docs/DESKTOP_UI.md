@@ -95,6 +95,7 @@ explorer   # serves desktop/dist when present
 | Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer`. Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe` (plus the versioned Tauri NSIS name). PREINSTALL stops the UI then force-kills/deletes `holdem-explorer.exe` so upgrades are not blocked by a locked sidecar; POSTINSTALL requires `holdem-explorer.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. Packaged explorer uses the static MSVC CRT |
 | Native Open/Save dialogs | Browser prompts; Windows Tauri build wires `tauri-plugin-dialog` + `dialog:default` capability; adapter keeps a prompt fallback if the plugin invoke fails |
 | Packaged engine ownership | Tauri allocates a loopback port, spawns one `holdem-explorer` with `--launch-id` + `--study-packaged`, waits for `GET /api/ready` (protocol + launch id), and binds the webview client to that base URL. Foreign listeners on 8765 are not treated as ready. Browser/dev still uses Vite proxy / external explorer on 8765. |
+| HTTP JSON contracts | `desktop/src/engine/contracts` decodes `/api/ready` and status (including successful Open) with a required/additive/error policy; fixtures under `desktop/src/engine/fixtures`. Wire shapes for size lists, chip units, and null metrics stay unchanged. |
 | Code-signed official release | Not yet — CI artifact is unsigned |
 
 ### Windows installer (end users)
@@ -140,5 +141,5 @@ npm run tauri:build
 - Build: `cd desktop && npm run build`
 - Live: solve against `explorer`; Status bar shows EV / NashConv / mem (`gap_series` in status payload, no Graphs UI)
 - Visual targets: 1440×900 dark/light, 1920×1080 dual-range, 1280×800 compact
-- Real-engine HTTP acceptance: `tests/unit/test_explorer_workflow.cpp` inside `poker_http_tests` (Linux + Windows). Automates Build/solve/pause/inspect/save/open/continue/lock/compare against a spawned `explorer`. Does **not** cover Tauri webview lifecycle, native Open/Save dialogs, or the NSIS packaged install — re-validate those on Windows before a Study release.
+- Real-engine HTTP acceptance: `poker_http_tests` (`test_explorer_http.cpp` + `test_explorer_workflow.cpp`, Linux + Windows). Automates Build/solve/pause/inspect/save/open/continue/lock/compare against a spawned `explorer`. Does **not** cover Tauri webview lifecycle, native Open/Save dialogs, or the NSIS packaged install — re-validate those on Windows before a Study release.
 - Changing the flop, and changing an earlier street after a later card is dealt, are unsupported. Turn and river card changes keep the betting line when the deal-chance ancestor is known. Study packaging admits a full-range turn via `kStudyExplorerMaxPairRunouts`. A dense flop check-down can still need a higher `--max-pair-runouts` (see [EXPLORER.md](EXPLORER.md), [EQUITY.md](EQUITY.md)).

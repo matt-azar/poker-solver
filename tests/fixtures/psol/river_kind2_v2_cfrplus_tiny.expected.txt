@@ -1,0 +1,6 @@
+kind=2
+algorithm=1
+iterations=3
+oop_combos=1
+ip_combos=1
+slot_actions=2,2,2,2

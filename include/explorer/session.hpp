@@ -213,6 +213,7 @@ public:
         {
             return {};
         }
+        file_restore_phase_ = phase_;
         job_id_ = next_job_++;
         phase_ = Phase::Running;
         stop_ = false;
@@ -222,6 +223,57 @@ public:
         claim.allowed = true;
         claim.job_id = job_id_;
         return claim;
+    }
+
+    // Overlay Open/Save job: marks Running without retiring the current resource.
+    // Borrow fails until the job finishes; the worker uses training_resource().
+    // Restores file_restore_phase_ via finish_file_job / abort_continuation /
+    // install_from_file_job.
+    Claim begin_file_job()
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (phase_ == Phase::Running)
+        {
+            return {};
+        }
+        file_restore_phase_ = phase_;
+        job_id_ = next_job_++;
+        phase_ = Phase::Running;
+        stop_ = false;
+        pause_ = false;
+        ++generation_;
+        Claim claim;
+        claim.allowed = true;
+        claim.job_id = job_id_;
+        return claim;
+    }
+
+    // End a file job without replacing the engine (failed open, finished save).
+    void finish_file_job(std::uint64_t job_id, std::string status)
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running)
+        {
+            return;
+        }
+        Phase restore = file_restore_phase_;
+        if (restore == Phase::Running)
+        {
+            restore = resource_ ? Phase::Completed : Phase::Idle;
+        }
+        if (restore == Phase::Idle && resource_)
+        {
+            restore = Phase::Completed;
+        }
+        if ((restore == Phase::Completed || restore == Phase::Paused) && !resource_)
+        {
+            restore = Phase::Idle;
+        }
+        phase_ = restore;
+        stop_ = false;
+        pause_ = false;
+        status_ = std::move(status);
+        ++generation_;
     }
 
     // The continuation thread is the only user. This does not take a reader.
@@ -385,6 +437,42 @@ public:
         return true;
     }
 
+    // Successful Open publication from a begin_file_job overlay. Waits for
+    // readers, then replaces the engine in one step (Running → Completed).
+    template <typename Make>
+    bool install_from_file_job(
+        std::uint64_t job_id,
+        std::shared_ptr<void> resource,
+        std::uint64_t& solution_id,
+        Make&& make)
+    {
+        std::unique_lock<std::mutex> lock(mu_);
+        if (job_id != job_id_ || phase_ != Phase::Running || !resource)
+        {
+            return false;
+        }
+        quiet_.wait(lock, [&]() { return readers_ == 0; });
+        if (job_id != job_id_ || phase_ != Phase::Running || !resource)
+        {
+            return false;
+        }
+        baseline_resource_.reset();
+        baseline_solution_id_ = 0;
+        solution_id_ = next_solution_++;
+        pending_solution_ = 0;
+        resource_ = std::move(resource);
+        phase_ = Phase::Completed;
+        stop_ = false;
+        pause_ = false;
+        job_id_ = 0;
+        file_restore_phase_ = Phase::Completed;
+        const std::uint64_t next_generation = generation_ + 1;
+        status_ = make(next_generation, solution_id_);
+        generation_ = next_generation;
+        solution_id = solution_id_;
+        return true;
+    }
+
     // Publishes more training on the same solution. A stop keeps the chunks
     // that finished as Completed. A pause keeps them as Paused so Continue can
     // resume. make(generation) runs under the lock and must not call back in.
@@ -525,6 +613,8 @@ private:
     mutable std::mutex mu_;
     std::condition_variable quiet_;
     Phase phase_ = Phase::Idle;
+    // Phase to restore after a file-job overlay (Open/Save) that does not install.
+    Phase file_restore_phase_ = Phase::Idle;
     bool stop_ = false;
     bool pause_ = false;
     std::uint64_t job_id_ = 0;

@@ -616,6 +616,15 @@ std::string build_status(const StatusDraft& draft)
     out += draft.cancelled ? "true" : "false";
     out += ",\"time_limit_reached\":";
     out += draft.time_limit_reached ? "true" : "false";
+    out += ",\"file_op\":";
+    if (draft.file_op.empty())
+    {
+        out += "null";
+    }
+    else
+    {
+        append_escaped(out, draft.file_op);
+    }
     out += ",\"error\":";
     append_escaped(out, draft.error);
     out += ",\"job_id\":";

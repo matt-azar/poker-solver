@@ -8,6 +8,9 @@ import type {
 } from "../domain/types";
 import { presentUserText } from "../domain/userText";
 import { isTauriRuntime } from "../platform";
+import { decodeErrorPayload } from "./contracts/error";
+import { decodeReadyPayload, type ReadyPayload } from "./contracts/ready";
+import { decodeStatusPayload } from "./contracts/status";
 import { normalizeRunoutsPayload, type RunoutsModel } from "./runouts";
 
 function defaultEngineBaseUrl(): string {
@@ -116,16 +119,36 @@ export class EngineClient {
       return;
     }
     const message =
-      data && typeof data === "object" && data !== null && "error" in data
-        ? String((data as { error: unknown }).error)
-        : response.statusText || `HTTP ${response.status}`;
+      decodeErrorPayload(data) ?? (response.statusText || `HTTP ${response.status}`);
     throw new EngineError(message, response.status, data);
+  }
+
+  async ready(signal?: AbortSignal): Promise<ReadyPayload> {
+    const { response, data } = await this.request("GET", "/api/ready", undefined, { signal });
+    this.ensureOk(response, data);
+    try {
+      return decodeReadyPayload(data);
+    } catch (err) {
+      throw new EngineError(
+        err instanceof Error ? err.message : String(err),
+        response.status,
+        data,
+      );
+    }
   }
 
   async status(signal?: AbortSignal): Promise<StatusPayload> {
     const { response, data } = await this.request("GET", "/api/status", undefined, { signal });
     this.ensureOk(response, data);
-    return data as StatusPayload;
+    try {
+      return decodeStatusPayload(data);
+    } catch (err) {
+      throw new EngineError(
+        err instanceof Error ? err.message : String(err),
+        response.status,
+        data,
+      );
+    }
   }
 
   async solve(job: SolveJobRequest, signal?: AbortSignal): Promise<unknown> {
@@ -278,18 +301,56 @@ export class EngineClient {
     return data;
   }
 
-  async save(solutionId: string, path: string): Promise<unknown> {
-    const { response, data } = await this.request("POST", `/api/solutions/${solutionId}/save`, {
-      path,
-    });
-    this.ensureOk(response, data);
+  /** Poll `/api/status` until a file/solve overlay leaves `running`. */
+  private async waitUntilIdle(signal?: AbortSignal): Promise<StatusPayload> {
+    for (let attempt = 0; attempt < 600; ++attempt) {
+      if (signal?.aborted) {
+        throw new DOMException("signal is aborted without reason", "AbortError");
+      }
+      const status = await this.status(signal);
+      if (!status.running) {
+        const errorText =
+          typeof status.error === "string" && status.error.length > 0 ? status.error : "";
+        if (errorText) {
+          throw new EngineError(errorText, 400, status);
+        }
+        return status;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new EngineError("timed out waiting for explorer job", 504, null);
+  }
+
+  async save(solutionId: string, path: string, signal?: AbortSignal): Promise<unknown> {
+    const { response, data } = await this.request(
+      "POST",
+      `/api/solutions/${solutionId}/save`,
+      { path },
+      { signal },
+    );
+    this.ensureOk(response, data, true);
+    if (response.status === 202) {
+      await this.waitUntilIdle(signal);
+      return { saved: true };
+    }
     return data;
   }
 
-  async open(path: string): Promise<unknown> {
-    const { response, data } = await this.request("POST", "/api/open", { path });
-    this.ensureOk(response, data);
-    return data;
+  async open(path: string, signal?: AbortSignal): Promise<StatusPayload> {
+    const { response, data } = await this.request("POST", "/api/open", { path }, { signal });
+    this.ensureOk(response, data, true);
+    if (response.status === 202) {
+      return this.waitUntilIdle(signal);
+    }
+    try {
+      return decodeStatusPayload(data);
+    } catch (err) {
+      throw new EngineError(
+        err instanceof Error ? err.message : String(err),
+        response.status,
+        data,
+      );
+    }
   }
 
   /** Spot config for a loaded solution (ranges, bets, tree edits, optional settings). */

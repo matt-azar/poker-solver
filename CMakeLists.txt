@@ -89,13 +89,38 @@ target_link_libraries(poker_solver_core INTERFACE poker_study)
 
 include(cmake/EquityTargets.cmake)
 
+# Optional short git SHA for --version /api/ready (unknown when git is absent).
+set(POKER_SOLVER_GIT_SHA "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE _poker_git_sha
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE _poker_git_rc
+    )
+    if(_poker_git_rc EQUAL 0 AND NOT _poker_git_sha STREQUAL "")
+        set(POKER_SOLVER_GIT_SHA "${_poker_git_sha}")
+    endif()
+endif()
+
+function(poker_attach_version target)
+    target_compile_definitions(${target} PRIVATE
+        "POKER_SOLVER_VERSION=\"${PROJECT_VERSION}\""
+        "POKER_SOLVER_GIT_SHA=\"${POKER_SOLVER_GIT_SHA}\"")
+endfunction()
+
 add_executable(river_solver src/cli/river_main.cpp)
 target_link_libraries(river_solver PRIVATE poker_solver)
 poker_set_warnings(river_solver)
+poker_attach_version(river_solver)
 
 add_executable(street_solver src/cli/street_main.cpp)
 target_link_libraries(street_solver PRIVATE poker_solver)
 poker_set_warnings(street_solver)
+poker_attach_version(street_solver)
 
 # Study HTTP server (includes PSOL kind=2 open/continue via RiverBatchSolver).
 add_executable(explorer
@@ -116,6 +141,7 @@ if(WIN32)
     target_link_libraries(explorer PRIVATE ws2_32)
 endif()
 poker_set_warnings(explorer)
+poker_attach_version(explorer)
 
 if(BUILD_TESTING)
     # Engine / solver unit tests — no explorer process dependency.
@@ -207,6 +233,12 @@ if(BUILD_TESTING)
         DEPENDS poker_engine_tests poker_study_tests poker_http_tests
     )
 endif()
+
+# Offline generator for tests/fixtures/psol (EXCLUDE_FROM_ALL — not part of CI build).
+add_executable(generate_psol_fixtures tools/generate_psol_fixtures.cpp)
+target_link_libraries(generate_psol_fixtures PRIVATE poker_study)
+poker_set_warnings(generate_psol_fixtures)
+set_target_properties(generate_psol_fixtures PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 if(POKER_SOLVER_BUILD_BENCHMARKS)
     # Full-range check-down. Not part of ctest: it allocates hundreds of mebibytes.

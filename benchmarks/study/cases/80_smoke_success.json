@@ -16,7 +16,7 @@
   "eval_interval": 20,
   "eval_interval_source": "explicit --eval-interval",
   "gap_threshold_chips": 0.1,
-  "quality_target_nashconv_over_pot": 0.001,
+  "quality_target_accuracy_over_pot": 0.001,
   "wall_seconds": 60,
   "argv": [
     "--board", "Ah,Kd,7c,4s,2h",

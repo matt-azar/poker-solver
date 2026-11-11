@@ -178,6 +178,36 @@ jobs:
           --target street_parallel_bench
       - name: CTest
         run: ctest --test-dir build --output-on-failure
+      - name: Study benchmark smoke
+        run: |
+          set -euo pipefail
+          ./build/river_solver --version
+          ./build/street_solver --version
+          ./build/explorer --version
+          python3 benchmarks/run_study_benchmarks.py \
+            --bin-dir build \
+            --cases smoke \
+            --output-dir benchmarks/study/out/ci-smoke \
+            --timing-label contended
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("benchmarks/study/out/ci-smoke/results.json").read_text())
+          assert payload.get("schema") == "study-benchmark-results-2", payload.get("schema")
+          assert payload.get("stop_criterion") == "accuracy_over_pot"
+          by_id = {case["id"]: case["outcome"] for case in payload["cases"]}
+          expected = {
+              "smoke_success": "success",
+              "smoke_invalid": "invalid-input",
+              "smoke_timeout": "timeout",
+              "smoke_resource": "resource-rejection",
+          }
+          missing = sorted(set(expected) - set(by_id))
+          assert not missing, f"missing smoke cases: {missing}"
+          bad = {cid: by_id[cid] for cid, want in expected.items() if by_id[cid] != want}
+          assert not bad, f"unexpected smoke outcomes: {bad}"
+          print("smoke taxonomy ok:", by_id)
+          PY
       - name: JavaScript
         run: node tests/legacy_ui/browse.test.js
 

@@ -18,7 +18,7 @@
   "eval_interval_source": "--accuracy 0.001 uses the CLI default cadence of 20 because --eval-every is omitted.",
   "accuracy_fraction_of_pot": 0.001,
   "gap_threshold_chips": 0.1,
-  "quality_target_nashconv_over_pot": 0.001,
+  "quality_target_accuracy_over_pot": 0.001,
   "wall_seconds": 2400,
   "betting_note": "One shared bet size (0.5) is used on the flop, turn, and river, with an explicit raise size (0.75). max-raises 2 allows two facing raises. The opening bet does not count. The tree is benchmarks/study/configs/flop_srp_one_size.txt. All-in is a separate action.",
   "config": "benchmarks/study/configs/flop_srp_one_size.txt",

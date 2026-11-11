@@ -10,7 +10,7 @@ alwaysApply: true
 **Parallel work**
 
 - Assume siblings may write into `/workspace` even when asked to use a worktree. Do not checkout/commit there while they run unless ownership is proven disjoint.
-- Give each agent a disjoint path list. Serialize `CMakeLists.txt`, `tests/harness.hpp`, and the suite mains (`engine_main.cpp`, `study_main.cpp`, `http_main.cpp`), or have only the parent touch them. `tests/unit/test_main.cpp` is not linked.
+- Give each agent a disjoint path list. Serialize `CMakeLists.txt`, `tests/harness.hpp`, and suite mains (`engine_main.cpp` / `study_main.cpp` / `http_main.cpp`), or have only the parent touch them. (`tests/unit/test_main.cpp` is a historical stub and is not linked.)
 - Subagents often cannot `ManagePullRequest`; the parent opens PRs after push and subscribes CI.
 - If the tree is interleaved: WIP snapshot branch, then path-checkout onto clean `cursor/<feature>-<run-suffix>` branches from the correct base. Trim CMake/docs per branch before build.
 - Re-run `git status` immediately before every commit; restore unexpected paths.

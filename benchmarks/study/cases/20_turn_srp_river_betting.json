@@ -18,7 +18,7 @@
   "eval_interval_source": "--accuracy 0.001 uses the CLI default cadence of 20 because --eval-every is omitted.",
   "accuracy_fraction_of_pot": 0.001,
   "gap_threshold_chips": 0.1,
-  "quality_target_nashconv_over_pot": 0.001,
+  "quality_target_accuracy_over_pot": 0.001,
   "wall_seconds": 1800,
   "betting_note": "One shared bet size (0.5) and one explicit raise size (0.75) on the turn and the river. The tree is the street-config document benchmarks/study/configs/turn_srp_river_betting.txt. All-in is offered as its own action.",
   "config": "benchmarks/study/configs/turn_srp_river_betting.txt",

@@ -385,6 +385,37 @@ bool wait_for_completion(HttpResult& status)
     return false;
 }
 
+bool wait_until_not_running(HttpResult& status)
+{
+    for (int attempt = 0; attempt < 200; ++attempt)
+    {
+        if (!http_exchange("GET", "/api/status", "", status))
+        {
+            return false;
+        }
+        if (status.body.find("\"running\":false") != std::string::npos)
+        {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
+}
+
+bool wait_for_accepted_file_job(HttpResult& accepted, HttpResult& status)
+{
+    if (accepted.status == 200)
+    {
+        status = accepted;
+        return true;
+    }
+    if (accepted.status != 202)
+    {
+        return false;
+    }
+    return wait_until_not_running(status);
+}
+
 void check_agreement(const HttpResult& status, const HttpResult& exported, double expected_ev, bool expect_exact_ev)
 {
     CHECK(status.status == 200);
@@ -515,8 +546,11 @@ void check_persistence_workflow_under_value_load()
         "/api/solutions/" + sid1 + "/save",
         "{\"path\":\"" + path_json + "\"}",
         saved));
-    CHECK(saved.status == 200);
-    CHECK(saved.body.find("\"saved\":true") != std::string::npos);
+    CHECK(saved.status == 202);
+    HttpResult saved_status;
+    CHECK(wait_for_accepted_file_job(saved, saved_status));
+    CHECK(saved_status.body.find("\"error\":\"\"") != std::string::npos);
+    CHECK(saved_status.body.find("\"file_op\":\"saved\"") != std::string::npos);
 
     // Start a values query, then Open while it may still be inflight.
     HttpResult pending_before_open;
@@ -525,15 +559,21 @@ void check_persistence_workflow_under_value_load()
     const auto open_started = std::chrono::steady_clock::now();
     HttpResult opened;
     CHECK(http_exchange("POST", "/api/open", "{\"path\":\"" + path_json + "\"}", opened));
+    CHECK(opened.status == 202);
+    HttpResult opened_status;
+    // Status must answer while Open runs on the worker (accept loop free).
+    HttpResult mid_open_status;
+    CHECK(http_exchange("GET", "/api/status", "", mid_open_status));
+    CHECK(mid_open_status.status == 200);
+    CHECK(wait_for_accepted_file_job(opened, opened_status));
     const double open_seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - open_started).count();
-    CHECK(opened.status == 200);
     CHECK(open_seconds < 5.0);
-    const std::string sid2 = json_string(opened.body, "solution_id");
+    const std::string sid2 = json_string(opened_status.body, "solution_id");
     CHECK(!sid2.empty());
     CHECK(sid2 != sid1);
     double opened_iters = 0.0;
-    CHECK(json_number(opened.body, "iterations", opened_iters));
+    CHECK(json_number(opened_status.body, "iterations", opened_iters));
     CHECK(opened_iters == iters1);
 
     // Status must still answer after Open drained any cancelled value walk.
@@ -659,11 +699,16 @@ void check_lock_resolve_compare_workflow()
         "/api/solutions/" + scenario + "/save",
         "{\"path\":\"" + path_json + "\"}",
         saved));
-    CHECK(saved.status == 200);
+    CHECK(saved.status == 202);
+    HttpResult saved_status;
+    CHECK(wait_for_accepted_file_job(saved, saved_status));
+    CHECK(saved_status.body.find("\"error\":\"\"") != std::string::npos);
     HttpResult opened;
     CHECK(http_exchange("POST", "/api/open", "{\"path\":\"" + path_json + "\"}", opened));
-    CHECK(opened.status == 200);
-    const std::string reopened = json_string(opened.body, "solution_id");
+    CHECK(opened.status == 202);
+    HttpResult opened_status;
+    CHECK(wait_for_accepted_file_job(opened, opened_status));
+    const std::string reopened = json_string(opened_status.body, "solution_id");
     CHECK(!reopened.empty());
     HttpResult reopened_locks;
     CHECK(http_exchange("GET", "/api/solutions/" + reopened + "/locks", "", reopened_locks));
@@ -687,7 +732,7 @@ void check_lock_resolve_compare_workflow()
     CHECK(unlocked_one.status == 200);
     CHECK(unlocked_one.body.find(root) != std::string::npos);
     double before_warm = 0.0;
-    CHECK(json_number(opened.body, "iterations", before_warm));
+    CHECK(json_number(opened_status.body, "iterations", before_warm));
     HttpResult warm_accepted;
     CHECK(http_exchange(
         "POST",
@@ -997,6 +1042,20 @@ void run_explorer_http_tests()
         CHECK(ready.body.find("\"port\":" + std::to_string(g_explorer_port)) != std::string::npos);
         CHECK(ready.body.find("\"max_pair_runouts\":") != std::string::npos);
         CHECK(ready.body.find("\"launch_id\":\"\"") != std::string::npos);
+        CHECK(ready.body.find("\"version\":") != std::string::npos);
+        CHECK(ready.body.find("\"git_sha\":") != std::string::npos);
+    }
+
+    // Cold status contract: required flags + generation for the TS decoder.
+    {
+        HttpResult cold;
+        CHECK(http_exchange("GET", "/api/status", "", cold));
+        CHECK(cold.status == 200);
+        CHECK(cold.body.find("\"running\":false") != std::string::npos);
+        CHECK(cold.body.find("\"paused\":false") != std::string::npos);
+        CHECK(cold.body.find("\"cancelled\":false") != std::string::npos);
+        CHECK(cold.body.find("\"status_generation\":") != std::string::npos);
+        CHECK(cold.body.find("\"solution_id\":null") != std::string::npos);
     }
 
     // Tauri Study webview is cross-origin; CORS must be present or fetch fails.
@@ -1217,6 +1276,26 @@ void run_explorer_http_tests()
     CHECK(http_exchange("GET", "/api/status", "", still_up));
     CHECK(still_up.status == 200);
     CHECK(json_string(still_up.body, "solution_id") == street_solution);
+
+    // Failed Open must leave the live Study solution_id intact.
+    HttpResult failed_open;
+    CHECK(http_exchange(
+        "POST",
+        "/api/open",
+        "{\"path\":\""
+            + json_escape_path("/tmp/poker-solver-missing-open-"
+                + std::to_string(g_explorer_port) + ".psol")
+            + "\"}",
+        failed_open));
+    CHECK(failed_open.status == 202);
+    HttpResult failed_status;
+    CHECK(wait_for_accepted_file_job(failed_open, failed_status));
+    CHECK(failed_status.body.find("\"error\":\"\"") == std::string::npos);
+    HttpResult after_failed_open;
+    CHECK(http_exchange("GET", "/api/status", "", after_failed_open));
+    CHECK(after_failed_open.status == 200);
+    CHECK(json_string(after_failed_open.body, "solution_id") == street_solution);
+
     HttpResult missing_continue;
     CHECK(http_exchange("POST", "/api/solutions/s99/continue", "{\"iterations\":1}", missing_continue));
     CHECK(missing_continue.status == 404);

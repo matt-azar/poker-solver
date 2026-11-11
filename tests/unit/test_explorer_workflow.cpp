@@ -436,8 +436,8 @@ std::string json_escape_path(const std::string& path)
 
 void check_failure_paths()
 {
-    // Failed Open — missing path / missing file (HTTP 400). Deeper Open races and
-    // stale stop replies live in test_explorer_http.cpp / test_session.cpp.
+    // Failed Open — missing path is sync 400; missing file is 202 then status error.
+    // Deeper Open races live in test_explorer_http.cpp / test_session.cpp.
     HttpResult missing_path;
     CHECK(http_exchange("POST", "/api/open", "{}", missing_path));
     CHECK(missing_path.status == 400);
@@ -450,7 +450,10 @@ void check_failure_paths()
         ("{\"path\":\"" + json_escape_path(unique_temp_path("poker_solver_no_such_checkpoint.psol").string())
          + "\"}"),
         missing_file));
-    CHECK(missing_file.status == 400);
+    CHECK(missing_file.status == 202);
+    HttpResult missing_status;
+    CHECK(wait_until_idle(missing_status));
+    CHECK(missing_status.body.find("\"error\":\"\"") == std::string::npos);
 
     // Memory rejection via dry-run plan (Build). Engine budget refusals for the
     // same shape are covered in test_streets.cpp / test_budget.cpp.
@@ -546,17 +549,22 @@ void check_happy_path_lifecycle()
         "/api/solutions/" + solution + "/save",
         "{\"path\":\"" + path_json + "\"}",
         saved));
-    CHECK(saved.status == 200);
-    CHECK(saved.body.find("\"saved\":true") != std::string::npos);
+    CHECK(saved.status == 202);
+    HttpResult saved_status;
+    CHECK(wait_until_idle(saved_status));
+    CHECK(saved_status.body.find("\"error\":\"\"") != std::string::npos);
+    CHECK(saved_status.body.find("\"file_op\":\"saved\"") != std::string::npos);
 
     HttpResult opened;
     CHECK(http_exchange("POST", "/api/open", "{\"path\":\"" + path_json + "\"}", opened));
-    CHECK(opened.status == 200);
-    const std::string reopened = json_string(opened.body, "solution_id");
+    CHECK(opened.status == 202);
+    HttpResult opened_status;
+    CHECK(wait_until_idle(opened_status));
+    const std::string reopened = json_string(opened_status.body, "solution_id");
     CHECK(!reopened.empty());
     CHECK(reopened != solution);
     double opened_iters = 0.0;
-    CHECK(json_number(opened.body, "iterations", opened_iters));
+    CHECK(json_number(opened_status.body, "iterations", opened_iters));
     CHECK(opened_iters == paused_iters);
 
     HttpResult continued;

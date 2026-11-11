@@ -1,0 +1,10 @@
+{
+  "running": false,
+  "paused": false,
+  "cancelled": false,
+  "error": "",
+  "solution_id": null,
+  "root_node_id": null,
+  "job_id": null,
+  "status_generation": 0
+}
