@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import hashlib
 import json
 import os
 import platform
@@ -342,7 +343,7 @@ def as_float(value: object) -> float | None:
 
 
 def quality_from_metrics(metrics: dict) -> dict:
-    """Derive Pio Accuracy/pot for the quality gate.
+    """Derive Pio Accuracy/pot (stop criterion) and true NashConv/pot.
 
     Prefer the solver's printed accuracy_fraction_of_pot (chip-normalized).
     Fall back to accuracy/pot, then half of nash_gap/pot for older logs.
@@ -360,19 +361,33 @@ def quality_from_metrics(metrics: dict) -> dict:
     # only under zero-sum chips. Accuracy is NashConv/2.
     nashconv = nash_gap if nash_gap is not None else summed
     printed = as_float(metrics.get("accuracy_fraction_of_pot"))
-    derived = None
-    source = None
+    accuracy_over_pot = None
+    accuracy_source = None
     if printed is not None:
-        derived = printed
-        source = "printed_accuracy_fraction_of_pot"
+        accuracy_over_pot = printed
+        accuracy_source = "printed_accuracy_fraction_of_pot"
     elif accuracy is not None and pot is not None and pot != 0:
-        derived = accuracy / pot
-        source = "runner_derived_from_accuracy_and_pot"
+        accuracy_over_pot = accuracy / pot
+        accuracy_source = "runner_derived_from_accuracy_and_pot"
     elif nash_gap is not None and pot is not None and pot != 0:
-        derived = (0.5 * nash_gap) / pot
-        source = "runner_derived_from_half_nash_gap_and_pot"
-    measured = derived is not None
-    reached = bool(measured and derived is not None and derived <= TARGET)
+        accuracy_over_pot = (0.5 * nash_gap) / pot
+        accuracy_source = "runner_derived_from_half_nash_gap_and_pot"
+
+    printed_nc = as_float(metrics.get("nash_gap_fraction_of_pot"))
+    nashconv_over_pot = None
+    nashconv_source = None
+    if printed_nc is not None:
+        nashconv_over_pot = printed_nc
+        nashconv_source = "printed_nash_gap_fraction_of_pot"
+    elif nash_gap is not None and pot is not None and pot != 0:
+        nashconv_over_pot = nash_gap / pot
+        nashconv_source = "runner_derived_from_nash_gap_and_pot"
+    elif summed is not None and pot is not None and pot != 0:
+        nashconv_over_pot = summed / pot
+        nashconv_source = "runner_derived_from_best_responses_and_pot"
+
+    measured = accuracy_over_pot is not None
+    reached = bool(measured and accuracy_over_pot is not None and accuracy_over_pot <= TARGET)
     return {
         "nashconv": nashconv,
         "accuracy": accuracy if accuracy is not None else (
@@ -380,10 +395,19 @@ def quality_from_metrics(metrics: dict) -> dict:
         ),
         "nashconv_from_best_responses": summed,
         "nashconv_printed_nash_gap": nash_gap,
-        "nashconv_over_pot": derived,  # Accuracy/pot (legacy key name)
-        "nashconv_over_pot_source": source,
+        # Stop criterion: Pio Accuracy/pot.
+        "accuracy_over_pot": accuracy_over_pot,
+        "accuracy_over_pot_source": accuracy_source,
+        # True NashConv/pot (distinct from Accuracy/pot).
+        "nashconv_over_pot": nashconv_over_pot,
+        "nashconv_over_pot_source": nashconv_source,
+        # Legacy alias: older consumers read Accuracy/pot from this key.
+        "nashconv_over_pot_legacy_accuracy_alias": accuracy_over_pot,
         "printed_accuracy_fraction_of_pot": printed,
+        "printed_nash_gap_fraction_of_pot": printed_nc,
+        "stop_criterion": "accuracy_over_pot",
         "quality_target": TARGET,
+        "quality_target_accuracy_over_pot": TARGET,
         "quality_measured": measured,
         "quality_reached": reached,
         "player0_expected_utility": as_float(metrics.get("player0_expected_utility")),
@@ -607,9 +631,32 @@ def source_commit() -> dict:
         text = completed.stdout.strip()
         return text or None
 
+    checkout = git("rev-parse", "HEAD")
+    dirty = git("status", "--porcelain")
     return {
-        "commit": git("rev-parse", "HEAD"),
+        "checkout_sha": checkout,
+        "commit": checkout,  # alias for older summary readers
         "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        "dirty": bool(dirty),
+    }
+
+
+def file_digest(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    stat = path.stat()
+    return {
+        "path": str(path),
+        "sha256": digest.hexdigest(),
+        "size_bytes": stat.st_size,
+        "mtime_unix": stat.st_mtime,
     }
 
 
@@ -640,7 +687,12 @@ def write_summary(path: Path, payload: dict) -> None:
         "then `accuracy`/`pot`, then half of `nash_gap`/`pot`.",
         "",
         f"Source commit: `{payload['source'].get('commit')}` "
-        f"({payload['source'].get('branch')})",
+        f"({payload['source'].get('branch')}; "
+        f"dirty={payload['source'].get('dirty')})",
+        f"Stop criterion: `{payload.get('stop_criterion')}` "
+        f"(Accuracy/pot ≤ {format_number(payload.get('quality_target_accuracy_over_pot'))})",
+        f"Binaries digested: {len(payload.get('binaries') or [])}; "
+        f"configs digested: {len(payload.get('configs') or [])}",
         f"Platform: {payload['host'].get('platform')}",
         f"CPU: {payload['host'].get('cpu')} ({payload['host'].get('logical_cpus')} logical)",
         f"RAM bytes: {format_number(payload['host'].get('ram_bytes'))} "
@@ -679,7 +731,8 @@ def write_summary(path: Path, payload: dict) -> None:
                 f"- Engine memory budget MiB: {format_number(case['memory_mib_in_command'])}",
                 f"- Player 0 EV: {format_number(case['quality']['player0_expected_utility'])}",
                 f"- NashConv: {format_number(case['quality']['nashconv'])}",
-                f"- Accuracy/pot (runner-derived): {format_number(case['quality']['nashconv_over_pot'])}",
+                f"- Accuracy/pot (stop criterion): {format_number(case['quality'].get('accuracy_over_pot'))}",
+                f"- NashConv/pot: {format_number(case['quality'].get('nashconv_over_pot'))}",
                 f"- Quality measured: {case['quality']['quality_measured']}",
                 f"- Quality reached: {case['quality']['quality_reached']}",
                 f"- Deals: {format_number(metrics.get('deals'))}",
@@ -836,19 +889,54 @@ def main(argv: list[str]) -> int:
             flush=True,
         )
 
+    binaries = []
+    configs = []
+    seen_bins: set[str] = set()
+    seen_cfgs: set[str] = set()
+    for record in records:
+        command = record.get("command") or []
+        if command:
+            binary = Path(str(command[0]))
+            key = str(binary)
+            if key not in seen_bins:
+                seen_bins.add(key)
+                dig = file_digest(binary)
+                if dig is not None:
+                    binaries.append(dig)
+        for index, arg in enumerate(command):
+            if arg == "--config" and index + 1 < len(command) and command[index + 1] != "-":
+                cfg = Path(str(command[index + 1]))
+                ck = str(cfg)
+                if ck not in seen_cfgs:
+                    seen_cfgs.add(ck)
+                    dig = file_digest(cfg)
+                    if dig is not None:
+                        configs.append(dig)
+
     payload = {
-        "schema": "study-benchmark-results-1",
+        "schema": "study-benchmark-results-2",
         "nashconv_definition": (
             "player0_best_response_utility + player1_best_response_utility"
         ),
-        "quality_target_nashconv_over_pot": TARGET,  # Accuracy/pot; legacy key name
-        "nashconv_over_pot_derivation": (
+        "stop_criterion": "accuracy_over_pot",
+        "quality_target_accuracy_over_pot": TARGET,
+        # Legacy alias: older notes treated this key as the stop target, but the
+        # value was always Accuracy/pot (NashConv/2 / pot), not NashConv/pot.
+        "quality_target_nashconv_over_pot": TARGET,
+        "quality_target_nashconv_over_pot_legacy_alias_of": "quality_target_accuracy_over_pot",
+        "accuracy_over_pot_derivation": (
             "Prefer printed accuracy_fraction_of_pot; else accuracy/pot; "
-            "else (nash_gap/2)/pot. That quotient is runner-derived."
+            "else (nash_gap/2)/pot. That quotient is the stop criterion."
+        ),
+        "nashconv_over_pot_derivation": (
+            "Prefer printed nash_gap_fraction_of_pot; else nash_gap/pot; "
+            "else (BR0+BR1)/pot. Distinct from Accuracy/pot."
         ),
         "timing_label": args.timing_label,
         "dry_run": bool(args.dry_run),
         "source": source,
+        "binaries": binaries,
+        "configs": configs,
         "host": host,
         "build": build,
         "cases": records,

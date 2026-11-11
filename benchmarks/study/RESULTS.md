@@ -2,11 +2,18 @@
 
 NashConv is the sum of unilateral BR gains
 `(u0(BR0)-u0)+(u1(BR1)-u1)`. Under zero-sum chips that equals
-`player0_best_response_utility + player1_best_response_utility`. The target is
-NashConv/pot at most 0.001. Prefer the solver's printed
-`nash_gap_fraction_of_pot` when present. `wall_seconds` is cold process time.
-`train_seconds` is the solver's training clock, not the process wall time.
-Engine `allocated_bytes` / `peak_allocated_bytes` are distinct from process RSS.
+`player0_best_response_utility + player1_best_response_utility`. Pio Accuracy is
+NashConv/2. The stop criterion for new runs (`study-benchmark-results-2`) is
+**Accuracy/pot** at most 0.001. Prefer printed `accuracy_fraction_of_pot` when
+present. Reports also record true **NashConv/pot** under a distinct key.
+`wall_seconds` is cold process time. `train_seconds` is the solver's training
+clock, not the process wall time. Engine `allocated_bytes` /
+`peak_allocated_bytes` are distinct from process RSS.
+
+Historical tables below (pre–schema-2) labeled and gated on **NashConv/pot**.
+Those numbers and outcomes are preserved as recorded; they are not rewritten to
+Accuracy/pot. New committed runs should emit both fractions and name the stop
+criterion explicitly.
 
 Raw logs stay in `benchmarks/study/out/` and are gitignored. This file is the committed record.
 

@@ -14,6 +14,8 @@ describe("decodeReadyPayload", () => {
     expect(ready.protocol).toBe(EXPLORER_READY_PROTOCOL);
     expect(ready.port).toBe(35931);
     expect(ready.launch_id).toBe("contract-1");
+    expect(ready.version).toBe("0.1.0");
+    expect(ready.git_sha).toBe("deadbeef");
   });
 
   it("rejects missing protocol and wrong types", () => {

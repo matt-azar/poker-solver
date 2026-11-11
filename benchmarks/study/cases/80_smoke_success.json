@@ -2,7 +2,7 @@
   "id": "smoke_success",
   "role": "diagnostic",
   "binary": "river_solver",
-  "why": "Tiny nuts-versus-underpair river used only to show a completed process whose NashConv/pot is at or below 0.001. It does not replace a reference case.",
+  "why": "Tiny nuts-versus-underpair river used only to show a completed process whose Accuracy/pot is at or below 0.001. It does not replace a reference case.",
   "study_inputs_note": "Diagnostic only. AA versus KK on this board is a lock, not a study range.",
   "pot": 100,
   "effective_stack": 200,
@@ -16,7 +16,7 @@
   "eval_interval": 20,
   "eval_interval_source": "explicit --eval-interval",
   "gap_threshold_chips": 0.1,
-  "quality_target_nashconv_over_pot": 0.001,
+  "quality_target_accuracy_over_pot": 0.001,
   "wall_seconds": 60,
   "argv": [
     "--board", "Ah,Kd,7c,4s,2h",

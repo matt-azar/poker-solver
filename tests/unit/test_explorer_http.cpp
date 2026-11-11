@@ -997,6 +997,8 @@ void run_explorer_http_tests()
         CHECK(ready.body.find("\"port\":" + std::to_string(g_explorer_port)) != std::string::npos);
         CHECK(ready.body.find("\"max_pair_runouts\":") != std::string::npos);
         CHECK(ready.body.find("\"launch_id\":\"\"") != std::string::npos);
+        CHECK(ready.body.find("\"version\":") != std::string::npos);
+        CHECK(ready.body.find("\"git_sha\":") != std::string::npos);
     }
 
     // Cold status contract: required flags + generation for the TS decoder.

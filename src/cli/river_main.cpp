@@ -3,6 +3,7 @@
 #include "game/street_game.hpp"
 #include "poker/card.hpp"
 #include "poker/range.hpp"
+#include "poker/version.hpp"
 #include "solver/street_batch.hpp"
 #include "solver/strategy_report.hpp"
 #include "solver/trainer.hpp"
@@ -461,6 +462,16 @@ void fill_root_from_entries(
 
 int main(int argc, char** argv)
 {
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg = argv[i];
+        if (arg == "--version" || arg == "-V")
+        {
+            std::cout << "poker_solver " << poker::solver_version()
+                      << " git=" << poker::solver_git_sha() << "\n";
+            return 0;
+        }
+    }
     try
     {
         Options options = defaults();

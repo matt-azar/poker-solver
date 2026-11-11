@@ -18,7 +18,7 @@
   "eval_interval": 20,
   "eval_interval_source": "explicit --eval-interval 20, chosen to match the street accuracy cadence",
   "gap_threshold_chips": 0.1,
-  "quality_target_nashconv_over_pot": 0.001,
+  "quality_target_accuracy_over_pot": 0.001,
   "wall_seconds": 1800,
   "argv": [
     "--board", "Th,9h,6d,4h,2c",

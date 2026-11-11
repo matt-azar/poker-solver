@@ -14,7 +14,7 @@
   "threads": 1,
   "memory_mib": 4096,
   "eval_interval": 20,
-  "quality_target_nashconv_over_pot": 0.001,
+  "quality_target_accuracy_over_pot": 0.001,
   "wall_seconds": 2,
   "config": "benchmarks/study/configs/smoke_timeout_flop.txt",
   "argv": [
