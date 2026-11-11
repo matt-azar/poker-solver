@@ -669,6 +669,47 @@ void test_pause_during_continuation_stays_paused()
     session.release_reader();
 }
 
+void test_file_job_overlay_keeps_prior_on_failure_and_replaces_on_success()
+{
+    poker::explorer::Session session;
+    std::shared_ptr<void> retiring;
+    const std::uint64_t job = session.begin(retiring);
+    const auto permit = session.prepare_success(job);
+    CHECK(session.commit_success(
+        job,
+        std::make_shared<int>(11),
+        permit.solution_id,
+        [](std::uint64_t, bool) { return std::string("{\"ok\":true}"); }));
+    const std::uint64_t prior = session.current_solution();
+    CHECK(prior != 0);
+
+    const auto open_fail = session.begin_file_job();
+    CHECK(open_fail.allowed);
+    CHECK(session.phase() == poker::explorer::Phase::Running);
+    CHECK(session.training_resource(open_fail.job_id) != nullptr);
+    session.finish_file_job(open_fail.job_id, "{\"running\":false,\"error\":\"bad file\"}");
+    CHECK(session.phase() == poker::explorer::Phase::Completed);
+    CHECK(session.current_solution() == prior);
+    {
+        poker::explorer::ReaderLease lease(session, session.borrow(prior));
+        CHECK(static_cast<bool>(lease));
+        CHECK(*std::static_pointer_cast<int>(lease.resource()) == 11);
+    }
+
+    const auto open_ok = session.begin_file_job();
+    CHECK(open_ok.allowed);
+    std::uint64_t loaded = 0;
+    CHECK(session.install_from_file_job(
+        open_ok.job_id,
+        std::make_shared<int>(22),
+        loaded,
+        [](std::uint64_t, std::uint64_t) { return std::string("{\"loaded\":true}"); }));
+    CHECK(loaded != 0);
+    CHECK(loaded != prior);
+    CHECK(session.phase() == poker::explorer::Phase::Completed);
+    CHECK(session.current_solution() == loaded);
+}
+
 void run_session_tests()
 {
     test_kept_stop_publishes_the_resource();
@@ -677,6 +718,7 @@ void run_session_tests()
     test_pause_publishes_kept_resource();
     test_continue_resumes_paused_solution();
     test_pause_during_continuation_stays_paused();
+    test_file_job_overlay_keeps_prior_on_failure_and_replaces_on_success();
     test_stop_before_construct();
     test_stop_during_chunk();
     test_stop_before_publication();

@@ -301,17 +301,47 @@ export class EngineClient {
     return data;
   }
 
-  async save(solutionId: string, path: string): Promise<unknown> {
-    const { response, data } = await this.request("POST", `/api/solutions/${solutionId}/save`, {
-      path,
-    });
-    this.ensureOk(response, data);
+  /** Poll `/api/status` until a file/solve overlay leaves `running`. */
+  private async waitUntilIdle(signal?: AbortSignal): Promise<StatusPayload> {
+    for (let attempt = 0; attempt < 600; ++attempt) {
+      if (signal?.aborted) {
+        throw new DOMException("signal is aborted without reason", "AbortError");
+      }
+      const status = await this.status(signal);
+      if (!status.running) {
+        const errorText =
+          typeof status.error === "string" && status.error.length > 0 ? status.error : "";
+        if (errorText) {
+          throw new EngineError(errorText, 400, status);
+        }
+        return status;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new EngineError("timed out waiting for explorer job", 504, null);
+  }
+
+  async save(solutionId: string, path: string, signal?: AbortSignal): Promise<unknown> {
+    const { response, data } = await this.request(
+      "POST",
+      `/api/solutions/${solutionId}/save`,
+      { path },
+      { signal },
+    );
+    this.ensureOk(response, data, true);
+    if (response.status === 202) {
+      await this.waitUntilIdle(signal);
+      return { saved: true };
+    }
     return data;
   }
 
-  async open(path: string): Promise<StatusPayload> {
-    const { response, data } = await this.request("POST", "/api/open", { path });
-    this.ensureOk(response, data);
+  async open(path: string, signal?: AbortSignal): Promise<StatusPayload> {
+    const { response, data } = await this.request("POST", "/api/open", { path }, { signal });
+    this.ensureOk(response, data, true);
+    if (response.status === 202) {
+      return this.waitUntilIdle(signal);
+    }
     try {
       return decodeStatusPayload(data);
     } catch (err) {

@@ -121,9 +121,9 @@ Engine and session types live under `include/game`, `include/solver`, `include/e
 
 ### Explorer HTTP is single-threaded (open/save vs status)
 
-The explorer accept loop handles **one client at a time** (`accept` → `handle_client` → close). `POST /api/open` / save load or write the checkpoint on that thread. Status polls every 250ms with a 4s abort timeout; when open takes longer, concurrent `/api/status` fetches abort as browser `AbortError` ("signal is aborted without reason") and the Study UI paints **Engine unreachable** even though the shell is fine.
+The explorer accept loop handles **one client at a time** (`accept` → `handle_client` → close). `POST /api/open` and solution save are **overlay jobs** on `g_app.worker` (HTTP **202** + `/api/status` progress with additive `file_op`). They must not block the accept thread the way a sync checkpoint read/write used to. Status polls every 250ms with a 4s abort timeout.
 
-**Do:** `stopPolling()` before sync open/save on the desktop client; `startPolling()` after (success and failure). Treat `stopPolling` aborts as shutdown cancel, not unreachable. Never surface raw AbortError text in the status bar.
+**Do:** Keep Study status polling running across Open/Save; let `engineClient.open/save` wait on status until `running` clears. Treat `stopPolling` aborts as shutdown cancel, not unreachable. Never surface raw AbortError text in the status bar. Failed Open must leave the prior `solution_id` intact (`finish_file_job`, not `begin()`).
 
 **Don't:** Leave status polling running across a long `/api/open` and treat timeout aborts as a dead engine.
 
