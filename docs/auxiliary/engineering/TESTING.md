@@ -16,7 +16,7 @@ Build production binaries without tests or benchmarks:
 cmake --build build --config Release --target street_solver --target river_solver --target explorer --target equity_calculator
 ```
 
-Omit `--config Release` on a single-config generator. A plain `cmake --build build` also compiles the test binary and benchmark binaries. Benchmarks stay outside CTest.
+Omit `--config Release` on a single-config generator. Unit tests are gated by `BUILD_TESTING` (default ON). Micro-benchmarks are opt-in with `-DPOKER_SOLVER_BUILD_BENCHMARKS=ON` and stay outside CTest. CTest uses the source tree as `WORKING_DIRECTORY` so `configs/` fixtures resolve from an out-of-tree build directory; Study asset tests also compile in `POKER_SOLVER_SOURCE_DIR`. Temp checkpoint/fixture paths use unique names under the OS temp directory.
 
 JavaScript checks from the repository root:
 

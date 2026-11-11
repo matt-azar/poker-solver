@@ -10,7 +10,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target e
 ./build/explorer --port 8765
 
 # from desktop/
-npm install
+npm ci
 npm run dev
 ```
 

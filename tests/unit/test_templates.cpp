@@ -13,13 +13,9 @@
 namespace
 {
 
-std::filesystem::path make_temp_dir(const char* name)
+std::filesystem::path make_temp_dir(const char* prefix)
 {
-    const std::filesystem::path root =
-        std::filesystem::temp_directory_path() / name;
-    std::filesystem::remove_all(root);
-    std::filesystem::create_directories(root);
-    return root;
+    return make_unique_temp_dir(prefix);
 }
 
 void write_file(const std::filesystem::path& path, const std::string& text)
@@ -130,11 +126,13 @@ void test_resolve_env_override()
 
 void test_repo_templates_parse()
 {
-    const std::filesystem::path candidates[] = {
-        std::filesystem::path("configs") / "templates",
-        std::filesystem::path("..") / "configs" / "templates",
-        std::filesystem::path("..") / ".." / "configs" / "templates",
-    };
+    std::vector<std::filesystem::path> candidates;
+#if defined(POKER_SOLVER_SOURCE_DIR)
+    candidates.push_back(poker_source_dir() / "configs" / "templates");
+#endif
+    candidates.push_back(std::filesystem::path("configs") / "templates");
+    candidates.push_back(std::filesystem::path("..") / "configs" / "templates");
+    candidates.push_back(std::filesystem::path("..") / ".." / "configs" / "templates");
     std::filesystem::path root;
     for (const std::filesystem::path& candidate : candidates)
     {

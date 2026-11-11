@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:
@@ -78,6 +79,7 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DPOKER_SOLVER_BUILD_BENCHMARKS=ON
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
       - name: Build
@@ -103,17 +105,65 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Ensure apt packages
+        run: |
+          set -euo pipefail
+          # Apt mirrors on ubuntu-latest occasionally fail DNS (azure.archive /
+          # archive / security). Pre-install ninja + ccache with retries so the
+          # later ccache-action apt step is a no-op, then fall back if needed.
+          need_pkgs=()
+          command -v ninja >/dev/null 2>&1 || need_pkgs+=(ninja-build)
+          command -v ccache >/dev/null 2>&1 || need_pkgs+=(ccache)
+          if ((${#need_pkgs[@]})); then
+            installed=0
+            for attempt in 1 2 3 4 5; do
+              if sudo apt-get update && sudo apt-get install -y "${need_pkgs[@]}"; then
+                installed=1
+                break
+              fi
+              echo "apt install ${need_pkgs[*]} failed (attempt ${attempt}); retrying…" >&2
+              sleep $((attempt * 20))
+            done
+            if [[ "$installed" -ne 1 ]]; then
+              echo "apt packages unavailable after retries; continuing with fallbacks" >&2
+            fi
+          fi
+          if command -v ninja >/dev/null 2>&1; then
+            ninja --version
+          else
+            echo "Ninja unavailable; using Unix Makefiles" >&2
+            echo "USE_UNIX_MAKEFILES=1" >> "$GITHUB_ENV"
+          fi
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --version | head -n 1
+          else
+            echo "ccache unavailable; building without compiler cache" >&2
+            echo "SKIP_CCACHE=1" >> "$GITHUB_ENV"
+          fi
       - name: ccache
+        if: env.SKIP_CCACHE != '1'
+        continue-on-error: true
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: linux-release
       - name: Configure
-        run: >
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: |
+          set -euo pipefail
+          gen_args=()
+          if [[ "${USE_UNIX_MAKEFILES:-}" != "1" ]]; then
+            gen_args=(-G Ninja)
+          fi
+          launcher_args=()
+          if command -v ccache >/dev/null 2>&1; then
+            launcher_args=(
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            )
+          fi
+          cmake -S . -B build "${gen_args[@]}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPOKER_SOLVER_BUILD_BENCHMARKS=ON \
+            "${launcher_args[@]}"
       - name: Build
         run: >
           cmake --build build --parallel
@@ -144,18 +194,61 @@ jobs:
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
       - uses: actions/checkout@v4
-      - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Ensure apt packages
+        run: |
+          set -euo pipefail
+          need_pkgs=()
+          command -v ninja >/dev/null 2>&1 || need_pkgs+=(ninja-build)
+          command -v ccache >/dev/null 2>&1 || need_pkgs+=(ccache)
+          if ((${#need_pkgs[@]})); then
+            installed=0
+            for attempt in 1 2 3 4 5; do
+              if sudo apt-get update && sudo apt-get install -y "${need_pkgs[@]}"; then
+                installed=1
+                break
+              fi
+              echo "apt install ${need_pkgs[*]} failed (attempt ${attempt}); retrying…" >&2
+              sleep $((attempt * 20))
+            done
+            if [[ "$installed" -ne 1 ]]; then
+              echo "apt packages unavailable after retries; continuing with fallbacks" >&2
+            fi
+          fi
+          if command -v ninja >/dev/null 2>&1; then
+            ninja --version
+          else
+            echo "Ninja unavailable; using Unix Makefiles" >&2
+            echo "USE_UNIX_MAKEFILES=1" >> "$GITHUB_ENV"
+          fi
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --version | head -n 1
+          else
+            echo "ccache unavailable; building without compiler cache" >&2
+            echo "SKIP_CCACHE=1" >> "$GITHUB_ENV"
+          fi
       - name: ccache
+        if: env.SKIP_CCACHE != '1'
+        continue-on-error: true
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: linux-sanitizer
       - name: Configure
         run: |
-          cmake -S . -B build-san -G Ninja \
+          set -euo pipefail
+          gen_args=()
+          if [[ "${USE_UNIX_MAKEFILES:-}" != "1" ]]; then
+            gen_args=(-G Ninja)
+          fi
+          launcher_args=()
+          if command -v ccache >/dev/null 2>&1; then
+            launcher_args=(
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            )
+          fi
+          cmake -S . -B build-san "${gen_args[@]}" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            "${launcher_args[@]}" \
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
       - name: Build
@@ -237,10 +330,15 @@ jobs:
           if [[ "$code" == "true" ]]; then
             [[ "${{ needs.windows.result }}" == "success" ]]
             [[ "${{ needs.linux.result }}" == "success" ]]
-            case "${{ needs.linux-sanitizer.result }}" in
-              success|skipped) ;;
-              *) exit 1 ;;
-            esac
+            # Draft PRs may skip the sanitizer; ready/push/dispatch require success.
+            if [[ "${{ github.event.pull_request.draft }}" == "true" ]]; then
+              case "${{ needs.linux-sanitizer.result }}" in
+                success|skipped) ;;
+                *) exit 1 ;;
+              esac
+            else
+              [[ "${{ needs.linux-sanitizer.result }}" == "success" ]]
+            fi
           fi
           if [[ "$desk" == "true" ]]; then
             [[ "${{ needs.desktop.result }}" == "success" ]]

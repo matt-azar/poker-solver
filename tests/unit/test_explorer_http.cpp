@@ -456,17 +456,7 @@ std::string explorer_executable_path()
 
 std::string workflow_checkpoint_path()
 {
-#ifdef _WIN32
-    char directory[MAX_PATH];
-    const DWORD length = GetTempPathA(MAX_PATH, directory);
-    if (length == 0 || length >= MAX_PATH)
-    {
-        return {};
-    }
-    return std::string(directory, directory + length) + "poker_solver_http_workflow.psol";
-#else
-    return "/tmp/poker_solver_http_workflow.psol";
-#endif
+    return unique_temp_path("poker_solver_http_workflow.psol").string();
 }
 
 std::string json_escape_path(const std::string& path)

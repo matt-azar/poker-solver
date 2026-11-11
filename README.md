@@ -28,7 +28,7 @@ Maintainers: CI rebuilds the artifact on desktop changes (Actions → **Windows 
 ./build/explorer --port 8765          # Windows: build\Release\explorer.exe --port 8765
 
 # terminal 2
-cd desktop && npm install && npm run dev
+cd desktop && npm ci && npm run dev
 ```
 
 Open `http://127.0.0.1:5173`. Vite proxies `/api` to the explorer.
@@ -36,7 +36,7 @@ Open `http://127.0.0.1:5173`. Vite proxies `/api` to the explorer.
 Production static serve (no Vite):
 
 ```sh
-cd desktop && npm run build
+cd desktop && npm ci && npm run build
 ./build/explorer --port 8765          # prefers desktop/dist when present
 ```
 
@@ -45,8 +45,9 @@ Then open `http://127.0.0.1:8765`.
 ## Requirements
 
 - CMake 3.16+
-- C++20 compiler: Visual Studio 2019+ (MSVC) or MinGW-w64 GCC on Windows; GCC 10+ or Clang 11+ on Linux / WSL2
-- Node 22+ only for `desktop/` development or packaging
+- C++20 compiler: Visual Studio 2022 (MSVC) on Windows; GCC 13+ on Linux (CI). MinGW-w64 / Clang / older VS are untested without a smoke lane.
+- Node 22+ for `desktop/` (`engines.node` in `desktop/package.json`; CI uses Node 22 + `npm ci`)
+- Rust 1.83+ for the Tauri shell (`desktop/src-tauri/Cargo.toml` `rust-version`)
 
 No Python or third-party C++ libraries are required for the solver.
 
@@ -55,26 +56,28 @@ No Python or third-party C++ libraries are required for the solver.
 Windows (Visual Studio):
 
 ```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DPOKER_SOLVER_BUILD_BENCHMARKS=ON
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Use `"Visual Studio 16 2019"` if needed. Prefer `--config Release` with the VS generator.
+Prefer `--config Release` with the VS generator. Or use `scripts\build.ps1`.
 
-Linux / WSL2 / MinGW:
+Linux / WSL2:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPOKER_SOLVER_BUILD_BENCHMARKS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+Or `scripts/build.sh`. Tests default on (`BUILD_TESTING`); micro-benchmarks opt in with `-DPOKER_SOLVER_BUILD_BENCHMARKS=ON`. CTest runs with the source tree as the working directory so `configs/` fixtures resolve from any build directory.
+
 Debug:
 
 ```sh
-cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
-cmake --build build-debug
+cmake -S . -B build/debug -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/debug
 ```
 
 Production CLIs (multi-config): `build\Release\street_solver.exe`, `build\Release\river_solver.exe`, `build\Release\explorer.exe`, `build\Release\equity_calculator.exe`. Single-config builds omit the `Release` directory.

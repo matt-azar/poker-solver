@@ -416,17 +416,7 @@ std::string explorer_executable_path()
 
 std::string checkpoint_path()
 {
-#ifdef _WIN32
-    char directory[MAX_PATH];
-    const DWORD length = GetTempPathA(MAX_PATH, directory);
-    if (length == 0 || length >= MAX_PATH)
-    {
-        return {};
-    }
-    return std::string(directory, directory + length) + "poker_solver_desktop_acceptance.psol";
-#else
-    return "/tmp/poker_solver_desktop_acceptance.psol";
-#endif
+    return unique_temp_path("poker_solver_desktop_acceptance.psol").string();
 }
 
 std::string json_escape_path(const std::string& path)
@@ -457,7 +447,8 @@ void check_failure_paths()
     CHECK(http_exchange(
         "POST",
         "/api/open",
-        "{\"path\":\"/tmp/poker_solver_no_such_checkpoint.psol\"}",
+        ("{\"path\":\"" + json_escape_path(unique_temp_path("poker_solver_no_such_checkpoint.psol").string())
+         + "\"}"),
         missing_file));
     CHECK(missing_file.status == 400);
 
