@@ -105,26 +105,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Ensure Ninja
+      - name: Ensure apt packages
         run: |
           set -euo pipefail
+          # Apt mirrors on ubuntu-latest occasionally fail DNS (azure.archive /
+          # archive / security). Pre-install ninja + ccache with retries so the
+          # later ccache-action apt step is a no-op, then fall back if needed.
+          need_pkgs=()
+          command -v ninja >/dev/null 2>&1 || need_pkgs+=(ninja-build)
+          command -v ccache >/dev/null 2>&1 || need_pkgs+=(ccache)
+          if ((${#need_pkgs[@]})); then
+            installed=0
+            for attempt in 1 2 3 4 5; do
+              if sudo apt-get update && sudo apt-get install -y "${need_pkgs[@]}"; then
+                installed=1
+                break
+              fi
+              echo "apt install ${need_pkgs[*]} failed (attempt ${attempt}); retrying…" >&2
+              sleep $((attempt * 20))
+            done
+            if [[ "$installed" -ne 1 ]]; then
+              echo "apt packages unavailable after retries; continuing with fallbacks" >&2
+            fi
+          fi
           if command -v ninja >/dev/null 2>&1; then
             ninja --version
-            exit 0
+          else
+            echo "Ninja unavailable; using Unix Makefiles" >&2
+            echo "USE_UNIX_MAKEFILES=1" >> "$GITHUB_ENV"
           fi
-          # Apt mirrors on ubuntu-latest occasionally fail DNS; retry, then
-          # fall back to the default Unix Makefiles generator.
-          for attempt in 1 2 3; do
-            if sudo apt-get update && sudo apt-get install -y ninja-build; then
-              ninja --version
-              exit 0
-            fi
-            echo "apt install ninja-build failed (attempt ${attempt}); retrying…" >&2
-            sleep $((attempt * 20))
-          done
-          echo "Ninja unavailable after apt retries; using Unix Makefiles" >&2
-          echo "USE_UNIX_MAKEFILES=1" >> "$GITHUB_ENV"
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --version | head -n 1
+          else
+            echo "ccache unavailable; building without compiler cache" >&2
+            echo "SKIP_CCACHE=1" >> "$GITHUB_ENV"
+          fi
       - name: ccache
+        if: env.SKIP_CCACHE != '1'
+        continue-on-error: true
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: linux-release
@@ -135,11 +153,17 @@ jobs:
           if [[ "${USE_UNIX_MAKEFILES:-}" != "1" ]]; then
             gen_args=(-G Ninja)
           fi
+          launcher_args=()
+          if command -v ccache >/dev/null 2>&1; then
+            launcher_args=(
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            )
+          fi
           cmake -S . -B build "${gen_args[@]}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DPOKER_SOLVER_BUILD_BENCHMARKS=ON \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            "${launcher_args[@]}"
       - name: Build
         run: >
           cmake --build build --parallel
@@ -170,24 +194,41 @@ jobs:
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
       - uses: actions/checkout@v4
-      - name: Ensure Ninja
+      - name: Ensure apt packages
         run: |
           set -euo pipefail
+          need_pkgs=()
+          command -v ninja >/dev/null 2>&1 || need_pkgs+=(ninja-build)
+          command -v ccache >/dev/null 2>&1 || need_pkgs+=(ccache)
+          if ((${#need_pkgs[@]})); then
+            installed=0
+            for attempt in 1 2 3 4 5; do
+              if sudo apt-get update && sudo apt-get install -y "${need_pkgs[@]}"; then
+                installed=1
+                break
+              fi
+              echo "apt install ${need_pkgs[*]} failed (attempt ${attempt}); retrying…" >&2
+              sleep $((attempt * 20))
+            done
+            if [[ "$installed" -ne 1 ]]; then
+              echo "apt packages unavailable after retries; continuing with fallbacks" >&2
+            fi
+          fi
           if command -v ninja >/dev/null 2>&1; then
             ninja --version
-            exit 0
+          else
+            echo "Ninja unavailable; using Unix Makefiles" >&2
+            echo "USE_UNIX_MAKEFILES=1" >> "$GITHUB_ENV"
           fi
-          for attempt in 1 2 3; do
-            if sudo apt-get update && sudo apt-get install -y ninja-build; then
-              ninja --version
-              exit 0
-            fi
-            echo "apt install ninja-build failed (attempt ${attempt}); retrying…" >&2
-            sleep $((attempt * 20))
-          done
-          echo "Ninja unavailable after apt retries; using Unix Makefiles" >&2
-          echo "USE_UNIX_MAKEFILES=1" >> "$GITHUB_ENV"
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --version | head -n 1
+          else
+            echo "ccache unavailable; building without compiler cache" >&2
+            echo "SKIP_CCACHE=1" >> "$GITHUB_ENV"
+          fi
       - name: ccache
+        if: env.SKIP_CCACHE != '1'
+        continue-on-error: true
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: linux-sanitizer
@@ -198,10 +239,16 @@ jobs:
           if [[ "${USE_UNIX_MAKEFILES:-}" != "1" ]]; then
             gen_args=(-G Ninja)
           fi
+          launcher_args=()
+          if command -v ccache >/dev/null 2>&1; then
+            launcher_args=(
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            )
+          fi
           cmake -S . -B build-san "${gen_args[@]}" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            "${launcher_args[@]}" \
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
       - name: Build
