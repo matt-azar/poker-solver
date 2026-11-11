@@ -1,5 +1,6 @@
 #include "server_shared.hpp"
 
+#include "explorer/cors_policy.hpp"
 #include "poker/version.hpp"
 
 #include <algorithm>
@@ -83,13 +84,16 @@ bool safe_static_asset_path(const std::string& path)
 }
 
 // Study UI in the Tauri webview is cross-origin (https://tauri.localhost →
-// http://127.0.0.1:8765). Without these headers the browser reports
-// TypeError: Failed to fetch even when the sidecar is listening.
-constexpr const char* kCorsHeaders =
-    "Access-Control-Allow-Origin: *\r\n"
-    "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
-    "Access-Control-Allow-Headers: Content-Type\r\n"
-    "Access-Control-Allow-Private-Network: true\r\n";
+// loopback explorer). CORS is rebuilt per request from Origin + packaged mode.
+thread_local std::string g_active_cors_headers =
+    poker::explorer::cors_response_headers({}, false);
+
+void begin_request_cors(const std::string& request)
+{
+    const std::string origin = poker::explorer::cors_request_origin(request);
+    g_active_cors_headers =
+        poker::explorer::cors_response_headers(origin, g_app.study_packaged);
+}
 
 void send_response(
     socket_t client,
@@ -108,7 +112,7 @@ void send_response(
     header += "Content-Type: " + type + "\r\n";
     header += "Content-Length: " + std::to_string(body.size()) + "\r\n";
     header += "Cache-Control: no-store\r\n";
-    header += kCorsHeaders;
+    header += g_active_cors_headers;
     header += extra_headers;
     header += "Connection: close\r\n\r\n";
     header += body;
@@ -717,6 +721,7 @@ void save_job(std::uint64_t job_id, std::string path)
 void handle_client(socket_t client)
 {
     const std::string request = receive_request(client);
+    begin_request_cors(request);
     const std::size_t line_end = request.find("\r\n");
     if (line_end == std::string::npos)
     {

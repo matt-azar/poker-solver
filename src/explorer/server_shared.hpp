@@ -92,6 +92,8 @@ struct ExplorerAppContext
     std::string launch_id;
     // Bound loopback port after listen (resolved when `--port 0`).
     int listen_port = 0;
+    // True when launched with `--study-packaged` (CORS allowlist; no `*`).
+    bool study_packaged = false;
 };
 
 extern ExplorerAppContext g_app;
