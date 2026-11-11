@@ -38,5 +38,6 @@ Supporting material outside the main CFR+ workflow and Study UI docs. Prefer the
 
 ### Notes
 
+- [PROJECT_HISTORY.md](notes/PROJECT_HISTORY.md) — eras, design decisions, and rejected alternatives
 - [HAND_HISTORY.md](notes/HAND_HISTORY.md)
 - [RIVER_INTEGRATION.md](notes/RIVER_INTEGRATION.md)
