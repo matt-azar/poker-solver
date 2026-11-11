@@ -15,7 +15,7 @@ Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor
 3. **Parent owns forge writes.** Subagents often lack `ManagePullRequest` and must not use `gh` to create/update PRs. After a sibling pushes, the parent opens/updates the PR and subscribes CI.
 4. **Snapshot before splitting.** If the tree is interleaved, commit everything onto `cursor/wip-…-c006`, then path-checkout onto clean feature branches from the correct base.
 5. **Re-check `git status` before every commit.** Restore unexpected paths with `git checkout HEAD -- <path>`.
-6. **Scope CMake / harness edits.** A WIP snapshot’s `CMakeLists.txt` / `tests/unit/test_main.cpp` / `tests/harness.hpp` will list every agent’s sources. Trim to this branch only.
+6. **Scope CMake / harness edits.** A WIP snapshot’s `CMakeLists.txt` / suite mains (`engine_main.cpp` / `study_main.cpp` / `http_main.cpp`) / `tests/harness.hpp` will list every agent’s sources. Trim to this branch only. (`tests/unit/test_main.cpp` is a historical stub and is not linked.)
 
 ### What went wrong (concrete)
 
@@ -34,8 +34,8 @@ Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor
 Work only under this worktree path: <absolute path>.
 Do not modify /workspace.
 Touch only these paths: <list>.
-Do not edit CMakeLists.txt, tests/harness.hpp, or tests/unit/test_main.cpp
-  unless listed; if you must, add only your targets.
+Do not edit CMakeLists.txt, tests/harness.hpp, or suite mains
+  (engine_main / study_main / http_main) unless listed; if you must, add only your targets.
 Branch: cursor/<name>-<run-suffix> from <exact base ref>
   (use the suffix required by this cloud run, e.g. -ce85 / -c006).
 Push with git push -u origin <branch>.
@@ -50,8 +50,8 @@ Report: tip SHA, files touched, test command + counts, compare URL.
 2. Commit all dirty + untracked onto `cursor/wip-<topic>-<run-suffix>`.
 3. For each feature: branch from `origin/main` (or dependency base).
 4. `git checkout wip -- <only that feature’s files>`.
-5. Trim CMake, harness, `test_main`, and docs.
-6. `CXX=g++` build; run `poker_solver_tests`; fix.
+5. Trim CMake, harness, suite mains, and docs.
+6. `CXX=g++` build; run `poker_solver_tests` (engine + study + HTTP); fix.
 7. Push; parent opens PR; subscribe CI.
 8. Keep WIP for archaeology until splits are pushed.
 
@@ -245,13 +245,12 @@ Matrix, Hands, Node Locking, and the Actions mix bar paint **passive → aggress
 
 ### Platform gaps
 
-- On **`main`**, `tests/unit/test_explorer_http.cpp` still **SKIPs on non-Windows**. A green Linux CTest alone is not HTTP coverage. (Linux HTTP port may live on a separate PR — check before claiming the gap is closed.)
-- Some working-set / card-delay asserts are Windows-only (`#ifdef _WIN32`).
+- **HTTP suite:** `poker_http_tests` (`test_explorer_http.cpp` + `test_explorer_workflow.cpp`) runs on **Linux and Windows** in CI via a spawned `explorer` on an ephemeral port. Do not claim Linux lacks HTTP coverage. Some working-set / card-delay asserts remain Windows-only (`#ifdef _WIN32`).
 - Assertion totals differ by compiler; fail missing parity checkpoints instead of skipping (`cc12bc8`).
 - **Desktop `tsc -b`:** Study store nullability (`node` / `liveEquity` unnarrowed) fails `desktop` and `windows-installer` CI even when vitest is green (#190/#191). After lifecycle/analysis changes, run `cd desktop && npx tsc -b`.
 - **CI path gate:** `dorny/paths-filter` needs `pull-requests: read` under restricted `GITHUB_TOKEN` scopes; fail the aggregate `ci` job if the path gate itself fails (#200).
 - **NSIS / installer hooks:** wait for **`windows-installer`** green before merge. A green non-installer subset is not enough — #158/#159 landed broken PREINSTALL arity / duplicate `kill:` labels and needed follow-ups (#161).
-- **Tauri sidecar spawn:** `bundle.externalBin` may be `binaries/holdem-explorer`, but the installed file is `<exe_dir>/holdem-explorer.exe`. `shell().sidecar("binaries/holdem-explorer")` looks under a non-existent `binaries/` folder (os error 3). Spawn the absolute path beside the app (or `sidecar("holdem-explorer")`). Packaged UI must also **statically import** `@tauri-apps/api/core` — `@vite-ignore` dynamic imports leave a bare specifier that fails at runtime.
+- **Tauri sidecar spawn:** `bundle.externalBin` may be `binaries/holdem-explorer`, but the installed file is `<exe_dir>/holdem-explorer.exe`. `shell().sidecar("binaries/holdem-explorer")` looks under a non-existent `binaries/` folder (os error 3). Spawn the absolute path beside the app (or `sidecar("holdem-explorer")`). Packaged UI must also **statically import** `@tauri-apps/api/core` — `@vite-ignore` dynamic imports leave a bare specifier that fails at runtime. Packaged Study owns the child via `/api/ready` + launch id (not “any TCP on 8765”).
 - **NSIS upgrade + sidecar lock:** A running/orphaned `holdem-explorer.exe` keeps the file locked → "Error opening file for writing: …\holdem-explorer.exe" (Ignore leaves a stale engine). PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning` — its `kill:` labels collide with the template's insert), then `taskkill /F /T /IM holdem-explorer.exe`, Sleep, and `Delete` the old sidecar. Never `taskkill` `explorer.exe`.
 
 ### Licensing
