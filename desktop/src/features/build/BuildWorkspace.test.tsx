@@ -41,6 +41,29 @@ vi.mock("../../domain/profiles", async () => {
   };
 });
 
+vi.mock("../../domain/bettingTreeCatalogue", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../domain/bettingTreeCatalogue")
+  >("../../domain/bettingTreeCatalogue");
+  const memory = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      memory.set(key, value);
+    },
+  };
+  let catalogue = actual.createBettingTreeCatalogue(storage);
+  return {
+    ...actual,
+    getBettingTreeCatalogue: () => catalogue,
+    resetBettingTreeCatalogueForTests: () => {
+      memory.clear();
+      catalogue = actual.createBettingTreeCatalogue(storage);
+      return catalogue;
+    },
+  };
+});
+
 vi.mock("../../engine/client", () => ({
   EngineError: class EngineError extends Error {
     status: number;
@@ -70,6 +93,9 @@ vi.mock("../../engine/client", () => ({
 }));
 
 const { resetSeatActionCatalogueForTests } = await import("../../domain/profiles");
+const { resetBettingTreeCatalogueForTests } = await import(
+  "../../domain/bettingTreeCatalogue"
+);
 const { useStudyStore } = await import("../../state/studyStore");
 const { BuildWorkspace, formatPaintCellWeight } = await import("./BuildWorkspace");
 
@@ -86,6 +112,7 @@ describe("formatPaintCellWeight", () => {
 describe("BuildWorkspace range tools", () => {
   beforeEach(() => {
     resetSeatActionCatalogueForTests();
+    resetBettingTreeCatalogueForTests();
     useStudyStore.setState({
       draft: {
         ...useStudyStore.getState().draft,
@@ -128,7 +155,7 @@ describe("BuildWorkspace range tools", () => {
     expect(screen.getByRole("button", { name: "Open tree" })).toBeTruthy();
   });
 
-  it("opens a saved betting tree into sizes and edits without touching board or ranges", async () => {
+  it("saves and opens a betting tree from the in-app catalogue without a file input", async () => {
     const user = userEvent.setup();
     useStudyStore.setState({
       draft: {
@@ -136,29 +163,31 @@ describe("BuildWorkspace range tools", () => {
         boardText: "Ah Kd 2c",
         oopRange: "AA,KK",
         ipRange: "QQ+",
-        oopFlop: "25",
-        treeEdits: [],
+        oopFlop: "33, 75",
+        ipFlop: "50",
+        potCap: 3,
+        treeEdits: ["force - c"],
       },
     });
     render(<BuildWorkspace />);
-    const file = new File(
-      [
-        JSON.stringify({
-          format: "holdem-study-betting-tree",
-          version: 1,
-          name: "test tree",
-          tree: {
-            oopFlop: "33, 75",
-            ipFlop: "50",
-            potCap: 3,
-            treeEdits: ["force - c"],
-          },
-        }),
-      ],
-      "tree.json",
-      { type: "application/json" },
-    );
-    await user.upload(screen.getByLabelText("Open betting tree file"), file);
+    expect(screen.queryByLabelText("Open betting tree file")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Save tree" }));
+    expect(screen.getByRole("dialog", { name: "Betting tree catalogue" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Name for saved betting tree"), {
+      target: { value: "SRP medium" },
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByRole("button", { name: "SRP medium" })).toBeTruthy();
+
+    useStudyStore.getState().updateDraft({
+      oopFlop: "25",
+      ipFlop: "",
+      potCap: 0,
+      treeEdits: [],
+    });
+    await user.click(screen.getByRole("button", { name: "SRP medium" }));
+
     const draft = useStudyStore.getState().draft;
     expect(draft.oopFlop).toBe("33, 75");
     expect(draft.ipFlop).toBe("50");
@@ -167,6 +196,7 @@ describe("BuildWorkspace range tools", () => {
     expect(draft.boardText).toBe("Ah Kd 2c");
     expect(draft.oopRange).toBe("AA,KK");
     expect(draft.ipRange).toBe("QQ+");
+    expect(screen.queryByRole("dialog", { name: "Betting tree catalogue" })).toBeNull();
   });
 
   it("lets the user type a paint weight into a number field", async () => {
