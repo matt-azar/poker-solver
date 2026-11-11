@@ -1,6 +1,7 @@
 import {
   EXPLORER_READY_PROTOCOL,
   isJsonObject,
+  optionalStringOrNull,
   requireBoolean,
   requireNumber,
   requireString,
@@ -13,6 +14,10 @@ export type ReadyPayload = {
   port: number;
   max_pair_runouts: number;
   launch_id: string;
+  /** Additive product version string when the engine reports it. */
+  version?: string | null;
+  /** Additive short git SHA when the engine reports it. */
+  git_sha?: string | null;
 };
 
 export function decodeReadyPayload(data: unknown): ReadyPayload {
@@ -32,5 +37,7 @@ export function decodeReadyPayload(data: unknown): ReadyPayload {
     port: requireNumber(data, "port"),
     max_pair_runouts: requireNumber(data, "max_pair_runouts"),
     launch_id: requireString(data, "launch_id"),
+    version: optionalStringOrNull(data, "version"),
+    git_sha: optionalStringOrNull(data, "git_sha"),
   };
 }

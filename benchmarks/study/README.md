@@ -9,6 +9,10 @@ NashConv is the sum of unilateral BR gains
 `player0_best_response_utility + player1_best_response_utility`. Player 0 is out of position.
 
 The quality target is Pio Accuracy/pot at most **0.001** (Accuracy = NashConv/2).
+The runner schema `study-benchmark-results-2` records both
+`accuracy_over_pot` (stop criterion) and `nashconv_over_pot` (true NashConv/pot)
+and sets `stop_criterion` to `accuracy_over_pot`. Case fixtures use
+`quality_target_accuracy_over_pot`.
 
 `street_solver` prints `accuracy` and `accuracy_fraction_of_pot` (Pio Accuracy). `river_solver` prints `accuracy` / `accuracy_fraction_of_pot` as well. The runner prefers those fields and falls back to half of `nash_gap`/`pot` for older logs.
 
@@ -124,6 +128,10 @@ Other runner flags:
 - `--cases` accepts `reference` (the default), `smoke`, `all`, or comma-separated ids
 
 Raw stdout, stderr, `results.json`, and `summary.md` are written to the output directory. `benchmarks/study/out/` is gitignored by `benchmarks/study/.gitignore`. Do not commit those logs. The committed record of hardware, source revision, outcomes, and timings is `benchmarks/study/RESULTS.md`.
+
+Each `results.json` also records provenance: checkout SHA/branch/dirty, SHA-256 digests of the solver binaries and any `--config` files, CMake toolchain fields from the build directory, host CPU/RAM, and per-case argv / thread / memory notes. `street_solver`, `river_solver`, and `explorer` accept `--version` (`poker_solver <version> git=<sha|unknown>`). Explorer `GET /api/ready` includes additive `version` and `git_sha` fields without bumping ready protocol `1`.
+
+CI runs the diagnostic smoke set (`--cases smoke`) after the Linux Release build to keep outcome classification wired. That lane is contended and is not a performance claim.
 
 ## Flushed phases
 

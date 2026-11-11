@@ -14,7 +14,7 @@
   "threads": null,
   "memory_mib": null,
   "eval_interval": null,
-  "quality_target_nashconv_over_pot": 0.001,
+  "quality_target_accuracy_over_pot": 0.001,
   "wall_seconds": 30,
   "argv": [
     "--not-a-real-flag"

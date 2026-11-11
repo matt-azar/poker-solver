@@ -1,5 +1,7 @@
 #include "server_shared.hpp"
 
+#include "poker/version.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -21,6 +23,16 @@ namespace explorer_detail
 
 int run(int argc, char** argv)
 {
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg = argv[i];
+        if (arg == "--version" || arg == "-V")
+        {
+            std::cout << "poker_solver " << poker::solver_version()
+                      << " git=" << poker::solver_git_sha() << "\n";
+            return 0;
+        }
+    }
     poker::explorer::ValueWorker values(
         g_app.session,
         [](const std::shared_ptr<void>& resource,

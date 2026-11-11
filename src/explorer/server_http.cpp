@@ -1,5 +1,7 @@
 #include "server_shared.hpp"
 
+#include "poker/version.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -595,6 +597,7 @@ void handle_client(socket_t client)
     {
         // Versioned ownership handshake for packaged Study. Independent of
         // solve status (/api/status) so a cold server still answers ready.
+        // `version` / `git_sha` are additive provenance fields (protocol stays 1).
         std::string payload = "{\"ok\":true,\"protocol\":";
         payload += std::to_string(kExplorerReadyProtocol);
         payload += ",\"port\":";
@@ -603,6 +606,10 @@ void handle_client(socket_t client)
         payload += std::to_string(g_app.equity_max_pair_runouts);
         payload += ",\"launch_id\":";
         append_escaped(payload, g_app.launch_id);
+        payload += ",\"version\":";
+        append_escaped(payload, poker::solver_version());
+        payload += ",\"git_sha\":";
+        append_escaped(payload, poker::solver_git_sha());
         payload += '}';
         send_response(client, 200, "application/json", payload);
         return;
