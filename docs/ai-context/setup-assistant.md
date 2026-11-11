@@ -103,9 +103,9 @@ Settings dialog (menu **Settings → Open settings…**): algorithm (`cfr_plus` 
 ### Study / other
 
 - Study: action history, range matrix (**Overlay → EV+Eq** among overlays), combo inspector, lower analysis dock (**Compare runouts**, equity hist, categories, **Value / Bluffs**).
-- **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers.
+- **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers. The assistant can open this report with card filters and frequency ranking via `compare_runouts`; clicks and **Open in Study** use the same navigation as a manual report click.
 - **Value / Bluffs** lists betting candidates; equity mode includes node equity and **After call** (panel-only; assistant bluff candidates use node equity).
-- The floating Study assistant reads the **current** Study decision (path, seat, strategy, selected hand) and list Value / Bluffs-style **bluff candidates** for IP/OOP via bounded read-only tools. It reuses the analysis scheduler and does **not** change Study selection or Solve.
+- The floating Study assistant reads the **current** Study decision (path, seat, strategy, selected hand) and lists Value / Bluffs-style **bluff candidates** for IP/OOP via bounded read-only tools. Those Q&A tools reuse the analysis scheduler and do **not** change Study selection. `compare_runouts` is the exception that opens Compare runouts with filters. The assistant never starts Solve.
 - Solve / Pause / Continue / Stop from Solve menu or shortcuts (`S` solve when connected + draft valid).
 - File → Save / Open — PSOL solutions; Library lists recent solutions and templates.
 - Locks: Tree → Node locking… . Strategy edits: separate drawer.

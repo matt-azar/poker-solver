@@ -1756,6 +1756,35 @@
   cursor: default;
 }
 
+.line-card-cell[data-filtered-out="true"] {
+  opacity: 0.28;
+}
+
+.line-card-filter {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.line-card-ranked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.line-card-ranked li {
+  margin: 0;
+}
+
 /* White card chip, same idea as the Hands combo badge, so the tag stays
    readable on a red-to-green EV/equity fill. Suit colors are the light-theme
    deck values because the chip face is always white. */

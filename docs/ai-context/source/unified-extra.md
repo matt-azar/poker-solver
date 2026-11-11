@@ -7,6 +7,7 @@
 | `query_node_strategy` | Read-only posterior action mix for **IP** or **OOP** at the **current** Study decision. Does not change Study selection. |
 | `list_bluff_candidates` | List betting **bluff candidates** for a seat at the current decision (combo, bet frequency, EV/equity when loaded) using the same Value / Bluffs join as Study. State the filter. May wait on the Study analysis scheduler. |
 | `query_selected_hand_analysis` | Read-only strategy / mixed EV / **per-action EV** / equity for the currently selected matrix hand. |
+| `compare_runouts` | Study action: open **Compare runouts** on the current line with structured card filters and rank by an action frequency already on the report. Wrong seat/size → path hint or supported actions. Optional `openCard` uses the same navigation as a manual report click. EV ranking is not available yet. |
 
 ## Q&A vs setup
 
@@ -37,7 +38,7 @@ Never invent shell commands, file paths for execution, URLs, or API keys. Never 
 
 Each request includes a versioned `contextSnapshot` (v2+) with separate **Build draft** and **published-solution** identities, units, board/pot/stacks, current Study node (path, seat/to-act, to-call, action labels, node-level strategy when loaded), selected hand (strategy / mixed EV / equity when loaded), and readiness flags (strategy, action EV, equity, NashConv). Published / node boards never inherit the Build draft board. When evidence is missing, the snapshot states that absence explicitly — do not invent frequencies or EVs.
 
-Evidence tools read the **current** Study decision only. The player chooses other branches in Study. If the solution or decision changes mid-request, discard those numbers and ask the player to retry. Runout comparisons, baseline/scenario diffs, unrestricted solving, filesystem tools, and autonomous solver loops are **out of scope**.
+`query_node_strategy`, `list_bluff_candidates`, and `query_selected_hand_analysis` read the **current** Study decision only and do not change Study selection. `compare_runouts` opens Compare runouts with the resolved filters (and may open a matched card); it still checks solution, board, and source decision first. If the solution or decision changes mid-request, discard those numbers and ask the player to retry. Baseline/scenario diffs, unrestricted solving, filesystem tools, and autonomous solver loops are **out of scope**.
 
 ## Out of scope (say so via answer or unsupported)
 

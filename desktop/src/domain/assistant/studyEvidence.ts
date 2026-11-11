@@ -1,10 +1,11 @@
 /**
  * Bounded Study-page evidence tools for the floating assistant.
  *
- * Read-only: strategy / bluff listing / selected-hand summary at the **current**
- * Study decision. May wait on the existing analysis scheduler. Never starts a
- * solve, opens the filesystem, performs unrestricted HTTP, or changes Study
- * selection to discover another seat/branch.
+ * Strategy / bluff listing / selected-hand summary stay read-only at the
+ * **current** Study decision. `compare_runouts` is an ordinary Study action:
+ * it opens Compare runouts with structured filters and may open a matched
+ * row via the same path as a manual report click. Never starts a solve or
+ * opens the filesystem.
  */
 import {
   actorLabel,
@@ -12,6 +13,18 @@ import {
   strategyFrequencies,
   type PathStep,
 } from "../actionHistory";
+import {
+  isCardRank,
+  isCardSuit,
+  lineCardReportStreet,
+  resolveLineCardAction,
+  type LineCardCardPredicate,
+  type LineCardReportActiveFilter,
+  type LineCardReportModel,
+  type LineCardSortBy,
+  type LineCardSortDirection,
+} from "../lineCardReport";
+import { normalizeBoardCards, type CardRank, type CardSuit } from "../cards";
 import { analysisErrorIsPermanent, analysisPayloadReady } from "../setup/identity";
 import { groupEv, groupHands } from "../browse";
 import {
@@ -67,12 +80,24 @@ export interface StudyEvidenceHost {
   /** Warm EV + equity via Study's analysis scheduler (user/auto priority). */
   ensureNodeAnalysis: () => Promise<void>;
   /**
-   * Optional navigation hook kept for callers/tests. Evidence tools in this
-   * pass do **not** call it — the player chooses branches in Study.
+   * Optional navigation hook kept for callers/tests. Read-only evidence tools
+   * do **not** call it — the player chooses branches in Study.
    */
   navigateTo: (nodeId: string) => Promise<void>;
   /** Optional peek without changing Study selection (engine getNode). */
   fetchNode?: (nodeId: string) => Promise<NodePayload>;
+  /** Open Compare runouts for the current decision (optional filter). */
+  loadLineCardReport?: (opts?: {
+    filter?: LineCardReportActiveFilter | null;
+  }) => Promise<void>;
+  /** Apply/clear filter on the loaded report without rebuilding rows. */
+  applyLineCardReportFilter?: (
+    filter: LineCardReportActiveFilter | null,
+  ) => void;
+  /** Same navigation as a manual Compare-runouts cell click. */
+  openLineCardRow?: (resolvedNodeId: string) => Promise<void>;
+  /** Read the loaded Compare-runouts report (after load). */
+  readLineCardReport?: () => LineCardReportModel | null;
 }
 
 export const QUERY_NODE_STRATEGY_TOOL = {
@@ -138,17 +163,91 @@ export const QUERY_SELECTED_HAND_TOOL = {
   },
 } as const;
 
+export const COMPARE_RUNOUTS_TOOL = {
+  name: "compare_runouts",
+  description:
+    "Study action: open Compare runouts on the **current** betting line with structured card filters and rank by an action frequency already on the report (e.g. heart rivers that do not pair the board, ranked by IP's 75% bet). Checks solution, board, and source decision. Wrong seat or size returns a path hint or the supported actions — it does not silently hop. Optional openCard uses the same navigation as a manual report click. EV ranking is not available yet.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      seat: {
+        type: "string",
+        enum: ["IP", "OOP"],
+        description: "Acting seat that must match the current decision (default: current actor).",
+      },
+      street: {
+        type: "string",
+        enum: ["turn", "river"],
+        description: "Card street to vary. Defaults from the current board.",
+      },
+      suits: {
+        type: "array",
+        items: { type: "string", enum: ["s", "h", "d", "c"] },
+        description: "Keep only these suits (h=hearts). Omit for any suit.",
+      },
+      ranks: {
+        type: "array",
+        items: {
+          type: "string",
+          enum: ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"],
+        },
+        description: "Keep only these ranks. Omit for any rank.",
+      },
+      excludeBoardPair: {
+        type: "boolean",
+        description: "When true, drop cards whose rank pairs the fixed board.",
+      },
+      action: {
+        type: "string",
+        description:
+          'Action to rank by frequency — exact label ("Bet 75") or size ("75%", "75"). Required when sortBy is frequency.',
+      },
+      sortBy: {
+        type: "string",
+        enum: ["frequency", "deal"],
+        description: "Sort key (default frequency). EV ranking is a follow-up.",
+      },
+      sortDirection: {
+        type: "string",
+        enum: ["desc", "asc"],
+        description: "Sort direction (default desc).",
+      },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: 52,
+        description: "Max ranked rows to return (default 12).",
+      },
+      openCard: {
+        type: "string",
+        description:
+          "Optional card code (e.g. Ah) to open via the same path as a manual report click.",
+      },
+      openReport: {
+        type: "boolean",
+        description: "Open Compare runouts with filters (default true).",
+      },
+    },
+  },
+} as const;
+
 /** Tools the model may invoke for Study evidence (bounded). */
 export const STUDY_EVIDENCE_TOOL_SCHEMAS = [
   QUERY_NODE_STRATEGY_TOOL,
   LIST_BLUFF_CANDIDATES_TOOL,
   QUERY_SELECTED_HAND_TOOL,
+  COMPARE_RUNOUTS_TOOL,
 ] as const;
 
 export const STUDY_EVIDENCE_DEFERRED_TOOLS = [
-  "compare_runouts",
   "compare_baseline_scenario",
 ] as const;
+
+export const ASSISTANT_COMPARE_RUNOUTS_LIMITS = {
+  maxRows: 52,
+  defaultRows: 12,
+} as const;
 
 export type StudyEvidenceToolName =
   (typeof STUDY_EVIDENCE_TOOL_SCHEMAS)[number]["name"];
@@ -212,6 +311,43 @@ export interface SelectedHandEvidence {
   equity: number | null;
   evBasis: EvDisplayBasis | null;
   absences: string[];
+}
+
+export interface CompareRunoutsRow {
+  card: string;
+  frequency: number | null;
+  dealProbability: number | null;
+  resolvedNodeId: string | null;
+  reach: number | null;
+}
+
+export interface CompareRunoutsEvidence {
+  ok: boolean;
+  seat: StudyEvidenceSeat | null;
+  nodeId: string | null;
+  line: string | null;
+  street: "turn" | "river" | null;
+  board: string[];
+  filters: {
+    suits: CardSuit[];
+    ranks: CardRank[];
+    excludeBoardPair: boolean;
+    action: string | null;
+    sortBy: LineCardSortBy;
+    sortDirection: LineCardSortDirection;
+  };
+  supportedActions: string[];
+  rows: CompareRunoutsRow[];
+  truncated: boolean;
+  openedReport: boolean;
+  openedCard: string | null;
+  /** Prefer for an Open in Study control when a row was (or can be) opened. */
+  openInStudy: {
+    card: string;
+    resolvedNodeId: string;
+  } | null;
+  absences: string[];
+  pathHint?: string | null;
 }
 
 function pathLabels(trail: PathStep[]): string[] {
@@ -788,6 +924,341 @@ export async function listBluffCandidates(
   };
 }
 
+function parseSuitList(raw: unknown): CardSuit[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const out: CardSuit[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const suit = entry.trim().toLowerCase();
+    if (isCardSuit(suit) && !out.includes(suit)) {
+      out.push(suit);
+    }
+  }
+  return out;
+}
+
+function parseRankList(raw: unknown): CardRank[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const out: CardRank[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const rank = entry.trim().toUpperCase();
+    if (isCardRank(rank) && !out.includes(rank)) {
+      out.push(rank);
+    }
+  }
+  return out;
+}
+
+/**
+ * Open Compare runouts with structured filters and optional row navigation.
+ * Requires a published solution and a turn/river decision whose seat matches.
+ */
+export async function compareRunouts(
+  host: StudyEvidenceHost,
+  args: Record<string, unknown> = {},
+): Promise<CompareRunoutsEvidence> {
+  const live = host.read();
+  const seat = normalizeSeat(args.seat, actingSeat(live.currentNode));
+  const suits = parseSuitList(args.suits);
+  const ranks = parseRankList(args.ranks);
+  const excludeBoardPair = Boolean(args.excludeBoardPair);
+  const sortByRaw = typeof args.sortBy === "string" ? args.sortBy : "frequency";
+  const sortBy: LineCardSortBy =
+    sortByRaw === "deal" || sortByRaw === "frequency" ? sortByRaw : "frequency";
+  const sortDirection: LineCardSortDirection =
+    args.sortDirection === "asc" ? "asc" : "desc";
+  const limitRaw =
+    typeof args.limit === "number" && Number.isFinite(args.limit)
+      ? Math.trunc(args.limit)
+      : ASSISTANT_COMPARE_RUNOUTS_LIMITS.defaultRows;
+  const limit = Math.min(
+    ASSISTANT_COMPARE_RUNOUTS_LIMITS.maxRows,
+    Math.max(1, limitRaw),
+  );
+  const openReport = args.openReport !== false;
+  const openCard =
+    typeof args.openCard === "string" && args.openCard.trim()
+      ? args.openCard.trim()
+      : null;
+  const actionQuery =
+    typeof args.action === "string" && args.action.trim()
+      ? args.action.trim()
+      : null;
+
+  const empty = (
+    absences: string[],
+    partial?: Partial<CompareRunoutsEvidence>,
+  ): CompareRunoutsEvidence => ({
+    ok: false,
+    seat,
+    nodeId: live.currentNode?.node_id ?? null,
+    line: live.currentNode?.line ?? null,
+    street: null,
+    board: normalizeBoardCards(live.currentNode?.board),
+    filters: {
+      suits,
+      ranks,
+      excludeBoardPair,
+      action: actionQuery,
+      sortBy,
+      sortDirection,
+    },
+    supportedActions: [...(live.currentNode?.actions ?? [])],
+    rows: [],
+    truncated: false,
+    openedReport: false,
+    openedCard: null,
+    openInStudy: null,
+    absences,
+    ...partial,
+  });
+
+  if (!seat) {
+    return empty([
+      "Could not determine seat (IP/OOP). Pass seat explicitly or open a decision node.",
+    ]);
+  }
+  if (!live.solutionId) {
+    return empty([
+      "No published solution — open or solve a spot before Compare runouts.",
+    ]);
+  }
+  if (!host.loadLineCardReport || !host.readLineCardReport) {
+    return empty([
+      "Compare runouts is not wired in this assistant host. Open Compare runouts from Study.",
+    ]);
+  }
+
+  const resolved = await resolveCurrentSeatNode(host, seat);
+  if ("absences" in resolved) {
+    return empty(resolved.absences, { pathHint: resolved.pathHint });
+  }
+
+  const { node, pathHint } = resolved;
+  const solutionId = live.solutionId;
+  const nodeId = node.node_id;
+  const board = normalizeBoardCards(node.board);
+  const streetFromBoard = lineCardReportStreet(board);
+  const streetArg =
+    args.street === "turn" || args.street === "river" ? args.street : null;
+  if (!streetFromBoard) {
+    return empty(
+      [
+        "Compare runouts needs a turn or river board (flop-only spots have no card to vary).",
+      ],
+      {
+        nodeId,
+        line: node.line ?? nodeId,
+        supportedActions: [...(node.actions ?? [])],
+        pathHint,
+      },
+    );
+  }
+  if (streetArg && streetArg !== streetFromBoard) {
+    return empty(
+      [
+        `Current board varies the ${streetFromBoard}, not the ${streetArg}. Open a ${streetArg} decision on this line in Study.`,
+      ],
+      {
+        nodeId,
+        line: node.line ?? nodeId,
+        street: streetFromBoard,
+        board,
+        supportedActions: [...(node.actions ?? [])],
+        pathHint,
+      },
+    );
+  }
+  const street = streetFromBoard;
+  const actionLabels = [...(node.actions ?? [])];
+  let actionIndex: number | null = null;
+  let actionLabel: string | null = null;
+  if (sortBy === "frequency") {
+    const matched = resolveLineCardAction(actionLabels, actionQuery);
+    if (!matched.ok) {
+      return empty([matched.reason], {
+        nodeId,
+        line: node.line ?? nodeId,
+        street,
+        board,
+        supportedActions: matched.supported,
+        pathHint,
+      });
+    }
+    actionIndex = matched.index;
+    actionLabel = matched.label;
+  }
+
+  const predicate: LineCardCardPredicate = {
+    ...(suits.length ? { suits } : {}),
+    ...(ranks.length ? { ranks } : {}),
+    ...(excludeBoardPair ? { excludeBoardPair: true } : {}),
+  };
+  const filter: LineCardReportActiveFilter = {
+    predicate,
+    board,
+    actionIndex,
+    actionLabel,
+    sortBy,
+    sortDirection,
+    seat,
+  };
+
+  if (!identityStillMatches(host, solutionId, nodeId)) {
+    return empty([
+      "Study solution or decision changed before Compare runouts started. Retry on the intended decision.",
+    ]);
+  }
+
+  if (openReport) {
+    await host.loadLineCardReport({ filter });
+  } else if (host.applyLineCardReportFilter) {
+    const existing = host.readLineCardReport();
+    if (
+      existing &&
+      !existing.pending &&
+      existing.solutionId === solutionId &&
+      existing.reportNodeId === nodeId
+    ) {
+      host.applyLineCardReportFilter(filter);
+    } else {
+      await host.loadLineCardReport({ filter });
+    }
+  } else {
+    await host.loadLineCardReport({ filter });
+  }
+
+  if (!identityStillMatches(host, solutionId, nodeId)) {
+    return empty([
+      "Study solution or decision changed while building Compare runouts. Retry on the intended decision.",
+    ]);
+  }
+
+  const report = host.readLineCardReport();
+  if (!report || report.pending) {
+    return empty(
+      [
+        report?.error ??
+          "Compare runouts did not finish loading. Retry from the current decision.",
+      ],
+      {
+        nodeId,
+        line: node.line ?? nodeId,
+        street,
+        board,
+        supportedActions: actionLabels,
+        pathHint,
+      },
+    );
+  }
+  if (report.error) {
+    return empty([report.error], {
+      nodeId,
+      line: report.line,
+      street: report.street,
+      board,
+      supportedActions: [...report.actionLabels],
+      pathHint,
+    });
+  }
+  if (report.solutionId !== solutionId || report.reportNodeId !== nodeId) {
+    return empty([
+      "Compare runouts report identity no longer matches the current Study decision. Retry on the intended decision.",
+    ]);
+  }
+
+  const matchedCards = report.matchedCards ?? [];
+  const byCard = new Map(report.rows.map((row) => [row.card, row]));
+  const ranked: CompareRunoutsRow[] = [];
+  for (const card of matchedCards) {
+    const row = byCard.get(card);
+    if (!row) continue;
+    ranked.push({
+      card: row.card,
+      frequency:
+        actionIndex != null && row.frequencies[actionIndex] != null
+          ? row.frequencies[actionIndex]!
+          : null,
+      dealProbability: row.dealProbability,
+      resolvedNodeId: row.resolvedNodeId,
+      reach: row.reach,
+    });
+  }
+
+  const rows = ranked.slice(0, limit);
+  const absences: string[] = [];
+  if (rows.length === 0) {
+    absences.push(
+      "No runouts matched those filters on this line. Adjust suits/ranks/board-pair or open another decision.",
+    );
+  }
+
+  let openedCard: string | null = null;
+  let openInStudy: CompareRunoutsEvidence["openInStudy"] = null;
+  const topOpenable = rows.find((row) => row.resolvedNodeId);
+  if (topOpenable?.resolvedNodeId) {
+    openInStudy = {
+      card: topOpenable.card,
+      resolvedNodeId: topOpenable.resolvedNodeId,
+    };
+  }
+
+  if (openCard) {
+    const target =
+      ranked.find(
+        (row) => row.card.toLowerCase() === openCard.toLowerCase() && row.resolvedNodeId,
+      ) ?? null;
+    if (!target?.resolvedNodeId) {
+      absences.push(
+        `Card ${openCard} is not in the filtered Compare runouts results (or has no decision).`,
+      );
+    } else if (!host.openLineCardRow) {
+      absences.push(
+        `Card ${openCard} matched, but Open in Study is not wired in this assistant host.`,
+      );
+      openInStudy = { card: target.card, resolvedNodeId: target.resolvedNodeId };
+    } else if (!identityStillMatches(host, solutionId, nodeId)) {
+      absences.push(
+        "Study solution or decision changed before opening the runout. Retry on the intended decision.",
+      );
+    } else {
+      await host.openLineCardRow(target.resolvedNodeId);
+      openedCard = target.card;
+      openInStudy = { card: target.card, resolvedNodeId: target.resolvedNodeId };
+    }
+  }
+
+  return {
+    ok: rows.length > 0,
+    seat,
+    nodeId: report.reportNodeId,
+    line: report.line,
+    street: report.street,
+    board,
+    filters: {
+      suits,
+      ranks,
+      excludeBoardPair,
+      action: actionLabel,
+      sortBy,
+      sortDirection,
+    },
+    supportedActions: [...report.actionLabels],
+    rows,
+    truncated: ranked.length > rows.length,
+    openedReport: openReport || Boolean(report),
+    openedCard,
+    openInStudy,
+    absences,
+    pathHint,
+  };
+}
+
 export async function querySelectedHandAnalysis(
   host: StudyEvidenceHost,
   _args: Record<string, unknown> = {},
@@ -989,6 +1460,8 @@ export async function executeStudyEvidenceTool(
       return listBluffCandidates(host, args);
     case QUERY_SELECTED_HAND_TOOL.name:
       return querySelectedHandAnalysis(host, args);
+    case COMPARE_RUNOUTS_TOOL.name:
+      return compareRunouts(host, args);
     default:
       return {
         ok: false,
@@ -997,10 +1470,35 @@ export async function executeStudyEvidenceTool(
   }
 }
 
-/** Heuristic: question is about live Study node strategy / bluffs / hand EV. */
+/** Heuristic: Compare-runouts filter/rank request (Fake client routing). */
+export function looksLikeCompareRunoutsRequest(text: string): boolean {
+  const lower = text.trim().toLowerCase();
+  if (!lower) return false;
+  if (/\b(compare\s+runouts|filter\s+runouts|rank(?:ed)?\s+by\b.*\bbet)\b/.test(lower)) {
+    return true;
+  }
+  if (
+    /\b(heart|spade|diamond|club|hearts|spades|diamonds|clubs)\b/.test(lower) &&
+    /\b(river|turn|runouts?|cards?)\b/.test(lower)
+  ) {
+    return true;
+  }
+  if (
+    /\b(don'?t|do\s+not|doesn'?t)\s+pair\b/.test(lower) &&
+    /\b(board|river|turn|runouts?)\b/.test(lower)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Heuristic: question is about live Study node strategy / bluffs / hand EV / runouts. */
 export function looksLikeStudyEvidenceRequest(text: string): boolean {
   const lower = text.trim().toLowerCase();
   if (!lower) return false;
+  if (looksLikeCompareRunoutsRequest(text)) {
+    return true;
+  }
   return (
     /\bbluffs?\b/.test(lower) ||
     /\b(value\s*\/?\s*bluffs?|betting\s+range)\b/.test(lower) ||

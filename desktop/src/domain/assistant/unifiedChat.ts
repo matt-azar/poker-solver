@@ -28,15 +28,18 @@ import {
 } from "./workflow";
 import type { CatalogueLike } from "./resolve";
 import {
+  COMPARE_RUNOUTS_TOOL,
   executeStudyEvidenceTool,
   isStudyEvidenceToolName,
   LIST_BLUFF_CANDIDATES_TOOL,
+  looksLikeCompareRunoutsRequest,
   looksLikeStudyEvidenceRequest,
   QUERY_NODE_STRATEGY_TOOL,
   QUERY_SELECTED_HAND_TOOL,
   STUDY_EVIDENCE_DEFERRED_TOOLS,
   STUDY_EVIDENCE_TOOL_SCHEMAS,
   type BluffCandidatesEvidence,
+  type CompareRunoutsEvidence,
   type NodeStrategyEvidence,
   type StudyEvidenceHost,
 } from "./studyEvidence";
@@ -62,11 +65,19 @@ export interface UnifiedChatRequest {
   signal?: AbortSignal;
 }
 
+export type UnifiedChatOpenInStudy = {
+  card: string;
+  resolvedNodeId: string;
+  line?: string | null;
+};
+
 export type UnifiedChatOutcome =
   | {
       kind: "answer";
       message: string;
       provider: UnifiedChatMode;
+      /** Optional Compare-runouts Open in Study target (same as manual cell click). */
+      openInStudy?: UnifiedChatOpenInStudy;
     }
   | {
       kind: "setup";
@@ -338,10 +349,102 @@ function formatBluffAnswer(evidence: BluffCandidatesEvidence): string {
   );
 }
 
+function formatCompareRunoutsAnswer(evidence: CompareRunoutsEvidence): string {
+  const filterBits: string[] = [];
+  if (evidence.filters.suits.length) {
+    filterBits.push(`suits ${evidence.filters.suits.join(",")}`);
+  }
+  if (evidence.filters.ranks.length) {
+    filterBits.push(`ranks ${evidence.filters.ranks.join(",")}`);
+  }
+  if (evidence.filters.excludeBoardPair) {
+    filterBits.push("exclude board pairs");
+  }
+  if (evidence.filters.action) {
+    filterBits.push(`rank by ${evidence.filters.action} frequency`);
+  } else if (evidence.filters.sortBy === "deal") {
+    filterBits.push("rank by deal probability");
+  }
+  const filterText = filterBits.length ? filterBits.join("; ") : "no card filter";
+  if (!evidence.ok || evidence.rows.length === 0) {
+    return (
+      evidence.absences.join(" ") ||
+      `No matching ${evidence.street ?? "runout"} cards on ${evidence.line ?? "this line"} (${filterText}).`
+    );
+  }
+  const lines = evidence.rows.map((row) => {
+    const freq =
+      row.frequency == null || !Number.isFinite(row.frequency)
+        ? "freq n/a"
+        : `${(row.frequency * 100).toFixed(1)}%`;
+    return `${row.card}: ${freq}`;
+  });
+  const more = evidence.truncated ? " (truncated)" : "";
+  const opened = evidence.openedReport
+    ? " Compare runouts is open with these filters."
+    : "";
+  const cardOpened = evidence.openedCard
+    ? ` Opened ${evidence.openedCard} in Study.`
+    : evidence.openInStudy
+      ? ` Use Open in Study for ${evidence.openInStudy.card}, or click a highlighted card in the report.`
+      : "";
+  const caveat = evidence.absences.length ? ` ${evidence.absences.join(" ")}` : "";
+  return (
+    `${evidence.seat ?? "Seat"} ${evidence.street ?? "runout"}s on ${evidence.line ?? evidence.nodeId}` +
+    ` (${filterText})${more}:${opened}\n${lines.join("\n")}${cardOpened}${caveat}`
+  );
+}
+
 function inferEvidenceSeat(text: string): "IP" | "OOP" | undefined {
   if (/\bip\b/i.test(text) && !/\boop\b/i.test(text)) return "IP";
   if (/\boop\b/i.test(text) && !/\bip\b/i.test(text)) return "OOP";
   return undefined;
+}
+
+/** Best-effort structured args for the Fake client's compare_runouts path. */
+export function inferCompareRunoutsArgs(text: string): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+  const seat = inferEvidenceSeat(text);
+  if (seat) args.seat = seat;
+  if (/\brivers?\b/i.test(text)) args.street = "river";
+  else if (/\bturns?\b/i.test(text)) args.street = "turn";
+  const suits: string[] = [];
+  if (/\bhearts?\b/i.test(text)) suits.push("h");
+  if (/\bspades?\b/i.test(text)) suits.push("s");
+  if (/\bdiamonds?\b/i.test(text)) suits.push("d");
+  if (/\bclubs?\b/i.test(text)) suits.push("c");
+  if (suits.length) args.suits = suits;
+  if (/\b(don'?t|do\s+not|doesn'?t)\s+pair\b/i.test(text)) {
+    args.excludeBoardPair = true;
+  }
+  const size =
+    text.match(/\b(\d{1,3}(?:\.\d+)?%)\s*(?:pot\s+)?bet\b/i) ||
+    text.match(/\b(?:bet|ranked by)\s+(?:IP'?s?\s+|OOP'?s?\s+)?(\d{1,3}(?:\.\d+)?%?)\b/i) ||
+    text.match(/\b(\d{1,3}(?:\.\d+)?%)\b/);
+  if (size?.[1]) {
+    args.action = size[1];
+    args.sortBy = "frequency";
+  }
+  args.openReport = true;
+  return args;
+}
+
+function openInStudyFromEvidence(
+  toolName: string,
+  result: unknown,
+): UnifiedChatOpenInStudy | undefined {
+  if (toolName !== COMPARE_RUNOUTS_TOOL.name) {
+    return undefined;
+  }
+  const evidence = result as CompareRunoutsEvidence;
+  if (!evidence?.openInStudy?.resolvedNodeId) {
+    return undefined;
+  }
+  return {
+    card: evidence.openInStudy.card,
+    resolvedNodeId: evidence.openInStudy.resolvedNodeId,
+    line: evidence.line,
+  };
 }
 
 /**
@@ -382,6 +485,22 @@ export class FakeUnifiedChatClient implements UnifiedChatClient {
     if (intent !== "setup") {
       if (deps.evidenceHost && looksLikeStudyEvidenceRequest(text)) {
         const seat = inferEvidenceSeat(text);
+        if (looksLikeCompareRunoutsRequest(text)) {
+          const evidence = (await executeStudyEvidenceTool(
+            deps.evidenceHost,
+            COMPARE_RUNOUTS_TOOL.name,
+            inferCompareRunoutsArgs(text),
+          )) as CompareRunoutsEvidence;
+          return {
+            kind: "answer",
+            provider: "fake",
+            message: formatCompareRunoutsAnswer(evidence),
+            openInStudy: openInStudyFromEvidence(
+              COMPARE_RUNOUTS_TOOL.name,
+              evidence,
+            ),
+          };
+        }
         if (/\bbluffs?\b/i.test(text)) {
           const evidence = (await executeStudyEvidenceTool(
             deps.evidenceHost,
@@ -582,7 +701,7 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
       analysisTools: {
         available: [...STUDY_NODE_EVIDENCE_TOOL_NAMES],
         note:
-          "Use query_node_strategy / list_bluff_candidates / query_selected_hand_analysis for live Study evidence at the current decision only. They wait on the Study analysis scheduler and do not change Study selection. Runout/compare tools are not available. Never start a solve.",
+          "Use query_node_strategy / list_bluff_candidates / query_selected_hand_analysis for live Study evidence at the current decision only — they wait on the Study analysis scheduler and do not change Study selection. Use compare_runouts to open Compare runouts with card filters and frequency ranking on the current line (wrong seat/size → path hint or supported actions). Never start a solve.",
         deferred: [...STUDY_EVIDENCE_DEFERRED_TOOLS],
         selectedHandSchemaStatus: SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.status,
       },
@@ -608,6 +727,7 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
     const setupForced = intent === "setup";
     const tools = openaiToolsForIntent(intent);
     let evidenceRounds = 0;
+    let lastOpenInStudy: UnifiedChatOpenInStudy | undefined;
 
     while (evidenceRounds <= ASSISTANT_EVIDENCE_TOOL_MAX_ROUNDS) {
       const payload = await this.providerRequest({
@@ -627,7 +747,12 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
           typeof tool.args.message === "string" && tool.args.message.trim()
             ? tool.args.message.trim()
             : "I could not form an answer.";
-        return { kind: "answer", provider: "openai", message };
+        return {
+          kind: "answer",
+          provider: "openai",
+          message,
+          ...(lastOpenInStudy ? { openInStudy: lastOpenInStudy } : {}),
+        };
       }
 
       if (tool.name === SETUP_TOOL) {
@@ -690,6 +815,10 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
           tool.name,
           tool.args,
         );
+        const openTarget = openInStudyFromEvidence(tool.name, result);
+        if (openTarget) {
+          lastOpenInStudy = openTarget;
+        }
         messages.push({
           role: "assistant",
           content: null,
@@ -716,7 +845,12 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
       // Fallback: treat plain text content as an answer.
       const content = extractPlainContent(payload);
       if (content) {
-        return { kind: "answer", provider: "openai", message: content };
+        return {
+          kind: "answer",
+          provider: "openai",
+          message: content,
+          ...(lastOpenInStudy ? { openInStudy: lastOpenInStudy } : {}),
+        };
       }
 
       throw new AssistantProviderError(

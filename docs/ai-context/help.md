@@ -40,10 +40,10 @@ For the full unified role (Q&A + mutating setup), see `unified.md`.
 | --- | --- |
 | “Why does folding show 0 EV?” | Local EV uses folding now as the zero point. Open the **Settings** gear → **EV display** → **Global EV (root-centered)** to show EV on the root basis. |
 | “Where do I see hand EV and equity?” | In **Study**, open a decision, choose **Overlay → EV+Eq**, and select a hand for details. Study starts loading EV and equity automatically on decision nodes. If a number is pending, say so. |
-| “Which river cards are best for IP on this line?” | Open a river decision on that line and use **Compare runouts**. The report varies the river card while holding the betting line fixed. Check the displayed seat before interpreting the numbers. Give the navigation; leave ranking to the report. |
+| “Which river cards are best for IP on this line?” | Prefer `compare_runouts` when the player is already on that river decision: open **Compare runouts** with filters (suit, board-pair, action frequency). Check the seat and supported sizes; wrong seat/size → path hint or supported actions. Otherwise navigate them to the river decision and **Compare runouts**. |
 | “What does Accuracy mean?” | Accuracy is the average of the two best-response gains, or NashConv divided by two. The Build target is a fraction of the pot in ordinary chip-EV solves. Enter `0.005` for 0.5% of pot. |
 | “Why is equity higher than EV?” | Equity is a share of the pot. EV measures expected utility in the solve, with future actions and the displayed reference point. Explain the different units before comparing the hand's figures. |
-| “Where can I compare river cards?” | From a river decision in **Study**, open **Compare runouts**. |
+| “Where can I compare river cards?” | From a river decision in **Study**, open **Compare runouts**, or ask the assistant to filter/rank runouts on the current line. |
 
 ## When analysis is unavailable
 
@@ -100,9 +100,9 @@ Settings dialog (menu **Settings → Open settings…**): algorithm (`cfr_plus` 
 ### Study / other
 
 - Study: action history, range matrix (**Overlay → EV+Eq** among overlays), combo inspector, lower analysis dock (**Compare runouts**, equity hist, categories, **Value / Bluffs**).
-- **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers.
+- **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers. The assistant can open this report with card filters and frequency ranking via `compare_runouts`; clicks and **Open in Study** use the same navigation as a manual report click.
 - **Value / Bluffs** lists betting candidates; equity mode includes node equity and **After call** (panel-only; assistant bluff candidates use node equity).
-- The floating Study assistant reads the **current** Study decision (path, seat, strategy, selected hand) and list Value / Bluffs-style **bluff candidates** for IP/OOP via bounded read-only tools. It reuses the analysis scheduler and does **not** change Study selection or Solve.
+- The floating Study assistant reads the **current** Study decision (path, seat, strategy, selected hand) and lists Value / Bluffs-style **bluff candidates** for IP/OOP via bounded read-only tools. Those Q&A tools reuse the analysis scheduler and do **not** change Study selection. `compare_runouts` is the exception that opens Compare runouts with filters. The assistant never starts Solve.
 - Solve / Pause / Continue / Stop from Solve menu or shortcuts (`S` solve when connected + draft valid).
 - File → Save / Open — PSOL solutions; Library lists recent solutions and templates.
 - Locks: Tree → Node locking… . Strategy edits: separate drawer.

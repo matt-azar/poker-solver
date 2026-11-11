@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateActionFrequency,
+  filterAndSortLineCardRows,
+  fixedBoardForLineCard,
   LINE_CARD_GRID_RANKS,
   lineCardEquityFromPayload,
   lineCardEvFromValues,
   lineCardReportStreet,
   lineCardTargetId,
+  matchesLineCardPredicate,
   readNodeJoint,
+  resolveLineCardAction,
   rowFromResolvedNode,
   unavailableRow,
+  withLineCardReportFilter,
+  type LineCardReportRow,
 } from "./lineCardReport";
 import type { ChanceCardOption } from "./cards";
 import type { NodePayload } from "./types";
@@ -174,5 +180,143 @@ describe("aggregateActionFrequency", () => {
     // Reach mass 0.2 at Check=1 and 0.8 at Bet=1 → bet aggregate 0.8.
     expect(aggregateActionFrequency(rows, 0)).toBeCloseTo(0.2, 8);
     expect(aggregateActionFrequency(rows, 1)).toBeCloseTo(0.8, 8);
+  });
+});
+
+describe("line card predicates and action resolve", () => {
+  it("matches heart non-pairing rivers against the fixed board", () => {
+    const board = ["Ah", "Kd", "7c", "2s", "3d"];
+    expect(fixedBoardForLineCard(board, "river")).toEqual(["Ah", "Kd", "7c", "2s"]);
+    expect(
+      matchesLineCardPredicate("5h", board, "river", {
+        suits: ["h"],
+        excludeBoardPair: true,
+      }),
+    ).toBe(true);
+    expect(
+      matchesLineCardPredicate("Ah", board, "river", {
+        suits: ["h"],
+        excludeBoardPair: true,
+      }),
+    ).toBe(false);
+    expect(
+      matchesLineCardPredicate("5s", board, "river", {
+        suits: ["h"],
+        excludeBoardPair: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("resolves 75% to Bet 75 and rejects missing sizes", () => {
+    const labels = ["Check", "Bet 33", "Bet 75"];
+    expect(resolveLineCardAction(labels, "75%")).toEqual({
+      ok: true,
+      index: 2,
+      label: "Bet 75",
+    });
+    expect(resolveLineCardAction(labels, "Bet 75")).toEqual({
+      ok: true,
+      index: 2,
+      label: "Bet 75",
+    });
+    const missing = resolveLineCardAction(labels, "100%");
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.reason).toMatch(/not available/i);
+      expect(missing.supported).toEqual(labels);
+    }
+  });
+
+  it("filters and ranks rows by action frequency like the manual report order", () => {
+    const board = ["Ah", "Kd", "7c", "2s", "3d"];
+    const rows: LineCardReportRow[] = [
+      {
+        card: "5h",
+        dealProbability: 0.02,
+        dealProbabilityDefined: true,
+        reach: 0.1,
+        reachDefined: true,
+        zeroReach: false,
+        available: true,
+        reason: null,
+        resolvedNodeId: "n-5h",
+        actions: ["Check", "Bet 75"],
+        frequencies: [0.2, 0.8],
+        player: 1,
+      },
+      {
+        card: "9h",
+        dealProbability: 0.02,
+        dealProbabilityDefined: true,
+        reach: 0.1,
+        reachDefined: true,
+        zeroReach: false,
+        available: true,
+        reason: null,
+        resolvedNodeId: "n-9h",
+        actions: ["Check", "Bet 75"],
+        frequencies: [0.4, 0.6],
+        player: 1,
+      },
+      {
+        card: "Ah",
+        dealProbability: 0.02,
+        dealProbabilityDefined: true,
+        reach: 0.1,
+        reachDefined: true,
+        zeroReach: false,
+        available: true,
+        reason: null,
+        resolvedNodeId: "n-Ah",
+        actions: ["Check", "Bet 75"],
+        frequencies: [0.1, 0.9],
+        player: 1,
+      },
+      {
+        card: "5s",
+        dealProbability: 0.02,
+        dealProbabilityDefined: true,
+        reach: 0.1,
+        reachDefined: true,
+        zeroReach: false,
+        available: true,
+        reason: null,
+        resolvedNodeId: "n-5s",
+        actions: ["Check", "Bet 75"],
+        frequencies: [0, 1],
+        player: 1,
+      },
+    ];
+    const ranked = filterAndSortLineCardRows(rows, {
+      board,
+      street: "river",
+      predicate: { suits: ["h"], excludeBoardPair: true },
+      actionIndex: 1,
+      sortBy: "frequency",
+      sortDirection: "desc",
+    });
+    expect(ranked.map((row) => row.card)).toEqual(["5h", "9h"]);
+    const filtered = withLineCardReportFilter(
+      {
+        pending: false,
+        reportNodeId: "n",
+        line: "root",
+        street: "river",
+        chanceNodeId: "chance",
+        actionLabels: ["Check", "Bet 75"],
+        rows,
+        solutionId: "sol",
+      },
+      {
+        predicate: { suits: ["h"], excludeBoardPair: true },
+        board,
+        actionIndex: 1,
+        actionLabel: "Bet 75",
+        sortBy: "frequency",
+        sortDirection: "desc",
+        seat: "IP",
+      },
+    );
+    expect(filtered.matchedCards).toEqual(["5h", "9h"]);
   });
 });

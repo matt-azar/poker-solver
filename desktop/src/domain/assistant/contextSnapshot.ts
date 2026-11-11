@@ -15,6 +15,7 @@ import type {
   StatusPayload,
 } from "../types";
 import {
+  COMPARE_RUNOUTS_TOOL,
   LIST_BLUFF_CANDIDATES_TOOL,
   QUERY_NODE_STRATEGY_TOOL,
   QUERY_SELECTED_HAND_TOOL,
@@ -25,9 +26,10 @@ import {
 export const ASSISTANT_CONTEXT_SNAPSHOT_VERSION = 2 as const;
 
 /**
- * Bounded read-only tools for Study-page evidence.
- * Executable tools fetch via the Study analysis scheduler with work/memory limits;
- * runout/compare remain deferred.
+ * Bounded Study-page evidence tools.
+ * Strategy / bluffs / selected-hand stay read-only at the current decision.
+ * `compare_runouts` opens Compare runouts with filters (Study action).
+ * Baseline/scenario compare remains deferred.
  */
 export const SELECTED_HAND_ANALYSIS_TOOL_SCHEMA = {
   name: QUERY_SELECTED_HAND_TOOL.name,
@@ -41,6 +43,7 @@ export const STUDY_NODE_EVIDENCE_TOOL_NAMES = [
   QUERY_NODE_STRATEGY_TOOL.name,
   LIST_BLUFF_CANDIDATES_TOOL.name,
   QUERY_SELECTED_HAND_TOOL.name,
+  COMPARE_RUNOUTS_TOOL.name,
 ] as const;
 
 export interface AssistantContextBuildIdentity {

@@ -120,6 +120,7 @@ function frequencyBar(freqs: number[], colors: string[]): string | undefined {
 export function LineCardReport() {
   const report = useStudyStore((s) => s.lineCardReport);
   const loadLineCardReport = useStudyStore((s) => s.loadLineCardReport);
+  const applyLineCardReportFilter = useStudyStore((s) => s.applyLineCardReportFilter);
   const openLineCardRow = useStudyStore((s) => s.openLineCardRow);
   const evDisplayBasis =
     (useStudyStore((s) => s.evDisplayBasis) as EvDisplayBasis | undefined) ?? "local";
@@ -141,6 +142,55 @@ export function LineCardReport() {
     }
     return map;
   }, [report]);
+
+  const matchedSet = useMemo(() => {
+    if (!report?.matchedCards) {
+      return null;
+    }
+    return new Set(report.matchedCards);
+  }, [report?.matchedCards]);
+
+  const filterSummary = useMemo(() => {
+    const filter = report?.activeFilter;
+    if (!filter) {
+      return null;
+    }
+    const bits: string[] = [];
+    if (filter.predicate.suits?.length) {
+      bits.push(`suits ${filter.predicate.suits.join(",")}`);
+    }
+    if (filter.predicate.ranks?.length) {
+      bits.push(`ranks ${filter.predicate.ranks.join(",")}`);
+    }
+    if (filter.predicate.excludeBoardPair) {
+      bits.push("no board pairs");
+    }
+    if (filter.actionLabel) {
+      bits.push(
+        `${filter.sortDirection === "asc" ? "asc" : "desc"} ${filter.actionLabel}`,
+      );
+    } else if (filter.sortBy === "deal") {
+      bits.push("deal probability");
+    }
+    if (filter.seat) {
+      bits.push(filter.seat);
+    }
+    return bits.length ? bits.join(" · ") : "filtered";
+  }, [report?.activeFilter]);
+
+  const rankedRows = useMemo(() => {
+    if (!report?.matchedCards?.length) {
+      return [] as LineCardReportRow[];
+    }
+    const rows: LineCardReportRow[] = [];
+    for (const card of report.matchedCards) {
+      const row = byCard.get(card);
+      if (row) {
+        rows.push(row);
+      }
+    }
+    return rows;
+  }, [byCard, report?.matchedCards]);
 
   const colors = useMemo(
     () => mapActionColors(report?.actionLabels ?? []),
@@ -389,10 +439,24 @@ export function LineCardReport() {
               </button>
             ))}
           </div>
+          {report.activeFilter ? (
+            <button
+              type="button"
+              className="toolbar-btn"
+              data-testid="line-card-clear-filter"
+              onClick={() => applyLineCardReportFilter(null)}
+            >
+              Clear filter
+            </button>
+          ) : null}
           <button
             type="button"
             className="toolbar-btn"
-            onClick={() => void loadLineCardReport()}
+            onClick={() =>
+              void loadLineCardReport(
+                report.activeFilter ? { filter: report.activeFilter } : undefined,
+              )
+            }
           >
             Refresh
           </button>
@@ -403,6 +467,14 @@ export function LineCardReport() {
         {seat ? (
           <span className="line-card-seat" data-testid="line-card-seat">
             {seat}
+          </span>
+        ) : null}
+        {filterSummary ? (
+          <span className="line-card-filter" data-testid="line-card-filter">
+            {filterSummary}
+            {report.matchedCards
+              ? ` · ${report.matchedCards.length} match${report.matchedCards.length === 1 ? "" : "es"}`
+              : ""}
           </span>
         ) : null}
         {metric === "ev" ? (
@@ -426,6 +498,33 @@ export function LineCardReport() {
             </span>
           ))}
         </div>
+      ) : null}
+      {rankedRows.length > 0 && report.activeFilter?.actionIndex != null ? (
+        <ol className="line-card-ranked" data-testid="line-card-ranked">
+          {rankedRows.slice(0, 12).map((row) => {
+            const actionIndex = report.activeFilter?.actionIndex ?? 0;
+            const freq = row.frequencies[actionIndex];
+            return (
+              <li key={`ranked-${row.card}`}>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  disabled={!row.resolvedNodeId}
+                  onClick={() => {
+                    if (row.resolvedNodeId) {
+                      void openLineCardRow(row.resolvedNodeId);
+                    }
+                  }}
+                >
+                  {row.card}
+                  {freq != null && Number.isFinite(freq)
+                    ? ` · ${(freq * 100).toFixed(1)}%`
+                    : ""}
+                </button>
+              </li>
+            );
+          })}
+        </ol>
       ) : null}
       {report.error ? <p className="tree-editor-error">{report.error}</p> : null}
       {report.pending ? <p className="empty-hint">Loading…</p> : null}
@@ -459,6 +558,7 @@ export function LineCardReport() {
                 const value = cellValue(row);
                 const face = cardFace(code);
                 const heat = row?.available ? heatByCard.get(code) : undefined;
+                const filteredOut = Boolean(matchedSet && !matchedSet.has(code));
                 const bar =
                   metric === "frequencies" && row?.available
                     ? frequencyBar(row.frequencies, colors.byIndex)
@@ -472,12 +572,15 @@ export function LineCardReport() {
                     data-card={code}
                     data-suit={suit}
                     data-available={row?.available ? "true" : "false"}
+                    data-filtered-out={filteredOut ? "true" : "false"}
                     data-heat={heat ? "true" : "false"}
                     data-heat-color={heat ?? ""}
                     disabled={!row?.resolvedNodeId}
                     title={
                       row
-                        ? `${code}${row.reason ? ` · ${row.reason}` : ""}`
+                        ? `${code}${row.reason ? ` · ${row.reason}` : ""}${
+                            filteredOut ? " · filtered out" : ""
+                          }`
                         : `${code} not in this deal`
                     }
                     style={heat ? { backgroundColor: heat } : undefined}

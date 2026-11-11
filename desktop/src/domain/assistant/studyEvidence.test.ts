@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ActionValuesPayload, NodePayload } from "../types";
+import type { LineCardReportActiveFilter, LineCardReportModel } from "../lineCardReport";
 import {
+  compareRunouts,
   findSeatDecisionNodeId,
   listBluffCandidates,
+  looksLikeCompareRunoutsRequest,
   looksLikeStudyEvidenceRequest,
   queryNodeStrategy,
   querySelectedHandAnalysis,
@@ -71,12 +74,32 @@ function valuesFor(node: NodePayload): ActionValuesPayload {
   };
 }
 
+function riverIpNode(partial: Partial<NodePayload> = {}): NodePayload {
+  return ipNode({
+    node_id: "ip-river",
+    line: "root/Check/As",
+    board: ["Ah", "Kd", "7c", "2s", "3d"],
+    actions: ["Check", "Bet 75"],
+    strategy: [
+      [0.2, 0.8],
+      [0.4, 0.6],
+      [0.7, 0.3],
+    ],
+    ...partial,
+  });
+}
+
 function makeHost(initial: {
   node: NodePayload;
   nodes?: Record<string, NodePayload>;
   equityReady?: boolean;
   selectedCell?: { text: string } | null;
-}): { host: StudyEvidenceHost; state: StudyEvidenceLiveState } {
+  lineCardReport?: LineCardReportModel | null;
+}): {
+  host: StudyEvidenceHost;
+  state: StudyEvidenceLiveState;
+  lineCardReport: { current: LineCardReportModel | null };
+} {
   const nodes = {
     [initial.node.node_id]: initial.node,
     ...(initial.nodes ?? {}),
@@ -121,6 +144,10 @@ function makeHost(initial: {
     status: { solution_id: "sol-1", nash_gap: 0.01 },
   };
 
+  const lineCardReport = {
+    current: initial.lineCardReport ?? null,
+  };
+
   const host: StudyEvidenceHost = {
     read: () => state,
     ensureNodeAnalysis: vi.fn(async () => undefined),
@@ -145,8 +172,91 @@ function makeHost(initial: {
       }
       return next;
     }),
+    loadLineCardReport: vi.fn(async (opts?: { filter?: LineCardReportActiveFilter | null }) => {
+      lineCardReport.current = {
+        pending: false,
+        reportNodeId: state.currentNode!.node_id,
+        line: String(state.currentNode?.line ?? state.currentNode!.node_id),
+        street: "river",
+        chanceNodeId: "chance-river",
+        actionLabels: [...(state.currentNode?.actions ?? [])],
+        solutionId: state.solutionId ?? undefined,
+        rows: [
+          {
+            card: "5h",
+            dealProbability: 0.02,
+            dealProbabilityDefined: true,
+            reach: 0.1,
+            reachDefined: true,
+            zeroReach: false,
+            available: true,
+            reason: null,
+            resolvedNodeId: "ip-river-5h",
+            actions: ["Check", "Bet 75"],
+            frequencies: [0.2, 0.8],
+            player: 1,
+          },
+          {
+            card: "9h",
+            dealProbability: 0.02,
+            dealProbabilityDefined: true,
+            reach: 0.1,
+            reachDefined: true,
+            zeroReach: false,
+            available: true,
+            reason: null,
+            resolvedNodeId: "ip-river-9h",
+            actions: ["Check", "Bet 75"],
+            frequencies: [0.4, 0.6],
+            player: 1,
+          },
+          {
+            card: "Ah",
+            dealProbability: 0.02,
+            dealProbabilityDefined: true,
+            reach: 0.1,
+            reachDefined: true,
+            zeroReach: false,
+            available: true,
+            reason: null,
+            resolvedNodeId: "ip-river-Ah",
+            actions: ["Check", "Bet 75"],
+            frequencies: [0.1, 0.9],
+            player: 1,
+          },
+          {
+            card: "5s",
+            dealProbability: 0.02,
+            dealProbabilityDefined: true,
+            reach: 0.1,
+            reachDefined: true,
+            zeroReach: false,
+            available: true,
+            reason: null,
+            resolvedNodeId: "ip-river-5s",
+            actions: ["Check", "Bet 75"],
+            frequencies: [0, 1],
+            player: 1,
+          },
+        ],
+        activeFilter: opts?.filter ?? null,
+        matchedCards: opts?.filter
+          ? ["5h", "9h"]
+          : undefined,
+      };
+    }),
+    applyLineCardReportFilter: vi.fn((filter) => {
+      if (!lineCardReport.current) return;
+      lineCardReport.current = {
+        ...lineCardReport.current,
+        activeFilter: filter,
+        matchedCards: filter ? ["5h", "9h"] : undefined,
+      };
+    }),
+    openLineCardRow: vi.fn(async () => undefined),
+    readLineCardReport: () => lineCardReport.current,
   };
-  return { host, state };
+  return { host, state, lineCardReport };
 }
 
 describe("looksLikeStudyEvidenceRequest", () => {
@@ -157,6 +267,97 @@ describe("looksLikeStudyEvidenceRequest", () => {
     expect(looksLikeStudyEvidenceRequest("At this 3BP node, which hands bluff?")).toBe(true);
     expect(looksLikeStudyEvidenceRequest("How often does OOP bet here?")).toBe(true);
     expect(looksLikeStudyEvidenceRequest("Set pot to 55")).toBe(false);
+  });
+
+  it("detects compare-runouts filter phrasing", () => {
+    expect(
+      looksLikeCompareRunoutsRequest(
+        "On this line, show the heart rivers that don't pair the board, ranked by IP's 75% bet frequency.",
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeStudyEvidenceRequest(
+        "Show heart rivers that don't pair the board ranked by IP's 75% bet",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("compareRunouts", () => {
+  it("opens Compare runouts with heart non-pairing rivers ranked by 75% frequency", async () => {
+    const { host } = makeHost({ node: riverIpNode() });
+    const evidence = await compareRunouts(host, {
+      seat: "IP",
+      street: "river",
+      suits: ["h"],
+      excludeBoardPair: true,
+      action: "75%",
+      sortBy: "frequency",
+    });
+    expect(evidence.ok).toBe(true);
+    expect(evidence.openedReport).toBe(true);
+    expect(evidence.filters.action).toBe("Bet 75");
+    expect(evidence.rows.map((row) => row.card)).toEqual(["5h", "9h"]);
+    expect(evidence.rows[0]?.frequency).toBeCloseTo(0.8, 8);
+    expect(evidence.openInStudy?.card).toBe("5h");
+    expect(host.loadLineCardReport).toHaveBeenCalled();
+  });
+
+  it("rejects an unavailable size with supported actions", async () => {
+    const { host } = makeHost({ node: riverIpNode() });
+    const evidence = await compareRunouts(host, {
+      seat: "IP",
+      action: "33%",
+      suits: ["h"],
+    });
+    expect(evidence.ok).toBe(false);
+    expect(evidence.absences.join(" ")).toMatch(/not available/i);
+    expect(evidence.supportedActions).toEqual(["Check", "Bet 75"]);
+    expect(host.loadLineCardReport).not.toHaveBeenCalled();
+  });
+
+  it("hints when the requested seat is not acting", async () => {
+    const { host, state } = makeHost({
+      node: oopRoot(),
+      nodes: { "ip-1": riverIpNode() },
+    });
+    const evidence = await compareRunouts(host, {
+      seat: "IP",
+      action: "75%",
+    });
+    expect(evidence.ok).toBe(false);
+    expect(evidence.absences.join(" ")).toMatch(/not IP/i);
+    expect(state.currentNode?.node_id).toBe("root");
+    expect(host.loadLineCardReport).not.toHaveBeenCalled();
+  });
+
+  it("opens a matched card through openLineCardRow", async () => {
+    const { host } = makeHost({ node: riverIpNode() });
+    const evidence = await compareRunouts(host, {
+      seat: "IP",
+      suits: ["h"],
+      excludeBoardPair: true,
+      action: "Bet 75",
+      openCard: "9h",
+    });
+    expect(evidence.ok).toBe(true);
+    expect(evidence.openedCard).toBe("9h");
+    expect(host.openLineCardRow).toHaveBeenCalledWith("ip-river-9h");
+  });
+
+  it("aborts when the solution changes while loading the report", async () => {
+    const { host, state } = makeHost({ node: riverIpNode() });
+    host.loadLineCardReport = vi.fn(async () => {
+      state.solutionId = "sol-other";
+    });
+    const evidence = await compareRunouts(host, {
+      seat: "IP",
+      action: "75%",
+      suits: ["h"],
+      excludeBoardPair: true,
+    });
+    expect(evidence.ok).toBe(false);
+    expect(evidence.absences.join(" ")).toMatch(/changed while building/i);
   });
 });
 
