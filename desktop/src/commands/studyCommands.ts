@@ -237,13 +237,24 @@ export async function executeCalculateEv(
 }
 
 export async function executeSave(
-  deps: SimpleCommandDeps & { save: () => Promise<void | boolean> },
+  deps: SimpleCommandDeps & {
+    save: () => Promise<void | boolean | { ok: boolean; cancelled?: boolean; error?: string }>;
+  },
 ): Promise<CommandResult> {
   const gate = canExecuteSave(deps.getContext());
   if (!gate.ok) {
     return { ok: false, reason: gate.reason };
   }
-  await deps.save();
+  const result = await deps.save();
+  if (result && typeof result === "object" && "ok" in result && !result.ok) {
+    return {
+      ok: false,
+      reason: result.cancelled ? "cancelled" : result.error || "Save failed",
+    };
+  }
+  if (result === false) {
+    return { ok: false, reason: "Save failed" };
+  }
   return { ok: true };
 }
 

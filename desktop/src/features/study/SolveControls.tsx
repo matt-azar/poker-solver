@@ -52,9 +52,7 @@ export function SolveControls() {
         onClick={() =>
           void executeSave({
             ...commandDeps(),
-            save: async () => {
-              await saveSolutionFile(solutionFileDeps());
-            },
+            save: async () => saveSolutionFile(solutionFileDeps()),
           })
         }
       >

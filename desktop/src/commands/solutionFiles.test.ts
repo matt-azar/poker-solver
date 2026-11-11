@@ -10,7 +10,7 @@ function makeDeps(overrides: Partial<Parameters<typeof openSolutionFile>[0]> = {
     getSolutionPath: () => "",
     updateDraft: vi.fn(),
     openSolution: vi.fn(async () => ({ ok: true as const, path: "/tmp/spot.psol" })),
-    saveSolution: vi.fn(async () => undefined),
+    saveSolution: vi.fn(async (path: string) => ({ ok: true as const, path })),
     pickOpenPath: vi.fn(async () => null as string | null),
     pickSavePath: vi.fn(async () => null as string | null),
     ...overrides,
@@ -61,7 +61,7 @@ describe("openSolutionFile", () => {
 });
 
 describe("saveSolutionFile", () => {
-  it("saves to the existing path without prompting", async () => {
+  it("saves to the existing path without prompting or drafting first", async () => {
     const deps = makeDeps({
       getSolutionPath: () => "/tmp/existing.psol",
       pickSavePath: vi.fn(async () => "/tmp/other.psol"),
@@ -71,11 +71,11 @@ describe("saveSolutionFile", () => {
       path: "/tmp/existing.psol",
     });
     expect(deps.pickSavePath).not.toHaveBeenCalled();
-    expect(deps.updateDraft).toHaveBeenCalledWith({ solutionPath: "/tmp/existing.psol" });
-    expect(deps.saveSolution).toHaveBeenCalled();
+    expect(deps.updateDraft).not.toHaveBeenCalled();
+    expect(deps.saveSolution).toHaveBeenCalledWith("/tmp/existing.psol");
   });
 
-  it("prompts Save As when no path is set", async () => {
+  it("prompts Save As when no path is set and does not draft before ack", async () => {
     const deps = makeDeps({
       getSolutionPath: () => "  ",
       pickSavePath: vi.fn(async () => "/tmp/new.psol"),
@@ -85,8 +85,23 @@ describe("saveSolutionFile", () => {
       path: "/tmp/new.psol",
     });
     expect(deps.pickSavePath).toHaveBeenCalled();
-    expect(deps.updateDraft).toHaveBeenCalledWith({ solutionPath: "/tmp/new.psol" });
-    expect(deps.saveSolution).toHaveBeenCalled();
+    expect(deps.updateDraft).not.toHaveBeenCalled();
+    expect(deps.saveSolution).toHaveBeenCalledWith("/tmp/new.psol");
+  });
+
+  it("returns failure when the store rejects the save", async () => {
+    const deps = makeDeps({
+      getSolutionPath: () => "/tmp/existing.psol",
+      saveSolution: vi.fn(async () => ({
+        ok: false as const,
+        error: "disk full",
+      })),
+    });
+    await expect(saveSolutionFile(deps)).resolves.toEqual({
+      ok: false,
+      error: "disk full",
+    });
+    expect(deps.updateDraft).not.toHaveBeenCalled();
   });
 
   it("leaves the study alone when Save As is cancelled", async () => {
@@ -105,7 +120,7 @@ describe("saveSolutionFile", () => {
 });
 
 describe("saveSolutionFileAs", () => {
-  it("always prompts and saves the picked path", async () => {
+  it("always prompts and saves the picked path without drafting first", async () => {
     const deps = makeDeps({
       getSolutionPath: () => "/tmp/existing.psol",
       pickSavePath: vi.fn(async (defaultPath?: string) => {
@@ -117,8 +132,24 @@ describe("saveSolutionFileAs", () => {
       ok: true,
       path: "/tmp/renamed.psol",
     });
-    expect(deps.updateDraft).toHaveBeenCalledWith({ solutionPath: "/tmp/renamed.psol" });
-    expect(deps.saveSolution).toHaveBeenCalled();
+    expect(deps.updateDraft).not.toHaveBeenCalled();
+    expect(deps.saveSolution).toHaveBeenCalledWith("/tmp/renamed.psol");
+  });
+
+  it("cancels when replace confirm returns false", async () => {
+    const deps = makeDeps({
+      getSolutionPath: () => "/tmp/existing.psol",
+      pickSavePath: vi.fn(async () => "/tmp/other.psol"),
+      confirmReplace: vi.fn(async () => false),
+    });
+    await expect(saveSolutionFileAs(deps)).resolves.toEqual({
+      ok: false,
+      error: "cancelled",
+      cancelled: true,
+    });
+    expect(deps.confirmReplace).toHaveBeenCalledWith("/tmp/other.psol");
+    expect(deps.saveSolution).not.toHaveBeenCalled();
+    expect(deps.updateDraft).not.toHaveBeenCalled();
   });
 
   it("leaves the study alone on cancel", async () => {

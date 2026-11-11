@@ -351,6 +351,29 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     expect(state.phase).toBe("failed");
   });
 
+  it("failed Save As keeps the previous path; successful Save As commits the new path", async () => {
+    expect(useStudyStore.getState().draft.solutionPath).toBe("/good.psol");
+
+    engineMocks.engineClient.save.mockRejectedValueOnce(
+      new engineMocks.EngineError("disk full", 500),
+    );
+    const failed = await useStudyStore
+      .getState()
+      .saveSolution("/other.psol");
+    expect(failed).toEqual({ ok: false, error: "disk full" });
+    expect(useStudyStore.getState().draft.solutionPath).toBe("/good.psol");
+    expect(useStudyStore.getState().message).toMatch(/disk full/i);
+
+    engineMocks.engineClient.save.mockResolvedValueOnce(undefined);
+    const saved = await useStudyStore.getState().saveSolution("/other.psol");
+    expect(saved).toEqual({ ok: true, path: "/other.psol" });
+    expect(useStudyStore.getState().draft.solutionPath).toBe("/other.psol");
+    expect(engineMocks.engineClient.save).toHaveBeenLastCalledWith(
+      "s1",
+      "/other.psol",
+    );
+  });
+
   it("openSolution pauses status polling so abort does not paint unreachable", async () => {
     let releaseOpen: (() => void) | null = null;
     const openGate = new Promise<void>((resolve) => {

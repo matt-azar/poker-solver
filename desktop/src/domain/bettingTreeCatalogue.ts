@@ -1,6 +1,9 @@
 /**
  * Flat localStorage catalogue of named betting trees (no folders).
  * Mirrors the range-catalogue persistence pattern at one level.
+ *
+ * Entry ids are opaque and stable across renames. Display names may collide
+ * only when the caller passes an explicit replaceId.
  */
 import {
   BETTING_TREE_FORMAT,
@@ -27,17 +30,45 @@ export interface SavedBettingTree {
   document: BettingTreeDocument;
 }
 
+export type CatalogueMutationResult =
+  | { ok: true; entry: SavedBettingTree }
+  | {
+      ok: false;
+      error: string;
+      reason: "blank_name" | "not_found" | "name_collision" | "storage";
+      collidingId?: string;
+    };
+
+export type CatalogueRemoveResult =
+  | { ok: true }
+  | {
+      ok: false;
+      error: string;
+      reason: "not_found" | "storage";
+    };
+
 export interface BettingTreeCatalogue {
   list(): SavedBettingTree[];
   get(id: string): SavedBettingTree | undefined;
-  /** Upsert by name (same slug overwrites). */
-  save(displayName: string, document: BettingTreeDocument): SavedBettingTree;
-  rename(id: string, displayName: string): SavedBettingTree | null;
-  remove(id: string): boolean;
-  clear(): void;
+  /**
+   * Insert a new opaque id, or replace an existing entry when replaceId is set.
+   * Same-name collision without replaceId returns name_collision (no mutation).
+   */
+  save(
+    displayName: string,
+    document: BettingTreeDocument,
+    opts?: { replaceId?: string },
+  ): CatalogueMutationResult;
+  rename(
+    id: string,
+    displayName: string,
+    opts?: { replaceId?: string },
+  ): CatalogueMutationResult;
+  remove(id: string): CatalogueRemoveResult;
+  clear(): CatalogueRemoveResult;
 }
 
-/** Stable id for a Build-saved betting tree name (overwrites on re-save). */
+/** Legacy slug id used before opaque ids — kept for migration detection. */
 export function savedBettingTreeId(displayName: string): string {
   const slug =
     displayName
@@ -48,20 +79,41 @@ export function savedBettingTreeId(displayName: string): string {
   return `user-saved-tree-${slug}`;
 }
 
-function readEntries(storage?: BettingTreeStorage): SavedBettingTree[] {
+function normalizeNameKey(displayName: string): string {
+  return displayName.trim().toLowerCase();
+}
+
+function newBettingTreeId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `user-saved-tree-${crypto.randomUUID()}`;
+  }
+  return `user-saved-tree-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+}
+
+function isLegacySlugId(id: string, displayName: string): boolean {
+  return id === savedBettingTreeId(displayName);
+}
+
+function readEntries(storage?: BettingTreeStorage): {
+  entries: SavedBettingTree[];
+  migrated: boolean;
+} {
   if (!storage) {
-    return [];
+    return { entries: [], migrated: false };
   }
   const raw = storage.getItem(BETTING_TREE_CATALOGUE_STORAGE_KEY);
   if (!raw) {
-    return [];
+    return { entries: [], migrated: false };
   }
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) {
-      return [];
+      return { entries: [], migrated: false };
     }
     const out: SavedBettingTree[] = [];
+    let migrated = false;
     for (const entry of parsed) {
       if (!entry || typeof entry !== "object") {
         continue;
@@ -83,22 +135,28 @@ function readEntries(storage?: BettingTreeStorage): SavedBettingTree[] {
       if (!parsedDoc.ok) {
         continue;
       }
+      const displayName = obj.displayName.trim() || "Saved tree";
+      let id = obj.id;
+      if (isLegacySlugId(id, displayName)) {
+        id = newBettingTreeId();
+        migrated = true;
+      }
       out.push({
-        id: obj.id,
-        displayName: obj.displayName.trim() || "Saved tree",
+        id,
+        displayName,
         dataRevision:
           typeof obj.dataRevision === "string"
             ? obj.dataRevision
             : Date.now().toString(36),
         document: {
           ...parsedDoc.document,
-          name: obj.displayName.trim() || parsedDoc.document.name,
+          name: displayName || parsedDoc.document.name,
         },
       });
     }
-    return out;
+    return { entries: out, migrated };
   } catch {
-    return [];
+    return { entries: [], migrated: false };
   }
 }
 
@@ -121,16 +179,51 @@ function normalizeDocument(
   };
 }
 
+function findNameCollision(
+  entries: Map<string, SavedBettingTree>,
+  displayName: string,
+  exceptId?: string,
+): SavedBettingTree | undefined {
+  const key = normalizeNameKey(displayName);
+  for (const entry of entries.values()) {
+    if (exceptId && entry.id === exceptId) {
+      continue;
+    }
+    if (normalizeNameKey(entry.displayName) === key) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
 export function createBettingTreeCatalogue(
   storage?: BettingTreeStorage,
 ): BettingTreeCatalogue {
   const entries = new Map<string, SavedBettingTree>();
-  for (const entry of readEntries(storage)) {
+  const loaded = readEntries(storage);
+  for (const entry of loaded.entries) {
     entries.set(entry.id, entry);
   }
-
-  function persist(): void {
+  if (loaded.migrated) {
+    // Persist rewritten opaque ids before exposing live state to callers.
     writeEntries(storage, [...entries.values()]);
+  }
+
+  function commit(next: Map<string, SavedBettingTree>): CatalogueMutationResult | true {
+    try {
+      writeEntries(storage, [...next.values()]);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: "storage",
+        error: error instanceof Error ? error.message : "Storage write failed",
+      };
+    }
+    entries.clear();
+    for (const [key, value] of next) {
+      entries.set(key, value);
+    }
+    return true;
   }
 
   return {
@@ -142,55 +235,150 @@ export function createBettingTreeCatalogue(
     get(id: string) {
       return entries.get(id);
     },
-    save(displayName: string, document: BettingTreeDocument) {
+    save(displayName, document, opts) {
       const name = displayName.trim();
       if (!name) {
-        throw new Error("Enter a name for the saved tree.");
+        return {
+          ok: false,
+          reason: "blank_name",
+          error: "Enter a name for the saved tree.",
+        };
       }
-      const id = savedBettingTreeId(name);
+      const next = new Map(entries);
+      const replaceId = opts?.replaceId;
+      if (replaceId) {
+        if (!next.has(replaceId)) {
+          return {
+            ok: false,
+            reason: "not_found",
+            error: "Could not find that saved tree.",
+          };
+        }
+        const collision = findNameCollision(next, name, replaceId);
+        if (collision) {
+          return {
+            ok: false,
+            reason: "name_collision",
+            error: `A tree named "${collision.displayName}" already exists.`,
+            collidingId: collision.id,
+          };
+        }
+        const saved: SavedBettingTree = {
+          id: replaceId,
+          displayName: name,
+          dataRevision: Date.now().toString(36),
+          document: normalizeDocument(name, document),
+        };
+        next.set(replaceId, saved);
+        const committed = commit(next);
+        if (committed !== true) {
+          return committed;
+        }
+        return { ok: true, entry: saved };
+      }
+
+      const collision = findNameCollision(next, name);
+      if (collision) {
+        return {
+          ok: false,
+          reason: "name_collision",
+          error: `A tree named "${collision.displayName}" already exists.`,
+          collidingId: collision.id,
+        };
+      }
       const saved: SavedBettingTree = {
-        id,
+        id: newBettingTreeId(),
         displayName: name,
         dataRevision: Date.now().toString(36),
         document: normalizeDocument(name, document),
       };
-      entries.set(id, saved);
-      persist();
-      return saved;
+      next.set(saved.id, saved);
+      const committed = commit(next);
+      if (committed !== true) {
+        return committed;
+      }
+      return { ok: true, entry: saved };
     },
-    rename(id: string, displayName: string) {
+    rename(id, displayName, opts) {
       const existing = entries.get(id);
       if (!existing) {
-        return null;
+        return {
+          ok: false,
+          reason: "not_found",
+          error: "Could not find that saved tree.",
+        };
       }
       const name = displayName.trim();
       if (!name) {
-        return null;
+        return {
+          ok: false,
+          reason: "blank_name",
+          error: "Saved tree name cannot be empty.",
+        };
       }
-      const nextId = savedBettingTreeId(name);
+      const next = new Map(entries);
+      const collision = findNameCollision(next, name, id);
+      if (collision) {
+        if (!opts?.replaceId || opts.replaceId !== collision.id) {
+          return {
+            ok: false,
+            reason: "name_collision",
+            error: `A tree named "${collision.displayName}" already exists.`,
+            collidingId: collision.id,
+          };
+        }
+        next.delete(collision.id);
+      }
       const saved: SavedBettingTree = {
-        id: nextId,
+        id,
         displayName: name,
         dataRevision: Date.now().toString(36),
         document: normalizeDocument(name, existing.document),
       };
-      entries.delete(id);
-      // Replacing another tree with the same slug overwrites it intentionally.
-      entries.set(nextId, saved);
-      persist();
-      return saved;
-    },
-    remove(id: string) {
-      if (!entries.has(id)) {
-        return false;
+      next.set(id, saved);
+      const committed = commit(next);
+      if (committed !== true) {
+        return committed;
       }
-      entries.delete(id);
-      persist();
-      return true;
+      return { ok: true, entry: saved };
+    },
+    remove(id) {
+      if (!entries.has(id)) {
+        return {
+          ok: false,
+          reason: "not_found",
+          error: "Could not find that saved tree.",
+        };
+      }
+      const next = new Map(entries);
+      next.delete(id);
+      try {
+        writeEntries(storage, [...next.values()]);
+      } catch (error) {
+        return {
+          ok: false,
+          reason: "storage",
+          error: error instanceof Error ? error.message : "Storage write failed",
+        };
+      }
+      entries.clear();
+      for (const [key, value] of next) {
+        entries.set(key, value);
+      }
+      return { ok: true };
     },
     clear() {
+      try {
+        writeEntries(storage, []);
+      } catch (error) {
+        return {
+          ok: false,
+          reason: "storage",
+          error: error instanceof Error ? error.message : "Storage write failed",
+        };
+      }
       entries.clear();
-      persist();
+      return { ok: true };
     },
   };
 }

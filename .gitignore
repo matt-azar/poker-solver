@@ -36,3 +36,4 @@ desktop/src-tauri/binaries/explorer-*
 !desktop/src-tauri/binaries/.gitkeep
 !desktop/src-tauri/binaries/README.md
 build-equity/
+build-remove-kuhn/
