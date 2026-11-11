@@ -77,7 +77,7 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-debug
 ```
 
-Production CLIs (multi-config): `build\Release\street_solver.exe`, `build\Release\river_solver.exe`, `build\Release\explorer.exe`, `build\Release\equity_calculator.exe`. Single-config builds omit the `Release` directory. Reference-game CLIs `kuhn_solver` and `leduc_solver` are also built; see [docs/auxiliary/reference/LEDUC.md](docs/auxiliary/reference/LEDUC.md).
+Production CLIs (multi-config): `build\Release\street_solver.exe`, `build\Release\river_solver.exe`, `build\Release\explorer.exe`, `build\Release\equity_calculator.exe`. Single-config builds omit the `Release` directory.
 
 ## Run
 
@@ -112,7 +112,7 @@ Raise or lower the work ceiling with `--max-pair-runouts` or `POKER_EQUITY_MAX_P
 ```text
 include/          Public C++ headers (game, solver, poker, explorer)
 src/              Engine libraries (poker/, solver/, game/, explorer/)
-src/cli/          Process entrypoints (street/river/explorer/equity/kuhn/leduc)
+src/cli/          Process entrypoints (street/river/explorer/equity)
 desktop/          React Study UI + Tauri Windows shell (product UI)
 legacy/ui/        Legacy explorer static page (fallback + regression)
 benchmarks/       Study benchmark runner, cases, and street micro-benches
@@ -147,7 +147,7 @@ Index: [docs/README.md](docs/README.md). Primary docs stay at `docs/`; supportin
 ### Auxiliary
 
 - [docs/auxiliary/](docs/auxiliary/README.md) — planning, engineering, payoffs, reference games, archive notes
-  ([ROADMAP](docs/auxiliary/planning/ROADMAP.md), [FEATURE_PARITY](docs/auxiliary/planning/FEATURE_PARITY.md), [PROJECT_HISTORY](docs/auxiliary/notes/PROJECT_HISTORY.md), [TESTING](docs/auxiliary/engineering/TESTING.md), [BENCHMARKS](docs/auxiliary/engineering/BENCHMARKS.md), [LEDUC](docs/auxiliary/reference/LEDUC.md), [HUNL](docs/auxiliary/reference/HUNL.md), …)
+  ([ROADMAP](docs/auxiliary/planning/ROADMAP.md), [FEATURE_PARITY](docs/auxiliary/planning/FEATURE_PARITY.md), [PROJECT_HISTORY](docs/auxiliary/notes/PROJECT_HISTORY.md), [TESTING](docs/auxiliary/engineering/TESTING.md), [BENCHMARKS](docs/auxiliary/engineering/BENCHMARKS.md), [HUNL](docs/auxiliary/reference/HUNL.md), …)
 
 ## License
 

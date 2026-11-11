@@ -703,12 +703,7 @@ int main(int argc, char** argv)
             }
             else if (arg == "--reference")
             {
-#if defined(POKER_SOLVER_HAS_REFERENCE) && POKER_SOLVER_HAS_REFERENCE
                 options.reference = true;
-#else
-                throw std::invalid_argument(
-                    "--reference requires a build with POKER_SOLVER_ENABLE_REFERENCE=ON");
-#endif
             }
             else if (arg == "--report")
             {

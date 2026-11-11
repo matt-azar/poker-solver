@@ -19,7 +19,7 @@ alwaysApply: true
 **Architecture / Study correctness (short)**
 
 - On `main`, flop/turn/river (3/4/5 cards) use `StreetBatchSolver`. `river_solver` is a thin CLI onto that path. `RiverGame` stays the five-card oracle; `RiverBatchSolver` is oracle/legacy only.
-- Pin production batch changes against `CfrTrainer<*Game>` / `--reference`. Kuhn/Leduc stay on `CfrTrainer` only. `include/` must not depend on `legacy/ui/` or `desktop/`.
+- Pin production batch changes against `CfrTrainer<*Game>` / `--reference`. `include/` must not depend on `legacy/ui/` or `desktop/`.
 - Nash gap is NashConv (sum of BR gains). Accuracy / stop criterion is Pio’s average (NashConv/2); default unit is pot fraction.
 - Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; Equity (UI label) is check-down pot fraction ≠ chip EV.
 - Study `/values` are root-centered; Local EV uses `local_offset` (include street `contrib`, not half pot alone). Index Fold from `values.actions`, not `node.actions`. Serialize EV/equity analysis jobs; identity includes `analysis_revision`. Do not full-tree frontload analysis.

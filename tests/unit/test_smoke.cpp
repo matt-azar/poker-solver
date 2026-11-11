@@ -1,9 +1,11 @@
-#include "game/kuhn.hpp"
 #include "harness.hpp"
+
+#include "poker/card.hpp"
+#include "poker/range.hpp"
 
 void run_smoke_tests()
 {
-    CHECK(poker::kuhn::kNumInfosets == 12);
-    CHECK(poker::kuhn::kNumDeals == 6);
-    CHECK(poker::kuhn::kActionsPerInfoset == 2);
+    CHECK(poker::holdem::kDeckSize == 52);
+    CHECK(poker::holdem::kComboCount == 1326);
+    CHECK(poker::holdem::Range::combo_index(0, 1) == 0);
 }

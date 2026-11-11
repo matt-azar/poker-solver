@@ -689,7 +689,7 @@ private:
     // One strategy for the whole pass. Later histories in the same information
     // set do not see regrets written earlier in this pass.
     // When locks_ is set, locked action rows replace RM output for matching
-    // infosets. Kuhn and other non-combo trainers pass combo_index 0.
+    // infosets. Trainers without a combo axis pass combo_index 0.
     // PCFR+: match on cumulative regret plus the previous pass's instantaneous
     // CF regret (last_r_), then apply locks.
     void begin_pass()

@@ -1,6 +1,6 @@
 # Mathematics
 
-Definitions used by the Hold'em street/river solvers and by the Kuhn/Leduc reference games that verify the shared CFR trainer.
+Definitions used by the Hold'em street/river solvers and the shared CFR trainer.
 
 ## Hold'em showdown and hand distributions
 
@@ -131,13 +131,3 @@ If \(D_i(h)=0\), \(Q_i(h,a)\) is undefined. The query does not invent a uniform 
 The mixed hand value is \(V_i(h)=\sum_a \bar\sigma_i(h,a)\, Q_i(h,a)\).
 
 Where the posterior marginal \(m_i(h)\) exists, the node value is \(\sum_h m_i(h)\, V_i(h)\). At the root this is the stored EV from the actor's side: player 0's utility when OOP acts, and its negation when IP acts. A group's mixed value averages over the hands in the group with those same marginals. Those aggregates are not NashConv, cumulative regret, or a best-response gain.
-
-## Kuhn reference (trainer verification)
-
-Kuhn Poker is a two-player zero-sum imperfect-information game used to pin the shared CFR trainer. Deck `{Jack, Queen, King}`; each player posts a unit ante; player 1 acts first (Check or Bet 1). Tree: [ARCHITECTURE.md](ARCHITECTURE.md). Equilibrium game value for player 1:
-
-\[
-V = -\frac{1}{18}.
-\]
-
-Equilibrium strategies form a family parameterized by \(\alpha \in [0, 1/3]\) (Kuhn, 1950). Tests check that family and that both vanilla CFR and CFR+ approach \(V\) with Nash gap below \(10^{-3}\) at 200,000 iterations. Measured times: [BENCHMARKS.md](auxiliary/engineering/BENCHMARKS.md).
