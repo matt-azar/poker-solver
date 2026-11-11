@@ -34,7 +34,7 @@ After `npm run build`, `explorer` prefers `desktop/dist` over `legacy/ui/` when 
 ## Setup assistant notes
 
 - Range charts: Build → **Catalogue** (seat×action tree). See `configs/range-profiles/README.md`. Equity → **Import JSON** loads an equity scenario, not a range profile.
-- OpenAI credentials: prefer Tauri `assistant_secret_*` storage in the packaged app; browser prototype may use `holdem-study-openai-key` localStorage. Never commit keys. A distributed product should use an authenticated backend proxy.
+- OpenAI credentials: prefer Tauri `assistant_secret_*` (OS keyring; legacy `assistant_secrets.json` migrate-on-read) in the packaged app; browser prototype may use `holdem-study-openai-key` localStorage. Never commit keys. A distributed product should use an authenticated backend proxy.
 
 ## License
 

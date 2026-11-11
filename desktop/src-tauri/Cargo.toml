@@ -23,6 +23,14 @@ tauri = { version = "=2.5.1", features = [] }
 tauri-plugin-shell = "=2.2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# OS credential store for assistant API keys (migrate from assistant_secrets.json).
+# Pin 2.3.x — keyring 3+ needs rustc past 1.83. On Linux use kernel keyutils
+# (not Secret Service / zbus) so the resolve graph stays rustc-1.83-friendly.
+keyring = { version = "=2.3.3", default-features = false, features = [
+  "linux-no-secret-service",
+  "platform-macos",
+  "platform-windows",
+] }
 
 # Native Open/Save pickers for the Windows installer build. Keep Linux off this
 # crate so the resolve graph stays clear of zbus/ashpd floats past rustc 1.83.
