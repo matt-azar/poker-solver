@@ -1,6 +1,6 @@
 [package]
 name = "poker-solver-study"
-version = "0.1.1"
+version = "0.1.2"
 description = "Hold'em Study desktop shell (Tauri 2 + explorer sidecar)"
 authors = ["Matt Azar"]
 edition = "2021"
