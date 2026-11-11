@@ -1217,6 +1217,23 @@ void run_explorer_http_tests()
     CHECK(http_exchange("GET", "/api/status", "", still_up));
     CHECK(still_up.status == 200);
     CHECK(json_string(still_up.body, "solution_id") == street_solution);
+
+    // Failed Open must leave the live Study solution_id intact.
+    HttpResult failed_open;
+    CHECK(http_exchange(
+        "POST",
+        "/api/open",
+        "{\"path\":\""
+            + json_escape_path("/tmp/poker-solver-missing-open-"
+                + std::to_string(g_explorer_port) + ".psol")
+            + "\"}",
+        failed_open));
+    CHECK(failed_open.status == 400);
+    HttpResult after_failed_open;
+    CHECK(http_exchange("GET", "/api/status", "", after_failed_open));
+    CHECK(after_failed_open.status == 200);
+    CHECK(json_string(after_failed_open.body, "solution_id") == street_solution);
+
     HttpResult missing_continue;
     CHECK(http_exchange("POST", "/api/solutions/s99/continue", "{\"iterations\":1}", missing_continue));
     CHECK(missing_continue.status == 404);

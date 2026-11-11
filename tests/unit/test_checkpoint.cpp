@@ -67,6 +67,103 @@ std::filesystem::path test_file(const char* prefix)
     return unique_temp_path(prefix);
 }
 
+std::filesystem::path fixture_path(const char* relative)
+{
+#ifdef POKER_SOLVER_SOURCE_DIR
+    return std::filesystem::path(POKER_SOLVER_SOURCE_DIR) / relative;
+#else
+    return std::filesystem::path(relative);
+#endif
+}
+
+void test_release_fixture_street_kind1_continue()
+{
+    const std::filesystem::path path =
+        fixture_path("tests/fixtures/psol/street_kind1_v2_cfrplus_tiny.psol");
+    CHECK(std::filesystem::is_regular_file(path));
+    const CheckpointDocument loaded =
+        poker::explorer::read_checkpoint(path.string(), 64ull * 1024ull * 1024ull);
+    CHECK(loaded.kind == 1);
+    CHECK(loaded.algorithm == 1);
+    CHECK(loaded.tables.iterations == 4);
+    CHECK(loaded.tables.oop_combos.size() == 1);
+    CHECK(loaded.tables.ip_combos.size() == 1);
+    CHECK(!loaded.tables.slot_actions.empty());
+    for (const std::uint32_t actions : loaded.tables.slot_actions)
+    {
+        CHECK(actions == 2);
+    }
+    CHECK_NEAR(loaded.value, 55.7904, 1e-3);
+
+    const poker::streets::StreetConfig config =
+        poker::streets::parse_street_config(loaded.config_text);
+    StreetBatchSolver full(config);
+    full.continue_iterations(6, Algorithm::CfrPlus);
+    StreetBatchSolver restored(config);
+    restored.install_training_tables(loaded.tables);
+    restored.bind_training_algorithm(Algorithm::CfrPlus);
+    restored.continue_iterations(2, Algorithm::CfrPlus);
+    CHECK(same_tables(restored.training_tables(), full.training_tables()));
+    CHECK(restored.completed_iterations() == 6);
+}
+
+void test_release_fixture_river_kind2_continue()
+{
+    const std::filesystem::path path =
+        fixture_path("tests/fixtures/psol/river_kind2_v2_cfrplus_tiny.psol");
+    CHECK(std::filesystem::is_regular_file(path));
+    const CheckpointDocument loaded =
+        poker::explorer::read_checkpoint(path.string(), 64ull * 1024ull * 1024ull);
+    CHECK(loaded.kind == 2);
+    CHECK(loaded.algorithm == 1);
+    CHECK(loaded.tables.iterations == 3);
+    CHECK(loaded.tables.oop_combos.size() == 1);
+    CHECK(loaded.tables.ip_combos.size() == 1);
+    for (const std::uint32_t actions : loaded.tables.slot_actions)
+    {
+        CHECK(actions == 2);
+    }
+
+    const poker::river::RiverConfig config =
+        poker::river::parse_river_config(loaded.config_text);
+    poker::solver::RiverBatchSolver full(config);
+    full.continue_iterations(5, Algorithm::CfrPlus);
+    poker::solver::RiverBatchSolver restored(config);
+    restored.install_training_tables(loaded.tables);
+    restored.continue_iterations(2, Algorithm::CfrPlus);
+    CHECK(same_tables(restored.training_tables(), full.training_tables()));
+}
+
+void test_checkpoint_unique_temps_concurrent_writers()
+{
+    const poker::streets::StreetConfig config = turn_config();
+    StreetBatchSolver solver(config);
+    solver.continue_iterations(1, Algorithm::CfrPlus);
+    CheckpointDocument document;
+    document.kind = 1;
+    document.algorithm = 1;
+    document.samples = 1;
+    document.config_text = poker::streets::format_street_config(config);
+    document.tables = solver.training_tables();
+    document.value = solver.expected_utility();
+
+    const std::filesystem::path path_a = test_file("poker-solver-conc-a.psol");
+    const std::filesystem::path path_b = test_file("poker-solver-conc-b.psol");
+    poker::explorer::write_checkpoint(path_a.string(), document);
+    poker::explorer::write_checkpoint(path_b.string(), document);
+    const CheckpointDocument loaded_a =
+        poker::explorer::read_checkpoint(path_a.string(), 64ull * 1024ull * 1024ull);
+    const CheckpointDocument loaded_b =
+        poker::explorer::read_checkpoint(path_b.string(), 64ull * 1024ull * 1024ull);
+    CHECK(same_tables(loaded_a.tables, document.tables));
+    CHECK(same_tables(loaded_b.tables, document.tables));
+    // Fixed sibling `.tmp` must not remain after a successful replace.
+    CHECK(!std::filesystem::exists(path_a.string() + ".tmp"));
+    CHECK(!std::filesystem::exists(path_b.string() + ".tmp"));
+    std::filesystem::remove(path_a);
+    std::filesystem::remove(path_b);
+}
+
 void test_resume_matches_uninterrupted_street()
 {
     const poker::streets::StreetConfig config = turn_config();
@@ -578,6 +675,9 @@ void run_checkpoint_tests()
 {
     test_resume_matches_uninterrupted_street();
     test_resume_matches_uninterrupted_river();
+    test_release_fixture_street_kind1_continue();
+    test_release_fixture_river_kind2_continue();
+    test_checkpoint_unique_temps_concurrent_writers();
     test_checkpoint_rejects_bad_files();
     test_checkpoint_locks_round_trip();
     test_checkpoint_v1_loads_empty_locks();

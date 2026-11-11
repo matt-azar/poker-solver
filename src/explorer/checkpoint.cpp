@@ -2,7 +2,9 @@
 
 #include "solver/solve_types.hpp"
 
+#include <atomic>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -15,6 +17,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace poker::explorer
@@ -623,7 +627,20 @@ void write_checkpoint(
         : kVersionLocks;
 
     const std::filesystem::path destination(path);
-    const std::filesystem::path temporary(destination.string() + ".tmp");
+    // Unique sibling temp so concurrent writers to different destinations (or
+    // overlapping retries) cannot clobber a shared `path.tmp`.
+    static std::atomic<std::uint64_t> temporary_counter{0};
+    const auto stamp = static_cast<unsigned long long>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto sequence = temporary_counter.fetch_add(1, std::memory_order_relaxed);
+#ifdef _WIN32
+    const auto pid = static_cast<unsigned long long>(::GetCurrentProcessId());
+#else
+    const auto pid = static_cast<unsigned long long>(::getpid());
+#endif
+    const std::filesystem::path temporary(
+        destination.string() + ".tmp." + std::to_string(stamp) + "."
+        + std::to_string(sequence) + "." + std::to_string(pid));
     try
     {
         {
