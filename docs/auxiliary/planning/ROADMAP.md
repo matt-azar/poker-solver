@@ -249,6 +249,8 @@ Official reference material checked October 27, 2026. These sources establish re
 
 ## Appendix: historical phases 1-10
 
+Narrative history of eras and design decisions (including these phases): [PROJECT_HISTORY.md](../notes/PROJECT_HISTORY.md).
+
 The phases below were the kernel plan through the baseline reviewed above. They are complete. Section 2 is the starting point for the milestones in this document.
 
 | Phase | Status |

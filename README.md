@@ -147,7 +147,7 @@ Index: [docs/README.md](docs/README.md). Primary docs stay at `docs/`; supportin
 ### Auxiliary
 
 - [docs/auxiliary/](docs/auxiliary/README.md) — planning, engineering, payoffs, reference games, archive notes
-  ([ROADMAP](docs/auxiliary/planning/ROADMAP.md), [FEATURE_PARITY](docs/auxiliary/planning/FEATURE_PARITY.md), [TESTING](docs/auxiliary/engineering/TESTING.md), [BENCHMARKS](docs/auxiliary/engineering/BENCHMARKS.md), [LEDUC](docs/auxiliary/reference/LEDUC.md), [HUNL](docs/auxiliary/reference/HUNL.md), …)
+  ([ROADMAP](docs/auxiliary/planning/ROADMAP.md), [FEATURE_PARITY](docs/auxiliary/planning/FEATURE_PARITY.md), [PROJECT_HISTORY](docs/auxiliary/notes/PROJECT_HISTORY.md), [TESTING](docs/auxiliary/engineering/TESTING.md), [BENCHMARKS](docs/auxiliary/engineering/BENCHMARKS.md), [LEDUC](docs/auxiliary/reference/LEDUC.md), [HUNL](docs/auxiliary/reference/HUNL.md), …)
 
 ## License
 
