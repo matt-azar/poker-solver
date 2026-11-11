@@ -210,6 +210,8 @@ int run(int argc, char** argv)
     } teardown;
 
     int port = 8765;
+    bool study_packaged = false;
+    bool max_pair_explicit = false;
     if (const char* env_limit = std::getenv("POKER_EQUITY_MAX_PAIR_RUNOUTS"))
     {
         std::uint64_t parsed = 0;
@@ -219,6 +221,7 @@ int run(int argc, char** argv)
             return 1;
         }
         g_app.equity_max_pair_runouts = parsed;
+        max_pair_explicit = true;
     }
     for (int i = 1; i < argc; ++i)
     {
@@ -226,6 +229,11 @@ int run(int argc, char** argv)
         if (arg == "--port" && i + 1 < argc)
         {
             port = std::atoi(argv[++i]);
+            if (port < 0 || port > 65535)
+            {
+                std::cerr << "invalid --port\n";
+                return 1;
+            }
         }
         else if (arg == "--max-pair-runouts" && i + 1 < argc)
         {
@@ -236,7 +244,25 @@ int run(int argc, char** argv)
                 return 1;
             }
             g_app.equity_max_pair_runouts = parsed;
+            max_pair_explicit = true;
         }
+        else if (arg == "--launch-id" && i + 1 < argc)
+        {
+            g_app.launch_id = argv[++i];
+            if (g_app.launch_id.empty() || g_app.launch_id.size() > 128)
+            {
+                std::cerr << "invalid --launch-id\n";
+                return 1;
+            }
+        }
+        else if (arg == "--study-packaged")
+        {
+            study_packaged = true;
+        }
+    }
+    if (study_packaged && !max_pair_explicit)
+    {
+        g_app.equity_max_pair_runouts = poker::holdem::kStudyExplorerMaxPairRunouts;
     }
     choose_ui_root();
     g_app.templates_root = poker::explorer::resolve_templates_directory(executable_directory());
@@ -269,12 +295,30 @@ int run(int argc, char** argv)
         close_socket(server);
         return 1;
     }
+    if (port == 0)
+    {
+        socklen_t length = sizeof(address);
+        if (getsockname(server, reinterpret_cast<sockaddr*>(&address), &length) != 0)
+        {
+            std::cerr << "getsockname failed after --port 0 bind\n";
+            close_socket(server);
+            return 1;
+        }
+        port = static_cast<int>(ntohs(address.sin_port));
+        if (port <= 0)
+        {
+            std::cerr << "OS assigned an invalid port\n";
+            close_socket(server);
+            return 1;
+        }
+    }
     if (listen(server, 8) != 0)
     {
         std::cerr << "listen failed\n";
         close_socket(server);
         return 1;
     }
+    g_app.listen_port = port;
     std::cout << "explorer http://127.0.0.1:" << port << "\n";
     std::cout << "ui " << g_app.ui_root << "\n";
     std::cout << "recent "
@@ -282,6 +326,10 @@ int run(int argc, char** argv)
     if (!g_app.templates_root.empty())
     {
         std::cout << "templates " << g_app.templates_root.string() << "\n";
+    }
+    if (!g_app.ranges_root.empty())
+    {
+        std::cout << "ranges " << g_app.ranges_root.string() << "\n";
     }
     std::cout.flush();
 

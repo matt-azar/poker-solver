@@ -987,6 +987,18 @@ void run_explorer_http_tests()
     CHECK(server.started());
     CHECK(wait_until_listening());
 
+    // Packaged Study ownership handshake (versioned readiness independent of solve status).
+    {
+        HttpResult ready;
+        CHECK(http_exchange("GET", "/api/ready", "", ready));
+        CHECK(ready.status == 200);
+        CHECK(ready.body.find("\"ok\":true") != std::string::npos);
+        CHECK(ready.body.find("\"protocol\":1") != std::string::npos);
+        CHECK(ready.body.find("\"port\":" + std::to_string(g_explorer_port)) != std::string::npos);
+        CHECK(ready.body.find("\"max_pair_runouts\":") != std::string::npos);
+        CHECK(ready.body.find("\"launch_id\":\"\"") != std::string::npos);
+    }
+
     // Tauri Study webview is cross-origin; CORS must be present or fetch fails.
     {
         HttpResult cors_status;

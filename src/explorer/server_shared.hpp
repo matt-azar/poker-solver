@@ -74,6 +74,10 @@ inline int solve_stats_eval_every(int iteration_budget, int samples)
     return from_samples < kSolveStatsEvalMaxGap ? from_samples : kSolveStatsEvalMaxGap;
 }
 
+// Versioned readiness handshake for packaged Study ownership.
+// Bump when /api/ready shape or semantics change incompatibly.
+inline constexpr int kExplorerReadyProtocol = 1;
+
 // Owned process-wide study server state (session, workers, static roots).
 struct ExplorerAppContext
 {
@@ -84,6 +88,10 @@ struct ExplorerAppContext
     std::uint64_t equity_max_pair_runouts = poker::holdem::kDefaultMaxPairRunouts;
     std::filesystem::path templates_root;
     std::filesystem::path ranges_root;
+    // Empty unless `--launch-id` was set (packaged Study always sets one).
+    std::string launch_id;
+    // Bound loopback port after listen (resolved when `--port 0`).
+    int listen_port = 0;
 };
 
 extern ExplorerAppContext g_app;

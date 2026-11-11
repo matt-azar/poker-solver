@@ -591,6 +591,22 @@ void handle_client(socket_t client)
         return;
     }
 
+    if (line.rfind("GET /api/ready", 0) == 0)
+    {
+        // Versioned ownership handshake for packaged Study. Independent of
+        // solve status (/api/status) so a cold server still answers ready.
+        std::string payload = "{\"ok\":true,\"protocol\":";
+        payload += std::to_string(kExplorerReadyProtocol);
+        payload += ",\"port\":";
+        payload += std::to_string(g_app.listen_port);
+        payload += ",\"max_pair_runouts\":";
+        payload += std::to_string(g_app.equity_max_pair_runouts);
+        payload += ",\"launch_id\":";
+        append_escaped(payload, g_app.launch_id);
+        payload += '}';
+        send_response(client, 200, "application/json", payload);
+        return;
+    }
     if (line.rfind("GET /api/status", 0) == 0)
     {
         send_response(client, 200, "application/json", g_app.session.status());
