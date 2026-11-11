@@ -1,0 +1,20 @@
+{
+  "running": false,
+  "paused": false,
+  "cancelled": false,
+  "failed": false,
+  "error": "",
+  "solution_id": "s1",
+  "root_node_id": "r0",
+  "job_id": "j1",
+  "status_generation": 3,
+  "iterations": 2,
+  "player0_expected_utility": 50.0,
+  "nash_gap": 0.0,
+  "accuracy_chips": 0.0,
+  "pot": 100,
+  "stack": 100,
+  "board": ["Kh", "Kd", "7c", "4s", "2h"],
+  "algorithm": "cfr+",
+  "future_additive_field": "ignored"
+}

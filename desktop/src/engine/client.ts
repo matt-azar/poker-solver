@@ -8,6 +8,9 @@ import type {
 } from "../domain/types";
 import { presentUserText } from "../domain/userText";
 import { isTauriRuntime } from "../platform";
+import { decodeErrorPayload } from "./contracts/error";
+import { decodeReadyPayload, type ReadyPayload } from "./contracts/ready";
+import { decodeStatusPayload } from "./contracts/status";
 import { normalizeRunoutsPayload, type RunoutsModel } from "./runouts";
 
 function defaultEngineBaseUrl(): string {
@@ -116,16 +119,36 @@ export class EngineClient {
       return;
     }
     const message =
-      data && typeof data === "object" && data !== null && "error" in data
-        ? String((data as { error: unknown }).error)
-        : response.statusText || `HTTP ${response.status}`;
+      decodeErrorPayload(data) ?? (response.statusText || `HTTP ${response.status}`);
     throw new EngineError(message, response.status, data);
+  }
+
+  async ready(signal?: AbortSignal): Promise<ReadyPayload> {
+    const { response, data } = await this.request("GET", "/api/ready", undefined, { signal });
+    this.ensureOk(response, data);
+    try {
+      return decodeReadyPayload(data);
+    } catch (err) {
+      throw new EngineError(
+        err instanceof Error ? err.message : String(err),
+        response.status,
+        data,
+      );
+    }
   }
 
   async status(signal?: AbortSignal): Promise<StatusPayload> {
     const { response, data } = await this.request("GET", "/api/status", undefined, { signal });
     this.ensureOk(response, data);
-    return data as StatusPayload;
+    try {
+      return decodeStatusPayload(data);
+    } catch (err) {
+      throw new EngineError(
+        err instanceof Error ? err.message : String(err),
+        response.status,
+        data,
+      );
+    }
   }
 
   async solve(job: SolveJobRequest, signal?: AbortSignal): Promise<unknown> {
@@ -286,10 +309,18 @@ export class EngineClient {
     return data;
   }
 
-  async open(path: string): Promise<unknown> {
+  async open(path: string): Promise<StatusPayload> {
     const { response, data } = await this.request("POST", "/api/open", { path });
     this.ensureOk(response, data);
-    return data;
+    try {
+      return decodeStatusPayload(data);
+    } catch (err) {
+      throw new EngineError(
+        err instanceof Error ? err.message : String(err),
+        response.status,
+        data,
+      );
+    }
   }
 
   /** Spot config for a loaded solution (ranges, bets, tree edits, optional settings). */
