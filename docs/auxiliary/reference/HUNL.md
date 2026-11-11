@@ -24,11 +24,5 @@ The production solvers find an equilibrium of a finite bet-size tree: a river, t
 
 Linear CFR uses the same regret-matching rule as vanilla CFR. On iteration `t` (starting at 1) it multiplies both the new regret and the average-strategy contribution by `t`. Regrets stay signed. Both players update in one traversal. CFR+ floors only the updating player after that player's pass, weights only the average strategy by `t`, and alternates who updates.
 
-Historical 10,000-iteration Kuhn table (before the pass-level CFR+ floor). Current 200,000-iteration Kuhn rows: [BENCHMARKS.md](../engineering/BENCHMARKS.md). Command: `kuhn_solver --iterations 10000 --algorithm <name>`.
+`tests/unit/test_cfr.cpp` checks that Linear CFR on a tiny river `StreetGame` is deterministic, differs from vanilla CFR at the same iteration count, and still records at least one negative cumulative regret.
 
-| Algorithm | Iterations | Runtime (s) | Iterations/s | Player 1 value | Nash gap |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| vanilla CFR | 10000 | 0.0140505 | 7.117e5 | -0.0555306025757 | 0.00297179826288 |
-| linear CFR | 10000 | 0.0166417 | 6.009e5 | -0.0555625698041 | 0.00591309307769 |
-
-`-1/18` is -0.0555555555556. At 10,000 iterations linear CFR is closer to that value; vanilla CFR has the smaller Nash gap. The unit test checks that 2,000 iterations of linear CFR are deterministic, that the strategy differs from vanilla CFR, and that some cumulative regret is still negative.

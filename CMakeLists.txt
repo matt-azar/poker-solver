@@ -18,22 +18,13 @@ find_package(Threads REQUIRED)
 # --- Library boundaries (dependency direction is one-way) ---
 # poker_primitives            cards, evaluator, ranges
 # poker_solver                production postflop engine (StreetBatch + regret matching)
-# poker_solver_reference      Kuhn/Leduc wrappers + reference CLIs/tests (optional)
-# poker_solver_legacy_river   RiverBatchSolver for PSOL kind=2 / oracle fixtures (optional)
+# poker_solver_legacy_river   RiverBatchSolver for PSOL kind=2 / oracle fixtures
 # poker_study                 explorer session services: workers, checkpoints (uses solver)
 # poker_equity                check-down equity (uses primitives only)
 #
 # Reference enumerators (StreetGame, RiverGame, CfrTrainer) are header-only and
-# stay available to TUs that include them; the reference *library* owns Kuhn
-# object files. Production poker_solver must not link the reference or legacy
-# targets.
-
-option(POKER_SOLVER_ENABLE_REFERENCE
-    "Build reference enumerators support: Kuhn/Leduc, --reference CLIs, oracle tests"
-    ON)
-option(POKER_SOLVER_ENABLE_LEGACY_RIVER
-    "Build RiverBatchSolver and PSOL kind=2 open/continue support"
-    ON)
+# stay available to TUs that include them. Production poker_solver must not link
+# the legacy river target.
 
 add_library(poker_primitives STATIC
     src/poker/card.cpp
@@ -67,31 +58,14 @@ if(WIN32)
 endif()
 poker_set_warnings(poker_solver)
 
-if(POKER_SOLVER_ENABLE_REFERENCE)
-    add_library(poker_solver_reference STATIC
-        src/reference/kuhn.cpp
-        src/reference/kuhn_cfr.cpp
-        src/reference/kuhn_best_response.cpp
-    )
-    target_include_directories(poker_solver_reference PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    )
-    target_link_libraries(poker_solver_reference PUBLIC poker_solver)
-    target_compile_definitions(poker_solver_reference PUBLIC POKER_SOLVER_HAS_REFERENCE=1)
-    poker_set_warnings(poker_solver_reference)
-endif()
-
-if(POKER_SOLVER_ENABLE_LEGACY_RIVER)
-    add_library(poker_solver_legacy_river STATIC
-        src/legacy/river_batch.cpp
-    )
-    target_include_directories(poker_solver_legacy_river PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    )
-    target_link_libraries(poker_solver_legacy_river PUBLIC poker_solver)
-    target_compile_definitions(poker_solver_legacy_river PUBLIC POKER_SOLVER_HAS_LEGACY_RIVER=1)
-    poker_set_warnings(poker_solver_legacy_river)
-endif()
+add_library(poker_solver_legacy_river STATIC
+    src/legacy/river_batch.cpp
+)
+target_include_directories(poker_solver_legacy_river PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_link_libraries(poker_solver_legacy_river PUBLIC poker_solver)
+poker_set_warnings(poker_solver_legacy_river)
 
 add_library(poker_study STATIC
     src/explorer/value_worker.cpp
@@ -100,10 +74,7 @@ add_library(poker_study STATIC
 target_include_directories(poker_study PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
-target_link_libraries(poker_study PUBLIC poker_solver)
-if(POKER_SOLVER_ENABLE_LEGACY_RIVER)
-    target_link_libraries(poker_study PUBLIC poker_solver_legacy_river)
-endif()
+target_link_libraries(poker_study PUBLIC poker_solver poker_solver_legacy_river)
 poker_set_warnings(poker_study)
 
 # Compatibility alias: historical target name used by benches/docs.
@@ -112,57 +83,38 @@ target_link_libraries(poker_solver_core INTERFACE poker_study)
 
 include(cmake/EquityTargets.cmake)
 
-if(POKER_SOLVER_ENABLE_REFERENCE)
-    add_executable(kuhn_solver src/cli/kuhn_main.cpp)
-    target_link_libraries(kuhn_solver PRIVATE poker_solver_reference)
-    poker_set_warnings(kuhn_solver)
-
-    add_executable(leduc_solver src/cli/leduc_main.cpp)
-    target_link_libraries(leduc_solver PRIVATE poker_solver_reference)
-    poker_set_warnings(leduc_solver)
-endif()
-
 add_executable(river_solver src/cli/river_main.cpp)
 target_link_libraries(river_solver PRIVATE poker_solver)
-if(POKER_SOLVER_ENABLE_REFERENCE)
-    # StreetGame + CfrTrainer are header-only; the define gates --reference.
-    target_compile_definitions(river_solver PRIVATE POKER_SOLVER_HAS_REFERENCE=1)
-endif()
 poker_set_warnings(river_solver)
 
 add_executable(street_solver src/cli/street_main.cpp)
 target_link_libraries(street_solver PRIVATE poker_solver)
-if(POKER_SOLVER_ENABLE_REFERENCE)
-    target_compile_definitions(street_solver PRIVATE POKER_SOLVER_HAS_REFERENCE=1)
-endif()
 poker_set_warnings(street_solver)
 
-# Study HTTP server needs legacy river for PSOL kind=2 open/continue.
-if(POKER_SOLVER_ENABLE_LEGACY_RIVER)
-    add_executable(explorer
-        src/cli/explorer_main.cpp
-        src/explorer/server_globals.cpp
-        src/explorer/server_json.cpp
-        src/explorer/server_jobs.cpp
-        src/explorer/server_http.cpp
-        src/explorer/server_run.cpp
-        src/explorer/equity_jobs.cpp
-        src/explorer/equity_http.cpp
-    )
-    target_include_directories(explorer PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/explorer"
-    )
-    target_link_libraries(explorer PRIVATE poker_study poker_equity)
-    if(WIN32)
-        target_link_libraries(explorer PRIVATE ws2_32)
-    endif()
-    poker_set_warnings(explorer)
+# Study HTTP server (includes PSOL kind=2 open/continue via RiverBatchSolver).
+add_executable(explorer
+    src/cli/explorer_main.cpp
+    src/explorer/server_globals.cpp
+    src/explorer/server_json.cpp
+    src/explorer/server_jobs.cpp
+    src/explorer/server_http.cpp
+    src/explorer/server_run.cpp
+    src/explorer/equity_jobs.cpp
+    src/explorer/equity_http.cpp
+)
+target_include_directories(explorer PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/explorer"
+)
+target_link_libraries(explorer PRIVATE poker_study poker_equity)
+if(WIN32)
+    target_link_libraries(explorer PRIVATE ws2_32)
 endif()
+poker_set_warnings(explorer)
 
 enable_testing()
 
 # Engine / solver unit tests — no explorer process dependency.
-set(POKER_ENGINE_TEST_SOURCES
+add_executable(poker_engine_tests
     tests/unit/engine_main.cpp
     tests/unit/test_smoke.cpp
     tests/unit/test_holdem.cpp
@@ -187,30 +139,15 @@ set(POKER_ENGINE_TEST_SOURCES
     tests/unit/test_hand_history.cpp
     tests/unit/test_dcfr.cpp
     tests/unit/test_pcfr.cpp
+    tests/unit/test_cfr.cpp
+    tests/unit/test_river.cpp
 )
-if(POKER_SOLVER_ENABLE_REFERENCE)
-    list(APPEND POKER_ENGINE_TEST_SOURCES
-        tests/unit/test_kuhn.cpp
-        tests/unit/test_cfr.cpp
-        tests/unit/test_leduc.cpp
-    )
-endif()
-if(POKER_SOLVER_ENABLE_LEGACY_RIVER)
-    list(APPEND POKER_ENGINE_TEST_SOURCES
-        tests/unit/test_river.cpp
-    )
-endif()
-
-add_executable(poker_engine_tests ${POKER_ENGINE_TEST_SOURCES})
 target_include_directories(poker_engine_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/tests"
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 # poker_study for PSOL round-trip coverage inside DCFR/PCFR tests (no explorer process).
 target_link_libraries(poker_engine_tests PRIVATE poker_study poker_equity)
-if(POKER_SOLVER_ENABLE_REFERENCE)
-    target_link_libraries(poker_engine_tests PRIVATE poker_solver_reference)
-endif()
 poker_set_warnings(poker_engine_tests)
 if(MSVC)
     target_link_options(poker_engine_tests PRIVATE "/STACK:8388608")
@@ -236,35 +173,27 @@ poker_set_warnings(poker_study_tests)
 add_test(NAME poker_study_tests COMMAND poker_study_tests)
 
 # HTTP / process integration tests — require the explorer binary.
-if(POKER_SOLVER_ENABLE_LEGACY_RIVER)
-    add_executable(poker_http_tests
-        tests/unit/http_main.cpp
-        tests/unit/test_explorer_http.cpp
-        tests/unit/test_explorer_workflow.cpp
-    )
-    target_include_directories(poker_http_tests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    )
-    target_link_libraries(poker_http_tests PRIVATE poker_study poker_equity)
-    if(WIN32)
-        target_link_libraries(poker_http_tests PRIVATE ws2_32)
-    endif()
-    add_dependencies(poker_http_tests explorer)
-    poker_set_warnings(poker_http_tests)
-    add_test(NAME poker_http_tests COMMAND poker_http_tests)
+add_executable(poker_http_tests
+    tests/unit/http_main.cpp
+    tests/unit/test_explorer_http.cpp
+    tests/unit/test_explorer_workflow.cpp
+)
+target_include_directories(poker_http_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_link_libraries(poker_http_tests PRIVATE poker_study poker_equity)
+if(WIN32)
+    target_link_libraries(poker_http_tests PRIVATE ws2_32)
 endif()
+add_dependencies(poker_http_tests explorer)
+poker_set_warnings(poker_http_tests)
+add_test(NAME poker_http_tests COMMAND poker_http_tests)
 
 # Compatibility meta-target used by CI and local "build all unit suites".
-if(POKER_SOLVER_ENABLE_LEGACY_RIVER)
-    add_custom_target(poker_solver_tests
-        DEPENDS poker_engine_tests poker_study_tests poker_http_tests
-    )
-else()
-    add_custom_target(poker_solver_tests
-        DEPENDS poker_engine_tests poker_study_tests
-    )
-endif()
+add_custom_target(poker_solver_tests
+    DEPENDS poker_engine_tests poker_study_tests poker_http_tests
+)
 
 # Full-range check-down. Not part of ctest: it allocates hundreds of mebibytes.
 add_executable(street_memory_bench benchmarks/bin/street_memory_bench.cpp)

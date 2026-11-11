@@ -277,7 +277,7 @@ public:
         return find_exact(make_lock_key(infoset_id, turn, river));
     }
 
-    // Line-only lookup (infoset id with turn=river=-1). Used by Kuhn/CfrTrainer
+    // Line-only lookup (infoset id with turn=river=-1). Used by CfrTrainer
     // and by callers that intentionally address a line lock.
     const NodeLock* find(std::size_t infoset_id) const
     {

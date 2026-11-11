@@ -146,8 +146,7 @@ struct HeldSolution
     // Prior unlocked (or earlier locked) revision kept queryable after resolve-locked.
     std::uint64_t baseline_solution_id = 0;
     std::shared_ptr<poker::solver::StreetBatchSolver> street;
-    // Legacy PSOL kind=2 only. Fresh solves use street. Requires
-    // POKER_SOLVER_ENABLE_LEGACY_RIVER (on in the normal product build).
+    // Legacy PSOL kind=2 only. Fresh solves use street.
     std::shared_ptr<poker::solver::RiverBatchSolver> river;
     std::string root_id;
     bool has_memory = false;

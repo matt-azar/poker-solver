@@ -7,7 +7,7 @@ Supporting material outside the main CFR+ workflow and Study UI docs. Prefer the
 | [planning/](planning/) | Roadmap, feature-parity ledger, study baseline |
 | [engineering/](engineering/) | Testing, benchmarks, agent lessons |
 | [payoffs/](payoffs/) | Rake, ICM, action-label incentives |
-| [reference/](reference/) | Kuhn/Leduc reference games; HUNL abstraction limits |
+| [reference/](reference/) | HUNL abstraction limits and research notes |
 | [notes/](notes/) | Hand-history export contract; historical river-integration note |
 
 ## Index
@@ -33,7 +33,6 @@ Supporting material outside the main CFR+ workflow and Study UI docs. Prefer the
 
 ### Reference
 
-- [LEDUC.md](reference/LEDUC.md)
 - [HUNL.md](reference/HUNL.md)
 
 ### Notes

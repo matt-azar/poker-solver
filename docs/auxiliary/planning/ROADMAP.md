@@ -16,7 +16,7 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 ## 2. Starting point and evidence
 
-Foundation in place: shared street/river public tree, pass-frozen CFR variants, active-player CFR+ flooring, blocker-aware showdowns, first-public-card parallelism, engine allocation budgets (default 1024 MiB), node-scoped browsing, Kuhn/Leduc reference games on `CfrTrainer`. Threads default to one.
+Foundation in place: shared street/river public tree, pass-frozen CFR variants, active-player CFR+ flooring, blocker-aware showdowns, first-public-card parallelism, engine allocation budgets (default 1024 MiB), node-scoped browsing, Hold’em reference enumerators on `CfrTrainer`. Threads default to one.
 
 Flop, turn, and river are one betting tree (two, one, or zero cards left). `StreetGame` / `StreetBatchSolver` accept 3/4/5-card boards. Five-card pins match `RiverGame`. Explorer and `river_solver` both use that shared tree; `river_solver` is a thin CLI, not a separate `RiverBatchSolver` product path. `RiverGame` is the five-card oracle.
 
@@ -256,9 +256,9 @@ The phases below were the kernel plan through the baseline reviewed above. They 
 | Phase | Status |
 | --- | --- |
 | 1. Repository, CMake, tests | Complete |
-| 2. Kuhn Poker + vanilla CFR | Complete |
+| 2. Early CFR trainer fixtures (removed; Hold’em `StreetGame` pins remain) | Complete |
 | 3. Generalized CFR engine + CFR+ | Complete |
-| 4. Leduc Hold’em | Complete |
+| 4. Early multi-street trainer fixture (removed) | Complete |
 | 5. Hold’em cards, evaluator, ranges | Complete |
 | 6. Heads-up river solver | Complete |
 | 7. Performance optimization | Complete |

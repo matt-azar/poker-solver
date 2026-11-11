@@ -28,7 +28,7 @@ Product entry: `explorer` + `desktop/`. Installer and packaging notes are in DES
 
 ## Auxiliary
 
-Non-essential material — planning ledgers, engineering notes, optional payoffs, reference games, and archive notes — is under [`auxiliary/`](auxiliary/README.md).
+Non-essential material — planning ledgers, engineering notes, optional payoffs, research notes, and archive notes — is under [`auxiliary/`](auxiliary/README.md).
 
 Project archaeology (eras and design decisions): [`auxiliary/notes/PROJECT_HISTORY.md`](auxiliary/notes/PROJECT_HISTORY.md).
 

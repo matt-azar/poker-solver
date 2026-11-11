@@ -1,6 +1,6 @@
 # Architecture
 
-Production postflop solving uses one public betting tree. Flop, turn, and river differ only by how many cards remain (two, one, or zero). `StreetBatchSolver` is the production engine; `StreetGame` + `CfrTrainer` is the reference enumerator (`--reference`). `RiverGame` is the five-card oracle. Kuhn and Leduc stay on `CfrTrainer` only and are not part of the Study product path.
+Production postflop solving uses one public betting tree. Flop, turn, and river differ only by how many cards remain (two, one, or zero). `StreetBatchSolver` is the production engine; `StreetGame` + `CfrTrainer` is the reference enumerator (`--reference`). `RiverGame` is the five-card oracle.
 
 Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [EXPLORER.md](EXPLORER.md), [HOLDEM.md](HOLDEM.md).
 
@@ -20,18 +20,12 @@ Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER
 | --- | --- | --- |
 | `poker_primitives` | Cards, hand eval, categories, ranges | — |
 | `poker_solver` | Production postflop engine (`StreetBatchSolver`) + regret matching | primitives |
-| `poker_solver_reference` | Kuhn object code + Kuhn CFR/BR wrappers (optional) | solver |
-| `poker_solver_legacy_river` | `RiverBatchSolver` for PSOL kind=2 / oracle fixtures (optional) | solver |
-| `poker_study` | Checkpoint + value worker session services | solver (+ legacy river when enabled) |
+| `poker_solver_legacy_river` | `RiverBatchSolver` for PSOL kind=2 / oracle fixtures | solver |
+| `poker_study` | Checkpoint + value worker session services | solver + legacy river |
 | `poker_equity` | Check-down equity | primitives only |
 | `poker_solver_core` | INTERFACE alias → `poker_study` (legacy name) | study |
 
-CMake options (both default ON for the normal development build):
-
-- `POKER_SOLVER_ENABLE_REFERENCE` — Kuhn/Leduc CLIs, `--reference` on street/river CLIs, Kuhn unit tests. When OFF, `--reference` is rejected explicitly.
-- `POKER_SOLVER_ENABLE_LEGACY_RIVER` — `RiverBatchSolver` library, explorer (PSOL kind=2), river oracle tests. Production `poker_solver` never links this target.
-
-Shared solve declarations (`Algorithm`, `SolveConfig`, `SolveStats`) live in `include/solver/solve_types.hpp` so batch headers need not pull the full `CfrTrainer` template. `StreetConfig` / sizing rules live in `include/game/street_config.hpp`; `RiverConfig` in `include/game/river_config.hpp`. Reference enumerators (`StreetGame`, `RiverGame`) and `CfrTrainer` remain header-only under `include/game/` and `include/solver/trainer.hpp`.
+Shared solve declarations (`Algorithm`, `SolveConfig`, `SolveStats`) live in `include/solver/solve_types.hpp` so batch headers need not pull the full `CfrTrainer` template. `StreetConfig` / sizing rules live in `include/game/street_config.hpp`; `RiverConfig` in `include/game/river_config.hpp`. Reference enumerators (`StreetGame`, `RiverGame`) and `CfrTrainer` remain header-only under `include/game/` and `include/solver/trainer.hpp`. Hold’em `--reference` on `street_solver` / `river_solver` is always available. Production `poker_solver` never links the legacy river target.
 
 Canonical range catalogue assets live under `configs/range-profiles/`; the Study client imports them directly (no `desktop/` copies).
 
@@ -71,9 +65,7 @@ Read `src/solver/postflop/algorithms/cfr_plus.hpp` for one complete CFR+ iterati
 | `poker::solver::CfrTrainer<Game>` | Vanilla CFR, CFR+, linear CFR, DCFR, PCFR+ for any extensive-game type |
 | `regret_matching` | Current strategy from cumulative regret; reach-weighted accumulation |
 | `compute_best_response` | Exact best response, deepest information set first |
-| `KuhnCfrTrainer` / Kuhn BR helpers | Kuhn-only wrappers (`kuhn_cfr.hpp`, `kuhn_best_response.hpp`) |
 | `explorer` | Local Study HTTP server; serves `desktop/dist` or `legacy/ui/`; fresh solves use `StreetBatchSolver` |
-| `poker::kuhn`, `poker::leduc` | Small reference games for shared CFR tests |
 
 ## Extensive-game interface
 
@@ -89,7 +81,7 @@ On the street/river path, player 0 is out of position. Chance deals ordered hand
 
 ## Solver storage
 
-`StreetBatchSolver` stores regret, strategy-sum, and one shared sigma workspace as `TableScalar` (`float`) tables, with a compact offset table from information set to first action. Slot lookup is keyed by public node, legal runout (off-board card or ordered pair), and supported hand — not a dense `52×52×hands` map. One-action decisions omit stored rows (implicit probability 1). The sigma workspace holds the frozen strategy during a training pass and the normalized average during evaluation; those two views are mutually exclusive, so they share one full-size buffer. Counterfactual values, NashConv, and other sensitive reductions stay double. `CfrTrainer` (Kuhn/Leduc and reference enumerators) and legacy `RiverBatchSolver` keep `double` tables. The action-count scratch limit is 8 per information set. See `include/solver/table_scalar.hpp` and [STREETS.md](STREETS.md).
+`StreetBatchSolver` stores regret, strategy-sum, and one shared sigma workspace as `TableScalar` (`float`) tables, with a compact offset table from information set to first action. Slot lookup is keyed by public node, legal runout (off-board card or ordered pair), and supported hand — not a dense `52×52×hands` map. One-action decisions omit stored rows (implicit probability 1). The sigma workspace holds the frozen strategy during a training pass and the normalized average during evaluation; those two views are mutually exclusive, so they share one full-size buffer. Counterfactual values, NashConv, and other sensitive reductions stay double. `CfrTrainer` (Hold’em reference enumerators) and legacy `RiverBatchSolver` keep `double` tables. The action-count scratch limit is 8 per information set. See `include/solver/table_scalar.hpp` and [STREETS.md](STREETS.md).
 
 Node locks (`poker::solver::NodeLock` / `LockSet` in `node_lock.hpp`) are an immutable constraint layer keyed by `(infoset / public-node index, turn, river)`. A line lock uses `turn=river=-1` and applies on every runout of that betting line; a node lock keeps the selected cards and applies only there. Lookup prefers the exact runout, then falls back to the line lock. A `FullNode` lock applies one validated action-probability row to every combo; `SelectedCombos` applies that row only to listed combo indices. An empty probability row means unlocked and is distinct from locking an action at probability zero. When `SolveConfig::locks` is set, `CfrTrainer`, `StreetBatchSolver`, and `RiverBatchSolver` call `apply_lock_to_strategy` after regret matching. Explorer locking is street-first.
 
@@ -120,10 +112,4 @@ run early.
 - Production trees use a fixed list of bet sizes (plus geometric / all-in / pot-cap rules on the street path).
 - Best response is exact on the game that was solved.
 - At most 8 actions per information set until the scratch arrays are widened.
-- Kuhn and Leduc verify the shared trainer; they are not Study product surfaces.
-
-## Reference games (Kuhn / Leduc)
-
-Kuhn and Leduc implement the same extensive-game interface and train only through `CfrTrainer`. Rules: [LEDUC.md](auxiliary/reference/LEDUC.md). Equilibrium math for Kuhn: [MATHEMATICS.md](MATHEMATICS.md).
-
-Kuhn public sequences (`Sequence`): `Empty`, `Check`, `Bet`, `CheckBet`, and terminals `CheckCheck`, `BetFold`, `BetCall`, `CheckBetFold`, `CheckBetCall`. Twelve infosets: three private cards × four decision points. Chance deals six equally likely ordered card pairs.
+- Tiny synthetic games and Hold’em `StreetGame` fixtures verify the shared trainer; they are not Study product surfaces.

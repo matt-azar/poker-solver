@@ -16,7 +16,7 @@ Build production binaries without tests or benchmarks:
 cmake --build build --config Release --target street_solver --target river_solver --target explorer --target equity_calculator
 ```
 
-Omit `--config Release` on a single-config generator. A plain `cmake --build build` also compiles the test binary and benchmark binaries. Benchmarks stay outside CTest. Reference-game targets `kuhn_solver` and `leduc_solver` are optional.
+Omit `--config Release` on a single-config generator. A plain `cmake --build build` also compiles the test binary and benchmark binaries. Benchmarks stay outside CTest.
 
 JavaScript checks from the repository root:
 
@@ -30,20 +30,14 @@ Explorer HTTP cases spawn a local `explorer` on an ephemeral port on Windows and
 
 ## Categories
 
-**Kuhn reference** (`tests/unit/test_kuhn.cpp`)
-
-- Six distinct deals; no duplicate cards
-- Legal actions and sequence transitions
-- Pot and contribution accounting (antes included)
-- Terminal utilities: check-check ±1, bet-call ±2, folds ±1
-- Zero-sum: \(u_1 + u_2 = 0\) on every terminal of every deal
-- Infoset ids depend only on the acting player’s private card and public sequence
-
 **CFR primitives** (`tests/unit/test_cfr.cpp`)
 
+- CancelGame / ZeroReachGame pass-level floor contracts
 - All-negative regrets → uniform
 - Mixed positive regrets → normalized positive regrets
 - Reach-weighted average accumulation on a hand-constructed two-action path
+- Tiny river `StreetGame` trainer lifecycle: early stop, eval history, wall-time stop, Linear CFR determinism
+- FullNode lock and unlocked-row ≡ null locks on `CfrTrainer<StreetGame>`
 
 **DCFR(1.5, 0, 2)** (`tests/unit/test_dcfr.cpp`)
 
@@ -53,29 +47,6 @@ Explorer HTTP cases spawn a local `explorer` on an ephemeral port on Windows and
 - Continuation and save/load/continue match uninterrupted training
 - Algorithm tag `3` round-trip; unknown tags and algorithm switches reject without mutation
 - Single/multi-thread frozen parity; DCFR rejected on non-frozen walk and legacy river batch
-
-**Mathematical validation**
-
-- After 200,000 vanilla CFR iterations and 200,000 CFR+ iterations, both through `CfrTrainer<KuhnGame>`: \(|u_1 + 1/18| \le 10^{-3}\) and Nash gap \(< 10^{-3}\)
-- The generalized best response matches a separate enumeration of all 64 pure plans per player
-- The generalized utility walk matches the original Kuhn utility walk
-- CFR+ regrets stay non-negative; vanilla CFR still records negative regrets
-- At 200,000 iterations the CFR+ Nash gap is smaller than the vanilla gap
-- A CFR+ run with gap threshold \(10^{-2}\) and eval interval 200 stops before the iteration cap
-- Two independent trainers with the same algorithm and iteration count produce identical strategies
-- Strategy lies near Kuhn’s equilibrium family (bet King at \(3\alpha\), call Queen at \(\alpha + 1/3\))
-- Nash gap after 200,000 vanilla iterations is smaller than after 200 iterations
-
-**Leduc** (`tests/unit/test_leduc.cpp`)
-
-- Six, then five, then four equally likely remaining cards, with dealt cards removed
-- An information set is the acting player's card and the public history
-- Fold, showdown, pair, and tie utilities
-- Every terminal in the default tree is zero-sum and has a consistent pot
-- Vanilla CFR and CFR+ both update regrets through `CfrTrainer<LeducGame>`
-- CFR+ regrets stay non-negative
-- Nash gap after 200 iterations is smaller than after 20, for both algorithms
-- Two vanilla runs of 15 iterations match
 
 **Hold'em fundamentals** (`tests/unit/test_holdem.cpp`)
 
@@ -171,12 +142,9 @@ The explorer page at `http://127.0.0.1:8765` solved that paired flop for one fro
 
 **Linear CFR** (`tests/unit/test_cfr.cpp`)
 
-- 2,000 iterations on Kuhn are deterministic
+- Tiny river `StreetGame` Linear CFR runs are deterministic
 - The average strategy differs from vanilla CFR at the same iteration count
 - At least one cumulative regret is negative
-- The player-1 value is within 0.01 of `-1/18`, and the Nash gap is below 0.05
-
-The default Leduc tree has 936 decision information sets. Solver reports include iteration count, runtime, memory, player-0 value, Nash gap, and the information-set count.
 
 Payoff accounting and exact best response are tested separately from the Nash gap.
 
@@ -186,4 +154,4 @@ Payoff accounting and exact best response are tested separately from the Nash ga
 street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1
 ```
 
-Prints value and Nash gap for the check-only flop. Reference-game smoke: `kuhn_solver --iterations 1000 --print-strategies`.
+Prints value and Nash gap for the check-only flop. Reference enumerator smoke: `street_solver --board Ah,Kd,7c,4s,2h --oop-range AcAd --ip-range KsKc --iterations 20 --reference`.

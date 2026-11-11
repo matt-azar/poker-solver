@@ -280,14 +280,6 @@ void expect_thread_parity()
     CHECK_NEAR(one.nash_gap(), two.nash_gap(), 1e-9);
 }
 
-void expect_kuhn_gap_not_worse_order()
-{
-    // Smoke: PCFR+ on Kuhn reaches a small gap; not a strict ≤ CFR+ claim.
-    // Full study bake-off lives outside unit tests.
-    // Kuhn uses the dedicated game in test_cfr; here just ensure enum is usable.
-    CHECK(poker::solver::kAlgorithmTagPcfrPlus == 4);
-}
-
 } // namespace
 
 void run_pcfr_tests()
@@ -298,5 +290,4 @@ void run_pcfr_tests()
     expect_continuation_and_cold_prediction_on_load();
     expect_rejection_matrix();
     expect_thread_parity();
-    expect_kuhn_gap_not_worse_order();
 }

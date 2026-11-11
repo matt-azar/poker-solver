@@ -85,7 +85,7 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
         run: >
           cmake --build build --config Release --parallel
-          --target kuhn_solver --target leduc_solver --target river_solver
+          --target river_solver
           --target street_solver --target explorer --target equity_calculator
           --target poker_solver_tests --target poker_engine_tests
           --target poker_study_tests --target poker_http_tests
@@ -117,7 +117,7 @@ jobs:
       - name: Build
         run: >
           cmake --build build --parallel
-          --target kuhn_solver --target leduc_solver --target river_solver
+          --target river_solver
           --target street_solver --target explorer --target equity_calculator
           --target poker_solver_tests --target poker_engine_tests
           --target poker_study_tests --target poker_http_tests

@@ -87,12 +87,6 @@ A flop, turn, and river are **one** betting tree with two, one, or zero cards le
 **Do:** Pin batch changes against `--reference` / `CfrTrainer<*Game>` on small fixtures.  
 **Don't:** “Optimize” by changing only the batch kernel without an oracle gate.
 
-### Kuhn / Leduc stay on `CfrTrainer`
-
-Public-tree frozen passes, engine heap budgets, and explorer sessions are street/river-specific.
-
-**Don't:** Wire Kuhn/Leduc into `StreetBatchSolver`, frozen threads, or explorer solve jobs.
-
 ### `include/` must not depend on UI trees
 
 Engine and session types live under `include/game`, `include/solver`, `include/explorer`, `include/poker`. HTTP and static files are `src/cli/explorer_main.cpp` + `src/explorer/` (serves `desktop/dist` or `legacy/ui/`).
@@ -102,7 +96,6 @@ Engine and session types live under `include/game`, `include/solver`, `include/e
 ### Utility sign and player index
 
 - River/street: **player 0 = OOP**, terminal utility is **P0 net chips** (root-centered); IP is the negation under chip zero-sum.
-- Kuhn docs historically talk about player 1 first — do not paste that into street EV / NashConv code.
 
 **Do:** Treat reported solver EV as OOP/`u0` unless a dual-payoff API says otherwise.  
 **Pointers:** `docs/RIVER.md`, `docs/MATHEMATICS.md`, `include/solver/trainer.hpp`.

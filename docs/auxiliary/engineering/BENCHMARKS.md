@@ -1,61 +1,6 @@
 # Benchmarks
 
-Primary production measurements are the **Street** and **River** sections below and [benchmarks/study/](../../../benchmarks/study/). Kuhn and Leduc tables are reference-trainer history.
-
-## Kuhn vanilla CFR and CFR+
-
-Historical table from when CFR+ floored each regret during the traversal. The current update freezes the strategy for a pass and floors only the player who just finished that pass.
-
-Historical measurement: `build\Release\kuhn_solver.exe` on Windows 10.0.26200, MSVC 19.40.33811.0, Release, x64. Runtime is the regret-update loop. Memory is the regret table, the strategy-sum table, and the information-set offset table: `2 * 24 * 8 + 13 * 4` = 436 bytes.
-
-| Algorithm | Iterations | Runtime (s) | Iterations/s | \(u_1\) | Nash gap |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| vanilla CFR | 10000 | 0.0151241 | 6.611e5 | -0.0555306025757 | 0.00297179826288 |
-| vanilla CFR | 50000 | 0.0720609 | 6.939e5 | -0.0555553612639 | 0.00201551812054 |
-| vanilla CFR | 100000 | 0.147987 | 6.757e5 | -0.0555535451992 | 0.00126531026002 |
-| vanilla CFR | 200000 | 0.389424 | 5.136e5 | -0.0555553050479 | 0.000950614671129 |
-| CFR+ | 10000 | 0.0280012 | 3.571e5 | -0.0556839065728 | 0.00304938147655 |
-| CFR+ | 50000 | 0.1453823 | 3.439e5 | -0.0556123433833 | 0.00136656280438 |
-| CFR+ | 100000 | 0.3687451 | 2.712e5 | -0.055595601859 | 0.000967395475419 |
-| CFR+ | 200000 | 0.6254145 | 3.198e5 | -0.0555838196919 | 0.000683744741163 |
-
-\(-1/18\) is -0.0555555555556. Both algorithms are within \(10^{-3}\) of that value by 10,000 iterations. The Nash gap (NashConv) drops below \(10^{-3}\) at 200,000 vanilla iterations and at 100,000 CFR+ iterations.
-
-CFR+ walks the tree twice per iteration (one pass for each player), so its iteration rate is lower. At 200,000 iterations its Nash gap is smaller than vanilla CFR’s. On this 12-information-set game the wall-clock advantage is small.
-
-## Kuhn after the pass-level floor
-
-Same machine and compiler, Release, from `poker_solver_tests` in this change (parent `9e0d87d`). Runtime is the regret-update loop inside the unit test. Memory is still 436 bytes. At 200,000 iterations the CFR+ Nash gap is smaller than the vanilla gap. That comparison is this Kuhn measurement only.
-
-| Algorithm | Iterations | Runtime (s) | \(u_1\) | Nash gap |
-| --- | ---: | ---: | ---: | ---: |
-| vanilla CFR | 200000 | 0.361615 | -0.0555541620942 | 0.000962626251605 |
-| CFR+ | 200000 | 0.6515666 | -0.055555555546 | 2.63026537634e-06 |
-| linear CFR | 2000 | 0.0034519 | -0.055423756632 | 0.0110188373994 |
-
-\(-1/18\) is -0.0555555555556. Linear CFR does not floor. The 2,000-iteration linear row uses the current schedule. The historical 10,000-iteration row is above.
-
-## Linear CFR on Kuhn
-
-Historical, from before the pass-level floor. Same machine and compiler. `kuhn_solver --iterations 10000 --algorithm <name>`. Linear CFR weights iteration `t` on both the new regret and the average strategy. It does not floor regrets. Both players update in one pass.
-
-| Algorithm | Iterations | Runtime (s) | Iterations/s | \(u_1\) | Nash gap |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| vanilla CFR | 10000 | 0.0140505 | 7.117e5 | -0.0555306025757 | 0.00297179826288 |
-| linear CFR | 10000 | 0.0166417 | 6.009e5 | -0.0555625698041 | 0.00591309307769 |
-
-Linear CFR is closer to \(-1/18\) at this length. Vanilla CFR has the smaller Nash gap. The 10,000-iteration vanilla row above is an older run of the same value and the same gap. See [HUNL.md](../reference/HUNL.md).
-
-## Leduc
-
-Same machine and compiler. Command: `build\Release\leduc_solver.exe --algorithm <name> --iterations N`. Default rules: ante 1, round-1 raise 2, round-2 raise 4, two raises per street. 936 decision information sets. Memory estimate 38692 bytes is the regret table, strategy-sum table, and offset table.
-
-| Algorithm | Iterations | Runtime (s) | Iterations/s | Player 0 value | Nash gap |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| vanilla CFR | 1000 | 0.7050075 | 1.418e3 | -0.0891149365429 | 0.0537834490152 |
-| CFR+ | 1000 | 1.3089424 | 7.640e2 | -0.0862957760813 | 0.0921236987006 |
-
-Published solves put the equilibrium value near -0.0856. One thousand iterations leaves a Nash gap around 0.05 to 0.09. At this length, CFR+ is closer in value and vanilla CFR has the smaller Nash gap. The unit tests check the gap against a 20-iteration run of the same algorithm, where both gaps are still above 0.15 and then fall. See [LEDUC.md](../reference/LEDUC.md).
+Primary production measurements are the **Street** and **River** sections below and [benchmarks/study/](../../../benchmarks/study/).
 
 ## Five-card evaluator
 
