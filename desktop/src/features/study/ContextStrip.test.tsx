@@ -208,4 +208,42 @@ describe("ContextStrip board card selector", () => {
     ).toBeTruthy();
     expect(compare.classList.contains("context-strip__compare")).toBe(true);
   });
+
+  it("shows all-in bets as bN(a) in the line column", () => {
+    useStudyStore.setState({
+      currentNode: {
+        node_id: "n-allin",
+        kind: "decision",
+        board: ["Ah", "Kd", "7c"],
+        place: "flop",
+        player: 1,
+        pot: 237,
+        line: "Bet 137 all-in",
+      },
+      pathTrail: [
+        {
+          nodeId: "root",
+          label: "Root",
+          rawLabel: "Root",
+          kind: "root",
+          street: "flop",
+          actor: null,
+        },
+        {
+          nodeId: "n-allin",
+          label: "b137 Allin",
+          rawLabel: "Bet 137 all-in",
+          kind: "action",
+          street: "flop",
+          actor: "OOP",
+          sizePot: 100,
+          toCall: 0,
+        },
+      ],
+    });
+    render(<ContextStrip />);
+    expect(screen.getByText("b137(a)")).toBeTruthy();
+    expect(screen.queryByText("b137 Allin")).toBeNull();
+    expect(screen.queryByText("Bet 137 all-in")).toBeNull();
+  });
 });

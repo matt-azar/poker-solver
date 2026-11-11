@@ -336,14 +336,48 @@ describe("betSizes", () => {
     // Without to_call, Raise to still yields a tag (street_total / pot).
     expect(potTagFromLabel("Raise to 400", 200)).toBe("r200");
 
-    // Trailing all-in must not suppress the pot tag (regression).
+    // Trailing all-in keeps the pot number; display tags append " Allin".
     expect(potTagFromLabel("Bet 150 all-in", 100)).toBe("b150");
+    expect(potTagFromLabel("Bet 150 all-in", 100, 0, "display")).toBe("b150 Allin");
+    expect(potTagFromLabel("Bet 150 all-in", 100, 0, "line")).toBe("b150(a)");
     const allIn = formatActionDisplay("Bet 150 all-in", 100, "both");
-    expect(allIn.primary).toBe("b150");
+    expect(allIn.primary).toBe("b150 Allin");
     expect(allIn.secondary).toBe("150.0 chips");
     expect(allIn.raw).toBe("Bet 150 all-in");
-    expect(allIn.primary).not.toMatch(/all-?in/i);
+    expect(allIn.potTag).toBe("b150 Allin");
     expect(allIn.primary).not.toMatch(/%/);
+  });
+
+  it("formats all-in bet and raise tags distinctly from non-all-in", () => {
+    // Non-all-in regression — no Allin / (a) suffix.
+    expect(potTagFromLabel("Bet 137", 100, 0, "display")).toBe("b137");
+    expect(potTagFromLabel("Bet 137", 100, 0, "line")).toBe("b137");
+    expect(formatActionDisplay("Bet 137", 100, "pot").primary).toBe("b137");
+
+    // All-in bet: display `bN Allin`, line `bN(a)`.
+    expect(potTagFromLabel("Bet 137 all-in", 100, 0, "display")).toBe(
+      "b137 Allin",
+    );
+    expect(potTagFromLabel("Bet 137 all-in", 100, 0, "line")).toBe("b137(a)");
+    expect(formatActionDisplay("Bet 137 all-in", 100, "pot").primary).toBe(
+      "b137 Allin",
+    );
+
+    // All-in raise (Raise to / legacy Raise): same markers with `r`.
+    expect(
+      potTagFromLabel("Raise to 400 all-in", 300, 100, "display"),
+    ).toBe("r100 Allin");
+    expect(potTagFromLabel("Raise to 400 all-in", 300, 100, "line")).toBe(
+      "r100(a)",
+    );
+    expect(
+      formatActionDisplay("Raise to 400 all-in", 300, "pot", { toCall: 100 })
+        .primary,
+    ).toBe("r100 Allin");
+    expect(potTagFromLabel("Raise 137 all-in", 100, 0, "display")).toBe(
+      "r137 Allin",
+    );
+    expect(potTagFromLabel("Raise 137 all-in", 100, 0, "line")).toBe("r137(a)");
   });
 
   it("keeps frequency formatting separate from pot tags", () => {

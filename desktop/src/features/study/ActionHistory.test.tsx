@@ -251,6 +251,47 @@ describe("ActionHistory path chrome", () => {
     expect(screen.getAllByText("3h")).toHaveLength(1);
   });
 
+  it("shows all-in bets as bN(a) in the abbreviated path", () => {
+    useStudyStore.setState({
+      currentNode: {
+        ...rootNode,
+        node_id: "n-allin",
+        player: 1,
+        pot: 237,
+        to_call: 137,
+        line: "Bet 137 all-in",
+        actions: ["Fold", "Call all-in"],
+        children: ["n-f", "n-c"],
+      },
+      pathTrail: [
+        {
+          nodeId: "root",
+          label: "Root",
+          rawLabel: "Root",
+          kind: "root",
+          street: "flop",
+          actor: null,
+        },
+        {
+          nodeId: "n-allin",
+          label: "b137 Allin",
+          rawLabel: "Bet 137 all-in",
+          kind: "action",
+          street: "flop",
+          actor: "OOP",
+          sizePot: 100,
+          toCall: 0,
+        },
+      ],
+    });
+    render(<ActionHistory />);
+    expect(
+      screen.getByLabelText("Betting path by street").getAttribute("data-path"),
+    ).toBe("b137(a)");
+    expect(screen.getByText("b137(a)")).toBeTruthy();
+    expect(screen.queryByText("b137 Allin")).toBeNull();
+  });
+
   it("keeps pot-fraction path tags when bet size display is chips", () => {
     useStudyStore.setState({
       pathTrail: [

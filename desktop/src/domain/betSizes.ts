@@ -792,11 +792,39 @@ export function sizeChipsForPotTag(
   return Math.abs(parsed.chips);
 }
 
-/** Compact pot tag like `b75` / `r150` from an engine action label + pot. */
+/**
+ * How to render a sized all-in on a pot tag.
+ * - `base`: `b150` / `r100` (no all-in marker)
+ * - `display`: visible action tags — `b150 Allin` / `r100 Allin`
+ * - `line`: abbreviated line notation — `b150(a)` / `r100(a)`
+ */
+export type PotTagVariant = "base" | "display" | "line";
+
+/** Append the shared all-in marker for display tags or line notation. */
+export function withAllInPotTagSuffix(
+  baseTag: string,
+  allIn: boolean,
+  variant: PotTagVariant = "base",
+): string {
+  if (!allIn || variant === "base") {
+    return baseTag;
+  }
+  if (variant === "display") {
+    return `${baseTag} Allin`;
+  }
+  return `${baseTag}(a)`;
+}
+
+/**
+ * Compact pot tag like `b75` / `r150` from an engine action label + pot.
+ * Sized all-ins reuse {@link parseSizedAction}.allIn so display tags and
+ * line notation stay on one path (`Allin` vs `(a)`).
+ */
 export function potTagFromLabel(
   label: string,
   pot: number,
   toCall = 0,
+  variant: PotTagVariant = "base",
 ): string | null {
   if (!(pot > 0)) {
     return null;
@@ -811,7 +839,7 @@ export function potTagFromLabel(
   }
   const pct = Math.round((sizeChips / pot) * 100);
   const kind = parsed.kind === "raise" ? "r" : "b";
-  return `${kind}${pct}`;
+  return withAllInPotTagSuffix(`${kind}${pct}`, parsed.allIn, variant);
 }
 
 /** Format absolute chips with one decimal place. */
@@ -844,13 +872,13 @@ export function chipsFromLabel(label: string): number | null {
 }
 
 export interface ActionDisplayParts {
-  /** Compact pot tag (`b50`) or passive label (`Check`). Never a bare percent. */
+  /** Compact pot tag (`b50` / `b150 Allin`) or passive label (`Check`). Never a bare percent. */
   primary: string;
   /** Optional chips with units (`50.0 chips`), or null. */
   secondary: string | null;
   /** Engine/raw label for tooltips and a11y. */
   raw: string;
-  /** Compact pot tag when applicable (`b50`), else null. */
+  /** Compact pot tag when applicable (`b50` / `b150 Allin`), else null. */
   potTag: string | null;
 }
 
@@ -876,7 +904,9 @@ export function formatActionDisplay(
 ): ActionDisplayParts {
   const trimmed = label.trim();
   const toCall = Number(options.toCall ?? 0);
-  const potTag = potTagFromLabel(trimmed, pot, toCall);
+  // Visible tags use the display variant (`b150 Allin`); line notation uses
+  // `line` via {@link potTagFromLabel} / abbreviatePathAction.
+  const potTag = potTagFromLabel(trimmed, pot, toCall, "display");
   if (/^(check|fold|call)$/i.test(trimmed) || /^call\b/i.test(trimmed)) {
     return { primary: trimmed, secondary: null, raw: trimmed, potTag: null };
   }

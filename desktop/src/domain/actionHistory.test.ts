@@ -224,7 +224,50 @@ describe("actionHistory helpers", () => {
     expect(compactActionLabel("Bet 75", 100, "chips")).toBe("75.0 chips");
     expect(compactActionLabel("Bet 75", 100, "both")).toBe("b75");
     expect(compactActionLabel("Raise to 400", 300, "pot", 100)).toBe("r100");
-    expect(compactActionLabel("Bet 150 all-in", 100, "pot")).toBe("b150");
+    expect(compactActionLabel("Bet 150 all-in", 100, "pot")).toBe("b150 Allin");
+  });
+
+  it("abbreviates all-in bets and raises with (a) in line notation", () => {
+    // Non-all-in regression.
+    expect(abbreviatePathAction("Bet 137", 100)).toBe("b137");
+    expect(abbreviatePathAction("Raise 137", 100)).toBe("r137");
+    expect(abbreviatePathAction("Raise to 400", 300, 100)).toBe("r100");
+
+    // All-in bet / raise → bN(a) / rN(a); checks/calls/folds unchanged.
+    expect(abbreviatePathAction("Bet 137 all-in", 100)).toBe("b137(a)");
+    expect(abbreviatePathAction("Raise 137 all-in", 100)).toBe("r137(a)");
+    expect(abbreviatePathAction("Raise to 400 all-in", 300, 100)).toBe(
+      "r100(a)",
+    );
+    expect(abbreviatePathAction("Check")).toBe("x");
+    expect(abbreviatePathAction("Call")).toBe("c");
+    expect(abbreviatePathAction("Fold")).toBe("f");
+    expect(abbreviatePathAction("Call all-in")).toBe("c");
+
+    // Display tags already carrying " Allin" still collapse to line form.
+    expect(abbreviatePathAction("b137 Allin")).toBe("b137(a)");
+    expect(abbreviatePathAction("r100 Allin")).toBe("r100(a)");
+    expect(abbreviatePathAction("b137(a)")).toBe("b137(a)");
+
+    expect(
+      abbreviateActionLine("Check/Bet 137 all-in/Call", 100),
+    ).toBe("x/b137(a)/c");
+    expect(
+      formatAbbreviatedPath([
+        {
+          steps: [
+            { kind: "root", label: "Root", rawLabel: "Root" },
+            {
+              kind: "action",
+              label: "b137 Allin",
+              rawLabel: "Bet 137 all-in",
+              sizePot: 100,
+              toCall: 0,
+            },
+          ],
+        },
+      ]),
+    ).toBe("b137(a)");
   });
 
   it("pairs actions with child ids and strategy frequencies", () => {
