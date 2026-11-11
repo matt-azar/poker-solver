@@ -40,7 +40,7 @@ timeline
 timeline
     Nov 9 : EV and equity queue : Rank-table equity : Same-line card comparison : Parallel action EV
     Nov 10 : Windows 0.1.1 : Board-specific locks : Assistant answers questions : Betting tree catalogue
-    Nov 11 : Windows 0.1.2 : Assistant runout filters : Sized all-in labels
+    Nov 11 : Windows 0.1.2 : Assistant runout filters : Sized all-in labels : Save and rename fixes
 ```
 
 ## The first Hold’em solver
@@ -152,11 +152,13 @@ The first lock implementation keyed constraints by betting line. It could theref
 
 Build first offered file dialogs for saving and opening betting trees. Later on November 10, it moved those saved trees into an in-app catalogue. A betting tree entry stored sizes, caps, and line edits. Applying it reused those settings on the current board and ranges. A PSOL file remained the way to save the full solution and resume training. The same day, Study suspended status polling while Explorer opened or saved a PSOL. File operations could occupy the server’s request loop long enough for a poll to time out and incorrectly show the engine as disconnected. [Save and open trees](https://github.com/matt-azar/poker-solver/pull/203) · [Betting tree catalogue](https://github.com/matt-azar/poker-solver/pull/221) · [Status polling during Open and Save](https://github.com/matt-azar/poker-solver/pull/220)
 
+On November 11, Save As began updating the draft’s file path only after Explorer confirmed the write. The betting-tree catalogue began writing changes to storage before updating its list on screen. Renames kept the same entry ID, and a duplicate name required an explicit replacement. [Save and catalogue fixes](https://github.com/matt-azar/poker-solver/pull/229)
+
 The assistant began on November 1 by turning an explicit setup request into an editable Build draft. It used the same settings as manual setup. On November 2, the code began recording the draft revision before asking the model, so it could detect a manual edit made while the request was pending. The range source and solve rake were separate settings. A 100NL catalogue selection identified the rake structure used to derive those ranges. The player could choose the rake applied to the postflop tree separately. [Build assistant](https://github.com/matt-azar/poker-solver/pull/73) · [Draft revision check](https://github.com/matt-azar/poker-solver/pull/113) · [Range selection](../../STUDY_SETUP_ASSISTANT.md#range-semantics-product-rules)
 
 On November 9, the project began generating the assistant’s reference material from source files checked against the UI and gave it access to live strategy data. On November 10, product and poker questions used a separate route that could read the current decision. On November 11, the assistant gained a Study action that filters the Compare runouts report by card and ranks the results by an action’s frequency. A selected result opens through the same path as a manual click. [Assistant documentation](https://github.com/matt-azar/poker-solver/pull/196) · [Current-decision data](https://github.com/matt-azar/poker-solver/pull/197) · [Question answering](https://github.com/matt-azar/poker-solver/pull/216) · [Runout filtering](https://github.com/matt-azar/poker-solver/pull/224)
 
-The unsigned Windows releases `v0.1.1-windows` and `v0.1.2-windows` were published on November 10 and 11. The assistant’s runout filtering and the sized all-in labels merged after 0.1.2 was published. [Windows 0.1.1](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.1-windows) · [Windows 0.1.2](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.2-windows) · [Sized all-in labels](https://github.com/matt-azar/poker-solver/pull/225)
+The unsigned Windows releases `v0.1.1-windows` and `v0.1.2-windows` were published on November 10 and 11. Runout filtering, sized all-in labels, and the save fixes merged after 0.1.2 was published. [Windows 0.1.1](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.1-windows) · [Windows 0.1.2](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.2-windows) · [Sized all-in labels](https://github.com/matt-azar/poker-solver/pull/225)
 
 By November 11, the roadmap still listed compact saves, a persistent batch queue, training drills, preflop solving, and signed installers as future work. Matched benchmarks with PioSolver were still outstanding. [Roadmap](../planning/ROADMAP.md)
 
