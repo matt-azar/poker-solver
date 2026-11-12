@@ -45,7 +45,13 @@ test "session train save open roundtrip" {
     try sess.train(2);
     try std.testing.expect(sess.phase == .published);
     try std.testing.expect(sess.policyRevision() >= 1);
-    try sess.setLocksText("lock demo");
+    const locks_text =
+        \\lock 42 at -1 -1 full probs 0.25 0.75
+        \\lock 12 at -1 7 full probs 1 0
+        \\lock 8 line full probs 0 1
+        \\
+    ;
+    try sess.setLocksText(locks_text);
     sess.setMetrics(.{ .value = 50, .br0 = 50, .br1 = -50, .nash_gap = 0, .accuracy = 0 });
 
     var tmp = std.testing.tmpDir(.{});
@@ -65,7 +71,14 @@ test "session train save open roundtrip" {
     try other.open(path);
     try std.testing.expect(other.solution_id != prior_id);
     try std.testing.expect(other.phase == .published);
-    try std.testing.expectEqualStrings("lock demo", other.locks_text);
+    try std.testing.expectEqualStrings(locks_text, other.locks_text);
+    // Overlay text remains parseable as C++-compatible node/line locks.
+    var parsed = try poker_engine.solve.node_lock.parseLockSet(std.testing.allocator, other.locks_text);
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 3), parsed.size());
+    try std.testing.expectEqual(@as(f64, 0.25), parsed.findExact(42, -1, -1).?.actions.probs[0]);
+    try std.testing.expectEqual(@as(f64, 1.0), parsed.findForRunout(12, -1, 7).?.actions.probs[0]);
+    try std.testing.expect(parsed.find(8).?.isLine());
     try std.testing.expect(other.has_metrics);
     try std.testing.expectApproxEqAbs(@as(f64, 50.0), other.metrics.value, 1e-12);
 

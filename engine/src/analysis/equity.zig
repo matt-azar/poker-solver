@@ -4,9 +4,21 @@ const range_mod = @import("../poker/range.zig");
 const hand_eval = @import("../poker/hand_eval.zig");
 const compile = @import("../game/compile.zig");
 
-pub const EquityError = error{ InvalidEquity, OutOfMemory, WorkLimit };
+pub const EquityError = error{ InvalidEquity, OutOfMemory, WorkLimit, InvalidWeight };
 
+/// C++ `kFullRangeTurnPairRunouts` / Study packaging ceiling.
+pub const full_range_turn_pair_runouts: u64 = 51_369_120;
+/// C++ `kDefaultMaxPairRunouts` (library / Equity Calculator default).
 pub const default_max_pair_runouts: u64 = 1_100_000;
+/// C++ `kStudyExplorerMaxPairRunouts` (= full-range turn).
+pub const study_explorer_max_pair_runouts: u64 = full_range_turn_pair_runouts;
+pub const equity_distribution_buckets: usize = 10;
+
+pub const EquityDistributionBucket = struct {
+    lo: f64 = 0,
+    hi: f64 = 0,
+    weight: f64 = 0,
+};
 
 pub const ComboEquity = struct {
     index: i32 = 0,
@@ -130,12 +142,13 @@ pub fn showdownEquity(
             runouts.append(.{ c, -1 }) catch return error.OutOfMemory;
         }
     } else {
+        // Unordered flop completions C(n,2) — match C++ showdown_equity / Study.
         var t: i32 = 0;
         while (t < 52) : (t += 1) {
             if (dead[@intCast(t)]) continue;
-            var r: i32 = 0;
+            var r: i32 = t + 1;
             while (r < 52) : (r += 1) {
-                if (r == t or dead[@intCast(r)]) continue;
+                if (dead[@intCast(r)]) continue;
                 runouts.append(.{ t, r }) catch return error.OutOfMemory;
             }
         }
@@ -337,4 +350,47 @@ pub fn checkdownEquity(
         r1.weights[@intCast(combo)] = game.hands.range_w[1][i];
     }
     return showdownEquity(allocator, game.board, r0, r1, max_pair_runouts);
+}
+
+pub fn emptyEquityDistribution() [equity_distribution_buckets]EquityDistributionBucket {
+    var buckets: [equity_distribution_buckets]EquityDistributionBucket = undefined;
+    var i: usize = 0;
+    while (i < equity_distribution_buckets) : (i += 1) {
+        buckets[i] = .{
+            .lo = @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(equity_distribution_buckets)),
+            .hi = @as(f64, @floatFromInt(i + 1)) / @as(f64, @floatFromInt(equity_distribution_buckets)),
+            .weight = 0,
+        };
+    }
+    return buckets;
+}
+
+/// Ten-bucket Study histogram over [0,1]; last bucket includes 1.0.
+pub fn equityDistribution(equities: []const f64, weights: []const f64) EquityError![equity_distribution_buckets]EquityDistributionBucket {
+    if (equities.len != weights.len) return error.InvalidEquity;
+    var buckets = emptyEquityDistribution();
+    for (equities, weights) |eq_in, weight| {
+        if (!std.math.isFinite(weight) or weight < 0.0) return error.InvalidWeight;
+        if (weight == 0.0) continue;
+        if (!std.math.isFinite(eq_in)) return error.InvalidEquity;
+        var equity = eq_in;
+        if (equity < 0.0) equity = 0.0 else if (equity > 1.0) equity = 1.0;
+        var index: usize = @intFromFloat(equity * @as(f64, @floatFromInt(equity_distribution_buckets)));
+        if (index >= equity_distribution_buckets) index = equity_distribution_buckets - 1;
+        buckets[index].weight += weight;
+    }
+    return buckets;
+}
+
+pub fn equityDistributionFromPlayer(player: PlayerEquity) EquityError![equity_distribution_buckets]EquityDistributionBucket {
+    var eqs: [1326]f64 = undefined;
+    var ws: [1326]f64 = undefined;
+    var n: usize = 0;
+    for (player.combos) |row| {
+        if (!row.defined or !(row.input_weight > 0)) continue;
+        eqs[n] = row.equity;
+        ws[n] = row.input_weight;
+        n += 1;
+    }
+    return equityDistribution(eqs[0..n], ws[0..n]);
 }
