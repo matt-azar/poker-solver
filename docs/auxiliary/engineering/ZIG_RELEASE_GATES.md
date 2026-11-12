@@ -70,7 +70,8 @@ Do **not** wait forever on flop-scale trains:
 | River / smoke (`river_gate_smoke.txt`) | ≤ 60 s | `scripts/zig/run-gate-bounded.sh 60 …` |
 | Flop `flop_srp_one_size` warm fixed-iter | ≤ 180 s (then kill + escalate) | same wrapper / C++ `--time-limit` |
 | Flop cold Accuracy/pot ≤ 0.001 | dedicated Windows Release machine; not an agent dig | — |
-| `flop_srp_two_sizes` train | needs ≥ ~6.5 GiB plan peak; skip if host RAM tight | plan-memory first |
+| `flop_srp_two_sizes` train | plan peak ~2.63 GiB with flop-only `oop-flop-bets`/`ip-flop-bets`; skip if host RAM tight | plan-memory first |
 
-Harness: `zig-out/bin/gate-bench` (Zig Session CFR+) and C++ `street_solver`.
+Harness: `zig-out/bin/gate-bench` (Zig Session frozen CFR+; NashConv via frozen
+`response_walk`). Prefer `--skip-eval` only when measuring train wall alone.
 Linux numbers are interim only — Windows Release remains authoritative.

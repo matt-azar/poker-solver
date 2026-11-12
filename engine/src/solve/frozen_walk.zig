@@ -11,6 +11,16 @@ const training_state = @import("training_state.zig");
 
 pub const FrozenError = error{ InvalidFrozen, OutOfMemory } || hand_eval.EvalError || payoff.PayoffError || training_state.TrainError;
 
+/// Avoid importing analysis/ from solve/ (cycle). Same fields as EvaluationResult.
+pub const FrozenEval = struct {
+    u0: f64 = 0,
+    u1: f64 = 0,
+    br0: f64 = 0,
+    br1: f64 = 0,
+    nash_gap: f64 = 0,
+    accuracy: f64 = 0,
+};
+
 const max_actions: usize = 8;
 const max_depth: usize = 64;
 
@@ -68,7 +78,8 @@ const Scratch = struct {
 pub const FrozenCtx = struct {
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
-    state: *training_state.TrainingState,
+    /// Required for CFR+ train walks; null for evaluation-only contexts.
+    state: ?*training_state.TrainingState,
     n0: usize,
     n1: usize,
     joint_scale: f64,
@@ -90,6 +101,14 @@ pub const FrozenCtx = struct {
     scratch_len: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator, game: compile.CompiledGame, state: *training_state.TrainingState) FrozenError!FrozenCtx {
+        return initCommon(allocator, game, state);
+    }
+
+    pub fn initEval(allocator: std.mem.Allocator, game: compile.CompiledGame) FrozenError!FrozenCtx {
+        return initCommon(allocator, game, null);
+    }
+
+    fn initCommon(allocator: std.mem.Allocator, game: compile.CompiledGame, state: ?*training_state.TrainingState) FrozenError!FrozenCtx {
         const n0: usize = @intCast(game.hands.nHands(0));
         const n1: usize = @intCast(game.hands.nHands(1));
         if (n0 == 0 or n1 == 0) return error.InvalidFrozen;
@@ -133,7 +152,6 @@ pub const FrozenCtx = struct {
         }
         return ctx;
     }
-
     pub fn deinit(self: *FrozenCtx) void {
         var d: usize = 0;
         while (d < self.scratch_len) : (d += 1) {
@@ -554,7 +572,7 @@ pub const FrozenCtx = struct {
                         continue;
                     }
                     const b: usize = @intCast(base);
-                    child.pi0[h0] = here.pi0[h0] * self.state.sigma[b + action];
+                    child.pi0[h0] = here.pi0[h0] * self.state.?.sigma[b + action];
                 }
                 @memcpy(child.pi1, here.pi1);
             } else {
@@ -567,7 +585,7 @@ pub const FrozenCtx = struct {
                         continue;
                     }
                     const b: usize = @intCast(base);
-                    child.pi1[h1] = here.pi1[h1] * self.state.sigma[b + action];
+                    child.pi1[h1] = here.pi1[h1] * self.state.?.sigma[b + action];
                 }
             }
             try self.walk(node.child[action], turn, river, depth + 1, updating, weight_iter);
@@ -604,7 +622,7 @@ pub const FrozenCtx = struct {
                     continue;
                 }
                 const b: usize = @intCast(base);
-                const row = self.state.sigma[b .. b + n_act];
+                const row = self.state.?.sigma[b .. b + n_act];
                 var mix: f64 = 0;
                 action = 0;
                 while (action < n_act) : (action += 1) {
@@ -613,14 +631,14 @@ pub const FrozenCtx = struct {
                 here.ev0[h0] = mix;
                 if (updating < 0 or updating == 0) {
                     regret_matching.accumulateAverage(
-                        self.state.strategy_sum[b .. b + n_act],
+                        self.state.?.strategy_sum[b .. b + n_act],
                         row,
                         weight_iter * here.pi0[h0],
                     );
                     action = 0;
                     while (action < n_act) : (action += 1) {
                         const instant = here.aev0[action * self.n0 + h0] - mix;
-                        self.state.regret[b + action] += @floatCast(instant);
+                        self.state.?.regret[b + action] += @floatCast(instant);
                     }
                 }
             }
@@ -645,7 +663,7 @@ pub const FrozenCtx = struct {
                     continue;
                 }
                 const b: usize = @intCast(base);
-                const row = self.state.sigma[b .. b + n_act];
+                const row = self.state.?.sigma[b .. b + n_act];
                 var mix: f64 = 0;
                 action = 0;
                 while (action < n_act) : (action += 1) {
@@ -654,21 +672,234 @@ pub const FrozenCtx = struct {
                 here.ev1[h1] = mix;
                 if (updating < 0 or updating == 1) {
                     regret_matching.accumulateAverage(
-                        self.state.strategy_sum[b .. b + n_act],
+                        self.state.?.strategy_sum[b .. b + n_act],
                         row,
                         weight_iter * here.pi1[h1],
                     );
                     action = 0;
                     while (action < n_act) : (action += 1) {
                         const instant = here.aev1[action * self.n1 + h1] - mix;
-                        self.state.regret[b + action] += @floatCast(instant);
+                        self.state.?.regret[b + action] += @floatCast(instant);
                     }
                 }
             }
         }
     }
-};
 
+    /// C++ `response_walk`: on-profile (`responding == -1`) or unilateral BR.
+    pub fn responseWalk(
+        self: *FrozenCtx,
+        node_index: u32,
+        turn: i32,
+        river: i32,
+        depth: usize,
+        responding: i32,
+        sigma: []const f32,
+    ) FrozenError!void {
+        if (depth >= max_depth) return error.InvalidFrozen;
+        const node = self.game.nodes[node_index];
+        const here = &self.scratch[depth];
+
+        if (node.kind == .terminal) {
+            try self.applyTerminal(node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1);
+            return;
+        }
+
+        if (node.kind == .chance) {
+            @memset(here.ev0, 0);
+            @memset(here.ev1, 0);
+            var dead: [52]bool = .{false} ** 52;
+            for (self.game.board) |c| dead[@intCast(c)] = true;
+            if (turn >= 0) dead[@intCast(turn)] = true;
+            if (river >= 0) dead[@intCast(river)] = true;
+            var denom: i32 = 52 - @as(i32, @intCast(self.game.board.len)) - 4;
+            if (turn >= 0) denom -= 1;
+            if (river >= 0) denom -= 1;
+            if (denom <= 0) return error.InvalidFrozen;
+            const probability = 1.0 / @as(f64, @floatFromInt(denom));
+            const child = &self.scratch[depth + 1];
+            var c: i32 = 0;
+            while (c < 52) : (c += 1) {
+                if (dead[@intCast(c)]) continue;
+                var next_turn = turn;
+                var next_river = river;
+                if (node.deal_which == 1) next_turn = c else next_river = c;
+                if (!self.cardReachesPair(next_turn, next_river, here.pi0, here.pi1)) continue;
+                var h0: usize = 0;
+                while (h0 < self.n0) : (h0 += 1) {
+                    child.pi0[h0] = if (self.live0[h0]) here.pi0[h0] else 0;
+                }
+                var h1: usize = 0;
+                while (h1 < self.n1) : (h1 += 1) {
+                    child.pi1[h1] = if (self.live1[h1]) here.pi1[h1] else 0;
+                }
+                try self.responseWalk(node.child[0], next_turn, next_river, depth + 1, responding, sigma);
+                h0 = 0;
+                while (h0 < self.n0) : (h0 += 1) here.ev0[h0] += probability * child.ev0[h0];
+                h1 = 0;
+                while (h1 < self.n1) : (h1 += 1) here.ev1[h1] += probability * child.ev1[h1];
+            }
+            return;
+        }
+
+        self.ensureBoardSupport(turn, river);
+        const child = &self.scratch[depth + 1];
+        if (node.n_actions <= 1) {
+            if (node.player == 0) {
+                var h0: usize = 0;
+                while (h0 < self.n0) : (h0 += 1) {
+                    child.pi0[h0] = if (self.handSupported(0, h0, turn, river)) here.pi0[h0] else 0;
+                }
+                @memcpy(child.pi1, here.pi1);
+            } else {
+                @memcpy(child.pi0, here.pi0);
+                var h1: usize = 0;
+                while (h1 < self.n1) : (h1 += 1) {
+                    child.pi1[h1] = if (self.handSupported(1, h1, turn, river)) here.pi1[h1] else 0;
+                }
+            }
+            try self.responseWalk(node.child[0], turn, river, depth + 1, responding, sigma);
+            @memcpy(here.ev0, child.ev0);
+            @memcpy(here.ev1, child.ev1);
+            return;
+        }
+
+        if (node.n_actions > max_actions) return error.InvalidFrozen;
+        try self.fillActorSlotBases(here, node, turn, river);
+        const n_act: usize = node.n_actions;
+        const choosing = node.player == responding;
+
+        var action: usize = 0;
+        while (action < n_act) : (action += 1) {
+            if (node.player == 0) {
+                var h0: usize = 0;
+                while (h0 < self.n0) : (h0 += 1) {
+                    const base = here.slot_base[h0];
+                    if (base < 0) {
+                        child.pi0[h0] = 0;
+                        continue;
+                    }
+                    if (choosing) {
+                        child.pi0[h0] = here.pi0[h0];
+                    } else {
+                        const b: usize = @intCast(base);
+                        child.pi0[h0] = here.pi0[h0] * sigma[b + action];
+                    }
+                }
+                @memcpy(child.pi1, here.pi1);
+            } else {
+                @memcpy(child.pi0, here.pi0);
+                var h1: usize = 0;
+                while (h1 < self.n1) : (h1 += 1) {
+                    const base = here.slot_base[h1];
+                    if (base < 0) {
+                        child.pi1[h1] = 0;
+                        continue;
+                    }
+                    if (choosing) {
+                        child.pi1[h1] = here.pi1[h1];
+                    } else {
+                        const b: usize = @intCast(base);
+                        child.pi1[h1] = here.pi1[h1] * sigma[b + action];
+                    }
+                }
+            }
+            try self.responseWalk(node.child[action], turn, river, depth + 1, responding, sigma);
+            @memcpy(here.aev0[action * self.n0 ..][0..self.n0], child.ev0);
+            @memcpy(here.aev1[action * self.n1 ..][0..self.n1], child.ev1);
+        }
+
+        self.ensureBoardSupport(turn, river);
+        var h0: usize = 0;
+        while (h0 < self.n0) : (h0 += 1) {
+            if (!self.live0[h0]) {
+                here.ev0[h0] = 0;
+                continue;
+            }
+            if (node.player == 0 and responding == 0) {
+                var best: usize = 0;
+                action = 1;
+                while (action < n_act) : (action += 1) {
+                    if (here.aev0[action * self.n0 + h0] > here.aev0[best * self.n0 + h0]) best = action;
+                }
+                here.ev0[h0] = here.aev0[best * self.n0 + h0];
+            } else if (node.player == 0) {
+                const base = here.slot_base[h0];
+                if (base < 0) {
+                    here.ev0[h0] = 0;
+                    continue;
+                }
+                const b: usize = @intCast(base);
+                const row = sigma[b .. b + n_act];
+                var mix: f64 = 0;
+                action = 0;
+                while (action < n_act) : (action += 1) {
+                    mix += row[action] * here.aev0[action * self.n0 + h0];
+                }
+                here.ev0[h0] = mix;
+            } else if (responding == 1) {
+                here.ev0[h0] = 0;
+            } else {
+                var mix: f64 = 0;
+                action = 0;
+                while (action < n_act) : (action += 1) {
+                    mix += here.aev0[action * self.n0 + h0];
+                }
+                here.ev0[h0] = mix;
+            }
+        }
+        var h1: usize = 0;
+        while (h1 < self.n1) : (h1 += 1) {
+            if (!self.live1[h1]) {
+                here.ev1[h1] = 0;
+                continue;
+            }
+            if (node.player == 1 and responding == 1) {
+                var best: usize = 0;
+                action = 1;
+                while (action < n_act) : (action += 1) {
+                    if (here.aev1[action * self.n1 + h1] > here.aev1[best * self.n1 + h1]) best = action;
+                }
+                here.ev1[h1] = here.aev1[best * self.n1 + h1];
+            } else if (node.player == 1) {
+                const base = here.slot_base[h1];
+                if (base < 0) {
+                    here.ev1[h1] = 0;
+                    continue;
+                }
+                const b: usize = @intCast(base);
+                const row = sigma[b .. b + n_act];
+                var mix: f64 = 0;
+                action = 0;
+                while (action < n_act) : (action += 1) {
+                    mix += row[action] * here.aev1[action * self.n1 + h1];
+                }
+                here.ev1[h1] = mix;
+            } else if (responding == 0) {
+                here.ev1[h1] = 0;
+            } else {
+                var mix: f64 = 0;
+                action = 0;
+                while (action < n_act) : (action += 1) {
+                    mix += here.aev1[action * self.n1 + h1];
+                }
+                here.ev1[h1] = mix;
+            }
+        }
+    }
+
+    fn sumScratch(values: []const f64) f64 {
+        var total: f64 = 0;
+        for (values) |v| total += v;
+        return total;
+    }
+
+    fn prepareResponseRoot(self: *FrozenCtx) void {
+        @memset(self.scratch[0].pi0, 1.0);
+        @memset(self.scratch[0].pi1, 1.0);
+        self.support_turn = -2;
+    }
+};
 /// CFR+ frozen schedule matching C++ train_frozen_cfr_plus_iterations.
 pub fn trainFrozenCfrPlus(
     allocator: std.mem.Allocator,
@@ -699,6 +930,52 @@ pub fn trainFrozenCfrPlus(
         published = try training_state.publishAverage(allocator, game, state);
     }
     return published;
+}
+
+/// Frozen evaluate_profile: on-path + unilateral BR → NashConv / Accuracy.
+/// Matches C++ `StreetBatchSolver::Engine::evaluate_profile` (single-thread).
+pub fn evaluatePublishedFrozen(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    average: []const f32,
+) FrozenError!FrozenEval {
+    var owned: ?[]f32 = null;
+    defer if (owned) |buf| allocator.free(buf);
+    var sigma = average;
+    if (average.len == 0) {
+        var uniform = try training_state.TrainingState.init(allocator, game);
+        defer uniform.deinit();
+        owned = try allocator.dupe(f32, uniform.sigma);
+        sigma = owned.?;
+    } else if (average.len != @as(usize, @intCast(@max(game.table_entries, 0)))) {
+        return error.InvalidFrozen;
+    }
+
+    var ctx = try FrozenCtx.initEval(allocator, game);
+    defer ctx.deinit();
+
+    ctx.prepareResponseRoot();
+    try ctx.responseWalk(0, -1, -1, 0, -1, sigma);
+    const util0 = FrozenCtx.sumScratch(ctx.scratch[0].ev0);
+    const util1 = FrozenCtx.sumScratch(ctx.scratch[0].ev1);
+
+    ctx.prepareResponseRoot();
+    try ctx.responseWalk(0, -1, -1, 0, 0, sigma);
+    const br_util0 = FrozenCtx.sumScratch(ctx.scratch[0].ev0);
+
+    ctx.prepareResponseRoot();
+    try ctx.responseWalk(0, -1, -1, 0, 1, sigma);
+    const br_util1 = FrozenCtx.sumScratch(ctx.scratch[0].ev1);
+
+    const nash_gap = (br_util0 - util0) + (br_util1 - util1);
+    return .{
+        .u0 = util0,
+        .u1 = util1,
+        .br0 = br_util0,
+        .br1 = br_util1,
+        .nash_gap = nash_gap,
+        .accuracy = 0.5 * nash_gap,
+    };
 }
 
 test "frozen river smoke trains" {
@@ -732,4 +1009,7 @@ test "frozen river smoke trains" {
     var published = try trainFrozenCfrPlus(std.testing.allocator, game, &state, 5);
     defer published.deinit();
     try std.testing.expect(published.trained == 5);
+    const eval = try evaluatePublishedFrozen(std.testing.allocator, game, published.average);
+    try std.testing.expect(eval.nash_gap >= 0);
+    try std.testing.expectApproxEqAbs(eval.accuracy, 0.5 * eval.nash_gap, 1e-12);
 }
