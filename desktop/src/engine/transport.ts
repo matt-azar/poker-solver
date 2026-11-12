@@ -168,7 +168,7 @@ export async function ipcValues(nodeIdOrIndex: string | number = 0): Promise<unk
   return env.body;
 }
 
-/** Study check-down equity (host `equity` → `checkdownEquity`). Root / board ranges first. */
+/** Study check-down equity (host `equity` → reach-weighted `checkdownEquityAtNode`). */
 export async function ipcEquity(opts?: {
   nodeIndex?: number;
   nodeId?: string;

@@ -3,6 +3,7 @@ const card = @import("../poker/card.zig");
 const range_mod = @import("../poker/range.zig");
 const hand_eval = @import("../poker/hand_eval.zig");
 const compile = @import("../game/compile.zig");
+const training_state = @import("../solve/training_state.zig");
 
 pub const EquityError = error{ InvalidEquity, OutOfMemory, WorkLimit, InvalidWeight };
 
@@ -350,6 +351,230 @@ pub fn checkdownEquity(
         r1.weights[@intCast(combo)] = game.hands.range_w[1][i];
     }
     return showdownEquity(allocator, game.board, r0, r1, max_pair_runouts);
+}
+
+fn handBlocksCards(game: compile.CompiledGame, player: usize, hand: usize, turn: i32, river: i32) bool {
+    const c0 = game.hands.hole_low[player][hand];
+    const c1 = game.hands.hole_high[player][hand];
+    for (game.board) |b| {
+        if (b == c0 or b == c1) return true;
+    }
+    if (turn >= 0 and (@as(card.Card, @intCast(turn)) == c0 or @as(card.Card, @intCast(turn)) == c1)) return true;
+    if (river >= 0 and (@as(card.Card, @intCast(river)) == c0 or @as(card.Card, @intCast(river)) == c1)) return true;
+    return false;
+}
+
+fn handStructurallySupported(game: compile.CompiledGame, player: usize, hand: usize, turn: i32, river: i32) bool {
+    if (!(game.hands.range_w[player][hand] > 0)) return false;
+    if (handBlocksCards(game, player, hand, turn, river)) return false;
+    const opp: usize = 1 - player;
+    const n_opp: usize = @intCast(@max(game.hands.nHands(opp), 0));
+    const a0 = game.hands.hole_low[player][hand];
+    const a1 = game.hands.hole_high[player][hand];
+    var oh: usize = 0;
+    while (oh < n_opp) : (oh += 1) {
+        if (!(game.hands.range_w[opp][oh] > 0)) continue;
+        if (handBlocksCards(game, opp, oh, turn, river)) continue;
+        const b0 = game.hands.hole_low[opp][oh];
+        const b1 = game.hands.hole_high[opp][oh];
+        if (a0 == b0 or a0 == b1 or a1 == b0 or a1 == b1) continue;
+        return true;
+    }
+    return false;
+}
+
+fn zeroCard(game: compile.CompiledGame, reach: []f64, player: usize, dealt: i32) void {
+    if (dealt < 0) return;
+    const dealt_c: card.Card = @intCast(dealt);
+    var hand: usize = 0;
+    while (hand < reach.len) : (hand += 1) {
+        if (!(reach[hand] > 0)) continue;
+        const c0 = game.hands.hole_low[player][hand];
+        const c1 = game.hands.hole_high[player][hand];
+        if (c0 == dealt_c or c1 == dealt_c) reach[hand] = 0;
+    }
+}
+
+fn zeroUnsupported(game: compile.CompiledGame, reach: []f64, player: usize, turn: i32, river: i32) void {
+    var hand: usize = 0;
+    while (hand < reach.len) : (hand += 1) {
+        if (!(reach[hand] > 0)) continue;
+        if (!handStructurallySupported(game, player, hand, turn, river)) reach[hand] = 0;
+    }
+}
+
+/// C++ `StreetBatchSolver::Engine::replay_weights`: independent per-player reach
+/// along the betting/chance line (own actions × card removal). Caller frees q0/q1.
+pub fn replayReachWeights(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    sigma: []const f32,
+    node_index: u32,
+    turn: i32,
+    river: i32,
+) EquityError!struct { q0: []f64, q1: []f64 } {
+    if (node_index >= game.nodes.len) return error.InvalidEquity;
+
+    var chain_buf: [128]u32 = undefined;
+    var depth: usize = 0;
+    var at = node_index;
+    while (true) {
+        if (depth >= chain_buf.len) return error.InvalidEquity;
+        chain_buf[depth] = at;
+        depth += 1;
+        const parent = game.nodes[at].parent;
+        if (parent < 0) break;
+        at = @intCast(parent);
+    }
+    std.mem.reverse(u32, chain_buf[0..depth]);
+    if (depth == 0 or chain_buf[0] != 0) return error.InvalidEquity;
+
+    const n0: usize = @intCast(@max(game.hands.nHands(0), 0));
+    const n1: usize = @intCast(@max(game.hands.nHands(1), 0));
+    const q0 = allocator.alloc(f64, n0) catch return error.OutOfMemory;
+    errdefer allocator.free(q0);
+    const q1 = allocator.alloc(f64, n1) catch return error.OutOfMemory;
+    errdefer allocator.free(q1);
+    if (n0 != 0) @memcpy(q0, game.hands.range_w[0][0..n0]);
+    if (n1 != 0) @memcpy(q1, game.hands.range_w[1][0..n1]);
+
+    var seen_turn: i32 = -1;
+    var seen_river: i32 = -1;
+    zeroUnsupported(game, q0, 0, seen_turn, seen_river);
+    zeroUnsupported(game, q1, 1, seen_turn, seen_river);
+
+    var step: usize = 0;
+    while (step + 1 < depth) : (step += 1) {
+        const current = chain_buf[step];
+        const next = chain_buf[step + 1];
+        const node = game.nodes[current];
+        if (game.nodes[next].parent != @as(i32, @intCast(current))) return error.InvalidEquity;
+
+        if (node.kind == .chance) {
+            const dealt: i32 = if (node.deal_which == 1) turn else river;
+            if (dealt < 0) return error.InvalidEquity;
+            zeroCard(game, q0, 0, dealt);
+            zeroCard(game, q1, 1, dealt);
+            if (node.deal_which == 1) {
+                seen_turn = dealt;
+            } else {
+                seen_river = dealt;
+            }
+            zeroUnsupported(game, q0, 0, seen_turn, seen_river);
+            zeroUnsupported(game, q1, 1, seen_turn, seen_river);
+            continue;
+        }
+
+        if (node.kind != .decision) return error.InvalidEquity;
+        const action = game.nodes[next].parent_action;
+        if (action < 0) return error.InvalidEquity;
+        const player: usize = if (node.player == 0) 0 else 1;
+        const acting = if (player == 0) q0 else q1;
+        var hand: usize = 0;
+        while (hand < acting.len) : (hand += 1) {
+            if (!(acting[hand] > 0)) continue;
+            if (!handStructurallySupported(game, player, hand, seen_turn, seen_river)) {
+                acting[hand] = 0;
+                continue;
+            }
+            if (node.n_actions <= 1) continue;
+            const key = game.cardKey(node, @intCast(hand), seen_turn, seen_river) catch {
+                acting[hand] = 0;
+                continue;
+            };
+            if (key < 0 or @as(usize, @intCast(key)) >= node.slot_of.len) {
+                acting[hand] = 0;
+                continue;
+            }
+            const slot_i = node.slot_of[@intCast(key)];
+            if (slot_i < 0) {
+                acting[hand] = 0;
+                continue;
+            }
+            const base: usize = @intCast(game.slots[@intCast(slot_i)].base);
+            const sigma_i = base + @as(usize, @intCast(action));
+            if (sigma_i >= sigma.len) {
+                acting[hand] = 0;
+                continue;
+            }
+            acting[hand] *= @as(f64, @floatCast(sigma[sigma_i]));
+        }
+    }
+
+    if (seen_turn != turn or seen_river != river) return error.InvalidEquity;
+    return .{ .q0 = q0, .q1 = q1 };
+}
+
+fn boardThroughNode(
+    game: compile.CompiledGame,
+    turn: i32,
+    river: i32,
+    out: *[5]card.Card,
+) EquityError![]const card.Card {
+    var n: usize = 0;
+    for (game.board) |c| {
+        if (n >= out.len) return error.InvalidEquity;
+        out[n] = c;
+        n += 1;
+    }
+    if (turn >= 0) {
+        if (n >= out.len) return error.InvalidEquity;
+        out[n] = @intCast(turn);
+        n += 1;
+    }
+    if (river >= 0) {
+        if (n >= out.len) return error.InvalidEquity;
+        out[n] = @intCast(river);
+        n += 1;
+    }
+    if (n != 3 and n != 4 and n != 5) return error.InvalidEquity;
+    return out[0..n];
+}
+
+/// Study node check-down equity: both players' strategy-conditioned reach along
+/// the line, board through the node, pair enumeration. Zero-weight hands are
+/// omitted from showdownEquity inputs and aggregates (ZR-95 / audit P0-2).
+pub fn checkdownEquityAtNode(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    published: training_state.PublishedPolicy,
+    node_index: u32,
+    turn: i32,
+    river: i32,
+    max_pair_runouts: u64,
+) EquityError!ShowdownEquity {
+    var owned_sigma: ?[]f32 = null;
+    defer if (owned_sigma) |buf| allocator.free(buf);
+    const sigma: []const f32 = blk: {
+        if (published.average.len != 0) break :blk published.average;
+        var uniform = training_state.TrainingState.init(allocator, game) catch return error.OutOfMemory;
+        defer uniform.deinit();
+        owned_sigma = allocator.dupe(f32, uniform.sigma) catch return error.OutOfMemory;
+        break :blk owned_sigma.?;
+    };
+
+    const reach = try replayReachWeights(allocator, game, sigma, node_index, turn, river);
+    defer {
+        allocator.free(reach.q0);
+        allocator.free(reach.q1);
+    }
+
+    var r0 = range_mod.Range{};
+    var r1 = range_mod.Range{};
+    for (game.hands.combos[0], 0..) |combo, i| {
+        if (i < reach.q0.len and reach.q0[i] > 0 and std.math.isFinite(reach.q0[i])) {
+            r0.weights[@intCast(combo)] = reach.q0[i];
+        }
+    }
+    for (game.hands.combos[1], 0..) |combo, i| {
+        if (i < reach.q1.len and reach.q1[i] > 0 and std.math.isFinite(reach.q1[i])) {
+            r1.weights[@intCast(combo)] = reach.q1[i];
+        }
+    }
+
+    var board_buf: [5]card.Card = undefined;
+    const board = try boardThroughNode(game, turn, river, &board_buf);
+    return showdownEquity(allocator, board, r0, r1, max_pair_runouts);
 }
 
 pub fn emptyEquityDistribution() [equity_distribution_buckets]EquityDistributionBucket {
