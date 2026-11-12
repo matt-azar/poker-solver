@@ -193,7 +193,6 @@ pub fn main() !void {
         try runAccuracyStop(
             allocator,
             &sess,
-            game,
             stdout,
             begin_ns,
             pot_chips,
@@ -238,7 +237,7 @@ pub fn main() !void {
     }
 
     const t_eval0 = std.time.nanoTimestamp();
-    const eval = try evaluateFrozen(allocator, game, published.average, sess.threads);
+    const eval = try evaluateFrozen(&sess, published.average);
     const eval_ns = std.time.nanoTimestamp() - t_eval0;
     const accuracy_frac = if (pot_chips > 0) eval.accuracy / pot_chips else 0;
 
@@ -307,18 +306,11 @@ fn applyFlag(arg: []const u8, args: *std.process.ArgIterator, opts: *Options) !v
 }
 
 fn evaluateFrozen(
-    allocator: std.mem.Allocator,
-    game: poker_engine.game.compile.CompiledGame,
+    sess: *poker_app.Session,
     average: []const f32,
-    threads: u32,
 ) !poker_engine.analysis.evaluation.EvaluationResult {
-    // Match #259 gate-bench full eval: threaded frozen response_walk.
-    const frozen_eval = try poker_engine.solve.frozen_walk.evaluatePublishedFrozenThreaded(
-        allocator,
-        game,
-        average,
-        threads,
-    );
+    // Session-owned FrozenCtx reuses ranks across Acc-stop train(1)/eval cycles.
+    const frozen_eval = try sess.evaluateFrozen(average);
     return poker_engine.analysis.evaluation.makeEvaluation(
         frozen_eval.u0,
         frozen_eval.u1,
@@ -330,7 +322,6 @@ fn evaluateFrozen(
 fn runAccuracyStop(
     allocator: std.mem.Allocator,
     sess: *poker_app.Session,
-    game: poker_engine.game.compile.CompiledGame,
     stdout: anytype,
     begin_ns: i128,
     pot_chips: f64,
@@ -374,7 +365,7 @@ fn runAccuracyStop(
         if (do_eval) {
             const published = sess.published orelse return error.NothingPublished;
             const t_eval0 = std.time.nanoTimestamp();
-            const eval = try evaluateFrozen(allocator, game, published.average, sess.threads);
+            const eval = try evaluateFrozen(sess, published.average);
             const step_eval_ns = std.time.nanoTimestamp() - t_eval0;
             eval_ns_total += step_eval_ns;
             eval_count += 1;
@@ -425,7 +416,7 @@ fn runAccuracyStop(
     if (!fresh_eval or last_eval == null) {
         const published = sess.published orelse return error.NothingPublished;
         const t_eval0 = std.time.nanoTimestamp();
-        const eval = try evaluateFrozen(allocator, game, published.average, sess.threads);
+        const eval = try evaluateFrozen(sess, published.average);
         const step_eval_ns = std.time.nanoTimestamp() - t_eval0;
         eval_ns_total += step_eval_ns;
         eval_count += 1;
