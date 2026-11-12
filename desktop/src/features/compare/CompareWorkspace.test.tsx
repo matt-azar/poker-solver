@@ -93,7 +93,7 @@ describe("CompareWorkspace busy state (R12)", () => {
     });
     render(<CompareWorkspace />);
     expect(screen.getByText("Unavailable over IPC")).toBeTruthy();
-    expect(screen.getByText(/not available over solver-engine IPC/i)).toBeTruthy();
+    expect(screen.getByText(/dual-session baseline/i)).toBeTruthy();
     expect(useStudyStore.getState().loadCompare).not.toHaveBeenCalled();
   });
 

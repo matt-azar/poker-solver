@@ -2035,3 +2035,52 @@ test "equity calculator jobs start get complete without session" {
     }
     try std.testing.expect(completed);
 }
+
+test "categories dispatch river made-hand Study shape" {
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "categories-smoke");
+    defer state.deinit();
+    try state.session.begin(text);
+    try state.session.train(1);
+
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "r-cat"),
+        .op = try std.testing.allocator.dupe(u8, "categories"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"kind\":\"categories\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"model\":\"made-hand\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"available\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"exclusive\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"node_id\":\"p0.t-1.r-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"oop\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"ip\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"categories\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "four of a kind") != null);
+}

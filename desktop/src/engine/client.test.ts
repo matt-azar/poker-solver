@@ -440,3 +440,51 @@ describe("EngineClient Equity calculator jobs IPC (ZR-84)", () => {
     });
   });
 });
+
+describe("EngineClient ZR-103 getCategories / compare IPC", () => {
+  let client: EngineClient;
+
+  beforeEach(() => {
+    invoke.mockReset();
+    client = new EngineClient({ baseUrl: "http://unused" });
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("routes getCategories over IPC (no HTTP categories 501 string)", async () => {
+    invoke.mockResolvedValueOnce(
+      okBody("categories", {
+        pending: false,
+        kind: "categories",
+        model: "made-hand",
+        available: true,
+        exclusive: true,
+        categories: ["high card", "pair"],
+        oop: { defined: true, total_mass: 1, fractions: [0, 1], mass: [0, 1] },
+        ip: { defined: true, total_mass: 1, fractions: [1, 0], mass: [1, 0] },
+        node_id: "p0.t-1.r-1",
+      }),
+    );
+    const body = (await client.getCategories("s1", "p0.t-1.r-1")) as {
+      solution_id?: string;
+      node_id?: string;
+      available?: boolean;
+    };
+    expect(body.solution_id).toBe("s1");
+    expect(body.node_id).toBe("p0.t-1.r-1");
+    expect(body.available).toBe(true);
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "categories",
+      body: { node_index: 0, node_id: "p0.t-1.r-1" },
+      jobId: null,
+    });
+  });
+
+  it("compare stays explicit dual-session deferred 501 on IPC", async () => {
+    await expect(client.compare("base", "s1", "p0.t-1.r-1")).rejects.toMatchObject({
+      name: "EngineError",
+      status: 501,
+      message: expect.stringMatching(/dual-session baseline/i),
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});

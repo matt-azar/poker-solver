@@ -34,7 +34,8 @@ describe("studyIpcFeatureAvailable", () => {
     expect(studyIpcFeatureAvailable("compare")).toBe(false);
     expect(studyIpcFeatureAvailable("resolveLocked")).toBe(false);
     expect(studyIpcFeatureAvailable("strategyEdits")).toBe(false);
-    expect(studyIpcFeatureAvailable("categories")).toBe(false);
+    // ZR-103 wired host `categories` + client IPC branch.
+    expect(studyIpcFeatureAvailable("categories")).toBe(true);
     expect(studyIpcFeatureAvailable("runouts")).toBe(false);
   });
 
@@ -52,7 +53,7 @@ describe("studyIpcFeatureAvailable", () => {
   });
 
   it("exposes honest unavailable copy", () => {
-    expect(studyIpcUnavailableReason("compare")).toMatch(/not available/i);
+    expect(studyIpcUnavailableReason("compare")).toMatch(/dual-session baseline/i);
     expect(studyIpcUnavailableReason("resolveLocked")).toMatch(/not available/i);
     expect(studyIpcUnavailableReason("strategyEdits")).toMatch(/not available/i);
     expect(studyIpcUnavailableReason("categories")).toMatch(/not available/i);
