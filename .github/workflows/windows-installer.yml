@@ -28,6 +28,13 @@ on:
       - "cmake/**"
       - "CMakeLists.txt"
       - "configs/**"
+      - "build.zig"
+      - "build.zig.zon"
+      - "engine/**"
+      - "app/**"
+      - "formats/**"
+      - "host/**"
+      - "cli/**"
       - ".github/workflows/windows-installer.yml"
       - ".github/workflows/windows-installer-release.yml"
   pull_request:
@@ -38,6 +45,13 @@ on:
       - "cmake/**"
       - "CMakeLists.txt"
       - "configs/**"
+      - "build.zig"
+      - "build.zig.zon"
+      - "engine/**"
+      - "app/**"
+      - "formats/**"
+      - "host/**"
+      - "cli/**"
       - ".github/workflows/windows-installer.yml"
       - ".github/workflows/windows-installer-release.yml"
 
@@ -102,6 +116,39 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
         run: cmake --build build --config Release --parallel --target explorer
 
+      # tauri.conf.json externalBin lists both holdem-explorer and solver-engine
+      # (Phase 6). Study still defaults to HTTP holdem-explorer; solver-engine is
+      # bundled dormant until cutover. Zig pin matches .github/workflows/zig.yml.
+      - name: Install Zig 0.14.1
+        shell: pwsh
+        env:
+          ZIG_VERSION: "0.14.1"
+          ZIG_WINDOWS_SHA256: "554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ver = $env:ZIG_VERSION
+          $zip = "$env:RUNNER_TEMP\zig.zip"
+          $url = "https://ziglang.org/download/$ver/zig-x86_64-windows-$ver.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          $expected = $env:ZIG_WINDOWS_SHA256.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Zig zip sha256 mismatch: got $actual want $expected"
+          }
+          $dest = Join-Path $env:LOCALAPPDATA "zig-$ver"
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Expand-Archive -Path $zip -DestinationPath $dest
+          Add-Content $env:GITHUB_PATH (Join-Path $dest "zig-x86_64-windows-$ver")
+
+      - name: Build solver-engine (ReleaseFast)
+        shell: pwsh
+        run: |
+          zig version
+          zig build -Doptimize=ReleaseFast
+          if (-not (Test-Path "zig-out/bin/solver-engine.exe")) {
+            throw "solver-engine.exe missing after zig build"
+          }
+
       - name: Install desktop npm dependencies
         working-directory: desktop
         run: npm ci
@@ -113,7 +160,7 @@ jobs:
         working-directory: desktop
         run: npm run build
 
-      - name: Prepare explorer sidecar binary
+      - name: Prepare sidecar binaries
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path desktop/src-tauri/binaries | Out-Null
@@ -123,7 +170,10 @@ jobs:
           # Sidecar basename is holdem-explorer (not explorer) to avoid Windows Shell collisions.
           Copy-Item -Force build/Release/explorer.exe `
             "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe"
-          Get-Item "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe" |
+          Copy-Item -Force zig-out/bin/solver-engine.exe `
+            "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe"
+          Get-Item "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe",
+                   "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe" |
             Format-List FullName, Length, LastWriteTime
 
       - name: Build Tauri NSIS installer
@@ -144,6 +194,13 @@ jobs:
           $sidecar | Format-Table -AutoSize
           if (-not $sidecar) {
             throw "holdem-explorer sidecar missing from Tauri release output"
+          }
+          $zigEngine = Get-ChildItem -Recurse desktop/src-tauri/target/release `
+            -Filter "solver-engine*.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 5 FullName, Length
+          $zigEngine | Format-Table -AutoSize
+          if (-not $zigEngine) {
+            throw "solver-engine sidecar missing from Tauri release output (externalBin)"
           }
 
           $releaseRoot = "desktop/src-tauri/target/release"

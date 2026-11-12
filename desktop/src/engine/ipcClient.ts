@@ -23,11 +23,13 @@ export class SolverEngineIpcClient {
   >;
   private buffer = new Uint8Array(0);
   private pump: Promise<void> | null = null;
+  private readonly write: IpcByteWriter;
+  private readonly read: IpcByteReader;
 
-  constructor(
-    private readonly write: IpcByteWriter,
-    private readonly read: IpcByteReader,
-  ) {}
+  constructor(write: IpcByteWriter, read: IpcByteReader) {
+    this.write = write;
+    this.read = read;
+  }
 
   start(): void {
     if (this.pump) return;
