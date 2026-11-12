@@ -3,9 +3,9 @@
  *
  * Flip a flag to `true` in the same PR that wires the matching EngineClient
  * IPC branch / host op (do not invent fake host ops here):
- * - resolveLocked  → ZR-100
- * - strategyEdits  → ZR-101
- * - categories / compare → ZR-103
+ * - resolveLocked  → ZR-100 (#301) — enabled
+ * - strategyEdits  → ZR-101 (#303) — flip after merge
+ * - categories / compare → ZR-103 (#302)
  * - runouts        → later (dock tab already removed; loadRunouts residual)
  *
  * Packaged Study is IPC-only. Browser/Vitest (no Tauri, no IPC) leave controls
@@ -15,8 +15,8 @@ import { isTauriRuntime } from "../platform";
 import { isIpcTransport } from "./transport";
 
 export const STUDY_IPC_FEATURE_FLAGS = {
-  // #301 wired host resolve_locked; flag flip may follow separately — leave false here.
-  resolveLocked: false,
+  // Host `resolve_locked` + EngineClient IPC branch (#301).
+  resolveLocked: true,
   compare: false,
   // ZR-103: host `categories` + EngineClient IPC branch (made-hand on 5-card boards).
   categories: true,
