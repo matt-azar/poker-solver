@@ -15,6 +15,7 @@ import { isTauriRuntime } from "../platform";
 import { isIpcTransport } from "./transport";
 
 export const STUDY_IPC_FEATURE_FLAGS = {
+  // #301 wired host resolve_locked; flag flip may follow separately — leave false here.
   resolveLocked: false,
   compare: false,
   // ZR-103: host `categories` + EngineClient IPC branch (made-hand on 5-card boards).

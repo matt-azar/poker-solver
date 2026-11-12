@@ -190,6 +190,21 @@ export class SolverEngineIpcClient {
     return env.body;
   }
 
+  /** Resolve Locked: baseline stamp + optional reset + train under locks. */
+  async resolveLocked(
+    body: {
+      iterations: number;
+      warm_start?: number;
+      accuracy?: number;
+      samples?: number;
+      time_limit?: number;
+    },
+    jobId?: string,
+  ): Promise<unknown> {
+    const env = await this.request("resolve_locked", body, jobId);
+    return env.body;
+  }
+
   /** Standalone Equity calculator job start (no Study session). */
   async startEquityJob(body: Record<string, unknown>): Promise<unknown> {
     const env = await this.request("start_equity_job", body);

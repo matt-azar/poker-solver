@@ -545,6 +545,60 @@ pub const Session = struct {
         self.locks_text = owned;
     }
 
+    /// Prepare a locked re-solve (Study Resolve Locked).
+    /// Stamps `baseline_id` from the prior solution when unset, mints a new
+    /// `solution_id`, and optionally resets trainer tables (warm_start=false).
+    /// Does not clone the baseline policy blob — Compare still needs a later
+    /// dual-solution host path; status still reports the baseline id for UI.
+    pub fn prepareResolveLocked(self: *Session, warm_start: bool) SessionError!void {
+        self.mu.lock();
+        defer self.mu.unlock();
+        if (self.busyForReplace()) return error.Busy;
+        if (self.phase != .paused and self.phase != .published) return error.InvalidSession;
+        if (self.game == null) return error.InvalidSession;
+        if (!self.has_training or self.training == null) return error.InvalidSession;
+        if (self.solution_id == 0) return error.NothingPublished;
+
+        if (!warm_start) {
+            const game = self.game.?;
+            const state = &(self.training orelse return error.InvalidSession);
+            const locks_snapshot: []u8 = if (self.locks_text.len != 0)
+                (self.allocator.dupe(u8, self.locks_text) catch return error.OutOfMemory)
+            else
+                &.{};
+            defer if (locks_snapshot.len != 0) self.allocator.free(locks_snapshot);
+
+            var locks_owned: ?poker_engine.solve.node_lock.LockSet = null;
+            defer if (locks_owned) |*owned| owned.deinit();
+            if (locks_snapshot.len != 0) {
+                locks_owned = poker_engine.solve.node_lock.parseLockSet(self.allocator, locks_snapshot) catch {
+                    return error.InvalidSession;
+                };
+            }
+            state.resetForResolve(game, if (locks_owned) |*owned| owned else null) catch |err| {
+                return switch (err) {
+                    error.OutOfMemory => error.OutOfMemory,
+                    error.LockActionCountMismatch,
+                    error.InvalidTrain,
+                    error.ThreadQuotaExceeded,
+                    error.LockedMemoryLimitExceeded,
+                    error.SystemResources,
+                    error.Unexpected,
+                    => error.InvalidSession,
+                };
+            };
+        }
+
+        if (self.baseline_id == 0) {
+            self.baseline_id = self.solution_id;
+        }
+        self.solution_id = self.next_id;
+        self.next_id += 1;
+        self.clearControlFlags();
+        self.last_terminal = .completed;
+        self.phase = .paused;
+    }
+
     pub fn setStrategyEditsText(self: *Session, text: []const u8) SessionError!void {
         const owned = self.allocator.dupe(u8, text) catch return error.OutOfMemory;
         if (self.strategy_edits_text.len != 0) self.allocator.free(self.strategy_edits_text);

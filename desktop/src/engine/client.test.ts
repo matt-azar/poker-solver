@@ -87,6 +87,38 @@ describe("EngineClient Slice A IPC branches", () => {
     });
   });
 
+  it("routes resolveLocked over IPC as resolve_locked", async () => {
+    invoke.mockResolvedValueOnce(
+      okBody("resolve_locked", {
+        solution_id: 2,
+        policy_revision: 5,
+        trained: 8,
+        terminal_reason: "completed",
+        async: true,
+      }),
+    );
+    const reply = await client.resolveLocked("s1", {
+      iterations: 8,
+      warm_start: 0,
+      time_limit: 12,
+    });
+    expect(reply).toMatchObject({
+      running: false,
+      job_id: "j1",
+      solution_id: "s2",
+      policy_revision: 5,
+      trained: 8,
+      terminal_reason: "completed",
+      transport: "ipc",
+      warm_start: "reset",
+    });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "resolve_locked",
+      body: { iterations: 8, warm_start: 0, time_limit: 12 },
+      jobId: "j1",
+    });
+  });
+
   it("routes getNode / open / save over IPC", async () => {
     invoke.mockResolvedValueOnce(
       okBody("node", {

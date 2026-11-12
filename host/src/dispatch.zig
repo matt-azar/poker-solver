@@ -335,6 +335,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     state.session.mu.lock();
     const phase = state.session.phase;
     const solution_id = state.session.solution_id;
+    const baseline_id = state.session.baseline_id;
     const policy_revision = state.session.policyRevision();
     const has_training = state.session.has_training;
     const can_continue = state.session.canContinue();
@@ -370,6 +371,11 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
         try w.writeAll(",\"solution_id\":null,\"root_node_id\":null");
     } else {
         try w.print(",\"solution_id\":\"s{d}\",\"root_node_id\":\"p0.t-1.r-1\"", .{solution_id});
+    }
+    if (baseline_id == 0) {
+        try w.writeAll(",\"baseline_solution_id\":null");
+    } else {
+        try w.print(",\"baseline_solution_id\":\"s{d}\"", .{baseline_id});
     }
     if (active) |jid| {
         try w.print(",\"job_id\":\"{s}\"", .{jid});
@@ -981,7 +987,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
-    // Study locks CRUD over Session.locks_text (node_lock codec). No resolveLocked.
+    // Study locks CRUD over Session.locks_text (node_lock codec).
+    // resolve_locked is async (main.zig → startResolveLocked), like solve.
     if (std.mem.eql(u8, req.op, "list_locks")) {
         if (state.session.solution_id == 0) {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
@@ -1233,53 +1240,49 @@ fn trainWorker(task: *TrainTask) void {
     state.writeReply(reply) catch {};
 }
 
-/// Spawn background CFR+ train so the stdin loop can serve `values` mid-train (R10).
-/// Does not write a sync reply; the worker emits the solve reply when finished.
-pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
-    try state.track(req.request_id);
-    errdefer state.untrack(req.request_id);
-
+fn admitTrainJob(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
     // Stale cancelled id: reject only while that cancel is still sticky mid-flight.
     // After a worker finishes it clears the id so a fresh mint can reuse names.
     if (state.isCancelled(req.job_id) and state.train_running.load(.acquire)) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "cancelled", "job cancelled");
         defer err_reply.deinit();
-        state.untrack(req.request_id);
         try state.writeReply(err_reply);
-        return;
+        return .replied;
     }
     if (req.job_id) |jid| state.clearCancelled(jid);
 
     if (state.session.phase == .idle) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_session", "call begin_config before solve");
         defer err_reply.deinit();
-        state.untrack(req.request_id);
         try state.writeReply(err_reply);
-        return;
+        return .replied;
     }
 
     if (!state.session.has_training) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "cannot_continue", "browse-only solution has no trainer state");
         defer err_reply.deinit();
-        state.untrack(req.request_id);
         try state.writeReply(err_reply);
-        return;
+        return .replied;
     }
 
     if (state.train_running.load(.acquire)) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "train already running");
         defer err_reply.deinit();
-        state.untrack(req.request_id);
         try state.writeReply(err_reply);
-        return;
+        return .replied;
     }
     // Reap a finished worker before starting another.
     state.joinTrain();
+    return .ok;
+}
 
+fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !void {
     const iterations = bodyIntField(req.body_json, "iterations") orelse 1;
     const accuracy = bodyFloatField(req.body_json, "accuracy") orelse 0;
     const time_limit = bodyFloatField(req.body_json, "time_limit") orelse -1;
-    const eval_every = bodyIntField(req.body_json, "eval_every") orelse 20;
+    // C++ resolve-locked `samples` mapped to eval chunking; honor as eval_every when set.
+    const samples = bodyIntField(req.body_json, "samples");
+    const eval_every = bodyIntField(req.body_json, "eval_every") orelse (samples orelse 20);
     state.budget.returnToTraining();
     // Honor config threads; never raise above Session/config (ZR-91). Cap by host budget.
     if (state.budget.training > 0 and state.session.threads > state.budget.training) {
@@ -1320,6 +1323,53 @@ pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
         try state.writeReply(err_reply);
         return;
     };
+}
+
+/// Spawn background CFR+ train so the stdin loop can serve `values` mid-train (R10).
+/// Does not write a sync reply; the worker emits the solve reply when finished.
+pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
+    try state.track(req.request_id);
+    errdefer state.untrack(req.request_id);
+
+    switch (try admitTrainJob(state, req)) {
+        .replied => {
+            state.untrack(req.request_id);
+            return;
+        },
+        .ok => {},
+    }
+    try spawnTrainWorker(state, req);
+}
+
+/// Study Resolve Locked: stamp baseline, mint new solution id, optional reset, then train under locks.
+pub fn startResolveLocked(state: *HostState, req: ipc.Envelope) !void {
+    try state.track(req.request_id);
+    errdefer state.untrack(req.request_id);
+
+    switch (try admitTrainJob(state, req)) {
+        .replied => {
+            state.untrack(req.request_id);
+            return;
+        },
+        .ok => {},
+    }
+
+    const warm_start = (bodyIntField(req.body_json, "warm_start") orelse 0) != 0;
+    state.session.prepareResolveLocked(warm_start) catch |err| {
+        const code: []const u8 = switch (err) {
+            error.Busy => "busy",
+            error.NothingPublished => "nothing_published",
+            error.InvalidSession => "cannot_continue",
+            else => "resolve_locked_failed",
+        };
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    };
+
+    try spawnTrainWorker(state, req);
 }
 
 test "ready dispatch" {
@@ -1983,6 +2033,74 @@ test "locks list put delete Study CRUD" {
     defer del_reply.deinit();
     try std.testing.expect(del_reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, del_reply.body_json, "\"locks\":[]") != null);
+}
+
+test "resolve_locked stamps baseline, mints solution id, trains under lock" {
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "resolve-locked");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(2);
+    const prior_id = state.session.solution_id;
+    const prior_trained = state.session.training.?.trained;
+
+    var put_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "rl-put"),
+        .op = try std.testing.allocator.dupe(u8, "put_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\",\"kind\":\"full\",\"scope\":\"node\",\"probs\":[1,0]}"),
+    };
+    defer put_req.deinit();
+    var put_reply = try handle(&state, put_req);
+    defer put_reply.deinit();
+    try std.testing.expect(put_reply.ok);
+
+    // startResolveLocked writes via writeReply (stdout); exercise Session prepare
+    // + train directly for the reset path, then verify status baseline encoding.
+    try state.session.prepareResolveLocked(false);
+    try std.testing.expect(state.session.baseline_id == prior_id);
+    try std.testing.expect(state.session.solution_id != prior_id);
+    try std.testing.expect(state.session.training.?.trained == 0);
+    try std.testing.expect(prior_trained >= 2);
+    try state.session.train(2);
+    try std.testing.expect(state.session.training.?.trained >= 2);
+    try std.testing.expect(state.session.phase == .published);
+
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"baseline_solution_id\":\"s") != null);
+    var baseline_buf: [32]u8 = undefined;
+    const baseline_needle = try std.fmt.bufPrint(&baseline_buf, "\"baseline_solution_id\":\"s{d}\"", .{prior_id});
+    try std.testing.expect(std.mem.indexOf(u8, status_body, baseline_needle) != null);
+
+    // Warm-start path keeps iteration count and still bumps id once.
+    const mid_id = state.session.solution_id;
+    const mid_trained = state.session.training.?.trained;
+    try state.session.prepareResolveLocked(true);
+    try std.testing.expect(state.session.baseline_id == prior_id);
+    try std.testing.expect(state.session.solution_id != mid_id);
+    try std.testing.expect(state.session.training.?.trained == mid_trained);
 }
 
 test "equity calculator jobs start get complete without session" {
