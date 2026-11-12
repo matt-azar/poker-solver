@@ -491,10 +491,12 @@ pub const Session = struct {
         self.mu.lock();
         if (stopped) {
             self.last_terminal = .cancelled;
-            self.phase = if (self.published != null) .paused else .failed;
+            // No publish yet: return to post-begin `.paused` so Solve/Continue can
+            // restart without re-begin (ZR-106 short-admit + immediate Stop).
+            self.phase = .paused;
         } else if (paused) {
             self.last_terminal = .paused;
-            self.phase = if (self.published != null) .paused else .failed;
+            self.phase = .paused;
         } else {
             self.last_terminal = .completed;
             self.phase = .published;
@@ -529,7 +531,8 @@ pub const Session = struct {
             if (self.stop_requested.load(.acquire)) {
                 self.last_terminal = .cancelled;
                 self.mu.lock();
-                self.phase = if (self.published != null) .paused else .failed;
+                // Keep trainer-ready `.paused` even with no published average yet.
+                self.phase = .paused;
                 self.mu.unlock();
                 self.clearControlFlags();
                 return;
@@ -537,7 +540,7 @@ pub const Session = struct {
             if (self.pause_requested.load(.acquire)) {
                 self.last_terminal = .paused;
                 self.mu.lock();
-                self.phase = if (self.published != null) .paused else .failed;
+                self.phase = .paused;
                 self.mu.unlock();
                 self.clearControlFlags();
                 return;
