@@ -10,19 +10,21 @@ alwaysApply: true
 **Parallel work**
 
 - Assume siblings may write into `/workspace` even when asked to use a worktree. Do not checkout/commit there while they run unless ownership is proven disjoint.
-- Give each agent a disjoint path list. Serialize shared manifests (`build.zig`, `desktop/src-tauri/tauri.conf.json`, Study spawn/IPC files) or have only the parent touch them.
+- Give each agent a disjoint path list. Serialize `build.zig`, `tauri.conf.json`, `solver_engine.rs`, `host/src/dispatch.zig`, and `desktop/src/engine/{client,transport}.ts`, or have only the parent touch them.
 - Subagents often cannot `ManagePullRequest`; the parent opens PRs after push and subscribes CI.
-- If the tree is interleaved: WIP snapshot branch, then path-checkout onto clean `cursor/<feature>-<run-suffix>` branches from the correct base. Trim docs per branch before build.
+- If the tree is interleaved: WIP snapshot branch, then path-checkout onto clean `cursor/<feature>-<run-suffix>` branches from the product tip (`zig-rewrite` until cutover merges to `main`).
 - Re-run `git status` immediately before every commit; restore unexpected paths.
-- Follow-ups committed on an already-merged PR head never reach `main` — rebase onto the correct base as a new PR.
+- Follow-ups committed on an already-merged PR head never reach the base — rebase onto the correct tip as a new PR.
 
 **Architecture / Study correctness (short)**
 
-- On `zig-rewrite`, Study ships Zig `solver-engine` typed IPC only. Do not reintroduce `holdem-explorer`, CMake product builds, or HTTP `:8765` fallbacks.
-- Nash gap is NashConv (sum of BR gains). Accuracy / stop criterion is Pio’s average (NashConv/2); default unit is pot fraction.
-- Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; Equity (UI label) is check-down pot fraction ≠ chip EV.
-- Study values are root-centered; Local EV uses `local_offset` (include street `contrib`, not half pot alone). Serialize EV/equity analysis jobs; identity includes `analysis_revision`. Do not full-tree frontload analysis.
-- Default node lock keeps turn/river cards; `scope:"line"` is explicit line-wide (flop root needs an explicit scope field).
-- Street config is `street-config 1` text; empty bet arrays mean check-only; absent keys mean defaults. No Flop donk control.
+- On `zig-rewrite`, Study ships Zig `solver-engine` typed IPC only. Do not reintroduce `holdem-explorer`, CMake product builds, HTTP `:8765`, or HTTP fallthrough while IPC is active.
+- Windows: GUI subsystem + `CREATE_NO_WINDOW` for `solver-engine`; pin `-Dcpu=x86_64_v2`; drain stderr on spawn.
+- Tauri IPC: demux by `request_id`; don't hold the lifecycle mutex for the whole RPC; don't kill train on one timeout.
+- Nash gap is NashConv (sum of BR gains). Accuracy / stop criterion is Pio’s average (NashConv/2); default unit is pot fraction. Compare stop thresholds to Accuracy chips, not raw NashConv.
+- Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; Equity is check-down pot fraction ≠ chip EV.
+- Study node equity must be reach-weighted at the selected node; Equity Calculator jobs are a separate IPC surface. Local EV: `local_offset` + Fold from `values.actions`.
+- Heap-stable runout ranks under MT; train freeze must apply locks; frozen-root aev reports `Q_i`.
+- Street config is `street-config 1` text; empty bet arrays mean check-only; absent keys mean defaults. No Flop donk control. Preview/plan-memory must not mutate Session.
 - AI packs: edit `docs/ai-context/source/` then `npm run sync:ai-context` / CI `check:ai-context`. Do not hand-edit generated packs.
 - Do not change `LICENSE`. Update `docs/auxiliary/planning/FEATURE_PARITY.md` only with the commit that demonstrates the row.

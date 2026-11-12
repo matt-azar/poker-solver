@@ -13,11 +13,11 @@ Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor
 ### Hard rules
 
 1. **One writer per tree.** Delegated Task / best-of-n runners may still write into shared `/workspace` even when told to use an isolated worktree. Do not `git checkout`, reset, or commit on `/workspace` while siblings run unless you have confirmed they never touch that path.
-2. **Disjoint file ownership.** Assign path prefixes per agent. If two tracks need the same file (`CMakeLists.txt`, `explorer_main.cpp`, `docs/auxiliary/planning/FEATURE_PARITY.md`), serialize or let only the parent edit it.
+2. **Disjoint file ownership.** Assign path prefixes per agent. Serialize shared manifests (`build.zig`, `desktop/src-tauri/tauri.conf.json`, Tauri `solver_engine.rs` spawn/IPC, `host/src/dispatch.zig`, `desktop/src/engine/client.ts` / `transport.ts`) or let only the parent edit them. Historical CMake / `explorer_main.cpp` ownership rules apply only on pre-cutover trees.
 3. **Parent owns forge writes.** Subagents often lack `ManagePullRequest` and must not use `gh` to create/update PRs. After a sibling pushes, the parent opens/updates the PR and subscribes CI.
-4. **Snapshot before splitting.** If the tree is interleaved, commit everything onto `cursor/wip-…-c006`, then path-checkout onto clean feature branches from the correct base.
+4. **Snapshot before splitting.** If the tree is interleaved, commit everything onto `cursor/wip-…-<run-suffix>`, then path-checkout onto clean feature branches from the correct base (`zig-rewrite` while that is the product tip).
 5. **Re-check `git status` before every commit.** Restore unexpected paths with `git checkout HEAD -- <path>`.
-6. **Scope CMake / harness edits.** A WIP snapshot’s `CMakeLists.txt` / suite mains (`engine_main.cpp` / `study_main.cpp` / `http_main.cpp`) / `tests/harness.hpp` will list every agent’s sources. Trim to this branch only. (`tests/unit/test_main.cpp` is a historical stub and is not linked.)
+6. **Scope shared harness edits.** A WIP snapshot’s `build.zig` / host dispatch / desktop EngineClient will list every agent’s ops. Trim to this branch only.
 
 ### What went wrong (concrete)
 
@@ -36,11 +36,11 @@ Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor
 Work only under this worktree path: <absolute path>.
 Do not modify /workspace.
 Touch only these paths: <list>.
-Do not edit CMakeLists.txt, tests/harness.hpp, or suite mains
-  (engine_main / study_main / http_main) unless listed; if you must, add only your targets.
-  tests/unit/test_main.cpp is a historical stub and is not linked.
+Do not edit build.zig, tauri.conf.json, solver_engine.rs, host/src/dispatch.zig,
+  or desktop/src/engine/{client,transport}.ts unless listed; if you must, add only your ops.
 Branch: cursor/<name>-<run-suffix> from <exact base ref>
   (use the suffix required by this cloud run, e.g. -ce85 / -c006).
+  Product tip base is often origin/zig-rewrite until cutover merges to main.
 Push with git push -u origin <branch>.
 Do not open a PR (parent will ManagePullRequest).
 Do not change LICENSE.
@@ -51,10 +51,10 @@ Report: tip SHA, files touched, test command + counts, compare URL.
 
 1. Inventory with `git status` / `git diff --stat`.
 2. Commit all dirty + untracked onto `cursor/wip-<topic>-<run-suffix>`.
-3. For each feature: branch from `origin/main` (or dependency base).
+3. For each feature: branch from the product tip (`origin/zig-rewrite` or `origin/main`).
 4. `git checkout wip -- <only that feature’s files>`.
-5. Trim CMake, harness, suite mains, and docs.
-6. `CXX=g++` build; run `ctest` (`poker_engine_tests`, `poker_study_tests`, `poker_http_tests`); fix.
+5. Trim shared manifests, dispatch, EngineClient, and docs.
+6. `zig build` + `zig build test`; desktop `npx tsc -b` / focused vitest; fix.
 7. Push; parent opens PR; subscribe CI.
 8. Keep WIP for archaeology until splits are pushed.
 
@@ -66,6 +66,41 @@ Report: tip SHA, files touched, test command + counts, compare URL.
 ---
 
 ## 2. Architecture and module boundaries
+
+### Zig `solver-engine` IPC (current product)
+
+Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdout pipes via Tauri). There is no shipping HTTP `:8765` / `holdem-explorer` path on `zig-rewrite` (#286–#287).
+
+| Trap | Symptom | Do / Don't |
+| --- | --- | --- |
+| HTTP fallthrough while IPC is active | `Engine unreachable: Failed to fetch` after a healthy sidecar spawn (#288) | **Don't** `fetch("")` or hit `:8765` from Library/Study when IPC transport is selected. Block HTTP fallthrough. |
+| Library needs live pipes | Templates/ranges fail until solve works | Serve templates/ranges via **Tauri FS** (`library_*`) without requiring a healthy engine session (#288, #289) |
+| Console PE under GUI shell | Blank console; closing it kills the sidecar and bricks Study (#290) | Link `solver-engine` with Windows **GUI subsystem**; pass `CREATE_NO_WINDOW` on spawn as defense in depth. Keep CLI tools Console. |
+| AVX-512 default CPU | `0xc000001d` illegal instruction on older hosts | Pin `zig build -Dcpu=x86_64_v2` (scripts + CI); override with `ZIG_CPU` (#288, #289) |
+| stderr not drained | Windows ready handshake deadlocks when parent redirects stderr | Drain sidecar stderr during spawn/ready (#288) |
+| Lifecycle mutex around whole RPC | Mid-train `values` stalls behind `solve` | Hold lifecycle mutex only for spawn/take/kill; short stdin write lock; demux stdout by `request_id` (#282) |
+| Timeout kills train | One slow RPC aborts an in-flight solve | Kill on write/`Broken pipe`/shutdown; **don't** nuke train on a single RPC timeout (#289) |
+| Preview mutates session | Build Preview / plan-memory wipes a loaded Study | `tree_preview` / `plan_memory` must temp-compile **without** `begin_config` / `clearSolution` (#295) |
+| Continue re-begins config | Continue broken after pause | `continueSolve` = host `solve` on the **open** session (no `begin_config`); mint a fresh job id (#292) |
+| Study `stop` ≠ host cancel | Stop leaves jobs running | Map Study stop → host job **cancel** (#284) |
+| Fake node equity | Equity looks like root on every node | Study node equity must **replay reach weights** (own actions × card removal) then check-down on the node board (#293). Calculator jobs (`start_equity_job`…) are a **different** IPC surface (#297). |
+| Starting-board equity gate | Desktop 501 on non-root equity | Drop non-root 501 once reach-aware host equity exists; don't ship `node_equity_unsupported` forever (#291→#293) |
+| Tree-edit path tokens | Soft-unapplied edits / wrong AddSize | Match compact↔display labels (Bet/Raise/all-in); Apply AddSize with pot-cap / all-in / min-raise rules; report unapplied edits (#296) |
+| `parseConfig` over host | Library Apply template 501 | Street-config parse may stay **local TS** (no host op, no session mutation) (#294) |
+
+**Pointers:** `docs/DESKTOP_UI.md`, `host/`, `engine/`, `desktop/src-tauri/src/solver_engine.rs`, PRs #254/#280–#297.
+
+### Zig frozen CFR / rematch correctness
+
+- **Heap-stable runout ranks:** do not store `RunoutRanks` by value in a hash map and hand out pointers — concurrent inserts rehash and UAF under MT Acc-stop (#266). Store heap-stable pointers; fill off-lock.
+- **Locks on train:** freeze / floorAndFreeze must `findForRunout` + `applyLockToStrategy` after regret matching (#278). Having `LockSet` types is not enough.
+- **Frozen-root action EV:** Study latency path may use `response_walk`, but reported aev must match conditional **`Q_i`** (divide CF raw by `prior * joint_scale * open`) (#279).
+- **Flop-scale aev reach:** non-root `actionValuesDealByDeal` must weight by opponent betting-path reach for **`card_mode ≠ 0`** ancestors, and skip hole pairs that collide with fixed turn/river (#277).
+- Persist chance workers / ranks across Session train/eval when required (#270, #276); don't respawn every chance if the pool is Session-scoped.
+- Persist `FrozenCtx` carefully across Acc-stop cycles; Acc-stop that rebuilds ranks every iter stresses the map (#266).
+
+**Do:** Pin rematches against tip C++ / deal-by-deal twins before claiming Study parity.  
+**Don't:** Treat soft Acc-stop wall-clock scoreboard wins as correctness GO.
 
 ### One production postflop engine (M6)
 
@@ -168,15 +203,15 @@ At a flop root, `t-1.r-1` is both the node id and the line key — **do not infe
 
 ### Study equity path vs Equity Calculator
 
-- Study node `/equity` uses `StreetBatchSolver::checkdown_equity` (cached rank tables / blocker masses) — same check-down math, much faster than pair enumeration (#191).
-- Equity Calculator / CLI stay on `showdown_equity` + `kDefaultMaxPairRunouts` (~1.1M).
-- Packaged Study raises `--max-pair-runouts` to `kStudyExplorerMaxPairRunouts` (= full-range turn, ~51.4M). Dense flop check-downs can still exceed that. **Never silently sample** when over the limit.
-- Study ceiling is a **packaging knob**: keep C++ `kStudyExplorerMaxPairRunouts` and Tauri `STUDY_EXPLORER_MAX_PAIR_RUNOUTS` aligned; raising only an env var does nothing for the packaged desktop spawn (#188).
-- Warm the **current** decision (queue + identity-keyed cache). Do **not** full-tree frontload EV/equity into the save — commercial “always ready” is kernel speed + non-thrashing plumbing (#184, #190, #191).
+- **Historical C++:** Study node `/equity` used `StreetBatchSolver::checkdown_equity` (cached rank tables) — same check-down math, much faster than pair enumeration (#191).
+- **Zig Study:** host `equity` must use **reach-weighted** `replayReachWeights` → `checkdownEquityAtNode` on the node board (#293). Returning starting-board / starting-range check-down at every node is a regression.
+- **Equity Calculator** is a separate IPC job surface (`start_equity_job` / `get_equity_job` / `cancel_equity_job`) — multiway Auto/Exact/Monte Carlo — not Study node equity (#297).
+- Work limits: never silently sample when over the pair-runout ceiling. Study packaging ceilings and calculator defaults differ; keep host constants aligned with what Tauri/Study expect.
+- Warm the **current** decision (queue + identity-keyed cache). Do **not** full-tree frontload EV/equity into the save (#184, #190, #191).
 
 User-facing Study copy says **Equity** (not “Check-down equity”); the quantity is still check-down pot fraction, not chip EV (#189).
 
-Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via normalized `comboKey` (suit-order variants); gate ready/pending with solution+node id so navigate does not show another node’s Eq (#170).
+Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via normalized `comboKey` (suit-order variants); gate ready/pending with solution+node id so navigate does not show another node’s Eq (#170). Node inspect must fill strategy-conditioned `reach` / `marginal` or the matrix treats every cell as undefined (#292).
 
 ### Frozen parallel + cold action EV
 
@@ -248,13 +283,14 @@ Matrix, Hands, Node Locking, and the Actions mix bar paint **passive → aggress
 
 ### Platform gaps
 
-- **HTTP suite:** `poker_http_tests` (`test_explorer_http.cpp` + `test_explorer_workflow.cpp`) runs on **Linux and Windows** in CI via a spawned `explorer` on an ephemeral port. Do not claim Linux lacks HTTP coverage. Some working-set / card-delay asserts remain Windows-only (`#ifdef _WIN32`).
-- Assertion totals differ by compiler; fail missing parity checkpoints instead of skipping (`cc12bc8`).
-- **Desktop `tsc -b`:** Study store nullability (`node` / `liveEquity` unnarrowed) fails `desktop` and `windows-installer` CI even when vitest is green (#190/#191). After lifecycle/analysis changes, run `cd desktop && npx tsc -b`.
+- **Zig CI:** after engine/host changes run `zig build` + `zig build test` (`.github/workflows/zig.yml`). Prefer `-Dcpu=x86_64_v2` for portable Windows artifacts (#288/#289).
+- **Desktop `tsc -b`:** Study store nullability fails `desktop` / installer CI when vitest is green (#190/#191). After lifecycle/IPC client changes, run `cd desktop && npx tsc -b`.
 - **CI path gate:** `dorny/paths-filter` needs `pull-requests: read` under restricted `GITHUB_TOKEN` scopes; fail the aggregate `ci` job if the path gate itself fails (#200).
-- **NSIS / installer hooks:** wait for **`windows-installer`** green before merge. A green non-installer subset is not enough — #158/#159 landed broken PREINSTALL arity / duplicate `kill:` labels and needed follow-ups (#161).
-- **Tauri sidecar spawn:** `bundle.externalBin` may be `binaries/holdem-explorer`, but the installed file is `<exe_dir>/holdem-explorer.exe`. `shell().sidecar("binaries/holdem-explorer")` looks under a non-existent `binaries/` folder (os error 3). Spawn the absolute path beside the app (or `sidecar("holdem-explorer")`). Packaged UI must also **statically import** `@tauri-apps/api/core` — `@vite-ignore` dynamic imports leave a bare specifier that fails at runtime. Packaged Study owns the child via `/api/ready` + launch id (not “any TCP on 8765”).
-- **NSIS upgrade + sidecar lock:** A running/orphaned `holdem-explorer.exe` keeps the file locked → "Error opening file for writing: …\holdem-explorer.exe" (Ignore leaves a stale engine). PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning` — its `kill:` labels collide with the template's insert), then `taskkill /F /T /IM holdem-explorer.exe`, Sleep, and `Delete` the old sidecar. Never `taskkill` `explorer.exe`.
+- **NSIS / installer hooks:** wait for **`windows-installer`** green before merge on spawn/NSIS changes (#158/#159/#161). Stable installer must ship `solver-engine.exe` only and fail if `holdem-explorer` reappears (#286).
+- **Tauri sidecar spawn (Zig):** `externalBin` → `binaries/solver-engine`; installed file is `<exe_dir>/solver-engine.exe`. Spawn the absolute path beside the app. Packaged UI must **statically import** `@tauri-apps/api/core`. Own the child via IPC ready + launch id — not “any TCP on 8765.”
+- **NSIS upgrade + sidecar lock:** PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning`), then `taskkill` / delete **both** `solver-engine.exe` and legacy `holdem-explorer.exe`. Never `taskkill` `explorer.exe` (Windows shell).
+- **Packaged security:** production CSP (#242); assistant secrets in OS **keyring** (#243).
+- **Historical C++ HTTP gaps** (pre-cutover trees only): Linux/Windows `poker_http_tests`, MSVC stack, `holdem-explorer` path quirks — do not restore those shipping paths on `zig-rewrite`.
 
 ### Licensing
 
@@ -263,7 +299,7 @@ Do not change `LICENSE`, SPDX, or license metadata. `UNLICENSED` ≠ Unlicense. 
 ### Branch / PR hygiene (cloud)
 
 - Branches: `cursor/<descriptive-name>-<run-suffix>`, lowercase (suffix comes from the cloud-run instructions).
-- Prefer `base_branch=main` unless stacking on an unmerged dependency; say so in the PR body.
+- Prefer the **product tip** as `base_branch` (`zig-rewrite` until cutover merges to `main`); say so in the PR body when not targeting `main`.
 - Update `docs/auxiliary/planning/FEATURE_PARITY.md` **only** in the commit that demonstrates the row change.
 - When UI chrome moves, update `docs/ai-context/source/` + `sync:ai-context` and player docs in the **same** change when packs claim those labels.
 
@@ -382,7 +418,7 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 
 ## 7. Keeping this doc fresh
 
-- Durable scheduled refresh: Cursor Automation prompt in [`AGENT_LESSONS_REFRESH.md`](AGENT_LESSONS_REFRESH.md) (create/activate at [cursor.com/automations](https://cursor.com/automations) against `matt-azar/poker-solver`).
+- Durable scheduled refresh: Cursor Automation [Update docs](https://cursor.com/automations/138d322b-ddfd-11f1-ba91-f63b1661ac50) plus the paste-ready prompt in [`AGENT_LESSONS_REFRESH.md`](AGENT_LESSONS_REFRESH.md). Prefer the **product tip** base (`zig-rewrite` until cutover lands on `main`).
 - When a PR fixes an agent-rediscovered trap, add a short **Do/Don't** here in the same PR when practical.
 - Update the short digest in `.cursor/rules/parallel-agents.mdc` and root `AGENTS.md` whenever a new trap belongs in every agent’s always-on context.
 
@@ -397,9 +433,10 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 | Street tree / budget / frozen | `docs/STREETS.md` |
 | River chips / oracle | `docs/RIVER.md` |
 | Math / EV / NashConv | `docs/MATHEMATICS.md` |
-| Explorer HTTP / Study UI | `docs/EXPLORER.md`, `docs/DESKTOP_UI.md` |
+| Study UI / Zig IPC | `docs/DESKTOP_UI.md` (HTTP explorer notes are historical) |
 | Equity | `docs/EQUITY.md` |
 | Assistant / AI packs | `docs/STUDY_SETUP_ASSISTANT.md`, `docs/ai-context/README.md` |
+| Zig release / cutover gates | `docs/auxiliary/engineering/ZIG_RELEASE_GATES.md` |
 | Milestones / gates | `docs/auxiliary/planning/ROADMAP.md`, `docs/auxiliary/planning/FEATURE_PARITY.md` |
 | Testing / benches | `docs/auxiliary/engineering/TESTING.md`, `benchmarks/study/README.md` |
 | Lessons refresh automation | `docs/auxiliary/engineering/AGENT_LESSONS_REFRESH.md` |
