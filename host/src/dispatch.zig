@@ -2521,3 +2521,470 @@ test "categories dispatch river made-hand Study shape" {
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"categories\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "four of a kind") != null);
 }
+
+fn digExtractF64After(hay: []const u8, key: []const u8) ?f64 {
+    const idx = std.mem.indexOf(u8, hay, key) orelse return null;
+    var i = idx + key.len;
+    while (i < hay.len and (hay[i] == ' ' or hay[i] == ':' or hay[i] == '"')) : (i += 1) {}
+    var end = i;
+    while (end < hay.len and ((hay[end] >= '0' and hay[end] <= '9') or hay[end] == '.' or hay[end] == 'e' or hay[end] == 'E' or hay[end] == '+' or hay[end] == '-')) : (end += 1) {}
+    if (end == i) return null;
+    return std.fmt.parseFloat(f64, hay[i..end]) catch null;
+}
+
+test "ZR-116 dig: node equity root vs navigated differs on reach fixture" {
+    // Same ZR-95 pin: AsQs vs 2d2h on AhKhQhJh; check→check→Ac → OOP ~100% vs root ~18%.
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh
+        \\pot 100
+        \\stack 200
+        \\oop-range AsQs:1
+        \\ip-range 2d2h:1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\oop-turn-bets 0.5
+        \\ip-turn-bets 0.5
+        \\oop-river-bets 0.5
+        \\ip-river-bets 0.5
+        \\first-to-act 0
+        \\max-raises 1
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "zr116-eq-nav");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    var root_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "eq-root"),
+        .op = try std.testing.allocator.dupe(u8, "equity"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer root_req.deinit();
+    var root_reply = try handle(&state, root_req);
+    defer root_reply.deinit();
+    try std.testing.expect(root_reply.ok);
+    const root_eq = digExtractF64After(root_reply.body_json, "\"oop_equity\"") orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f64, 2.0 / 11.0), root_eq, 1e-4);
+
+    // Locate check→check→Ac river decision via tree walk (same as rematch pin).
+    var lease = try state.session.borrowPublishedWait(1 * std.time.ns_per_s);
+    defer lease.deinit();
+    const game = lease.game;
+    const root_node = game.nodes[0];
+    var check0: ?u32 = null;
+    var a: usize = 0;
+    while (a < root_node.n_actions) : (a += 1) {
+        if (std.mem.eql(u8, root_node.action_labels[a], "Check")) {
+            check0 = root_node.child[a];
+            break;
+        }
+    }
+    const after_oop = check0 orelse return error.TestUnexpectedResult;
+    const ip_node = game.nodes[after_oop];
+    var check1: ?u32 = null;
+    a = 0;
+    while (a < ip_node.n_actions) : (a += 1) {
+        if (std.mem.eql(u8, ip_node.action_labels[a], "Check")) {
+            check1 = ip_node.child[a];
+            break;
+        }
+    }
+    const chance_idx = check1 orelse return error.TestUnexpectedResult;
+    const ac = try poker_engine.poker.card.parseCard("Ac");
+    var id_buf: [64]u8 = undefined;
+    const river_id = try std.fmt.bufPrint(&id_buf, "p{d}.t-1.r{d}", .{ game.nodes[chance_idx].child[0], ac });
+    var body_buf: [96]u8 = undefined;
+    const body = try std.fmt.bufPrint(&body_buf, "{{\"node_id\":\"{s}\"}}", .{river_id});
+
+    var nav_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "eq-nav"),
+        .op = try std.testing.allocator.dupe(u8, "equity"),
+        .body_json = try std.testing.allocator.dupe(u8, body),
+    };
+    defer nav_req.deinit();
+    var nav_reply = try handle(&state, nav_req);
+    defer nav_reply.deinit();
+    try std.testing.expect(nav_reply.ok);
+    const nav_eq = digExtractF64After(nav_reply.body_json, "\"oop_equity\"") orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f64, 1.0), nav_eq, 1e-4);
+    try std.testing.expect(@abs(nav_eq - root_eq) > 0.5);
+
+    // Unknown node → typed error (not hang / 501).
+    var bad: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "eq-bad"),
+        .op = try std.testing.allocator.dupe(u8, "equity"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p999.t-1.r-1\"}"),
+    };
+    defer bad.deinit();
+    var bad_reply = try handle(&state, bad);
+    defer bad_reply.deinit();
+    try std.testing.expect(!bad_reply.ok);
+    try std.testing.expect(std.mem.eql(u8, bad_reply.error_code orelse "", "unknown_node"));
+}
+
+test "ZR-116 dig: categories river ok; flop/turn available=false" {
+    const river =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var river_state = try HostState.init(std.testing.allocator, "zr116-cat-r");
+    defer river_state.deinit();
+    try river_state.session.begin(river);
+    try river_state.session.train(1);
+    var river_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "cat-r"),
+        .op = try std.testing.allocator.dupe(u8, "categories"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer river_req.deinit();
+    var river_reply = try handle(&river_state, river_req);
+    defer river_reply.deinit();
+    try std.testing.expect(river_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, river_reply.body_json, "\"available\":true") != null);
+
+    const flop =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-flop-bets 0.5
+        \\ip-flop-bets 0.5
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var flop_state = try HostState.init(std.testing.allocator, "zr116-cat-f");
+    defer flop_state.deinit();
+    try flop_state.session.begin(flop);
+    try flop_state.session.train(1);
+    var flop_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "cat-f"),
+        .op = try std.testing.allocator.dupe(u8, "categories"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer flop_req.deinit();
+    var flop_reply = try handle(&flop_state, flop_req);
+    defer flop_reply.deinit();
+    try std.testing.expect(flop_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, flop_reply.body_json, "\"available\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, flop_reply.body_json, "five-card") != null);
+
+    const turn =
+        \\street-config 1
+        \\board Ah Kd 7c 2s
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var turn_state = try HostState.init(std.testing.allocator, "zr116-cat-t");
+    defer turn_state.deinit();
+    try turn_state.session.begin(turn);
+    try turn_state.session.train(1);
+    var turn_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "cat-t"),
+        .op = try std.testing.allocator.dupe(u8, "categories"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer turn_req.deinit();
+    var turn_reply = try handle(&turn_state, turn_req);
+    defer turn_reply.deinit();
+    try std.testing.expect(turn_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, turn_reply.body_json, "\"available\":false") != null);
+}
+
+test "ZR-116 dig: equity calculator invalid board + cancel under busy" {
+    var state = try HostState.init(std.testing.allocator, "zr116-eq-jobs");
+    defer state.deinit();
+
+    // Garbage card → invalid_request (sync reject).
+    {
+        const body =
+            \\{"version":1,"client_revision":"bad-card","method":"exact","target_samples":100,"seed":1,"board":["Zz"],"dead_cards":[],"players":[{"id":"p1","range":"AsAd"},{"id":"p2","range":"KcKd"}]}
+        ;
+        var req: ipc.Envelope = .{
+            .allocator = std.testing.allocator,
+            .kind = .request,
+            .request_id = try std.testing.allocator.dupe(u8, "bad-card"),
+            .op = try std.testing.allocator.dupe(u8, "start_equity_job"),
+            .body_json = try std.testing.allocator.dupe(u8, body),
+        };
+        defer req.deinit();
+        var reply = try handle(&state, req);
+        defer reply.deinit();
+        try std.testing.expect(!reply.ok);
+        try std.testing.expect(std.mem.eql(u8, reply.error_code orelse "", "invalid_request"));
+    }
+
+    // Two-card board → invalid_request at enqueue.
+    {
+        const body =
+            \\{"version":1,"client_revision":"bad-len","method":"exact","target_samples":100,"seed":1,"board":["2c","3d"],"dead_cards":[],"players":[{"id":"p1","range":"AsAd"},{"id":"p2","range":"KcKd"}]}
+        ;
+        var req: ipc.Envelope = .{
+            .allocator = std.testing.allocator,
+            .kind = .request,
+            .request_id = try std.testing.allocator.dupe(u8, "bad-len"),
+            .op = try std.testing.allocator.dupe(u8, "start_equity_job"),
+            .body_json = try std.testing.allocator.dupe(u8, body),
+        };
+        defer req.deinit();
+        var reply = try handle(&state, req);
+        defer reply.deinit();
+        try std.testing.expect(!reply.ok);
+        try std.testing.expect(std.mem.eql(u8, reply.error_code orelse "", "invalid_request"));
+    }
+
+    // Duplicate board cards → job fails with invalid_input (not crash).
+    {
+        const body =
+            \\{"version":1,"client_revision":"dup","method":"exact","target_samples":100,"seed":1,"board":["2c","3d","7h","9s","2c"],"dead_cards":[],"players":[{"id":"p1","range":"AsAd"},{"id":"p2","range":"KcKd"}]}
+        ;
+        var start_req: ipc.Envelope = .{
+            .allocator = std.testing.allocator,
+            .kind = .request,
+            .request_id = try std.testing.allocator.dupe(u8, "dup-start"),
+            .op = try std.testing.allocator.dupe(u8, "start_equity_job"),
+            .body_json = try std.testing.allocator.dupe(u8, body),
+        };
+        defer start_req.deinit();
+        var start_reply = try handle(&state, start_req);
+        defer start_reply.deinit();
+        try std.testing.expect(start_reply.ok);
+        const job_id_start = std.mem.indexOf(u8, start_reply.body_json, "\"job_id\":\"") orelse return error.TestUnexpectedResult;
+        const id_slice = start_reply.body_json[job_id_start + 10 ..];
+        const id_end = std.mem.indexOfScalar(u8, id_slice, '"') orelse return error.TestUnexpectedResult;
+        const job_id = id_slice[0..id_end];
+        var failed = false;
+        var attempt: usize = 0;
+        while (attempt < 200) : (attempt += 1) {
+            std.Thread.sleep(5 * std.time.ns_per_ms);
+            var get_body_buf: [64]u8 = undefined;
+            const get_body = try std.fmt.bufPrint(&get_body_buf, "{{\"job_id\":\"{s}\"}}", .{job_id});
+            var get_req: ipc.Envelope = .{
+                .allocator = std.testing.allocator,
+                .kind = .request,
+                .request_id = try std.testing.allocator.dupe(u8, "dup-get"),
+                .op = try std.testing.allocator.dupe(u8, "get_equity_job"),
+                .body_json = try std.testing.allocator.dupe(u8, get_body),
+            };
+            defer get_req.deinit();
+            var get_reply = try handle(&state, get_req);
+            defer get_reply.deinit();
+            try std.testing.expect(get_reply.ok);
+            if (std.mem.indexOf(u8, get_reply.body_json, "\"state\":\"failed\"") != null) {
+                try std.testing.expect(std.mem.indexOf(u8, get_reply.body_json, "invalid_input") != null);
+                failed = true;
+                break;
+            }
+            if (std.mem.indexOf(u8, get_reply.body_json, "\"state\":\"completed\"") != null) {
+                try std.testing.expect(false);
+            }
+        }
+        try std.testing.expect(failed);
+    }
+
+    // Fill queue to busy, cancel one queued job, enqueue succeeds again.
+    {
+        const slow =
+            \\{"version":1,"client_revision":"busy","method":"monte_carlo","target_samples":5000000,"max_attempts":50000000,"seed":1,"board":[],"dead_cards":[],"players":[{"id":"p1","range":"random"},{"id":"p2","range":"random"}]}
+        ;
+        var ids: [5][16]u8 = undefined;
+        var id_lens: [5]usize = undefined;
+        var n: usize = 0;
+        while (n < 5) : (n += 1) {
+            var start_req: ipc.Envelope = .{
+                .allocator = std.testing.allocator,
+                .kind = .request,
+                .request_id = try std.testing.allocator.dupe(u8, "busy-start"),
+                .op = try std.testing.allocator.dupe(u8, "start_equity_job"),
+                .body_json = try std.testing.allocator.dupe(u8, slow),
+            };
+            defer start_req.deinit();
+            var start_reply = try handle(&state, start_req);
+            defer start_reply.deinit();
+            if (!start_reply.ok) {
+                try std.testing.expect(std.mem.eql(u8, start_reply.error_code orelse "", "busy"));
+                break;
+            }
+            const job_id_start = std.mem.indexOf(u8, start_reply.body_json, "\"job_id\":\"") orelse return error.TestUnexpectedResult;
+            const id_slice = start_reply.body_json[job_id_start + 10 ..];
+            const id_end = std.mem.indexOfScalar(u8, id_slice, '"') orelse return error.TestUnexpectedResult;
+            @memcpy(ids[n][0..id_end], id_slice[0..id_end]);
+            id_lens[n] = id_end;
+        }
+        try std.testing.expect(n >= 4);
+
+        // One more start should be busy (queue full while one may be running).
+        {
+            var busy_req: ipc.Envelope = .{
+                .allocator = std.testing.allocator,
+                .kind = .request,
+                .request_id = try std.testing.allocator.dupe(u8, "busy-again"),
+                .op = try std.testing.allocator.dupe(u8, "start_equity_job"),
+                .body_json = try std.testing.allocator.dupe(u8, slow),
+            };
+            defer busy_req.deinit();
+            var busy_reply = try handle(&state, busy_req);
+            defer busy_reply.deinit();
+            try std.testing.expect(!busy_reply.ok);
+            try std.testing.expect(std.mem.eql(u8, busy_reply.error_code orelse "", "busy"));
+        }
+
+        // Cancel last accepted queued id → frees a slot.
+        const cancel_id = ids[n - 1][0..id_lens[n - 1]];
+        var cancel_body_buf: [64]u8 = undefined;
+        const cancel_body = try std.fmt.bufPrint(&cancel_body_buf, "{{\"job_id\":\"{s}\"}}", .{cancel_id});
+        var cancel_req: ipc.Envelope = .{
+            .allocator = std.testing.allocator,
+            .kind = .request,
+            .request_id = try std.testing.allocator.dupe(u8, "busy-cancel"),
+            .op = try std.testing.allocator.dupe(u8, "cancel_equity_job"),
+            .body_json = try std.testing.allocator.dupe(u8, cancel_body),
+        };
+        defer cancel_req.deinit();
+        var cancel_reply = try handle(&state, cancel_req);
+        defer cancel_reply.deinit();
+        try std.testing.expect(cancel_reply.ok);
+
+        var after_req: ipc.Envelope = .{
+            .allocator = std.testing.allocator,
+            .kind = .request,
+            .request_id = try std.testing.allocator.dupe(u8, "busy-after"),
+            .op = try std.testing.allocator.dupe(u8, "start_equity_job"),
+            .body_json = try std.testing.allocator.dupe(u8, slow),
+        };
+        defer after_req.deinit();
+        var after_reply = try handle(&state, after_req);
+        defer after_reply.deinit();
+        try std.testing.expect(after_reply.ok);
+
+        // Cancel running (first) job — must return ok and progress to cancelled/stopped.
+        const run_id = ids[0][0..id_lens[0]];
+        var run_cancel_buf: [64]u8 = undefined;
+        const run_cancel_body = try std.fmt.bufPrint(&run_cancel_buf, "{{\"job_id\":\"{s}\"}}", .{run_id});
+        var run_cancel_req: ipc.Envelope = .{
+            .allocator = std.testing.allocator,
+            .kind = .request,
+            .request_id = try std.testing.allocator.dupe(u8, "run-cancel"),
+            .op = try std.testing.allocator.dupe(u8, "cancel_equity_job"),
+            .body_json = try std.testing.allocator.dupe(u8, run_cancel_body),
+        };
+        defer run_cancel_req.deinit();
+        var run_cancel_reply = try handle(&state, run_cancel_req);
+        defer run_cancel_reply.deinit();
+        try std.testing.expect(run_cancel_reply.ok);
+
+        var terminal = false;
+        var attempt: usize = 0;
+        while (attempt < 400) : (attempt += 1) {
+            std.Thread.sleep(10 * std.time.ns_per_ms);
+            var get_body_buf: [64]u8 = undefined;
+            const get_body = try std.fmt.bufPrint(&get_body_buf, "{{\"job_id\":\"{s}\"}}", .{run_id});
+            var get_req: ipc.Envelope = .{
+                .allocator = std.testing.allocator,
+                .kind = .request,
+                .request_id = try std.testing.allocator.dupe(u8, "run-get"),
+                .op = try std.testing.allocator.dupe(u8, "get_equity_job"),
+                .body_json = try std.testing.allocator.dupe(u8, get_body),
+            };
+            defer get_req.deinit();
+            var get_reply = try handle(&state, get_req);
+            defer get_reply.deinit();
+            try std.testing.expect(get_reply.ok);
+            if (std.mem.indexOf(u8, get_reply.body_json, "\"state\":\"cancelled\"") != null or
+                std.mem.indexOf(u8, get_reply.body_json, "\"state\":\"stopped\"") != null or
+                std.mem.indexOf(u8, get_reply.body_json, "\"state\":\"stopping\"") != null)
+            {
+                // stopping is transitional; wait for cancelled/stopped when possible
+                if (std.mem.indexOf(u8, get_reply.body_json, "\"state\":\"stopping\"") == null) {
+                    terminal = true;
+                    break;
+                }
+            }
+        }
+        try std.testing.expect(terminal);
+
+        // Drain remaining heavy jobs so HostState.deinit cannot hang on worker join.
+        var drain_i: usize = 0;
+        while (drain_i < n) : (drain_i += 1) {
+            const id = ids[drain_i][0..id_lens[drain_i]];
+            var buf: [64]u8 = undefined;
+            const body = try std.fmt.bufPrint(&buf, "{{\"job_id\":\"{s}\"}}", .{id});
+            var req: ipc.Envelope = .{
+                .allocator = std.testing.allocator,
+                .kind = .request,
+                .request_id = try std.testing.allocator.dupe(u8, "drain-cancel"),
+                .op = try std.testing.allocator.dupe(u8, "cancel_equity_job"),
+                .body_json = try std.testing.allocator.dupe(u8, body),
+            };
+            defer req.deinit();
+            var reply = try handle(&state, req);
+            defer reply.deinit();
+            try std.testing.expect(reply.ok);
+        }
+        std.Thread.sleep(50 * std.time.ns_per_ms);
+    }
+}
