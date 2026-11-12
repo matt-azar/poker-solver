@@ -2,6 +2,7 @@
 //! Hold'em Study Tauri shell: loads the Vite UI and manages the explorer sidecar.
 
 mod assistant_secrets;
+mod solver_engine;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -27,13 +28,6 @@ const EXPLORER_EXTERNAL_BIN: &str = "binaries/holdem-explorer";
 
 /// Runtime sidecar basename beside the app executable (and under target/debug).
 const EXPLORER_SIDECAR_BASENAME: &str = "holdem-explorer";
-
-/// Zig typed-IPC sidecar (Phase 6 tech-preview). Default Study still uses
-/// `holdem-explorer` over HTTP; cutover will spawn this with inherited pipes.
-#[allow(dead_code)]
-const SOLVER_ENGINE_EXTERNAL_BIN: &str = "binaries/solver-engine";
-#[allow(dead_code)]
-const SOLVER_ENGINE_SIDECAR_BASENAME: &str = "solver-engine";
 
 /// How long to wait for the owned sidecar's `/api/ready` after spawn.
 const ENGINE_READY_TIMEOUT: Duration = Duration::from_secs(12);
@@ -519,8 +513,24 @@ pub fn run() {
     }
     builder
         .manage(EngineState::new())
+        .manage(solver_engine::SolverEngineState::new())
         .setup(|app| {
-            spawn_explorer_sidecar(app);
+            // Zig path prefers solver-engine IPC. HTTP explorer is a temporary
+            // fallback when the Zig sidecar is missing or fails ready.
+            let handle = app.handle().clone();
+            let zig_state = app.state::<solver_engine::SolverEngineState>();
+            match solver_engine::ensure_solver_engine_session(&handle, &zig_state) {
+                Ok(info) => {
+                    eprintln!("info: {}", info.status);
+                }
+                Err(err) => {
+                    eprintln!(
+                        "warning: solver-engine IPC unavailable ({err}); \
+                         starting HTTP explorer fallback (temporary)"
+                    );
+                    spawn_explorer_sidecar(app);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -528,6 +538,9 @@ pub fn run() {
             engine_status,
             engine_endpoint,
             ensure_engine,
+            solver_engine::ensure_solver_engine,
+            solver_engine::solver_engine_info,
+            solver_engine::solver_engine_request,
             assistant_secret_get,
             assistant_secret_set,
             assistant_secret_clear,
@@ -538,6 +551,9 @@ pub fn run() {
         .run(|app_handle, event| {
             // Only on final Exit — ExitRequested can still be cancelled.
             if let RunEvent::Exit = event {
+                if let Some(state) = app_handle.try_state::<solver_engine::SolverEngineState>() {
+                    solver_engine::kill_solver_engine(&state);
+                }
                 kill_explorer_sidecar(app_handle);
             }
         });

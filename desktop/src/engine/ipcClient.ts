@@ -1,7 +1,7 @@
 /**
  * Tech-preview IPC client for `solver-engine`.
  * Domain ops mirror EngineClient; transport is framed pipes (not HTTP).
- * Default Study path remains HTTP `holdem-explorer` until cutover.
+ * Packaged Study prefers this path; HTTP `holdem-explorer` is a labeled fallback.
  */
 import {
   encodeIpcFrame,
@@ -138,6 +138,12 @@ export class SolverEngineIpcClient {
 
   async node(nodeIndex = 0): Promise<unknown> {
     const env = await this.request("node", { node_index: nodeIndex });
+    return env.body;
+  }
+
+  /** Node action-EV summary (root-centered + local_offset). */
+  async values(nodeIndex = 0): Promise<unknown> {
+    const env = await this.request("values", { node_index: nodeIndex });
     return env.body;
   }
 }

@@ -12,6 +12,8 @@ import { decodeErrorPayload } from "./contracts/error";
 import { decodeReadyPayload, type ReadyPayload } from "./contracts/ready";
 import { decodeStatusPayload } from "./contracts/status";
 import { normalizeRunoutsPayload, type RunoutsModel } from "./runouts";
+import { formatSolveJobStreetConfig } from "./streetConfigText";
+import { ipcBeginConfig, ipcSolve, ipcStatus, ipcValues, isIpcTransport } from "./transport";
 
 function defaultEngineBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_ENGINE_URL;
@@ -138,6 +140,17 @@ export class EngineClient {
   }
 
   async status(signal?: AbortSignal): Promise<StatusPayload> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const data = await ipcStatus();
+      try {
+        return decodeStatusPayload(data);
+      } catch (err) {
+        throw new EngineError(err instanceof Error ? err.message : String(err), 0, data);
+      }
+    }
     const { response, data } = await this.request("GET", "/api/status", undefined, { signal });
     this.ensureOk(response, data);
     try {
@@ -152,6 +165,35 @@ export class EngineClient {
   }
 
   async solve(job: SolveJobRequest, signal?: AbortSignal): Promise<unknown> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const configText = formatSolveJobStreetConfig(job);
+      const iterations = Math.max(1, Math.trunc(job.iterations || 1));
+      // Host train replies when finished (async worker; Tauri RPC wall 240s).
+      // Prefer job.time_limit as a soft note only — host cancel/time_limit TBD.
+      await ipcBeginConfig(configText);
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const body = (await ipcSolve(iterations, "j-study")) as {
+        solution_id?: number;
+        policy_revision?: number;
+        trained?: number;
+      };
+      return {
+        running: false,
+        job_id: "j-study",
+        solution_id:
+          body.solution_id != null && body.solution_id > 0
+            ? `s${body.solution_id}`
+            : null,
+        policy_revision: body.policy_revision ?? 0,
+        trained: body.trained ?? iterations,
+        transport: "ipc",
+      };
+    }
     const { response, data } = await this.request("POST", "/api/solve", job, { signal });
     this.ensureOk(response, data, true);
     return data;
@@ -225,6 +267,20 @@ export class EngineClient {
     nodeId: string,
     signal?: AbortSignal,
   ): Promise<ActionValuesPayload> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      // IPC values currently key by node_index; Study root maps to 0.
+      // Full `pN.tT.rR` → index mapping remains a follow-on gap.
+      void nodeId;
+      const data = await ipcValues(0);
+      return {
+        ...(data as object),
+        solution_id: solutionId,
+        node_id: nodeId,
+      } as ActionValuesPayload;
+    }
     const { response, data } = await this.request(
       "GET",
       `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/values`,

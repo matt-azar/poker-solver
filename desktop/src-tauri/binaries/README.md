@@ -4,10 +4,12 @@ Tauri `bundle.externalBin` lists:
 
 | Entry | Product role |
 | --- | --- |
-| `binaries/holdem-explorer` | Shipping C++ HTTP explorer (default Study path) |
-| `binaries/solver-engine` | Zig typed-IPC tech-preview (`solver-engine` / `.exe`) |
+| `binaries/holdem-explorer` | C++ HTTP explorer (temporary labeled Study fallback) |
+| `binaries/solver-engine` | Zig typed-IPC sidecar — preferred Study path (`solver-engine` / `.exe`) |
 
-Default Study still speaks HTTP to `holdem-explorer`. Zig cutover uses inherited-pipe IPC to `solver-engine` (protocol 2).
+Zig Study path **prefers** inherited-pipe IPC to `solver-engine` (protocol 2).
+HTTP `holdem-explorer` remains a **temporary labeled fallback** when the Zig
+sidecar is missing or fails ready (`VITE_SOLVER_TRANSPORT=http` forces HTTP).
 
 ## Naming (required by Tauri)
 
