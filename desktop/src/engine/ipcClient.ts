@@ -165,4 +165,28 @@ export class SolverEngineIpcClient {
     const env = await this.request("equity", body);
     return env.body;
   }
+
+  /** Study locks list. */
+  async listLocks(): Promise<unknown> {
+    const env = await this.request("list_locks");
+    return env.body;
+  }
+
+  /** Upsert a lock; reply is full locks list. */
+  async putLock(body: {
+    node_id: string;
+    kind: "full" | "selected";
+    scope?: "node" | "line";
+    hand_indices?: number[];
+    probs: number[];
+  }): Promise<unknown> {
+    const env = await this.request("put_lock", body);
+    return env.body;
+  }
+
+  /** Delete lock(s); reply is full locks list. */
+  async deleteLock(opts?: { node_id?: string; hand_index?: number }): Promise<unknown> {
+    const env = await this.request("delete_lock", opts ?? null);
+    return env.body;
+  }
 }

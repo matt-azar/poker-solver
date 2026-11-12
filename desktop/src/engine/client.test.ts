@@ -110,3 +110,72 @@ describe("EngineClient Slice A IPC branches", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 });
+
+describe("EngineClient Slice C locks IPC branches", () => {
+  let client: EngineClient;
+
+  beforeEach(() => {
+    invoke.mockReset();
+    client = new EngineClient({ baseUrl: "http://unused" });
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("routes listLocks / putLock / deleteLock over IPC", async () => {
+    invoke.mockResolvedValueOnce(okBody("list_locks", { locks: [] }));
+    await expect(client.listLocks("s1")).resolves.toEqual({ locks: [] });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "list_locks",
+      body: null,
+      jobId: null,
+    });
+
+    const putBody = {
+      node_id: "p0.t-1.r-1",
+      kind: "full" as const,
+      scope: "node" as const,
+      probs: [0.4, 0.6],
+    };
+    invoke.mockResolvedValueOnce(
+      okBody("put_lock", {
+        locks: [{ node_id: "p0.t-1.r-1", kind: "full", scope: "node", hand_indices: [], probs: [0.4, 0.6] }],
+      }),
+    );
+    const put = await client.putLock("s1", putBody);
+    expect((put as { locks: unknown[] }).locks).toHaveLength(1);
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "put_lock",
+      body: putBody,
+      jobId: null,
+    });
+
+    invoke.mockResolvedValueOnce(okBody("delete_lock", { locks: [] }));
+    await expect(client.deleteLock("s1", "p0.t-1.r-1")).resolves.toEqual({ locks: [] });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "delete_lock",
+      body: { node_id: "p0.t-1.r-1" },
+      jobId: null,
+    });
+
+    invoke.mockResolvedValueOnce(okBody("delete_lock", { locks: [] }));
+    await client.deleteLock("s1", "p0.t-1.r-1", 2);
+    expect(invoke).toHaveBeenLastCalledWith("solver_engine_request", {
+      op: "delete_lock",
+      body: { node_id: "p0.t-1.r-1", hand_index: 2 },
+      jobId: null,
+    });
+  });
+
+  it("keeps locks HTTP when transport is fallback", async () => {
+    setHttpFallbackTransport();
+    const fetchImpl = vi.fn(async () => {
+      return new Response(JSON.stringify({ locks: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    client = new EngineClient({ baseUrl: "http://127.0.0.1:8765", fetchImpl });
+    await client.listLocks("s9");
+    expect(fetchImpl).toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});

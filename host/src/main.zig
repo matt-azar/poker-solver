@@ -9,6 +9,7 @@ const ipc = @import("ipc.zig");
 const dispatch = @import("dispatch.zig");
 const workers = @import("workers.zig");
 const equity_json = @import("equity_json.zig");
+const locks_json = @import("locks_json.zig");
 
 pub const sidecar_name = "solver-engine";
 pub const phase = "phase-6";
@@ -92,5 +93,6 @@ test {
     _ = dispatch;
     _ = workers;
     _ = equity_json;
+    _ = locks_json;
     _ = linkedLayers;
 }

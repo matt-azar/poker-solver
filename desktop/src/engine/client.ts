@@ -16,10 +16,13 @@ import { formatSolveJobStreetConfig } from "./streetConfigText";
 import {
   ipcBeginConfig,
   ipcCancel,
+  ipcDeleteLock,
   ipcEquity,
+  ipcListLocks,
   ipcNode,
   ipcOpen,
   ipcPause,
+  ipcPutLock,
   ipcSave,
   ipcSolve,
   ipcStatus,
@@ -558,6 +561,11 @@ export class EngineClient {
   }
 
   async listLocks(solutionId: string): Promise<unknown> {
+    if (isIpcTransport()) {
+      // Host Session is single-solution; solutionId is Study-side identity.
+      void solutionId;
+      return ipcListLocks();
+    }
     const { response, data } = await this.request(
       "GET",
       `/api/solutions/${solutionId}/locks`,
@@ -577,6 +585,10 @@ export class EngineClient {
       probs: number[];
     },
   ): Promise<unknown> {
+    if (isIpcTransport()) {
+      void solutionId;
+      return ipcPutLock(body);
+    }
     const { response, data } = await this.request(
       "PUT",
       `/api/solutions/${solutionId}/locks`,
@@ -591,6 +603,10 @@ export class EngineClient {
     nodeId?: string,
     handIndex?: number,
   ): Promise<unknown> {
+    if (isIpcTransport()) {
+      void solutionId;
+      return ipcDeleteLock({ nodeId, handIndex });
+    }
     const query = new URLSearchParams();
     if (nodeId) {
       query.set("node_id", nodeId);
