@@ -2,7 +2,14 @@ const std = @import("std");
 const compile = @import("../game/compile.zig");
 const regret_matching = @import("regret_matching.zig");
 
-pub const TrainError = error{InvalidTrain, OutOfMemory};
+pub const TrainError = error{
+    InvalidTrain,
+    OutOfMemory,
+    ThreadQuotaExceeded,
+    LockedMemoryLimitExceeded,
+    SystemResources,
+    Unexpected,
+};
 
 /// Mutable CFR tables. `sigma` is trainer-exclusive (D2).
 pub const TrainingState = struct {
@@ -50,32 +57,181 @@ pub const PublishedPolicy = struct {
     }
 };
 
-pub fn freezeSigma(game: compile.CompiledGame, state: *TrainingState) void {
-    for (game.slots) |slot| {
+const SlotPass = enum {
+    freeze,
+    floor,
+    floor_and_freeze,
+    publish,
+};
+
+fn applySlotRange(
+    game: compile.CompiledGame,
+    state: *TrainingState,
+    pass: SlotPass,
+    player: i32,
+    begin: usize,
+    end: usize,
+    average: ?[]f32,
+) void {
+    var index = begin;
+    while (index < end) : (index += 1) {
+        const slot = game.slots[index];
         const node = game.nodes[@intCast(slot.node)];
         const n: usize = node.n_actions;
         const base: usize = @intCast(slot.base);
-        regret_matching.regretMatching(state.regret[base .. base + n], state.sigma[base .. base + n]);
+        switch (pass) {
+            .freeze => {
+                regret_matching.regretMatching(state.regret[base .. base + n], state.sigma[base .. base + n]);
+            },
+            .floor => {
+                if (player >= 0 and node.player != player) continue;
+                regret_matching.floorRegrets(state.regret[base .. base + n]);
+            },
+            .floor_and_freeze => {
+                // Match C++ apply_floor_and_freeze_range: floor updating seat, freeze all.
+                if (player >= 0 and node.player == player) {
+                    regret_matching.floorRegrets(state.regret[base .. base + n]);
+                }
+                regret_matching.regretMatching(state.regret[base .. base + n], state.sigma[base .. base + n]);
+            },
+            .publish => {
+                const out = average orelse return;
+                regret_matching.normalizeAverage(
+                    state.strategy_sum[base .. base + n],
+                    out[base .. base + n],
+                );
+            },
+        }
     }
+}
+
+const SlotJob = struct {
+    game: compile.CompiledGame,
+    state: *TrainingState,
+    pass: SlotPass,
+    player: i32,
+    average: ?[]f32,
+    begins: []const usize,
+    ends: []const usize,
+};
+
+fn runSlotWorker(worker: usize, job: *const SlotJob) void {
+    applySlotRange(job.game, job.state, job.pass, job.player, job.begins[worker], job.ends[worker], job.average);
+}
+
+fn partitionSlots(total: usize, workers: u32, begins: []usize, ends: []usize) void {
+    const w: usize = workers;
+    const base = total / w;
+    const remainder = total % w;
+    var cursor: usize = 0;
+    var worker: usize = 0;
+    while (worker < w) : (worker += 1) {
+        const count = base + @as(usize, if (worker < remainder) 1 else 0);
+        begins[worker] = cursor;
+        ends[worker] = cursor + count;
+        cursor += count;
+    }
+}
+
+/// C++ `PoolJob::Slots`: static partition of `game.slots` across `threads`.
+/// Slots write disjoint regret/sigma/average spans — no atomics.
+fn runSlotPassThreaded(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    state: *TrainingState,
+    pass: SlotPass,
+    player: i32,
+    threads_in: u32,
+    average: ?[]f32,
+) TrainError!void {
+    const total = game.slots.len;
+    if (total == 0) return;
+    const threads: u32 = if (threads_in < 1) 1 else @min(threads_in, 64);
+    if (threads <= 1) {
+        applySlotRange(game, state, pass, player, 0, total, average);
+        return;
+    }
+
+    var begins: [64]usize = undefined;
+    var ends: [64]usize = undefined;
+    partitionSlots(total, threads, begins[0..threads], ends[0..threads]);
+    const job = SlotJob{
+        .game = game,
+        .state = state,
+        .pass = pass,
+        .player = player,
+        .average = average,
+        .begins = begins[0..threads],
+        .ends = ends[0..threads],
+    };
+
+    var thread_buf = try allocator.alloc(std.Thread, threads - 1);
+    defer allocator.free(thread_buf);
+    var spawned: usize = 0;
+    errdefer {
+        var i: usize = 0;
+        while (i < spawned) : (i += 1) thread_buf[i].join();
+    }
+    while (spawned < threads - 1) : (spawned += 1) {
+        const idx = spawned + 1;
+        thread_buf[spawned] = try std.Thread.spawn(.{}, runSlotWorker, .{ idx, &job });
+    }
+    runSlotWorker(0, &job);
+    for (thread_buf) |t| t.join();
+}
+
+pub fn freezeSigma(game: compile.CompiledGame, state: *TrainingState) void {
+    applySlotRange(game, state, .freeze, -1, 0, game.slots.len, null);
+}
+
+pub fn freezeSigmaThreaded(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    state: *TrainingState,
+    threads: u32,
+) TrainError!void {
+    try runSlotPassThreaded(allocator, game, state, .freeze, -1, threads, null);
 }
 
 pub fn floorPlayer(game: compile.CompiledGame, state: *TrainingState, player: i32) void {
-    for (game.slots) |slot| {
-        const node = game.nodes[@intCast(slot.node)];
-        if (node.player != player) continue;
-        const n: usize = node.n_actions;
-        const base: usize = @intCast(slot.base);
-        regret_matching.floorRegrets(state.regret[base .. base + n]);
-    }
+    applySlotRange(game, state, .floor, player, 0, game.slots.len, null);
+}
+
+pub fn floorPlayerThreaded(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    state: *TrainingState,
+    player: i32,
+    threads: u32,
+) TrainError!void {
+    try runSlotPassThreaded(allocator, game, state, .floor, player, threads, null);
 }
 
 pub fn floorAndFreeze(game: compile.CompiledGame, state: *TrainingState, player: i32) void {
-    floorPlayer(game, state, player);
-    freezeSigma(game, state);
+    applySlotRange(game, state, .floor_and_freeze, player, 0, game.slots.len, null);
+}
+
+pub fn floorAndFreezeThreaded(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    state: *TrainingState,
+    player: i32,
+    threads: u32,
+) TrainError!void {
+    try runSlotPassThreaded(allocator, game, state, .floor_and_freeze, player, threads, null);
 }
 
 /// After a completed iteration: materialize stable average-policy revision (D2).
 pub fn publishAverage(allocator: std.mem.Allocator, game: compile.CompiledGame, state: *TrainingState) TrainError!PublishedPolicy {
+    return publishAverageThreaded(allocator, game, state, 1);
+}
+
+pub fn publishAverageThreaded(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    state: *TrainingState,
+    threads: u32,
+) TrainError!PublishedPolicy {
     state.policy_revision += 1;
     var published = PublishedPolicy{
         .allocator = allocator,
@@ -88,14 +244,83 @@ pub fn publishAverage(allocator: std.mem.Allocator, game: compile.CompiledGame, 
     }
     published.average = allocator.alloc(f32, state.strategy_sum.len) catch return error.OutOfMemory;
     @memset(published.average, 0);
-    for (game.slots) |slot| {
-        const node = game.nodes[@intCast(slot.node)];
-        const n: usize = node.n_actions;
-        const base: usize = @intCast(slot.base);
-        regret_matching.normalizeAverage(
-            state.strategy_sum[base .. base + n],
-            published.average[base .. base + n],
-        );
-    }
+    try runSlotPassThreaded(allocator, game, state, .publish, -1, threads, published.average);
     return published;
+}
+
+test "slot passes: 4-thread matches serial" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 2s
+        \\pot 100
+        \\stack 100
+        \\oop-range QcQd:1,JcJd:1,TcTd:1
+        \\ip-range 9c9d:1,8c8d:1,7c7d:1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\first-to-act 0
+        \\max-raises 1
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var spec = try @import("../game/street_config.zig").parseStreetConfig(std.testing.allocator, text);
+    defer spec.deinit();
+    var game = try compile.compile(std.testing.allocator, spec);
+    defer game.deinit();
+    try std.testing.expect(game.slots.len > 8);
+
+    var serial = try TrainingState.init(std.testing.allocator, game);
+    defer serial.deinit();
+    var threaded = try TrainingState.init(std.testing.allocator, game);
+    defer threaded.deinit();
+
+    // Seed identical non-trivial regrets so freeze/floor/publish exercise real work.
+    for (serial.regret, 0..) |*r, i| {
+        const v: f32 = @floatFromInt(@as(i32, @intCast(i % 17)) - 8);
+        r.* = v;
+        threaded.regret[i] = v;
+    }
+
+    freezeSigma(game, &serial);
+    try freezeSigmaThreaded(std.testing.allocator, game, &threaded, 4);
+    for (serial.sigma, threaded.sigma) |a, b| {
+        try std.testing.expectApproxEqAbs(@as(f64, a), @as(f64, b), 1e-7);
+    }
+
+    floorAndFreeze(game, &serial, 0);
+    try floorAndFreezeThreaded(std.testing.allocator, game, &threaded, 0, 4);
+    for (serial.regret, threaded.regret) |a, b| {
+        try std.testing.expectApproxEqAbs(@as(f64, a), @as(f64, b), 1e-7);
+    }
+    for (serial.sigma, threaded.sigma) |a, b| {
+        try std.testing.expectApproxEqAbs(@as(f64, a), @as(f64, b), 1e-7);
+    }
+
+    floorPlayer(game, &serial, 1);
+    try floorPlayerThreaded(std.testing.allocator, game, &threaded, 1, 4);
+    for (serial.regret, threaded.regret) |a, b| {
+        try std.testing.expectApproxEqAbs(@as(f64, a), @as(f64, b), 1e-7);
+    }
+
+    // Accumulate fake strategy_sum so publish has mass.
+    for (serial.strategy_sum, 0..) |*s, i| {
+        const v = serial.sigma[i] * 3.0;
+        s.* = v;
+        threaded.strategy_sum[i] = v;
+    }
+    var pub1 = try publishAverage(std.testing.allocator, game, &serial);
+    defer pub1.deinit();
+    var pub4 = try publishAverageThreaded(std.testing.allocator, game, &threaded, 4);
+    defer pub4.deinit();
+    try std.testing.expectEqual(pub1.average.len, pub4.average.len);
+    for (pub1.average, pub4.average) |a, b| {
+        try std.testing.expectApproxEqAbs(@as(f64, a), @as(f64, b), 1e-7);
+    }
 }
