@@ -271,10 +271,7 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      // IPC values currently key by node_index; Study root maps to 0.
-      // Full `pN.tT.rR` → index mapping remains a follow-on gap.
-      void nodeId;
-      const data = await ipcValues(0);
+      const data = await ipcValues(nodeId);
       return {
         ...(data as object),
         solution_id: solutionId,

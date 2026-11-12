@@ -75,6 +75,12 @@ def main() -> int:
     )
     ap.add_argument("--iterations", type=int, default=1)
     ap.add_argument("--node-index", type=int, default=0)
+    ap.add_argument(
+        "--node-id",
+        type=str,
+        default=None,
+        help="Study node id pN.tT.rR (preferred over --node-index when set)",
+    )
     ap.add_argument("--train-timeout", type=float, default=180.0)
     ap.add_argument("--values-timeout", type=float, default=60.0)
     args = ap.parse_args()
@@ -172,11 +178,16 @@ def main() -> int:
             )
 
             t_values = time.perf_counter()
+            values_body = (
+                {"node_id": args.node_id}
+                if args.node_id
+                else {"node_index": args.node_index}
+            )
             try:
                 values_env = rpc(
                     proc,
                     "values",
-                    {"node_index": args.node_index},
+                    values_body,
                     "lat-values",
                 )
             except Exception as exc:  # noqa: BLE001
@@ -207,10 +218,14 @@ def main() -> int:
                     {
                         "stage": "values",
                         "fixture": args.config.name,
-                        "node_index": args.node_index,
+                        "node_id": body.get("node_id") or args.node_id,
+                        "node_index": body.get("node_index", args.node_index),
+                        "has_action_ev": isinstance(body.get("action_ev"), list),
+                        "n_hands": body.get("n_hands"),
+                        "n_actions": body.get("n_actions"),
                         "ipc_round_trip_ms": round(values_s * 1000.0, 3),
                         "host_values_elapsed_ms": host_ms,
-                        "body": body,
+                        "body_keys": sorted(body.keys()) if isinstance(body, dict) else None,
                     },
                     separators=(",", ":"),
                 )

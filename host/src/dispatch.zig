@@ -121,6 +121,138 @@ fn bodyIntField(body: []const u8, key: []const u8) ?i32 {
     return std.fmt.parseInt(i32, body[from..i], 10) catch null;
 }
 
+fn resolveValuesNode(
+    game: poker_engine.game.CompiledGame,
+    body_json: []const u8,
+) poker_engine.analysis.node_id.NodeIdError!poker_engine.analysis.node_id.ParsedNodeId {
+    if (bodyStringField(body_json, "node_id")) |text| {
+        return poker_engine.analysis.node_id.locateNode(game, text);
+    }
+    const node_index: u32 = @intCast(bodyIntField(body_json, "node_index") orelse 0);
+    const turn = bodyIntField(body_json, "turn") orelse -1;
+    const river = bodyIntField(body_json, "river") orelse -1;
+    if (node_index >= game.nodes.len) return error.UnknownNode;
+    var buf: [64]u8 = undefined;
+    const text = std.fmt.bufPrint(&buf, "p{d}.t{d}.r{d}", .{ node_index, turn, river }) catch return error.UnknownNode;
+    return poker_engine.analysis.node_id.locateNode(game, text);
+}
+
+fn appendJsonString(list: *std.ArrayList(u8), value: []const u8) !void {
+    try list.append('"');
+    for (value) |c| {
+        switch (c) {
+            '"' => try list.appendSlice("\\\""),
+            '\\' => try list.appendSlice("\\\\"),
+            '\n' => try list.appendSlice("\\n"),
+            '\r' => try list.appendSlice("\\r"),
+            '\t' => try list.appendSlice("\\t"),
+            else => try list.append(c),
+        }
+    }
+    try list.append('"');
+}
+
+fn formatValuesBody(
+    allocator: std.mem.Allocator,
+    page: *const poker_engine.analysis.action_ev.ActionValues,
+    located: poker_engine.analysis.node_id.ParsedNodeId,
+    solution_id: u64,
+    elapsed_ms: i128,
+    live_under_train: bool,
+) ![]u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    errdefer list.deinit();
+    const w = list.writer();
+
+    const node_id_text = try poker_engine.analysis.node_id.formatNodeId(
+        allocator,
+        located.node_index,
+        located.turn,
+        located.river,
+    );
+    defer allocator.free(node_id_text);
+
+    const engine_tag: []const u8 = if (located.node_index == 0 and located.turn < 0 and located.river < 0)
+        "frozen_response_walk"
+    else
+        "deal_by_deal";
+
+    const n_actions = page.actions.len;
+    const n_hands = page.combos.len;
+
+    try w.writeAll("{\"pending\":false,\"solution_id\":\"s");
+    try w.print("{d}", .{solution_id});
+    try w.writeAll("\",\"node_id\":");
+    try appendJsonString(&list, node_id_text);
+    try w.print(",\"node_index\":{d},\"player\":{d},\"policy_revision\":{d}", .{
+        page.node_index,
+        page.player,
+        page.policy_revision,
+    });
+    try w.writeAll(",\"units\":\"chips\",\"utility_basis\":\"root_centered\"");
+    try w.print(",\"local_offset\":{d:.6},\"reach_defined\":{}", .{ page.local_offset, page.reach_defined });
+    try w.print(",\"node_ev_defined\":{}", .{page.node_ev_defined});
+    if (page.node_ev_defined) {
+        try w.print(",\"node_ev\":{d:.6}", .{page.node_ev});
+    } else {
+        try w.writeAll(",\"node_ev\":null");
+    }
+    try w.print(",\"n_hands\":{d},\"n_actions\":{d},\"elapsed_ms\":{d}", .{
+        n_hands,
+        n_actions,
+        elapsed_ms,
+    });
+    try w.writeAll(",\"engine\":\"");
+    try w.writeAll(engine_tag);
+    try w.print("\",\"live_under_train\":{}", .{live_under_train});
+
+    try w.writeAll(",\"actions\":[");
+    for (page.actions, 0..) |label, i| {
+        if (i > 0) try w.writeAll(",");
+        try appendJsonString(&list, label);
+    }
+    try w.writeAll("],\"combos\":[");
+    for (page.combos, 0..) |label, i| {
+        if (i > 0) try w.writeAll(",");
+        try appendJsonString(&list, label);
+    }
+    try w.writeAll("],\"ev_defined\":[");
+    for (page.ev_defined, 0..) |defined, i| {
+        if (i > 0) try w.writeAll(",");
+        try w.writeAll(if (defined != 0) "true" else "false");
+    }
+    try w.writeAll("],\"action_ev\":[");
+    var hand: usize = 0;
+    while (hand < n_hands) : (hand += 1) {
+        if (hand > 0) try w.writeAll(",");
+        if (hand >= page.ev_defined.len or page.ev_defined[hand] == 0) {
+            try w.writeAll("null");
+            continue;
+        }
+        try w.writeAll("[");
+        var action: usize = 0;
+        while (action < n_actions) : (action += 1) {
+            if (action > 0) try w.writeAll(",");
+            const idx = hand * n_actions + action;
+            const value: f64 = if (idx < page.action_ev.len) page.action_ev[idx] else 0;
+            try w.print("{d:.6}", .{value});
+        }
+        try w.writeAll("]");
+    }
+    try w.writeAll("],\"value\":[");
+    hand = 0;
+    while (hand < n_hands) : (hand += 1) {
+        if (hand > 0) try w.writeAll(",");
+        if (hand >= page.ev_defined.len or page.ev_defined[hand] == 0 or hand >= page.mixed_ev.len) {
+            try w.writeAll("null");
+            continue;
+        }
+        try w.print("{d:.6}", .{page.mixed_ev[hand]});
+    }
+    try w.writeAll("]}");
+    return try list.toOwnedSlice();
+}
+
 fn unescapeConfig(allocator: std.mem.Allocator, escaped: []const u8) ![]u8 {
     var raw = std.ArrayList(u8).init(allocator);
     errdefer raw.deinit();
@@ -186,7 +318,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
                 state.budget.analysis,
             })
         else
-            try std.fmt.bufPrint(&buf, "{{\"running\":{},\"paused\":{},\"cancelled\":false,\"status_generation\":{d},\"solution_id\":\"s{d}\",\"job_id\":null,\"root_node_id\":\"p0\",\"phase\":\"{s}\",\"policy_revision\":{d},\"workers_training\":{d},\"workers_analysis\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}", .{
+            try std.fmt.bufPrint(&buf, "{{\"running\":{},\"paused\":{},\"cancelled\":false,\"status_generation\":{d},\"solution_id\":\"s{d}\",\"job_id\":null,\"root_node_id\":\"p0.t-1.r-1\",\"phase\":\"{s}\",\"policy_revision\":{d},\"workers_training\":{d},\"workers_analysis\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}", .{
                 running,
                 paused,
                 state.session.solution_id + state.session.policyRevision(),
@@ -282,30 +414,34 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
         defer lease.deinit();
-        const node_index: u32 = @intCast(bodyIntField(req.body_json, "node_index") orelse 0);
+        const located = resolveValuesNode(lease.game, req.body_json) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
+        };
         const t0 = std.time.nanoTimestamp();
-        var page = poker_engine.analysis.action_ev.actionValues(state.allocator, lease.game, lease.published, node_index, -1, -1) catch |err| {
+        var page = poker_engine.analysis.action_ev.actionValues(
+            state.allocator,
+            lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "values_failed", @errorName(err));
         };
         defer page.deinit();
         const elapsed_ns = std.time.nanoTimestamp() - t0;
         const elapsed_ms = @divTrunc(elapsed_ns, 1_000_000);
-        // Summary page for Study latency (full hand×action tables are a follow-on).
-        // Root uses frozen response_walk CF → Q_i under a reader lease while train may continue.
-        var buf: [512]u8 = undefined;
-        const body = try std.fmt.bufPrint(&buf, "{{\"node_index\":{d},\"player\":{d},\"policy_revision\":{d},\"units\":\"chips\",\"utility_basis\":\"root_centered\",\"local_offset\":{d:.6},\"node_ev_defined\":{},\"node_ev\":{d:.6},\"n_hands\":{d},\"n_actions\":{d},\"elapsed_ms\":{d},\"solution_id\":\"s{d}\",\"engine\":\"frozen_response_walk\",\"live_under_train\":{}}}", .{
-            page.node_index,
-            page.player,
-            page.policy_revision,
-            page.local_offset,
-            page.node_ev_defined,
-            page.node_ev,
-            page.combos.len,
-            page.actions.len,
-            elapsed_ms,
+        const body = formatValuesBody(
+            state.allocator,
+            &page,
+            located,
             lease.solution_id,
+            elapsed_ms,
             state.train_running.load(.acquire),
-        });
+        ) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "values_failed", @errorName(err));
+        };
+        defer state.allocator.free(body);
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
@@ -443,4 +579,62 @@ test "ready dispatch" {
     defer reply.deinit();
     try std.testing.expect(reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "solver-engine") != null);
+}
+
+test "values accepts Study node_id and returns hand×action tables" {
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "values-node-id");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "v1"),
+        .op = try std.testing.allocator.dupe(u8, "values"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"node_id\":\"p0.t-1.r-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"action_ev\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"combos\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"value\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"actions\":[") != null);
+
+    var bad: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "v2"),
+        .op = try std.testing.allocator.dupe(u8, "values"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p999.t-1.r-1\"}"),
+    };
+    defer bad.deinit();
+    var bad_reply = try handle(&state, bad);
+    defer bad_reply.deinit();
+    try std.testing.expect(!bad_reply.ok);
+    try std.testing.expect(std.mem.eql(u8, bad_reply.error_code orelse "", "unknown_node"));
 }

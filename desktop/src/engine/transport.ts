@@ -152,8 +152,13 @@ export async function ipcStatus(): Promise<unknown> {
   return env.body;
 }
 
-export async function ipcValues(nodeIndex = 0): Promise<unknown> {
-  const env = await solverEngineRequest("values", { node_index: nodeIndex });
+/** Study node id (`pN.tT.rR`) or legacy numeric node_index (root = 0). */
+export async function ipcValues(nodeIdOrIndex: string | number = 0): Promise<unknown> {
+  const body =
+    typeof nodeIdOrIndex === "string"
+      ? { node_id: nodeIdOrIndex }
+      : { node_index: nodeIdOrIndex };
+  const env = await solverEngineRequest("values", body);
   return env.body;
 }
 
