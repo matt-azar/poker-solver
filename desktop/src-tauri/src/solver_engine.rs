@@ -277,12 +277,24 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
     // Pipe stderr and drain it. Inheriting the parent stderr can deadlock the
     // ready handshake on Windows when the parent’s stderr is redirected (pipe
     // buffer fills → child blocks on log write → IPC ready never arrives).
-    let mut child = Command::new(&path)
-        .arg("--launch-id")
+    //
+    // On Windows, also pass CREATE_NO_WINDOW so a Console-subsystem sidecar
+    // (or a stale installer binary) cannot allocate a blank console. Closing
+    // that console kills the child and bricks Study IPC. Prefer Zig
+    // `subsystem = .Windows` for new builds; this flag is defense in depth.
+    let mut cmd = Command::new(&path);
+    cmd.arg("--launch-id")
         .arg(launch_id)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|err| format!("spawn `{}`: {err}", path.display()))?;
     let stdin = child
