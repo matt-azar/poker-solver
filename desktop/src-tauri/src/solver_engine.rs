@@ -85,12 +85,15 @@ struct PipeSession {
 pub struct SolverEngineState {
     /// Lifecycle only: spawn / take / kill. Never hold across RPC waits.
     session: Mutex<Option<PipeSession>>,
+    /// Serializes ensure probe/kill/spawn so only one reconnect runs at a time.
+    reconnect: Mutex<()>,
 }
 
 impl SolverEngineState {
     pub fn new() -> Self {
         Self {
             session: Mutex::new(None),
+            reconnect: Mutex::new(()),
         }
     }
 }
@@ -282,6 +285,30 @@ fn kill_session(slot: &mut Option<PipeSession>) {
             let _ = handle.join();
         }
         fail_all_pending(&session.io, "solver-engine session killed");
+    }
+}
+
+/// True when `failed_io` is still the installed session's pipes.
+///
+/// Late fatals from a superseded sidecar must not kill the replacement
+/// (ZR-154): an old request can return after reconnect has already installed
+/// engine B.
+fn is_current_connection(installed: Option<&Arc<SessionIo>>, failed_io: &Arc<SessionIo>) -> bool {
+    installed
+        .map(|io| Arc::ptr_eq(io, failed_io))
+        .unwrap_or(false)
+}
+
+/// Kill the installed session only when it is still `io` (the connection that
+/// failed). No-op when a newer sidecar has already replaced it.
+fn kill_solver_engine_if_current(state: &SolverEngineState, io: &Arc<SessionIo>) {
+    let mut guard = state
+        .session
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let current = guard.as_ref().map(|s| &s.io);
+    if is_current_connection(current, io) {
+        kill_session(&mut guard);
     }
 }
 
@@ -495,6 +522,12 @@ pub fn ensure_solver_engine_session(
     app: &AppHandle,
     state: &SolverEngineState,
 ) -> Result<SolverEngineInfo, String> {
+    // Single-flight reconnect: concurrent ensures share one probe/kill/spawn.
+    let _reconnect = state
+        .reconnect
+        .lock()
+        .map_err(|_| "solver-engine reconnect lock poisoned".to_string())?;
+
     // Existing session: probe ready without holding the lifecycle lock across the wait.
     let existing = {
         let guard = state
@@ -510,7 +543,8 @@ pub fn ensure_solver_engine_session(
             Ok(_) => return Ok(info),
             Err(_) => {
                 let _ = launch_id;
-                kill_solver_engine(state);
+                // Only tear down the pipes we probed — not a newer install.
+                kill_solver_engine_if_current(state, &io);
             }
         }
     }
@@ -571,6 +605,8 @@ pub fn solver_engine_request(
     body: Option<Value>,
     job_id: Option<String>,
 ) -> Result<Value, String> {
+    // Capture the connection that issued this RPC so a late fatal cannot kill a
+    // sidecar installed by a later reconnect (ZR-154).
     let io = session_io(&state)?;
     let reply = rpc_shared(
         &io,
@@ -588,7 +624,7 @@ pub fn solver_engine_request(
             || err.contains("shut down")
             || err.contains("stdin lock poisoned");
         if fatal {
-            kill_solver_engine(&state);
+            kill_solver_engine_if_current(&state, &io);
         }
     }
     reply
@@ -692,5 +728,172 @@ mod tests {
         let err = reply_to_result(reply).unwrap_err();
         assert!(err.contains("busy"));
         assert!(err.contains("train running"));
+    }
+
+    #[test]
+    fn only_one_reconnect_attempt_holds_the_lock() {
+        let state = SolverEngineState::new();
+        let _held = state.reconnect.lock().expect("reconnect lock");
+        assert!(
+            state.reconnect.try_lock().is_err(),
+            "second reconnect must wait — only one attempt at a time"
+        );
+    }
+
+    /// Connection-scoped kill needs a real OS child (`sleep`). Unix-only.
+    #[cfg(unix)]
+    mod connection_scoped {
+        use super::super::*;
+        use std::path::Path;
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::collections::HashMap;
+        use std::process::{Command, Stdio};
+
+        fn test_engine_info(launch_id: &str) -> SolverEngineInfo {
+            SolverEngineInfo {
+                status: "test".into(),
+                transport: "ipc".into(),
+                protocol: PROTOCOL,
+                launch_id: launch_id.into(),
+                sidecar: SIDECAR_BASENAME.into(),
+                workers: 0,
+                http_fallback_label: "test".into(),
+            }
+        }
+
+        /// Stand-in sidecar: real OS child so kill/wait exercise the lifecycle path.
+        fn install_test_session(
+            state: &SolverEngineState,
+            launch_id: &str,
+        ) -> (Arc<SessionIo>, u32) {
+            let mut child = Command::new("sleep")
+                .arg("60")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn sleep stand-in sidecar");
+            let stdin = child.stdin.take().expect("stdin");
+            let _stdout = child.stdout.take();
+            let pid = child.id();
+            let io = Arc::new(SessionIo {
+                stdin: Mutex::new(stdin),
+                next_request: AtomicU64::new(1),
+                pending: Mutex::new(HashMap::new()),
+                shut_down: AtomicBool::new(false),
+            });
+            let session = PipeSession {
+                child,
+                io: Arc::clone(&io),
+                reader: None,
+                launch_id: launch_id.to_string(),
+                info: test_engine_info(launch_id),
+            };
+            {
+                let mut guard = state.session.lock().expect("session lock");
+                kill_session(&mut guard);
+                *guard = Some(session);
+            }
+            (io, pid)
+        }
+
+        fn process_alive(pid: u32) -> bool {
+            Path::new(&format!("/proc/{pid}")).exists()
+        }
+
+        #[test]
+        fn is_current_connection_matches_only_same_arc() {
+            let (mut child_a, io_a) = {
+                let mut child = Command::new("sleep")
+                    .arg("2")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap();
+                let stdin = child.stdin.take().unwrap();
+                let io = Arc::new(SessionIo {
+                    stdin: Mutex::new(stdin),
+                    next_request: AtomicU64::new(1),
+                    pending: Mutex::new(HashMap::new()),
+                    shut_down: AtomicBool::new(false),
+                });
+                (child, io)
+            };
+            let (mut child_b, io_b) = {
+                let mut child = Command::new("sleep")
+                    .arg("2")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap();
+                let stdin = child.stdin.take().unwrap();
+                let io = Arc::new(SessionIo {
+                    stdin: Mutex::new(stdin),
+                    next_request: AtomicU64::new(1),
+                    pending: Mutex::new(HashMap::new()),
+                    shut_down: AtomicBool::new(false),
+                });
+                (child, io)
+            };
+            assert!(is_current_connection(Some(&io_a), &io_a));
+            assert!(!is_current_connection(Some(&io_b), &io_a));
+            assert!(!is_current_connection(None, &io_a));
+            let _ = child_a.kill();
+            let _ = child_a.wait();
+            let _ = child_b.kill();
+            let _ = child_b.wait();
+        }
+
+        #[test]
+        fn delayed_failure_from_engine_a_leaves_engine_b_running() {
+            let state = SolverEngineState::new();
+            let (io_a, pid_a) = install_test_session(&state, "engine-a");
+            assert!(process_alive(pid_a), "engine A should start alive");
+
+            // Reconnect installs B (kills A via install helper).
+            let (io_b, pid_b) = install_test_session(&state, "engine-b");
+            assert!(!process_alive(pid_a), "engine A should be gone after reconnect");
+            assert!(process_alive(pid_b), "engine B should be running");
+            assert!(!Arc::ptr_eq(&io_a, &io_b));
+
+            // Late fatal from a request issued against A must not kill B.
+            kill_solver_engine_if_current(&state, &io_a);
+
+            {
+                let guard = state.session.lock().expect("session lock");
+                let session = guard
+                    .as_ref()
+                    .expect("engine B must remain installed after delayed A failure");
+                assert!(
+                    Arc::ptr_eq(&session.io, &io_b),
+                    "installed pipes must still be engine B"
+                );
+                assert_eq!(session.child.id(), pid_b);
+                assert!(!session.io.shut_down.load(Ordering::SeqCst));
+            }
+            assert!(
+                process_alive(pid_b),
+                "engine B OS process must survive delayed failure from A"
+            );
+
+            kill_solver_engine(&state);
+            assert!(!process_alive(pid_b));
+        }
+
+        #[test]
+        fn fatal_on_current_connection_still_kills() {
+            let state = SolverEngineState::new();
+            let (io, pid) = install_test_session(&state, "engine-current");
+            assert!(process_alive(pid));
+            kill_solver_engine_if_current(&state, &io);
+            assert!(
+                state.session.lock().expect("session lock").is_none(),
+                "current connection fatal must clear the slot"
+            );
+            assert!(!process_alive(pid));
+        }
     }
 }
