@@ -93,6 +93,16 @@ fn applyLockAfterMatch(
             error.LockActionCountMismatch => error.LockActionCountMismatch,
         };
     };
+    // ZR-125 / Tiger: after lock overwrite, σ row must still be a probability
+    // (mirrors validateActionRow; f32 tolerance matches regret_matching).
+    // std.debug.assert is a no-op under ReleaseFast.
+    var sum: f64 = 0;
+    for (state.sigma[base .. base + n]) |p| {
+        std.debug.assert(std.math.isFinite(p));
+        std.debug.assert(p >= 0);
+        sum += p;
+    }
+    std.debug.assert(@abs(sum - 1.0) <= 1e-5);
 }
 
 fn applySlotRange(
@@ -108,9 +118,14 @@ fn applySlotRange(
     var index = begin;
     while (index < end) : (index += 1) {
         const slot = game.slots[index];
+        std.debug.assert(@as(usize, @intCast(slot.node)) < game.nodes.len);
         const node = game.nodes[@intCast(slot.node)];
         const n: usize = node.n_actions;
         const base: usize = @intCast(slot.base);
+        // ZR-125: slot.base + n_actions must fit CFR table lengths (table_entries).
+        std.debug.assert(base + n <= state.regret.len);
+        std.debug.assert(base + n <= state.sigma.len);
+        std.debug.assert(base + n <= state.strategy_sum.len);
         switch (pass) {
             .freeze => {
                 regret_matching.regretMatching(state.regret[base .. base + n], state.sigma[base .. base + n]);
@@ -130,6 +145,7 @@ fn applySlotRange(
             },
             .publish => {
                 const out = average orelse return;
+                std.debug.assert(base + n <= out.len);
                 regret_matching.normalizeAverage(
                     state.strategy_sum[base .. base + n],
                     out[base .. base + n],

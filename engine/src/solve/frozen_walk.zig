@@ -528,7 +528,14 @@ pub const FrozenCtx = struct {
             if (key < 0 or @as(usize, @intCast(key)) >= node.slot_of.len) return error.InvalidFrozen;
             const index = node.slot_of[@intCast(key)];
             if (index < 0) return error.InvalidFrozen;
-            here.slot_base[hand] = self.game.slots[@intCast(index)].base;
+            // ZR-125: slot table index must be in range before reading base.
+            std.debug.assert(@as(usize, @intCast(index)) < self.game.slots.len);
+            const base = self.game.slots[@intCast(index)].base;
+            if (self.state) |st| {
+                const b: usize = @intCast(base);
+                std.debug.assert(b + node.n_actions <= st.sigma.len);
+            }
+            here.slot_base[hand] = base;
         }
     }
 
@@ -1097,6 +1104,8 @@ pub const FrozenCtx = struct {
         serial_chance: bool,
     ) FrozenError!void {
         if (depth >= max_depth) return error.InvalidFrozen;
+        // ZR-125: child indexes must stay inside the compiled tree.
+        std.debug.assert(node_index < self.game.nodes.len);
         const node = self.game.nodes[node_index];
         const here = &w.scratch[depth];
 
@@ -1194,7 +1203,10 @@ pub const FrozenCtx = struct {
                         continue;
                     }
                     const b: usize = @intCast(base);
+                    // ZR-125: σ ≥ 0 ⇒ own-reach stays non-negative (rematch invariant).
+                    std.debug.assert(self.state.?.sigma[b + action] >= 0);
                     child.pi0[h0] = here.pi0[h0] * self.state.?.sigma[b + action];
+                    std.debug.assert(child.pi0[h0] >= 0);
                 }
                 @memcpy(child.pi1, here.pi1);
             } else {
@@ -1207,7 +1219,9 @@ pub const FrozenCtx = struct {
                         continue;
                     }
                     const b: usize = @intCast(base);
+                    std.debug.assert(self.state.?.sigma[b + action] >= 0);
                     child.pi1[h1] = here.pi1[h1] * self.state.?.sigma[b + action];
+                    std.debug.assert(child.pi1[h1] >= 0);
                 }
             }
             try self.walk(w, node.child[action], turn, river, depth + 1, updating, weight_iter, serial_chance);
@@ -1321,6 +1335,8 @@ pub const FrozenCtx = struct {
         serial_chance: bool,
     ) FrozenError!void {
         if (depth >= max_depth) return error.InvalidFrozen;
+        // ZR-125: child indexes must stay inside the compiled tree.
+        std.debug.assert(node_index < self.game.nodes.len);
         const node = self.game.nodes[node_index];
         const here = &w.scratch[depth];
 
@@ -1425,8 +1441,11 @@ pub const FrozenCtx = struct {
                         child.pi0[h0] = here.pi0[h0];
                     } else {
                         const b: usize = @intCast(base);
+                        // ZR-125: σ ≥ 0 ⇒ own-reach stays non-negative.
+                        std.debug.assert(sigma[b + action] >= 0);
                         child.pi0[h0] = here.pi0[h0] * sigma[b + action];
                     }
+                    std.debug.assert(child.pi0[h0] >= 0);
                 }
                 @memcpy(child.pi1, here.pi1);
             } else {
@@ -1442,8 +1461,10 @@ pub const FrozenCtx = struct {
                         child.pi1[h1] = here.pi1[h1];
                     } else {
                         const b: usize = @intCast(base);
+                        std.debug.assert(sigma[b + action] >= 0);
                         child.pi1[h1] = here.pi1[h1] * sigma[b + action];
                     }
+                    std.debug.assert(child.pi1[h1] >= 0);
                 }
             }
             try self.responseWalk(w, node.child[action], turn, river, depth + 1, responding, sigma, serial_chance);

@@ -2,9 +2,17 @@
   "running": false,
   "paused": false,
   "cancelled": false,
+  "failed": false,
   "error": "",
   "solution_id": null,
   "root_node_id": null,
   "job_id": null,
-  "status_generation": 0
+  "status_generation": 0,
+  "phase": "idle",
+  "iterations": 0,
+  "iterations_requested": 0,
+  "policy_revision": 0,
+  "has_training": false,
+  "can_continue": false,
+  "terminal_reason": "none"
 }

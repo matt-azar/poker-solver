@@ -1481,13 +1481,18 @@ fn trainWorker(task: *TrainTask) void {
     }
 }
 
+/// ZR-106 short-admit JSON (Study polls `status` for completion).
+fn formatTrainAdmitBody(buf: []u8, solution_id: u64, threads: u32) ![]u8 {
+    return std.fmt.bufPrint(
+        buf,
+        "{{\"accepted\":true,\"running\":true,\"solution_id\":{d},\"async\":true,\"threads\":{d}}}",
+        .{ solution_id, threads },
+    );
+}
+
 fn writeTrainAdmitReply(state: *HostState, req: ipc.Envelope) !void {
     var buf: [192]u8 = undefined;
-    const body = try std.fmt.bufPrint(
-        &buf,
-        "{{\"accepted\":true,\"running\":true,\"solution_id\":{d},\"async\":true,\"threads\":{d}}}",
-        .{ state.session.solution_id, state.session.threads },
-    );
+    const body = try formatTrainAdmitBody(&buf, state.session.solution_id, state.session.threads);
     var reply = try ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     defer reply.deinit();
     try state.writeReply(reply);
@@ -2612,6 +2617,123 @@ test "status reports compiling while begin_running" {
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"running\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"phase\":\"compiling\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"iterations\":0") != null);
+}
+
+test "admit rejects while begin compiling" {
+    // ZR-125 / ZR-120: solve must not race an in-flight begin_config.
+    // Do not call admitTrainJob's busy branch here — it writeReply()s to stdout
+    // and can deadlock under `zig build test` (pipe not drained). Pin the same
+    // gates the busy branch uses: has_training + begin_running ⇒ compiling status.
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "admit-busy-begin");
+    defer state.deinit();
+    try state.session.begin(config);
+    try std.testing.expect(state.session.has_training);
+
+    var ok_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "adm-ok"),
+        .job_id = try std.testing.allocator.dupe(u8, "j-ok"),
+        .op = try std.testing.allocator.dupe(u8, "solve"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"iterations\":1}"),
+    };
+    defer ok_req.deinit();
+    // .ok path does not write stdout — pin the idle admit gate.
+    try std.testing.expect((try admitTrainJob(&state, ok_req)) == .ok);
+
+    state.begin_running.store(true, .release);
+    try std.testing.expect(state.beginOrTrainBusy());
+    try std.testing.expect(state.begin_running.load(.acquire));
+    try std.testing.expect(!state.train_running.load(.acquire));
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"phase\":\"compiling\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"running\":true") != null);
+}
+
+test "short-admit body shape and continue iterations_requested target" {
+    // ZR-125: ZR-106 admit JSON + ZR-120 absolute iterations_requested on continue.
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "admit-iters-target");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(3);
+
+    var buf: [192]u8 = undefined;
+    const admit_body = try formatTrainAdmitBody(&buf, state.session.solution_id, state.session.threads);
+    try std.testing.expect(std.mem.indexOf(u8, admit_body, "\"accepted\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, admit_body, "\"running\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, admit_body, "\"async\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, admit_body, "\"solution_id\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, admit_body, "\"threads\":") != null);
+
+    // Mirror spawnTrainWorker absolute-target math for a continue of 5.
+    state.session.mu.lock();
+    const start_trained: i32 = if (state.session.training) |*training| training.trained else 0;
+    state.session.mu.unlock();
+    try std.testing.expectEqual(@as(i32, 3), start_trained);
+    const job_iters: i32 = 5;
+    state.train_iterations_requested = start_trained + job_iters;
+    state.train_running.store(true, .release);
+
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"iterations\":3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"iterations_requested\":8") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"running\":true") != null);
+}
+
+test "status publishes failed flag when session phase is failed" {
+    // ZR-125 / ZR-123: desktop recovery maps phase=failed via status.failed.
+    var state = try HostState.init(std.testing.allocator, "status-failed");
+    defer state.deinit();
+    state.session.phase = .failed;
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"failed\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"phase\":\"failed\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"running\":false") != null);
 }
 
 test "strategy edits list put delete Study CRUD" {
