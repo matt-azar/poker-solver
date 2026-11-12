@@ -4,6 +4,7 @@ const chips = @import("../poker/chips.zig");
 const compile = @import("../game/compile.zig");
 const range_mod = @import("../poker/range.zig");
 const training_state = @import("../solve/training_state.zig");
+const equity = @import("equity.zig");
 const node_id = @import("node_id.zig");
 
 pub const InspectError = error{ InvalidAnalysis, OutOfMemory };
@@ -89,56 +90,6 @@ pub const NodePage = struct {
     }
 };
 
-fn dealConflictsFixedCards(deal: compile.Deal, turn: i32, river: i32) bool {
-    if (turn >= 0) {
-        if (deal.c0 == turn or deal.c1 == turn or deal.d0 == turn or deal.d1 == turn) return true;
-    }
-    if (river >= 0) {
-        if (deal.c0 == river or deal.c1 == river or deal.d0 == river or deal.d1 == river) return true;
-    }
-    return false;
-}
-
-/// Both players' average-policy mass along betting edges to `target` (chance edges skipped).
-fn pathBettingReach(
-    game: compile.CompiledGame,
-    sigma: []const f32,
-    target: u32,
-    deal: compile.Deal,
-    turn: i32,
-    river: i32,
-) InspectError!f64 {
-    var parents: [64]u32 = undefined;
-    var parent_actions: [64]i32 = undefined;
-    var depth: usize = 0;
-    var cur = target;
-    while (game.nodes[cur].parent >= 0) {
-        if (depth >= parents.len) return error.InvalidAnalysis;
-        parents[depth] = @intCast(game.nodes[cur].parent);
-        parent_actions[depth] = game.nodes[cur].parent_action;
-        cur = parents[depth];
-        depth += 1;
-    }
-    var reach: f64 = 1.0;
-    var i = depth;
-    while (i > 0) {
-        i -= 1;
-        const pnode = game.nodes[parents[i]];
-        const pa = parent_actions[i];
-        if (pnode.kind != .decision or pa < 0) continue;
-        if (pnode.n_actions <= 1) continue;
-        const hand = if (pnode.player == 0) deal.h0 else deal.h1;
-        if (hand < 0) return error.InvalidAnalysis;
-        const key = game.cardKey(pnode, hand, turn, river) catch return error.InvalidAnalysis;
-        if (key < 0 or @as(usize, @intCast(key)) >= pnode.slot_of.len) return error.InvalidAnalysis;
-        const slot_i = pnode.slot_of[@intCast(key)];
-        if (slot_i < 0) return error.InvalidAnalysis;
-        const base: usize = @intCast(game.slots[@intCast(slot_i)].base);
-        reach *= @as(f64, @floatCast(sigma[base + @as(usize, @intCast(pa))]));
-    }
-    return reach;
-}
-
 fn fillComboLabels(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
@@ -176,6 +127,19 @@ fn normalizeMarginal(reach: []const f32, marginal: []f32) void {
     }
 }
 
+fn copyReachF32(allocator: std.mem.Allocator, src: []const f64) InspectError![]f32 {
+    const out = allocator.alloc(f32, src.len) catch return error.OutOfMemory;
+    var i: usize = 0;
+    while (i < src.len) : (i += 1) {
+        out[i] = @floatCast(src[i]);
+    }
+    return out;
+}
+
+/// Study `reach[]` must be C++ `replay_weights` scale (strategy-conditioned range
+/// weights from `range_w`, not absolute deal-joint probabilities). Desktop
+/// Range / Weight-fill uses mean(reach) as inclusion ∈ [0,1]; deal mass ≪ 1
+/// painted near-flat bars (ZR-105).
 fn fillReachArrays(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
@@ -186,49 +150,35 @@ fn fillReachArrays(
     actor: i32,
     page: *NodePage,
 ) InspectError!void {
-    const n0: usize = @intCast(@max(game.hands.nHands(0), 0));
-    const n1: usize = @intCast(@max(game.hands.nHands(1), 0));
-    var mass0 = allocator.alloc(f32, n0) catch return error.OutOfMemory;
-    defer allocator.free(mass0);
-    var mass1 = allocator.alloc(f32, n1) catch return error.OutOfMemory;
-    defer allocator.free(mass1);
-    @memset(mass0, 0);
-    @memset(mass1, 0);
-
-    var any = false;
-    var joint: f64 = 0;
-    for (game.deals) |deal| {
-        if (dealConflictsFixedCards(deal, turn, river)) continue;
-        const path_w = pathBettingReach(game, sigma, node_index, deal, turn, river) catch continue;
-        if (!(path_w > 0) or !(deal.probability > 0)) continue;
-        const w: f32 = @floatCast(deal.probability * path_w);
-        if (deal.h0 >= 0 and @as(usize, @intCast(deal.h0)) < n0) {
-            mass0[@intCast(deal.h0)] += w;
-        }
-        if (deal.h1 >= 0 and @as(usize, @intCast(deal.h1)) < n1) {
-            mass1[@intCast(deal.h1)] += w;
-        }
-        joint += deal.probability * path_w;
-        any = true;
+    const walked = equity.replayReachWeights(allocator, game, sigma, node_index, turn, river) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidAnalysis,
+    };
+    defer {
+        allocator.free(walked.q0);
+        allocator.free(walked.q1);
     }
-    page.joint = joint;
-    page.reach_defined = any;
 
     const hero: usize = if (actor == 1) 1 else 0;
     const vill: usize = 1 - hero;
-    const hero_mass = if (hero == 0) mass0 else mass1;
-    const vill_mass = if (vill == 0) mass0 else mass1;
+    const hero_q = if (hero == 0) walked.q0 else walked.q1;
+    const vill_q = if (vill == 0) walked.q0 else walked.q1;
+
+    var joint: f64 = 0;
+    for (hero_q) |r| joint += r;
+    page.joint = joint;
+    page.reach_defined = joint > 0;
 
     page.combos = try fillComboLabels(allocator, game, hero);
     page.n_hands = @intCast(page.combos.len);
-    page.reach = allocator.dupe(f32, hero_mass) catch return error.OutOfMemory;
-    page.marginal = allocator.alloc(f32, hero_mass.len) catch return error.OutOfMemory;
+    page.reach = try copyReachF32(allocator, hero_q);
+    page.marginal = allocator.alloc(f32, hero_q.len) catch return error.OutOfMemory;
     normalizeMarginal(page.reach, page.marginal);
 
     page.opponent_player = @intCast(vill);
     page.opponent_combos = try fillComboLabels(allocator, game, vill);
-    page.opponent_reach = allocator.dupe(f32, vill_mass) catch return error.OutOfMemory;
-    page.opponent_marginal = allocator.alloc(f32, vill_mass.len) catch return error.OutOfMemory;
+    page.opponent_reach = try copyReachF32(allocator, vill_q);
+    page.opponent_marginal = allocator.alloc(f32, vill_q.len) catch return error.OutOfMemory;
     normalizeMarginal(page.opponent_reach, page.opponent_marginal);
 }
 
