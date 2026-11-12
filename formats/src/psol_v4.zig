@@ -738,6 +738,10 @@ test "windows file-in-use replace failure leaves prior checkpoint readable" {
     // MoveFileEx REPLACE. Open with share_access=0 to model Explorer/AV file-in-use.
     // Injected `.rename` covers the class on every OS (incl. Linux cloud); this
     // case is for zig-windows CI.
+    //
+    // NtCreateFile rejects Win32 absolutes (`C:\...`) with OBJECT_PATH_SYNTAX_BAD —
+    // it wants an NT-prefixed path (`\??\C:\...`) or a directory-relative name.
+    // Open the basename against the tmp Dir handle (same file writeFile targets).
     if (@import("builtin").os.tag != .windows) return;
 
     var tmp = std.testing.tmpDir(.{});
@@ -752,10 +756,11 @@ test "windows file-in-use replace failure leaves prior checkpoint readable" {
     try writeFile(std.testing.allocator, path, prior);
 
     const w = std.os.windows;
-    const path_w = try std.unicode.wtf8ToWtf16LeAllocZ(std.testing.allocator, path);
-    defer std.testing.allocator.free(path_w);
+    const name_w = try std.unicode.wtf8ToWtf16LeAllocZ(std.testing.allocator, "ckpt.psol");
+    defer std.testing.allocator.free(name_w);
     {
-        const held = try w.OpenFile(path_w, .{
+        const held = try w.OpenFile(name_w, .{
+            .dir = tmp.dir.fd,
             .access_mask = w.GENERIC_READ | w.SYNCHRONIZE,
             .share_access = 0,
             .creation = w.FILE_OPEN,
