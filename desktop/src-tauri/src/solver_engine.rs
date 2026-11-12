@@ -554,7 +554,14 @@ pub fn solver_engine_request(
         REQUEST_TIMEOUT,
     );
     if let Err(err) = &reply {
-        if err.contains("pipe closed") || err.contains("timed out") {
+        // Kill only on pipe/session death. A single RPC timeout must not nuke an
+        // in-flight Study train (values/solve can be slow under flop fixtures).
+        let fatal = err.contains("pipe closed")
+            || err.contains("write:")
+            || err.contains("Broken pipe")
+            || err.contains("shut down")
+            || err.contains("stdin lock poisoned");
+        if fatal {
             kill_solver_engine(&state);
         }
     }
@@ -562,9 +569,12 @@ pub fn solver_engine_request(
 }
 
 pub fn kill_solver_engine(state: &SolverEngineState) {
-    if let Ok(mut guard) = state.session.lock() {
-        kill_session(&mut guard);
-    }
+    // Poisoned mutex must not skip Exit/kill — orphan sidecars lock NSIS upgrades.
+    let mut guard = state
+        .session
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    kill_session(&mut guard);
 }
 
 #[cfg(test)]

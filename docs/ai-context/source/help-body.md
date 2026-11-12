@@ -1,7 +1,7 @@
 ## What this product is
 
 - Everyday postflop study: Build a spot → Solve → browse strategy on Study → optional Equity / Compare / Library.
-- Numerical kernels run locally via the `explorer` HTTP API. Solving does not require OpenAI.
+- Numerical kernels run locally via the Zig `solver-engine` typed IPC sidecar. Solving does not require OpenAI.
 
 ## Core workflow
 

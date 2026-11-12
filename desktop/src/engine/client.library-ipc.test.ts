@@ -49,4 +49,17 @@ describe("EngineClient library IPC", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledWith("library_list_recent", {});
   });
+
+  it("uses Tauri library commands even when IPC transport is unavailable", async () => {
+    const fetchImpl = vi.fn();
+    const { setHttpFallbackTransport } = await import("./transport");
+    const { EngineClient } = await import("./client");
+    setHttpFallbackTransport("solver-engine unavailable: test");
+    invoke.mockResolvedValueOnce([{ id: "t1", name: "t1" }]);
+    const client = new EngineClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    const data = await client.templates();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("library_list_templates", {});
+    expect(data).toEqual([{ id: "t1", name: "t1" }]);
+  });
 });

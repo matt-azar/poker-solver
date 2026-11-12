@@ -113,7 +113,9 @@ Installer product name is `Holdem Study` (no apostrophe) because NSIS shortcut m
 
 ```sh
 # build Zig solver-engine, copy sidecar with target triple, then:
-zig build -Doptimize=ReleaseFast
+# Always pin -Dcpu=x86_64_v2 for any Windows sidecar that may leave the builder
+# host (bare ReleaseFast follows host CPU and can APPCRASH on older machines).
+zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2
 cd desktop
 npm ci && npm run build
 # place solver-engine-x86_64-pc-windows-msvc.exe under src-tauri/binaries/

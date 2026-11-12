@@ -55,6 +55,9 @@ export async function ensureEngine(): Promise<EnsureEngineResult> {
     };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
+    // Stay on the non-engine label — never leave an empty HTTP base URL that
+    // status/library can fetch("") against (#288-class Engine unreachable).
+    engineClient.setBaseUrl(null);
     const transport = setHttpFallbackTransport(`solver-engine unavailable: ${error}`);
     let status = "solver-engine unavailable";
     try {
