@@ -12,7 +12,8 @@ import { decodeErrorPayload } from "./contracts/error";
 import { decodeReadyPayload, type ReadyPayload } from "./contracts/ready";
 import { decodeStatusPayload } from "./contracts/status";
 import { normalizeRunoutsPayload, type RunoutsModel } from "./runouts";
-import { ipcStatus, ipcValues, isIpcTransport } from "./transport";
+import { formatSolveJobStreetConfig } from "./streetConfigText";
+import { ipcBeginConfig, ipcSolve, ipcStatus, ipcValues, isIpcTransport } from "./transport";
 
 function defaultEngineBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_ENGINE_URL;
@@ -165,13 +166,33 @@ export class EngineClient {
 
   async solve(job: SolveJobRequest, signal?: AbortSignal): Promise<unknown> {
     if (isIpcTransport()) {
-      // Gap: Study SolveJobRequest → street-config begin_config/solve not wired yet.
-      throw new EngineError(
-        "solver-engine IPC: Study solve job → begin_config not wired yet; " +
-          "use scripts/zig/node-ev-latency.py or HTTP explorer fallback (temporary)",
-        501,
-        { transport: "ipc", op: "solve", job },
-      );
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const configText = formatSolveJobStreetConfig(job);
+      const iterations = Math.max(1, Math.trunc(job.iterations || 1));
+      // Host train is synchronous today; Study awaits then polls status.
+      // Prefer job.time_limit as a soft note only — host cancel/time_limit TBD.
+      await ipcBeginConfig(configText);
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const body = (await ipcSolve(iterations, "j-study")) as {
+        solution_id?: number;
+        policy_revision?: number;
+        trained?: number;
+      };
+      return {
+        running: false,
+        job_id: "j-study",
+        solution_id:
+          body.solution_id != null && body.solution_id > 0
+            ? `s${body.solution_id}`
+            : null,
+        policy_revision: body.policy_revision ?? 0,
+        trained: body.trained ?? iterations,
+        transport: "ipc",
+      };
     }
     const { response, data } = await this.request("POST", "/api/solve", job, { signal });
     this.ensureOk(response, data, true);

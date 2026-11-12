@@ -18,7 +18,8 @@ const PROTOCOL: u32 = 2;
 const SIDECAR_BASENAME: &str = "solver-engine";
 const EXTERNAL_BIN: &str = "binaries/solver-engine";
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// Sync host train can be long on flop fixtures; keep bounded (prefs / D12 digs).
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(240);
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

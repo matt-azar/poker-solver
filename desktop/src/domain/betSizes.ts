@@ -188,19 +188,19 @@ export function isExplicitEmptyList(specs: number[]): boolean {
   );
 }
 
-function isGeometricSpec(spec: number): boolean {
+export function isGeometricSpec(spec: number): boolean {
   return spec <= GEO_BASE + 0.5 && spec > MULTIPLE_BASE + 0.5;
 }
 
-function isMultipleSpec(spec: number): boolean {
+export function isMultipleSpec(spec: number): boolean {
   return spec <= MULTIPLE_BASE + 0.5 && spec > EXPLICIT_EMPTY_SPEC + 0.5;
 }
 
-function isAllInSpec(spec: number): boolean {
+export function isAllInSpec(spec: number): boolean {
   return spec < -5e8 && spec > -1.5e9;
 }
 
-function isExplicitEmptySpec(spec: number): boolean {
+export function isExplicitEmptySpec(spec: number): boolean {
   return spec <= EXPLICIT_EMPTY_SPEC + 0.5 && spec > EXPLICIT_EMPTY_SPEC - 1e6;
 }
 
