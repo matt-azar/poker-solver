@@ -410,9 +410,10 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 - Flush solver phase lines so interrupted study runs still show construction/cache/last eval (`381c9a5`).
 - Explicit units in UI/API (`chips` / `root_centered` vs `fraction of the pot` / Equity).
 - Parent-integrated parallel tracks with disjoint paths and immediate PR open after push.
-- Full `ctest` locally before push (`poker_engine_tests`, `poker_study_tests`, `poker_http_tests`); watch for unexpected SKIP lines.
+- `zig build test` + desktop vitest/`tsc -b` locally before push; watch for unexpected SKIP / 501 stubs.
 - After Study client/analysis changes: desktop vitest **and** `npx tsc -b`; after assistant/UI label moves: `npm run check:ai-context`.
-- Pin numerical parity for parallel EV/BR; treat wall-clock speed asserts as soft.
+- Pin numerical rematch parity for EV/BR/Acc-stop; treat wall-clock scoreboard asserts as soft.
+- Restack parallel Zig IPC slices onto tip carefully; keep `dispatch.zig` / `client.ts` append-friendly.
 
 ---
 
