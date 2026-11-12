@@ -709,6 +709,125 @@ fn handleDeleteStrategyEdit(state: *HostState, req: ipc.Envelope) !ipc.Envelope 
     return replyStrategyEditsBody(state, req, &edits);
 }
 
+/// ZR-137: fat `equity` body extracted from `handle` (op discriminator stays in parent).
+fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
+    state.budget.prioritizeAnalysis(1);
+    defer state.budget.returnToTraining();
+    const wait_ns: u64 = 120 * std.time.ns_per_s;
+    var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+    };
+    defer lease.deinit();
+    // Reach-weighted node check-down (audit P0-2 / ZR-95): board through the
+    // selected node + both players' strategy-conditioned reach.
+    const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
+        const code: []const u8 = switch (err) {
+            error.UnknownNode => "unknown_node",
+            error.OutOfMemory => "oom",
+        };
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+    };
+    const node_id_text = poker_engine.analysis.node_id.formatNodeId(
+        state.allocator,
+        located.node_index,
+        located.turn,
+        located.river,
+    ) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "equity_pack_failed", @errorName(err));
+    };
+    defer state.allocator.free(node_id_text);
+    const t0 = std.time.nanoTimestamp();
+    var page = poker_engine.analysis.equity.checkdownEquityAtNode(
+        state.allocator,
+        lease.game,
+        lease.published,
+        located.node_index,
+        located.turn,
+        located.river,
+        poker_engine.analysis.equity.study_explorer_max_pair_runouts,
+    ) catch |err| {
+        const code: []const u8 = switch (err) {
+            error.WorkLimit => "work_limit",
+            error.InvalidEquity => "invalid_equity",
+            error.InvalidWeight => "invalid_weight",
+            error.OutOfMemory => "oom",
+        };
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+    };
+    defer page.deinit();
+    const elapsed_ns = std.time.nanoTimestamp() - t0;
+    const elapsed_ms: i64 = @intCast(@divTrunc(elapsed_ns, 1_000_000));
+    const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
+    const body = equity_json.packStudyEquityBody(state.allocator, .{
+        .solution_id = lease.solution_id,
+        .node_id = node_id_text,
+        .node_index = located.node_index,
+        .policy_revision = state.session.policyRevision(),
+        .status_generation = state.session.solution_id + state.session.policyRevision(),
+        .query_seconds = query_seconds,
+        .elapsed_ms = elapsed_ms,
+        .live_under_train = state.train_running.load(.acquire),
+        .page = &page,
+    }) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "equity_pack_failed", @errorName(err));
+    };
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+}
+
+/// ZR-137: fat `categories` body extracted from `handle` (op discriminator stays in parent).
+fn handleCategories(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
+    state.budget.prioritizeAnalysis(1);
+    defer state.budget.returnToTraining();
+    const wait_ns: u64 = 120 * std.time.ns_per_s;
+    var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+    };
+    defer lease.deinit();
+    const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
+    };
+    const node_id_text = poker_engine.analysis.node_id.formatNodeId(
+        state.allocator,
+        located.node_index,
+        located.turn,
+        located.river,
+    ) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "categories_failed", @errorName(err));
+    };
+    defer state.allocator.free(node_id_text);
+    const t0 = std.time.nanoTimestamp();
+    const report = poker_engine.analysis.categories.categoriesAtNode(
+        state.allocator,
+        lease.game,
+        lease.published,
+        located.node_index,
+        located.turn,
+        located.river,
+    ) catch |err| {
+        const code: []const u8 = switch (err) {
+            error.InvalidEquity, error.InvalidCategories => "invalid_categories",
+            error.InvalidWeight => "invalid_weight",
+            error.WorkLimit => "work_limit",
+            error.OutOfMemory => "oom",
+        };
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+    };
+    const elapsed_ns = std.time.nanoTimestamp() - t0;
+    const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
+    const body = categories_json.packStudyCategoriesBody(state.allocator, .{
+        .solution_id = lease.solution_id,
+        .node_id = node_id_text,
+        .policy_revision = state.session.policyRevision(),
+        .query_seconds = query_seconds,
+        .report = &report,
+    }) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "categories_pack_failed", @errorName(err));
+    };
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+}
+
 fn resolveLocatedNode(
     game: poker_engine.game.CompiledGame,
     body_json: []const u8,
@@ -1048,121 +1167,12 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "equity")) {
-        state.budget.prioritizeAnalysis(1);
-        defer state.budget.returnToTraining();
-        const wait_ns: u64 = 120 * std.time.ns_per_s;
-        var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
-        };
-        defer lease.deinit();
-        // Reach-weighted node check-down (audit P0-2 / ZR-95): board through the
-        // selected node + both players' strategy-conditioned reach.
-        const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
-            const code: []const u8 = switch (err) {
-                error.UnknownNode => "unknown_node",
-                error.OutOfMemory => "oom",
-            };
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
-        };
-        const node_id_text = poker_engine.analysis.node_id.formatNodeId(
-            state.allocator,
-            located.node_index,
-            located.turn,
-            located.river,
-        ) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "equity_pack_failed", @errorName(err));
-        };
-        defer state.allocator.free(node_id_text);
-        const t0 = std.time.nanoTimestamp();
-        var page = poker_engine.analysis.equity.checkdownEquityAtNode(
-            state.allocator,
-            lease.game,
-            lease.published,
-            located.node_index,
-            located.turn,
-            located.river,
-            poker_engine.analysis.equity.study_explorer_max_pair_runouts,
-        ) catch |err| {
-            const code: []const u8 = switch (err) {
-                error.WorkLimit => "work_limit",
-                error.InvalidEquity => "invalid_equity",
-                error.InvalidWeight => "invalid_weight",
-                error.OutOfMemory => "oom",
-            };
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
-        };
-        defer page.deinit();
-        const elapsed_ns = std.time.nanoTimestamp() - t0;
-        const elapsed_ms: i64 = @intCast(@divTrunc(elapsed_ns, 1_000_000));
-        const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
-        const body = equity_json.packStudyEquityBody(state.allocator, .{
-            .solution_id = lease.solution_id,
-            .node_id = node_id_text,
-            .node_index = located.node_index,
-            .policy_revision = state.session.policyRevision(),
-            .status_generation = state.session.solution_id + state.session.policyRevision(),
-            .query_seconds = query_seconds,
-            .elapsed_ms = elapsed_ms,
-            .live_under_train = state.train_running.load(.acquire),
-            .page = &page,
-        }) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "equity_pack_failed", @errorName(err));
-        };
-        defer state.allocator.free(body);
-        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+        return handleEquity(state, req);
     }
 
     // Study Categories (made-hand on five-card boards; short boards → available=false).
     if (std.mem.eql(u8, req.op, "categories")) {
-        state.budget.prioritizeAnalysis(1);
-        defer state.budget.returnToTraining();
-        const wait_ns: u64 = 120 * std.time.ns_per_s;
-        var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
-        };
-        defer lease.deinit();
-        const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
-        };
-        const node_id_text = poker_engine.analysis.node_id.formatNodeId(
-            state.allocator,
-            located.node_index,
-            located.turn,
-            located.river,
-        ) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "categories_failed", @errorName(err));
-        };
-        defer state.allocator.free(node_id_text);
-        const t0 = std.time.nanoTimestamp();
-        const report = poker_engine.analysis.categories.categoriesAtNode(
-            state.allocator,
-            lease.game,
-            lease.published,
-            located.node_index,
-            located.turn,
-            located.river,
-        ) catch |err| {
-            const code: []const u8 = switch (err) {
-                error.InvalidEquity, error.InvalidCategories => "invalid_categories",
-                error.InvalidWeight => "invalid_weight",
-                error.WorkLimit => "work_limit",
-                error.OutOfMemory => "oom",
-            };
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
-        };
-        const elapsed_ns = std.time.nanoTimestamp() - t0;
-        const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
-        const body = categories_json.packStudyCategoriesBody(state.allocator, .{
-            .solution_id = lease.solution_id,
-            .node_id = node_id_text,
-            .policy_revision = state.session.policyRevision(),
-            .query_seconds = query_seconds,
-            .report = &report,
-        }) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "categories_pack_failed", @errorName(err));
-        };
-        defer state.allocator.free(body);
-        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+        return handleCategories(state, req);
     }
 
     // Study locks CRUD over Session.locks_text (node_lock codec).
