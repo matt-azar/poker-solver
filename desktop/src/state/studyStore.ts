@@ -76,6 +76,7 @@ import {
   studyMutationScopeIsCurrent,
 } from "../domain/requestScope";
 import {
+  classifyStrategyEditFailure,
   strategyMutationCompletion,
   type StrategyEditDraft,
   type StrategyEditRecord,
@@ -1737,9 +1738,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (get().solutionId !== solutionId) {
         return;
       }
-      set({
-        message: error instanceof EngineError ? error.message : "Strategy edit failed",
-      });
+      const classified = classifyStrategyEditFailure(error);
+      if (classified.sessionDead) {
+        set({
+          connection: "disconnected",
+          message: classified.message,
+        });
+        return;
+      }
+      set({ message: classified.message });
     }
   },
   async clearStrategyEditHands(handIndices) {

@@ -22,7 +22,10 @@ tauri-build = { version = "=2.2.0", features = [] }
 tauri = { version = "=2.5.1", features = [] }
 tauri-plugin-shell = "=2.2.0"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order keeps envelope keys in json! insertion order so nested body
+# fields like "kind" cannot precede envelope "kind" under BTreeMap alphabetical
+# serialization (ZR-119 InvalidFrame on put_strategy_edit / put_lock).
+serde_json = { version = "1", features = ["preserve_order"] }
 # OS credential store for assistant API keys (migrate from assistant_secrets.json).
 # Pin 2.3.x — keyring 3+ needs rustc past 1.83. On Linux use kernel keyutils
 # (not Secret Service / zbus) so the resolve graph stays rustc-1.83-friendly.

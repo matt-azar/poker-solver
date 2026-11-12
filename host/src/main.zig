@@ -60,10 +60,36 @@ pub fn main() !void {
     const stdin = std.io.getStdIn().reader();
 
     while (true) {
-        var req = ipc.readFrame(allocator, stdin) catch |err| {
-            if (err == error.BrokenPipe) break;
-            std.debug.print("ipc read error: {s}\n", .{@errorName(err)});
+        // Read length + payload first so a decode-only InvalidFrame keeps the
+        // stream aligned and the sidecar can reply instead of exiting (ZR-119).
+        var len_buf: [4]u8 = undefined;
+        stdin.readNoEof(&len_buf) catch break;
+        const len = std.mem.readInt(u32, &len_buf, .little);
+        if (len == 0 or len > 16 * 1024 * 1024) {
+            std.debug.print("ipc read error: InvalidFrame\n", .{});
             break;
+        }
+        const payload = allocator.alloc(u8, len) catch break;
+        defer allocator.free(payload);
+        stdin.readNoEof(payload) catch break;
+
+        var req = ipc.decodePayload(allocator, payload) catch |err| {
+            std.debug.print("ipc decode error: {s}\n", .{@errorName(err)});
+            // Recoverable: payload consumed; try to ACK with an error reply.
+            const rid = blk: {
+                // Best-effort top-level request_id for the waiter.
+                if (std.mem.indexOf(u8, payload, "\"request_id\":\"")) |at| {
+                    const from = at + "\"request_id\":\"".len;
+                    if (std.mem.indexOfScalar(u8, payload[from..], '"')) |n| {
+                        break :blk payload[from .. from + n];
+                    }
+                }
+                break :blk "unknown";
+            };
+            var bad = ipc.makeErrorReply(allocator, rid, null, "invalid_frame", "invalid_frame", @errorName(err)) catch continue;
+            defer bad.deinit();
+            state.writeReply(bad) catch {};
+            continue;
         };
         defer req.deinit();
         if (req.kind != .request) {

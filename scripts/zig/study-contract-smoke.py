@@ -38,18 +38,30 @@ class ContractError(RuntimeError):
     pass
 
 
-def encode(op: str, body: Any, request_id: str, job_id: str | None = None) -> bytes:
-    payload = json.dumps(
-        {
-            "v": 2,
-            "kind": "request",
-            "request_id": request_id,
-            "job_id": job_id,
-            "op": op,
-            "body": body,
-        },
-        separators=(",", ":"),
-    ).encode()
+def encode(
+    op: str,
+    body: Any,
+    request_id: str,
+    job_id: str | None = None,
+    *,
+    alphabetical_keys: bool = False,
+) -> bytes:
+    """Encode a protocol-2 request frame.
+
+    When alphabetical_keys=True, emit BTreeMap-style key order (body before
+    kind) to regression-test host top-level field scanning (ZR-119).
+    """
+    envelope: dict[str, Any] = {
+        "v": 2,
+        "kind": "request",
+        "request_id": request_id,
+        "job_id": job_id,
+        "op": op,
+        "body": body,
+    }
+    if alphabetical_keys:
+        envelope = {k: envelope[k] for k in sorted(envelope)}
+    payload = json.dumps(envelope, separators=(",", ":")).encode()
     return struct.pack("<I", len(payload)) + payload
 
 
@@ -75,9 +87,13 @@ def write_req(
     body: Any,
     request_id: str,
     job_id: str | None = None,
+    *,
+    alphabetical_keys: bool = False,
 ) -> None:
     assert proc.stdin is not None
-    proc.stdin.write(encode(op, body, request_id, job_id))
+    proc.stdin.write(
+        encode(op, body, request_id, job_id, alphabetical_keys=alphabetical_keys)
+    )
     proc.stdin.flush()
 
 
@@ -153,8 +169,16 @@ class ReplyInbox:
         *,
         expect_ok: bool = True,
         timeout_s: float = 30.0,
+        alphabetical_keys: bool = False,
     ) -> dict:
-        write_req(proc, op, body, request_id, job_id)
+        write_req(
+            proc,
+            op,
+            body,
+            request_id,
+            job_id,
+            alphabetical_keys=alphabetical_keys,
+        )
         env = self.take(op, timeout_s=timeout_s)
         if expect_ok and not env.get("ok", False):
             raise ContractError(
@@ -427,6 +451,78 @@ def main() -> int:
             "child_oop": float(eq_child["oop_equity"]),
             "child_ip": float(eq_child["ip_equity"]),
             "child_node_id": child_id,
+        }
+
+        # --- strategy-edit put with alphabetical envelope keys (ZR-119) ---
+        # Mimics serde_json BTreeMap order (body before kind). Nested body
+        # "kind":"full" must not InvalidFrame-kill the sidecar.
+        n_actions = int(node_root.get("n_actions") or 0)
+        require(n_actions >= 1, f"root n_actions: {n_actions}")
+        probs = [0.0] * n_actions
+        probs[-1] = 1.0
+        put_alpha = body_dict(
+            inbox.rpc(
+                proc,
+                "put_strategy_edit",
+                {
+                    "node_id": "p0.t-1.r-1",
+                    "kind": "full",
+                    "probs": probs,
+                },
+                "c-put-edit-alpha",
+                alphabetical_keys=True,
+            )
+        )
+        require(
+            isinstance(put_alpha.get("edits"), list) and len(put_alpha["edits"]) >= 1,
+            f"alpha put_strategy_edit: {put_alpha}",
+        )
+        # Engine must still answer after the alpha-ordered frame (no exit).
+        listed = body_dict(
+            inbox.rpc(proc, "list_strategy_edits", None, "c-list-edits")
+        )
+        require(
+            len(listed.get("edits") or []) >= 1,
+            f"list after alpha put: {listed}",
+        )
+        deleted = body_dict(
+            inbox.rpc(
+                proc,
+                "delete_strategy_edit",
+                {"node_id": "p0.t-1.r-1"},
+                "c-del-edit",
+            )
+        )
+        require(
+            len(deleted.get("edits") or []) == 0,
+            f"delete strategy edit: {deleted}",
+        )
+        # Recoverable reject must not disconnect.
+        bad = inbox.rpc(
+            proc,
+            "put_strategy_edit",
+            {
+                "node_id": "p0.t-1.r-1",
+                "kind": "full",
+                "probs": [2.0] + [0.0] * (n_actions - 1),
+            },
+            "c-put-edit-bad",
+            expect_ok=False,
+            alphabetical_keys=True,
+        )
+        require(bad.get("ok") is False, f"expected invalid probs reject: {bad}")
+        require(
+            bad.get("error_code") in ("invalid_request", "invalid_frame"),
+            f"unexpected bad error_code: {bad}",
+        )
+        alive = body_dict(inbox.rpc(proc, "status", None, "c-status-after-edit"))
+        require("running" in alive, f"status after strategy edit: {alive}")
+        stages["strategy_edit_alpha_keys"] = {
+            "put_n_edits": len(put_alpha.get("edits") or []),
+            "list_n_edits": len(listed.get("edits") or []),
+            "delete_n_edits": len(deleted.get("edits") or []),
+            "invalid_probs_rejected": True,
+            "sidecar_alive_after": True,
         }
 
         # --- pause mid-train, then stop (cancel) mid-train ---
