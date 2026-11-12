@@ -1762,21 +1762,23 @@ pub fn trainFrozenCfrPlusOnCtx(
     const w = &ctx.workspace;
     var published = training_state.PublishedPolicy{ .allocator = allocator };
     var step: i32 = 0;
+    const slot_threads = ctx.threads;
     while (step < iterations) : (step += 1) {
         state.trained += 1;
         const weight_iter: f64 = @floatFromInt(state.trained);
-        training_state.freezeSigma(game, state);
+        // PoolJob::Slots: static partition when threads > 1 (D3 worker budget).
+        try training_state.freezeSigmaThreaded(allocator, game, state, slot_threads);
         @memset(w.scratch[0].pi0, 1.0);
         @memset(w.scratch[0].pi1, 1.0);
         w.resetSupport();
         try ctx.walk(w, 0, -1, -1, 0, 0, weight_iter, false);
-        training_state.floorAndFreeze(game, state, 0);
+        try training_state.floorAndFreezeThreaded(allocator, game, state, 0, slot_threads);
         @memset(w.scratch[0].pi0, 1.0);
         @memset(w.scratch[0].pi1, 1.0);
         w.resetSupport();
         try ctx.walk(w, 0, -1, -1, 0, 1, weight_iter, false);
-        training_state.floorPlayer(game, state, 1);
-        const next = try training_state.publishAverage(allocator, game, state);
+        try training_state.floorPlayerThreaded(allocator, game, state, 1, slot_threads);
+        const next = try training_state.publishAverageThreaded(allocator, game, state, slot_threads);
         if (publish_hook) |hook| {
             const hook_ctx = publish_ctx orelse return error.InvalidFrozen;
             const rev = next.revision;
