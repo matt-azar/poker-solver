@@ -107,13 +107,15 @@ jobs:
         shell: pwsh
         run: zig version
 
+      # Pin CPU: bare ReleaseFast follows the runner (can emit AVX-512).
+      # ma1pc i7-10510U is AVX2-only — illegal instruction on CI zip without this.
       - name: Build (ReleaseFast)
         shell: pwsh
-        run: zig build -Doptimize=ReleaseFast
+        run: zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2
 
       - name: Test
         shell: pwsh
-        run: zig build test
+        run: zig build test -Dcpu=x86_64_v2
 
       - name: IPC ready smoke
         shell: pwsh

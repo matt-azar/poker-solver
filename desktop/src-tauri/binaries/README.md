@@ -33,7 +33,8 @@ The shell always spawns the absolute path beside the app (or
 ## Source binary
 
 ```bash
-zig build -Doptimize=ReleaseFast
+# Windows shipping/CI: pin -Dcpu=x86_64_v2 (no AVX-512; runner-native can SIGILL).
+zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2
 # Windows CI example:
 cp zig-out/bin/solver-engine.exe \
   desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe
