@@ -6,6 +6,7 @@ const ipc = @import("ipc.zig");
 const workers = @import("workers.zig");
 const equity_json = @import("equity_json.zig");
 const equity_jobs = @import("equity_jobs.zig");
+const categories_json = @import("categories_json.zig");
 const locks_json = @import("locks_json.zig");
 const node_lock = poker_engine.solve.node_lock;
 
@@ -922,6 +923,59 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             .page = &page,
         }) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "equity_pack_failed", @errorName(err));
+        };
+        defer state.allocator.free(body);
+        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+    }
+
+    // Study Categories (made-hand on five-card boards; short boards → available=false).
+    if (std.mem.eql(u8, req.op, "categories")) {
+        state.budget.prioritizeAnalysis(1);
+        defer state.budget.returnToTraining();
+        const wait_ns: u64 = 120 * std.time.ns_per_s;
+        var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+        defer lease.deinit();
+        const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
+        };
+        const node_id_text = poker_engine.analysis.node_id.formatNodeId(
+            state.allocator,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "categories_failed", @errorName(err));
+        };
+        defer state.allocator.free(node_id_text);
+        const t0 = std.time.nanoTimestamp();
+        const report = poker_engine.analysis.categories.categoriesAtNode(
+            state.allocator,
+            lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch |err| {
+            const code: []const u8 = switch (err) {
+                error.InvalidEquity, error.InvalidCategories => "invalid_categories",
+                error.InvalidWeight => "invalid_weight",
+                error.WorkLimit => "work_limit",
+                error.OutOfMemory => "oom",
+            };
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        const elapsed_ns = std.time.nanoTimestamp() - t0;
+        const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
+        const body = categories_json.packStudyCategoriesBody(state.allocator, .{
+            .solution_id = lease.solution_id,
+            .node_id = node_id_text,
+            .policy_revision = state.session.policyRevision(),
+            .query_seconds = query_seconds,
+            .report = &report,
+        }) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "categories_pack_failed", @errorName(err));
         };
         defer state.allocator.free(body);
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);

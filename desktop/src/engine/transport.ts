@@ -334,3 +334,15 @@ export async function ipcCancelEquityJob(jobId: string): Promise<unknown> {
   const env = await solverEngineRequest("cancel_equity_job", { job_id: jobId });
   return env.body;
 }
+
+/** Study Categories (made-hand on five-card boards; host `categories`). */
+export async function ipcCategories(opts?: {
+  nodeIndex?: number;
+  nodeId?: string;
+}): Promise<unknown> {
+  const env = await solverEngineRequest("categories", {
+    node_index: opts?.nodeIndex ?? 0,
+    ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
+  });
+  return env.body;
+}
