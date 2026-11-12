@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { engineActivityMessage } from "../domain/solveActivity";
 import { DEFAULT_SPOT } from "../domain/types";
 import { solveControlFlags } from "../domain/solveControls";
 
@@ -250,6 +251,124 @@ describe("studyStore session recovery (ZR-123)", () => {
     const state = useStudyStore.getState();
     expect(state.phase).toBe("failed");
     expect(state.status?.failed).toBe(true);
+    expect(state.message).toMatch(/failed/i);
+    expect(state.message).not.toMatch(/complete/i);
     expect(solveControlFlags(state.phase).canSolve).toBe(true);
+  });
+
+  it("one soft status blip does not paint Engine unreachable (ZR-148)", async () => {
+    engineMocks.setStatusImpl(async () => {
+      throw new Error("transient decode glitch");
+    });
+    useStudyStore.setState({
+      phase: "solving",
+      connection: "connected",
+      message: "Solving — 12/200 iterations",
+      solutionId: "s1",
+    });
+    await useStudyStore.getState().refresh();
+    const afterBlip = useStudyStore.getState();
+    expect(afterBlip.connection).toBe("connected");
+    expect(afterBlip.message).not.toMatch(/Engine unreachable/);
+    expect(afterBlip.phase).toBe("solving");
+  });
+
+  it("hard pipe-closed status failure marks dead immediately (ZR-148)", async () => {
+    engineMocks.setStatusImpl(async () => {
+      throw new Error("Broken pipe");
+    });
+    useStudyStore.setState({
+      phase: "solving",
+      connection: "connected",
+      solutionId: "s1",
+    });
+    await useStudyStore.getState().refresh();
+    const state = useStudyStore.getState();
+    expect(state.connection).toBe("disconnected");
+    expect(state.message).toMatch(/Engine unreachable/);
+    expect(state.phase).toBe("failed");
+  });
+
+  it("successful poll clears sticky unreachable message (ZR-148)", async () => {
+    engineMocks.setStatusImpl(async () => ({
+      running: false,
+      paused: false,
+      cancelled: false,
+      failed: false,
+      status_generation: 11,
+      solution_id: null,
+      phase: "idle",
+    }));
+    useStudyStore.setState({
+      phase: "idle",
+      connection: "disconnected",
+      message:
+        "Engine unreachable: status request timed out. Use Reconnect — Study will re-ensure the local solver-engine.",
+      solutionId: null,
+    });
+    await useStudyStore.getState().refresh();
+    const state = useStudyStore.getState();
+    expect(state.connection).toBe("connected");
+    expect(state.message).not.toMatch(/Engine unreachable/);
+    expect(state.message).toMatch(/ready/i);
+  });
+
+  it("failed train with last_error does not claim Solve complete (ZR-148)", async () => {
+    engineMocks.setStatusImpl(async () => ({
+      running: false,
+      paused: false,
+      cancelled: false,
+      failed: true,
+      last_error: "InvalidSession",
+      error: "InvalidSession",
+      status_generation: 12,
+      solution_id: "s-new",
+      root_node_id: "p0.t-1.r-1",
+      phase: "published",
+      iterations: 40,
+      iterations_requested: 200,
+    }));
+    useStudyStore.setState({
+      phase: "solving",
+      connection: "connected",
+      message: "Solving — 40/200 iterations",
+      solutionId: "s1",
+    });
+    await useStudyStore.getState().refresh();
+    const state = useStudyStore.getState();
+    expect(state.phase).toBe("failed");
+    expect(state.status?.last_error).toBe("InvalidSession");
+    // Footer sentence prefers sticky last_error over any store fallback
+    // (navigate/analysis may overwrite message after reload).
+    expect(
+      engineActivityMessage(state.phase, state.status, state.message),
+    ).toBe("InvalidSession");
+    expect(
+      engineActivityMessage(state.phase, state.status, "Solve complete."),
+    ).not.toMatch(/complete/i);
+  });
+
+  it("preserves pause_requested while host still reports running (ZR-148)", async () => {
+    engineMocks.setStatusImpl(async () => ({
+      running: true,
+      paused: false,
+      cancelled: false,
+      phase: "training",
+      iterations: 8,
+      iterations_requested: 100,
+      job_id: "j-study-2",
+      status_generation: 13,
+    }));
+    useStudyStore.setState({
+      phase: "pause_requested",
+      connection: "connected",
+      message: "Pause requested — finishing current sample…",
+      solutionId: "s1",
+    });
+    await useStudyStore.getState().refresh();
+    const state = useStudyStore.getState();
+    expect(state.phase).toBe("pause_requested");
+    expect(state.message).toMatch(/Pause requested/i);
+    expect(state.status?.job_id).toBe("j-study-2");
   });
 });

@@ -17,6 +17,38 @@ export const STATUS_POLL_BACKOFF_INITIAL_MS = 500;
 /** Cap on exponential backoff after consecutive failures (ms). */
 export const STATUS_POLL_BACKOFF_MAX_MS = 8_000;
 
+/**
+ * Race a promise against AbortSignal so IPC status honors the 4s poll budget
+ * and shutdown cancel (Tauri invoke itself is not cancelled).
+ */
+export function raceWithAbort<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal | null,
+): Promise<T> {
+  if (!signal) {
+    return promise;
+  }
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 /** Solution + node (+ optional revision / actions) for one mutation or fetch. */
 export interface StudyMutationScope {
   solutionId: string;

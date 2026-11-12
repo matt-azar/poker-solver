@@ -102,6 +102,68 @@ export function normalizeStatusForPhase(status: StatusPayload): StatusPayload {
   return status;
 }
 
+/** Sticky train/session fault code from status (`last_error` preferred, then `error`). */
+export function statusStickyError(
+  status: StatusPayload | null | undefined,
+): string | null {
+  if (!status) {
+    return null;
+  }
+  if (typeof status.last_error === "string" && status.last_error.length > 0) {
+    return status.last_error;
+  }
+  if (typeof status.error === "string" && status.error.length > 0) {
+    return status.error;
+  }
+  return null;
+}
+
+/** True when status snapshot says the last train/session fault is sticky. */
+export function statusIndicatesFailure(
+  status: StatusPayload | null | undefined,
+): boolean {
+  if (!status) {
+    return false;
+  }
+  const hostPhase =
+    typeof status.phase === "string" ? status.phase.toLowerCase() : "";
+  return Boolean(status.failed) || hostPhase === "failed" || statusStickyError(status) != null;
+}
+
+/**
+ * How many consecutive soft status-poll failures before painting disconnected.
+ * Hard session-dead faults (pipe closed / InvalidFrame) mark dead immediately.
+ */
+export const STATUS_POLL_DEAD_AFTER_FAILURES = 3;
+
+/**
+ * Decide whether a status-poll failure should paint Reconnect / unreachable.
+ * Transient decode/timeout blips must not flicker "Engine unreachable" over a
+ * healthy sidecar (ZR-148).
+ */
+export function shouldMarkStatusPollDead(args: {
+  consecutiveFailures: number;
+  detail: string;
+  threshold?: number;
+}): boolean {
+  if (isEngineSessionDead(args.detail)) {
+    return true;
+  }
+  const threshold = args.threshold ?? STATUS_POLL_DEAD_AFTER_FAILURES;
+  return args.consecutiveFailures >= threshold;
+}
+
+/** True when store message is a disconnected / ensure-fail recovery string. */
+export function isRecoveryOrUnreachableMessage(message: string): boolean {
+  const text = message.toLowerCase();
+  return (
+    text.includes("engine unreachable") ||
+    text.includes("reconnecting") ||
+    text.includes("engine setup failed") ||
+    text.includes("use reconnect")
+  );
+}
+
 /**
  * Patch applied when marking the engine unreachable (status poll, Apply, stop).
  * Clears sticky busy/cancel; does not re-ensure (Reconnect / recover does).

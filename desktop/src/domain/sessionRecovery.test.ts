@@ -3,10 +3,15 @@ import {
   classifyEngineSessionFault,
   disconnectedRecoveryMessage,
   isEngineSessionDead,
+  isRecoveryOrUnreachableMessage,
   isStickyBusyPhase,
   normalizeStatusForPhase,
   phaseAfterSessionFault,
   sessionDeadUiPatch,
+  shouldMarkStatusPollDead,
+  STATUS_POLL_DEAD_AFTER_FAILURES,
+  statusIndicatesFailure,
+  statusStickyError,
 } from "./sessionRecovery";
 
 describe("sessionRecovery", () => {
@@ -54,5 +59,51 @@ describe("sessionRecovery", () => {
       phase: "failed",
     });
     expect(next.failed).toBe(true);
+  });
+
+  it("marks status-poll dead immediately for session-dead faults, else after threshold (ZR-148)", () => {
+    expect(
+      shouldMarkStatusPollDead({
+        consecutiveFailures: 1,
+        detail: "Broken pipe",
+      }),
+    ).toBe(true);
+    expect(
+      shouldMarkStatusPollDead({
+        consecutiveFailures: 1,
+        detail: "status request timed out",
+      }),
+    ).toBe(false);
+    expect(
+      shouldMarkStatusPollDead({
+        consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+        detail: "status request timed out",
+      }),
+    ).toBe(true);
+  });
+
+  it("reads sticky last_error and recovery unreachable copy", () => {
+    expect(
+      statusStickyError({
+        running: false,
+        last_error: "InvalidSession",
+        error: "",
+      }),
+    ).toBe("InvalidSession");
+    expect(
+      statusIndicatesFailure({
+        running: false,
+        failed: true,
+        phase: "published",
+      }),
+    ).toBe(true);
+    expect(
+      isRecoveryOrUnreachableMessage(
+        "Engine unreachable: status request timed out. Use Reconnect — Study will re-ensure the local solver-engine.",
+      ),
+    ).toBe(true);
+    expect(isRecoveryOrUnreachableMessage("Solving — 12/200 iterations")).toBe(
+      false,
+    );
   });
 });
