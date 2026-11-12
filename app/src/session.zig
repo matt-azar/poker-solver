@@ -8,7 +8,7 @@ pub const SessionError = error{
     NothingPublished,
     OpenFailed,
     OutOfMemory,
-} || poker_formats.OpenError || poker_engine.game.street_config.ConfigError || poker_engine.game.compile.CompileError || poker_engine.solve.training_state.TrainError || poker_engine.solve.cfr_plus.CfrError;
+} || poker_formats.OpenError || poker_engine.game.street_config.ConfigError || poker_engine.game.compile.CompileError || poker_engine.solve.training_state.TrainError || poker_engine.solve.cfr_plus.CfrError || poker_engine.solve.frozen_walk.FrozenError;
 
 pub const Phase = enum {
     idle,
@@ -110,11 +110,12 @@ pub const Session = struct {
         const game = self.game orelse return error.InvalidSession;
         const state = &(self.training orelse return error.InvalidSession);
         self.phase = .training;
-        const published = try poker_engine.solve.cfr_plus.trainDealByDeal(
+        // StreetBatch-style frozen CFR+ (C++ train_frozen_cfr_plus_iterations).
+        const published = try poker_engine.solve.frozen_walk.trainFrozenCfrPlus(
             self.allocator,
             game,
             state,
-            .{ .iterations = iterations },
+            iterations,
         );
         if (self.published) |*old| old.deinit();
         self.published = published;
