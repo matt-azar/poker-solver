@@ -1,5 +1,9 @@
 import { useMemo } from "react";
 import {
+  studyIpcFeatureAvailable,
+  studyIpcUnavailableReason,
+} from "../../engine/ipcCapabilities";
+import {
   editForNode,
   formatProbPct,
   isHandEdited,
@@ -60,6 +64,8 @@ export function StrategyEditDrawer() {
   }, [draft.kind, draft.handIndices, combos]);
 
   const busy = phase === "solving" || phase === "building";
+  const editsAvailable = studyIpcFeatureAvailable("strategyEdits");
+  const editsUnavailableReason = studyIpcUnavailableReason("strategyEdits");
 
   if (!open) {
     return null;
@@ -88,6 +94,11 @@ export function StrategyEditDrawer() {
             Edits the stored average strategy for browse/EV. Does not lock CFR updates.
             Session-only — not saved in PSOL.
           </p>
+          {!editsAvailable ? (
+            <p className="empty-hint" role="status" style={{ marginTop: 8 }}>
+              {editsUnavailableReason}
+            </p>
+          ) : null}
         </div>
         <button
           type="button"
@@ -255,18 +266,32 @@ export function StrategyEditDrawer() {
           <button
             type="button"
             className="toolbar-btn"
+            disabled={!editsAvailable}
+            title={editsAvailable ? undefined : editsUnavailableReason}
             onClick={() => seedStrategyEditFromStrategy()}
           >
             Seed from strategy
           </button>
-          <button type="button" className="toolbar-btn" onClick={() => revertStrategyEditDraft()}>
+          <button
+            type="button"
+            className="toolbar-btn"
+            disabled={!editsAvailable}
+            title={editsAvailable ? undefined : editsUnavailableReason}
+            onClick={() => revertStrategyEditDraft()}
+          >
             Revert draft
           </button>
           <button
             type="button"
             className="toolbar-btn primary"
             onClick={() => void applyStrategyEdit()}
-            disabled={busy || !currentNode || currentNode.kind !== "decision"}
+            disabled={
+              !editsAvailable ||
+              busy ||
+              !currentNode ||
+              currentNode.kind !== "decision"
+            }
+            title={editsAvailable ? undefined : editsUnavailableReason}
           >
             Apply strategy edit
           </button>
@@ -274,16 +299,25 @@ export function StrategyEditDrawer() {
             type="button"
             className="toolbar-btn"
             onClick={() => void clearStrategyEditHands()}
-            disabled={draft.handIndices.length === 0}
+            disabled={!editsAvailable || draft.handIndices.length === 0}
+            title={editsAvailable ? undefined : editsUnavailableReason}
           >
             Clear selected edits
           </button>
-          <button type="button" className="toolbar-btn" onClick={() => void clearStrategyEditNode()}>
+          <button
+            type="button"
+            className="toolbar-btn"
+            disabled={!editsAvailable}
+            title={editsAvailable ? undefined : editsUnavailableReason}
+            onClick={() => void clearStrategyEditNode()}
+          >
             Clear node edits
           </button>
           <button
             type="button"
             className="toolbar-btn danger"
+            disabled={!editsAvailable}
+            title={editsAvailable ? undefined : editsUnavailableReason}
             onClick={() => void clearAllStrategyEdits()}
           >
             Clear all strategy edits

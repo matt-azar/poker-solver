@@ -1,9 +1,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { clearStudyIpcFeatureOverridesForTests } from "../../engine/ipcCapabilities";
+import { setHttpFallbackTransport, setIpcTransport } from "../../engine/transport";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 afterEach(() => {
   cleanup();
+  clearStudyIpcFeatureOverridesForTests();
+  setHttpFallbackTransport();
 });
 
 describe("WorkspaceSwitcher", () => {
@@ -23,5 +27,21 @@ describe("WorkspaceSwitcher", () => {
       selector: "select",
     }) as HTMLSelectElement;
     expect(select.value).toBe("study");
+  });
+
+  it("soft-disables Compare when solver-engine IPC lacks compare", () => {
+    setIpcTransport({
+      protocol: 2,
+      launchId: "test",
+      sidecar: "solver-engine",
+      workers: 1,
+    });
+    const onChange = vi.fn();
+    render(<WorkspaceSwitcher workspace="study" onChange={onChange} />);
+    const compareTab = screen.getByRole("tab", { name: "Compare" });
+    expect(compareTab).toHaveProperty("disabled", true);
+    expect(compareTab.getAttribute("title")).toMatch(/not available/i);
+    compareTab.click();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

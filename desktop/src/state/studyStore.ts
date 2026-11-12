@@ -113,8 +113,20 @@ import {
 import { draftFromFullTemplate } from "../domain/setup/templateApply";
 import { getRangeProfileCatalogue } from "../domain/profiles";
 import { EngineError, engineClient } from "../engine/client";
+import {
+  studyIpcFeatureAvailable,
+  studyIpcUnavailableReason,
+  type StudyIpcFeature,
+} from "../engine/ipcCapabilities";
 import { isTauriRuntime } from "../platform";
 import { readEngineStatus } from "../platform/engine";
+
+function rejectUnavailableIpcFeature(feature: StudyIpcFeature): string | null {
+  if (studyIpcFeatureAvailable(feature)) {
+    return null;
+  }
+  return studyIpcUnavailableReason(feature);
+}
 import { useThemeStore } from "./themeStore";
 import { useLayoutStore } from "./layoutStore";
 import {
@@ -1470,6 +1482,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       set({ strategyEditDrawerOpen: false });
       return;
     }
+    const unavailable = rejectUnavailableIpcFeature("strategyEdits");
+    if (unavailable) {
+      set({ message: unavailable, strategyEditDrawerOpen: false });
+      return;
+    }
     const node = get().currentNode;
     const solutionId = get().solutionId;
     if (!node || !solutionId) {
@@ -1551,6 +1568,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     set({ strategyEditDraft: structuredClone(baseline) });
   },
   async refreshStrategyEdits() {
+    const unavailable = rejectUnavailableIpcFeature("strategyEdits");
+    if (unavailable) {
+      set({ strategyEdits: [], message: unavailable });
+      return;
+    }
     const solutionId = get().solutionId;
     if (!solutionId) {
       set({ strategyEdits: [] });
@@ -1573,6 +1595,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
   },
   async applyStrategyEdit() {
+    const unavailable = rejectUnavailableIpcFeature("strategyEdits");
+    if (unavailable) {
+      set({ message: unavailable });
+      return;
+    }
     const solutionId = get().solutionId;
     const node = get().currentNode;
     if (!solutionId || !node || node.kind !== "decision") {
@@ -1666,6 +1693,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
   },
   async clearStrategyEditHands(handIndices) {
+    const unavailable = rejectUnavailableIpcFeature("strategyEdits");
+    if (unavailable) {
+      set({ message: unavailable });
+      return;
+    }
     const solutionId = get().solutionId;
     const node = get().currentNode;
     if (!solutionId || !node) {
@@ -1706,6 +1738,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
   },
   async clearStrategyEditNode() {
+    const unavailable = rejectUnavailableIpcFeature("strategyEdits");
+    if (unavailable) {
+      set({ message: unavailable });
+      return;
+    }
     const solutionId = get().solutionId;
     const node = get().currentNode;
     if (!solutionId || !node) {
@@ -1739,6 +1776,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
   },
   async clearAllStrategyEdits() {
+    const unavailable = rejectUnavailableIpcFeature("strategyEdits");
+    if (unavailable) {
+      set({ message: unavailable });
+      return;
+    }
     const solutionId = get().solutionId;
     if (!solutionId) {
       return;
@@ -2038,6 +2080,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   async resolveLocked() {
+    const unavailable = rejectUnavailableIpcFeature("resolveLocked");
+    if (unavailable) {
+      set({ message: unavailable });
+      return;
+    }
     const solutionId = get().solutionId;
     if (!solutionId) {
       return;
@@ -2818,6 +2865,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   async loadRunouts() {
+    const unavailable = rejectUnavailableIpcFeature("runouts");
+    if (unavailable) {
+      set({ message: unavailable });
+      return;
+    }
     const solutionId = get().solutionId;
     const node = get().currentNode;
     if (!solutionId || !node) {
@@ -3023,6 +3075,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   async loadCategories() {
+    const unavailable = rejectUnavailableIpcFeature("categories");
+    if (unavailable) {
+      set({ message: unavailable });
+      return;
+    }
     const solutionId = get().solutionId;
     const node = get().currentNode;
     if (!solutionId || !node) {
@@ -3241,6 +3298,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   async loadCompare(nodeId) {
+    const unavailable = rejectUnavailableIpcFeature("compare");
+    if (unavailable) {
+      set({ compareNote: null, message: unavailable });
+      return;
+    }
     const baseline = get().baselineSolutionId;
     const scenario = get().solutionId;
     const targetNode = nodeId || get().currentNode?.node_id;
