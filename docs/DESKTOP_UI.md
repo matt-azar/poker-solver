@@ -8,8 +8,8 @@ React study client (`desktop/`) over the `explorer` HTTP API. Numerical kernels 
 | --- | --- |
 | Web client | React 19 + TypeScript + Vite |
 | State | Zustand for study/layout/theme; query identity in the engine client |
-| Engine transport | Prefer Zig `solver-engine` typed IPC (protocol 2, inherited pipes via Tauri). HTTP `holdem-explorer` is a temporary labeled fallback when IPC is unavailable (`VITE_SOLVER_TRANSPORT=http` forces HTTP). |
-| Desktop shell | Tauri 2 + preferred `solver-engine` IPC sidecar (HTTP `holdem-explorer` fallback); browser + Vite proxy still supported |
+| Engine transport | Packaged Study: Zig `solver-engine` typed IPC only (protocol 2, inherited pipes via Tauri). Browser/Vite-dev may still use a separate HTTP explorer. |
+| Desktop shell | Tauri 2 + `solver-engine` IPC sidecar; browser + Vite proxy still supported |
 | Static serving | Prefer `desktop/dist` when present; fall back to `legacy/ui/` |
 | Legacy UI | Kept under `legacy/ui/` for regression and fallback |
 
@@ -91,10 +91,10 @@ explorer   # serves desktop/dist when present
 | Browser Study client + localhost `explorer` | Supported |
 | Vite `/api` proxy in `npm run dev` | Supported |
 | `explorer` serving `desktop/dist` | Supported |
-| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell prefers `solver-engine` inherited-pipe IPC (`ensure_solver_engine` / `solver_engine_request`); if missing, spawns installed `holdem-explorer` beside the app (absolute path; not `binaries/…`), waits for `GET /api/ready`, and exposes `ensure_engine` for HTTP Reconnect. The webview loads Vite `dist`. Explorer CORS reflects allowlisted Origins (including `https://tauri.localhost`) with OPTIONS preflight; packaged Study (`--study-packaged`) does not fall back to `*`. HTTP fallback port is not fixed at 8765; see the next row. |
-| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer`. Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe` (plus the versioned Tauri NSIS name). PREINSTALL stops the UI then force-kills/deletes `holdem-explorer.exe` so upgrades are not blocked by a locked sidecar; POSTINSTALL requires `holdem-explorer.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. Packaged explorer uses the static MSVC CRT |
+| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns installed `solver-engine` beside the app (absolute path; not `binaries/…`) over inherited-pipe IPC (`ensure_solver_engine` / `solver_engine_request`, protocol 2). The webview loads Vite `dist`. No packaged `holdem-explorer` fallback after Zig cutover. |
+| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer` (also on `zig-rewrite`). Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe`. PREINSTALL stops the UI then force-kills/deletes `solver-engine.exe` (and legacy `holdem-explorer.exe` if present); POSTINSTALL requires `solver-engine.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. |
 | Native Open/Save dialogs | Browser prompts; Windows Tauri build wires `tauri-plugin-dialog` + `dialog:default` capability; adapter keeps a prompt fallback if the plugin invoke fails |
-| Packaged engine ownership | Prefer `solver-engine` with `--launch-id` over inherited pipes (protocol 2). Tauri demuxes stdout by `request_id` so Study can issue mid-train `values` while `solve` is in flight (host stdin already concurrent). HTTP fallback: Tauri allocates a loopback port, spawns `holdem-explorer` with `--launch-id` + `--study-packaged`, waits for `GET /api/ready`, and binds the webview client to that base URL. Foreign listeners on 8765 are not treated as ready. Browser/dev still uses Vite proxy / external explorer on 8765 (`VITE_SOLVER_TRANSPORT=http` forces HTTP). |
+| Packaged engine ownership | `solver-engine` with `--launch-id` over inherited pipes (protocol 2). Tauri demuxes stdout by `request_id` so Study can issue mid-train `values` while `solve` is in flight. Browser/dev still uses Vite proxy / external explorer on 8765. |
 | Production CSP | Packaged webview CSP allows `'self'` / Tauri IPC / assets, loopback explorer (`http://127.0.0.1:*`, `http://localhost:*`), and `https://api.openai.com` for the assistant. `devCsp` stays null so `tauri:dev` / HMR are unconstrained. Browser `npm run dev` is unaffected. Unused `shell:allow-execute` was removed; spawn remains for the owned sidecar. |
 | HTTP JSON contracts | `desktop/src/engine/contracts` decodes `/api/ready` and status (including successful Open) with a required/additive/error policy; fixtures under `desktop/src/engine/fixtures`. Wire shapes for size lists, chip units, and null metrics stay unchanged. |
 | Code-signed official release | Not yet — CI artifact is unsigned |
@@ -103,8 +103,8 @@ explorer   # serves desktop/dist when present
 
 Prefer the [latest GitHub Release download](https://github.com/matt-azar/poker-solver/releases/latest/download/Holdem-Study-windows-x64-setup.exe), or Actions → **Windows Installer** → artifact `holdem-study-windows-installer`.
 
-1. Run `Holdem-Study-windows-x64-setup.exe` (current-user install; WebView2 may bootstrap if missing). Close Holdem Study if it is open (setup will offer to stop it). Setup stops any leftover `holdem-explorer` engine, fails loudly if the sidecar is missing after copy, and clears Mark-of-the-Web on the installed exes.
-2. Launch **Holdem Study** from the Start menu. The shell picks a free `127.0.0.1` port, starts `holdem-explorer` with a launch id, and waits for `GET /api/ready` before the Study UI connects. No CMake or npm required.
+1. Run `Holdem-Study-windows-x64-setup.exe` (current-user install; WebView2 may bootstrap if missing). Close Holdem Study if it is open (setup will offer to stop it). Setup stops any leftover `solver-engine` (and legacy `holdem-explorer`), fails loudly if `solver-engine.exe` is missing after copy, and clears Mark-of-the-Web on the installed exes.
+2. Launch **Holdem Study** from the Start menu. The shell starts `solver-engine` with a launch id over inherited pipes and waits for the protocol-2 ready handshake before the Study UI connects. No CMake or npm required.
 
 ### Cutting a Windows Release (maintainers)
 
@@ -120,10 +120,11 @@ Installer product name is `Holdem Study` (no apostrophe) because NSIS shortcut m
 ### Local packaging (maintainers)
 
 ```sh
-# build explorer (MSVC), copy sidecar with target triple, then:
+# build Zig solver-engine, copy sidecar with target triple, then:
+zig build -Doptimize=ReleaseFast
 cd desktop
 npm ci && npm run build
-# place holdem-explorer-x86_64-pc-windows-msvc.exe under src-tauri/binaries/
+# place solver-engine-x86_64-pc-windows-msvc.exe under src-tauri/binaries/
 npm run tauri:build
 ```
 

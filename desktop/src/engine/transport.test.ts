@@ -31,15 +31,15 @@ describe("solver transport selection", () => {
     setHttpFallbackTransport();
   });
 
-  it("labels HTTP as a temporary fallback", () => {
+  it("labels HTTP as browser/dev only (not packaged)", () => {
     const http = setHttpFallbackTransport();
     expect(http.kind).toBe("http-fallback");
-    expect(http.label.toLowerCase()).toContain("temporary");
-    expect(http.label.toLowerCase()).toContain("ipc");
+    expect(http.label.toLowerCase()).toContain("browser/dev");
+    expect(http.label.toLowerCase()).toContain("solver-engine");
     expect(getActiveTransport().kind).toBe("http-fallback");
   });
 
-  it("records solver-engine IPC as the preferred Zig transport", () => {
+  it("records solver-engine IPC as the packaged Zig transport", () => {
     const ipc = setIpcTransport({
       protocol: 2,
       launchId: "zig-test",

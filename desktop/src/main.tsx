@@ -12,7 +12,7 @@ applyDocumentTheme(resolveTheme(useThemeStore.getState().preference));
 detectAndInstallPlatform();
 
 async function bootEngineThenRender(): Promise<void> {
-  // Packaged Tauri: prefer solver-engine IPC; HTTP explorer is temporary fallback.
+  // Packaged Tauri: solver-engine IPC only.
   const result = await ensureEngine();
   if (result.ok) {
     console.info(

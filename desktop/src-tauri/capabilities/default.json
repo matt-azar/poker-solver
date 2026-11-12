@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for Hold'em Study (webview + explorer sidecar)",
+  "description": "Default capabilities for Hold'em Study (webview + Zig solver-engine sidecar)",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,16 +9,6 @@
     {
       "identifier": "shell:allow-spawn",
       "allow": [
-        {
-          "name": "holdem-explorer",
-          "sidecar": true,
-          "args": true
-        },
-        {
-          "name": "binaries/holdem-explorer",
-          "sidecar": true,
-          "args": true
-        },
         {
           "name": "solver-engine",
           "sidecar": true,

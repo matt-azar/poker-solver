@@ -313,7 +313,7 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
             launch_id: launch_id.to_string(),
             sidecar: SIDECAR_BASENAME.into(),
             workers: 0,
-            http_fallback_label: "HTTP explorer fallback (temporary — Zig path prefers solver-engine IPC)"
+            http_fallback_label: "HTTP explorer (browser/dev only — packaged Study uses solver-engine IPC)"
                 .into(),
         },
     })
@@ -417,7 +417,7 @@ fn ready_handshake(io: &Arc<SessionIo>, launch_id: &str) -> Result<SolverEngineI
                     launch_id: launch_id.to_string(),
                     sidecar: SIDECAR_BASENAME.into(),
                     workers,
-                    http_fallback_label: "HTTP explorer fallback (temporary — Zig path prefers solver-engine IPC)"
+                    http_fallback_label: "HTTP explorer (browser/dev only — packaged Study uses solver-engine IPC)"
                         .into(),
                 });
             }

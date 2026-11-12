@@ -1,8 +1,8 @@
-# Windows NSIS installer for Hold'em Study (Tauri + explorer sidecar).
+# Windows NSIS installer for Hold'em Study (Tauri + Zig solver-engine sidecar).
 #
 # Prerequisites (not owned by this workflow):
 # - desktop/package.json must define "tauri": "tauri" and depend on @tauri-apps/cli
-# - desktop/src-tauri must be configured for an externalBin sidecar named "holdem-explorer"
+# - desktop/src-tauri must be configured for an externalBin sidecar named "solver-engine"
 # - No code signing is required or performed
 #
 # Artifact: holdem-study-windows-installer (NSIS *.exe under bundle/nsis)
@@ -12,7 +12,7 @@
 #   builds and attaches the installer to a GitHub Release.
 # - Stable download name: Holdem-Study-windows-x64-setup.exe
 #   (README /releases/latest/download/… stays current across cuts)
-# - Path-filtered main/PR pushes below only upload the Actions artifact.
+# - Path-filtered main / zig-rewrite / PR pushes below only upload the Actions artifact.
 
 name: Windows Installer
 
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
   workflow_call:
   push:
-    branches: [main]
+    branches: [main, zig-rewrite]
     paths:
       - "desktop/**"
       - "src/**"
@@ -97,28 +97,8 @@ jobs:
       - name: sccache
         uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: Configure CMake (Release, static MSVC CRT)
-        # Static CRT so the shipped holdem-explorer sidecar does not depend on a
-        # separate Visual C++ Redistributable on the end-user machine.
-        # Keep the runner's default generator (do not force VS 17 — not always present).
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-        run: >
-          cmake -S . -B build
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-          -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-
-      - name: Build explorer (Release)
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-        run: cmake --build build --config Release --parallel --target explorer
-
-      # tauri.conf.json externalBin lists both holdem-explorer and solver-engine
-      # (Phase 6). Study still defaults to HTTP holdem-explorer; solver-engine is
-      # bundled dormant until cutover. Zig pin matches .github/workflows/zig.yml.
+      # Shipping Study sidecar is Zig solver-engine (owner GO 2026-11-12).
+      # Zig pin matches .github/workflows/zig.yml.
       - name: Install Zig 0.14.1
         shell: pwsh
         env:
@@ -154,31 +134,27 @@ jobs:
         run: npm ci
 
       # Unit suite lives in CI's path-gated `desktop` job (ci.yml), not here —
-      # this workflow already pays for CMake + Tauri NSIS and keeps the
+      # this workflow already pays for Zig + Tauri NSIS and keeps the
       # installer path focused on packaging.
       - name: Build desktop UI
         working-directory: desktop
         run: npm run build
 
-      - name: Prepare sidecar binaries
+      - name: Prepare solver-engine sidecar
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path desktop/src-tauri/binaries | Out-Null
           $hostTriple = (rustc -vV | Select-String "host:").ToString().Split()[1]
           Write-Host "rustc host triple: $hostTriple"
           # Expected on windows-latest: x86_64-pc-windows-msvc
-          # Sidecar basename is holdem-explorer (not explorer) to avoid Windows Shell collisions.
-          Copy-Item -Force build/Release/explorer.exe `
-            "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe"
           Copy-Item -Force zig-out/bin/solver-engine.exe `
             "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe"
-          Get-Item "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe",
-                   "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe" |
+          Get-Item "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe" |
             Format-List FullName, Length, LastWriteTime
 
       - name: Build Tauri NSIS installer
         # Requires package.json script: "tauri": "tauri" (with @tauri-apps/cli installed).
-        # NSIS POSTINSTALL verifies holdem-explorer.exe and Unblock-Files the engine+UI.
+        # NSIS POSTINSTALL verifies solver-engine.exe and Unblock-Files the engine+UI.
         working-directory: desktop
         env:
           RUSTC_WRAPPER: sccache
@@ -188,19 +164,20 @@ jobs:
       - name: Verify release payload includes sidecar and Library assets
         shell: pwsh
         run: |
-          $sidecar = Get-ChildItem -Recurse desktop/src-tauri/target/release `
-            -Filter "holdem-explorer*.exe" -ErrorAction SilentlyContinue |
-            Select-Object -First 5 FullName, Length
-          $sidecar | Format-Table -AutoSize
-          if (-not $sidecar) {
-            throw "holdem-explorer sidecar missing from Tauri release output"
-          }
           $zigEngine = Get-ChildItem -Recurse desktop/src-tauri/target/release `
             -Filter "solver-engine*.exe" -ErrorAction SilentlyContinue |
             Select-Object -First 5 FullName, Length
           $zigEngine | Format-Table -AutoSize
           if (-not $zigEngine) {
             throw "solver-engine sidecar missing from Tauri release output (externalBin)"
+          }
+
+          $legacy = Get-ChildItem -Recurse desktop/src-tauri/target/release `
+            -Filter "holdem-explorer*.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 3 FullName, Length
+          if ($legacy) {
+            $legacy | Format-Table -AutoSize
+            throw "holdem-explorer must not ship in the stable Zig installer payload"
           }
 
           $releaseRoot = "desktop/src-tauri/target/release"
@@ -283,7 +260,7 @@ jobs:
             Unsigned Windows NSIS installer for Holdem Study.
 
             - Installs for the current user
-            - Starts the holdem-explorer engine sidecar and opens the Study UI
+            - Starts the Zig solver-engine sidecar (typed IPC) and opens the Study UI
             - No CMake or npm required
             - Windows SmartScreen may warn because the binary is not code-signed — More info → Run anyway
             - WebView2 may install on first launch if missing

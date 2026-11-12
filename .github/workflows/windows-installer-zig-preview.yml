@@ -1,8 +1,8 @@
-# Labeled Zig tech-preview Windows installer (Phase 7 / D8 scaffolding).
+# Historical Zig tech-preview Windows installer (Phase 7 / D8 scaffolding).
 #
-# Builds Zig solver-engine (preferred Study IPC) plus holdem-explorer as a
-# temporary labeled HTTP fallback, then packages a distinctly named NSIS
-# artifact. Does NOT publish a GitHub Release and does NOT claim shipping cutover.
+# After owner GO (2026-11-12), the stable Windows Installer workflow ships
+# Zig solver-engine. This workflow remains as a distinctly labeled artifact
+# builder for zig-rewrite pushes; it no longer bundles holdem-explorer.
 #
 # Trigger: manual, or push to zig-rewrite that touches Zig / desktop / this file.
 
@@ -34,14 +34,13 @@ permissions:
   contents: read
 
 env:
-  CMAKE_BUILD_PARALLEL_LEVEL: 4
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
   ZIG_VERSION: "0.14.1"
   ZIG_WINDOWS_SHA256: "554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c"
   PREVIEW_PRODUCT_NAME: "Holdem Study Zig Tech Preview"
   PREVIEW_ARTIFACT_NAME: "holdem-study-zig-tech-preview-windows-installer"
-  PREVIEW_INSTALLER_LABEL: "Zig tech preview — not the shipping installer"
+  PREVIEW_INSTALLER_LABEL: "Zig tech preview — labeled artifact (stable installer also ships solver-engine)"
 
 jobs:
   build-zig-preview-installer:
@@ -69,22 +68,6 @@ jobs:
 
       - name: sccache
         uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Configure CMake (Release, static MSVC CRT)
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-        run: >
-          cmake -S . -B build
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-          -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-
-      - name: Build explorer (Release)
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-        run: cmake --build build --config Release --parallel --target explorer
 
       - name: Install Zig ${{ env.ZIG_VERSION }}
         shell: pwsh
@@ -134,7 +117,7 @@ jobs:
         working-directory: desktop
         run: npm run build
 
-      - name: Prepare sidecars (holdem-explorer + solver-engine)
+      - name: Prepare solver-engine sidecar
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -142,13 +125,10 @@ jobs:
           $hostTriple = (rustc -vV | Select-String "host:").ToString().Split()[1]
           Write-Host "rustc host triple: $hostTriple"
 
-          Copy-Item -Force build/Release/explorer.exe `
-            "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe"
           Copy-Item -Force zig-out/bin/solver-engine.exe `
             "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe"
 
-          Get-Item "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe",
-                   "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe" |
+          Get-Item "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe" |
             Format-List FullName, Length, LastWriteTime
 
       - name: Build Tauri NSIS installer (Zig tech preview)
@@ -164,11 +144,14 @@ jobs:
           $ErrorActionPreference = "Stop"
           $releaseRoot = "desktop/src-tauri/target/release"
 
-          foreach ($name in @("holdem-explorer*.exe", "solver-engine*.exe")) {
-            $hit = Get-ChildItem -Recurse $releaseRoot -Filter $name -ErrorAction SilentlyContinue |
-              Select-Object -First 3 FullName, Length
-            if (-not $hit) { throw "missing sidecar pattern: $name" }
-            $hit | Format-Table -AutoSize
+          $hit = Get-ChildItem -Recurse $releaseRoot -Filter "solver-engine*.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 3 FullName, Length
+          if (-not $hit) { throw "missing sidecar pattern: solver-engine*.exe" }
+          $hit | Format-Table -AutoSize
+
+          $legacy = Get-ChildItem -Recurse $releaseRoot -Filter "holdem-explorer*.exe" -ErrorAction SilentlyContinue
+          if ($legacy) {
+            throw "holdem-explorer must not ship in Zig installer payload"
           }
 
           $nsisDir = "desktop/src-tauri/target/release/bundle/nsis"
@@ -185,8 +168,7 @@ jobs:
             ""
             "productName: $($env:PREVIEW_PRODUCT_NAME)"
             "Zig: $($env:ZIG_VERSION)"
-            "Sidecars: solver-engine.exe (preferred Study IPC) + holdem-explorer.exe (temporary HTTP fallback)"
-            "Study prefers solver-engine IPC; HTTP explorer is a labeled temporary fallback until cutover GO."
+            "Sidecar: solver-engine.exe (Study IPC host; no holdem-explorer)"
             "See docs/auxiliary/engineering/ZIG_RELEASE_GATES.md"
           ) -join "`r`n"
           Set-Content -Encoding utf8 "$nsisDir/ZIG_TECH_PREVIEW.txt" $note

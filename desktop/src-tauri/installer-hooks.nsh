@@ -2,27 +2,26 @@
 ;
 ; Sidecar naming
 ; --------------
-; tauri.conf.json externalBin is "binaries/holdem-explorer".
+; tauri.conf.json externalBin is "binaries/solver-engine".
 ; Tauri ships that sidecar next to the app executable as:
-;   $INSTDIR\holdem-explorer.exe
-; (basename of the externalBin entry — NOT "binaries/holdem-explorer.exe").
+;   $INSTDIR\solver-engine.exe
+; (basename of the externalBin entry — NOT "binaries/solver-engine.exe").
 ;
 ; CRITICAL: Never taskkill Windows File Explorer (`explorer.exe`).
-; The solver sidecar is deliberately named holdem-explorer.exe so an
-; image-name kill of ${SIDECAR_EXE} cannot touch the desktop shell.
+; Image-name kill of ${SIDECAR_EXE} / ${LEGACY_EXPLORER_EXE} cannot touch it.
 ;
 ; Upgrade / reinstall lock
 ; ------------------------
 ; Tauri's CheckIfAppIsRunning only stops the UI image (${MAINBINARYNAME}.exe).
 ; Force-closing Holdem Study.exe does not run our Rust Exit handler, so
-; holdem-explorer.exe often keeps running and NSIS fails with:
-;   "Error opening file for writing: …\holdem-explorer.exe"
-; (Abort / Retry / Ignore). Ignoring leaves a stale sidecar — PR-only UI
-; bumps still "work", which hides the miss.
+; solver-engine.exe (and older holdem-explorer.exe installs) often keep running
+; and NSIS fails with:
+;   "Error opening file for writing: …\solver-engine.exe"
+; (Abort / Retry / Ignore). Ignoring leaves a stale sidecar.
 ;
 ; PREINSTALL therefore: stop the UI (so it cannot respawn the engine), then
-; force-stop the sidecar, wait for handles, and Delete the old binary so the
-; following File copy always replaces it.
+; force-stop sidecars, wait for handles, and Delete the old binaries so the
+; following File copy always replaces them.
 ;
 ; Do NOT !insertmacro CheckIfAppIsRunning here. Tauri 2.5's macro uses fixed
 ; labels (kill:/cancel:/app_check_done:) and the installer template already
@@ -32,15 +31,15 @@
 ;
 ; Engine setup
 ; ------------
-; POSTINSTALL verifies the sidecar is present, clears Mark-of-the-Web
+; POSTINSTALL verifies solver-engine.exe is present, clears Mark-of-the-Web
 ; (Zone.Identifier) so SmartScreen does not silently block the first launch,
 ; and writes a short setup note next to the binaries.
 
-!define SIDECAR_EXE "holdem-explorer.exe"
-; Zig typed-IPC host (tauri.conf externalBin). Present in shipping and
-; Zig tech-preview installers; Study still defaults to holdem-explorer.
-!define ZIG_ENGINE_EXE "solver-engine.exe"
-; Prefer Tauri's MAINBINARYNAME so Zig tech-preview productName renames work.
+!define SIDECAR_EXE "solver-engine.exe"
+; Older C++ installs may still have holdem-explorer.exe — kill/delete on upgrade
+; so the File copy is not blocked. Not bundled after Zig cutover.
+!define LEGACY_EXPLORER_EXE "holdem-explorer.exe"
+; Prefer Tauri's MAINBINARYNAME so productName renames work.
 !define APP_EXE "${MAINBINARYNAME}.exe"
 
 !macro KillHoldemStudyUi
@@ -65,17 +64,17 @@
   Pop $0
 !macroend
 
-!macro KillZigSolverEngine
-  ; Safe: solver-engine.exe is not explorer.exe. Missing process is fine.
-  DetailPrint "Stopping ${ZIG_ENGINE_EXE} if running..."
-  nsExec::ExecToLog 'taskkill /F /T /IM "${ZIG_ENGINE_EXE}"'
+!macro KillLegacyExplorerSidecar
+  ; Safe: holdem-explorer.exe is not explorer.exe. Missing process is fine.
+  DetailPrint "Stopping legacy ${LEGACY_EXPLORER_EXE} if running..."
+  nsExec::ExecToLog 'taskkill /F /T /IM "${LEGACY_EXPLORER_EXE}"'
   Pop $0
 !macroend
 
 !macro StopHoldemStudyForInstall
   !insertmacro KillHoldemStudyUi
   !insertmacro KillHoldemStudySidecar
-  !insertmacro KillZigSolverEngine
+  !insertmacro KillLegacyExplorerSidecar
   ; Give Windows time to release the exe image section after Stop-Process.
   Sleep 1500
   ClearErrors
@@ -86,11 +85,11 @@
     DetailPrint "Removed previous ${SIDECAR_EXE} so setup can replace it."
   ${EndIf}
   ClearErrors
-  Delete "$INSTDIR\${ZIG_ENGINE_EXE}"
+  Delete "$INSTDIR\${LEGACY_EXPLORER_EXE}"
   ${If} ${Errors}
-    DetailPrint "Old ${ZIG_ENGINE_EXE} still present; File copy will overwrite if unlocked."
+    DetailPrint "Legacy ${LEGACY_EXPLORER_EXE} still present or absent; continuing."
   ${Else}
-    DetailPrint "Removed previous ${ZIG_ENGINE_EXE} so setup can replace it."
+    DetailPrint "Removed legacy ${LEGACY_EXPLORER_EXE} from a prior install."
   ${EndIf}
 !macroend
 
@@ -99,7 +98,7 @@
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  DetailPrint "Verifying Hold'em Study engine sidecar..."
+  DetailPrint "Verifying Hold'em Study Zig solver-engine sidecar..."
   IfFileExists "$INSTDIR\${SIDECAR_EXE}" sidecar_ok sidecar_missing
   sidecar_missing:
     MessageBox MB_ICONSTOP|MB_OK "Installation incomplete: ${SIDECAR_EXE} is missing from:$\r$\n$INSTDIR$\r$\n$\r$\nRe-download the installer artifact or rebuild the Windows Installer workflow."
@@ -107,27 +106,19 @@
     Quit
   sidecar_ok:
 
-  DetailPrint "Verifying Zig solver-engine sidecar..."
-  IfFileExists "$INSTDIR\${ZIG_ENGINE_EXE}" zig_ok zig_missing
-  zig_missing:
-    MessageBox MB_ICONSTOP|MB_OK "Installation incomplete: ${ZIG_ENGINE_EXE} is missing from:$\r$\n$INSTDIR$\r$\n$\r$\nRebuild the Windows installer so both externalBin sidecars are present."
-    SetErrorLevel 3
-    Quit
-  zig_ok:
-
-  ; Clear Mark-of-the-Web on the app + engines so the first launch is not blocked.
+  ; Clear Mark-of-the-Web on the app + engine so the first launch is not blocked.
   DetailPrint "Unblocking installed executables (Zone.Identifier)..."
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=''SilentlyContinue''; Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${APP_EXE}''); Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${SIDECAR_EXE}''); Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${ZIG_ENGINE_EXE}''); Get-ChildItem -LiteralPath ''$INSTDIR'' -Filter ''*.exe'' -File | Unblock-File"'
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=''SilentlyContinue''; Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${APP_EXE}''); Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${SIDECAR_EXE}''); Get-ChildItem -LiteralPath ''$INSTDIR'' -Filter ''*.exe'' -File | Unblock-File"'
   Pop $0
 
   ; Tiny marker so support can confirm engine install ran.
   FileOpen $1 "$INSTDIR\engine-setup.txt" w
   FileWrite $1 "Hold'em Study engine sidecar: ${SIDECAR_EXE}$\r$\n"
-  FileWrite $1 "Zig IPC host (dormant until cutover): ${ZIG_ENGINE_EXE}$\r$\n"
+  FileWrite $1 "Transport: Zig typed IPC (protocol 2, inherited pipes)$\r$\n"
   FileWrite $1 "Installed beside the UI in:$\r$\n$INSTDIR$\r$\n"
-  FileWrite $1 "Default Study still launches ${SIDECAR_EXE} on 127.0.0.1:8765.$\r$\n"
+  FileWrite $1 "Study launches ${SIDECAR_EXE}; HTTP holdem-explorer is not shipped.$\r$\n"
   FileClose $1
-  DetailPrint "Engine sidecars ready: $INSTDIR\${SIDECAR_EXE} + $INSTDIR\${ZIG_ENGINE_EXE}"
+  DetailPrint "Engine sidecar ready: $INSTDIR\${SIDECAR_EXE}"
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

@@ -515,8 +515,7 @@ pub fn run() {
         .manage(EngineState::new())
         .manage(solver_engine::SolverEngineState::new())
         .setup(|app| {
-            // Zig path prefers solver-engine IPC. HTTP explorer is a temporary
-            // fallback when the Zig sidecar is missing or fails ready.
+            // Shipping Study uses Zig solver-engine IPC only (no holdem-explorer).
             let handle = app.handle().clone();
             let zig_state = app.state::<solver_engine::SolverEngineState>();
             match solver_engine::ensure_solver_engine_session(&handle, &zig_state) {
@@ -525,10 +524,9 @@ pub fn run() {
                 }
                 Err(err) => {
                     eprintln!(
-                        "warning: solver-engine IPC unavailable ({err}); \
-                         starting HTTP explorer fallback (temporary)"
+                        "error: solver-engine IPC unavailable ({err}). \
+                         Window will still open; use Reconnect after fixing the install."
                     );
-                    spawn_explorer_sidecar(app);
                 }
             }
             Ok(())
