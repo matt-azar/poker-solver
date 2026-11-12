@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "windows-dialog",
+  "description": "Native Open/Save dialogs — Windows installer only (plugin is cfg(windows))",
+  "windows": ["main"],
+  "platforms": ["windows"],
+  "permissions": ["dialog:default"]
+}
