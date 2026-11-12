@@ -8,6 +8,7 @@ const poker_formats = @import("poker_formats");
 const ipc = @import("ipc.zig");
 const dispatch = @import("dispatch.zig");
 const workers = @import("workers.zig");
+const equity_json = @import("equity_json.zig");
 
 pub const sidecar_name = "solver-engine";
 pub const phase = "phase-6";
@@ -90,5 +91,6 @@ test {
     _ = ipc;
     _ = dispatch;
     _ = workers;
+    _ = equity_json;
     _ = linkedLayers;
 }

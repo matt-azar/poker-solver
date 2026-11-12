@@ -167,6 +167,18 @@ export async function ipcValues(nodeIdOrIndex: string | number = 0): Promise<unk
   return env.body;
 }
 
+/** Study check-down equity (host `equity` → `checkdownEquity`). Root / board ranges first. */
+export async function ipcEquity(opts?: {
+  nodeIndex?: number;
+  nodeId?: string;
+}): Promise<unknown> {
+  const env = await solverEngineRequest("equity", {
+    node_index: opts?.nodeIndex ?? 0,
+    ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
+  });
+  return env.body;
+}
+
 export async function ipcBeginConfig(configText: string): Promise<unknown> {
   const env = await solverEngineRequest("begin_config", { config_text: configText });
   return env.body;

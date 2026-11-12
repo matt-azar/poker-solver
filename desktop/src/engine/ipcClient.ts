@@ -150,4 +150,14 @@ export class SolverEngineIpcClient {
     const env = await this.request("values", body);
     return env.body;
   }
+
+  /** Study check-down equity (histograms + compact hands). */
+  async equity(nodeIdOrIndex: string | number = "p0.t-1.r-1"): Promise<unknown> {
+    const body =
+      typeof nodeIdOrIndex === "string"
+        ? { node_id: nodeIdOrIndex }
+        : { node_index: nodeIdOrIndex };
+    const env = await this.request("equity", body);
+    return env.body;
+  }
 }
