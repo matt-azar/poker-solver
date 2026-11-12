@@ -24,14 +24,23 @@ import {
   ipcNode,
   ipcOpen,
   ipcPause,
+  ipcPlanMemory,
   ipcPutLock,
   ipcSave,
   ipcSolve,
   ipcStatus,
+  ipcTreePreview,
   ipcValues,
   mintStudyJobId,
   isIpcTransport,
 } from "./transport";
+
+function streetConfigTextFromPreviewJob(job: SolveJobRequest | { text: string }): string {
+  if ("text" in job && typeof (job as { text?: unknown }).text === "string") {
+    return (job as { text: string }).text;
+  }
+  return formatSolveJobStreetConfig(job as SolveJobRequest);
+}
 
 function defaultEngineBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_ENGINE_URL;
@@ -691,7 +700,8 @@ export class EngineClient {
 
   async planMemory(job: SolveJobRequest | { text: string }): Promise<MemoryPlanPayload> {
     if (isIpcTransport()) {
-      throw new EngineError("planMemory is not available over solver-engine IPC yet", 501, null);
+      const configText = streetConfigTextFromPreviewJob(job);
+      return (await ipcPlanMemory(configText)) as MemoryPlanPayload;
     }
     const { response, data } = await this.request("POST", "/api/plan-memory", job);
     this.ensureOk(response, data);
@@ -700,7 +710,8 @@ export class EngineClient {
 
   async treePreview(job: SolveJobRequest | { text: string }): Promise<TreePreviewPayload> {
     if (isIpcTransport()) {
-      throw new EngineError("treePreview is not available over solver-engine IPC yet", 501, null);
+      const configText = streetConfigTextFromPreviewJob(job);
+      return (await ipcTreePreview(configText)) as TreePreviewPayload;
     }
     const { response, data } = await this.request("POST", "/api/tree-preview", job);
     this.ensureOk(response, data);
