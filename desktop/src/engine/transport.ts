@@ -129,7 +129,15 @@ export async function solverEngineRequest(
   if (!raw || typeof raw !== "object") {
     throw new Error("solver_engine_request returned a non-object");
   }
-  return raw as IpcRequestEnvelope;
+  const env = raw as IpcRequestEnvelope;
+  if (env.ok === false) {
+    const detail =
+      (typeof env.error_message === "string" && env.error_message.trim()) ||
+      (typeof env.error_code === "string" && env.error_code.trim()) ||
+      `${op} failed`;
+    throw new Error(detail);
+  }
+  return env;
 }
 
 export async function ipcReady(): Promise<{

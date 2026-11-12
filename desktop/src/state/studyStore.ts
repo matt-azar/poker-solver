@@ -638,6 +638,69 @@ function emptyAnalysisState() {
   };
 }
 
+/** True when a Tauri train RPC waiter hit its ceiling while the sidecar may still train. */
+function isEngineIpcTimeout(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  return /timed out/i.test(message);
+}
+
+/**
+ * Cancel a leftover in-flight train before begin_config (ZR-106).
+ * A prior timed-out solve RPC can leave phase=training and Busy the next begin.
+ */
+async function stopOrphanTrainIfRunning(): Promise<void> {
+  try {
+    const status = await engineClient.status();
+    if (!status.running) {
+      return;
+    }
+    try {
+      await engineClient.stop();
+    } catch {
+      // No minted job id / already stopped — status poll will converge.
+    }
+    for (let i = 0; i < 50; i += 1) {
+      const next = await engineClient.status();
+      if (!next.running) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  } catch {
+    // Unreachable engine — let the subsequent solve surface the error.
+  }
+}
+
+/**
+ * Soft-recover train RPC timeout: keep Solving and let status polling finish
+ * the lifecycle instead of restoring the prior study and leaving a sticky Busy.
+ */
+async function recoverTrainRpcTimeout(
+  get: () => { refresh: () => Promise<void>; startPolling: () => void },
+  error: unknown,
+): Promise<boolean> {
+  if (!isEngineIpcTimeout(error)) {
+    return false;
+  }
+  try {
+    const status = await engineClient.status();
+    if (status.running || status.paused || status.solution_id) {
+      continuationPending = true;
+      get().startPolling();
+      await get().refresh();
+      return true;
+    }
+  } catch {
+    // Fall through to hard failure.
+  }
+  return false;
+}
+
 let lineCardReportToken = 0;
 
 /** Decision nodes get always-on EV/equity; chance/terminal do not. */
@@ -2021,12 +2084,18 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       strategyEditDrawerOpen: false,
       selectedCell: null,
     });
+    // Short-admit train (ZR-106): poll status for completion so flop cannot
+    // freeze Study behind a long sync solve RPC.
+    continuationPending = true;
+    get().startPolling();
     try {
+      await stopOrphanTrainIfRunning();
       await engineClient.solve(buildJob(get().draft));
-      continuationPending = true;
-      get().startPolling();
       await get().refresh();
     } catch (error) {
+      if (await recoverTrainRpcTimeout(get, error)) {
+        return;
+      }
       pendingReloadNodeId = undefined;
       set({
         ...prior,
@@ -2058,6 +2127,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       strategyEditDraftBaseline: null,
       strategyEditDrawerOpen: false,
     });
+    continuationPending = true;
+    get().startPolling();
     try {
       const body: { iterations: number; time_limit?: number } = {
         iterations: get().draft.iterations,
@@ -2066,10 +2137,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         body.time_limit = Number(get().draft.timeLimit);
       }
       await engineClient.continueSolve(solutionId, body);
-      continuationPending = true;
-      get().startPolling();
       await get().refresh();
     } catch (error) {
+      if (await recoverTrainRpcTimeout(get, error)) {
+        return;
+      }
       pendingReloadNodeId = undefined;
       set({
         ...prior,
@@ -2106,6 +2178,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       strategyEditDraftBaseline: null,
       strategyEditDrawerOpen: false,
     });
+    continuationPending = true;
+    get().startPolling();
     try {
       const body: {
         iterations: number;
@@ -2119,10 +2193,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         body.time_limit = Number(get().draft.timeLimit);
       }
       await engineClient.resolveLocked(solutionId, body);
-      continuationPending = true;
-      get().startPolling();
       await get().refresh();
     } catch (error) {
+      if (await recoverTrainRpcTimeout(get, error)) {
+        return;
+      }
       pendingReloadNodeId = undefined;
       set({
         ...prior,

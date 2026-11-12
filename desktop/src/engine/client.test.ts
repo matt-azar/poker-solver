@@ -62,21 +62,20 @@ describe("EngineClient Slice A IPC branches", () => {
   it("routes continueSolve over IPC as solve without begin_config", async () => {
     invoke.mockResolvedValueOnce(
       okBody("solve", {
+        accepted: true,
+        running: true,
         solution_id: 1,
-        policy_revision: 4,
-        trained: 15,
-        terminal_reason: "completed",
         async: true,
+        threads: 1,
       }),
     );
     const reply = await client.continueSolve("s1", { iterations: 5, time_limit: 30 });
     expect(reply).toMatchObject({
-      running: false,
+      running: true,
       job_id: "j1",
       solution_id: "s1",
-      policy_revision: 4,
-      trained: 15,
-      terminal_reason: "completed",
+      trained: 0,
+      terminal_reason: "admitted",
       transport: "ipc",
     });
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -90,11 +89,11 @@ describe("EngineClient Slice A IPC branches", () => {
   it("routes resolveLocked over IPC as resolve_locked", async () => {
     invoke.mockResolvedValueOnce(
       okBody("resolve_locked", {
+        accepted: true,
+        running: true,
         solution_id: 2,
-        policy_revision: 5,
-        trained: 8,
-        terminal_reason: "completed",
         async: true,
+        threads: 1,
       }),
     );
     const reply = await client.resolveLocked("s1", {
@@ -103,12 +102,11 @@ describe("EngineClient Slice A IPC branches", () => {
       time_limit: 12,
     });
     expect(reply).toMatchObject({
-      running: false,
+      running: true,
       job_id: "j1",
       solution_id: "s2",
-      policy_revision: 5,
-      trained: 8,
-      terminal_reason: "completed",
+      trained: 0,
+      terminal_reason: "admitted",
       transport: "ipc",
       warm_start: "reset",
     });
@@ -116,6 +114,39 @@ describe("EngineClient Slice A IPC branches", () => {
       op: "resolve_locked",
       body: { iterations: 8, warm_start: 0, time_limit: 12 },
       jobId: "j1",
+    });
+  });
+
+  it("admits solve quickly and leaves completion to status polling", async () => {
+    invoke
+      .mockResolvedValueOnce(okBody("begin_config", { solution_id: 3 }))
+      .mockResolvedValueOnce(
+        okBody("solve", {
+          accepted: true,
+          running: true,
+          solution_id: 3,
+          async: true,
+          threads: 2,
+        }),
+      );
+    const reply = await client.solve({
+      board: ["Ah", "Kd", "7c"],
+      pot: 100,
+      stack: 200,
+      oop_range: "AA",
+      ip_range: "KK",
+      oop_bets: [],
+      ip_bets: [],
+      iterations: 200,
+      memory_mib: 1024,
+      threads: 2,
+    });
+    expect(reply).toMatchObject({
+      running: true,
+      job_id: "j1",
+      solution_id: "s3",
+      terminal_reason: "admitted",
+      transport: "ipc",
     });
   });
 

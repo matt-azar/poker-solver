@@ -36,8 +36,22 @@ const PROTOCOL: u32 = 2;
 const SIDECAR_BASENAME: &str = "solver-engine";
 const EXTERNAL_BIN: &str = "binaries/solver-engine";
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
-/// Sync host train can be long on flop fixtures; keep bounded (prefs / D12 digs).
+/// Default RPC budget (status / node / most ops).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(240);
+/// `begin_config` can compile a flop tree for a while on the stdin loop.
+const BEGIN_CONFIG_TIMEOUT: Duration = Duration::from_secs(600);
+/// Legacy completion-shaped train replies (pre short-admit clients). Host now
+/// admits `solve` / `resolve_locked` immediately; keep a long ceiling so a
+/// completion-shaped sidecar cannot brick Study at 240s on flop (ZR-106).
+const TRAIN_RPC_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
+
+fn timeout_for_op(op: &str) -> Duration {
+    match op {
+        "solve" | "resolve_locked" => TRAIN_RPC_TIMEOUT,
+        "begin_config" => BEGIN_CONFIG_TIMEOUT,
+        _ => REQUEST_TIMEOUT,
+    }
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -563,7 +577,7 @@ pub fn solver_engine_request(
         &op,
         body.unwrap_or(Value::Null),
         job_id,
-        REQUEST_TIMEOUT,
+        timeout_for_op(&op),
     );
     if let Err(err) = &reply {
         // Kill only on pipe/session death. A single RPC timeout must not nuke an

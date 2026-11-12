@@ -255,22 +255,28 @@ export class EngineClient {
         time_limit,
         jobId,
       })) as {
+        accepted?: boolean;
+        running?: boolean;
         solution_id?: number;
         policy_revision?: number;
         trained?: number;
         terminal_reason?: string;
         threads?: number;
       };
+      // Host short-admits train (ZR-90/ZR-106); Study polls status for completion.
+      const admitted = body.accepted === true || body.running === true;
       return {
-        running: false,
+        running: admitted ? true : false,
         job_id: jobId,
         solution_id:
           body.solution_id != null && body.solution_id > 0
             ? `s${body.solution_id}`
             : null,
         policy_revision: body.policy_revision ?? 0,
-        trained: body.trained ?? iterations,
-        terminal_reason: body.terminal_reason ?? "completed",
+        trained: admitted ? 0 : (body.trained ?? iterations),
+        terminal_reason: admitted
+          ? "admitted"
+          : (body.terminal_reason ?? "completed"),
         threads: body.threads,
         transport: "ipc",
       };
@@ -336,22 +342,27 @@ export class EngineClient {
         time_limit,
         jobId,
       })) as {
+        accepted?: boolean;
+        running?: boolean;
         solution_id?: number;
         policy_revision?: number;
         trained?: number;
         terminal_reason?: string;
         threads?: number;
       };
+      const admitted = reply.accepted === true || reply.running === true;
       return {
-        running: false,
+        running: admitted ? true : false,
         job_id: jobId,
         solution_id:
           reply.solution_id != null && reply.solution_id > 0
             ? `s${reply.solution_id}`
             : solutionId,
         policy_revision: reply.policy_revision ?? 0,
-        trained: reply.trained ?? iterations,
-        terminal_reason: reply.terminal_reason ?? "completed",
+        trained: admitted ? 0 : (reply.trained ?? iterations),
+        terminal_reason: admitted
+          ? "admitted"
+          : (reply.terminal_reason ?? "completed"),
         threads: reply.threads,
         transport: "ipc",
       };
@@ -401,22 +412,27 @@ export class EngineClient {
         time_limit,
         jobId,
       })) as {
+        accepted?: boolean;
+        running?: boolean;
         solution_id?: number;
         policy_revision?: number;
         trained?: number;
         terminal_reason?: string;
         threads?: number;
       };
+      const admitted = reply.accepted === true || reply.running === true;
       return {
-        running: false,
+        running: admitted ? true : false,
         job_id: jobId,
         solution_id:
           reply.solution_id != null && reply.solution_id > 0
             ? `s${reply.solution_id}`
             : solutionId,
         policy_revision: reply.policy_revision ?? 0,
-        trained: reply.trained ?? iterations,
-        terminal_reason: reply.terminal_reason ?? "completed",
+        trained: admitted ? 0 : (reply.trained ?? iterations),
+        terminal_reason: admitted
+          ? "admitted"
+          : (reply.terminal_reason ?? "completed"),
         threads: reply.threads,
         transport: "ipc",
         warm_start: body.warm_start ? "continue" : "reset",
