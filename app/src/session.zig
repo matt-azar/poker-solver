@@ -37,6 +37,8 @@ pub const Session = struct {
     metrics: Metrics = .{},
     has_metrics: bool = false,
     frozen: bool = false,
+    /// Shared worker budget for frozen chance steal (D3). From config `threads` or host override.
+    threads: u32 = 1,
 
     pub fn init(allocator: std.mem.Allocator) Session {
         return .{ .allocator = allocator };
@@ -75,7 +77,18 @@ pub const Session = struct {
         self.metrics = .{};
         self.has_metrics = false;
         self.frozen = false;
+        self.threads = 1;
         self.phase = .idle;
+    }
+
+    fn clampThreads(threads: i32) u32 {
+        if (threads < 1) return 1;
+        return @intCast(@min(threads, 64));
+    }
+
+    /// Override worker count (host D3 budget). Clamped to 1..64.
+    pub fn setThreads(self: *Session, threads: u32) void {
+        self.threads = if (threads < 1) 1 else @min(threads, 64);
     }
 
     /// Begin a new solve from street-config text. On failure, prior solution is kept.
@@ -90,12 +103,14 @@ pub const Session = struct {
         errdefer training.deinit();
         const owned_config = self.allocator.dupe(u8, config_text) catch return error.OutOfMemory;
         errdefer self.allocator.free(owned_config);
+        const threads = clampThreads(spec.threads);
 
         // Install only after compile+train tables succeed (fail-closed).
         self.clearSolution();
         self.config_text = owned_config;
         self.game = game;
         self.training = training;
+        self.threads = threads;
         self.solution_id = self.next_id;
         self.next_id += 1;
         self.baseline_id = 0;
@@ -111,11 +126,12 @@ pub const Session = struct {
         const state = &(self.training orelse return error.InvalidSession);
         self.phase = .training;
         // StreetBatch-style frozen CFR+ (C++ train_frozen_cfr_plus_iterations).
-        const published = try poker_engine.solve.frozen_walk.trainFrozenCfrPlus(
+        const published = try poker_engine.solve.frozen_walk.trainFrozenCfrPlusThreaded(
             self.allocator,
             game,
             state,
             iterations,
+            self.threads,
         );
         if (self.published) |*old| old.deinit();
         self.published = published;
@@ -250,6 +266,7 @@ pub const Session = struct {
         self.frozen = doc.frozen;
         self.metrics = doc.metrics;
         self.has_metrics = doc.has_metrics;
+        self.threads = clampThreads(spec.threads);
         self.solution_id = self.next_id;
         self.next_id += 1;
         self.baseline_id = 0;

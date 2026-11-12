@@ -183,6 +183,10 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         }
         const iterations = bodyIntField(req.body_json, "iterations") orelse 1;
         state.budget.returnToTraining();
+        // D3: train uses the shared training worker budget (manual config may already set Session.threads).
+        if (state.budget.training > 0) {
+            state.session.setThreads(state.budget.training);
+        }
         state.session.train(iterations) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "solve_failed", @errorName(err));
         };
