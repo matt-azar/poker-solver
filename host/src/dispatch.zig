@@ -281,8 +281,9 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         const elapsed_ns = std.time.nanoTimestamp() - t0;
         const elapsed_ms = @divTrunc(elapsed_ns, 1_000_000);
         // Summary page for Study latency (full hand×action tables are a follow-on).
-        var buf: [384]u8 = undefined;
-        const body = try std.fmt.bufPrint(&buf, "{{\"node_index\":{d},\"player\":{d},\"policy_revision\":{d},\"units\":\"chips\",\"utility_basis\":\"root_centered\",\"local_offset\":{d:.6},\"node_ev_defined\":{},\"node_ev\":{d:.6},\"n_hands\":{d},\"n_actions\":{d},\"elapsed_ms\":{d},\"solution_id\":\"s{d}\"}}", .{
+        // Root uses frozen response_walk; see action_ev.actionValues.
+        var buf: [448]u8 = undefined;
+        const body = try std.fmt.bufPrint(&buf, "{{\"node_index\":{d},\"player\":{d},\"policy_revision\":{d},\"units\":\"chips\",\"utility_basis\":\"root_centered\",\"local_offset\":{d:.6},\"node_ev_defined\":{},\"node_ev\":{d:.6},\"n_hands\":{d},\"n_actions\":{d},\"elapsed_ms\":{d},\"solution_id\":\"s{d}\",\"engine\":\"frozen_response_walk\"}}", .{
             page.node_index,
             page.player,
             page.policy_revision,

@@ -14,9 +14,8 @@ what to run and what must stay blocked.
 | Phase exit gates | `zig-phase-checklist.md` |
 | Parity / oracle log | `zig-parity-oracle-log.md` |
 
-Do **not** claim Windows shipping cutover from this scaffolding. The Zig Study
-path prefers `solver-engine` typed IPC; HTTP `holdem-explorer` is only a
-temporary labeled fallback until cutover GO.
+Do **not** claim Windows shipping cutover from this scaffolding. Stable Study
+still speaks HTTP to `holdem-explorer`.
 
 ## Locked fixtures (D12)
 
@@ -70,10 +69,10 @@ Do **not** wait forever on flop-scale trains:
 | --- | --- | --- |
 | River / smoke (`river_gate_smoke.txt`) | ≤ 60 s | `scripts/zig/run-gate-bounded.sh 60 …` |
 | Flop `flop_srp_one_size` warm fixed-iter | ≤ 180 s (then kill + escalate) | same wrapper / C++ `--time-limit` |
-| Flop `flop_srp_one_size` Study node-EV (IPC) | train ≤ 180 s + values ≤ 60 s | `scripts/zig/node-ev-latency.py` |
+| Flop `flop_srp_one_size` Study node-EV (IPC) | train ≤ 120 s + values ≤ 180 s | `scripts/zig/node-ev-latency.py` (root = frozen `response_walk`) |
 | Flop cold Accuracy/pot ≤ 0.001 | dedicated Windows Release machine; not an agent dig | — |
-| `flop_srp_two_sizes` train | needs ≥ ~6.5 GiB plan peak; skip if host RAM tight | plan-memory first |
+| `flop_srp_two_sizes` train | plan peak ~2.63 GiB with flop-only `oop-flop-bets`/`ip-flop-bets`; skip if host RAM tight | plan-memory first |
 
-Harness: `zig-out/bin/gate-bench` (Zig Session CFR+) and C++ `street_solver`.
-Node-EV dig: `python3 scripts/zig/node-ev-latency.py` after `zig build`.
+Harness: `zig-out/bin/gate-bench` (Zig Session frozen CFR+; NashConv via frozen
+`response_walk`). Prefer `--skip-eval` only when measuring train wall alone.
 Linux numbers are interim only — Windows Release remains authoritative.
