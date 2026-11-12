@@ -189,19 +189,19 @@ pub fn actionValuesFrozen(
     return page;
 }
 
-/// True when every multi-action decision on the path to `target` is card_mode 0
-/// (hand-only slots). Enables opponent betting-path reach without turn/river keys.
-fn pathDecisionsAreMode0(game: compile.CompiledGame, target: u32) bool {
-    var cur = target;
-    while (true) {
-        const n = game.nodes[cur];
-        if (n.kind == .decision and n.n_actions > 1 and n.card_mode != 0) return false;
-        if (n.parent < 0) return true;
-        cur = @intCast(n.parent);
+/// True when `deal` holes collide with a fixed turn and/or river (C++ oracle skip).
+fn dealConflictsFixedCards(deal: compile.Deal, turn: i32, river: i32) bool {
+    if (turn >= 0) {
+        if (deal.c0 == turn or deal.c1 == turn or deal.d0 == turn or deal.d1 == turn) return true;
     }
+    if (river >= 0) {
+        if (deal.c0 == river or deal.c1 == river or deal.d0 == river or deal.d1 == river) return true;
+    }
+    return false;
 }
 
 /// Opponent average-policy mass along betting edges to `target` (hero reach omitted).
+/// Uses `cardKey` so card_mode ≠ 0 ancestors work when turn/river are fixed for the query.
 fn opponentBettingReach(
     game: compile.CompiledGame,
     sigma: []const f32,
@@ -302,12 +302,14 @@ pub fn actionValuesDealByDeal(
     defer allocator.free(mass);
     @memset(mass, 0);
 
-    // Non-root river (mode-0 path): weight deals by opponent betting reach so
-    // facing-Bet Call EV matches C++ q_opp posterior (MATHEMATICS.md Q_i).
-    const weight_by_opp_reach = node_index != 0 and pathDecisionsAreMode0(game, node_index);
+    // Non-root: weight deals by opponent betting reach so facing-Bet Call EV
+    // matches C++ q_opp posterior (MATHEMATICS.md Q_i). card_mode ≠ 0 ancestors
+    // need the query's turn/river fixed (same as C++ StreetGame oracle).
+    const weight_by_opp_reach = node_index != 0;
 
     var reach_mass: f64 = 0;
     for (game.deals) |deal| {
+        if (dealConflictsFixedCards(deal, turn, river)) continue;
         const hero_hand: i32 = if (node.player == 0) deal.h0 else deal.h1;
         if (hero_hand < 0 or @as(usize, @intCast(hero_hand)) >= hands) continue;
         const opp_w: f64 = if (weight_by_opp_reach)

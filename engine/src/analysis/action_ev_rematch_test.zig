@@ -1,5 +1,6 @@
 //! Action-EV rematch pins vs tip C++ `tests/unit/test_action_ev.cpp`
-//! (`test_river_bluff_fixture`, `test_local_offset_includes_street_contrib_after_call`).
+//! (`test_river_bluff_fixture`, `test_local_offset_includes_street_contrib_after_call`,
+//! flop→turn card_mode≠0 reach conditioning).
 const std = @import("std");
 const compile = @import("../game/compile.zig");
 const street_config = @import("../game/street_config.zig");
@@ -63,11 +64,13 @@ fn setNamedAverage(
     average: []f32,
     node_index: u32,
     hand: usize,
+    turn: i32,
+    river: i32,
     named: []const NamedProb,
 ) !void {
     const node = game.nodes[node_index];
     if (node.kind != .decision or node.n_actions <= 1) return error.TestUnexpectedResult;
-    const key = try game.cardKey(node, @intCast(hand), -1, -1);
+    const key = try game.cardKey(node, @intCast(hand), turn, river);
     if (key < 0 or @as(usize, @intCast(key)) >= node.slot_of.len) return error.TestUnexpectedResult;
     const slot_i = node.slot_of[@intCast(key)];
     if (slot_i < 0) return error.TestUnexpectedResult;
@@ -114,18 +117,18 @@ fn installRiverBluff(
     const nuts = try findGameHand(game, 0, "Kc", "Ks");
     const air = try findGameHand(game, 0, "2c", "3d");
     const aces = try findGameHand(game, 1, "Ah", "Ad");
-    try setNamedAverage(game, average, 0, nuts, &.{
+    try setNamedAverage(game, average, 0, nuts, -1, -1, &.{
         .{ .prefix = "Check", .p = 0.0 },
         .{ .prefix = "Bet", .p = 1.0 },
     });
-    try setNamedAverage(game, average, 0, air, &.{
+    try setNamedAverage(game, average, 0, air, -1, -1, &.{
         .{ .prefix = "Check", .p = 1.0 - air_shove },
         .{ .prefix = "Bet", .p = air_shove },
     });
     const root = game.nodes[0];
     const bet = findAction(root.action_labels[0..root.n_actions], "Bet") orelse return error.TestUnexpectedResult;
     const facing: u32 = root.child[bet];
-    try setNamedAverage(game, average, facing, aces, &.{
+    try setNamedAverage(game, average, facing, aces, -1, -1, &.{
         .{ .prefix = "Fold", .p = 1.0 - ip_call },
         .{ .prefix = "Call", .p = ip_call },
     });
@@ -250,8 +253,8 @@ test "local_offset includes street contrib after bet+call" {
     defer published.deinit();
     const oop = try findGameHand(game, 0, "Ah", "Ad");
     const ip = try findGameHand(game, 1, "Kc", "Kd");
-    try setNamedAverage(game, published.average, 0, oop, &.{.{ .prefix = "Bet", .p = 1.0 }});
-    try setNamedAverage(game, published.average, facing_idx, ip, &.{.{ .prefix = "Call", .p = 1.0 }});
+    try setNamedAverage(game, published.average, 0, oop, -1, -1, &.{.{ .prefix = "Bet", .p = 1.0 }});
+    try setNamedAverage(game, published.average, facing_idx, ip, -1, -1, &.{.{ .prefix = "Call", .p = 1.0 }});
 
     // Pick a concrete turn card for deal-by-deal (card_mode ≠ 0 at next street).
     var blocked: [52]bool = .{false} ** 52;
@@ -292,4 +295,145 @@ test "root local_offset is half pot with zero contrib" {
     defer page.deinit();
     try std.testing.expectEqual(@as(i32, 0), game.nodes[0].contrib[0]);
     try std.testing.expectApproxEqAbs(@as(f64, 50.0), page.local_offset, 1e-9);
+}
+
+fn flopCheckOnlyTurnBluffConfig(allocator: std.mem.Allocator) !compile.CompiledGame {
+    // Flop check-only (`oop-bets -` / `ip-bets -`), then turn pot-bet — same chip
+    // numbers as river/turn bluff once turn=4s is fixed (C++ turn_bluff board).
+    const text =
+        \\street-config 1
+        \\board Kh Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range KcKs:1,2c3d:1
+        \\ip-range AhAd:1
+        \\oop-bets -
+        \\ip-bets -
+        \\oop-turn-bets 1
+        \\first-to-act 0
+        \\max-raises 1
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var spec = try street_config.parseStreetConfig(allocator, text);
+    defer spec.deinit();
+    return compile.compile(allocator, spec);
+}
+
+/// Walk chance + single-action decisions until the next multi-action decision.
+fn firstMultiActionDecision(game: compile.CompiledGame, start: u32) !u32 {
+    var cursor = start;
+    var guard: usize = 0;
+    while (guard < 16) : (guard += 1) {
+        const node = game.nodes[cursor];
+        if (node.kind == .terminal) return error.TestUnexpectedResult;
+        if (node.kind == .decision and node.n_actions > 1) return cursor;
+        cursor = node.child[0];
+    }
+    return error.TestUnexpectedResult;
+}
+
+fn installFlopTurnBluff(
+    game: compile.CompiledGame,
+    average: []f32,
+    turn: i32,
+    air_shove: f32,
+    ip_call: f32,
+) !struct { turn_root: u32, facing: u32 } {
+    // Flop is check-only: walk root Check → IP Check → chance → turn OOP (card_mode 1).
+    try std.testing.expect(game.nodes[0].n_actions <= 1);
+    const turn_root = try firstMultiActionDecision(game, 0);
+    const turn_node = game.nodes[turn_root];
+    try std.testing.expect(turn_node.kind == .decision);
+    try std.testing.expect(turn_node.player == 0);
+    try std.testing.expect(turn_node.street == 1);
+    try std.testing.expect(turn_node.card_mode == 1);
+    try std.testing.expect(turn_node.mode1_is_turn);
+
+    const nuts = try findGameHand(game, 0, "Kc", "Ks");
+    const air = try findGameHand(game, 0, "2c", "3d");
+    const aces = try findGameHand(game, 1, "Ah", "Ad");
+    try setNamedAverage(game, average, turn_root, nuts, turn, -1, &.{
+        .{ .prefix = "Check", .p = 0.0 },
+        .{ .prefix = "Bet", .p = 1.0 },
+    });
+    try setNamedAverage(game, average, turn_root, air, turn, -1, &.{
+        .{ .prefix = "Check", .p = 1.0 - air_shove },
+        .{ .prefix = "Bet", .p = air_shove },
+    });
+    const bet = findAction(turn_node.action_labels[0..turn_node.n_actions], "Bet") orelse return error.TestUnexpectedResult;
+    const facing: u32 = turn_node.child[bet];
+    try std.testing.expect(game.nodes[facing].card_mode == 1);
+    try setNamedAverage(game, average, facing, aces, turn, -1, &.{
+        .{ .prefix = "Fold", .p = 1.0 - ip_call },
+        .{ .prefix = "Call", .p = ip_call },
+    });
+    return .{ .turn_root = turn_root, .facing = facing };
+}
+
+test "flop-scale turn bluff mode≠0 reach rematch pins" {
+    // Same Q pins as river/turn bluff, but path includes card_mode=1 decisions so
+    // deal-by-deal must weight q_opp with turn-keyed slots (ZR-53 residual).
+    var game = try flopCheckOnlyTurnBluffConfig(std.testing.allocator);
+    defer game.deinit();
+    const turn = try card.parseCard("4s");
+    var published = try uniformPublished(std.testing.allocator, game);
+    defer published.deinit();
+    const nodes = try installFlopTurnBluff(game, published.average, turn, 0.5, 0.5);
+
+    var page = try action_ev.actionValuesDealByDeal(std.testing.allocator, game, published, nodes.turn_root, turn, -1);
+    defer page.deinit();
+    const nuts = findHand(page.combos, "Kc", "Ks") orelse return error.TestUnexpectedResult;
+    const air = findHand(page.combos, "2c", "3d") orelse return error.TestUnexpectedResult;
+    const check = findAction(page.actions, "Check") orelse return error.TestUnexpectedResult;
+    const shove = findAction(page.actions, "Bet") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(page.ev_defined[nuts] == 1);
+    try std.testing.expect(page.ev_defined[air] == 1);
+    try std.testing.expectApproxEqAbs(@as(f64, 50.0), pageAction(page, nuts, check), 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 100.0), pageAction(page, nuts, shove), 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, -50.0), pageAction(page, air, check), 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, -50.0), pageAction(page, air, shove), 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 100.0), page.mixed_ev[nuts], 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, -50.0), page.mixed_ev[air], 1e-9);
+    try std.testing.expect(page.node_ev_defined);
+    try std.testing.expectApproxEqAbs(@as(f64, 25.0), page.node_ev, 1e-9);
+
+    var response = try action_ev.actionValuesDealByDeal(std.testing.allocator, game, published, nodes.facing, turn, -1);
+    defer response.deinit();
+    const aces = findHand(response.combos, "Ah", "Ad") orelse return error.TestUnexpectedResult;
+    const fold = findAction(response.actions, "Fold") orelse return error.TestUnexpectedResult;
+    const call = findAction(response.actions, "Call") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(response.player == 1);
+    try std.testing.expect(response.ev_defined[aces] == 1);
+    try std.testing.expectApproxEqAbs(@as(f64, -50.0), pageAction(response, aces, fold), 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, -50.0), pageAction(response, aces, call), 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 50.0), response.local_offset, 1e-9);
+}
+
+test "flop-scale pure air-check facing EV needs mode≠0 q_opp" {
+    // Without opponentBettingReach on card_mode=1 path, Call averages Check mass → ~0
+    // instead of −150 (same trap as river ZR-44, now on flop→turn).
+    var game = try flopCheckOnlyTurnBluffConfig(std.testing.allocator);
+    defer game.deinit();
+    const turn = try card.parseCard("4s");
+    var published = try uniformPublished(std.testing.allocator, game);
+    defer published.deinit();
+    const nodes = try installFlopTurnBluff(game, published.average, turn, 0.0, 0.0);
+
+    var forced = try action_ev.actionValuesDealByDeal(std.testing.allocator, game, published, nodes.facing, turn, -1);
+    defer forced.deinit();
+    const aces = findHand(forced.combos, "Ah", "Ad") orelse return error.TestUnexpectedResult;
+    const fold = findAction(forced.actions, "Fold") orelse return error.TestUnexpectedResult;
+    const call = findAction(forced.actions, "Call") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(forced.ev_defined[aces] == 1);
+    try std.testing.expectApproxEqAbs(@as(f64, -50.0), pageAction(forced, aces, fold), 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, -150.0), pageAction(forced, aces, call), 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, -50.0), forced.mixed_ev[aces], 1e-9);
 }
