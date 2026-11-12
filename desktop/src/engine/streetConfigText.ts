@@ -160,13 +160,34 @@ export function formatSolveJobStreetConfig(job: SolveJobRequest): string {
 
 /**
  * Parse `street-config 1` text back into the loose solution-config object
- * `draftPartialFromSolutionConfig` understands (ZR-92 open → Build draft).
+ * `draftPartialFromSolutionConfig` / Apply template understand (ZR-92 / ZR-86).
+ *
+ * Always sets Apply-ready fields: `kind: "street"`, `tree_edits`, `incentives`,
+ * and `edge_tags`. Throws on empty text or a missing `street-config 1` header.
  */
 export function parseStreetConfigTextToSolutionConfig(
   text: string,
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = { street_config_text: text };
+  if (!text.trim()) {
+    throw new Error("invalid street-config: empty text");
+  }
+
+  const out: Record<string, unknown> = {
+    kind: "street",
+    street_config_text: text,
+  };
   const treeEdits: string[] = [];
+  const incentives: Array<{
+    kind: "label" | "tag";
+    player: number;
+    key: string;
+    delta: number;
+  }> = [];
+  const edgeTags: Array<{
+    player?: number;
+    action: string;
+    tags: string[];
+  }> = [];
   const sizeKeys: Record<string, string> = {
     "oop-bets": "oop_bets",
     "ip-bets": "ip_bets",
@@ -189,9 +210,19 @@ export function parseStreetConfigTextToSolutionConfig(
     "oop-turn-donk": "oop_turn_donk",
     "oop-river-donk": "oop_river_donk",
   };
+
+  let sawHeader = false;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
-    if (!line || line.startsWith("#") || line.startsWith("street-config")) continue;
+    if (!line || line.startsWith("#")) continue;
+    if (!sawHeader) {
+      if (line !== "street-config 1") {
+        throw new Error("invalid street-config: expected street-config 1 header");
+      }
+      sawHeader = true;
+      continue;
+    }
+    if (line.startsWith("street-config")) continue;
     const sp = line.indexOf(" ");
     const key = sp < 0 ? line : line.slice(0, sp);
     const value = sp < 0 ? "" : line.slice(sp + 1).trim();
@@ -239,6 +270,32 @@ export function parseStreetConfigTextToSolutionConfig(
           .filter(Boolean)
           .map(Number);
         break;
+      case "incentive": {
+        const tokens = value.split(/[\s,]+/).filter(Boolean);
+        if (tokens.length !== 4) break;
+        const kind = tokens[0];
+        if (kind !== "label" && kind !== "tag") break;
+        const player = Number(tokens[1]);
+        const delta = Number(tokens[3]);
+        if (!Number.isFinite(player) || !tokens[2] || !Number.isFinite(delta)) break;
+        incentives.push({ kind, player, key: tokens[2], delta });
+        break;
+      }
+      case "edge-tag": {
+        const tokens = value.split(/[\s,]+/).filter(Boolean);
+        if (tokens.length < 2) break;
+        let player: number | undefined;
+        let actionAt = 0;
+        if ((tokens[0] === "0" || tokens[0] === "1") && tokens.length >= 3) {
+          player = Number(tokens[0]);
+          actionAt = 1;
+        }
+        const action = tokens[actionAt];
+        const tags = tokens.slice(actionAt + 1);
+        if (!action || tags.length === 0) break;
+        edgeTags.push(player != null ? { player, action, tags } : { action, tags });
+        break;
+      }
       case "tree-edit":
         if (value) treeEdits.push(value);
         break;
@@ -252,6 +309,11 @@ export function parseStreetConfigTextToSolutionConfig(
       }
     }
   }
-  if (treeEdits.length > 0) out.tree_edits = treeEdits;
+  if (!sawHeader) {
+    throw new Error("invalid street-config: expected street-config 1 header");
+  }
+  out.tree_edits = treeEdits;
+  out.incentives = incentives;
+  out.edge_tags = edgeTags;
   return out;
 }

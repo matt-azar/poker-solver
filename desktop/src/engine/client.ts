@@ -672,11 +672,17 @@ export class EngineClient {
 
   async parseConfig(text: string): Promise<Record<string, unknown>> {
     if (isIpcTransport()) {
-      throw new EngineError(
-        "parseConfig is not available over solver-engine IPC yet (Library apply-template residual)",
-        501,
-        null,
-      );
+      // Client-side only: templates are already local text; reuse the TS parser
+      // (no host op / no solver_engine_request).
+      try {
+        return parseStreetConfigTextToSolutionConfig(text);
+      } catch (err) {
+        throw new EngineError(
+          err instanceof Error ? err.message : String(err),
+          400,
+          null,
+        );
+      }
     }
     const { response, data } = await this.request("POST", "/api/config", { text });
     this.ensureOk(response, data);
