@@ -9,3 +9,7 @@ pub const parseStreetConfig = street_config.parseStreetConfig;
 pub const formatStreetConfig = street_config.formatStreetConfig;
 pub const CompiledGame = compile.CompiledGame;
 pub const compileGame = compile.compile;
+
+test {
+    _ = @import("tree_shape_parity_test.zig");
+}
