@@ -4,7 +4,12 @@ import {
 } from "../engine/ipcCapabilities";
 import { validateSetupForSolve } from "../domain/setup";
 import { solveControlFlags } from "../domain/solveControls";
-import type { NodePayload, SolvePhase, SpotDraft } from "../domain/types";
+import type {
+  NodePayload,
+  SolvePhase,
+  SpotDraft,
+  StatusPayload,
+} from "../domain/types";
 
 export type StudyWorkspaceId = "study" | "build" | "compare" | "library" | "equity";
 
@@ -16,6 +21,28 @@ export interface StudyCommandContext {
   currentNode: NodePayload | null;
   /** Cleared on successful launch; nonempty after client validation failure. */
   solveValidationErrors?: string[];
+  /**
+   * Host continuation capability (`status.can_continue` / `has_training`).
+   * `null` = unknown (no status / legacy body) — phase gate only.
+   * `false` = browse-only / trainer absent — Continue must stay disabled (ZR-96/115).
+   */
+  canContinueTraining?: boolean | null;
+}
+
+/** Map host status trainer flags into Continue eligibility. */
+export function trainerContinueFromStatus(
+  status: StatusPayload | null | undefined,
+): boolean | null {
+  if (!status) {
+    return null;
+  }
+  if (typeof status.can_continue === "boolean") {
+    return status.can_continue;
+  }
+  if (typeof status.has_training === "boolean") {
+    return status.has_training;
+  }
+  return null;
 }
 
 export interface CommandEligibility {
@@ -61,6 +88,12 @@ export function canExecuteContinue(ctx: StudyCommandContext): CommandEligibility
   }
   if (!ctx.solutionId) {
     return eligible(false, "Solve first");
+  }
+  if (ctx.canContinueTraining === false) {
+    return eligible(
+      false,
+      "This solution has no trainer state (browse-only checkpoint)",
+    );
   }
   return eligible(true, "Resume or add iterations to the current solution");
 }
@@ -362,6 +395,7 @@ export function studyCommandContextFromStore(state: {
   workspace: StudyWorkspaceId;
   currentNode: NodePayload | null;
   solveValidationErrors: string[];
+  status?: StatusPayload | null;
 }): StudyCommandContext {
   return {
     phase: state.phase,
@@ -370,5 +404,6 @@ export function studyCommandContextFromStore(state: {
     workspace: state.workspace,
     currentNode: state.currentNode,
     solveValidationErrors: state.solveValidationErrors,
+    canContinueTraining: trainerContinueFromStatus(state.status),
   };
 }

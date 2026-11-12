@@ -1,9 +1,19 @@
 import {
+  canExecuteContinue,
+  canExecutePause,
+  canExecuteSolve,
+  canExecuteStop,
+  executeContinue,
+  executePause,
+  executeSolve,
+  executeStop,
+  studyCommandContextFromStore,
+} from "../../commands/studyCommands";
+import {
   engineActivityMessage,
   phaseLabel,
   statusMetrics,
 } from "../../domain/solveActivity";
-import { solveControlFlags } from "../../domain/solveControls";
 import type { SolvePhase, StatusPayload } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
 
@@ -24,7 +34,36 @@ export function StatusBar({ message, connection, phase, status, onReconnect }: P
   const pause = useStudyStore((s) => s.pause);
   const stop = useStudyStore((s) => s.stop);
   const continueSolve = useStudyStore((s) => s.continueSolve);
-  const { canSolve, canContinue, canPause, canStop } = solveControlFlags(phase);
+  const draft = useStudyStore((s) => s.draft);
+  const solutionId = useStudyStore((s) => s.solutionId);
+  const workspace = useStudyStore((s) => s.workspace);
+  const currentNode = useStudyStore((s) => s.currentNode);
+  const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
+
+  const commandCtx = studyCommandContextFromStore({
+    phase,
+    draft,
+    solutionId,
+    workspace,
+    currentNode,
+    solveValidationErrors,
+    status: status ?? null,
+  });
+  const solveGate = canExecuteSolve(commandCtx);
+  const continueGate = canExecuteContinue(commandCtx);
+  const pauseGate = canExecutePause(commandCtx);
+  const stopGate = canExecuteStop(commandCtx);
+
+  function commandDeps() {
+    return {
+      getContext: () =>
+        studyCommandContextFromStore({
+          ...useStudyStore.getState(),
+          status: useStudyStore.getState().status,
+        }),
+    };
+  }
+
   const live =
     phase === "solving" ||
     phase === "building" ||
@@ -46,36 +85,38 @@ export function StatusBar({ message, connection, phase, status, onReconnect }: P
         <button
           type="button"
           className="toolbar-btn primary"
-          disabled={!canSolve}
-          title="Start solve"
-          onClick={() => void solve()}
+          disabled={!solveGate.ok}
+          title={solveGate.reason}
+          onClick={() => void executeSolve({ ...commandDeps(), solve })}
         >
           Solve
         </button>
         <button
           type="button"
           className="toolbar-btn"
-          disabled={!canContinue}
-          title="Continue solve"
-          onClick={() => void continueSolve()}
+          disabled={!continueGate.ok}
+          title={continueGate.reason}
+          onClick={() =>
+            void executeContinue({ ...commandDeps(), continueSolve })
+          }
         >
           Continue
         </button>
         <button
           type="button"
           className="toolbar-btn"
-          disabled={!canPause}
-          title="Pause solve"
-          onClick={() => void pause()}
+          disabled={!pauseGate.ok}
+          title={pauseGate.reason}
+          onClick={() => void executePause({ ...commandDeps(), pause })}
         >
           Pause
         </button>
         <button
           type="button"
           className="toolbar-btn danger"
-          disabled={!canStop}
-          title="Stop solve"
-          onClick={() => void stop()}
+          disabled={!stopGate.ok}
+          title={stopGate.reason}
+          onClick={() => void executeStop({ ...commandDeps(), stop })}
         >
           Stop
         </button>

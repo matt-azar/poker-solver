@@ -70,6 +70,7 @@ export function MenuBar({
   const phase = useStudyStore((s) => s.phase);
   const draft = useStudyStore((s) => s.draft);
   const solutionId = useStudyStore((s) => s.solutionId);
+  const status = useStudyStore((s) => s.status);
   const storeWorkspace = useStudyStore((s) => s.workspace);
   const currentNode = useStudyStore((s) => s.currentNode);
   const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
@@ -169,6 +170,7 @@ export function MenuBar({
     workspace: storeWorkspace,
     currentNode,
     solveValidationErrors,
+    status,
   });
   const solveGate = canExecuteSolve(commandCtx);
   const continueGate = canExecuteContinue(commandCtx);

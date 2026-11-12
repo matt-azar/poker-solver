@@ -10,6 +10,7 @@ export function SolveControls() {
   const phase = useStudyStore((s) => s.phase);
   const solutionId = useStudyStore((s) => s.solutionId);
   const draft = useStudyStore((s) => s.draft);
+  const status = useStudyStore((s) => s.status);
   const workspace = useStudyStore((s) => s.workspace);
   const currentNode = useStudyStore((s) => s.currentNode);
   const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
@@ -24,6 +25,7 @@ export function SolveControls() {
     workspace,
     currentNode,
     solveValidationErrors,
+    status,
   });
   const saveGate = canExecuteSave(ctx);
 
