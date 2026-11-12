@@ -136,6 +136,11 @@ pub const Session = struct {
         return deal_bytes + slot_bytes + node_bytes + table_bytes + overhead;
     }
 
+    /// f32 published averages (CFR normalizeAverage) need a looser sum check than
+    /// f64 lock rows (`lock_prob_sum_tolerance` = 1e-12). Reject NaN/negatives and
+    /// gross corruption; allow normal f32 rounding error so save→open continues.
+    const average_row_sum_tolerance: f64 = 1e-5;
+
     fn validateAveragePolicy(
         game: poker_engine.game.compile.CompiledGame,
         average: []const f32,
@@ -146,15 +151,14 @@ pub const Session = struct {
             if (n_actions == 0) continue;
             const base: usize = @intCast(slot.base);
             if (base + n_actions > average.len) return false;
-            var probs: [8]f64 = undefined;
-            if (n_actions > probs.len) return false;
+            var sum: f64 = 0;
             var a: usize = 0;
             while (a < n_actions) : (a += 1) {
-                probs[a] = average[base + a];
+                const p: f64 = average[base + a];
+                if (!std.math.isFinite(p) or p < 0.0) return false;
+                sum += p;
             }
-            if (!poker_engine.solve.node_lock.validateActionRow(probs[0..n_actions], @intCast(n_actions))) {
-                return false;
-            }
+            if (@abs(sum - 1.0) > average_row_sum_tolerance) return false;
         }
         return true;
     }

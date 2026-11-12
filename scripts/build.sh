@@ -12,10 +12,12 @@ zig build -Doptimize="${ZIG_OPTIMIZE:-ReleaseFast}" -Dcpu="${CPU}"
 zig build test -Dcpu="${CPU}"
 
 if [[ -x ./zig-out/bin/solver-engine ]]; then
-  python3 scripts/zig/ready-smoke.py ./zig-out/bin/solver-engine
+  BIN=./zig-out/bin/solver-engine
 elif [[ -x ./zig-out/bin/solver-engine.exe ]]; then
-  python3 scripts/zig/ready-smoke.py ./zig-out/bin/solver-engine.exe
+  BIN=./zig-out/bin/solver-engine.exe
 else
   echo "solver-engine missing under zig-out/bin" >&2
   exit 1
 fi
+python3 scripts/zig/ready-smoke.py "$BIN"
+python3 scripts/zig/study-contract-smoke.py "$BIN"
