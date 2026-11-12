@@ -908,6 +908,9 @@ pub const FrozenCtx = struct {
         }
     }
 
+    /// `needed_player`: -1 both seats; 0 only ev0; 1 only ev1.
+    /// Unilateral BR eval only consumes the responding seat's utility, so skip the
+    /// other showdown/fold side (C++ still computes both; Zig may skip).
     fn applyTerminal(
         self: *FrozenCtx,
         w: *WorkerLocal,
@@ -919,14 +922,17 @@ pub const FrozenCtx = struct {
         ev0: []f64,
         ev1: []f64,
         stable: bool,
+        needed_player: i32,
     ) FrozenError!void {
         self.ensureBoardSupport(w, turn, river);
+        const need0 = needed_player < 0 or needed_player == 0;
+        const need1 = needed_player < 0 or needed_player == 1;
+        // Always clear both: unused side must stay zero so chance/decision
+        // reductions never accumulate stale scratch from a prior card.
         @memset(ev0, 0);
         @memset(ev1, 0);
 
         if (node.folded >= 0) {
-            const total0 = self.collectReach(w, 0, pi0, w.amount0, &w.by_card0);
-            const total1 = self.collectReach(w, 1, pi1, w.amount1, &w.by_card1);
             var paid = try payoff.chipTerminal(
                 self.game.pot,
                 node.contrib[0],
@@ -937,23 +943,30 @@ pub const FrozenCtx = struct {
             );
             paid.utility[0] += node.incentive_u0;
             paid.utility[1] += node.incentive_u1;
-            for (w.idx0[0..w.idx0_len]) |h0u| {
-                const h0: usize = h0u;
-                const open = total1 - self.blockedReach(0, h0, &w.by_card1, w.amount1);
-                ev0[h0] = paid.utility[0] * self.game.hands.range_w[0][h0] * self.joint_scale * open;
+            if (need0) {
+                const total1 = self.collectReach(w, 1, pi1, w.amount1, &w.by_card1);
+                for (w.idx0[0..w.idx0_len]) |h0u| {
+                    const h0: usize = h0u;
+                    const open = total1 - self.blockedReach(0, h0, &w.by_card1, w.amount1);
+                    ev0[h0] = paid.utility[0] * self.game.hands.range_w[0][h0] * self.joint_scale * open;
+                }
             }
-            for (w.idx1[0..w.idx1_len]) |h1u| {
-                const h1: usize = h1u;
-                const open = total0 - self.blockedReach(1, h1, &w.by_card0, w.amount0);
-                ev1[h1] = paid.utility[1] * self.game.hands.range_w[1][h1] * self.joint_scale * open;
+            if (need1) {
+                const total0 = self.collectReach(w, 0, pi0, w.amount0, &w.by_card0);
+                for (w.idx1[0..w.idx1_len]) |h1u| {
+                    const h1: usize = h1u;
+                    const open = total0 - self.blockedReach(1, h1, &w.by_card0, w.amount0);
+                    ev1[h1] = paid.utility[1] * self.game.hands.range_w[1][h1] * self.joint_scale * open;
+                }
             }
             return;
         }
 
         // Ordered prefix/block showdown (C++ showdown_side) — O(n) per side, not O(n0·n1).
         const ranks = try self.ensureRanks(turn, river);
-        _ = self.collectReach(w, 0, pi0, w.amount0, null);
-        _ = self.collectReach(w, 1, pi1, w.amount1, null);
+        // Each hero side only needs opponent amounts.
+        if (need0) _ = self.collectReach(w, 1, pi1, w.amount1, null);
+        if (need1) _ = self.collectReach(w, 0, pi0, w.amount0, null);
 
         const win_u = blk: {
             const p = try payoff.chipTerminal(self.game.pot, node.contrib[0], node.contrib[1], -1, 1, self.game.rake);
@@ -968,9 +981,13 @@ pub const FrozenCtx = struct {
             break :blk [2]f64{ p.utility[0] + node.incentive_u0, p.utility[1] + node.incentive_u1 };
         };
 
-        try self.showdownSide(w, 0, ranks, win_u[0], lose_u[0], tie_u[0], w.amount1, ev0, stable);
+        if (need0) {
+            try self.showdownSide(w, 0, ranks, win_u[0], lose_u[0], tie_u[0], w.amount1, ev0, stable);
+        }
         // Pass player-1 utilities: showdownSide swaps win/lose for hero 1.
-        try self.showdownSide(w, 1, ranks, win_u[1], lose_u[1], tie_u[1], w.amount0, ev1, stable);
+        if (need1) {
+            try self.showdownSide(w, 1, ranks, win_u[1], lose_u[1], tie_u[1], w.amount0, ev1, stable);
+        }
     }
 
     pub fn walk(
@@ -989,8 +1006,8 @@ pub const FrozenCtx = struct {
         const here = &w.scratch[depth];
 
         if (node.kind == .terminal) {
-            // Train path: stable=false (C++ frozen_walk).
-            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1, false);
+            // Train path: stable=false (C++ frozen_walk); both seats.
+            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1, false, -1);
             return;
         }
 
@@ -1213,8 +1230,9 @@ pub const FrozenCtx = struct {
         const here = &w.scratch[depth];
 
         if (node.kind == .terminal) {
-            // Response/eval path: stable=true (C++ response_walk).
-            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1, true);
+            // Match C++ response_walk: stable=false. Pass responding so unilateral
+            // BR can skip the unused seat's showdown/fold side.
+            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1, false, responding);
             return;
         }
 
@@ -1251,10 +1269,14 @@ pub const FrozenCtx = struct {
                     child.pi1[h1] = if (w.live1[h1]) here.pi1[h1] else 0;
                 }
                 try self.responseWalk(w, node.child[0], next_turn, next_river, depth + 1, responding, sigma, true);
-                h0 = 0;
-                while (h0 < self.n0) : (h0 += 1) here.ev0[h0] += probability * child.ev0[h0];
-                h1 = 0;
-                while (h1 < self.n1) : (h1 += 1) here.ev1[h1] += probability * child.ev1[h1];
+                if (responding < 0 or responding == 0) {
+                    h0 = 0;
+                    while (h0 < self.n0) : (h0 += 1) here.ev0[h0] += probability * child.ev0[h0];
+                }
+                if (responding < 0 or responding == 1) {
+                    h1 = 0;
+                    while (h1 < self.n1) : (h1 += 1) here.ev1[h1] += probability * child.ev1[h1];
+                }
             }
             return;
         }
@@ -1276,8 +1298,16 @@ pub const FrozenCtx = struct {
                 }
             }
             try self.responseWalk(w, node.child[0], turn, river, depth + 1, responding, sigma, serial_chance);
-            @memcpy(here.ev0, child.ev0);
-            @memcpy(here.ev1, child.ev1);
+            if (responding < 0 or responding == 0) {
+                @memcpy(here.ev0, child.ev0);
+            } else {
+                @memset(here.ev0, 0);
+            }
+            if (responding < 0 or responding == 1) {
+                @memcpy(here.ev1, child.ev1);
+            } else {
+                @memset(here.ev1, 0);
+            }
             return;
         }
 
@@ -1322,86 +1352,99 @@ pub const FrozenCtx = struct {
                 }
             }
             try self.responseWalk(w, node.child[action], turn, river, depth + 1, responding, sigma, serial_chance);
-            @memcpy(here.aev0[action * self.n0 ..][0..self.n0], child.ev0);
-            @memcpy(here.aev1[action * self.n1 ..][0..self.n1], child.ev1);
+            // Unilateral BR only keeps the responding seat's action EVs.
+            if (responding < 0 or responding == 0) {
+                @memcpy(here.aev0[action * self.n0 ..][0..self.n0], child.ev0);
+            }
+            if (responding < 0 or responding == 1) {
+                @memcpy(here.aev1[action * self.n1 ..][0..self.n1], child.ev1);
+            }
         }
 
         self.ensureBoardSupport(w, turn, river);
-        var h0: usize = 0;
-        while (h0 < self.n0) : (h0 += 1) {
-            if (!w.live0[h0]) {
-                here.ev0[h0] = 0;
-                continue;
-            }
-            if (node.player == 0 and responding == 0) {
-                var best: usize = 0;
-                action = 1;
-                while (action < n_act) : (action += 1) {
-                    if (here.aev0[action * self.n0 + h0] > here.aev0[best * self.n0 + h0]) best = action;
-                }
-                here.ev0[h0] = here.aev0[best * self.n0 + h0];
-            } else if (node.player == 0) {
-                const base = here.slot_base[h0];
-                if (base < 0) {
+        if (responding < 0 or responding == 0) {
+            var h0: usize = 0;
+            while (h0 < self.n0) : (h0 += 1) {
+                if (!w.live0[h0]) {
                     here.ev0[h0] = 0;
                     continue;
                 }
-                const b: usize = @intCast(base);
-                const row = sigma[b .. b + n_act];
-                var mix: f64 = 0;
-                action = 0;
-                while (action < n_act) : (action += 1) {
-                    mix += row[action] * here.aev0[action * self.n0 + h0];
+                if (node.player == 0 and responding == 0) {
+                    var best: usize = 0;
+                    action = 1;
+                    while (action < n_act) : (action += 1) {
+                        if (here.aev0[action * self.n0 + h0] > here.aev0[best * self.n0 + h0]) best = action;
+                    }
+                    here.ev0[h0] = here.aev0[best * self.n0 + h0];
+                } else if (node.player == 0) {
+                    const base = here.slot_base[h0];
+                    if (base < 0) {
+                        here.ev0[h0] = 0;
+                        continue;
+                    }
+                    const b: usize = @intCast(base);
+                    const row = sigma[b .. b + n_act];
+                    var mix: f64 = 0;
+                    action = 0;
+                    while (action < n_act) : (action += 1) {
+                        mix += row[action] * here.aev0[action * self.n0 + h0];
+                    }
+                    here.ev0[h0] = mix;
+                } else if (responding == 1) {
+                    here.ev0[h0] = 0;
+                } else {
+                    var mix: f64 = 0;
+                    action = 0;
+                    while (action < n_act) : (action += 1) {
+                        mix += here.aev0[action * self.n0 + h0];
+                    }
+                    here.ev0[h0] = mix;
                 }
-                here.ev0[h0] = mix;
-            } else if (responding == 1) {
-                here.ev0[h0] = 0;
-            } else {
-                var mix: f64 = 0;
-                action = 0;
-                while (action < n_act) : (action += 1) {
-                    mix += here.aev0[action * self.n0 + h0];
-                }
-                here.ev0[h0] = mix;
             }
+        } else {
+            @memset(here.ev0, 0);
         }
-        var h1: usize = 0;
-        while (h1 < self.n1) : (h1 += 1) {
-            if (!w.live1[h1]) {
-                here.ev1[h1] = 0;
-                continue;
-            }
-            if (node.player == 1 and responding == 1) {
-                var best: usize = 0;
-                action = 1;
-                while (action < n_act) : (action += 1) {
-                    if (here.aev1[action * self.n1 + h1] > here.aev1[best * self.n1 + h1]) best = action;
-                }
-                here.ev1[h1] = here.aev1[best * self.n1 + h1];
-            } else if (node.player == 1) {
-                const base = here.slot_base[h1];
-                if (base < 0) {
+        if (responding < 0 or responding == 1) {
+            var h1: usize = 0;
+            while (h1 < self.n1) : (h1 += 1) {
+                if (!w.live1[h1]) {
                     here.ev1[h1] = 0;
                     continue;
                 }
-                const b: usize = @intCast(base);
-                const row = sigma[b .. b + n_act];
-                var mix: f64 = 0;
-                action = 0;
-                while (action < n_act) : (action += 1) {
-                    mix += row[action] * here.aev1[action * self.n1 + h1];
+                if (node.player == 1 and responding == 1) {
+                    var best: usize = 0;
+                    action = 1;
+                    while (action < n_act) : (action += 1) {
+                        if (here.aev1[action * self.n1 + h1] > here.aev1[best * self.n1 + h1]) best = action;
+                    }
+                    here.ev1[h1] = here.aev1[best * self.n1 + h1];
+                } else if (node.player == 1) {
+                    const base = here.slot_base[h1];
+                    if (base < 0) {
+                        here.ev1[h1] = 0;
+                        continue;
+                    }
+                    const b: usize = @intCast(base);
+                    const row = sigma[b .. b + n_act];
+                    var mix: f64 = 0;
+                    action = 0;
+                    while (action < n_act) : (action += 1) {
+                        mix += row[action] * here.aev1[action * self.n1 + h1];
+                    }
+                    here.ev1[h1] = mix;
+                } else if (responding == 0) {
+                    here.ev1[h1] = 0;
+                } else {
+                    var mix: f64 = 0;
+                    action = 0;
+                    while (action < n_act) : (action += 1) {
+                        mix += here.aev1[action * self.n1 + h1];
+                    }
+                    here.ev1[h1] = mix;
                 }
-                here.ev1[h1] = mix;
-            } else if (responding == 0) {
-                here.ev1[h1] = 0;
-            } else {
-                var mix: f64 = 0;
-                action = 0;
-                while (action < n_act) : (action += 1) {
-                    mix += here.aev1[action * self.n1 + h1];
-                }
-                here.ev1[h1] = mix;
             }
+        } else {
+            @memset(here.ev1, 0);
         }
     }
 
@@ -1458,17 +1501,24 @@ pub const FrozenCtx = struct {
         here: *Scratch,
         active_cards: []const i32,
         probability: f64,
+        needed_player: i32,
     ) void {
+        const need0 = needed_player < 0 or needed_player == 0;
+        const need1 = needed_player < 0 or needed_player == 1;
         for (active_cards) |dealt| {
-            const ev0_at = @as(usize, @intCast(dealt)) * self.n0;
-            const ev1_at = @as(usize, @intCast(dealt)) * self.n1;
-            var h0: usize = 0;
-            while (h0 < self.n0) : (h0 += 1) {
-                here.ev0[h0] += probability * self.result0[ev0_at + h0];
+            if (need0) {
+                const ev0_at = @as(usize, @intCast(dealt)) * self.n0;
+                var h0: usize = 0;
+                while (h0 < self.n0) : (h0 += 1) {
+                    here.ev0[h0] += probability * self.result0[ev0_at + h0];
+                }
             }
-            var h1: usize = 0;
-            while (h1 < self.n1) : (h1 += 1) {
-                here.ev1[h1] += probability * self.result1[ev1_at + h1];
+            if (need1) {
+                const ev1_at = @as(usize, @intCast(dealt)) * self.n1;
+                var h1: usize = 0;
+                while (h1 < self.n1) : (h1 += 1) {
+                    here.ev1[h1] += probability * self.result1[ev1_at + h1];
+                }
             }
         }
     }
@@ -1527,10 +1577,16 @@ pub const FrozenCtx = struct {
                 recordErr(job, err);
                 return;
             };
-            const ev0_at = @as(usize, @intCast(dealt)) * self.n0;
-            const ev1_at = @as(usize, @intCast(dealt)) * self.n1;
-            @memcpy(self.result0[ev0_at..][0..self.n0], child.ev0);
-            @memcpy(self.result1[ev1_at..][0..self.n1], child.ev1);
+            const need0 = job.mode == .train or job.responding < 0 or job.responding == 0;
+            const need1 = job.mode == .train or job.responding < 0 or job.responding == 1;
+            if (need0) {
+                const ev0_at = @as(usize, @intCast(dealt)) * self.n0;
+                @memcpy(self.result0[ev0_at..][0..self.n0], child.ev0);
+            }
+            if (need1) {
+                const ev1_at = @as(usize, @intCast(dealt)) * self.n1;
+                @memcpy(self.result1[ev1_at..][0..self.n1], child.ev1);
+            }
         }
     }
 
@@ -1607,7 +1663,7 @@ pub const FrozenCtx = struct {
                 }
             }
         }
-        self.reduceChildEv(here, ordered[0..n_ord], probability);
+        self.reduceChildEv(here, ordered[0..n_ord], probability, -1);
     }
 
     fn parallelResponseChance(
@@ -1663,7 +1719,7 @@ pub const FrozenCtx = struct {
                 }
             }
         }
-        self.reduceChildEv(here, ordered[0..n_ord], probability);
+        self.reduceChildEv(here, ordered[0..n_ord], probability, responding);
     }
 };
 
