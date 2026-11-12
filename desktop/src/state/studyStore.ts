@@ -1916,7 +1916,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           }
           set({
             connection: "disconnected",
-            message: `Engine unreachable: ${detail}.${shellHint} Use Reconnect — the installer should have placed holdem-explorer beside the app.`,
+            message: `Engine unreachable: ${detail}.${shellHint} Use Reconnect — the installer should have placed solver-engine (or holdem-explorer fallback) beside the app.`,
           });
         } finally {
           timed.dispose();

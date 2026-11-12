@@ -12,12 +12,13 @@ applyDocumentTheme(resolveTheme(useThemeStore.getState().preference));
 detectAndInstallPlatform();
 
 async function bootEngineThenRender(): Promise<void> {
-  // Packaged Tauri: wait for holdem-explorer before the Study UI polls /api/status.
+  // Packaged Tauri: prefer solver-engine IPC; HTTP explorer is temporary fallback.
   const result = await ensureEngine();
   if (result.ok) {
     console.info(
       "[tauri] ensure_engine",
       result.status,
+      result.transport.kind,
       result.endpoint?.baseUrl ?? "",
     );
   } else {

@@ -9,6 +9,7 @@ describe("ensureEngine", () => {
     if (result.ok) {
       expect(result.status).toMatch(/browser/i);
       expect(result.endpoint).toBeUndefined();
+      expect(result.transport.kind).toBe("http-fallback");
     }
   });
 });
