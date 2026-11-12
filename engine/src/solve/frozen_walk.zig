@@ -15,6 +15,9 @@ const node_lock = @import("node_lock.zig");
 
 pub const FrozenError = error{
     InvalidFrozen,
+    /// CFR+ iteration tables committed; installing the average strategy failed.
+    /// Distinct from mid-pass walk faults so Study can keep Continue (ZR-145).
+    StrategyPublishFailed,
     OutOfMemory,
     ThreadQuotaExceeded,
     LockedMemoryLimitExceeded,
@@ -2046,14 +2049,27 @@ pub const FrozenCtx = struct {
 /// Prefer `AfterIterHook` from Session so progress can advance without a full publish.
 pub const PublishHook = *const fn (*anyopaque, training_state.PublishedPolicy) anyerror!void;
 
-/// Called after each completed iteration when Session owns publication cadence (ZR-133).
-/// Progress (`trained`) is already advanced; the hook decides whether to materialize
-/// a strategy snapshot. Standalone callers with a null hook still publish every iter.
+/// Called after each *committed* CFR+ iteration when Session owns publication cadence (ZR-133).
+/// `trained` is already advanced past both player passes; the hook decides whether to
+/// materialize a strategy snapshot. Hook failure → `StrategyPublishFailed` (ZR-145).
+/// Standalone callers with a null hook still publish every iter.
 pub const AfterIterHook = *const fn (*anyopaque, trained: i32) anyerror!void;
 
 /// Cooperative stop/pause check at a complete-iteration boundary (ZR-90).
 /// Return true to leave the loop before starting the next iteration.
 pub const StopHook = *const fn (*anyopaque) bool;
+
+/// Observation / fault-injection points inside one CFR+ iteration (ZR-145).
+/// `before_passes` fires once mutation for this iter begins; `after_oop_pass` is the
+/// mid-pass window where regret tables are only half-updated; `committed` fires after
+/// `trained` advances (both passes + floors succeeded).
+pub const TrainStage = enum {
+    before_passes,
+    after_oop_pass,
+    committed,
+};
+
+pub const StageHook = *const fn (*anyopaque, TrainStage) anyerror!void;
 
 pub fn trainFrozenCfrPlus(
     allocator: std.mem.Allocator,
@@ -2069,6 +2085,9 @@ pub fn trainFrozenCfrPlus(
 /// Ensures ranks once; does not create or destroy the ctx.
 /// When `after_iter_hook` is set, iteration progress is separate from strategy
 /// publication — the hook owns cadence / buffer reuse (ZR-133 Change C).
+///
+/// ZR-145: `state.trained` advances only after both player passes finish. Linear
+/// weight still uses the prospective next iteration (`trained + 1`) during the passes.
 pub fn trainFrozenCfrPlusOnCtx(
     ctx: *FrozenCtx,
     state: *training_state.TrainingState,
@@ -2077,6 +2096,30 @@ pub fn trainFrozenCfrPlusOnCtx(
     after_iter_ctx: ?*anyopaque,
     stop_hook: ?StopHook,
     stop_ctx: ?*anyopaque,
+) FrozenError!training_state.PublishedPolicy {
+    return trainFrozenCfrPlusOnCtxStaged(
+        ctx,
+        state,
+        iterations,
+        after_iter_hook,
+        after_iter_ctx,
+        stop_hook,
+        stop_ctx,
+        null,
+        null,
+    );
+}
+
+pub fn trainFrozenCfrPlusOnCtxStaged(
+    ctx: *FrozenCtx,
+    state: *training_state.TrainingState,
+    iterations: i32,
+    after_iter_hook: ?AfterIterHook,
+    after_iter_ctx: ?*anyopaque,
+    stop_hook: ?StopHook,
+    stop_ctx: ?*anyopaque,
+    stage_hook: ?StageHook,
+    stage_ctx: ?*anyopaque,
 ) FrozenError!training_state.PublishedPolicy {
     if (iterations < 1) return error.InvalidFrozen;
     ctx.state = state;
@@ -2092,8 +2135,14 @@ pub fn trainFrozenCfrPlusOnCtx(
             const sctx = stop_ctx orelse return error.InvalidFrozen;
             if (hook(sctx)) break;
         }
-        state.trained += 1;
-        const weight_iter: f64 = @floatFromInt(state.trained);
+        // Prospective weight for this in-flight iteration; commit `trained` only
+        // after both alternating updates succeed (classic CFR+ schedule).
+        const next_trained = state.trained + 1;
+        const weight_iter: f64 = @floatFromInt(next_trained);
+        if (stage_hook) |hook| {
+            const sctx = stage_ctx orelse return error.InvalidFrozen;
+            hook(sctx, .before_passes) catch return error.InvalidFrozen;
+        }
         // PoolJob::Slots: static partition when threads > 1 (D3 worker budget).
         try training_state.freezeSigmaThreaded(allocator, game, state, slot_threads, ctx.locks);
         @memset(w.scratch[0].pi0, 1.0);
@@ -2101,15 +2150,27 @@ pub fn trainFrozenCfrPlusOnCtx(
         w.resetSupport();
         try ctx.walk(w, 0, -1, -1, 0, 0, weight_iter, false);
         try training_state.floorAndFreezeThreaded(allocator, game, state, 0, slot_threads, ctx.locks);
+        if (stage_hook) |hook| {
+            const sctx = stage_ctx orelse return error.InvalidFrozen;
+            // Mid-pass: OOP regrets updated; IP pass not done — tables partial.
+            hook(sctx, .after_oop_pass) catch return error.InvalidFrozen;
+        }
         @memset(w.scratch[0].pi0, 1.0);
         @memset(w.scratch[0].pi1, 1.0);
         w.resetSupport();
         try ctx.walk(w, 0, -1, -1, 0, 1, weight_iter, false);
         try training_state.floorPlayerThreaded(allocator, game, state, 1, slot_threads);
+        // Commit only a complete CFR+ iteration.
+        state.trained = next_trained;
+        if (stage_hook) |hook| {
+            const sctx = stage_ctx orelse return error.InvalidFrozen;
+            hook(sctx, .committed) catch return error.InvalidFrozen;
+        }
         if (after_iter_hook) |hook| {
             const hook_ctx = after_iter_ctx orelse return error.InvalidFrozen;
             // Session separates progress from full average materialization.
-            hook(hook_ctx, state.trained) catch return error.InvalidFrozen;
+            // Publish faults must not look like mid-pass train corruption (ZR-145).
+            hook(hook_ctx, state.trained) catch return error.StrategyPublishFailed;
             if (published.average.len != 0) published.deinit();
             published = .{
                 .allocator = allocator,
@@ -2119,7 +2180,12 @@ pub fn trainFrozenCfrPlusOnCtx(
             };
         } else {
             // Standalone / rematch path: publish every completed iteration.
-            const next = try training_state.publishAverageThreaded(allocator, game, state, slot_threads);
+            const next = training_state.publishAverageThreaded(allocator, game, state, slot_threads) catch |err| {
+                return switch (err) {
+                    error.OutOfMemory => error.OutOfMemory,
+                    else => error.StrategyPublishFailed,
+                };
+            };
             if (published.average.len != 0) published.deinit();
             published = next;
         }

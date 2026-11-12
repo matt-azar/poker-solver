@@ -2683,6 +2683,58 @@ test "forced train failure surfaces sticky last_error on status" {
     try std.testing.expect(std.mem.indexOf(u8, cleared, "\"failed\":false") != null);
 }
 
+test "publish failure keeps can_continue; mid-pass clears it" {
+    // ZR-145: StrategyPublishFailed ≠ mid-pass InvalidFrozen for Continue gates.
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "zr145-publish-vs-midpass");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    state.session.publish_every = 1;
+    state.session.inject_publish_fault = true;
+    const pub_err = state.session.train(1);
+    try std.testing.expectError(error.StrategyPublishFailed, pub_err);
+    state.setLastError(@errorName(error.StrategyPublishFailed));
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"last_error\":\"StrategyPublishFailed\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"can_continue\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"has_training\":true") != null);
+    try std.testing.expect(state.session.canContinue());
+
+    state.clearLastError();
+    state.session.inject_mid_pass_fault = true;
+    const mid_err = state.session.train(1);
+    try std.testing.expectError(error.InvalidFrozen, mid_err);
+    state.setLastError(@errorName(error.InvalidFrozen));
+    const mid_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(mid_body);
+    try std.testing.expect(std.mem.indexOf(u8, mid_body, "\"last_error\":\"InvalidFrozen\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mid_body, "\"can_continue\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mid_body, "\"has_training\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mid_body, "\"phase\":\"published\"") != null);
+    try std.testing.expect(!state.session.canContinue());
+}
+
 test "strategy edits list put delete Study CRUD" {
     const config =
         \\street-config 1
