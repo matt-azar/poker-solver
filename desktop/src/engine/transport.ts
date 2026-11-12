@@ -139,27 +139,6 @@ export async function solverEngineRequest(
   return env;
 }
 
-export async function ipcReady(): Promise<{
-  protocol: number;
-  sidecar: string;
-  launch_id?: string;
-  workers?: number;
-}> {
-  const env = await solverEngineRequest("ready");
-  const body = (env.body ?? {}) as {
-    protocol?: number;
-    sidecar?: string;
-    launch_id?: string;
-    workers?: number;
-  };
-  return {
-    protocol: body.protocol ?? SOLVER_ENGINE_PROTOCOL,
-    sidecar: body.sidecar ?? SOLVER_ENGINE_SIDECAR,
-    launch_id: body.launch_id,
-    workers: body.workers,
-  };
-}
-
 export async function ipcStatus(): Promise<unknown> {
   const env = await solverEngineRequest("status");
   return env.body;

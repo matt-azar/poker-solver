@@ -414,7 +414,7 @@ describe("EngineClient parseConfig IPC (ZR-86)", () => {
   });
 });
 
-describe("EngineClient ZR-83 treePreview / planMemory IPC", () => {
+describe("EngineClient ZR-83 treePreview IPC", () => {
   let client: EngineClient;
 
   beforeEach(() => {
@@ -478,28 +478,6 @@ describe("EngineClient ZR-83 treePreview / planMemory IPC", () => {
     expect(body.config_text).toContain("board Ah Kd 7c");
   });
 
-  it("routes planMemory({ text }) as plan_memory with that config_text", async () => {
-    const plan = {
-      estimated_peak_bytes: 2048,
-      memory_budget_bytes: 67_108_864,
-      deals: 1,
-      infosets: 2,
-      decision_nodes: 6,
-      terminals: 1,
-      public_decisions: 6,
-      threads: 1,
-      fits_budget: true,
-      dry_run: true,
-    };
-    invoke.mockResolvedValueOnce(okBody("plan_memory", plan));
-    const text = "street-config 1\nboard Ah Kd 7c\n";
-    await expect(client.planMemory({ text })).resolves.toEqual(plan);
-    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
-      op: "plan_memory",
-      body: { config_text: text },
-      jobId: null,
-    });
-  });
 });
 
 describe("EngineClient Equity calculator jobs IPC (ZR-84)", () => {

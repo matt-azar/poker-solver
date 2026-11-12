@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ActionValuesPayload,
-  MemoryPlanPayload,
   NodePayload,
   SolveJobRequest,
   StatusPayload,
@@ -27,7 +26,6 @@ import {
   ipcNode,
   ipcOpen,
   ipcPause,
-  ipcPlanMemory,
   ipcPutLock,
   ipcPutStrategyEdit,
   ipcResolveLocked,
@@ -714,16 +712,6 @@ export class EngineClient {
     const { response, data } = await this.request("POST", "/api/config", { text });
     this.ensureOk(response, data);
     return data as Record<string, unknown>;
-  }
-
-  async planMemory(job: SolveJobRequest | { text: string }): Promise<MemoryPlanPayload> {
-    if (isIpcTransport()) {
-      const configText = streetConfigTextFromPreviewJob(job);
-      return (await ipcPlanMemory(configText)) as MemoryPlanPayload;
-    }
-    const { response, data } = await this.request("POST", "/api/plan-memory", job);
-    this.ensureOk(response, data);
-    return data as MemoryPlanPayload;
   }
 
   async treePreview(job: SolveJobRequest | { text: string }): Promise<TreePreviewPayload> {

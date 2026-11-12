@@ -1,18 +1,13 @@
 /**
- * HTTP JSON compatibility policy for Study ↔ explorer.
+ * Status/error JSON decode helpers for Study engine payloads.
  *
  * - Required fields: must be present with the declared JSON type; missing or
  *   wrong type fails decode (do not coerce).
  * - Additive fields: unknown keys are ignored by decoders and may remain on
  *   the payload for forward compatibility.
- * - Errors: unsuccessful HTTP bodies use `{ "error": string }`; other shapes
+ * - Errors: unsuccessful bodies use `{ "error": string }`; other shapes
  *   fall back to statusText in EngineClient.
- * - Semantics not changed by this layer: omit vs [] vs explicit-empty size
- *   lists, chip vs pot-fraction units, root vs local EV, action order, null
- *   metrics when unset.
  */
-
-export const EXPLORER_READY_PROTOCOL = 1 as const;
 
 export type JsonObject = Record<string, unknown>;
 
