@@ -30,16 +30,16 @@ export type EnsureEngineResult =
 
 /**
  * Packaged Study uses Zig `solver-engine` typed IPC only.
- * Browser / Vite-dev without Tauri returns ok with a note (separate process).
+ * Browser / Vite-dev without Tauri cannot reach the engine (no holdem-explorer).
  */
 export async function ensureEngine(): Promise<EnsureEngineResult> {
   if (!isTauriRuntime()) {
     const transport = setHttpFallbackTransport(
-      "browser — use a separate explorer process",
+      "browser — Study engine requires the Tauri shell + solver-engine",
     );
     return {
       ok: true,
-      status: "browser — use a separate explorer process",
+      status: "browser — Study engine requires the Tauri shell + solver-engine",
       transport,
     };
   }
@@ -78,7 +78,11 @@ export async function readEngineStatus(): Promise<string | null> {
     if (transport.kind === "ipc") {
       return transport.label;
     }
-    return String(await invoke("engine_status"));
+    const info = await invoke("solver_engine_info");
+    if (info && typeof info === "object" && typeof (info as { status?: unknown }).status === "string") {
+      return (info as { status: string }).status;
+    }
+    return null;
   } catch {
     return null;
   }

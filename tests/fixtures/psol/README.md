@@ -1,6 +1,6 @@
 # PSOL compatibility fixtures
 
-Tiny checkpoints used as product compatibility pins for Open / Continue.
+Tiny checkpoints used as product compatibility pins for Open / Continue (Zig `formats` / `app` tests).
 
 | File | Kind | Algorithm | Notes |
 | --- | --- | --- | --- |
@@ -9,17 +9,9 @@ Tiny checkpoints used as product compatibility pins for Open / Continue.
 
 ## Provenance
 
-Generated with `generate_psol_fixtures` from this repository’s PSOL writer
-(codec-compatible with the `v0.1.2` wire layout: streaming write, versions 1–3,
-kinds 1–2). Source tip at generation time is recorded in git history for these
-blobs.
+Generated historically with the retired C++ `generate_psol_fixtures` tool from this repository’s PSOL writer (codec-compatible with the `v0.1.2` wire layout: streaming write, versions 1–3, kinds 1–2). Source tip at generation time is recorded in git history for these blobs.
 
-Regenerate (does not rewrite committed expected values until you update tests):
-
-```bash
-cmake --build build --target generate_psol_fixtures
-./build/generate_psol_fixtures tests/fixtures/psol
-```
+Do not expect a CMake regenerator on `zig-rewrite`; treat the committed blobs as the pin. Update fixtures only with an explicit Zig-side writer + matching rematch tests.
 
 ## Contract covered by tests
 
@@ -28,5 +20,4 @@ cmake --build build --target generate_psol_fixtures
 - Continue-from-fixture matches uninterrupted training for the remaining iters
 - Ordering of combos, slots, actions, runouts, and public paths is part of the
   on-disk contract; changing that order requires a layout id + remap or a hard
-  compatibility error (not implemented yet — document-only until an ordering
-  change ships)
+  compatibility error

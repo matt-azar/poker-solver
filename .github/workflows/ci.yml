@@ -1,10 +1,11 @@
 name: CI
 
-# push only on main + pull_request avoids duplicate runs on the same PR head.
-# workflow_dispatch re-runs both path gates (C++ and desktop) on demand.
+# Desktop Study UI gate. Zig build/test lives in zig.yml; Windows NSIS in
+# windows-installer.yml. C++ / holdem-explorer matrices were removed on zig-rewrite
+# (owner GO 2026-11-12 — full Zig, no C++ shipping path).
 on:
   push:
-    branches: [main]
+    branches: [main, zig-rewrite]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
@@ -13,23 +14,13 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  CMAKE_BUILD_PARALLEL_LEVEL: 4
-
 jobs:
-  # Path gate: skip the C++ matrix for docs/UI-only changes and skip the
-  # desktop suite when desktop/** is untouched, while still reporting a
-  # terminal `ci` check (see aggregate job below).
   changes:
     runs-on: ubuntu-latest
-    # paths-filter lists PR files via the GitHub API; restricted default
-    # GITHUB_TOKEN scopes omit pull-requests and fail with
-    # "Resource not accessible by integration".
     permissions:
       contents: read
       pull-requests: read
     outputs:
-      code: ${{ steps.gate.outputs.code }}
       desktop: ${{ steps.gate.outputs.desktop }}
     steps:
       - uses: actions/checkout@v4
@@ -38,16 +29,6 @@ jobs:
         if: github.event_name != 'workflow_dispatch'
         with:
           filters: |
-            code:
-              - 'src/**'
-              - 'include/**'
-              - 'tests/**'
-              - 'cmake/**'
-              - 'CMakeLists.txt'
-              - 'benchmarks/**'
-              - 'legacy/ui/**'
-              - 'configs/**'
-              - '.github/workflows/ci.yml'
             desktop:
               - 'desktop/**'
               - 'configs/range-profiles/**'
@@ -56,245 +37,15 @@ jobs:
               - 'docs/ai-context/**'
               - 'docs/STUDY_SETUP_ASSISTANT.md'
               - '.github/workflows/ci.yml'
-      # workflow_dispatch has no useful changed-files base; force both gates on.
       - id: gate
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
             echo "desktop=true" >> "$GITHUB_OUTPUT"
           else
-            echo "code=${{ steps.filter.outputs.code }}" >> "$GITHUB_OUTPUT"
             echo "desktop=${{ steps.filter.outputs.desktop }}" >> "$GITHUB_OUTPUT"
           fi
 
-  windows:
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-      - name: Configure
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-        run: >
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          -DPOKER_SOLVER_BUILD_BENCHMARKS=ON
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-      - name: Build
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-        run: >
-          cmake --build build --config Release --parallel
-          --target river_solver
-          --target street_solver --target explorer --target equity_calculator
-          --target poker_solver_tests --target poker_engine_tests
-          --target poker_study_tests --target poker_http_tests
-          --target equity_tests --target equity_calculator_tests
-          --target street_memory_bench --target street_betting_bench
-          --target street_parallel_bench
-      - name: CTest
-        run: ctest --test-dir build -C Release --output-on-failure
-      - name: JavaScript
-        run: node tests/legacy_ui/browse.test.js
-
-  linux:
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Ensure apt packages
-        run: |
-          set -euo pipefail
-          # Apt mirrors on ubuntu-latest occasionally fail DNS (azure.archive /
-          # archive / security). Pre-install ninja + ccache with retries so the
-          # later ccache-action apt step is a no-op, then fall back if needed.
-          need_pkgs=()
-          command -v ninja >/dev/null 2>&1 || need_pkgs+=(ninja-build)
-          command -v ccache >/dev/null 2>&1 || need_pkgs+=(ccache)
-          if ((${#need_pkgs[@]})); then
-            installed=0
-            for attempt in 1 2 3 4 5; do
-              if sudo apt-get update && sudo apt-get install -y "${need_pkgs[@]}"; then
-                installed=1
-                break
-              fi
-              echo "apt install ${need_pkgs[*]} failed (attempt ${attempt}); retrying…" >&2
-              sleep $((attempt * 20))
-            done
-            if [[ "$installed" -ne 1 ]]; then
-              echo "apt packages unavailable after retries; continuing with fallbacks" >&2
-            fi
-          fi
-          if command -v ninja >/dev/null 2>&1; then
-            ninja --version
-          else
-            echo "Ninja unavailable; using Unix Makefiles" >&2
-            echo "USE_UNIX_MAKEFILES=1" >> "$GITHUB_ENV"
-          fi
-          if command -v ccache >/dev/null 2>&1; then
-            ccache --version | head -n 1
-          else
-            echo "ccache unavailable; building without compiler cache" >&2
-            echo "SKIP_CCACHE=1" >> "$GITHUB_ENV"
-          fi
-      - name: ccache
-        if: env.SKIP_CCACHE != '1'
-        continue-on-error: true
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: linux-release
-      - name: Configure
-        run: |
-          set -euo pipefail
-          gen_args=()
-          if [[ "${USE_UNIX_MAKEFILES:-}" != "1" ]]; then
-            gen_args=(-G Ninja)
-          fi
-          launcher_args=()
-          if command -v ccache >/dev/null 2>&1; then
-            launcher_args=(
-              -DCMAKE_C_COMPILER_LAUNCHER=ccache
-              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-            )
-          fi
-          cmake -S . -B build "${gen_args[@]}" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DPOKER_SOLVER_BUILD_BENCHMARKS=ON \
-            "${launcher_args[@]}"
-      - name: Build
-        run: >
-          cmake --build build --parallel
-          --target river_solver
-          --target street_solver --target explorer --target equity_calculator
-          --target poker_solver_tests --target poker_engine_tests
-          --target poker_study_tests --target poker_http_tests
-          --target equity_tests --target equity_calculator_tests
-          --target street_memory_bench --target street_betting_bench
-          --target street_parallel_bench
-      - name: CTest
-        run: ctest --test-dir build --output-on-failure
-      - name: Study benchmark smoke
-        run: |
-          set -euo pipefail
-          ./build/river_solver --version
-          ./build/street_solver --version
-          ./build/explorer --version
-          python3 benchmarks/run_study_benchmarks.py \
-            --bin-dir build \
-            --cases smoke \
-            --output-dir benchmarks/study/out/ci-smoke \
-            --timing-label contended
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          payload = json.loads(Path("benchmarks/study/out/ci-smoke/results.json").read_text())
-          assert payload.get("schema") == "study-benchmark-results-2", payload.get("schema")
-          assert payload.get("stop_criterion") == "accuracy_over_pot"
-          by_id = {case["id"]: case["outcome"] for case in payload["cases"]}
-          expected = {
-              "smoke_success": "success",
-              "smoke_invalid": "invalid-input",
-              "smoke_timeout": "timeout",
-              "smoke_resource": "resource-rejection",
-          }
-          missing = sorted(set(expected) - set(by_id))
-          assert not missing, f"missing smoke cases: {missing}"
-          bad = {cid: by_id[cid] for cid, want in expected.items() if by_id[cid] != want}
-          assert not bad, f"unexpected smoke outcomes: {bad}"
-          print("smoke taxonomy ok:", by_id)
-          PY
-      - name: JavaScript
-        run: node tests/legacy_ui/browse.test.js
-
-  # Sanitizer: main + non-draft PRs only; waits for linux Release to fail fast.
-  linux-sanitizer:
-    needs: [changes, linux]
-    if: |
-      always()
-      && needs.changes.outputs.code == 'true'
-      && needs.linux.result == 'success'
-      && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      ASAN_OPTIONS: halt_on_error=1:detect_leaks=1
-      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Ensure apt packages
-        run: |
-          set -euo pipefail
-          need_pkgs=()
-          command -v ninja >/dev/null 2>&1 || need_pkgs+=(ninja-build)
-          command -v ccache >/dev/null 2>&1 || need_pkgs+=(ccache)
-          if ((${#need_pkgs[@]})); then
-            installed=0
-            for attempt in 1 2 3 4 5; do
-              if sudo apt-get update && sudo apt-get install -y "${need_pkgs[@]}"; then
-                installed=1
-                break
-              fi
-              echo "apt install ${need_pkgs[*]} failed (attempt ${attempt}); retrying…" >&2
-              sleep $((attempt * 20))
-            done
-            if [[ "$installed" -ne 1 ]]; then
-              echo "apt packages unavailable after retries; continuing with fallbacks" >&2
-            fi
-          fi
-          if command -v ninja >/dev/null 2>&1; then
-            ninja --version
-          else
-            echo "Ninja unavailable; using Unix Makefiles" >&2
-            echo "USE_UNIX_MAKEFILES=1" >> "$GITHUB_ENV"
-          fi
-          if command -v ccache >/dev/null 2>&1; then
-            ccache --version | head -n 1
-          else
-            echo "ccache unavailable; building without compiler cache" >&2
-            echo "SKIP_CCACHE=1" >> "$GITHUB_ENV"
-          fi
-      - name: ccache
-        if: env.SKIP_CCACHE != '1'
-        continue-on-error: true
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: linux-sanitizer
-      - name: Configure
-        run: |
-          set -euo pipefail
-          gen_args=()
-          if [[ "${USE_UNIX_MAKEFILES:-}" != "1" ]]; then
-            gen_args=(-G Ninja)
-          fi
-          launcher_args=()
-          if command -v ccache >/dev/null 2>&1; then
-            launcher_args=(
-              -DCMAKE_C_COMPILER_LAUNCHER=ccache
-              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-            )
-          fi
-          cmake -S . -B build-san "${gen_args[@]}" \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            "${launcher_args[@]}" \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
-      - name: Build
-        run: >
-          cmake --build build-san --parallel
-          --target poker_solver_tests --target poker_engine_tests
-          --target poker_study_tests --target poker_http_tests
-          --target equity_tests --target equity_calculator_tests
-          --target equity_calculator
-      - name: CTest
-        run: ctest --test-dir build-san --output-on-failure
-
-  # Desktop (Tauri UI) unit suite — independent of the C++ matrix so
-  # desktop-only PRs can go green without a full solver rebuild.
   desktop:
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
@@ -336,9 +87,9 @@ jobs:
         run: npm run build
 
   # Single status for branch protection: green on docs-only skips and when
-  # the gated matrices (C++ and/or desktop) that ran succeed.
+  # the desktop matrix that ran succeeds.
   ci:
-    needs: [changes, windows, linux, linux-sanitizer, desktop]
+    needs: [changes, desktop]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -346,35 +97,15 @@ jobs:
         run: |
           set -euo pipefail
           echo "changes=${{ needs.changes.result }}"
-          echo "code=${{ needs.changes.outputs.code }}"
           echo "desktop=${{ needs.changes.outputs.desktop }}"
-          echo "windows=${{ needs.windows.result }}"
-          echo "linux=${{ needs.linux.result }}"
-          echo "sanitizer=${{ needs.linux-sanitizer.result }}"
           echo "desktop_job=${{ needs.desktop.result }}"
           if [[ "${{ needs.changes.result }}" != "success" ]]; then
             echo "Path gate (changes) did not succeed" >&2
             exit 1
           fi
-          code="${{ needs.changes.outputs.code }}"
           desk="${{ needs.changes.outputs.desktop }}"
-          if [[ "$code" != "true" && "$desk" != "true" ]]; then
-            echo "Docs/UI-only change; C++ and desktop matrices skipped"
+          if [[ "$desk" != "true" ]]; then
+            echo "Docs/engine-only change; desktop matrix skipped (see zig.yml for Zig)"
             exit 0
           fi
-          if [[ "$code" == "true" ]]; then
-            [[ "${{ needs.windows.result }}" == "success" ]]
-            [[ "${{ needs.linux.result }}" == "success" ]]
-            # Draft PRs may skip the sanitizer; ready/push/dispatch require success.
-            if [[ "${{ github.event.pull_request.draft }}" == "true" ]]; then
-              case "${{ needs.linux-sanitizer.result }}" in
-                success|skipped) ;;
-                *) exit 1 ;;
-              esac
-            else
-              [[ "${{ needs.linux-sanitizer.result }}" == "success" ]]
-            fi
-          fi
-          if [[ "$desk" == "true" ]]; then
-            [[ "${{ needs.desktop.result }}" == "success" ]]
-          fi
+          [[ "${{ needs.desktop.result }}" == "success" ]]

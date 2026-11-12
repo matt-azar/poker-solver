@@ -1,8 +1,8 @@
 # Study baseline
 
-Everyday postflop study surface after the river / street / pause / locking integrates on `main`.
+Everyday postflop study surface on `zig-rewrite`.
 
-Product entry points: `explorer` + Study UI (`desktop/`), `street_solver`, and `river_solver` (thin five-card CLI onto `StreetBatchSolver`). Living status: [FEATURE_PARITY.md](FEATURE_PARITY.md). Ordered work: [ROADMAP.md](ROADMAP.md).
+Product entry points: Zig `solver-engine` + Study UI (`desktop/`). Living status: [FEATURE_PARITY.md](FEATURE_PARITY.md). Ordered work: [ROADMAP.md](ROADMAP.md). The C++ `explorer` / `street_solver` / CMake validation path is removed.
 
 ## In place
 
@@ -24,13 +24,11 @@ Product entry points: `explorer` + Study UI (`desktop/`), `street_solver`, and `
 ## Validation
 
 ```sh
-CXX=g++ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-ctest --test-dir build --output-on-failure
+zig build -Doptimize=ReleaseFast
+zig build test
+cd desktop && npm ci && npm test && npm run build
 ```
 
-`poker_solver_tests` is a CMake target that builds `poker_engine_tests`, `poker_study_tests`, and `poker_http_tests`. It is not an executable.
-
-Explorer HTTP tests spawn on Linux and Windows. Prefer the weighted multi-combo persistence case in `tests/unit/test_explorer_http.cpp` when changing Continue/Open/session. Desktop lifecycle acceptance (Build → solve → pause/inspect → save/open/continue → lock/compare) is `tests/unit/test_explorer_workflow.cpp`; Windows packaged Tauri/NSIS remains a manual release gate.
+Windows packaged Tauri/NSIS remains a manual release gate (Actions → **Windows Installer**).
 
 Study-corpus measurements: [benchmarks/study/RESULTS.md](../../../benchmarks/study/RESULTS.md).

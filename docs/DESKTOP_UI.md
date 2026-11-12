@@ -1,6 +1,6 @@
 # Desktop Study workstation
 
-React study client (`desktop/`) over the `explorer` HTTP API. Numerical kernels are unchanged. Doc index: [README.md](README.md). Engine API: [EXPLORER.md](EXPLORER.md).
+React study client (`desktop/`) over the Zig `solver-engine` typed-IPC host. Doc index: [README.md](README.md). The C++ HTTP explorer is retired: [EXPLORER.md](EXPLORER.md).
 
 ## Stack
 
@@ -8,29 +8,23 @@ React study client (`desktop/`) over the `explorer` HTTP API. Numerical kernels 
 | --- | --- |
 | Web client | React 19 + TypeScript + Vite |
 | State | Zustand for study/layout/theme; query identity in the engine client |
-| Engine transport | Packaged Study: Zig `solver-engine` typed IPC only (protocol 2, inherited pipes via Tauri). Browser/Vite-dev may still use a separate HTTP explorer. |
-| Desktop shell | Tauri 2 + `solver-engine` IPC sidecar; browser + Vite proxy still supported |
-| Static serving | Prefer `desktop/dist` when present; fall back to `legacy/ui/` |
-| Legacy UI | Kept under `legacy/ui/` for regression and fallback |
+| Engine transport | Zig `solver-engine` typed IPC only (protocol 2, inherited pipes via Tauri). No `holdem-explorer` / `:8765` shipping path. |
+| Desktop shell | Tauri 2 + `solver-engine` IPC sidecar |
+| Static UI | Vite `dist` loaded by the Tauri webview |
 
-The explorer process boundary is the engine API. The Study client is a typed UI over that API; Tauri packages the same client with a sidecar.
+The Study client is a typed UI over the IPC ops; Tauri owns the sidecar lifecycle.
 
 ## Development
 
 ```sh
-# terminal 1 — engine (from repo root, after cmake build)
-explorer --port 8765
+# terminal 1 — Zig engine
+zig build -Doptimize=ReleaseFast
 
-# terminal 2 — Study client
-cd desktop && npm ci && npm run dev
+# terminal 2 — Tauri Study shell (spawns solver-engine)
+cd desktop && npm ci && npm run tauri dev
 ```
 
-Vite proxies `/api` to `http://127.0.0.1:8765`. Production:
-
-```sh
-cd desktop && npm run build
-explorer   # serves desktop/dist when present
-```
+Browser-only `npm run dev` does not start an engine.
 
 ## Capability map
 
@@ -88,15 +82,13 @@ explorer   # serves desktop/dist when present
 
 | Item | Status |
 | --- | --- |
-| Browser Study client + localhost `explorer` | Supported |
-| Vite `/api` proxy in `npm run dev` | Supported |
-| `explorer` serving `desktop/dist` | Supported |
-| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns installed `solver-engine` beside the app (absolute path; not `binaries/…`) over inherited-pipe IPC (`ensure_solver_engine` / `solver_engine_request`, protocol 2). The webview loads Vite `dist`. No packaged `holdem-explorer` fallback after Zig cutover. |
-| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer` (also on `zig-rewrite`). Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe`. PREINSTALL stops the UI then force-kills/deletes `solver-engine.exe` (and legacy `holdem-explorer.exe` if present); POSTINSTALL requires `solver-engine.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. |
+| Browser-only Study without Tauri | UI shell only — no engine (C++ `holdem-explorer` / Vite `:8765` proxy removed) |
+| Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns installed `solver-engine` beside the app (absolute path; not `binaries/…`) over inherited-pipe IPC (`ensure_solver_engine` / `solver_engine_request`, protocol 2). The webview loads Vite `dist`. |
+| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer` (also on `zig-rewrite`). Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe`. PREINSTALL stops the UI then force-kills/deletes `solver-engine.exe` (and legacy `holdem-explorer.exe` if present on upgrade); POSTINSTALL requires `solver-engine.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`. |
 | Native Open/Save dialogs | Browser prompts; Windows Tauri build wires `tauri-plugin-dialog` + `dialog:default` capability; adapter keeps a prompt fallback if the plugin invoke fails |
-| Packaged engine ownership | `solver-engine` with `--launch-id` over inherited pipes (protocol 2). Tauri demuxes stdout by `request_id` so Study can issue mid-train `values` while `solve` is in flight. Browser/dev still uses Vite proxy / external explorer on 8765. |
-| Production CSP | Packaged webview CSP allows `'self'` / Tauri IPC / assets, loopback explorer (`http://127.0.0.1:*`, `http://localhost:*`), and `https://api.openai.com` for the assistant. `devCsp` stays null so `tauri:dev` / HMR are unconstrained. Browser `npm run dev` is unaffected. Unused `shell:allow-execute` was removed; spawn remains for the owned sidecar. |
-| HTTP JSON contracts | `desktop/src/engine/contracts` decodes `/api/ready` and status (including successful Open) with a required/additive/error policy; fixtures under `desktop/src/engine/fixtures`. Wire shapes for size lists, chip units, and null metrics stay unchanged. |
+| Packaged engine ownership | `solver-engine` with `--launch-id` over inherited pipes (protocol 2). Tauri demuxes stdout by `request_id` so Study can issue mid-train `values` while `solve` is in flight. No HTTP explorer fallback. |
+| Production CSP | Packaged webview CSP allows `'self'` / Tauri IPC / assets, loopback (`http://127.0.0.1:*`, `http://localhost:*`), and `https://api.openai.com` for the assistant. `devCsp` stays null so `tauri:dev` / HMR are unconstrained. Spawn remains for the owned `solver-engine` sidecar. |
+| IPC / contract fixtures | `desktop/src/engine/contracts` + IPC protocol helpers; fixtures under `desktop/src/engine/fixtures`. |
 | Code-signed official release | Not yet — CI artifact is unsigned |
 
 ### Windows installer (end users)
@@ -141,7 +133,8 @@ npm run tauri:build
 
 - Unit: `cd desktop && npm test` (browse, locks, strategy edits, status/`gap_series`, cards, analysis helpers, action colors)
 - Build: `cd desktop && npm run build`
-- Live: solve against `explorer`; Status bar shows EV / NashConv / mem (`gap_series` in status payload, no Graphs UI)
+- Engine: `zig build test` (+ optional `scripts/build.sh` ready smoke)
+- Live: solve via Tauri + `solver-engine` IPC; Status bar shows EV / NashConv / mem (`gap_series` in status payload, no Graphs UI)
 - Visual targets: 1440×900 dark/light, 1920×1080 dual-range, 1280×800 compact
-- Real-engine HTTP acceptance: `poker_http_tests` (`test_explorer_http.cpp` + `test_explorer_workflow.cpp`, Linux + Windows). Automates Build/solve/pause/inspect/save/open/continue/lock/compare against a spawned `explorer`. Does **not** cover Tauri webview lifecycle, native Open/Save dialogs, or the NSIS packaged install — re-validate those on Windows before a Study release.
-- Changing the flop, and changing an earlier street after a later card is dealt, are unsupported. Turn and river card changes keep the betting line when the deal-chance ancestor is known. Study packaging admits a full-range turn via `kStudyExplorerMaxPairRunouts`. A dense flop check-down can still need a higher `--max-pair-runouts` (see [EXPLORER.md](EXPLORER.md), [EQUITY.md](EQUITY.md)).
+- C++ `poker_http_tests` / spawned `explorer` were removed on `zig-rewrite`. Re-validate Tauri webview lifecycle, native Open/Save dialogs, and the NSIS packaged install on Windows before a Study release.
+- Changing the flop, and changing an earlier street after a later card is dealt, are unsupported. Turn and river card changes keep the betting line when the deal-chance ancestor is known. See [EQUITY.md](EQUITY.md) for check-down equity limits.

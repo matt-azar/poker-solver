@@ -7,7 +7,6 @@ import type {
   TreePreviewPayload,
 } from "../domain/types";
 import { presentUserText } from "../domain/userText";
-import { isTauriRuntime } from "../platform";
 import { decodeErrorPayload } from "./contracts/error";
 import { decodeReadyPayload, type ReadyPayload } from "./contracts/ready";
 import { decodeStatusPayload } from "./contracts/status";
@@ -35,11 +34,8 @@ function defaultEngineBaseUrl(): string {
   if (typeof fromEnv === "string" && fromEnv.length > 0) {
     return fromEnv;
   }
-  // Tauri webview origin is not the explorer; hit the managed local explorer.
-  // Resolve lazily — __TAURI_INTERNALS__ may be injected after module evaluation.
-  if (isTauriRuntime()) {
-    return "http://127.0.0.1:8765";
-  }
+  // Packaged Study uses solver-engine IPC (no HTTP explorer). Browser/dev may
+  // still set VITE_ENGINE_URL for fixture/HTTP unit tests only.
   return "";
 }
 

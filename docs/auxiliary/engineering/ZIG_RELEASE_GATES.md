@@ -25,8 +25,8 @@ Owner GO 2026-11-12: stable Windows NSIS ships Zig `solver-engine` only
   **⅓ pot** and **¾ pot** only
 
 Fixture assets live under `benchmarks/study/` (and parity harnesses that
-consume them). Always run C++ `--plan-memory` first on each fixture before
-comparing Zig.
+consume them). The in-repo C++ tree is removed on `zig-rewrite`; historical
+C++ `--plan-memory` / tip-C++ rematch notes live in store digs only.
 
 ## Locked measurement procedure (D12)
 

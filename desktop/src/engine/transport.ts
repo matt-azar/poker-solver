@@ -2,7 +2,8 @@
  * Study engine transport selection for the Zig rewrite path.
  *
  * Packaged Study uses `solver-engine` typed IPC (protocol 2) only.
- * `http-fallback` remains for browser / Vite-dev without Tauri.
+ * `http-fallback` is a non-engine label for browser / Vitest without Tauri
+ * (no holdem-explorer process).
  */
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "../platform";
@@ -27,7 +28,7 @@ export type HttpFallbackInfo = {
 export type ActiveTransport = IpcTransportInfo | HttpFallbackInfo;
 
 const HTTP_FALLBACK_LABEL =
-  "HTTP explorer (browser/dev only — packaged Study uses solver-engine IPC)";
+  "no engine (browser/dev — Study requires Tauri + solver-engine IPC)";
 
 let active: ActiveTransport = {
   kind: "http-fallback",

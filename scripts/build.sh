@@ -1,29 +1,18 @@
 #!/usr/bin/env bash
-# Shared local configure/build/test entry point (mirrors CI Release defaults).
+# Local Zig build + test entry point (mirrors .github/workflows/zig.yml defaults).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
-BUILD_TYPE="${BUILD_TYPE:-Release}"
-BUILD_BENCHMARKS="${BUILD_BENCHMARKS:-ON}"
-JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
+cd "$ROOT"
 
-cmake -S "$ROOT" -B "$BUILD_DIR" \
-  -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-  -DBUILD_TESTING=ON \
-  -DPOKER_SOLVER_BUILD_BENCHMARKS="$BUILD_BENCHMARKS"
+zig build -Doptimize="${ZIG_OPTIMIZE:-ReleaseFast}"
+zig build test
 
-cmake --build "$BUILD_DIR" --parallel "$JOBS" \
-  --target river_solver \
-  --target street_solver --target explorer --target equity_calculator \
-  --target poker_solver_tests --target poker_engine_tests \
-  --target poker_study_tests --target poker_http_tests \
-  --target equity_tests --target equity_calculator_tests
-
-if [[ "$BUILD_BENCHMARKS" == "ON" ]]; then
-  cmake --build "$BUILD_DIR" --parallel "$JOBS" \
-    --target street_memory_bench --target street_betting_bench \
-    --target street_parallel_bench
+if [[ -x ./zig-out/bin/solver-engine ]]; then
+  python3 scripts/zig/ready-smoke.py ./zig-out/bin/solver-engine
+elif [[ -x ./zig-out/bin/solver-engine.exe ]]; then
+  python3 scripts/zig/ready-smoke.py ./zig-out/bin/solver-engine.exe
+else
+  echo "solver-engine missing under zig-out/bin" >&2
+  exit 1
 fi
-
-ctest --test-dir "$BUILD_DIR" --output-on-failure
