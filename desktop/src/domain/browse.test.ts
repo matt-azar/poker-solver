@@ -85,6 +85,35 @@ describe("browse strategy grouping", () => {
     expect(RANGE_INCLUSION_MEASURE).toBe("inclusion weight");
   });
 
+  it("flop unit-weight reach keeps inclusion ~1; 1/n deal mass stays near-flat (ZR-121)", () => {
+    // Grid + combo inspector both derive height from rangeInclusionOf / raw reach.
+    const flopUnit = {
+      node_id: "p0.t-1.r-1",
+      kind: "decision" as const,
+      reach_defined: true,
+      actions: ["Check"],
+      combos: ["AsAc", "QsQh", "JsJh"],
+      reach: [1, 1, 1],
+      marginal: [1 / 3, 1 / 3, 1 / 3],
+      strategy: [[1], [1], [1]],
+    };
+    expect(rangeInclusionOf(cellOf(flopUnit, "AA"))).toBeCloseTo(1, 12);
+    expect(rangeInclusionOf(cellOf(flopUnit, "QQ"))).toBeCloseTo(1, 12);
+    expect(rangeInclusionOf(cellOf(flopUnit, "JJ"))).toBeCloseTo(1, 12);
+    const meanUnit =
+      flopUnit.reach.reduce((a, b) => a + b, 0) / flopUnit.reach.length;
+    expect(meanUnit).toBeCloseTo(1, 12);
+
+    const flopDeal = {
+      ...flopUnit,
+      reach: [1 / 3, 1 / 3, 1 / 3],
+    };
+    const meanDeal =
+      flopDeal.reach.reduce((a, b) => a + b, 0) / flopDeal.reach.length;
+    expect(meanDeal).toBeLessThan(0.4);
+    expect(rangeInclusionOf(cellOf(flopDeal, "AA"))!).toBeLessThan(0.4);
+  });
+
   it("opponentSolutionNode reuses opponent_reach for inclusion (not posterior)", () => {
     // Acting AA at 100% reach; opponent KK with reach=1 but marginal=1/3.
     // Old opponent pane showed KK33 via marginalSum/range_combos; must be 100.

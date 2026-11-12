@@ -167,6 +167,66 @@ describe("ComboInspector", () => {
     ).toBe(true);
   });
 
+  it("flop unit-weight reach fills combo height; 1/n deal mass stays flat (ZR-121)", () => {
+    useMatrixDisplayStore.getState().setRangeWeightHeightFill(true);
+    useStudyStore.setState({
+      selectedCell: { row: 0, col: 0, text: "AA" },
+      currentNode: {
+        node_id: "p0.t-1.r-1",
+        kind: "decision",
+        reach_defined: true,
+        actions: ["Check", "Bet 50"],
+        combos: ["AsAc", "AsAd", "AsAh"],
+        reach: [1, 1, 1],
+        marginal: [1 / 3, 1 / 3, 1 / 3],
+        strategy: [
+          [0.6, 0.4],
+          [0.6, 0.4],
+          [0.6, 0.4],
+        ],
+      },
+    });
+    const { unmount } = render(<ComboInspector />);
+    const full = [
+      ...document.querySelectorAll('.hands-combo[data-present="true"]'),
+    ] as HTMLElement[];
+    expect(full.length).toBeGreaterThan(0);
+    expect(
+      full.every(
+        (el) => Number(el.style.getPropertyValue("--weight-fill")) === 1,
+      ),
+    ).toBe(true);
+    unmount();
+
+    useStudyStore.setState({
+      selectedCell: { row: 0, col: 0, text: "AA" },
+      currentNode: {
+        node_id: "p0.t-1.r-1",
+        kind: "decision",
+        reach_defined: true,
+        actions: ["Check", "Bet 50"],
+        combos: ["AsAc", "AsAd", "AsAh"],
+        reach: [1 / 3, 1 / 3, 1 / 3],
+        marginal: [1 / 3, 1 / 3, 1 / 3],
+        strategy: [
+          [0.6, 0.4],
+          [0.6, 0.4],
+          [0.6, 0.4],
+        ],
+      },
+    });
+    render(<ComboInspector />);
+    const flat = [
+      ...document.querySelectorAll('.hands-combo[data-present="true"]'),
+    ] as HTMLElement[];
+    expect(flat.length).toBeGreaterThan(0);
+    expect(
+      flat.every(
+        (el) => Number(el.style.getPropertyValue("--weight-fill")) < 0.4,
+      ),
+    ).toBe(true);
+  });
+
   it("shows 12 offsuit suit slots for an unpaired offsuit cell", () => {
     useStudyStore.setState({
       currentNode: {

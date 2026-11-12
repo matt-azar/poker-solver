@@ -136,10 +136,11 @@ fn copyReachF32(allocator: std.mem.Allocator, src: []const f64) InspectError![]f
     return out;
 }
 
-/// Study `reach[]` must be C++ `replay_weights` scale (strategy-conditioned range
-/// weights from `range_w`, not absolute deal-joint probabilities). Desktop
-/// Range / Weight-fill uses mean(reach) as inclusion ∈ [0,1]; deal mass ≪ 1
-/// painted near-flat bars (ZR-105).
+/// Study `reach[]` must be C++ `replay_weights` scale on **every** street
+/// (flop / turn / river): strategy-conditioned range weights from `range_w`,
+/// own-σ along the line, and card removal through chance — never absolute
+/// deal-joint probabilities. Desktop Range / Weight-fill uses mean(reach) as
+/// inclusion ∈ [0,1]; deal mass ≪ 1 painted near-flat bars (ZR-105 / ZR-121).
 fn fillReachArrays(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,

@@ -172,6 +172,52 @@ describe("overlay labels and weight fill", () => {
     const inclusionFlat = aaFlat.reachSum / aaFlat.range_combos;
     expect(weightFillFraction(true, inclusionFlat)).toBeLessThan(0.01);
   });
+
+  it("flop12 unit-weight fixture fills height; 1/n deal-mass mean stays flat (ZR-121)", () => {
+    // Mirrors host flop12: 12 unit-weight combos. Deal-joint scale was max=1/12.
+    const combos = [
+      "2s2h",
+      "3s3h",
+      "4s4h",
+      "5s5h",
+      "6s6h",
+      "8s8h",
+      "9s9h",
+      "TsTh",
+      "JsJh",
+      "QsQh",
+      "KsKh",
+      "AsAc",
+    ];
+    const unit = {
+      node_id: "p0.t-1.r-1",
+      kind: "decision" as const,
+      reach_defined: true,
+      actions: ["Check", "Bet 50"],
+      combos,
+      reach: combos.map(() => 1),
+      marginal: combos.map(() => 1 / combos.length),
+      strategy: combos.map(() => [0.5, 0.5]),
+    };
+    const cells = groupHands(unit);
+    const liveMean =
+      unit.reach.reduce((a, b) => a + b, 0) / unit.reach.length;
+    expect(liveMean).toBeCloseTo(1, 12);
+    for (const cell of cells) {
+      const inclusion = cell.reachSum / cell.range_combos;
+      expect(weightFillFraction(true, inclusion)).toBeCloseTo(1, 12);
+    }
+
+    const dealMassReach = combos.map(() => 1 / combos.length);
+    const dealMean =
+      dealMassReach.reduce((a, b) => a + b, 0) / dealMassReach.length;
+    expect(dealMean).toBeLessThan(0.1);
+    const flat = groupHands({ ...unit, reach: dealMassReach });
+    for (const cell of flat) {
+      const inclusion = cell.reachSum / cell.range_combos;
+      expect(weightFillFraction(true, inclusion)).toBeLessThan(0.1);
+    }
+  });
 });
 
 describe("comboBadgeCards", () => {

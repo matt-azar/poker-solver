@@ -284,3 +284,173 @@ test "checkdown equity AA vs KK river" {
 test "evaluatePublished matches makeEvaluation identity" {
     _ = evaluation;
 }
+
+const ReachScaleStats = struct {
+    max: f32,
+    mean_live: f64,
+    live: usize,
+    n: usize,
+};
+
+fn reachScaleStats(reach: []const f32) ReachScaleStats {
+    var max_reach: f32 = 0;
+    var sum_live: f64 = 0;
+    var live: usize = 0;
+    for (reach) |r| {
+        if (r > max_reach) max_reach = r;
+        if (r > 0) {
+            live += 1;
+            sum_live += r;
+        }
+    }
+    const mean_live = if (live > 0) sum_live / @as(f64, @floatFromInt(live)) else 0;
+    return .{ .max = max_reach, .mean_live = mean_live, .live = live, .n = reach.len };
+}
+
+fn expectRangeWeightReachScale(reach: []const f32, min_live: usize) !void {
+    // Deal-joint mass on n unit hands is ~1/n (pre-#305 flop12 → 0.0833).
+    // Range-weight replay keeps live unit hands near 1 on every street.
+    const stats = reachScaleStats(reach);
+    try std.testing.expect(stats.live >= min_live);
+    try std.testing.expect(stats.max > 0.9);
+    try std.testing.expect(stats.mean_live > 0.9);
+    // Explicit guard: near-zero mean(reach) must not pass when hands are full weight.
+    try std.testing.expect(stats.mean_live > 0.5);
+}
+
+test "inspect flop root reach uses range-weight scale not 1/n deal mass" {
+    // ZR-121: 12 unit-weight flop hands — deal-joint scale was max=1/12; must be ≈1.
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range 2s2h:1,3s3h:1,4s4h:1,5s5h:1,6s6h:1,8s8h:1,9s9h:1,TsTh:1,JsJh:1,QsQh:1,KsKh:1,AsAc:1
+        \\ip-range 2s2h:1,3s3h:1,4s4h:1,5s5h:1,6s6h:1,8s8h:1,9s9h:1,TsTh:1,JsJh:1,QsQh:1,KsKh:1,AsAc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\
+    ;
+    var spec = try street_config.parseStreetConfig(std.testing.allocator, text);
+    defer spec.deinit();
+    var game = try compile.compile(std.testing.allocator, spec);
+    defer game.deinit();
+    var state = try training_state.TrainingState.init(std.testing.allocator, game);
+    defer state.deinit();
+    var published = try cfr_plus.trainDealByDeal(std.testing.allocator, game, &state, .{ .iterations = 1 });
+    defer published.deinit();
+
+    var page = try inspect.inspectNode(std.testing.allocator, game, published, 0, -1, -1);
+    defer page.deinit();
+    try std.testing.expect(page.reach_defined);
+    try std.testing.expect(page.reach.len >= 12);
+    try expectRangeWeightReachScale(page.reach, 12);
+    for (page.reach) |r| {
+        if (r > 0) try std.testing.expectApproxEqAbs(@as(f64, 1.0), @as(f64, r), 1e-5);
+    }
+}
+
+test "inspect flop post-chance turn reach uses range-weight scale" {
+    // ZR-121: multi-street chance path must keep unit-weight survivors ≈ 1 (card removal only).
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1,QsQd:1
+        \\ip-range JcJd:1,TcTd:1
+        \\oop-bets -
+        \\ip-bets -
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var spec = try street_config.parseStreetConfig(std.testing.allocator, text);
+    defer spec.deinit();
+    var game = try compile.compile(std.testing.allocator, spec);
+    defer game.deinit();
+    var state = try training_state.TrainingState.init(std.testing.allocator, game);
+    defer state.deinit();
+    var published = try cfr_plus.trainDealByDeal(std.testing.allocator, game, &state, .{ .iterations = 1 });
+    defer published.deinit();
+
+    var chance_idx: ?u32 = null;
+    for (game.nodes, 0..) |n, i| {
+        if (n.kind == .chance and n.deal_which == 1) {
+            chance_idx = @intCast(i);
+            break;
+        }
+    }
+    try std.testing.expect(chance_idx != null);
+    const turn_node: u32 = game.nodes[chance_idx.?].child[0];
+    var board_occ: [52]bool = .{false} ** 52;
+    for (game.board) |b| board_occ[@intCast(b)] = true;
+    var pick: i32 = -1;
+    var c: i32 = 0;
+    while (c < 52) : (c += 1) {
+        if (!board_occ[@intCast(c)]) {
+            pick = c;
+            break;
+        }
+    }
+    try std.testing.expect(pick >= 0);
+
+    var page = try inspect.inspectNode(std.testing.allocator, game, published, turn_node, pick, -1);
+    defer page.deinit();
+    try std.testing.expect(page.reach_defined);
+    try expectRangeWeightReachScale(page.reach, 1);
+}
+
+test "inspect turn root reach uses range-weight scale" {
+    // ZR-121: all-street contract — turn starting board same inclusion scale as flop/river.
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 2s
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1,QsQd:1
+        \\ip-range JcJd:1,TcTd:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var spec = try street_config.parseStreetConfig(std.testing.allocator, text);
+    defer spec.deinit();
+    var game = try compile.compile(std.testing.allocator, spec);
+    defer game.deinit();
+    var state = try training_state.TrainingState.init(std.testing.allocator, game);
+    defer state.deinit();
+    var published = try cfr_plus.trainDealByDeal(std.testing.allocator, game, &state, .{ .iterations = 1 });
+    defer published.deinit();
+
+    var page = try inspect.inspectNode(std.testing.allocator, game, published, 0, -1, -1);
+    defer page.deinit();
+    try std.testing.expect(page.reach_defined);
+    try expectRangeWeightReachScale(page.reach, 2);
+}
