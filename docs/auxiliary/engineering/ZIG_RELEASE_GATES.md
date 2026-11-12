@@ -49,7 +49,7 @@ When recording store scoreboard rows (optional; not required for cutover):
 
 | Workflow | Role |
 | --- | --- |
-| `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke + Study contract smoke (`scripts/zig/study-contract-smoke.py`, river fixture, ≤60s); Windows pins `-Dcpu=x86_64_v2` |
+| `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke + Study contract smoke (`scripts/zig/study-contract-smoke.py`, river fixture, ≤60s) + Linux overlap-actions smoke (`scripts/zig/study-overlap-actions-smoke.py`, ZR-152); Windows pins `-Dcpu=x86_64_v2`. Windows packaged Study overlap waits for ma1pc (ZR-147). |
 | `.github/workflows/windows-installer.yml` | Shipping NSIS; `externalBin` is Zig `solver-engine` only (no `holdem-explorer`) |
 | `.github/workflows/windows-installer-release.yml` | Tag-triggered release wrapper that reuses `windows-installer.yml` |
 | `.github/workflows/ci.yml` | Desktop Vitest / `tsc` / build (no C++ explorer matrix) |

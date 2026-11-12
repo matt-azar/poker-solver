@@ -15,6 +15,10 @@ python3 scripts/zig/ready-smoke.py ./zig-out/bin/solver-engine
 # equity → pause/stop → save/open/continue). River gate fixture; ≤60s; no Acc wall.
 python3 scripts/zig/study-contract-smoke.py ./zig-out/bin/solver-engine
 
+# Overlapping Solve/Stop/Continue/Open/nav with analysis in flight (ZR-152).
+# Linux real-sidecar; Windows packaged Study overlap waits for ma1pc (ZR-147).
+python3 scripts/zig/study-overlap-actions-smoke.py ./zig-out/bin/solver-engine
+
 # Desktop unit tests (Vitest) + typecheck
 cd desktop && npm ci && npm test && npx tsc -b
 
@@ -31,6 +35,7 @@ Windows: use `python` and `zig-out/bin/solver-engine.exe` the same way. Prefer `
 | Zig unit / integration | `zig build test` | Engine CFR/frozen/locks/equity/ICM math pins, Session train/eval, host dispatch envelopes under `tests/zig/` + `engine/` |
 | Ready smoke | `scripts/zig/ready-smoke.py` | Protocol-2 ready handshake on a live `solver-engine` process |
 | Study contract smoke | `scripts/zig/study-contract-smoke.py` | Real-sidecar typed IPC lifecycle used by Study (ZR-104). Uses `benchmarks/study/configs/river_gate_smoke.txt`. **No Accuracy wall.** |
+| Study overlap actions smoke | `scripts/zig/study-overlap-actions-smoke.py` | Alternating Solve/Stop/Continue/Open/nav with analysis in flight; late reply must not overwrite solution; memory settles; stdin EOF exits engine (ZR-152). Linux CI; Windows packaged suite → ZR-147/ma1pc. |
 | Desktop Vitest | `cd desktop && npm test` | `EngineClient` IPC branches, Study store/lifecycle, locks/strategy-edits soft gates, analysis helpers, UI domain |
 | Desktop typecheck | `cd desktop && npx tsc -b` | Store/client nullability that vitest can miss |
 | AI context packs | `cd desktop && npm run check:ai-context` | Generated packs match `docs/ai-context/source/` |
