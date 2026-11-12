@@ -24,7 +24,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          protected='^(main|master)$'
+          # Long-lived integration heads (C++ ships on main; Zig rewrite lands here).
+          protected='^(main|master|zig-rewrite)$'
 
           mapfile -t open_heads < <(
             gh pr list -R "$REPO" --state open --limit 500 \
