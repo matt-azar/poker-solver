@@ -1,7 +1,6 @@
 const std = @import("std");
 
-// Phase 1 scaffold: poker_engine (+ StreetSpec / street-config 1) and empty
-// sibling modules for later phases. Host binary name will be `solver-engine`.
+// Zig workspace: engine / app / formats / host(`solver-engine`) / cli.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -43,7 +42,6 @@ pub fn build(b: *std.Build) void {
     });
     cli_mod.addImport("poker_engine", engine_mod);
 
-    // Static library so `zig build` has a concrete install artifact in Phase 1.
     const engine_lib = b.addLibrary(.{
         .linkage = .static,
         .name = "poker_engine",
@@ -51,20 +49,18 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(engine_lib);
 
-    // street-config smoke CLI (parse + reformat). Not the product street_solver.
     const street_config_cli = b.addExecutable(.{
         .name = "street-config-check",
         .root_module = cli_mod,
     });
     b.installArtifact(street_config_cli);
 
-    // Host stub compiles as a library until Phase 6 wires IPC + `solver-engine`.
-    const host_lib = b.addLibrary(.{
-        .linkage = .static,
-        .name = "poker_host",
+    // Phase 6: typed-IPC sidecar (D11).
+    const solver_engine = b.addExecutable(.{
+        .name = "solver-engine",
         .root_module = host_mod,
     });
-    b.installArtifact(host_lib);
+    b.installArtifact(solver_engine);
 
     const engine_tests = b.addTest(.{
         .root_module = engine_mod,
@@ -81,8 +77,14 @@ pub fn build(b: *std.Build) void {
     });
     const run_formats_tests = b.addRunArtifact(formats_tests);
 
+    const host_tests = b.addTest(.{
+        .root_module = host_mod,
+    });
+    const run_host_tests = b.addRunArtifact(host_tests);
+
     const test_step = b.step("test", "Run Zig unit tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_app_tests.step);
     test_step.dependOn(&run_formats_tests.step);
+    test_step.dependOn(&run_host_tests.step);
 }

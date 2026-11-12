@@ -1,7 +1,13 @@
-# Holdem-explorer sidecar binaries
+# Sidecar binaries
 
-Tauri `bundle.externalBin` is configured as `binaries/holdem-explorer`
-(not `explorer`, to avoid colliding with Windows File Explorer).
+Tauri `bundle.externalBin` lists:
+
+| Entry | Product role |
+| --- | --- |
+| `binaries/holdem-explorer` | Shipping C++ HTTP explorer (default Study path) |
+| `binaries/solver-engine` | Zig typed-IPC tech-preview (`solver-engine` / `.exe`) |
+
+Default Study still speaks HTTP to `holdem-explorer`. Zig cutover uses inherited-pipe IPC to `solver-engine` (protocol 2).
 
 ## Naming (required by Tauri)
 
@@ -43,3 +49,16 @@ The packaged Study UI does not assume port 8765. `ensure_engine` allocates a
 loopback port, spawns this sidecar with `--launch-id` and `--study-packaged`,
 and returns after `GET /api/ready` matches protocol 1 and that launch id.
 Browser development still uses an explorer on port 8765.
+
+## Zig `solver-engine` (Phase 6 tech-preview)
+
+```bash
+zig build
+# Linux example — rename with target triple for Tauri externalBin:
+cp zig-out/bin/solver-engine \
+  desktop/src-tauri/binaries/solver-engine-x86_64-unknown-linux-gnu
+```
+
+At runtime the basename is `solver-engine[.exe]` beside the app. Framing:
+little-endian `u32` length + JSON envelope (`desktop/src/engine/ipcProtocol.ts`).
+Logs go to stderr; do not mix into the frame stream.
