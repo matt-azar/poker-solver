@@ -13,9 +13,12 @@ vi.mock("../platform", () => ({
 import {
   getActiveTransport,
   ipcCancel,
+  ipcDeleteLock,
+  ipcListLocks,
   ipcNode,
   ipcOpen,
   ipcPause,
+  ipcPutLock,
   ipcSave,
   ipcValues,
   setHttpFallbackTransport,
@@ -193,6 +196,72 @@ describe("Slice A IPC lifecycle + node helpers", () => {
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "save",
       body: { path: "/tmp/x.psol" },
+      jobId: null,
+    });
+  });
+});
+
+describe("Slice C locks IPC helpers", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("routes list / put / delete lock ops", async () => {
+    invoke.mockResolvedValue({
+      v: 2,
+      kind: "reply",
+      request_id: "l",
+      op: "list_locks",
+      ok: true,
+      body: { locks: [] },
+    });
+    await ipcListLocks();
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "list_locks",
+      body: null,
+      jobId: null,
+    });
+
+    invoke.mockResolvedValue({
+      v: 2,
+      kind: "reply",
+      request_id: "p",
+      op: "put_lock",
+      ok: true,
+      body: { locks: [{ node_id: "p0.t-1.r-1" }] },
+    });
+    await ipcPutLock({
+      node_id: "p0.t-1.r-1",
+      kind: "selected",
+      scope: "line",
+      hand_indices: [0, 1],
+      probs: [1, 0],
+    });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "put_lock",
+      body: {
+        node_id: "p0.t-1.r-1",
+        kind: "selected",
+        scope: "line",
+        hand_indices: [0, 1],
+        probs: [1, 0],
+      },
+      jobId: null,
+    });
+
+    invoke.mockResolvedValue({
+      v: 2,
+      kind: "reply",
+      request_id: "d",
+      op: "delete_lock",
+      ok: true,
+      body: { locks: [] },
+    });
+    await ipcDeleteLock({ nodeId: "p0.t-1.r-1", handIndex: 1 });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "delete_lock",
+      body: { node_id: "p0.t-1.r-1", hand_index: 1 },
       jobId: null,
     });
   });

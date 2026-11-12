@@ -214,6 +214,39 @@ export async function ipcSave(path: string): Promise<unknown> {
   return env.body;
 }
 
+/** Study locks list (`{"locks":[...]}`). */
+export async function ipcListLocks(): Promise<unknown> {
+  const env = await solverEngineRequest("list_locks");
+  return env.body;
+}
+
+/** Upsert one node/line lock; reply is full locks list. */
+export async function ipcPutLock(body: {
+  node_id: string;
+  kind: "full" | "selected";
+  scope?: "node" | "line";
+  hand_indices?: number[];
+  probs: number[];
+}): Promise<unknown> {
+  const env = await solverEngineRequest("put_lock", body);
+  return env.body;
+}
+
+/** Delete one lock / combo / all; reply is full locks list. */
+export async function ipcDeleteLock(opts?: {
+  nodeId?: string;
+  handIndex?: number;
+}): Promise<unknown> {
+  const body: Record<string, unknown> = {};
+  if (opts?.nodeId) body.node_id = opts.nodeId;
+  if (opts?.handIndex !== undefined) body.hand_index = opts.handIndex;
+  const env = await solverEngineRequest(
+    "delete_lock",
+    Object.keys(body).length > 0 ? body : null,
+  );
+  return env.body;
+}
+
 export async function ipcBeginConfig(configText: string): Promise<unknown> {
   const env = await solverEngineRequest("begin_config", { config_text: configText });
   return env.body;

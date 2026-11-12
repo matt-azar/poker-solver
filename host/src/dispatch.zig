@@ -5,6 +5,8 @@ const poker_engine = @import("poker_engine");
 const ipc = @import("ipc.zig");
 const workers = @import("workers.zig");
 const equity_json = @import("equity_json.zig");
+const locks_json = @import("locks_json.zig");
+const node_lock = poker_engine.solve.node_lock;
 
 const TrainTask = struct {
     state: *HostState,
@@ -120,6 +122,67 @@ fn bodyIntField(body: []const u8, key: []const u8) ?i32 {
     const from = i;
     while (i < body.len and ((body[i] >= '0' and body[i] <= '9') or body[i] == '-')) : (i += 1) {}
     return std.fmt.parseInt(i32, body[from..i], 10) catch null;
+}
+
+fn bodyArraySlice(body: []const u8, key: []const u8) ?[]const u8 {
+    var needle_buf: [64]u8 = undefined;
+    const needle = std.fmt.bufPrint(&needle_buf, "\"{s}\":", .{key}) catch return null;
+    const start = std.mem.indexOf(u8, body, needle) orelse return null;
+    var i = start + needle.len;
+    while (i < body.len and (body[i] == ' ' or body[i] == '\t')) : (i += 1) {}
+    if (i >= body.len or body[i] != '[') return null;
+    const from = i + 1;
+    var depth: i32 = 1;
+    i = from;
+    while (i < body.len and depth > 0) : (i += 1) {
+        if (body[i] == '[') depth += 1 else if (body[i] == ']') depth -= 1;
+    }
+    if (depth != 0) return null;
+    return body[from .. i - 1];
+}
+
+fn parseF64Array(allocator: std.mem.Allocator, text: []const u8) ![]f64 {
+    var list = std.ArrayList(f64).init(allocator);
+    errdefer list.deinit();
+    var i: usize = 0;
+    while (i < text.len) {
+        while (i < text.len and (text[i] == ' ' or text[i] == '\t' or text[i] == ',' or text[i] == '\n' or text[i] == '\r')) : (i += 1) {}
+        if (i >= text.len) break;
+        const from = i;
+        while (i < text.len and text[i] != ',' and text[i] != ' ' and text[i] != '\t' and text[i] != '\n' and text[i] != '\r') : (i += 1) {}
+        const value = try std.fmt.parseFloat(f64, text[from..i]);
+        try list.append(value);
+    }
+    return try list.toOwnedSlice();
+}
+
+fn parseUsizeArray(allocator: std.mem.Allocator, text: []const u8) ![]usize {
+    var list = std.ArrayList(usize).init(allocator);
+    errdefer list.deinit();
+    var i: usize = 0;
+    while (i < text.len) {
+        while (i < text.len and (text[i] == ' ' or text[i] == '\t' or text[i] == ',' or text[i] == '\n' or text[i] == '\r')) : (i += 1) {}
+        if (i >= text.len) break;
+        const from = i;
+        while (i < text.len and text[i] != ',' and text[i] != ' ' and text[i] != '\t' and text[i] != '\n' and text[i] != '\r') : (i += 1) {}
+        const value = try std.fmt.parseInt(usize, text[from..i], 10);
+        try list.append(value);
+    }
+    return try list.toOwnedSlice();
+}
+
+fn persistLocksText(state: *HostState, locks: *const node_lock.LockSet) !void {
+    const text = try node_lock.formatLockSet(state.allocator, locks);
+    defer state.allocator.free(text);
+    try state.session.setLocksText(text);
+}
+
+fn replyLocksBody(state: *HostState, req: ipc.Envelope, locks: *const node_lock.LockSet) !ipc.Envelope {
+    const body = locks_json.packStudyLocksBody(state.allocator, locks) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_pack_failed", @errorName(err));
+    };
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
 }
 
 fn resolveLocatedNode(
@@ -587,6 +650,162 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
+    // Study locks CRUD over Session.locks_text (node_lock codec). No resolveLocked.
+    if (std.mem.eql(u8, req.op, "list_locks")) {
+        if (state.session.solution_id == 0) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
+        }
+        var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
+        };
+        defer locks.deinit();
+        return replyLocksBody(state, req, &locks);
+    }
+
+    if (std.mem.eql(u8, req.op, "put_lock")) {
+        if (state.train_running.load(.acquire) or state.session.phase == .training) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+        }
+        var lease = state.session.borrowPublished() catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+        defer lease.deinit();
+
+        const node_id_text = bodyStringField(req.body_json, "node_id") orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "node_id required");
+        const located = poker_engine.analysis.node_id.locateNode(lease.game, node_id_text) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
+        };
+        var page = poker_engine.analysis.inspect.inspectNode(
+            state.allocator,
+            lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "inspect_failed", @errorName(err));
+        };
+        defer page.deinit();
+        if (page.player < 0 or page.n_actions == 0) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "locks apply only to decision nodes");
+        }
+
+        const kind_text = bodyStringField(req.body_json, "kind") orelse "full";
+        const scope_text = bodyStringField(req.body_json, "scope") orelse "node";
+        if (!std.mem.eql(u8, scope_text, "node") and !std.mem.eql(u8, scope_text, "line")) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "scope must be node or line");
+        }
+        const probs_slice = bodyArraySlice(req.body_json, "probs") orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs required");
+        const probs = parseF64Array(state.allocator, probs_slice) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad probs");
+        };
+        defer state.allocator.free(probs);
+        if (probs.len != page.n_actions) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs length must match action arity");
+        }
+
+        var lock = node_lock.NodeLock{
+            .infoset_id = located.node_index,
+        };
+        errdefer lock.deinit(state.allocator);
+        if (std.mem.eql(u8, scope_text, "line")) {
+            lock.scope = .line;
+            lock.turn = -1;
+            lock.river = -1;
+        } else {
+            lock.scope = .node;
+            lock.turn = @intCast(located.turn);
+            lock.river = @intCast(located.river);
+        }
+        if (std.mem.eql(u8, kind_text, "full")) {
+            lock.kind = .full_node;
+        } else if (std.mem.eql(u8, kind_text, "selected")) {
+            lock.kind = .selected_combos;
+            const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse "";
+            const hands = parseUsizeArray(state.allocator, hands_slice) catch {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_indices");
+            };
+            const n_hands: usize = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
+            for (hands) |hand| {
+                if (hand >= n_hands) {
+                    state.allocator.free(hands);
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
+                }
+            }
+            // Ownership transfers to lock (and then LockSet); do not free `hands` separately.
+            lock.combo_indices = hands;
+        } else {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "kind must be full or selected");
+        }
+        lock.actions = node_lock.makeActionLockRow(state.allocator, probs, @intCast(page.n_actions)) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid lock row");
+        };
+
+        var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
+        };
+        defer locks.deinit();
+        locks.upsert(lock) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+        };
+        // LockSet now owns the NodeLock storage; neutralize errdefer.
+        lock = .{};
+        persistLocksText(state, &locks) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+        };
+        return replyLocksBody(state, req, &locks);
+    }
+
+    if (std.mem.eql(u8, req.op, "delete_lock")) {
+        if (state.train_running.load(.acquire) or state.session.phase == .training) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+        }
+        if (state.session.solution_id == 0) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
+        }
+        var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
+        };
+        defer locks.deinit();
+
+        if (bodyStringField(req.body_json, "node_id")) |node_id_text| {
+            const parsed = poker_engine.analysis.node_id.parseNodeId(node_id_text) catch {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad node_id");
+            };
+            const key = node_lock.makeLockKey(parsed.node_index, parsed.turn, parsed.river);
+            if (bodyIntField(req.body_json, "hand_index")) |hand_i32| {
+                if (hand_i32 < 0) {
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_index");
+                }
+                const hand_index: usize = @intCast(hand_i32);
+                if (locks.findExactKey(key)) |existing| {
+                    if (existing.kind == .full_node) {
+                        return ipc.makeErrorReply(
+                            state.allocator,
+                            req.request_id,
+                            req.job_id,
+                            req.op,
+                            "invalid_request",
+                            "full-node locks unlock with node_id only; omit hand_index",
+                        );
+                    }
+                }
+                _ = locks.eraseComboKey(key, hand_index);
+            } else {
+                _ = locks.eraseKey(key);
+            }
+        } else {
+            locks.clear();
+        }
+
+        persistLocksText(state, &locks) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+        };
+        return replyLocksBody(state, req, &locks);
+    }
+
     return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_op", req.op);
 }
 
@@ -991,4 +1210,88 @@ test "equity dispatch river smoke Study shape" {
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"ip_hands\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"engine\":\"checkdown_equity\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "AsQs") != null);
+}
+
+test "locks list put delete Study CRUD" {
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "locks-crud");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    var list_empty: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "l0"),
+        .op = try std.testing.allocator.dupe(u8, "list_locks"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer list_empty.deinit();
+    var empty_reply = try handle(&state, list_empty);
+    defer empty_reply.deinit();
+    try std.testing.expect(empty_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, empty_reply.body_json, "\"locks\":[]") != null);
+
+    var put_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "l1"),
+        .op = try std.testing.allocator.dupe(u8, "put_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\",\"kind\":\"full\",\"scope\":\"node\",\"probs\":[0.4,0.6]}"),
+    };
+    defer put_req.deinit();
+    var put_reply = try handle(&state, put_req);
+    defer put_reply.deinit();
+    try std.testing.expect(put_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, put_reply.body_json, "\"node_id\":\"p0.t-1.r-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, put_reply.body_json, "\"kind\":\"full\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, put_reply.body_json, "\"scope\":\"node\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, put_reply.body_json, "0.4") != null);
+    try std.testing.expect(state.session.locks_text.len > 0);
+
+    var list_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "l2"),
+        .op = try std.testing.allocator.dupe(u8, "list_locks"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer list_req.deinit();
+    var list_reply = try handle(&state, list_req);
+    defer list_reply.deinit();
+    try std.testing.expect(list_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, list_reply.body_json, "\"locks\":[{") != null);
+
+    var del_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "l3"),
+        .op = try std.testing.allocator.dupe(u8, "delete_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer del_req.deinit();
+    var del_reply = try handle(&state, del_req);
+    defer del_reply.deinit();
+    try std.testing.expect(del_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, del_reply.body_json, "\"locks\":[]") != null);
 }
