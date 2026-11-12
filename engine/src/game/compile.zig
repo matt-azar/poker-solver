@@ -5,6 +5,7 @@ const range_mod = @import("../poker/range.zig");
 const payoff = @import("../poker/payoff.zig");
 const icm = @import("../poker/icm.zig");
 const street_spec = @import("street_spec.zig");
+const tree_edit = @import("tree_edit.zig");
 const betting = @import("betting.zig");
 
 pub const CompileError = error{
@@ -132,6 +133,10 @@ pub const CompiledGame = struct {
     /// Counted for infoset_count / strategy export parity with C++; no Slot rows.
     implicit_infosets: u64 = 0,
     table_entries: i32 = 0,
+    /// Soft tree-edit skips: formatOneEdit lines that never mutated the tree.
+    /// Compile still succeeds; callers can surface these without failing the solve.
+    unapplied_tree_edits: [][]const u8 = &.{},
+    unapplied_tree_edit_reasons: [][]const u8 = &.{},
 
     pub fn icmConfig(self: CompiledGame) icm.IcmConfig {
         return .{ .stacks = self.icm_stacks, .payouts = self.icm_payouts };
@@ -168,6 +173,14 @@ pub const CompiledGame = struct {
         if (self.incentive_edge_tags.len != 0) self.allocator.free(self.incentive_edge_tags);
         if (self.deals.len != 0) self.allocator.free(self.deals);
         if (self.slots.len != 0) self.allocator.free(self.slots);
+        for (self.unapplied_tree_edits) |line| {
+            if (line.len != 0) self.allocator.free(line);
+        }
+        if (self.unapplied_tree_edits.len != 0) self.allocator.free(self.unapplied_tree_edits);
+        for (self.unapplied_tree_edit_reasons) |reason| {
+            if (reason.len != 0) self.allocator.free(reason);
+        }
+        if (self.unapplied_tree_edit_reasons.len != 0) self.allocator.free(self.unapplied_tree_edit_reasons);
         self.runouts.deinit(self.allocator);
         self.hands.deinit(self.allocator);
         self.* = .{ .allocator = self.allocator };
@@ -572,6 +585,38 @@ fn buildRunoutIndex(allocator: std.mem.Allocator, game: *CompiledGame) CompileEr
     game.runouts.mode2_river = rivers.toOwnedSlice() catch return error.OutOfMemory;
 }
 
+fn collectUnappliedTreeEdits(
+    allocator: std.mem.Allocator,
+    game: *CompiledGame,
+    spec: street_spec.StreetSpec,
+    statuses: []const betting.EditApplyStatus,
+) CompileError!void {
+    var lines = std.ArrayList([]const u8).init(allocator);
+    errdefer {
+        for (lines.items) |line| allocator.free(line);
+        lines.deinit();
+    }
+    var reasons = std.ArrayList([]const u8).init(allocator);
+    errdefer {
+        for (reasons.items) |reason| allocator.free(reason);
+        reasons.deinit();
+    }
+    for (spec.tree_edits, 0..) |edit, i| {
+        const status = statuses[i];
+        if (status == .applied) continue;
+        var buf: [256]u8 = undefined;
+        const formatted = tree_edit.formatOneEdit(edit, &buf) catch return error.InvalidCompile;
+        const line = allocator.dupe(u8, formatted) catch return error.OutOfMemory;
+        errdefer allocator.free(line);
+        const reason = allocator.dupe(u8, betting.editApplyStatusName(status)) catch return error.OutOfMemory;
+        errdefer allocator.free(reason);
+        lines.append(line) catch return error.OutOfMemory;
+        reasons.append(reason) catch return error.OutOfMemory;
+    }
+    game.unapplied_tree_edits = lines.toOwnedSlice() catch return error.OutOfMemory;
+    game.unapplied_tree_edit_reasons = reasons.toOwnedSlice() catch return error.OutOfMemory;
+}
+
 fn buildPublicTree(allocator: std.mem.Allocator, game: *CompiledGame, spec: street_spec.StreetSpec) CompileError!void {
     var nodes = std.ArrayList(Node).init(allocator);
     errdefer {
@@ -587,10 +632,17 @@ fn buildPublicTree(allocator: std.mem.Allocator, game: *CompiledGame, spec: stre
     var decision_ids = std.ArrayList(u32).init(allocator);
     errdefer decision_ids.deinit();
 
+    var edit_statuses: []betting.EditApplyStatus = &.{};
+    if (spec.tree_edits.len != 0) {
+        edit_statuses = allocator.alloc(betting.EditApplyStatus, spec.tree_edits.len) catch return error.OutOfMemory;
+        @memset(edit_statuses, .never_matched_path);
+    }
+    defer if (edit_statuses.len != 0) allocator.free(edit_statuses);
+
     var root = betting.BetState{};
     root.pot = spec.pot;
     root.acting = spec.first_to_act;
-    _ = try buildNode(allocator, spec, game, &nodes, &decision_ids, root, "", 0);
+    _ = try buildNode(allocator, spec, game, &nodes, &decision_ids, root, "", 0, edit_statuses);
 
     game.nodes = nodes.toOwnedSlice() catch return error.OutOfMemory;
     game.decision_ids = decision_ids.toOwnedSlice() catch return error.OutOfMemory;
@@ -602,6 +654,9 @@ fn buildPublicTree(allocator: std.mem.Allocator, game: *CompiledGame, spec: stre
     }
     game.public_decisions = decisions;
     game.public_terminals = terminals;
+    if (edit_statuses.len != 0) {
+        try collectUnappliedTreeEdits(allocator, game, spec, edit_statuses);
+    }
 }
 
 fn buildNode(
@@ -613,6 +668,7 @@ fn buildNode(
     state: betting.BetState,
     path: []const u8,
     depth: i32,
+    edit_statuses: []betting.EditApplyStatus,
 ) CompileError!u32 {
     if (depth > 48) return error.InvalidCompile;
     if (state.terminal) {
@@ -641,7 +697,7 @@ fn buildNode(
         next.last_raise = 0;
         next.num_raises = 0;
         next.committed = next.contrib[0];
-        const child = try buildNode(allocator, spec, game, nodes, decision_ids, next, path, depth);
+        const child = try buildNode(allocator, spec, game, nodes, decision_ids, next, path, depth, edit_statuses);
         nodes.items[@intCast(id)].child[0] = child;
         nodes.items[@intCast(child)].parent = @intCast(id);
         nodes.items[@intCast(child)].parent_action = -1;
@@ -650,7 +706,8 @@ fn buildNode(
     }
 
     var legal = betting.legalActions(spec, state) catch return error.InvalidCompile;
-    betting.applyTreeEdits(&legal, spec, state, path) catch return error.InvalidCompile;
+    const statuses_arg: ?[]betting.EditApplyStatus = if (edit_statuses.len != 0) edit_statuses else null;
+    betting.applyTreeEdits(&legal, spec, state, path, statuses_arg) catch return error.InvalidCompile;
     const facing = state.committed > state.contrib[@intCast(state.acting)];
 
     var node = Node{
@@ -717,6 +774,7 @@ fn buildNode(
             betting.applyAction(spec, state, legal, action),
             next_path,
             depth + 1,
+            edit_statuses,
         );
         nodes.items[@intCast(id)].child[@intCast(action)] = child;
         nodes.items[@intCast(child)].parent = @intCast(id);
