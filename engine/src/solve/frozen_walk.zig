@@ -54,6 +54,24 @@ fn runoutKey(turn: i32, river: i32) i32 {
     return (turn + 1) * 64 + (river + 1);
 }
 
+/// Immutable legal-hand mask for one (turn,river) board (precomputed once).
+const BoardLive = struct {
+    live0: []bool = &.{},
+    live1: []bool = &.{},
+    idx0: []u16 = &.{},
+    idx0_len: usize = 0,
+    idx1: []u16 = &.{},
+    idx1_len: usize = 0,
+
+    fn deinit(self: *BoardLive, allocator: std.mem.Allocator) void {
+        if (self.live0.len != 0) allocator.free(self.live0);
+        if (self.live1.len != 0) allocator.free(self.live1);
+        if (self.idx0.len != 0) allocator.free(self.idx0);
+        if (self.idx1.len != 0) allocator.free(self.idx1);
+        self.* = undefined;
+    }
+};
+
 /// Immutable showdown facts for one runout (C++ Engine::RunoutRanks).
 /// Order is rank then hand index over every indexed hand.
 const RunoutRanks = struct {
@@ -204,6 +222,10 @@ pub const FrozenCtx = struct {
     /// invalidate `*const RunoutRanks` still in use by other workers (UAF).
     ranks: std.AutoHashMap(i32, *RunoutRanks),
     ranks_mu: std.Thread.Mutex = .{},
+    /// Precomputed legal-hand masks per (turn,river); immutable after `board_live_ready`.
+    board_live: std.AutoHashMap(i32, *BoardLive),
+    board_live_mu: std.Thread.Mutex = .{},
+    board_live_ready: bool = false,
     threads: u32 = 1,
     workspace: WorkerLocal = undefined,
     workspace_ready: bool = false,
@@ -277,6 +299,7 @@ pub const FrozenCtx = struct {
             .twin0 = try allocator.alloc(i32, n0),
             .twin1 = try allocator.alloc(i32, n1),
             .ranks = std.AutoHashMap(i32, *RunoutRanks).init(allocator),
+            .board_live = std.AutoHashMap(i32, *BoardLive).init(allocator),
             .threads = threads,
         };
         errdefer ctx.deinit();
@@ -325,6 +348,12 @@ pub const FrozenCtx = struct {
             self.allocator.destroy(entry.value_ptr.*);
         }
         self.ranks.deinit();
+        var blit = self.board_live.iterator();
+        while (blit.next()) |entry| {
+            entry.value_ptr.*.deinit(self.allocator);
+            self.allocator.destroy(entry.value_ptr.*);
+        }
+        self.board_live.deinit();
         self.allocator.free(self.support0);
         self.allocator.free(self.support1);
         self.allocator.free(self.twin0);
@@ -474,8 +503,123 @@ pub const FrozenCtx = struct {
         return self.compatibleOn(player, hand, turn, river) > 0;
     }
 
+    fn fillBoardLiveTable(self: *FrozenCtx, table: *BoardLive, turn: i32, river: i32) void {
+        var n0_live: usize = 0;
+        var h: usize = 0;
+        while (h < self.n0) : (h += 1) {
+            const live = self.handSupported(0, h, turn, river);
+            table.live0[h] = live;
+            if (live) {
+                table.idx0[n0_live] = @intCast(h);
+                n0_live += 1;
+            }
+        }
+        table.idx0_len = n0_live;
+        var n1_live: usize = 0;
+        h = 0;
+        while (h < self.n1) : (h += 1) {
+            const live = self.handSupported(1, h, turn, river);
+            table.live1[h] = live;
+            if (live) {
+                table.idx1[n1_live] = @intCast(h);
+                n1_live += 1;
+            }
+        }
+        table.idx1_len = n1_live;
+    }
+
+    fn ensureBoardLive(self: *FrozenCtx, turn: i32, river: i32) FrozenError!*const BoardLive {
+        const key = runoutKey(turn, river);
+        if (self.board_live_ready) {
+            return self.board_live.get(key) orelse return error.InvalidFrozen;
+        }
+        {
+            self.board_live_mu.lock();
+            defer self.board_live_mu.unlock();
+            if (self.board_live.get(key)) |existing| return existing;
+        }
+        var owned = true;
+        const table = try self.allocator.create(BoardLive);
+        errdefer if (owned) {
+            table.deinit(self.allocator);
+            self.allocator.destroy(table);
+        };
+        table.* = .{
+            .live0 = try self.allocator.alloc(bool, self.n0),
+            .live1 = try self.allocator.alloc(bool, self.n1),
+            .idx0 = try self.allocator.alloc(u16, self.n0),
+            .idx1 = try self.allocator.alloc(u16, self.n1),
+        };
+        self.fillBoardLiveTable(table, turn, river);
+        self.board_live_mu.lock();
+        defer self.board_live_mu.unlock();
+        if (self.board_live.get(key)) |existing| {
+            table.deinit(self.allocator);
+            self.allocator.destroy(table);
+            owned = false;
+            return existing;
+        }
+        try self.board_live.put(key, table);
+        owned = false;
+        return table;
+    }
+
+    /// Precompute legal-hand masks for every board the walk visits.
+    pub fn ensureAllBoardLiveReady(self: *FrozenCtx) FrozenError!void {
+        if (self.board_live_ready) return;
+        _ = try self.ensureBoardLive(-1, -1);
+        var dead: [52]bool = .{false} ** 52;
+        for (self.game.board) |c| dead[@intCast(c)] = true;
+        if (self.game.board.len == 5) {
+            self.board_live_ready = true;
+            return;
+        }
+        if (self.game.board.len == 4) {
+            var river: i32 = 0;
+            while (river < 52) : (river += 1) {
+                if (dead[@intCast(river)]) continue;
+                _ = try self.ensureBoardLive(-1, river);
+            }
+            self.board_live_ready = true;
+            return;
+        }
+        if (self.game.board.len != 3) return error.InvalidFrozen;
+        var turn: i32 = 0;
+        while (turn < 52) : (turn += 1) {
+            if (dead[@intCast(turn)]) continue;
+            _ = try self.ensureBoardLive(turn, -1);
+            var river: i32 = 0;
+            while (river < 52) : (river += 1) {
+                if (dead[@intCast(river)] or river == turn) continue;
+                _ = try self.ensureBoardLive(turn, river);
+            }
+        }
+        self.board_live_ready = true;
+    }
+
     fn ensureBoardSupport(self: *FrozenCtx, w: *WorkerLocal, turn: i32, river: i32) void {
         if (w.support_turn == turn and w.support_river == river) return;
+        // Prefer immutable precomputed masks (no per-worker legality scan).
+        if (self.board_live_ready) {
+            const table = self.board_live.get(runoutKey(turn, river)) orelse {
+                // Should be unreachable after ensureAllBoardLiveReady; fall through.
+                self.ensureBoardSupportCompute(w, turn, river);
+                return;
+            };
+            @memcpy(w.live0, table.live0);
+            @memcpy(w.live1, table.live1);
+            @memcpy(w.idx0[0..table.idx0_len], table.idx0[0..table.idx0_len]);
+            @memcpy(w.idx1[0..table.idx1_len], table.idx1[0..table.idx1_len]);
+            w.idx0_len = table.idx0_len;
+            w.idx1_len = table.idx1_len;
+            w.support_turn = turn;
+            w.support_river = river;
+            return;
+        }
+        self.ensureBoardSupportCompute(w, turn, river);
+    }
+
+    fn ensureBoardSupportCompute(self: *FrozenCtx, w: *WorkerLocal, turn: i32, river: i32) void {
         var n0_live: usize = 0;
         var h: usize = 0;
         while (h < self.n0) : (h += 1) {
@@ -713,6 +857,7 @@ pub const FrozenCtx = struct {
     /// before a multithreaded pass (C++ `ensure_ranks`). Workers then only read.
     /// Idempotent once `ranks_ready` — Acc-stop reuses a Session-owned ctx.
     pub fn ensureAllRanksReady(self: *FrozenCtx) FrozenError!void {
+        try self.ensureAllBoardLiveReady();
         if (self.ranks_ready) return;
         var dead: [52]bool = .{false} ** 52;
         for (self.game.board) |c| dead[@intCast(c)] = true;
@@ -745,7 +890,11 @@ pub const FrozenCtx = struct {
 
     fn ensureRanks(self: *FrozenCtx, turn: i32, river: i32) FrozenError!*const RunoutRanks {
         const key = runoutKey(turn, river);
-        // Fast path: published tables are immutable; pointer stays valid across rehash.
+        // After prewarm, tables are immutable — no mutex on the hot path.
+        if (self.ranks_ready) {
+            return self.ranks.get(key) orelse return error.InvalidFrozen;
+        }
+        // Fast path during lazy fill: published tables are immutable; pointer stays valid across rehash.
         {
             self.ranks_mu.lock();
             defer self.ranks_mu.unlock();
@@ -1109,9 +1258,13 @@ pub const FrozenCtx = struct {
         const node = self.game.nodes[node_index];
         const here = &w.scratch[depth];
 
+        // Train: both reaches always; EV only for the updating seat (needed_player).
+        const need0 = updating < 0 or updating == 0;
+        const need1 = updating < 0 or updating == 1;
+
         if (node.kind == .terminal) {
-            // Train path: stable=false (C++ frozen_walk); both seats.
-            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1, false, -1);
+            // Train path: stable=false; reuse one-seat terminal when updating is 0/1.
+            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1, false, updating);
             return;
         }
 
@@ -1120,8 +1273,8 @@ pub const FrozenCtx = struct {
                 try self.parallelChance(w, node, turn, river, depth, updating, weight_iter);
                 return;
             }
-            @memset(here.ev0, 0);
-            @memset(here.ev1, 0);
+            if (need0) @memset(here.ev0, 0);
+            if (need1) @memset(here.ev1, 0);
             var dead: [52]bool = .{false} ** 52;
             for (self.game.board) |c| dead[@intCast(c)] = true;
             if (turn >= 0) dead[@intCast(turn)] = true;
@@ -1149,10 +1302,14 @@ pub const FrozenCtx = struct {
                     child.pi1[h1] = if (w.live1[h1]) here.pi1[h1] else 0;
                 }
                 try self.walk(w, node.child[0], next_turn, next_river, depth + 1, updating, weight_iter, true);
-                h0 = 0;
-                while (h0 < self.n0) : (h0 += 1) here.ev0[h0] += probability * child.ev0[h0];
-                h1 = 0;
-                while (h1 < self.n1) : (h1 += 1) here.ev1[h1] += probability * child.ev1[h1];
+                if (need0) {
+                    h0 = 0;
+                    while (h0 < self.n0) : (h0 += 1) here.ev0[h0] += probability * child.ev0[h0];
+                }
+                if (need1) {
+                    h1 = 0;
+                    while (h1 < self.n1) : (h1 += 1) here.ev1[h1] += probability * child.ev1[h1];
+                }
             }
             return;
         }
@@ -1175,15 +1332,19 @@ pub const FrozenCtx = struct {
             }
             try self.walk(w, node.child[0], turn, river, depth + 1, updating, weight_iter, serial_chance);
             self.ensureBoardSupport(w, turn, river);
-            @memcpy(here.ev0, child.ev0);
-            @memcpy(here.ev1, child.ev1);
-            var z0: usize = 0;
-            while (z0 < self.n0) : (z0 += 1) {
-                if (!w.live0[z0]) here.ev0[z0] = 0;
+            if (need0) {
+                @memcpy(here.ev0, child.ev0);
+                var z0: usize = 0;
+                while (z0 < self.n0) : (z0 += 1) {
+                    if (!w.live0[z0]) here.ev0[z0] = 0;
+                }
             }
-            var z1: usize = 0;
-            while (z1 < self.n1) : (z1 += 1) {
-                if (!w.live1[z1]) here.ev1[z1] = 0;
+            if (need1) {
+                @memcpy(here.ev1, child.ev1);
+                var z1: usize = 0;
+                while (z1 < self.n1) : (z1 += 1) {
+                    if (!w.live1[z1]) here.ev1[z1] = 0;
+                }
             }
             return;
         }
@@ -1191,6 +1352,12 @@ pub const FrozenCtx = struct {
         if (node.n_actions > max_actions) return error.InvalidFrozen;
         try self.fillActorSlotBases(w, here, node, turn, river);
         const n_act: usize = node.n_actions;
+        // Actor action-EVs only when that seat is updating; opponent EV is the mix
+        // of the updating seat's values through the actor's σ.
+        const want_aev0 = node.player == 0 and need0;
+        const want_aev1 = node.player == 1 and need1;
+        const want_opp_ev0 = node.player == 1 and need0;
+        const want_opp_ev1 = node.player == 0 and need1;
 
         var action: usize = 0;
         while (action < n_act) : (action += 1) {
@@ -1225,16 +1392,21 @@ pub const FrozenCtx = struct {
                 }
             }
             try self.walk(w, node.child[action], turn, river, depth + 1, updating, weight_iter, serial_chance);
-            if (node.player == 0) {
+            if (want_aev0) {
                 @memcpy(here.aev0[action * self.n0 ..][0..self.n0], child.ev0);
+            }
+            if (want_opp_ev1) {
                 if (action == 0) {
                     @memcpy(here.ev1, child.ev1);
                 } else {
                     var h1: usize = 0;
                     while (h1 < self.n1) : (h1 += 1) here.ev1[h1] += child.ev1[h1];
                 }
-            } else {
+            }
+            if (want_aev1) {
                 @memcpy(here.aev1[action * self.n1 ..][0..self.n1], child.ev1);
+            }
+            if (want_opp_ev0) {
                 if (action == 0) {
                     @memcpy(here.ev0, child.ev0);
                 } else {
@@ -1246,26 +1418,26 @@ pub const FrozenCtx = struct {
 
         self.ensureBoardSupport(w, turn, river);
         if (node.player == 0) {
-            var h0: usize = 0;
-            while (h0 < self.n0) : (h0 += 1) {
-                if (!w.live0[h0]) {
-                    here.ev0[h0] = 0;
-                    continue;
-                }
-                const base = here.slot_base[h0];
-                if (base < 0) {
-                    here.ev0[h0] = 0;
-                    continue;
-                }
-                const b: usize = @intCast(base);
-                const row = self.state.?.sigma[b .. b + n_act];
-                var mix: f64 = 0;
-                action = 0;
-                while (action < n_act) : (action += 1) {
-                    mix += row[action] * here.aev0[action * self.n0 + h0];
-                }
-                here.ev0[h0] = mix;
-                if (updating < 0 or updating == 0) {
+            if (want_aev0) {
+                var h0: usize = 0;
+                while (h0 < self.n0) : (h0 += 1) {
+                    if (!w.live0[h0]) {
+                        here.ev0[h0] = 0;
+                        continue;
+                    }
+                    const base = here.slot_base[h0];
+                    if (base < 0) {
+                        here.ev0[h0] = 0;
+                        continue;
+                    }
+                    const b: usize = @intCast(base);
+                    const row = self.state.?.sigma[b .. b + n_act];
+                    var mix: f64 = 0;
+                    action = 0;
+                    while (action < n_act) : (action += 1) {
+                        mix += row[action] * here.aev0[action * self.n0 + h0];
+                    }
+                    here.ev0[h0] = mix;
                     regret_matching.accumulateAverage(
                         self.state.?.strategy_sum[b .. b + n_act],
                         row,
@@ -1278,35 +1450,39 @@ pub const FrozenCtx = struct {
                     }
                 }
             }
-            var h1: usize = 0;
-            while (h1 < self.n1) : (h1 += 1) {
-                if (!w.live1[h1]) here.ev1[h1] = 0;
+            if (want_opp_ev1) {
+                var h1: usize = 0;
+                while (h1 < self.n1) : (h1 += 1) {
+                    if (!w.live1[h1]) here.ev1[h1] = 0;
+                }
             }
         } else {
-            var h0: usize = 0;
-            while (h0 < self.n0) : (h0 += 1) {
-                if (!w.live0[h0]) here.ev0[h0] = 0;
+            if (want_opp_ev0) {
+                var h0: usize = 0;
+                while (h0 < self.n0) : (h0 += 1) {
+                    if (!w.live0[h0]) here.ev0[h0] = 0;
+                }
             }
-            var h1: usize = 0;
-            while (h1 < self.n1) : (h1 += 1) {
-                if (!w.live1[h1]) {
-                    here.ev1[h1] = 0;
-                    continue;
-                }
-                const base = here.slot_base[h1];
-                if (base < 0) {
-                    here.ev1[h1] = 0;
-                    continue;
-                }
-                const b: usize = @intCast(base);
-                const row = self.state.?.sigma[b .. b + n_act];
-                var mix: f64 = 0;
-                action = 0;
-                while (action < n_act) : (action += 1) {
-                    mix += row[action] * here.aev1[action * self.n1 + h1];
-                }
-                here.ev1[h1] = mix;
-                if (updating < 0 or updating == 1) {
+            if (want_aev1) {
+                var h1: usize = 0;
+                while (h1 < self.n1) : (h1 += 1) {
+                    if (!w.live1[h1]) {
+                        here.ev1[h1] = 0;
+                        continue;
+                    }
+                    const base = here.slot_base[h1];
+                    if (base < 0) {
+                        here.ev1[h1] = 0;
+                        continue;
+                    }
+                    const b: usize = @intCast(base);
+                    const row = self.state.?.sigma[b .. b + n_act];
+                    var mix: f64 = 0;
+                    action = 0;
+                    while (action < n_act) : (action += 1) {
+                        mix += row[action] * here.aev1[action * self.n1 + h1];
+                    }
+                    here.ev1[h1] = mix;
                     regret_matching.accumulateAverage(
                         self.state.?.strategy_sum[b .. b + n_act],
                         row,
@@ -1693,8 +1869,14 @@ pub const FrozenCtx = struct {
                 recordErr(job, err);
                 return;
             };
-            const need0 = job.mode == .train or job.responding < 0 or job.responding == 0;
-            const need1 = job.mode == .train or job.responding < 0 or job.responding == 1;
+            const need0 = switch (job.mode) {
+                .train => job.updating < 0 or job.updating == 0,
+                .response => job.responding < 0 or job.responding == 0,
+            };
+            const need1 = switch (job.mode) {
+                .train => job.updating < 0 or job.updating == 1,
+                .response => job.responding < 0 or job.responding == 1,
+            };
             if (need0) {
                 const ev0_at = @as(usize, @intCast(dealt)) * self.n0;
                 @memcpy(self.result0[ev0_at..][0..self.n0], child.ev0);
@@ -1755,8 +1937,8 @@ pub const FrozenCtx = struct {
         weight_iter: f64,
     ) FrozenError!void {
         const here = &w.scratch[depth];
-        @memset(here.ev0, 0);
-        @memset(here.ev1, 0);
+        if (updating < 0 or updating == 0) @memset(here.ev0, 0);
+        if (updating < 0 or updating == 1) @memset(here.ev1, 0);
         const denom = try self.chanceDenom(turn, river);
         const probability = 1.0 / @as(f64, @floatFromInt(denom));
         var active_cards: [52]i32 = undefined;
@@ -1798,7 +1980,7 @@ pub const FrozenCtx = struct {
                 }
             }
         }
-        self.reduceChildEv(here, ordered[0..n_ord], probability, -1);
+        self.reduceChildEv(here, ordered[0..n_ord], probability, updating);
     }
 
     fn parallelResponseChance(
