@@ -78,7 +78,7 @@ fn resolveSigma(
     return owned.*.?;
 }
 
-/// Prefer frozen public-tree `response_walk` for root EV (flop-scale Study latency).
+/// Prefer frozen public-tree `response_walk` + Q_i normalize for root EV (Study latency).
 /// Non-root / explicit turn·river pins keep the deal-by-deal oracle path.
 pub fn actionValues(
     allocator: std.mem.Allocator,
@@ -99,8 +99,89 @@ pub fn actionValues(
     return actionValuesDealByDeal(allocator, game, published, node_index, turn, river);
 }
 
+fn handCollidesBoard(game: compile.CompiledGame, player: usize, hand: usize) bool {
+    const c0 = game.hands.hole_low[player][hand];
+    const c1 = game.hands.hole_high[player][hand];
+    for (game.board) |b| {
+        if (c0 == b or c1 == b) return true;
+    }
+    return false;
+}
+
+fn handsShareHole(game: compile.CompiledGame, hero: usize, hero_hand: usize, opp: usize, opp_hand: usize) bool {
+    const c0 = game.hands.hole_low[hero][hero_hand];
+    const c1 = game.hands.hole_high[hero][hero_hand];
+    const o0 = game.hands.hole_low[opp][opp_hand];
+    const o1 = game.hands.hole_high[opp][opp_hand];
+    return c0 == o0 or c0 == o1 or c1 == o0 or c1 == o1;
+}
+
+fn differenceIsStable(total: f64, removed: f64, difference: f64) bool {
+    if (!std.math.isFinite(total) or !std.math.isFinite(removed) or !std.math.isFinite(difference)) {
+        return false;
+    }
+    if (difference < 0.0) return false;
+    if (difference == 0.0) return total == 0.0 and removed == 0.0;
+    const scale = @max(total, @abs(removed));
+    return difference > scale * 1e-3;
+}
+
+/// Root `open` / D_i(h): compatible opponent range mass (C++ stable_compatible_mass at root).
+fn rootCompatibleOpponentMass(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    actor: usize,
+    open_out: []f64,
+) ActionEvError!void {
+    const opp: usize = 1 - actor;
+    const opp_hands = game.hands.combos[opp].len;
+    var amount = allocator.alloc(f64, opp_hands) catch return error.OutOfMemory;
+    defer allocator.free(amount);
+    @memset(amount, 0);
+    var by_card: [52]f64 = .{0} ** 52;
+    var total: f64 = 0;
+    var oh: usize = 0;
+    while (oh < opp_hands) : (oh += 1) {
+        const w = game.hands.range_w[opp][oh];
+        if (!(w > 0) or handCollidesBoard(game, opp, oh)) continue;
+        amount[oh] = w;
+        total += w;
+        const c0 = game.hands.hole_low[opp][oh];
+        const c1 = game.hands.hole_high[opp][oh];
+        by_card[@intCast(c0)] += w;
+        by_card[@intCast(c1)] += w;
+    }
+    @memset(open_out, 0);
+    var hand: usize = 0;
+    while (hand < open_out.len) : (hand += 1) {
+        if (!(game.hands.range_w[actor][hand] > 0) or handCollidesBoard(game, actor, hand)) continue;
+        const c0 = game.hands.hole_low[actor][hand];
+        const c1 = game.hands.hole_high[actor][hand];
+        var blocked = by_card[@intCast(c0)] + by_card[@intCast(c1)];
+        const combo = range_mod.Range.comboIndex(c0, c1) catch return error.InvalidAnalysis;
+        const twin = game.hands.combo_to_hand[opp][@intCast(combo)];
+        if (twin >= 0) blocked -= amount[@intCast(twin)];
+        const open = total - blocked;
+        if (differenceIsStable(total, blocked, open)) {
+            open_out[hand] = open;
+            continue;
+        }
+        // Tiny-mass / cancellation: sum compatible opponent mass directly.
+        var direct: f64 = 0;
+        oh = 0;
+        while (oh < opp_hands) : (oh += 1) {
+            if (!(amount[oh] > 0)) continue;
+            if (handsShareHole(game, actor, hand, opp, oh)) continue;
+            direct += amount[oh];
+        }
+        open_out[hand] = direct;
+    }
+}
+
 /// Frozen StreetBatch-style action EV at the **root** under published average.
-/// Reuses FrozenCtx rank cache / response_walk (same engine as flop train + #256 BR / #259 MT).
+/// Reuses FrozenCtx rank cache / response_walk (same engine as flop train + #256 BR / #259 MT),
+/// then Q_i-normalizes raw CF aev: `conditional = raw / (prior * joint_scale * open)`
+/// (C++ `compute_action_values` / MATHEMATICS.md).
 pub fn actionValuesFrozen(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
@@ -128,6 +209,11 @@ pub fn actionValuesFrozen(
     const ev = if (actor == 0) w.scratch[0].ev0 else w.scratch[0].ev1;
     const aev = if (actor == 0) w.scratch[0].aev0 else w.scratch[0].aev1;
     const n_act: usize = node.n_actions;
+    const joint_scale = ctx.joint_scale;
+
+    const open = allocator.alloc(f64, hands) catch return error.OutOfMemory;
+    defer allocator.free(open);
+    try rootCompatibleOpponentMass(allocator, game, actor, open);
 
     var page = ActionValues{
         .allocator = allocator,
@@ -162,30 +248,42 @@ pub fn actionValuesFrozen(
         page.combos[hand] = allocator.dupe(u8, text) catch return error.OutOfMemory;
     }
 
-    // Root CF values from response_walk already fold opponent reach + chance.
-    // node_ev matches evaluatePublishedFrozen util for the acting seat.
-    // Do not trust live masks after the walk (left on last runout); use range weights.
+    // response_walk stores CF raw (= prior * joint_scale * open * Q_i for the actor).
+    // Publish MATHEMATICS.md Q_i; node_ev keeps the CF sum (matches evaluate util / deal-by-deal).
     var node_ev: f64 = 0;
     var any = false;
+    var node_ok = true;
     hand = 0;
     while (hand < hands) : (hand += 1) {
-        if (!(game.hands.range_w[actor][hand] > 0)) continue;
+        const prior = game.hands.range_w[actor][hand];
+        if (!(prior > 0)) continue;
+        const open_mass = open[hand];
+        if (!(open_mass > 0)) {
+            node_ok = false;
+            continue;
+        }
+        const denom = prior * joint_scale * open_mass;
+        if (!(denom > 0)) {
+            node_ok = false;
+            continue;
+        }
         any = true;
         page.ev_defined[hand] = 1;
-        page.mixed_ev[hand] = ev[hand];
+        // CF mixed sum → node_ev (same as pre-normalize evaluatePublishedFrozen util).
         node_ev += ev[hand];
+        page.mixed_ev[hand] = ev[hand] / denom;
         if (n_act <= 1) {
-            page.action_ev[hand * n_act] = ev[hand];
+            page.action_ev[hand * n_act] = page.mixed_ev[hand];
             continue;
         }
         a = 0;
         while (a < n_act) : (a += 1) {
-            page.action_ev[hand * n_act + a] = aev[a * hands + hand];
+            page.action_ev[hand * n_act + a] = aev[a * hands + hand] / denom;
         }
     }
     page.reach_defined = any;
-    page.node_ev_defined = any;
-    if (any) page.node_ev = node_ev;
+    page.node_ev_defined = any and node_ok;
+    if (page.node_ev_defined) page.node_ev = node_ev;
     return page;
 }
 

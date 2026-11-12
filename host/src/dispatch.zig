@@ -291,7 +291,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         const elapsed_ns = std.time.nanoTimestamp() - t0;
         const elapsed_ms = @divTrunc(elapsed_ns, 1_000_000);
         // Summary page for Study latency (full hand×action tables are a follow-on).
-        // Root uses frozen response_walk under a reader lease while train may continue.
+        // Root uses frozen response_walk CF → Q_i under a reader lease while train may continue.
         var buf: [512]u8 = undefined;
         const body = try std.fmt.bufPrint(&buf, "{{\"node_index\":{d},\"player\":{d},\"policy_revision\":{d},\"units\":\"chips\",\"utility_basis\":\"root_centered\",\"local_offset\":{d:.6},\"node_ev_defined\":{},\"node_ev\":{d:.6},\"n_hands\":{d},\"n_actions\":{d},\"elapsed_ms\":{d},\"solution_id\":\"s{d}\",\"engine\":\"frozen_response_walk\",\"live_under_train\":{}}}", .{
             page.node_index,
