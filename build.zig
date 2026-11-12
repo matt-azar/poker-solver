@@ -42,6 +42,14 @@ pub fn build(b: *std.Build) void {
     });
     cli_mod.addImport("poker_engine", engine_mod);
 
+    const gate_bench_mod = b.createModule(.{
+        .root_source_file = b.path("cli/src/gate_bench.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    gate_bench_mod.addImport("poker_engine", engine_mod);
+    gate_bench_mod.addImport("poker_app", app_mod);
+
     const engine_lib = b.addLibrary(.{
         .linkage = .static,
         .name = "poker_engine",
@@ -55,6 +63,12 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(street_config_cli);
 
+    // Phase 7 interim measurement harness (not a shipping cutover claim).
+    const gate_bench = b.addExecutable(.{
+        .name = "gate-bench",
+        .root_module = gate_bench_mod,
+    });
+    b.installArtifact(gate_bench);
     // Phase 6: typed-IPC sidecar (D11).
     const solver_engine = b.addExecutable(.{
         .name = "solver-engine",

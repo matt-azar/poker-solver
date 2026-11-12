@@ -1,0 +1,28 @@
+{
+  "id": "flop_srp_two_sizes",
+  "role": "reference",
+  "binary": "street_solver",
+  "why": "D12 gate sibling of flop_srp_one_size: same board/ranges/raises/caps; only both players' opening bets changed to ⅓ pot and ¾ pot.",
+  "derived_from": "flop_srp_one_size",
+  "pot": 100,
+  "effective_stack": 500,
+  "board": "Js 8h 3h",
+  "algorithm": "cfr_plus",
+  "iteration_cap": 400,
+  "threads": 4,
+  "memory_mib": 4096,
+  "memory_note": "Flop-only openings (oop-flop-bets/ip-flop-bets). Shared oop-bets/ip-bets stay 0.5 for turn/river. Linux plan peak ~2.63 GiB fits 4096 MiB.",
+  "accuracy_fraction_of_pot": 0.001,
+  "quality_target_accuracy_over_pot": 0.001,
+  "betting_note": "D12: only flop openings are 0.333333 0.75 via oop-flop-bets/ip-flop-bets; shared bets/raises otherwise match flop_srp_one_size.",
+  "config": "benchmarks/study/configs/flop_srp_two_sizes.txt",
+  "argv": [
+    "--config", "benchmarks/study/configs/flop_srp_two_sizes.txt",
+    "--iterations", "400",
+    "--algorithm", "cfr_plus",
+    "--accuracy", "0.001",
+    "--memory-mib", "4096",
+    "--threads", "4",
+    "--frozen"
+  ]
+}

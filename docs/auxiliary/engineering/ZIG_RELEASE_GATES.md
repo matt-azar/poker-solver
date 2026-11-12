@@ -60,3 +60,17 @@ zig build test
 
 Pin fields (version, URLs, hashes) must match `.github/workflows/zig.yml` and
 the store toolchain pin doc.
+
+## Bounded measurement rule (agent digs)
+
+Do **not** wait forever on flop-scale trains:
+
+| Fixture class | Suggested wall bound | Tool |
+| --- | --- | --- |
+| River / smoke (`river_gate_smoke.txt`) | ≤ 60 s | `scripts/zig/run-gate-bounded.sh 60 …` |
+| Flop `flop_srp_one_size` warm fixed-iter | ≤ 180 s (then kill + escalate) | same wrapper / C++ `--time-limit` |
+| Flop cold Accuracy/pot ≤ 0.001 | dedicated Windows Release machine; not an agent dig | — |
+| `flop_srp_two_sizes` train | needs ≥ ~6.5 GiB plan peak; skip if host RAM tight | plan-memory first |
+
+Harness: `zig-out/bin/gate-bench` (Zig Session CFR+) and C++ `street_solver`.
+Linux numbers are interim only — Windows Release remains authoritative.
