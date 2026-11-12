@@ -4,6 +4,7 @@
   "cancelled": false,
   "failed": false,
   "error": "",
+  "last_error": null,
   "solution_id": null,
   "root_node_id": null,
   "job_id": null,

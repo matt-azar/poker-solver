@@ -213,8 +213,11 @@ export function phaseFromStatus(status: StatusPayload | null, fallback: SolvePha
   }
   const hostPhase =
     typeof status.phase === "string" ? status.phase.toLowerCase() : "";
-  // Host publishes phase:"failed"; also honor legacy failed/error flags (ZR-123).
-  if (status.failed || status.error || hostPhase === "failed") {
+  // Host publishes phase:"failed"; also honor sticky last_error / legacy error (ZR-123 / ZR-130).
+  const stickyError =
+    (typeof status.last_error === "string" && status.last_error.length > 0) ||
+    Boolean(status.error);
+  if (status.failed || stickyError || hostPhase === "failed") {
     return "failed";
   }
   // Host begin_config compile (ZR-120): Building until train admits.

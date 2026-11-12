@@ -6,8 +6,9 @@ Spawns `solver-engine` over length-prefixed protocol-2 IPC and exercises:
   → equity → pause/stop mid-train → checkpoint save/open/continue
 
 Train uses ZR-106 short-admit (`{accepted,running}`); completion is polled
-via `status` (`running` / `terminal_reason` / `policy_revision`). Fresh trains
-publish one revision per iteration, so revision == cumulative trained.
+via `status` (`running` / `terminal_reason` / `policy_revision` / `last_error`).
+Async train faults stay sticky on `last_error` (no second solve reply). Fresh
+trains publish one revision per iteration, so revision == cumulative trained.
 
 Uses the tiny river_gate_smoke fixture. No Accuracy walls.
 Overall wall bound defaults to 60s.
@@ -359,12 +360,14 @@ def main() -> int:
             "iterations",
             "iterations_requested",
             "failed",
+            "last_error",
             "has_training",
             "can_continue",
             "policy_revision",
             "terminal_reason",
         ):
             require(key in status0, f"status missing {key}: {status0}")
+        require(status0.get("last_error") is None, f"idle last_error: {status0}")
         stages["status_idle"] = {
             "running": status0.get("running"),
             "phase": status0.get("phase"),
