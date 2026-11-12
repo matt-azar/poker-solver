@@ -469,126 +469,108 @@ fn emptyPlayers(allocator: std.mem.Allocator, players: []const PlayerHands) Calc
     return out;
 }
 
-fn runExact(
+/// Exact accumulate context: evaluate one completed board into weighted bins.
+const ExactDealCtx = struct {
+    bins: []ExactBins,
+    pick: []const *const HandRef,
+    equity_share: []f64,
+    win_event: []f64,
+    tie_event: []f64,
+    loss_event: []f64,
+    deals_done: *u64,
+    total: u64,
+    options: Options,
+    n: usize,
+    weight: f64,
+
+    fn accept(self: *@This(), full_board: []const card.Card) CalcError!void {
+        try evaluateDeal(self.pick[0..self.n], full_board, self.equity_share, self.win_event, self.tie_event, self.loss_event);
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            self.bins[i].equity.add(self.weight * self.equity_share[i]);
+            self.bins[i].win.add(self.weight * self.win_event[i]);
+            self.bins[i].tie.add(self.weight * self.tie_event[i]);
+            self.bins[i].loss.add(self.weight * self.loss_event[i]);
+            self.bins[i].mass.add(self.weight);
+        }
+        reportProgress(self.options, self.deals_done.*, self.total);
+    }
+};
+
+/// Fn-pointer trampoline for `enumerateCompletions` (cannot capture mutable ctx).
+const ExactAcceptState = struct {
+    var current: ?*ExactDealCtx = null;
+    fn acceptFn(full_board: []const card.Card) CalcError!void {
+        return current.?.accept(full_board);
+    }
+};
+
+fn exactEnumerateAtPick(
+    board_cards: []const card.Card,
+    used: u64,
+    opts: Options,
+    deals: *u64,
+    ctx: *ExactDealCtx,
+) CalcError!void {
+    ExactAcceptState.current = ctx;
+    defer ExactAcceptState.current = null;
+    try enumerateCompletions(board_cards, used, opts, deals, ExactAcceptState.acceptFn);
+}
+
+fn exactWalkHands(
+    depth: usize,
+    used: u64,
+    weight: f64,
+    pls: []const PlayerHands,
+    board_cards: []const card.Card,
+    opts: Options,
+    bins_ptr: []ExactBins,
+    pick_buf: *[max_players]*const HandRef,
+    eq: *[max_players]f64,
+    wn: *[max_players]f64,
+    ti: *[max_players]f64,
+    ls: *[max_players]f64,
+    deals: *u64,
+    tot: u64,
+) CalcError!void {
+    try checkCancel(opts);
+    if (depth == pls.len) {
+        var ctx = ExactDealCtx{
+            .bins = bins_ptr,
+            .pick = pick_buf[0..pls.len],
+            .equity_share = eq[0..pls.len],
+            .win_event = wn[0..pls.len],
+            .tie_event = ti[0..pls.len],
+            .loss_event = ls[0..pls.len],
+            .deals_done = deals,
+            .total = tot,
+            .options = opts,
+            .n = pls.len,
+            .weight = weight,
+        };
+        try exactEnumerateAtPick(board_cards, used, opts, deals, &ctx);
+        return;
+    }
+    for (pls[depth].hands) |*hand| {
+        if (sharesAny(hand.card0, hand.card1, used)) continue;
+        pick_buf[depth] = hand;
+        const next = used | (@as(u64, 1) << @intCast(hand.card0)) | (@as(u64, 1) << @intCast(hand.card1));
+        const next_weight = weight * hand.weight;
+        if (!std.math.isFinite(next_weight) or next_weight < 0.0) return error.NumericalRange;
+        if (!(next_weight > 0.0)) continue;
+        try exactWalkHands(depth + 1, next, next_weight, pls, board_cards, opts, bins_ptr, pick_buf, eq, wn, ti, ls, deals, tot);
+    }
+}
+
+fn finishExactResult(
     allocator: std.mem.Allocator,
     players: []const PlayerHands,
-    board: []const card.Card,
-    known_dead: u64,
-    options: Options,
+    bins: []const ExactBins,
     work: WorkEstimate,
     requested: Method,
+    options: Options,
 ) CalcError!Result {
-    if (work.exact_deals > options.max_exact_deals or work.estimate_capped) return error.WorkLimit;
-
     const n = players.len;
-    var bins = try allocator.alloc(ExactBins, n);
-    defer allocator.free(bins);
-    @memset(bins, .{});
-
-    var pick: [max_players]*const HandRef = undefined;
-    var equity_share: [max_players]f64 = undefined;
-    var win_event: [max_players]f64 = undefined;
-    var tie_event: [max_players]f64 = undefined;
-    var loss_event: [max_players]f64 = undefined;
-    var deals_done: u64 = 0;
-    const total = work.exact_deals;
-
-    const Ctx = struct {
-        bins: []ExactBins,
-        pick: []const *const HandRef,
-        equity_share: []f64,
-        win_event: []f64,
-        tie_event: []f64,
-        loss_event: []f64,
-        deals_done: *u64,
-        total: u64,
-        options: Options,
-        n: usize,
-        weight: f64,
-
-        fn accept(self: *@This(), full_board: []const card.Card) CalcError!void {
-            try evaluateDeal(self.pick[0..self.n], full_board, self.equity_share, self.win_event, self.tie_event, self.loss_event);
-            var i: usize = 0;
-            while (i < self.n) : (i += 1) {
-                self.bins[i].equity.add(self.weight * self.equity_share[i]);
-                self.bins[i].win.add(self.weight * self.win_event[i]);
-                self.bins[i].tie.add(self.weight * self.tie_event[i]);
-                self.bins[i].loss.add(self.weight * self.loss_event[i]);
-                self.bins[i].mass.add(self.weight);
-            }
-            reportProgress(self.options, self.deals_done.*, self.total);
-        }
-    };
-
-    // Recursive player walk.
-    const Walk = struct {
-        fn go(
-            depth: usize,
-            used: u64,
-            weight: f64,
-            pls: []const PlayerHands,
-            board_cards: []const card.Card,
-            opts: Options,
-            bins_ptr: []ExactBins,
-            pick_buf: *[max_players]*const HandRef,
-            eq: *[max_players]f64,
-            wn: *[max_players]f64,
-            ti: *[max_players]f64,
-            ls: *[max_players]f64,
-            deals: *u64,
-            tot: u64,
-        ) CalcError!void {
-            try checkCancel(opts);
-            if (depth == pls.len) {
-                var ctx = Ctx{
-                    .bins = bins_ptr,
-                    .pick = pick_buf[0..pls.len],
-                    .equity_share = eq[0..pls.len],
-                    .win_event = wn[0..pls.len],
-                    .tie_event = ti[0..pls.len],
-                    .loss_event = ls[0..pls.len],
-                    .deals_done = deals,
-                    .total = tot,
-                    .options = opts,
-                    .n = pls.len,
-                    .weight = weight,
-                };
-                const AcceptWrap = struct {
-                    ctx: *Ctx,
-                    fn call(full: []const card.Card) CalcError!void {
-                        // Zig does not allow capturing mutable ctx through fn ptr easily;
-                        // use threadlocal-like pattern via static pointer set by caller.
-                        _ = full;
-                        return error.InvalidInput;
-                    }
-                };
-                _ = AcceptWrap;
-                // Inline enumerate with capturing accept via stack pointer trick.
-                const AcceptState = struct {
-                    var current: ?*Ctx = null;
-                    fn acceptFn(full_board: []const card.Card) CalcError!void {
-                        return current.?.accept(full_board);
-                    }
-                };
-                AcceptState.current = &ctx;
-                defer AcceptState.current = null;
-                try enumerateCompletions(board_cards, used, opts, deals, AcceptState.acceptFn);
-                return;
-            }
-            for (pls[depth].hands) |*hand| {
-                if (sharesAny(hand.card0, hand.card1, used)) continue;
-                pick_buf[depth] = hand;
-                const next = used | (@as(u64, 1) << @intCast(hand.card0)) | (@as(u64, 1) << @intCast(hand.card1));
-                const next_weight = weight * hand.weight;
-                if (!std.math.isFinite(next_weight) or next_weight < 0.0) return error.NumericalRange;
-                if (!(next_weight > 0.0)) continue;
-                try go(depth + 1, next, next_weight, pls, board_cards, opts, bins_ptr, pick_buf, eq, wn, ti, ls, deals, tot);
-            }
-        }
-    };
-
-    try Walk.go(0, known_dead, 1.0, players, board, options, bins, &pick, &equity_share, &win_event, &tie_event, &loss_event, &deals_done, total);
-
     var result = Result{ .allocator = allocator, .owned_ids = true };
     errdefer result.deinit();
     result.requested_method = requested;
@@ -624,6 +606,49 @@ fn runExact(
         };
     }
     return result;
+}
+
+fn runExact(
+    allocator: std.mem.Allocator,
+    players: []const PlayerHands,
+    board: []const card.Card,
+    known_dead: u64,
+    options: Options,
+    work: WorkEstimate,
+    requested: Method,
+) CalcError!Result {
+    if (work.exact_deals > options.max_exact_deals or work.estimate_capped) return error.WorkLimit;
+
+    const n = players.len;
+    const bins = try allocator.alloc(ExactBins, n);
+    defer allocator.free(bins);
+    @memset(bins, .{});
+
+    var pick: [max_players]*const HandRef = undefined;
+    var equity_share: [max_players]f64 = undefined;
+    var win_event: [max_players]f64 = undefined;
+    var tie_event: [max_players]f64 = undefined;
+    var loss_event: [max_players]f64 = undefined;
+    var deals_done: u64 = 0;
+
+    try exactWalkHands(
+        0,
+        known_dead,
+        1.0,
+        players,
+        board,
+        options,
+        bins,
+        &pick,
+        &equity_share,
+        &win_event,
+        &tie_event,
+        &loss_event,
+        &deals_done,
+        work.exact_deals,
+    );
+
+    return finishExactResult(allocator, players, bins, work, requested, options);
 }
 
 const SplitMix64 = struct {
@@ -693,6 +718,136 @@ const WeightedSampler = struct {
     }
 };
 
+/// Sample one conflict-free hole-card tuple and a random board completion.
+/// Returns false when a sampled hand collides with used cards.
+fn sampleMonteCarloDeal(
+    samplers: []const WeightedSampler,
+    board: []const card.Card,
+    known_dead: u64,
+    rng: *SplitMix64,
+    pick: *[max_players]*const HandRef,
+    full: *[5]card.Card,
+) bool {
+    const n = samplers.len;
+    var used = known_dead;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const hand = samplers[i].sample(rng);
+        if (hand == null or sharesAny(hand.?.card0, hand.?.card1, used)) return false;
+        pick[i] = hand.?;
+        used |= (@as(u64, 1) << @intCast(hand.?.card0)) | (@as(u64, 1) << @intCast(hand.?.card1));
+    }
+
+    const board_count = board.len;
+    @memcpy(full[0..board_count], board);
+    var available: [52]card.Card = undefined;
+    var available_count: usize = 0;
+    var c: i32 = 0;
+    while (c < card.deck_size) : (c += 1) {
+        if ((used & (@as(u64, 1) << @intCast(c))) == 0) {
+            available[available_count] = c;
+            available_count += 1;
+        }
+    }
+    const need: i32 = 5 - @as(i32, @intCast(board_count));
+    var j: i32 = 0;
+    while (j < need) : (j += 1) {
+        const pick_i = rng.uniformInt(@intCast(available_count - @as(usize, @intCast(j))));
+        const chosen = available[@intCast(pick_i)];
+        available[@intCast(pick_i)] = available[available_count - 1 - @as(usize, @intCast(j))];
+        full[board_count + @as(usize, @intCast(j))] = chosen;
+    }
+    return true;
+}
+
+fn accumulateMonteCarloDeal(
+    n: usize,
+    pick: []const *const HandRef,
+    full_board: []const card.Card,
+    equity_share: []f64,
+    win_event: []f64,
+    tie_event: []f64,
+    loss_event: []f64,
+    equity_sum: *[max_players]Accumulator,
+    win_sum: *[max_players]Accumulator,
+    tie_sum: *[max_players]Accumulator,
+    loss_sum: *[max_players]Accumulator,
+    equity_sq: *[max_players]Accumulator,
+) CalcError!void {
+    try evaluateDeal(pick[0..n], full_board, equity_share[0..n], win_event[0..n], tie_event[0..n], loss_event[0..n]);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        equity_sum[i].add(equity_share[i]);
+        win_sum[i].add(win_event[i]);
+        tie_sum[i].add(tie_event[i]);
+        loss_sum[i].add(loss_event[i]);
+        equity_sq[i].add(equity_share[i] * equity_share[i]);
+    }
+}
+
+fn finishMonteCarloResult(
+    allocator: std.mem.Allocator,
+    players: []const PlayerHands,
+    requested: Method,
+    reason: []const u8,
+    work: WorkEstimate,
+    options: Options,
+    accepted: u64,
+    attempted: u64,
+    stopped: bool,
+    equity_sum: *const [max_players]Accumulator,
+    win_sum: *const [max_players]Accumulator,
+    tie_sum: *const [max_players]Accumulator,
+    loss_sum: *const [max_players]Accumulator,
+    equity_sq: *const [max_players]Accumulator,
+) CalcError!Result {
+    const n = players.len;
+    var result = Result{
+        .allocator = allocator,
+        .requested_method = requested,
+        .actual_method = .monte_carlo,
+        .method_reason = reason,
+        .exact_complete = false,
+        .stopped = stopped,
+        .work = work,
+        .accepted_samples = accepted,
+        .attempted_tuples = attempted,
+        .seed = options.seed,
+        .owned_ids = true,
+    };
+    errdefer result.deinit();
+
+    if (accepted == 0) {
+        if (attempted >= options.max_attempts) return error.SampleLimit;
+        result.joint_defined = false;
+        result.players = try emptyPlayers(allocator, players);
+        return result;
+    }
+
+    result.joint_defined = true;
+    result.players = try allocator.alloc(PlayerResult, n);
+    const samples: f64 = @floatFromInt(accepted);
+    const z: f64 = 1.959963984540054;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const eq = equity_sum[i].total() / samples;
+        const mean_sq = equity_sq[i].total() / samples;
+        const variance = @max(0.0, mean_sq - eq * eq);
+        const se = @sqrt(variance / samples);
+        result.players[i] = .{
+            .id = try allocator.dupe(u8, players[i].id),
+            .defined = true,
+            .equity = eq,
+            .win = win_sum[i].total() / samples,
+            .tie = tie_sum[i].total() / samples,
+            .loss = loss_sum[i].total() / samples,
+            .equity_ci_low = std.math.clamp(eq - z * se, 0.0, 1.0),
+            .equity_ci_high = std.math.clamp(eq + z * se, 0.0, 1.0),
+        };
+    }
+    return result;
+}
+
 fn runMonteCarlo(
     allocator: std.mem.Allocator,
     players: []const PlayerHands,
@@ -739,6 +894,7 @@ fn runMonteCarlo(
     var tie_sum: [max_players]Accumulator = [_]Accumulator{.{}} ** max_players;
     var loss_sum: [max_players]Accumulator = [_]Accumulator{.{}} ** max_players;
     var equity_sq: [max_players]Accumulator = [_]Accumulator{.{}} ** max_players;
+    var full: [5]card.Card = undefined;
 
     var accepted: u64 = 0;
     var attempted: u64 = 0;
@@ -756,98 +912,41 @@ fn runMonteCarlo(
         }
 
         attempted += 1;
-        var ok = true;
-        var used = known_dead;
-        var i: usize = 0;
-        while (i < n) : (i += 1) {
-            const hand = samplers[i].sample(&rng);
-            if (hand == null or sharesAny(hand.?.card0, hand.?.card1, used)) {
-                ok = false;
-                break;
-            }
-            pick[i] = hand.?;
-            used |= (@as(u64, 1) << @intCast(hand.?.card0)) | (@as(u64, 1) << @intCast(hand.?.card1));
-        }
-        if (!ok) continue;
-
-        var full: [5]card.Card = undefined;
-        const board_count = board.len;
-        @memcpy(full[0..board_count], board);
-        var available: [52]card.Card = undefined;
-        var available_count: usize = 0;
-        var c: i32 = 0;
-        while (c < card.deck_size) : (c += 1) {
-            if ((used & (@as(u64, 1) << @intCast(c))) == 0) {
-                available[available_count] = c;
-                available_count += 1;
-            }
-        }
-        const need: i32 = 5 - @as(i32, @intCast(board_count));
-        var j: i32 = 0;
-        while (j < need) : (j += 1) {
-            const pick_i = rng.uniformInt(@intCast(available_count - @as(usize, @intCast(j))));
-            const chosen = available[@intCast(pick_i)];
-            available[@intCast(pick_i)] = available[available_count - 1 - @as(usize, @intCast(j))];
-            full[board_count + @as(usize, @intCast(j))] = chosen;
-        }
-
-        try evaluateDeal(pick[0..n], full[0..5], equity_share[0..n], win_event[0..n], tie_event[0..n], loss_event[0..n]);
-        i = 0;
-        while (i < n) : (i += 1) {
-            equity_sum[i].add(equity_share[i]);
-            win_sum[i].add(win_event[i]);
-            tie_sum[i].add(tie_event[i]);
-            loss_sum[i].add(loss_event[i]);
-            equity_sq[i].add(equity_share[i] * equity_share[i]);
-        }
+        if (!sampleMonteCarloDeal(samplers, board, known_dead, &rng, &pick, &full)) continue;
+        try accumulateMonteCarloDeal(
+            n,
+            pick[0..n],
+            full[0..5],
+            equity_share[0..n],
+            win_event[0..n],
+            tie_event[0..n],
+            loss_event[0..n],
+            &equity_sum,
+            &win_sum,
+            &tie_sum,
+            &loss_sum,
+            &equity_sq,
+        );
         accepted += 1;
         if (accepted % 256 == 0) reportProgress(options, accepted, options.target_samples);
     }
 
-    var result = Result{
-        .allocator = allocator,
-        .requested_method = requested,
-        .actual_method = .monte_carlo,
-        .method_reason = reason,
-        .exact_complete = false,
-        .stopped = stopped,
-        .work = work,
-        .accepted_samples = accepted,
-        .attempted_tuples = attempted,
-        .seed = options.seed,
-        .owned_ids = true,
-    };
-    errdefer result.deinit();
-
-    if (accepted == 0) {
-        if (attempted >= options.max_attempts) return error.SampleLimit;
-        result.joint_defined = false;
-        result.players = try emptyPlayers(allocator, players);
-        return result;
-    }
-
-    result.joint_defined = true;
-    result.players = try allocator.alloc(PlayerResult, n);
-    const samples: f64 = @floatFromInt(accepted);
-    const z: f64 = 1.959963984540054;
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const eq = equity_sum[i].total() / samples;
-        const mean_sq = equity_sq[i].total() / samples;
-        const variance = @max(0.0, mean_sq - eq * eq);
-        const se = @sqrt(variance / samples);
-        result.players[i] = .{
-            .id = try allocator.dupe(u8, players[i].id),
-            .defined = true,
-            .equity = eq,
-            .win = win_sum[i].total() / samples,
-            .tie = tie_sum[i].total() / samples,
-            .loss = loss_sum[i].total() / samples,
-            .equity_ci_low = std.math.clamp(eq - z * se, 0.0, 1.0),
-            .equity_ci_high = std.math.clamp(eq + z * se, 0.0, 1.0),
-        };
-    }
-    return result;
+    return finishMonteCarloResult(
+        allocator,
+        players,
+        requested,
+        reason,
+        work,
+        options,
+        accepted,
+        attempted,
+        stopped,
+        &equity_sum,
+        &win_sum,
+        &tie_sum,
+        &loss_sum,
+        &equity_sq,
+    );
 }
 
 fn tryHuPostflopFastPath(
