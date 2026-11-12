@@ -169,6 +169,12 @@ const Reader = struct {
         if (self.remaining() < n) return error.InvalidPsol;
     }
 
+    /// Reject oversized counts before allocating: count × elem_size must fit in remaining bytes.
+    fn needCount(self: *Reader, count: usize, elem_size: usize) OpenError!void {
+        const nbytes = std.math.mul(usize, count, elem_size) catch return error.InvalidPsol;
+        try self.need(nbytes);
+    }
+
     fn u8r(self: *Reader) OpenError!u8 {
         try self.need(1);
         const v = self.data[self.at];
@@ -207,7 +213,7 @@ const Reader = struct {
 
     fn text(self: *Reader, allocator: std.mem.Allocator) OpenError![]u8 {
         const len = try self.u32r();
-        try self.need(len);
+        try self.needCount(len, 1);
         const out = allocator.dupe(u8, self.data[self.at .. self.at + len]) catch return error.OutOfMemory;
         self.at += len;
         return out;
@@ -215,6 +221,7 @@ const Reader = struct {
 
     fn i32s(self: *Reader, allocator: std.mem.Allocator) OpenError![]i32 {
         const len = try self.u32r();
+        try self.needCount(len, @sizeOf(i32));
         var out = allocator.alloc(i32, len) catch return error.OutOfMemory;
         errdefer allocator.free(out);
         var i: usize = 0;
@@ -224,6 +231,7 @@ const Reader = struct {
 
     fn u16s(self: *Reader, allocator: std.mem.Allocator) OpenError![]u16 {
         const len = try self.u32r();
+        try self.needCount(len, @sizeOf(u16));
         var out = allocator.alloc(u16, len) catch return error.OutOfMemory;
         errdefer allocator.free(out);
         var i: usize = 0;
@@ -233,6 +241,7 @@ const Reader = struct {
 
     fn f32s(self: *Reader, allocator: std.mem.Allocator) OpenError![]f32 {
         const len = try self.u32r();
+        try self.needCount(len, @sizeOf(f32));
         var out = allocator.alloc(f32, len) catch return error.OutOfMemory;
         errdefer allocator.free(out);
         var i: usize = 0;
@@ -341,6 +350,8 @@ pub fn decode(allocator: std.mem.Allocator, file: []const u8) OpenError!Document
     document.ip_combos = try reader.i32s(allocator);
     document.slot_actions = try reader.u16s(allocator);
     document.average = try reader.f32s(allocator);
+    // Dimension pin before session replace: empty average only with empty slots.
+    if (document.average.len == 0 and document.slot_actions.len != 0) return error.InvalidPsol;
 
     if ((flags & flag_training) != 0) {
         document.has_training_flag = true;
@@ -457,4 +468,103 @@ test "reject kind2 river fixture" {
     );
     defer std.testing.allocator.free(bytes);
     try std.testing.expectError(error.Kind2RiverRejected, decode(std.testing.allocator, bytes));
+}
+
+/// Rebuild header payload_len + FNV for a crafted payload (tests only).
+fn sealTestFile(allocator: std.mem.Allocator, flags: u32, payload: []const u8) ![]u8 {
+    var header: [header_bytes]u8 = undefined;
+    writeHeader(&header, flags, payload.len, fnv1a64(payload));
+    var out = try allocator.alloc(u8, header_bytes + payload.len);
+    @memcpy(out[0..header_bytes], &header);
+    @memcpy(out[header_bytes..], payload);
+    return out;
+}
+
+test "oversized f32 count rejects before allocate" {
+    // Minimal GAME prefix then average count that cannot fit in remaining bytes.
+    var payload = std.ArrayList(u8).init(std.testing.allocator);
+    defer payload.deinit();
+    try payload.append(algorithm_cfr_plus); // algorithm
+    try payload.append(0); // frozen
+    try payload.appendSlice(&[_]u8{ 0, 0 }); // pad
+    // config_text "x"
+    try payload.appendSlice(&[_]u8{ 1, 0, 0, 0 });
+    try payload.append('x');
+    // oop_combos / ip_combos / slot_actions empty
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+    // average count = 0x10000000 → 1 GiB of f32s; only this count field remains.
+    try payload.appendSlice(&[_]u8{ 0x00, 0x00, 0x00, 0x10 });
+
+    const file = try sealTestFile(std.testing.allocator, 0, payload.items);
+    defer std.testing.allocator.free(file);
+    try std.testing.expectError(error.InvalidPsol, decode(std.testing.allocator, file));
+}
+
+test "truncated average payload rejects before allocate" {
+    var payload = std.ArrayList(u8).init(std.testing.allocator);
+    defer payload.deinit();
+    try payload.append(algorithm_cfr_plus);
+    try payload.append(0);
+    try payload.appendSlice(&[_]u8{ 0, 0 });
+    try payload.appendSlice(&[_]u8{ 1, 0, 0, 0 });
+    try payload.append('x');
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+    // Claim 4 f32s but supply only one.
+    try payload.appendSlice(&[_]u8{ 4, 0, 0, 0 });
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+
+    const file = try sealTestFile(std.testing.allocator, 0, payload.items);
+    defer std.testing.allocator.free(file);
+    try std.testing.expectError(error.InvalidPsol, decode(std.testing.allocator, file));
+}
+
+test "oversized u16 slot_actions count rejects before allocate" {
+    var payload = std.ArrayList(u8).init(std.testing.allocator);
+    defer payload.deinit();
+    try payload.append(algorithm_cfr_plus);
+    try payload.append(0);
+    try payload.appendSlice(&[_]u8{ 0, 0 });
+    try payload.appendSlice(&[_]u8{ 1, 0, 0, 0 });
+    try payload.append('x');
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+    // slot_actions count = 0x20000000 → 1 GiB of u16s with no body.
+    try payload.appendSlice(&[_]u8{ 0x00, 0x00, 0x00, 0x20 });
+
+    const file = try sealTestFile(std.testing.allocator, 0, payload.items);
+    defer std.testing.allocator.free(file);
+    try std.testing.expectError(error.InvalidPsol, decode(std.testing.allocator, file));
+}
+
+test "empty average with non-empty slots rejects" {
+    var doc = Document{ .allocator = std.testing.allocator };
+    defer doc.deinit();
+    doc.config_text = try std.testing.allocator.dupe(u8, "street-config 1\nboard Ah Kd 7c\npot 100\n");
+    doc.slot_actions = try std.testing.allocator.dupe(u16, &.{2});
+    // average left empty — encode rejects; craft payload to hit decode pin.
+    var payload = std.ArrayList(u8).init(std.testing.allocator);
+    defer payload.deinit();
+    try payload.append(algorithm_cfr_plus);
+    try payload.append(0);
+    try payload.appendSlice(&[_]u8{ 0, 0 });
+    {
+        const cfg = doc.config_text;
+        var lenbuf: [4]u8 = undefined;
+        std.mem.writeInt(u32, &lenbuf, @intCast(cfg.len), .little);
+        try payload.appendSlice(&lenbuf);
+        try payload.appendSlice(cfg);
+    }
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 }); // oop
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 }); // ip
+    try payload.appendSlice(&[_]u8{ 1, 0, 0, 0 }); // one slot
+    try payload.appendSlice(&[_]u8{ 2, 0 }); // arity 2
+    try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 }); // average count 0
+
+    const file = try sealTestFile(std.testing.allocator, 0, payload.items);
+    defer std.testing.allocator.free(file);
+    try std.testing.expectError(error.InvalidPsol, decode(std.testing.allocator, file));
 }
