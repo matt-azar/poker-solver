@@ -228,6 +228,11 @@ export function phaseFromStatus(status: StatusPayload | null, fallback: SolvePha
     return "pause_requested";
   }
   if (status.running || hostPhase === "training") {
+    // Keep local Pausing/Stopping chrome while the host is still running
+    // (poll must not wipe pause_requested / stop_requested back to Solving).
+    if (fallback === "pause_requested" || fallback === "stop_requested") {
+      return fallback;
+    }
     return "solving";
   }
   if (status.paused || hostPhase === "paused") {

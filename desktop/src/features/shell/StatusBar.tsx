@@ -134,6 +134,7 @@ export function StatusBar({ message, connection, phase, status, onReconnect }: P
           Iter {metrics.iterations}
           {metrics.target !== "—" ? `/${metrics.target}` : ""}
         </span>
+        <span title="Active engine job id">Job {metrics.job}</span>
         <span title="Elapsed solve time">Time {metrics.runtime}</span>
         <span title="Estimated time to stop criterion (iterations or accuracy)">
           ETA {metrics.eta}

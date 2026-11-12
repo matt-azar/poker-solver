@@ -11,6 +11,7 @@ import { isTauriRuntime } from "../platform";
 import { decodeErrorPayload } from "./contracts/error";
 import { decodeStatusPayload } from "./contracts/status";
 import { formatSolveJobStreetConfig, parseStreetConfigTextToSolutionConfig } from "./streetConfigText";
+import { raceWithAbort } from "../domain/requestScope";
 import {
   ipcBeginConfig,
   ipcCancel,
@@ -196,10 +197,24 @@ export class EngineClient {
 
   async status(signal?: AbortSignal): Promise<StatusPayload> {
     if (isIpcTransport()) {
+      // Honor poll timeout / shutdown abort (ZR-148). Tauri invoke keeps
+      // running; Study unblocks and drops the late frame via status token.
       if (signal?.aborted) {
-        throw new EngineError("aborted", 0, null);
+        throw new DOMException("Aborted", "AbortError");
       }
-      const data = await ipcStatus();
+      let data: unknown;
+      try {
+        data = await raceWithAbort(ipcStatus(), signal);
+      } catch (err) {
+        if (
+          err &&
+          typeof err === "object" &&
+          (err as { name?: unknown }).name === "AbortError"
+        ) {
+          throw err;
+        }
+        throw new EngineError(err instanceof Error ? err.message : String(err), 0, null);
+      }
       try {
         return decodeStatusPayload(data);
       } catch (err) {

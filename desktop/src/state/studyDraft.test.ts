@@ -77,6 +77,36 @@ describe("phaseFromStatus", () => {
     expect(status.iterations).toBe(12);
     expect(status.iterations_requested).toBe(200);
   });
+
+  it("preserves pause_requested / stop_requested while host is still running (ZR-148)", () => {
+    const running = {
+      running: true,
+      paused: false,
+      cancelled: false,
+      phase: "training",
+      status_generation: 4,
+    };
+    expect(phaseFromStatus(running, "pause_requested")).toBe("pause_requested");
+    expect(phaseFromStatus(running, "stop_requested")).toBe("stop_requested");
+    expect(phaseFromStatus(running, "solving")).toBe("solving");
+  });
+
+  it("maps failed flag with empty error string to Failed", () => {
+    expect(
+      phaseFromStatus(
+        {
+          running: false,
+          paused: false,
+          cancelled: false,
+          failed: true,
+          error: "",
+          phase: "failed",
+          status_generation: 5,
+        },
+        "solving",
+      ),
+    ).toBe("failed");
+  });
 });
 
 describe("buildJob allow_all_in", () => {
