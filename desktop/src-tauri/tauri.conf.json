@@ -41,7 +41,6 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/holdem-explorer",
       "binaries/solver-engine"
     ],
     "resources": {

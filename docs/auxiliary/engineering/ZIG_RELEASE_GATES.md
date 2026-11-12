@@ -14,9 +14,9 @@ what to run and what must stay blocked.
 | Phase exit gates | `zig-phase-checklist.md` |
 | Parity / oracle log | `zig-parity-oracle-log.md` |
 
-Do **not** claim Windows shipping cutover from this scaffolding. The Zig Study
-path prefers `solver-engine` typed IPC; HTTP `holdem-explorer` is only a
-temporary labeled fallback until cutover GO.
+Owner GO 2026-11-12: stable Windows NSIS ships Zig `solver-engine` only
+(typed IPC). HTTP `holdem-explorer` is not a packaged Study path on
+`zig-rewrite`. Scoreboard/evidence remain in the store docs above.
 
 ## Locked fixtures (D12)
 

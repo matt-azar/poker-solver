@@ -1,7 +1,7 @@
 /**
- * Tech-preview IPC client for `solver-engine`.
+ * IPC client for `solver-engine`.
  * Domain ops mirror EngineClient; transport is framed pipes (not HTTP).
- * Packaged Study prefers this path; HTTP `holdem-explorer` is a labeled fallback.
+ * Packaged Study uses this path only (no holdem-explorer fallback).
  */
 import {
   encodeIpcFrame,

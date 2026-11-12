@@ -17,7 +17,7 @@ Download the unsigned NSIS setup from the [latest GitHub Release](https://github
 
 Windows SmartScreen may warn because the binary is not code-signed — **More info → Run anyway**.
 
-The installer stops any running Study UI/engine, places `holdem-explorer.exe` next to the UI, unblocks both binaries, and fails if the engine is missing. On launch the shell picks a free `127.0.0.1` port, starts that sidecar with a launch id, and waits for `GET /api/ready` before the Study UI connects. A process already listening on port 8765 is not used. No CMake or npm required.
+The installer stops any running Study UI/engine, places `solver-engine.exe` next to the UI, unblocks the binaries, and fails if the engine is missing. On launch the shell starts that Zig sidecar with a launch id over inherited pipes (typed IPC) and waits for ready before the Study UI connects. No CMake or npm required.
 
 Maintainers: CI rebuilds the artifact on desktop changes (Actions → **Windows Installer**). Publishing a Release is intentional — push a `v*-windows` tag (see packaging notes). Packaging notes: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
 
