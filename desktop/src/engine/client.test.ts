@@ -11,7 +11,11 @@ vi.mock("../platform", () => ({
 }));
 
 import { EngineClient } from "./client";
-import { setHttpFallbackTransport, setIpcTransport } from "./transport";
+import {
+  resetStudyJobIdCounterForTests,
+  setHttpFallbackTransport,
+  setIpcTransport,
+} from "./transport";
 
 function okBody(op: string, body: unknown) {
   return {
@@ -29,6 +33,7 @@ describe("EngineClient Slice A IPC branches", () => {
 
   beforeEach(() => {
     invoke.mockReset();
+    resetStudyJobIdCounterForTests();
     client = new EngineClient({ baseUrl: "http://unused" });
     setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
   });
@@ -51,6 +56,34 @@ describe("EngineClient Slice A IPC branches", () => {
       op: "cancel",
       body: null,
       jobId: "j-custom",
+    });
+  });
+
+  it("routes continueSolve over IPC as solve without begin_config", async () => {
+    invoke.mockResolvedValueOnce(
+      okBody("solve", {
+        solution_id: 1,
+        policy_revision: 4,
+        trained: 15,
+        terminal_reason: "completed",
+        async: true,
+      }),
+    );
+    const reply = await client.continueSolve("s1", { iterations: 5, time_limit: 30 });
+    expect(reply).toMatchObject({
+      running: false,
+      job_id: "j1",
+      solution_id: "s1",
+      policy_revision: 4,
+      trained: 15,
+      terminal_reason: "completed",
+      transport: "ipc",
+    });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "solve",
+      body: { iterations: 5, time_limit: 30 },
+      jobId: "j1",
     });
   });
 
