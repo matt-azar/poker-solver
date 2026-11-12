@@ -154,8 +154,15 @@ pub const Session = struct {
     }
 
     pub fn canContinue(self: *const Session) bool {
-        return self.has_training and self.published != null and
+        const ok = self.has_training and self.published != null and
             (self.phase == .paused or self.phase == .published);
+        // Negative space: Continue never without resume-safe trainer tables.
+        if (!self.has_training) std.debug.assert(!ok);
+        if (ok) {
+            std.debug.assert(self.has_training);
+            std.debug.assert(self.published != null);
+        }
+        return ok;
     }
 
     pub fn requestStop(self: *Session) void {
@@ -254,6 +261,9 @@ pub const Session = struct {
         self.cfr_pass_mutated = false;
         self.inject_mid_pass_fault = false;
         self.inject_publish_fault = false;
+        std.debug.assert(!self.has_training);
+        std.debug.assert(!self.cfr_pass_mutated);
+        std.debug.assert(!self.canContinue());
     }
 
     fn clearSolution(self: *Session) void {
@@ -414,6 +424,15 @@ pub const Session = struct {
         self.last_terminal = .completed;
         // Ready to train; not yet published. Open may still replace (fail-closed).
         self.phase = .paused;
+        // Postconditions: fail-closed install left a resume-safe unpublished session.
+        std.debug.assert(self.has_training);
+        std.debug.assert(self.training != null);
+        std.debug.assert(self.game != null);
+        std.debug.assert(self.phase == .paused);
+        std.debug.assert(self.memory_budget_bytes == budget_bytes);
+        std.debug.assert(self.budget.limit() == budget_bytes);
+        std.debug.assert(!self.cfr_pass_mutated);
+        std.debug.assert(self.last_committed_trained == 0);
     }
 
     fn clearStrategyEditBaseline(self: *Session) void {
@@ -642,8 +661,11 @@ pub const Session = struct {
         switch (stage) {
             .before_passes => {
                 self.cfr_pass_mutated = true;
+                std.debug.assert(self.cfr_pass_mutated);
             },
             .after_oop_pass => {
+                // Mid-pass: mutation flag must still be set until commit.
+                std.debug.assert(self.cfr_pass_mutated);
                 if (self.inject_mid_pass_fault) {
                     self.inject_mid_pass_fault = false;
                     return error.InvalidFrozen;
@@ -652,8 +674,10 @@ pub const Session = struct {
             .committed => {
                 if (self.training) |state| {
                     self.last_committed_trained = state.trained;
+                    std.debug.assert(self.last_committed_trained == state.trained);
                 }
                 self.cfr_pass_mutated = false;
+                std.debug.assert(!self.cfr_pass_mutated);
             },
         }
     }
@@ -726,13 +750,21 @@ pub const Session = struct {
                 self.cfr_pass_mutated = false;
                 self.has_training = true;
                 self.phase = if (self.published != null) .published else .paused;
+                // Publish ≠ mid-pass: trainer stays resume-safe.
+                std.debug.assert(self.has_training);
+                std.debug.assert(!self.cfr_pass_mutated);
+                std.debug.assert(self.training != null);
+                if (self.published != null) std.debug.assert(self.canContinue());
             } else if (self.cfr_pass_mutated) {
                 // Partial CFR+ mutation — browse last published only; need ckpt/begin.
                 self.invalidateTrainerForResumeLocked();
                 self.phase = if (self.published != null) .published else .failed;
+                std.debug.assert(!self.has_training);
+                std.debug.assert(!self.canContinue());
             } else {
                 self.cfr_pass_mutated = false;
                 self.phase = if (self.published != null) .published else .failed;
+                std.debug.assert(!self.cfr_pass_mutated);
             }
         }
 
@@ -789,6 +821,13 @@ pub const Session = struct {
         }
         self.has_training = true;
         self.cfr_pass_mutated = false;
+        // Successful train exit: committed counters match trainer; mutation window closed.
+        std.debug.assert(self.has_training);
+        std.debug.assert(!self.cfr_pass_mutated);
+        if (self.training) |ts| {
+            std.debug.assert(self.last_committed_trained == ts.trained);
+        }
+        std.debug.assert(self.phase == .paused or self.phase == .published);
         self.mu.unlock();
         self.clearControlFlags();
     }
@@ -1067,11 +1106,22 @@ pub const Session = struct {
         self.mu.unlock();
         // Checkpoint average must match the completed iteration being claimed.
         try self.ensurePublishedExact();
+        std.debug.assert(self.published != null);
+        if (self.training) |ts| {
+            // Save claims the last committed iteration when trainer tables exist.
+            std.debug.assert(self.last_committed_trained == ts.trained);
+        }
         var doc = self.buildDocument() catch |err| {
             if (err == error.OutOfMemory) return self.mapAllocErr(err);
             return err;
         };
         defer doc.deinit();
+        // Document / encode entry: config present; training lengths match average.
+        std.debug.assert(doc.config_text.len > 0);
+        if (doc.hasTraining()) {
+            std.debug.assert(doc.regret.len == doc.average.len);
+            std.debug.assert(doc.strategy_sum.len == doc.average.len);
+        }
         poker_formats.writeFile(self.allocator, path, doc) catch |err| {
             if (err == error.OutOfMemory) return self.mapAllocErr(err);
             return err;
@@ -1210,6 +1260,22 @@ pub const Session = struct {
         self.clearControlFlags();
         self.last_terminal = .completed;
         self.phase = .published;
+        // Open postconditions: published browsable; commit counters match resume policy.
+        std.debug.assert(self.published != null);
+        std.debug.assert(self.phase == .published);
+        std.debug.assert(self.budget.limit() == budget_bytes);
+        std.debug.assert(!self.cfr_pass_mutated);
+        if (want_training) {
+            std.debug.assert(self.has_training);
+            std.debug.assert(self.training != null);
+            std.debug.assert(self.last_committed_trained == doc.trained);
+            std.debug.assert(self.canContinue());
+        } else {
+            std.debug.assert(!self.has_training);
+            std.debug.assert(self.training == null);
+            std.debug.assert(self.last_committed_trained == 0);
+            std.debug.assert(!self.canContinue());
+        }
     }
 
     pub fn policyRevision(self: Session) u64 {

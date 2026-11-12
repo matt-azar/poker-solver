@@ -76,6 +76,20 @@ describe("solveActivity", () => {
     expect(message).toBe("InvalidSession");
   });
 
+  it("does not claim Solve complete when status indicates failure (ZR-149)", () => {
+    const message = engineActivityMessage(
+      "complete",
+      {
+        running: false,
+        failed: true,
+        phase: "failed",
+      },
+      "Solve complete.",
+    );
+    expect(message).toBe("Solve failed.");
+    expect(message).not.toMatch(/complete/i);
+  });
+
   it("includes job id on live Solving copy", () => {
     const message = engineActivityMessage(
       "solving",

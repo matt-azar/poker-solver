@@ -167,12 +167,18 @@ const Reader = struct {
 
     fn need(self: *Reader, n: usize) OpenError!void {
         if (self.remaining() < n) return error.InvalidPsol;
+        // Positive space: after accept, the requested span is inside the payload.
+        std.debug.assert(self.at + n <= self.data.len);
     }
 
     /// Reject oversized counts before allocating: count × elem_size must fit in remaining bytes.
     fn needCount(self: *Reader, count: usize, elem_size: usize) OpenError!void {
+        // Programmer invariant: callers pass a real element width (never 0).
+        std.debug.assert(elem_size > 0);
         const nbytes = std.math.mul(usize, count, elem_size) catch return error.InvalidPsol;
         try self.need(nbytes);
+        // Pair with encode length writes: accepted count must fit remaining bytes.
+        std.debug.assert(self.remaining() >= nbytes);
     }
 
     fn u8r(self: *Reader) OpenError!u8 {
@@ -264,6 +270,10 @@ pub fn encode(allocator: std.mem.Allocator, document: Document) OpenError![]u8 {
     if (document.algorithm != algorithm_cfr_plus) return error.InvalidPsol;
     if (document.config_text.len == 0) return error.InvalidPsol;
     if (document.average.len == 0 and document.slot_actions.len != 0) return error.InvalidPsol;
+    // Positive space after soft rejects (paired with decode dimension pins).
+    std.debug.assert(document.algorithm == algorithm_cfr_plus);
+    std.debug.assert(document.config_text.len > 0);
+    if (document.slot_actions.len != 0) std.debug.assert(document.average.len > 0);
 
     var flags: u32 = 0;
     if (document.hasTraining()) flags |= flag_training;
@@ -288,6 +298,9 @@ pub fn encode(allocator: std.mem.Allocator, document: Document) OpenError![]u8 {
         try writer.f32s(document.strategy_sum);
         if (document.regret.len != document.average.len) return error.InvalidPsol;
         if (document.strategy_sum.len != document.average.len) return error.InvalidPsol;
+        // Write-side pair for the decode length equality checks below.
+        std.debug.assert(document.regret.len == document.average.len);
+        std.debug.assert(document.strategy_sum.len == document.average.len);
     }
     if ((flags & flag_overlays) != 0) {
         try writer.text(document.locks_text);
@@ -305,10 +318,15 @@ pub fn encode(allocator: std.mem.Allocator, document: Document) OpenError![]u8 {
     const checksum = fnv1a64(payload);
     var header: [header_bytes]u8 = undefined;
     writeHeader(&header, flags, payload.len, checksum);
+    // Header contract the reader trusts (magic / version / payload_len).
+    std.debug.assert(std.mem.eql(u8, header[0..4], magic));
+    std.debug.assert(std.mem.readInt(u32, header[4..8], .little) == version);
+    std.debug.assert(std.mem.readInt(u64, header[12..20], .little) == payload.len);
 
     var out = allocator.alloc(u8, header_bytes + payload.len) catch return error.OutOfMemory;
     @memcpy(out[0..header_bytes], &header);
     @memcpy(out[header_bytes..], payload);
+    std.debug.assert(out.len == header_bytes + payload.len);
     return out;
 }
 
@@ -352,6 +370,8 @@ pub fn decode(allocator: std.mem.Allocator, file: []const u8) OpenError!Document
     document.average = try reader.f32s(allocator);
     // Dimension pin before session replace: empty average only with empty slots.
     if (document.average.len == 0 and document.slot_actions.len != 0) return error.InvalidPsol;
+    // Read-side pair for encode's average/slot precondition.
+    if (document.slot_actions.len != 0) std.debug.assert(document.average.len > 0);
 
     if ((flags & flag_training) != 0) {
         document.has_training_flag = true;
@@ -360,6 +380,9 @@ pub fn decode(allocator: std.mem.Allocator, file: []const u8) OpenError!Document
         document.strategy_sum = try reader.f32s(allocator);
         if (document.regret.len != document.average.len) return error.InvalidPsol;
         if (document.strategy_sum.len != document.average.len) return error.InvalidPsol;
+        // Read-side pair for encode training length asserts.
+        std.debug.assert(document.regret.len == document.average.len);
+        std.debug.assert(document.strategy_sum.len == document.average.len);
     }
     if ((flags & flag_overlays) != 0) {
         document.locks_text = try reader.text(allocator);
@@ -411,11 +434,16 @@ pub fn writeFileInjected(
     const bytes = try encode(allocator, document);
     defer allocator.free(bytes);
     if (bytes.len > max_psol_bytes) return error.InvalidPsol;
+    // Encode + size gate passed: bytes are a real v4 file under the hard ceiling.
+    std.debug.assert(bytes.len >= header_bytes);
+    std.debug.assert(bytes.len <= max_psol_bytes);
+    std.debug.assert(std.mem.eql(u8, bytes[0..4], magic));
 
     // Callers pass an already-unescaped filesystem path (host JSON unescape).
     const dirname = std.fs.path.dirname(path) orelse ".";
     const basename = std.fs.path.basename(path);
     if (basename.len == 0) return error.InvalidPsol;
+    std.debug.assert(basename.len > 0);
 
     var dir = std.fs.cwd().openDir(dirname, .{}) catch return error.InvalidPsol;
     defer dir.close();
@@ -426,6 +454,10 @@ pub fn writeFileInjected(
         basename,
         std.time.nanoTimestamp(),
     }) catch return error.InvalidPsol;
+    // Sibling temp must stay in this directory (basename only — no separators).
+    std.debug.assert(std.fs.path.dirname(tmp_name) == null);
+    std.debug.assert(std.mem.indexOfScalar(u8, tmp_name, '/') == null);
+    std.debug.assert(std.mem.indexOfScalar(u8, tmp_name, '\\') == null);
 
     const file = dir.createFile(tmp_name, .{ .exclusive = true }) catch return error.InvalidPsol;
     var file_open = true;
@@ -437,6 +469,8 @@ pub fn writeFileInjected(
 
     if (fault == .write) {
         // Partial write then fail: models ENOSPC mid-stream without truncating dest.
+        // Negative space: injected write faults must not reach rename.
+        std.debug.assert(fault == .write);
         const n = @min(bytes.len, @as(usize, 32));
         if (n != 0) file.writeAll(bytes[0..n]) catch {};
         return error.InvalidPsol;
@@ -444,7 +478,10 @@ pub fn writeFileInjected(
 
     file.writeAll(bytes) catch return error.InvalidPsol;
 
-    if (fault == .sync) return error.InvalidPsol;
+    if (fault == .sync) {
+        std.debug.assert(fault == .sync);
+        return error.InvalidPsol;
+    }
     file.sync() catch return error.InvalidPsol;
 
     file.close();
@@ -452,13 +489,17 @@ pub fn writeFileInjected(
 
     if (fault == .interrupt_before_replace) {
         // Crash-before-rename: dest untouched; errdefer removes the orphan temp.
+        std.debug.assert(fault == .interrupt_before_replace);
         return error.InvalidPsol;
     }
     if (fault == .rename) {
         // Rename/replace refused (e.g. Windows file-in-use). Dest stays intact.
+        std.debug.assert(fault == .rename);
         return error.InvalidPsol;
     }
 
+    // Positive space: only the no-fault path performs the single replace.
+    std.debug.assert(fault == .none);
     // Single replace. Zig's renameat uses MOVEFILE_REPLACE_EXISTING on Windows —
     // do not delete-then-retry (that race deletes the only good checkpoint).
     dir.rename(tmp_name, basename) catch return error.InvalidPsol;

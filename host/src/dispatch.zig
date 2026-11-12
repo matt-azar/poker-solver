@@ -892,6 +892,13 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     // phase at `.published` (prior average still installed).
     const failed = (phase == .failed or sticky_error != null) and !running;
 
+    // Status honesty pairs (ZR-149): Continue implies resume-safe trainer;
+    // peak covers live; failed idle snapshots are not "running".
+    if (can_continue) std.debug.assert(has_training);
+    if (!has_training) std.debug.assert(!can_continue);
+    std.debug.assert(peak_allocated_bytes >= allocated_bytes);
+    if (failed) std.debug.assert(!running);
+
     var list = std.ArrayList(u8).init(allocator);
     errdefer list.deinit();
     const w = list.writer();

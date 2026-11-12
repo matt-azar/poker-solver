@@ -43,12 +43,34 @@ export function decodeStatusPayload(data: unknown): StatusPayload {
   if ("can_continue" in data) {
     requireBoolean(data, "can_continue");
   }
+  // Overlapping Session.canContinue invariant (ZR-149): Continue needs trainer.
+  if ("can_continue" in data && "has_training" in data) {
+    const can_continue = Boolean(data.can_continue);
+    const has_training = Boolean(data.has_training);
+    if (can_continue && !has_training) {
+      throw new Error("contract: can_continue requires has_training");
+    }
+  }
   if ("failed" in data) {
     requireBoolean(data, "failed");
   }
   // ZR-130: sticky async-train fault code (null when clear).
   if ("last_error" in data) {
     optionalStringOrNull(data, "last_error");
+  }
+  // ZR-142 budget fields when present: peak covers live.
+  const memory_budget_bytes = optionalFiniteNumber(data, "memory_budget_bytes");
+  const allocated_bytes = optionalFiniteNumber(data, "allocated_bytes");
+  const peak_allocated_bytes = optionalFiniteNumber(data, "peak_allocated_bytes");
+  if (
+    allocated_bytes != null &&
+    peak_allocated_bytes != null &&
+    peak_allocated_bytes < allocated_bytes
+  ) {
+    throw new Error("contract: peak_allocated_bytes must be >= allocated_bytes");
+  }
+  if (memory_budget_bytes != null && memory_budget_bytes < 0) {
+    throw new Error("contract: memory_budget_bytes must be >= 0");
   }
   return {
     ...data,

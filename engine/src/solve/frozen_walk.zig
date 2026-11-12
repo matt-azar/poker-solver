@@ -2122,6 +2122,7 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
     stage_ctx: ?*anyopaque,
 ) FrozenError!training_state.PublishedPolicy {
     if (iterations < 1) return error.InvalidFrozen;
+    std.debug.assert(iterations >= 1);
     ctx.state = state;
     try ctx.ensureAllRanksReady();
     const game = ctx.game;
@@ -2137,7 +2138,9 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
         }
         // Prospective weight for this in-flight iteration; commit `trained` only
         // after both alternating updates succeed (classic CFR+ schedule).
+        const trained_before = state.trained;
         const next_trained = state.trained + 1;
+        std.debug.assert(next_trained == trained_before + 1);
         const weight_iter: f64 = @floatFromInt(next_trained);
         if (stage_hook) |hook| {
             const sctx = stage_ctx orelse return error.InvalidFrozen;
@@ -2150,6 +2153,8 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
         w.resetSupport();
         try ctx.walk(w, 0, -1, -1, 0, 0, weight_iter, false);
         try training_state.floorAndFreezeThreaded(allocator, game, state, 0, slot_threads, ctx.locks);
+        // Mid-pass window: trained must still be the pre-commit value.
+        std.debug.assert(state.trained == trained_before);
         if (stage_hook) |hook| {
             const sctx = stage_ctx orelse return error.InvalidFrozen;
             // Mid-pass: OOP regrets updated; IP pass not done — tables partial.
@@ -2162,6 +2167,8 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
         try training_state.floorPlayerThreaded(allocator, game, state, 1, slot_threads);
         // Commit only a complete CFR+ iteration.
         state.trained = next_trained;
+        std.debug.assert(state.trained == trained_before + 1);
+        std.debug.assert(state.trained == next_trained);
         if (stage_hook) |hook| {
             const sctx = stage_ctx orelse return error.InvalidFrozen;
             hook(sctx, .committed) catch return error.InvalidFrozen;
@@ -2178,6 +2185,8 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
                 .revision = state.policy_revision,
                 .trained = state.trained,
             };
+            // After-iter path: stub tracks the committed trained count.
+            std.debug.assert(published.trained == state.trained);
         } else {
             // Standalone / rematch path: publish every completed iteration.
             const next = training_state.publishAverageThreaded(allocator, game, state, slot_threads) catch |err| {
@@ -2188,6 +2197,7 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
             };
             if (published.average.len != 0) published.deinit();
             published = next;
+            std.debug.assert(published.trained == state.trained);
         }
     }
     return published;

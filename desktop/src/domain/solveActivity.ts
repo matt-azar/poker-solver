@@ -1,4 +1,7 @@
-import { statusStickyError } from "./sessionRecovery";
+import {
+  statusIndicatesFailure,
+  statusStickyError,
+} from "./sessionRecovery";
 import { statusRootEv } from "./status";
 import type { SolvePhase, StatusPayload } from "./types";
 import { presentUserText } from "./userText";
@@ -133,6 +136,11 @@ export function engineActivityMessage(
   const sticky = statusStickyError(status);
   if (sticky) {
     return presentUserText(sticky);
+  }
+  // Pair with statusIndicatesFailure (ZR-148 / ZR-149): sticky/host failure
+  // must win over Complete / stale "Solve complete." store fallback.
+  if (statusIndicatesFailure(status)) {
+    return "Solve failed.";
   }
   if (status?.message && String(status.message).trim()) {
     return String(status.message).trim();
