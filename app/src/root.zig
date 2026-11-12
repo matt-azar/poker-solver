@@ -282,6 +282,93 @@ test "prepareResolveLocked reset stamps baseline and zeros trained" {
     try std.testing.expectEqual(prior, sess.baseline_id);
 }
 
+test "publish cadence carries across train(1) and flushes on exact" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var sess = Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    sess.publish_every = 3;
+
+    // First completed iter always publishes (Study values waiters).
+    try sess.train(1);
+    try std.testing.expectEqual(@as(i32, 1), sess.training.?.trained);
+    try std.testing.expectEqual(@as(i32, 1), sess.last_published_trained);
+    try std.testing.expectEqual(@as(u64, 1), sess.policyRevision());
+
+    // Cadence carries: next two train(1) steps skip full publish.
+    try sess.train(1);
+    try sess.train(1);
+    try std.testing.expectEqual(@as(i32, 3), sess.training.?.trained);
+    try std.testing.expectEqual(@as(i32, 1), sess.last_published_trained);
+    try std.testing.expectEqual(@as(u64, 1), sess.policyRevision());
+    try std.testing.expectEqual(@as(i32, 2), sess.iters_since_publish);
+
+    // Third step since last publish hits the bound.
+    try sess.train(1);
+    try std.testing.expectEqual(@as(i32, 4), sess.training.?.trained);
+    try std.testing.expectEqual(@as(i32, 4), sess.last_published_trained);
+    try std.testing.expectEqual(@as(u64, 2), sess.policyRevision());
+    try std.testing.expectEqual(@as(i32, 0), sess.iters_since_publish);
+
+    // Mid-cadence Acc/save path forces the exact average for the claimed iter.
+    try sess.train(1);
+    try std.testing.expectEqual(@as(i32, 5), sess.training.?.trained);
+    try std.testing.expectEqual(@as(i32, 4), sess.last_published_trained);
+    try sess.ensurePublishedExact();
+    try std.testing.expectEqual(@as(i32, 5), sess.last_published_trained);
+    try std.testing.expectEqual(@as(u64, 3), sess.policyRevision());
+}
+
+test "multi-iter train forces publish at completion" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var sess = Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    sess.publish_every = 100;
+    try sess.train(5);
+    try std.testing.expectEqual(@as(i32, 5), sess.training.?.trained);
+    // First iter + completion flush (cadence bound never hit).
+    try std.testing.expectEqual(@as(i32, 5), sess.last_published_trained);
+    try std.testing.expectEqual(@as(u64, 2), sess.policyRevision());
+    try std.testing.expect(sess.phase == .published);
+}
+
 test {
     _ = session;
     _ = plan_preview;
