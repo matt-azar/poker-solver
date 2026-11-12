@@ -5,6 +5,14 @@ const poker_engine = @import("poker_engine");
 const ipc = @import("ipc.zig");
 const workers = @import("workers.zig");
 
+const TrainTask = struct {
+    state: *HostState,
+    request_id: []u8,
+    job_id: ?[]u8,
+    op: []u8,
+    iterations: i32,
+};
+
 pub const HostState = struct {
     allocator: std.mem.Allocator,
     session: poker_app.Session,
@@ -12,6 +20,10 @@ pub const HostState = struct {
     launch_id: []u8 = &.{},
     pending: std.ArrayList([]u8),
     cancelled_jobs: std.StringHashMap(void),
+    /// Serialize stdout frames from stdin loop + train worker (R10).
+    stdout_mu: std.Thread.Mutex = .{},
+    train_thread: ?std.Thread = null,
+    train_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     pub fn init(allocator: std.mem.Allocator, launch_id: []const u8) !HostState {
         return .{
@@ -25,6 +37,7 @@ pub const HostState = struct {
     }
 
     pub fn deinit(self: *HostState) void {
+        self.joinTrain();
         self.clearPending();
         self.session.deinit();
         if (self.launch_id.len != 0) self.allocator.free(self.launch_id);
@@ -32,6 +45,19 @@ pub const HostState = struct {
         while (it.next()) |key| self.allocator.free(key.*);
         self.cancelled_jobs.deinit();
         self.pending.deinit();
+    }
+
+    pub fn joinTrain(self: *HostState) void {
+        if (self.train_thread) |t| {
+            t.join();
+            self.train_thread = null;
+        }
+    }
+
+    pub fn writeReply(self: *HostState, reply: ipc.Envelope) !void {
+        self.stdout_mu.lock();
+        defer self.stdout_mu.unlock();
+        try ipc.writeFrame(self.allocator, std.io.getStdOut().writer(), reply);
     }
 
     pub fn clearPending(self: *HostState) void {
@@ -194,28 +220,6 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
-    if (std.mem.eql(u8, req.op, "solve")) {
-        if (state.session.phase == .idle) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_session", "call begin_config before solve");
-        }
-        const iterations = bodyIntField(req.body_json, "iterations") orelse 1;
-        state.budget.returnToTraining();
-        // D3: train uses the shared training worker budget (manual config may already set Session.threads).
-        if (state.budget.training > 0) {
-            state.session.setThreads(state.budget.training);
-        }
-        state.session.train(iterations) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "solve_failed", @errorName(err));
-        };
-        var buf: [160]u8 = undefined;
-        const body = try std.fmt.bufPrint(&buf, "{{\"solution_id\":{d},\"policy_revision\":{d},\"trained\":{d}}}", .{
-            state.session.solution_id,
-            state.session.policyRevision(),
-            if (state.session.published) |p| p.trained else 0,
-        });
-        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
-    }
-
     if (std.mem.eql(u8, req.op, "pause")) {
         state.session.pause() catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "pause_failed", @errorName(err));
@@ -249,12 +253,12 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     if (std.mem.eql(u8, req.op, "node")) {
         state.budget.prioritizeAnalysis(1);
         defer state.budget.returnToTraining();
-        const game = state.session.game orelse
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no game");
-        const published = state.session.published orelse
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no published policy");
+        var lease = state.session.borrowPublished() catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+        defer lease.deinit();
         const node_index: u32 = @intCast(bodyIntField(req.body_json, "node_index") orelse 0);
-        var page = poker_engine.analysis.inspect.inspectNode(state.allocator, game, published, node_index, -1, -1) catch |err| {
+        var page = poker_engine.analysis.inspect.inspectNode(state.allocator, lease.game, lease.published, node_index, -1, -1) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "inspect_failed", @errorName(err));
         };
         defer page.deinit();
@@ -272,22 +276,24 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     if (std.mem.eql(u8, req.op, "values")) {
         state.budget.prioritizeAnalysis(1);
         defer state.budget.returnToTraining();
-        const game = state.session.game orelse
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no game");
-        const published = state.session.published orelse
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no published policy");
+        // Wait briefly for mid-train publish when solve just started (R10).
+        const wait_ns: u64 = 120 * std.time.ns_per_s;
+        var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+        defer lease.deinit();
         const node_index: u32 = @intCast(bodyIntField(req.body_json, "node_index") orelse 0);
         const t0 = std.time.nanoTimestamp();
-        var page = poker_engine.analysis.action_ev.actionValues(state.allocator, game, published, node_index, -1, -1) catch |err| {
+        var page = poker_engine.analysis.action_ev.actionValues(state.allocator, lease.game, lease.published, node_index, -1, -1) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "values_failed", @errorName(err));
         };
         defer page.deinit();
         const elapsed_ns = std.time.nanoTimestamp() - t0;
         const elapsed_ms = @divTrunc(elapsed_ns, 1_000_000);
         // Summary page for Study latency (full hand×action tables are a follow-on).
-        // Root uses frozen response_walk; see action_ev.actionValues.
-        var buf: [448]u8 = undefined;
-        const body = try std.fmt.bufPrint(&buf, "{{\"node_index\":{d},\"player\":{d},\"policy_revision\":{d},\"units\":\"chips\",\"utility_basis\":\"root_centered\",\"local_offset\":{d:.6},\"node_ev_defined\":{},\"node_ev\":{d:.6},\"n_hands\":{d},\"n_actions\":{d},\"elapsed_ms\":{d},\"solution_id\":\"s{d}\",\"engine\":\"frozen_response_walk\"}}", .{
+        // Root uses frozen response_walk under a reader lease while train may continue.
+        var buf: [512]u8 = undefined;
+        const body = try std.fmt.bufPrint(&buf, "{{\"node_index\":{d},\"player\":{d},\"policy_revision\":{d},\"units\":\"chips\",\"utility_basis\":\"root_centered\",\"local_offset\":{d:.6},\"node_ev_defined\":{},\"node_ev\":{d:.6},\"n_hands\":{d},\"n_actions\":{d},\"elapsed_ms\":{d},\"solution_id\":\"s{d}\",\"engine\":\"frozen_response_walk\",\"live_under_train\":{}}}", .{
             page.node_index,
             page.player,
             page.policy_revision,
@@ -297,7 +303,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             page.combos.len,
             page.actions.len,
             elapsed_ms,
-            state.session.solution_id,
+            lease.solution_id,
+            state.train_running.load(.acquire),
         });
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
@@ -309,6 +316,113 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_op", req.op);
+}
+
+fn trainWorker(task: *TrainTask) void {
+    const state = task.state;
+    defer {
+        state.untrack(task.request_id);
+        state.train_running.store(false, .release);
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.destroy(task);
+    }
+
+    var reply: ipc.Envelope = undefined;
+    if (state.session.train(task.iterations)) |_| {
+        var buf: [192]u8 = undefined;
+        const trained: i32 = if (state.session.published) |p| p.trained else 0;
+        const body = std.fmt.bufPrint(&buf, "{{\"solution_id\":{d},\"policy_revision\":{d},\"trained\":{d},\"async\":true}}", .{
+            state.session.solution_id,
+            state.session.policyRevision(),
+            trained,
+        }) catch {
+            reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "solve_failed", "format") catch return;
+            defer reply.deinit();
+            state.writeReply(reply) catch {};
+            return;
+        };
+        reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, task.op, body) catch {
+            reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "solve_failed", "oom") catch return;
+            defer reply.deinit();
+            state.writeReply(reply) catch {};
+            return;
+        };
+    } else |err| {
+        reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "solve_failed", @errorName(err)) catch return;
+    }
+    defer reply.deinit();
+    state.writeReply(reply) catch {};
+}
+
+/// Spawn background CFR+ train so the stdin loop can serve `values` mid-train (R10).
+/// Does not write a sync reply; the worker emits the solve reply when finished.
+pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
+    try state.track(req.request_id);
+    errdefer state.untrack(req.request_id);
+
+    if (state.isCancelled(req.job_id)) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "cancelled", "job cancelled");
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    }
+
+    if (state.session.phase == .idle) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_session", "call begin_config before solve");
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    }
+
+    if (state.train_running.load(.acquire)) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "train already running");
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    }
+    // Reap a finished worker before starting another.
+    state.joinTrain();
+
+    const iterations = bodyIntField(req.body_json, "iterations") orelse 1;
+    state.budget.returnToTraining();
+    // D3: train uses the shared training worker budget (manual config may already set Session.threads).
+    if (state.budget.training > 0) {
+        state.session.setThreads(state.budget.training);
+    }
+
+    const task = try state.allocator.create(TrainTask);
+    errdefer state.allocator.destroy(task);
+    task.* = .{
+        .state = state,
+        .request_id = try state.allocator.dupe(u8, req.request_id),
+        .job_id = if (req.job_id) |j| try state.allocator.dupe(u8, j) else null,
+        .op = try state.allocator.dupe(u8, req.op),
+        .iterations = iterations,
+    };
+    errdefer {
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+    }
+
+    state.train_running.store(true, .release);
+    state.train_thread = std.Thread.spawn(.{}, trainWorker, .{task}) catch |err| {
+        state.train_running.store(false, .release);
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.destroy(task);
+        state.untrack(req.request_id);
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "solve_failed", @errorName(err));
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    };
 }
 
 test "ready dispatch" {

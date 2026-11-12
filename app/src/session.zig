@@ -21,6 +21,27 @@ pub const Phase = enum {
 
 pub const Metrics = poker_formats.Metrics;
 
+/// Reader lease over the current published average (Study values under train).
+/// Holds `readers` until `release` / `deinit`; train publish waits for quiet.
+pub const PublishedLease = struct {
+    session: ?*Session = null,
+    game: poker_engine.game.compile.CompiledGame,
+    /// Borrowed view — valid until `release`. Do not deinit.
+    published: poker_engine.solve.training_state.PublishedPolicy,
+    solution_id: u64 = 0,
+
+    pub fn release(self: *PublishedLease) void {
+        if (self.session) |sess| {
+            sess.releaseReader();
+            self.session = null;
+        }
+    }
+
+    pub fn deinit(self: *PublishedLease) void {
+        self.release();
+    }
+};
+
 /// Application-owned solution lifetime. Fail-closed on open/replace.
 pub const Session = struct {
     allocator: std.mem.Allocator,
@@ -39,12 +60,23 @@ pub const Session = struct {
     frozen: bool = false,
     /// Shared worker budget for frozen chance steal (D3). From config `threads` or host override.
     threads: u32 = 1,
+    /// Protects phase / published swap / reader count (mid-train Study browse).
+    mu: std.Thread.Mutex = .{},
+    readers: u32 = 0,
+    quiet: std.Thread.Condition = .{},
+    /// Signaled when a new policy_revision is installed (values waiters).
+    published_cv: std.Thread.Condition = .{},
 
     pub fn init(allocator: std.mem.Allocator) Session {
         return .{ .allocator = allocator };
     }
 
     pub fn deinit(self: *Session) void {
+        self.mu.lock();
+        while (self.readers != 0) {
+            self.quiet.wait(&self.mu);
+        }
+        self.mu.unlock();
         self.clearSolution();
         self.* = .{ .allocator = self.allocator };
     }
@@ -93,7 +125,12 @@ pub const Session = struct {
 
     /// Begin a new solve from street-config text. On failure, prior solution is kept.
     pub fn begin(self: *Session, config_text: []const u8) SessionError!void {
-        if (self.phase == .training or self.phase == .compiling) return error.Busy;
+        self.mu.lock();
+        if (self.phase == .training or self.phase == .compiling) {
+            self.mu.unlock();
+            return error.Busy;
+        }
+        self.mu.unlock();
 
         var spec = try poker_engine.game.parseStreetConfig(self.allocator, config_text);
         defer spec.deinit();
@@ -106,6 +143,12 @@ pub const Session = struct {
         const threads = clampThreads(spec.threads);
 
         // Install only after compile+train tables succeed (fail-closed).
+        self.mu.lock();
+        defer self.mu.unlock();
+        if (self.phase == .training or self.phase == .compiling) return error.Busy;
+        while (self.readers != 0) {
+            self.quiet.wait(&self.mu);
+        }
         self.clearSolution();
         self.config_text = owned_config;
         self.game = game;
@@ -118,27 +161,111 @@ pub const Session = struct {
         self.phase = .paused;
     }
 
+    fn installPublishedLocked(self: *Session, next: poker_engine.solve.training_state.PublishedPolicy) void {
+        // Caller holds `mu`. Wait until no Study readers hold the prior average.
+        while (self.readers != 0) {
+            self.quiet.wait(&self.mu);
+        }
+        if (self.published) |*old| old.deinit();
+        self.published = next;
+        self.published_cv.broadcast();
+    }
+
+    fn onTrainPublished(ctx: *anyopaque, next: poker_engine.solve.training_state.PublishedPolicy) anyerror!void {
+        const self: *Session = @ptrCast(@alignCast(ctx));
+        self.mu.lock();
+        defer self.mu.unlock();
+        self.installPublishedLocked(next);
+    }
+
     pub fn train(self: *Session, iterations: i32) SessionError!void {
+        self.mu.lock();
         if (self.phase != .paused and self.phase != .published) {
+            self.mu.unlock();
             return error.InvalidSession;
         }
-        const game = self.game orelse return error.InvalidSession;
-        const state = &(self.training orelse return error.InvalidSession);
+        const game = self.game orelse {
+            self.mu.unlock();
+            return error.InvalidSession;
+        };
+        const state = &(self.training orelse {
+            self.mu.unlock();
+            return error.InvalidSession;
+        });
         self.phase = .training;
-        // StreetBatch-style frozen CFR+ (C++ train_frozen_cfr_plus_iterations).
-        const published = try poker_engine.solve.frozen_walk.trainFrozenCfrPlusThreaded(
+        const threads = self.threads;
+        self.mu.unlock();
+        errdefer {
+            self.mu.lock();
+            self.phase = if (self.published != null) .published else .failed;
+            self.mu.unlock();
+        }
+
+        // StreetBatch-style frozen CFR+; mid-iter publish via reader-lease swap (R10).
+        var stub = try poker_engine.solve.frozen_walk.trainFrozenCfrPlusThreaded(
             self.allocator,
             game,
             state,
             iterations,
-            self.threads,
+            threads,
+            onTrainPublished,
+            self,
         );
-        if (self.published) |*old| old.deinit();
-        self.published = published;
+        // Average already installed by the hook; stub carries revision only.
+        stub.deinit();
+
+        self.mu.lock();
         self.phase = .published;
+        self.mu.unlock();
+    }
+
+    /// Borrow published policy for analysis. Safe while train continues (D2/D3).
+    pub fn borrowPublished(self: *Session) SessionError!PublishedLease {
+        self.mu.lock();
+        defer self.mu.unlock();
+        const game = self.game orelse return error.NothingPublished;
+        const published = self.published orelse return error.NothingPublished;
+        self.readers += 1;
+        return .{
+            .session = self,
+            .game = game,
+            .published = published,
+            .solution_id = self.solution_id,
+        };
+    }
+
+    /// Wait until a published revision exists (or timeout_ns), then borrow.
+    pub fn borrowPublishedWait(self: *Session, timeout_ns: u64) SessionError!PublishedLease {
+        const deadline = std.time.nanoTimestamp() + @as(i128, @intCast(timeout_ns));
+        self.mu.lock();
+        defer self.mu.unlock();
+        while (self.published == null) {
+            const now = std.time.nanoTimestamp();
+            if (now >= deadline) return error.NothingPublished;
+            const remaining: u64 = @intCast(deadline - now);
+            self.published_cv.timedWait(&self.mu, remaining) catch return error.NothingPublished;
+        }
+        const game = self.game orelse return error.NothingPublished;
+        const published = self.published orelse return error.NothingPublished;
+        self.readers += 1;
+        return .{
+            .session = self,
+            .game = game,
+            .published = published,
+            .solution_id = self.solution_id,
+        };
+    }
+
+    pub fn releaseReader(self: *Session) void {
+        self.mu.lock();
+        defer self.mu.unlock();
+        if (self.readers > 0) self.readers -= 1;
+        if (self.readers == 0) self.quiet.broadcast();
     }
 
     pub fn pause(self: *Session) SessionError!void {
+        self.mu.lock();
+        defer self.mu.unlock();
         if (self.phase != .published and self.phase != .training) return error.InvalidSession;
         if (self.published == null) return error.NothingPublished;
         self.phase = .paused;

@@ -1,5 +1,6 @@
 //! `solver-engine` sidecar (D11): typed IPC over inherited pipes (D1).
 //! Logs → stderr. IPC frames on stdin/stdout. Outside the engine.
+//! Solve runs on a background thread so Study `values` can overlap train (R10).
 const std = @import("std");
 const poker_app = @import("poker_app");
 const poker_engine = @import("poker_engine");
@@ -41,17 +42,17 @@ pub fn main() !void {
     var state = try dispatch.HostState.init(allocator, launch_id);
     defer {
         // Fail pending on exit (D1).
+        state.joinTrain();
         for (state.pending.items) |rid| {
             var err_reply = ipc.makeErrorReply(allocator, rid, null, "exit", "sidecar_exit", "solver-engine exiting") catch continue;
             defer err_reply.deinit();
-            ipc.writeFrame(allocator, std.io.getStdOut().writer(), err_reply) catch {};
+            state.writeReply(err_reply) catch {};
         }
         state.deinit();
         std.debug.print("solver-engine exiting\n", .{});
     }
 
     const stdin = std.io.getStdIn().reader();
-    const stdout = std.io.getStdOut().writer();
 
     while (true) {
         var req = ipc.readFrame(allocator, stdin) catch |err| {
@@ -63,14 +64,25 @@ pub fn main() !void {
         if (req.kind != .request) {
             var bad = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "invalid_frame", "expected request");
             defer bad.deinit();
-            try ipc.writeFrame(allocator, stdout, bad);
+            try state.writeReply(bad);
             continue;
         }
+
+        // Async solve: keep stdin free so values can run under train (R10).
+        if (std.mem.eql(u8, req.op, "solve")) {
+            dispatch.startSolve(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
+
         var reply = dispatch.handle(&state, req) catch |err| blk: {
             break :blk try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
         };
         defer reply.deinit();
-        try ipc.writeFrame(allocator, stdout, reply);
+        try state.writeReply(reply);
     }
 }
 

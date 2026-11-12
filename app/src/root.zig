@@ -6,6 +6,7 @@ const poker_formats = @import("poker_formats");
 pub const session = @import("session.zig");
 pub const Session = session.Session;
 pub const Phase = session.Phase;
+pub const PublishedLease = session.PublishedLease;
 pub const phase = "phase-5";
 
 pub fn engineModuleName() []const u8 {

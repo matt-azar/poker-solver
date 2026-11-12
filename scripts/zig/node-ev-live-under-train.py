@@ -1,28 +1,21 @@
 #!/usr/bin/env python3
-"""Probe Study node-EV latency under / interleaved with train (D12 live gate).
+"""Measure Study node-EV latency under active train (D12 live gate / R10).
 
-Architectural fact (Zig host today):
-  host/src/main.zig is a single-threaded stdin→dispatch→stdout loop.
-  `solve` blocks inside Session.train() until all requested iterations finish
-  and only then publishes. WorkerBudget is status accounting only — it does
-  not spawn concurrent train/analysis threads. Progress frames exist in the
-  IPC schema but are never emitted mid-solve. Therefore true overlap of
-  `values` with an in-flight train is **impossible** on this IPC path.
+After async host cutover:
+  `solve` runs on a background thread; stdin stays free for `values`.
+  Mid-train publish installs a coherent average after each completed iteration;
+  `values` takes a reader lease (waits briefly if nothing published yet).
 
-This harness:
-  1. CONCURRENCY_PROBE — write `solve` then immediately write `values` without
-     reading the solve reply. Expect ordered replies (solve then values) and
-     no true overlap. Bound wall; hard-kill on runaway.
-  2. INTERLEAVED_PROXY — closest measurable proxy: N× (1-iter solve → values)
-     on one long-lived sidecar. Reports per-cycle train + values latency while
-     the session keeps training (not concurrent CPU, but mid-campaign EV).
+Harness:
+  1. CONCURRENCY_PROBE — write multi-iter `solve`, immediately write `values`.
+     Expect `values` reply before `solve` completes (overlap_observed=true).
+  2. INTERLEAVED_PROXY — N× (1-iter solve → values) baseline on one sidecar.
 
 Example:
-  ./scripts/zig/node-ev-live-under-train.py \\
+  ./scripts/zig/run-gate-bounded.sh 120 python3 scripts/zig/node-ev-live-under-train.py \\
       --binary ./zig-out/bin/solver-engine \\
       --config benchmarks/study/configs/flop_srp_one_size.txt \\
-      --probe-iters 2 --interleave-cycles 2 \\
-      --overall-timeout 420
+      --probe-iters 2 --interleave-cycles 1 --overall-timeout 110
 """
 from __future__ import annotations
 
@@ -86,6 +79,19 @@ def rpc(proc: subprocess.Popen, op: str, body: Any, request_id: str, job_id=None
     return env
 
 
+def body_dict(env: dict) -> dict:
+    body = env.get("body")
+    if isinstance(body, dict):
+        return body
+    if isinstance(body, str):
+        try:
+            parsed = json.loads(body)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
 def kill_proc(proc: subprocess.Popen) -> None:
     try:
         proc.kill()
@@ -111,13 +117,13 @@ def main() -> int:
     ap.add_argument(
         "--interleave-cycles",
         type=int,
-        default=2,
+        default=1,
         help="number of (1-iter solve → values) cycles for the interleaved proxy",
     )
     ap.add_argument(
         "--overall-timeout",
         type=float,
-        default=420.0,
+        default=120.0,
         help="hard wall for the whole dig; kill sidecar on exceed",
     )
     ap.add_argument(
@@ -150,9 +156,8 @@ def main() -> int:
         "interleave_cycles": args.interleave_cycles,
         "overall_timeout_s": args.overall_timeout,
         "architectural_note": (
-            "host IPC is sync-only: main.zig single-threaded dispatch; "
-            "solve blocks Session.train; no mid-train publish; "
-            "WorkerBudget is accounting-only"
+            "async solve thread + mid-train publish + reader lease; "
+            "values may reply before solve completes"
         ),
     }
     print(json.dumps({"stage": "meta", **meta}, separators=(",", ":")))
@@ -177,19 +182,14 @@ def main() -> int:
         "ok": False,
         "metric": "live_node_ev_under_train",
         "fixture": args.config.name,
-        "overlap_possible": False,
-        "architectural_gap": (
-            "solver-engine IPC is fully sync-only: one request at a time in "
-            "host/src/main.zig; Session.train publishes only after all iters; "
-            "no async job queue / mid-train snapshot for Study values"
-        ),
+        "overlap_possible": True,
     }
 
     try:
         try:
             rpc(proc, "ready", None, "live-ready")
 
-            # ---- 1) Concurrency probe (prove sync-only) ----
+            # ---- 1) Concurrency probe (expect values before solve) ----
             if not args.skip_probe:
                 rpc(
                     proc,
@@ -205,7 +205,6 @@ def main() -> int:
                     "live-solve-probe",
                     job_id="j-live-probe",
                 )
-                # Immediately enqueue values without waiting for solve reply.
                 write_req(
                     proc,
                     "values",
@@ -214,7 +213,6 @@ def main() -> int:
                 )
                 t_values_enqueued = time.perf_counter()
 
-                # First reply must be solve (host processes FIFO, one at a time).
                 first = read_frame(proc.stdout)
                 t_first = time.perf_counter()
                 second = read_frame(proc.stdout)
@@ -222,62 +220,54 @@ def main() -> int:
 
                 first_op = first.get("op")
                 second_op = second.get("op")
-                ordered = first_op == "solve" and second_op == "values"
-                # Wall from values enqueue → values reply includes remaining
-                # train (if any) + values — NOT concurrent latency.
-                values_wait_ms = (t_second - t_values_enqueued) * 1000.0
-                solve_wall_ms = (t_first - t_send) * 1000.0
-                host_ms = None
-                node_ev = None
-                if second.get("ok") and isinstance(second.get("body"), dict):
-                    host_ms = second["body"].get("elapsed_ms")
-                    node_ev = second["body"].get("node_ev")
-                elif second.get("ok") and isinstance(second.get("body"), str):
-                    try:
-                        body = json.loads(second["body"])
-                        host_ms = body.get("elapsed_ms")
-                        node_ev = body.get("node_ev")
-                    except json.JSONDecodeError:
-                        pass
-
-                # Some hosts embed body as already-parsed dict via our reader —
-                # also accept body_json-style if present.
-                if host_ms is None and isinstance(second.get("body"), (dict, type(None))):
-                    # ipc reply may put JSON object in "body" as object after loads;
-                    # our read_frame loads the envelope; body may still be a string.
-                    body_field = second.get("body")
-                    if isinstance(body_field, str):
-                        try:
-                            body_field = json.loads(body_field)
-                        except json.JSONDecodeError:
-                            body_field = {}
-                    if isinstance(body_field, dict):
-                        host_ms = body_field.get("elapsed_ms")
-                        node_ev = body_field.get("node_ev")
+                values_first = first_op == "values" and second_op == "solve"
+                solve_first = first_op == "solve" and second_op == "values"
+                values_env = first if first_op == "values" else second
+                solve_env = first if first_op == "solve" else second
+                values_body = body_dict(values_env)
+                solve_body = body_dict(solve_env)
+                values_wait_ms = (
+                    (t_first if first_op == "values" else t_second) - t_values_enqueued
+                ) * 1000.0
+                solve_wall_ms = (
+                    (t_first if first_op == "solve" else t_second) - t_send
+                ) * 1000.0
+                host_ms = values_body.get("elapsed_ms")
+                live_flag = bool(values_body.get("live_under_train"))
+                overlap = values_first and bool(values_env.get("ok")) and bool(
+                    solve_env.get("ok")
+                )
 
                 probe = {
                     "stage": "concurrency_probe",
                     "probe_iters": args.probe_iters,
                     "first_reply_op": first_op,
                     "second_reply_op": second_op,
-                    "ordered_solve_then_values": ordered,
+                    "values_before_solve": values_first,
+                    "ordered_solve_then_values": solve_first,
                     "first_ok": bool(first.get("ok")),
                     "second_ok": bool(second.get("ok")),
                     "solve_wall_ms": round(solve_wall_ms, 3),
                     "values_wait_from_enqueue_ms": round(values_wait_ms, 3),
                     "host_values_elapsed_ms": host_ms,
-                    "node_ev": node_ev,
-                    "overlap_observed": False,
+                    "node_ev": values_body.get("node_ev"),
+                    "policy_revision": values_body.get("policy_revision"),
+                    "live_under_train": live_flag,
+                    "solve_trained": solve_body.get("trained"),
+                    "overlap_observed": overlap,
                     "conclusion": (
-                        "SYNC_ONLY: values reply arrived only after solve "
-                        "completed; host never ran values concurrently with train"
-                        if ordered
-                        else "UNEXPECTED_ORDER: investigate host dispatch"
+                        "ASYNC_OVERLAP: values replied before solve completed"
+                        if overlap
+                        else (
+                            "SYNC_ORDER: values still after solve — async gap remains"
+                            if solve_first
+                            else "UNEXPECTED_ORDER: investigate host dispatch"
+                        )
                     ),
                 }
                 print(json.dumps(probe, separators=(",", ":")))
                 result["concurrency_probe"] = probe
-                result["overlap_possible"] = False
+                result["overlap_possible"] = overlap
 
                 if timed_out["hit"]:
                     print(
@@ -287,19 +277,17 @@ def main() -> int:
                     result["error"] = "probe_timeout"
                     print(json.dumps(result, separators=(",", ":")))
                     return 3
-                if not ordered or not first.get("ok") or not second.get("ok"):
+                if not overlap:
                     print(
-                        f"BLOCKER: concurrency probe failed order/ok: {probe}",
+                        f"BLOCKER: concurrency probe did not observe overlap: {probe}",
                         file=sys.stderr,
                     )
-                    result["error"] = "probe_failed"
+                    result["error"] = "no_overlap"
                     print(json.dumps(result, separators=(",", ":")))
                     return 4
 
             # ---- 2) Interleaved proxy (1-iter solve → values)×N ----
             if not args.skip_interleave:
-                # Fresh session so probe train state does not confuse cycles.
-                # begin_config clears/rebuilds solution.
                 rpc(
                     proc,
                     "begin_config",
@@ -327,36 +315,17 @@ def main() -> int:
                         f"live-values-{i}",
                     )
                     values_s = time.perf_counter() - t_values
-                    body = values_env.get("body")
-                    if isinstance(body, str):
-                        try:
-                            body = json.loads(body)
-                        except json.JSONDecodeError:
-                            body = {}
-                    if not isinstance(body, dict):
-                        body = {}
+                    body = body_dict(values_env)
+                    sb = body_dict(solve_env)
                     cycle = {
                         "cycle": i,
                         "train_wall_s": round(train_s, 3),
                         "values_ipc_ms": round(values_s * 1000.0, 3),
                         "host_values_elapsed_ms": body.get("elapsed_ms"),
                         "node_ev": body.get("node_ev"),
-                        "policy_revision": (solve_env.get("body") or {}).get(
-                            "policy_revision"
-                        )
-                        if isinstance(solve_env.get("body"), dict)
-                        else None,
+                        "policy_revision": sb.get("policy_revision"),
                         "engine": body.get("engine"),
                     }
-                    # policy_revision may be inside string body
-                    if cycle["policy_revision"] is None:
-                        sb = solve_env.get("body")
-                        if isinstance(sb, str):
-                            try:
-                                sb = json.loads(sb)
-                                cycle["policy_revision"] = sb.get("policy_revision")
-                            except json.JSONDecodeError:
-                                pass
                     cycles.append(cycle)
                     print(json.dumps({"stage": "interleave_cycle", **cycle}, separators=(",", ":")))
 
@@ -380,13 +349,7 @@ def main() -> int:
                     print(json.dumps(result, separators=(",", ":")))
                     return 6
 
-                result["interleave_proxy"] = {
-                    "cycles": cycles,
-                    "note": (
-                        "Not concurrent with train CPU. Closest proxy: values "
-                        "immediately after each 1-iter publish while campaign continues."
-                    ),
-                }
+                result["interleave_proxy"] = {"cycles": cycles}
 
             result["ok"] = True
             print(json.dumps(result, separators=(",", ":")))

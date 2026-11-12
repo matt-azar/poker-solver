@@ -1262,13 +1262,17 @@ pub const FrozenCtx = struct {
 };
 
 /// CFR+ frozen schedule matching C++ train_frozen_cfr_plus_iterations.
+/// Optional mid-train publish hook (Study live node-EV / R10).
+/// Receives ownership of each completed-iteration `PublishedPolicy`.
+pub const PublishHook = *const fn (*anyopaque, training_state.PublishedPolicy) anyerror!void;
+
 pub fn trainFrozenCfrPlus(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
     state: *training_state.TrainingState,
     iterations: i32,
 ) FrozenError!training_state.PublishedPolicy {
-    return trainFrozenCfrPlusThreaded(allocator, game, state, iterations, 1);
+    return trainFrozenCfrPlusThreaded(allocator, game, state, iterations, 1, null, null);
 }
 
 pub fn trainFrozenCfrPlusThreaded(
@@ -1277,6 +1281,8 @@ pub fn trainFrozenCfrPlusThreaded(
     state: *training_state.TrainingState,
     iterations: i32,
     threads: u32,
+    publish_hook: ?PublishHook,
+    publish_ctx: ?*anyopaque,
 ) FrozenError!training_state.PublishedPolicy {
     if (iterations < 1) return error.InvalidFrozen;
     var ctx = try FrozenCtx.initThreaded(allocator, game, state, threads);
@@ -1298,8 +1304,25 @@ pub fn trainFrozenCfrPlusThreaded(
         w.resetSupport();
         try ctx.walk(w, 0, -1, -1, 0, 1, weight_iter, false);
         training_state.floorPlayer(game, state, 1);
-        if (published.average.len != 0) published.deinit();
-        published = try training_state.publishAverage(allocator, game, state);
+        const next = try training_state.publishAverage(allocator, game, state);
+        if (publish_hook) |hook| {
+            const hook_ctx = publish_ctx orelse return error.InvalidFrozen;
+            const rev = next.revision;
+            const trained = next.trained;
+            // Hook takes ownership of `next` (Session install / reader-lease swap).
+            hook(hook_ctx, next) catch return error.InvalidFrozen;
+            // Return value carries revision/trained only when hooked (average lives in Session).
+            if (published.average.len != 0) published.deinit();
+            published = .{
+                .allocator = allocator,
+                .average = &.{},
+                .revision = rev,
+                .trained = trained,
+            };
+        } else {
+            if (published.average.len != 0) published.deinit();
+            published = next;
+        }
     }
     return published;
 }
@@ -1398,7 +1421,7 @@ test "frozen river smoke trains" {
     // 4-thread path should match 1-thread even when chance steal is a no-op (river).
     var state4 = try training_state.TrainingState.init(std.testing.allocator, game);
     defer state4.deinit();
-    var published4 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state4, 5, 4);
+    var published4 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state4, 5, 4, null, null);
     defer published4.deinit();
     try std.testing.expectEqual(published.trained, published4.trained);
     const eval4 = try evaluatePublishedFrozenThreaded(std.testing.allocator, game, published4.average, 4);
@@ -1432,11 +1455,11 @@ test "frozen flop multithread matches serial" {
     defer game.deinit();
     var state1 = try training_state.TrainingState.init(std.testing.allocator, game);
     defer state1.deinit();
-    var pub1 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state1, 2, 1);
+    var pub1 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state1, 2, 1, null, null);
     defer pub1.deinit();
     var state4 = try training_state.TrainingState.init(std.testing.allocator, game);
     defer state4.deinit();
-    var pub4 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state4, 2, 4);
+    var pub4 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state4, 2, 4, null, null);
     defer pub4.deinit();
     try std.testing.expectEqual(pub1.average.len, pub4.average.len);
     // Strict float parity after ordered EV reduce (C++ parallel_chance).
