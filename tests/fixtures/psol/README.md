@@ -21,3 +21,6 @@ Do not expect a CMake regenerator on `zig-rewrite`; treat the committed blobs as
 - Ordering of combos, slots, actions, runouts, and public paths is part of the
   on-disk contract; changing that order requires a layout id + remap or a hard
   compatibility error
+- In-memory StreetBatch slots are decision → runout → hand → action (ZR-129 Change A).
+  PSOL v4 wire order remains decision → hand → runout → action; Session save/open
+  remaps through `compile.buildPsolLayoutMap` without a layout-id bump
