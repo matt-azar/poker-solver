@@ -1,15 +1,18 @@
 import type { StatusPayload } from "../../domain/types";
 import {
   isJsonObject,
+  optionalFiniteNumber,
+  optionalString,
   optionalStringOrNull,
   requireBoolean,
   requireNumber,
 } from "./policy";
 
 /**
- * Decode explorer status JSON (also the body of a successful `POST /api/open`).
- * Required flags + status_generation are validated; remaining fields pass
- * through for additive forward compatibility.
+ * Decode solver-engine status JSON (also the body of a successful open).
+ * Required flags + status_generation are validated; Zig-era progress fields
+ * (phase / iterations / iterations_requested) are type-checked when present
+ * so Study UI progress stays honest (ZR-120 / ZR-125).
  */
 export function decodeStatusPayload(data: unknown): StatusPayload {
   if (!isJsonObject(data)) {
@@ -28,6 +31,20 @@ export function decodeStatusPayload(data: unknown): StatusPayload {
   }
   if ("root_node_id" in data) {
     optionalStringOrNull(data, "root_node_id");
+  }
+  // Host always emits these on solver-engine; keep additive for older fixtures.
+  optionalString(data, "phase");
+  optionalFiniteNumber(data, "iterations");
+  optionalFiniteNumber(data, "iterations_requested");
+  optionalFiniteNumber(data, "policy_revision");
+  if ("has_training" in data) {
+    requireBoolean(data, "has_training");
+  }
+  if ("can_continue" in data) {
+    requireBoolean(data, "can_continue");
+  }
+  if ("failed" in data) {
+    requireBoolean(data, "failed");
   }
   return {
     ...data,

@@ -199,10 +199,12 @@ def admit_solve(
     env = inbox.take("solve", timeout_s=15.0)
     require(env.get("ok"), f"solve admit failed: {env}")
     body = body_dict(env)
-    require(
-        body.get("accepted") is True or body.get("running") is True,
-        f"expected short-admit body: {body}",
-    )
+    # ZR-125: pin the full short-admit shape Study relies on.
+    require(body.get("accepted") is True, f"admit accepted: {body}")
+    require(body.get("running") is True, f"admit running: {body}")
+    require(body.get("async") is True, f"admit async: {body}")
+    require("solution_id" in body, f"admit solution_id: {body}")
+    require("threads" in body, f"admit threads: {body}")
     return body
 
 
@@ -351,9 +353,24 @@ def main() -> int:
         status0 = body_dict(inbox.rpc(proc, "status", None, "c-status0"))
         require("running" in status0 and "paused" in status0, f"status shape: {status0}")
         require("status_generation" in status0, "status missing generation")
+        # ZR-125: idle status must expose progress + recovery fields Study polls.
+        for key in (
+            "phase",
+            "iterations",
+            "iterations_requested",
+            "failed",
+            "has_training",
+            "can_continue",
+            "policy_revision",
+            "terminal_reason",
+        ):
+            require(key in status0, f"status missing {key}: {status0}")
         stages["status_idle"] = {
             "running": status0.get("running"),
             "phase": status0.get("phase"),
+            "iterations": status0.get("iterations"),
+            "iterations_requested": status0.get("iterations_requested"),
+            "failed": status0.get("failed"),
         }
 
         # --- begin + short solve ---
@@ -543,6 +560,50 @@ def main() -> int:
             "sidecar_alive_after": True,
         }
 
+        # --- put_lock alphabetical envelope keys (ZR-119 / ZR-125) ---
+        lock_probs = [0.0] * n_actions
+        lock_probs[0] = 1.0
+        put_lock_alpha = body_dict(
+            inbox.rpc(
+                proc,
+                "put_lock",
+                {
+                    "node_id": "p0.t-1.r-1",
+                    "kind": "full",
+                    "scope": "node",
+                    "probs": lock_probs,
+                },
+                "c-put-lock-alpha",
+                alphabetical_keys=True,
+            )
+        )
+        require(
+            isinstance(put_lock_alpha.get("locks"), list)
+            and len(put_lock_alpha["locks"]) >= 1,
+            f"alpha put_lock: {put_lock_alpha}",
+        )
+        # Clear lock so later pause/stop trains stay unlocked.
+        clear_lock = body_dict(
+            inbox.rpc(
+                proc,
+                "delete_lock",
+                {"node_id": "p0.t-1.r-1"},
+                "c-del-lock",
+            )
+        )
+        require(
+            isinstance(clear_lock.get("locks"), list)
+            and len(clear_lock["locks"]) == 0,
+            f"delete_lock after alpha put: {clear_lock}",
+        )
+        alive_lock = body_dict(inbox.rpc(proc, "status", None, "c-status-after-lock"))
+        require("running" in alive_lock, f"status after put_lock: {alive_lock}")
+        stages["put_lock_alpha_keys"] = {
+            "put_n_locks": len(put_lock_alpha.get("locks") or []),
+            "delete_n_locks": len(clear_lock.get("locks") or []),
+            "sidecar_alive_after": True,
+        }
+
         # --- pause mid-train, then stop (cancel) mid-train ---
         inbox.rpc(proc, "begin_config", {"config_text": config_text}, "c-begin-pause")
         admit_solve(inbox, proc, long_iters, "c-solve-pause", "j-contract-pause")
@@ -624,18 +685,34 @@ def main() -> int:
             f"open revision reset: {open_body}",
         )
 
-        admit_solve(inbox, proc, 5, "c-ckpt-5", "j-ckpt-5")
+        # ZR-125: continue absolute iterations_requested = start_trained + job_iters.
+        # After open, trainer.trained is still 10; +5 ⇒ requested 15.
+        admit5 = admit_solve(inbox, proc, 5, "c-ckpt-5", "j-ckpt-5")
+        mid_continue = body_dict(
+            inbox.rpc(proc, "status", None, "c-status-continue-mid")
+        )
+        require(
+            int(mid_continue.get("iterations_requested") or -1) == 15,
+            f"continue iterations_requested!=15: {mid_continue}",
+        )
         ckpt15 = wait_until_idle(inbox, proc, "ckpt-5")
         require(ckpt15.get("terminal_reason") == "completed", f"ckpt continue: {ckpt15}")
         require(
             int(ckpt15.get("policy_revision") or 0) == 6,
             f"continue revision!=6 (open@1 +5): {ckpt15}",
         )
+        require(
+            int(ckpt15.get("iterations") or -1) == 15,
+            f"continue iterations!=15: {ckpt15}",
+        )
         stages["checkpoint"] = {
             "revision_after_10": ckpt10.get("policy_revision"),
             "revision_on_open": open_body.get("policy_revision"),
             "revision_after_open_continue_5": ckpt15.get("policy_revision"),
             "can_continue_on_open": open_body.get("can_continue"),
+            "continue_admit": admit5,
+            "continue_iterations_requested": mid_continue.get("iterations_requested"),
+            "continue_iterations": ckpt15.get("iterations"),
             "note": "trainer.trained is 15; status reports policy_revision (open resets to 1)",
         }
 

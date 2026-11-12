@@ -52,3 +52,33 @@ export function optionalStringOrNull(obj: JsonObject, key: string): string | nul
   }
   throw new Error(`contract: ${key} must be string or null`);
 }
+
+/** Additive finite number (host may omit on cold fixtures; reject wrong types). */
+export function optionalFiniteNumber(
+  obj: JsonObject,
+  key: string,
+): number | null | undefined {
+  if (!(key in obj)) {
+    return undefined;
+  }
+  const value = obj[key];
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`contract: ${key} must be a finite number or null`);
+  }
+  return value;
+}
+
+/** Additive string field (host phase / terminal_reason). */
+export function optionalString(obj: JsonObject, key: string): string | undefined {
+  if (!(key in obj)) {
+    return undefined;
+  }
+  const value = obj[key];
+  if (typeof value !== "string") {
+    throw new Error(`contract: ${key} must be string`);
+  }
+  return value;
+}
