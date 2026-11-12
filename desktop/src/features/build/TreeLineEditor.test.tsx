@@ -30,7 +30,6 @@ vi.mock("../../engine/client", () => ({
   },
   engineClient: {
     treePreview: (...args: unknown[]) => treePreview(...args),
-    planMemory: vi.fn(),
   },
 }));
 

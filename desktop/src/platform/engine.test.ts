@@ -8,8 +8,7 @@ describe("ensureEngine", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.status).toMatch(/Tauri shell/i);
-      expect(result.endpoint).toBeUndefined();
-      expect(result.transport.kind).toBe("http-fallback");
+      expect(result.transport.kind).toBe("no-engine");
     }
   });
 });

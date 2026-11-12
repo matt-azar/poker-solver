@@ -1,13 +1,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearStudyIpcFeatureOverridesForTests } from "../../engine/ipcCapabilities";
-import { setHttpFallbackTransport, setIpcTransport } from "../../engine/transport";
+import { setNoEngineTransport, setIpcTransport } from "../../engine/transport";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 afterEach(() => {
   cleanup();
   clearStudyIpcFeatureOverridesForTests();
-  setHttpFallbackTransport();
+  setNoEngineTransport();
 });
 
 describe("WorkspaceSwitcher", () => {

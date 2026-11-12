@@ -2,14 +2,13 @@
  * Study engine transport selection for the Zig rewrite path.
  *
  * Packaged Study uses `solver-engine` typed IPC (protocol 2) only.
- * `http-fallback` is a non-engine label for browser / Vitest without Tauri
- * (no holdem-explorer process).
+ * `no-engine` is the browser / Vitest label when Tauri is absent (no sidecar).
  */
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "../platform";
 import { SOLVER_ENGINE_PROTOCOL, SOLVER_ENGINE_SIDECAR } from "./ipcProtocol";
 
-export type TransportKind = "ipc" | "http-fallback";
+export type TransportKind = "ipc" | "no-engine";
 
 export type IpcTransportInfo = {
   kind: "ipc";
@@ -20,19 +19,19 @@ export type IpcTransportInfo = {
   workers: number;
 };
 
-export type HttpFallbackInfo = {
-  kind: "http-fallback";
+export type NoEngineTransportInfo = {
+  kind: "no-engine";
   label: string;
 };
 
-export type ActiveTransport = IpcTransportInfo | HttpFallbackInfo;
+export type ActiveTransport = IpcTransportInfo | NoEngineTransportInfo;
 
-const HTTP_FALLBACK_LABEL =
+const NO_ENGINE_LABEL =
   "no engine (browser/dev — Study requires Tauri + solver-engine IPC)";
 
 let active: ActiveTransport = {
-  kind: "http-fallback",
-  label: HTTP_FALLBACK_LABEL,
+  kind: "no-engine",
+  label: NO_ENGINE_LABEL,
 };
 
 export function getActiveTransport(): ActiveTransport {
@@ -43,10 +42,10 @@ export function isIpcTransport(): boolean {
   return active.kind === "ipc";
 }
 
-export function setHttpFallbackTransport(reason?: string): HttpFallbackInfo {
+export function setNoEngineTransport(reason?: string): NoEngineTransportInfo {
   active = {
-    kind: "http-fallback",
-    label: reason?.trim() ? `${HTTP_FALLBACK_LABEL}: ${reason}` : HTTP_FALLBACK_LABEL,
+    kind: "no-engine",
+    label: reason?.trim() ? `${NO_ENGINE_LABEL}: ${reason}` : NO_ENGINE_LABEL,
   };
   return active;
 }
@@ -138,27 +137,6 @@ export async function solverEngineRequest(
     throw new Error(detail);
   }
   return env;
-}
-
-export async function ipcReady(): Promise<{
-  protocol: number;
-  sidecar: string;
-  launch_id?: string;
-  workers?: number;
-}> {
-  const env = await solverEngineRequest("ready");
-  const body = (env.body ?? {}) as {
-    protocol?: number;
-    sidecar?: string;
-    launch_id?: string;
-    workers?: number;
-  };
-  return {
-    protocol: body.protocol ?? SOLVER_ENGINE_PROTOCOL,
-    sidecar: body.sidecar ?? SOLVER_ENGINE_SIDECAR,
-    launch_id: body.launch_id,
-    workers: body.workers,
-  };
 }
 
 export async function ipcStatus(): Promise<unknown> {

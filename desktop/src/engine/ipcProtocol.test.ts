@@ -40,4 +40,24 @@ describe("solver-engine ipc protocol", () => {
     expect(nodeDecoded?.envelope.op).toBe("node");
     expect(nodeDecoded?.envelope.body).toEqual({ node_id: "p2.t-1.r-1" });
   });
+
+  it("rejects unsupported protocol versions (InvalidFrame class)", () => {
+    const frame = encodeIpcFrame(makeRequest("r5", "ready"));
+    // Flip protocol byte in JSON: v:2 → v:1
+    const jsonStart = 4;
+    const json = new TextDecoder().decode(frame.subarray(jsonStart));
+    const tampered = new TextEncoder().encode(json.replace('"v":2', '"v":1'));
+    const out = new Uint8Array(4 + tampered.length);
+    new DataView(out.buffer).setUint32(0, tampered.length, true);
+    out.set(tampered, 4);
+    expect(() => tryDecodeIpcFrame(out)).toThrow(/unsupported solver-engine protocol/i);
+  });
+
+  it("rejects malformed JSON payloads", () => {
+    const bad = new TextEncoder().encode("{not-json");
+    const out = new Uint8Array(4 + bad.length);
+    new DataView(out.buffer).setUint32(0, bad.length, true);
+    out.set(bad, 4);
+    expect(() => tryDecodeIpcFrame(out)).toThrow();
+  });
 });

@@ -19,7 +19,7 @@ import {
 } from "../domain/setup";
 import type { ActionValuesPayload, NodePayload, StatusPayload } from "../domain/types";
 
-const ANALYSIS_KINDS: AnalysisKind[] = ["values", "runouts", "equity", "categories"];
+const ANALYSIS_KINDS: AnalysisKind[] = ["values", "equity", "categories"];
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 /** True while AppShell (or solve/open) wants periodic status polls. */
@@ -35,10 +35,9 @@ let nodeToken = 0;
 let statusToken = 0;
 let seenGeneration = -1;
 
-/** Independent tokens so equity polling does not cancel runouts (and vice versa). */
+/** Independent tokens so equity polling does not cancel sibling metrics. */
 const analysisTokens: Record<AnalysisKind, number> = {
   values: 0,
-  runouts: 0,
   equity: 0,
   categories: 0,
 };
@@ -46,7 +45,7 @@ const analysisPollTimers: Partial<Record<AnalysisKind, ReturnType<typeof setInte
 const analysisRequestIdentity: Partial<Record<AnalysisKind, AnalysisIdentity>> = {};
 /** Survives navigation so Study does not recompute EV/equity on every click. */
 const analysisPageCache = new AnalysisPageCache(64);
-/** One ValueWorker-bound job at a time (equity/values/runouts cancel each other). */
+/** One ValueWorker-bound job at a time (equity/values cancel each other). */
 const analysisRequestQueue = new AnalysisRequestQueue();
 /** Bumped on navigate so in-flight prefetch polls abandon promptly. */
 let analysisPrefetchEpoch = 0;
@@ -301,13 +300,6 @@ export function cachedAnalysisForNode(
         nodeId,
         revision,
         kind: "equity",
-      }) ?? null,
-    runouts:
-      analysisPageCache.get({
-        solutionId,
-        nodeId,
-        revision,
-        kind: "runouts",
       }) ?? null,
     categories:
       analysisPageCache.get({

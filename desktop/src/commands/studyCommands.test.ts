@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearStudyIpcFeatureOverridesForTests } from "../engine/ipcCapabilities";
-import { setHttpFallbackTransport, setIpcTransport } from "../engine/transport";
+import { setNoEngineTransport, setIpcTransport } from "../engine/transport";
 import { DEFAULT_SPOT, type SpotDraft } from "../domain/types";
 import {
   canExecuteCalculateEv,
@@ -174,7 +174,7 @@ describe("canExecuteSave / Calculate EV / lock / strategy", () => {
 describe("IPC soft-disable gates (ZR-102)", () => {
   afterEach(() => {
     clearStudyIpcFeatureOverridesForTests();
-    setHttpFallbackTransport();
+    setNoEngineTransport();
   });
 
   it("allows Resolve locked + Categories + strategy edits; keeps compare soft-disabled", () => {

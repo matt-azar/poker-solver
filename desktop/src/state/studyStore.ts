@@ -351,7 +351,6 @@ interface StudyState {
     alternative: PathAlternative,
   ) => Promise<void>;
   nodeValues: ActionValuesPayload | null;
-  runouts: unknown | null;
   equity: unknown | null;
   categories: unknown | null;
   lineCardReport: LineCardReportModel | null;
@@ -374,13 +373,7 @@ interface StudyState {
   setEvDisplayBasis: (basis: "local" | "root_centered") => void;
   actionFilter: number | null;
   setActionFilter: (index: number | null) => void;
-  analysisTab:
-    | "explorer"
-    | "runouts"
-    | "equity"
-    | "categories"
-    | "value-bluffs"
-    | "line-cards";
+  analysisTab: "equity" | "categories" | "value-bluffs" | "line-cards";
   setAnalysisTab: (tab: StudyState["analysisTab"]) => void;
   warmStart: boolean;
   setWarmStart: (value: boolean) => void;
@@ -485,7 +478,6 @@ interface StudyState {
    */
   selectBoardCard: (chanceChildNodeId: string) => Promise<void>;
   calculateEv: () => Promise<void>;
-  loadRunouts: () => Promise<void>;
   loadEquity: () => Promise<void>;
   loadCategories: () => Promise<void>;
   /**
@@ -557,7 +549,6 @@ type PublishedStudySnapshot = {
   canNavBack: boolean;
   canNavForward: boolean;
   nodeValues: ActionValuesPayload | null;
-  runouts: unknown | null;
   equity: unknown | null;
   categories: unknown | null;
   compareNote: ComparePayload | null;
@@ -585,7 +576,6 @@ function snapshotPublishedStudy(state: {
   canNavBack: boolean;
   canNavForward: boolean;
   nodeValues: ActionValuesPayload | null;
-  runouts: unknown | null;
   equity: unknown | null;
   categories: unknown | null;
   compareNote: ComparePayload | null;
@@ -611,7 +601,6 @@ function snapshotPublishedStudy(state: {
     canNavBack: state.canNavBack,
     canNavForward: state.canNavForward,
     nodeValues: state.nodeValues,
-    runouts: state.runouts,
     equity: state.equity,
     categories: state.categories,
     compareNote: state.compareNote,
@@ -631,7 +620,6 @@ function snapshotPublishedStudy(state: {
 function emptyAnalysisState() {
   return {
     nodeValues: null as ActionValuesPayload | null,
-    runouts: null as unknown | null,
     equity: null as unknown | null,
     categories: null as unknown | null,
     lineCardReport: null as LineCardReportModel | null,
@@ -1193,7 +1181,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     await get().navigateTo(alternative.nodeId, { history: "push" });
   },
   nodeValues: null,
-  runouts: null,
   equity: null,
   categories: null,
   lineCardReport: null,
@@ -1225,7 +1212,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   setActionFilter(index) {
     set({ actionFilter: index });
   },
-  analysisTab: "explorer",
+  analysisTab: "equity",
   setAnalysisTab(tab) {
     set({ analysisTab: tab });
   },
@@ -2933,97 +2920,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
                 solution_id: identity.solutionId,
               },
             });
-          },
-        );
-      },
-    });
-  },
-
-  async loadRunouts() {
-    const unavailable = rejectUnavailableIpcFeature("runouts");
-    if (unavailable) {
-      set({ message: unavailable });
-      return;
-    }
-    const solutionId = get().solutionId;
-    const node = get().currentNode;
-    if (!solutionId || !node) {
-      return;
-    }
-    const revision = analysisRevision(node, get().status);
-    const nodeId = node.node_id;
-    const cached = getAnalysisPageCache().get({
-      solutionId,
-      nodeId,
-      revision,
-      kind: "runouts",
-    });
-    if (cached) {
-      set({ runouts: cached, message: "Runouts ready." });
-      return;
-    }
-    set({
-      message: "Loading runouts…",
-      runouts: { pending: true, node_id: nodeId, solution_id: solutionId },
-    });
-    enqueueWorkerAnalysis({
-      kind: "runouts",
-      solutionId,
-      nodeId,
-      revision,
-      priority: "auto",
-      run: async () => {
-        if (
-          get().currentNode?.node_id !== nodeId ||
-          get().solutionId !== solutionId
-        ) {
-          return;
-        }
-        const { token, identity } = beginAnalysisRequest(
-          "runouts",
-          solutionId,
-          nodeId,
-          revision,
-        );
-        await pollAnalysis(
-          "runouts",
-          token,
-          () =>
-            engineClient.getRunouts(solutionId, nodeId) as Promise<{
-              pending?: boolean;
-              node_id?: string;
-              solution_id?: string;
-            }>,
-          (runouts) => {
-            if (!analysisRequestIsCurrent("runouts", token)) {
-              return;
-            }
-            const live = get().currentNode;
-            if (
-              !live ||
-              live.node_id !== identity.nodeId ||
-              get().solutionId !== identity.solutionId
-            ) {
-              getAnalysisPageCache().set(
-                { solutionId, nodeId, revision, kind: "runouts" },
-                runouts,
-              );
-              return;
-            }
-            if (runouts.node_id && runouts.node_id !== identity.nodeId) {
-              return;
-            }
-            getAnalysisPageCache().set(
-              { solutionId, nodeId, revision, kind: "runouts" },
-              runouts,
-            );
-            set({ runouts, message: "Runouts ready." });
-          },
-          (message) => {
-            if (!analysisRequestIsCurrent("runouts", token)) {
-              return;
-            }
-            set({ message, runouts: null });
           },
         );
       },

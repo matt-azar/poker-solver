@@ -68,9 +68,7 @@ export function AppShell() {
       });
       return;
     }
-    if (result.endpoint?.baseUrl) {
-      console.info("[tauri] reconnect engine", result.endpoint.baseUrl);
-    }
+    console.info("[tauri] reconnect engine", result.transport.kind, result.status);
     startPolling();
     await useStudyStore.getState().refresh();
   }

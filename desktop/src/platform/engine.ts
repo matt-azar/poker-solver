@@ -5,36 +5,26 @@ import { engineClient } from "../engine/client";
 import {
   ensureSolverEngineIpc,
   getActiveTransport,
-  setHttpFallbackTransport,
+  setNoEngineTransport,
   type ActiveTransport,
 } from "../engine/transport";
 import { isTauriRuntime } from "./index";
-
-export type EngineEndpoint = {
-  status: string;
-  port: number;
-  baseUrl: string;
-  launchId: string;
-  protocol: number;
-  maxPairRunouts: number;
-};
 
 export type EnsureEngineResult =
   | {
       ok: true;
       status: string;
-      endpoint?: EngineEndpoint;
       transport: ActiveTransport;
     }
   | { ok: false; status: string; error: string; transport: ActiveTransport };
 
 /**
  * Packaged Study uses Zig `solver-engine` typed IPC only.
- * Browser / Vite-dev without Tauri cannot reach the engine (no holdem-explorer).
+ * Browser / Vite-dev without Tauri cannot reach the engine.
  */
 export async function ensureEngine(): Promise<EnsureEngineResult> {
   if (!isTauriRuntime()) {
-    const transport = setHttpFallbackTransport(
+    const transport = setNoEngineTransport(
       "browser — Study engine requires the Tauri shell + solver-engine",
     );
     return {
@@ -55,10 +45,10 @@ export async function ensureEngine(): Promise<EnsureEngineResult> {
     };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    // Stay on the non-engine label — never leave an empty HTTP base URL that
+    // Stay on the no-engine label — never leave an empty HTTP base URL that
     // status/library can fetch("") against (#288-class Engine unreachable).
     engineClient.setBaseUrl(null);
-    const transport = setHttpFallbackTransport(`solver-engine unavailable: ${error}`);
+    const transport = setNoEngineTransport(`solver-engine unavailable: ${error}`);
     let status = "solver-engine unavailable";
     try {
       const info = await invoke("solver_engine_info");

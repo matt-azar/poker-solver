@@ -1,12 +1,12 @@
 /**
- * Soft-gate Study features that still 501 over solver-engine IPC.
+ * Soft-gate Study features that still lack a live solver-engine IPC op.
  *
  * Flip a flag to `true` in the same PR that wires the matching EngineClient
  * IPC branch / host op (do not invent fake host ops here):
  * - resolveLocked  → ZR-100 (#301) — enabled
  * - strategyEdits  → ZR-101 (#303) — enabled
- * - categories / compare → ZR-103 (#302)
- * - runouts        → later (dock tab already removed; loadRunouts residual)
+ * - categories     → ZR-103 (#302) — enabled
+ * - compare        → deferred (immutable dual-session baseline)
  *
  * Packaged Study is IPC-only. Browser/Vitest (no Tauri, no IPC) leave controls
  * enabled so unit tests that mock the store can still exercise handlers.
@@ -22,7 +22,6 @@ export const STUDY_IPC_FEATURE_FLAGS = {
   categories: true,
   // Host strategy-edits CRUD + EngineClient IPC branch (#303).
   strategyEdits: true,
-  runouts: false,
 } as const;
 
 export type StudyIpcFeature = keyof typeof STUDY_IPC_FEATURE_FLAGS;
@@ -35,7 +34,6 @@ const UNAVAILABLE_COPY: Record<StudyIpcFeature, string> = {
   categories: "Categories are not available over solver-engine IPC yet",
   strategyEdits:
     "Strategy edits are not available over solver-engine IPC yet",
-  runouts: "Runouts are not available over solver-engine IPC yet",
 };
 
 /** Test/sibling overrides — prefer flipping STUDY_IPC_FEATURE_FLAGS when ops ship. */

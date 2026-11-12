@@ -1,9 +1,0 @@
-{
-  "ok": true,
-  "protocol": 1,
-  "port": 35931,
-  "max_pair_runouts": 51369120,
-  "launch_id": "contract-1",
-  "version": "0.1.0",
-  "git_sha": "deadbeef"
-}

@@ -33,7 +33,7 @@ describe("EngineClient library IPC", () => {
     expect(data).toEqual([{ id: "flop-small-bet", name: "flop-small-bet" }]);
   });
 
-  it("does not fetch :8765 for library lists on IPC", async () => {
+  it("does not HTTP-fetch for library lists on IPC", async () => {
     const fetchImpl = vi.fn();
     const { setIpcTransport } = await import("./transport");
     const { EngineClient } = await import("./client");
@@ -52,9 +52,9 @@ describe("EngineClient library IPC", () => {
 
   it("uses Tauri library commands even when IPC transport is unavailable", async () => {
     const fetchImpl = vi.fn();
-    const { setHttpFallbackTransport } = await import("./transport");
+    const { setNoEngineTransport } = await import("./transport");
     const { EngineClient } = await import("./client");
-    setHttpFallbackTransport("solver-engine unavailable: test");
+    setNoEngineTransport("solver-engine unavailable: test");
     invoke.mockResolvedValueOnce([{ id: "t1", name: "t1" }]);
     const client = new EngineClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
     const data = await client.templates();
