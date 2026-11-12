@@ -160,6 +160,9 @@ test "one-action infosets stay implicit" {
     defer spec.deinit();
     var game = try compile.compile(std.testing.allocator, spec);
     defer game.deinit();
+    try std.testing.expectEqual(@as(usize, 0), game.slots.len);
+    try std.testing.expect(game.implicit_infosets > 0);
+    try std.testing.expectEqual(game.implicit_infosets, game.infosetCount());
     for (game.nodes) |node| {
         if (node.kind == .decision and node.n_actions <= 1) {
             try std.testing.expect(node.slot_of.len == 0);

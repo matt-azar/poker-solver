@@ -128,10 +128,18 @@ pub const CompiledGame = struct {
     hands: PrivateHandIndex = .{},
     deals: []Deal = &.{},
     slots: []Slot = &.{},
+    /// Supported (node, hand, runout) infosets with exactly one legal action.
+    /// Counted for infoset_count / strategy export parity with C++; no Slot rows.
+    implicit_infosets: u64 = 0,
     table_entries: i32 = 0,
 
     pub fn icmConfig(self: CompiledGame) icm.IcmConfig {
         return .{ .stacks = self.icm_stacks, .payouts = self.icm_payouts };
+    }
+
+    /// Stored multi-action slots plus implicit one-action infosets (C++ infoset_count).
+    pub fn infosetCount(self: CompiledGame) u64 {
+        return @as(u64, @intCast(self.slots.len)) + self.implicit_infosets;
     }
 
     pub fn deinit(self: *CompiledGame) void {
@@ -443,6 +451,7 @@ fn buildPolicyMap(allocator: std.mem.Allocator, game: *CompiledGame) CompileErro
     var slots = std.ArrayList(Slot).init(allocator);
     errdefer slots.deinit();
     var cursor: i32 = 0;
+    var implicit: u64 = 0;
 
     var node_index: i32 = 0;
     while (node_index < @as(i32, @intCast(game.nodes.len))) : (node_index += 1) {
@@ -455,7 +464,7 @@ fn buildPolicyMap(allocator: std.mem.Allocator, game: *CompiledGame) CompileErro
             const c0 = game.hands.hole_low[player][@intCast(hand)];
             const c1 = game.hands.hole_high[player][@intCast(hand)];
             if (node.card_mode == 0) {
-                try considerSlot(game, &slots, &cursor, node_index, hand, -1, -1);
+                try considerSlot(game, &slots, &cursor, &implicit, node_index, hand, -1, -1);
                 continue;
             }
             if (node.card_mode == 1) {
@@ -464,9 +473,9 @@ fn buildPolicyMap(allocator: std.mem.Allocator, game: *CompiledGame) CompileErro
                     if (on_board[@intCast(c)] or c == c0 or c == c1) continue;
                     if (row.compatible - row.contain[@intCast(c)] <= 0) continue;
                     if (node.mode1_is_turn) {
-                        try considerSlot(game, &slots, &cursor, node_index, hand, c, -1);
+                        try considerSlot(game, &slots, &cursor, &implicit, node_index, hand, c, -1);
                     } else {
-                        try considerSlot(game, &slots, &cursor, node_index, hand, -1, c);
+                        try considerSlot(game, &slots, &cursor, &implicit, node_index, hand, -1, c);
                     }
                 }
                 continue;
@@ -481,12 +490,13 @@ fn buildPolicyMap(allocator: std.mem.Allocator, game: *CompiledGame) CompileErro
                     const pair = range_mod.Range.comboIndex(turn, river) catch continue;
                     if (game.hands.combo_to_hand[1 - player][@intCast(pair)] >= 0) blocked -= 1;
                     if (row.compatible - blocked <= 0) continue;
-                    try considerSlot(game, &slots, &cursor, node_index, hand, turn, river);
+                    try considerSlot(game, &slots, &cursor, &implicit, node_index, hand, turn, river);
                 }
             }
         }
     }
     game.slots = slots.toOwnedSlice() catch return error.OutOfMemory;
+    game.implicit_infosets = implicit;
     game.table_entries = cursor;
 }
 
@@ -494,13 +504,18 @@ fn considerSlot(
     game: *CompiledGame,
     slots: *std.ArrayList(Slot),
     cursor: *i32,
+    implicit: *u64,
     node_index: i32,
     hand: i32,
     turn: i32,
     river: i32,
 ) CompileError!void {
     const node = &game.nodes[@intCast(node_index)];
-    if (node.n_actions <= 1) return;
+    if (node.n_actions <= 1) {
+        // Match C++ note_planned_slot: one-action infosets count, no Slot row.
+        implicit.* += 1;
+        return;
+    }
     const key = try game.cardKey(node.*, hand, turn, river);
     const slot_index: i32 = @intCast(slots.items.len);
     node.slot_of[@intCast(key)] = slot_index;
