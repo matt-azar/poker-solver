@@ -211,22 +211,33 @@ export function phaseFromStatus(status: StatusPayload | null, fallback: SolvePha
   if (!status) {
     return fallback;
   }
-  if (status.failed || status.error) {
+  const hostPhase = typeof status.phase === "string" ? status.phase : null;
+  // Host publishes phase:"failed"; also honor legacy failed/error flags (ZR-123).
+  if (status.failed || status.error || hostPhase === "failed") {
     return "failed";
   }
   if (status.running && status.paused) {
     return "pause_requested";
   }
-  if (status.running) {
+  if (status.running || hostPhase === "training" || hostPhase === "compiling") {
     return "solving";
   }
-  if (status.paused) {
+  if (status.paused || hostPhase === "paused") {
     return "paused";
   }
-  if (status.solution_id) {
+  if (status.solution_id || hostPhase === "published") {
     return "complete";
   }
-  return fallback === "solving" || fallback === "pause_requested" ? "idle" : fallback;
+  // Clear sticky busy/cancel when the host is idle (no solution / not running).
+  if (
+    fallback === "solving" ||
+    fallback === "pause_requested" ||
+    fallback === "stop_requested" ||
+    fallback === "building"
+  ) {
+    return "idle";
+  }
+  return fallback;
 }
 
 export function rootNodeId(statusRoot?: string | null): string {

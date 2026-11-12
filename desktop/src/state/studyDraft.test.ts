@@ -1,7 +1,36 @@
 import { describe, expect, it } from "vitest";
 import { ALL_IN_SPEC } from "../domain/betSizes";
 import { DEFAULT_SPOT } from "../domain/types";
-import { buildJob } from "./studyDraft";
+import { buildJob, phaseFromStatus } from "./studyDraft";
+
+describe("phaseFromStatus recovery mapping", () => {
+  it("maps host phase=failed and clears sticky stop_requested when idle", () => {
+    expect(
+      phaseFromStatus(
+        {
+          running: false,
+          paused: false,
+          cancelled: false,
+          status_generation: 1,
+          phase: "failed",
+        },
+        "solving",
+      ),
+    ).toBe("failed");
+    expect(
+      phaseFromStatus(
+        {
+          running: false,
+          paused: false,
+          cancelled: false,
+          status_generation: 2,
+          phase: "idle",
+        },
+        "stop_requested",
+      ),
+    ).toBe("idle");
+  });
+});
 
 describe("buildJob allow_all_in", () => {
   it("sends allow_all_in: 0 for Build sizes without a", () => {

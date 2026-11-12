@@ -7,6 +7,10 @@ import {
   toggleHandIndex,
   type LockDraft,
 } from "./locks";
+import {
+  classifyEngineSessionFault,
+  isEngineSessionDead,
+} from "./sessionRecovery";
 
 export interface StrategyEditRecord {
   node_id: string;
@@ -62,46 +66,33 @@ export function strategyMutationCompletion(args: {
   return { applyEditsList: true, applyDraft: true, reloadNode: true };
 }
 
-/** True when the IPC session/pipe is dead (Apply must surface Reconnect, not a soft edit failure). */
+/** True when the IPC session/pipe is dead (Apply must surface Reconnect). */
 export function isStrategyEditSessionDead(detail: string): boolean {
-  const text = detail.toLowerCase();
-  return (
-    text.includes("pipe closed") ||
-    text.includes("broken pipe") ||
-    text.includes("shut down") ||
-    text.includes("session killed") ||
-    text.includes("session shut down") ||
-    text.includes("engine unreachable") ||
-    text.includes("invalidframe") ||
-    text.includes("invalid_frame") ||
-    text.includes("solver-engine exiting") ||
-    text.includes("sidecar_exit")
-  );
+  // ZR-123: one session-dead classifier for Study (ZR-119 Apply uses this).
+  return isEngineSessionDead(detail);
 }
 
 /**
  * Classify Apply / clear failures so recoverable host rejects stay soft and
- * pipe death immediately asks for Reconnect (ZR-119).
+ * pipe death routes through durable session recovery (ZR-119 + ZR-123).
  */
 export function classifyStrategyEditFailure(error: unknown): {
   sessionDead: boolean;
+  detail: string;
   message: string;
 } {
-  const raw =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : "Strategy edit failed";
-  const detail = raw.trim() || "Strategy edit failed";
-  if (isStrategyEditSessionDead(detail)) {
+  const fault = classifyEngineSessionFault(error);
+  const detail = fault.detail === "engine fault" ? "Strategy edit failed" : fault.detail;
+  if (fault.sessionDead) {
     return {
       sessionDead: true,
+      detail,
       message: `Strategy edit failed — engine session died (${detail}). Use Reconnect, then re-open the strategy editor.`,
     };
   }
   return {
     sessionDead: false,
+    detail,
     message: detail.startsWith("Strategy edit")
       ? detail
       : `Strategy edit failed: ${detail}`,

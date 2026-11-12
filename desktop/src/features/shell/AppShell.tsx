@@ -7,7 +7,6 @@ import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { applyDocumentTheme, useThemeStore } from "../../state/themeStore";
 import { useHelpChatStore } from "../../state/assistantWindowStore";
-import { ensureEngine } from "../../platform/engine";
 import { BuildWorkspace } from "../build/BuildWorkspace";
 import { CompareWorkspace } from "../compare/CompareWorkspace";
 import { EquityWorkspace } from "../equity/EquityWorkspace";
@@ -31,6 +30,7 @@ export function AppShell() {
   const status = useStudyStore((s) => s.status);
   const startPolling = useStudyStore((s) => s.startPolling);
   const stopPolling = useStudyStore((s) => s.stopPolling);
+  const recoverEngineSession = useStudyStore((s) => s.recoverEngineSession);
   const assistantOpen = useHelpChatStore((s) => s.layout.visible);
   const toggleAssistant = useHelpChatStore((s) => s.toggleVisible);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -55,22 +55,13 @@ export function AppShell() {
   }, [startPolling, stopPolling]);
 
   async function reconnectEngine() {
-    stopPolling();
-    useStudyStore.setState({
-      connection: "connecting",
-      message: "Starting local engine…",
-    });
-    const result = await ensureEngine();
-    if (!result.ok) {
-      useStudyStore.setState({
-        connection: "disconnected",
-        message: `Engine setup failed: ${result.error}`,
-      });
-      return;
+    // Durable recovery path (ZR-123): re-ensure + clear sticky busy/cancel.
+    const result = await recoverEngineSession();
+    if (result.ok) {
+      console.info("[tauri] recover engine session ok");
+    } else {
+      console.warn("[tauri] recover engine session failed", result.error);
     }
-    console.info("[tauri] reconnect engine", result.transport.kind, result.status);
-    startPolling();
-    await useStudyStore.getState().refresh();
   }
 
   let body: ReactNode;
