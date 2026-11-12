@@ -1,4 +1,5 @@
 const std = @import("std");
+const chips = @import("chips.zig");
 
 /// Pio-style size tokens stored as f64 sentinels (same encoding as C++ size_spec.hpp).
 pub const chip_spec_floor: f64 = -1.0e8;
@@ -50,6 +51,120 @@ pub fn multipleOf(spec: f64) f64 {
     return -(spec - multiple_base);
 }
 
+pub fn geometricPotFraction(pot: i32, stack_left: i32, streets_left: i32) f64 {
+    if (pot <= 0 or stack_left <= 0 or streets_left <= 0) return 0.0;
+    if (streets_left == 1) {
+        return @as(f64, @floatFromInt(stack_left)) / @as(f64, @floatFromInt(pot));
+    }
+    const ratio = 1.0 + 2.0 * @as(f64, @floatFromInt(stack_left)) / @as(f64, @floatFromInt(pot));
+    const root = std.math.pow(f64, ratio, 1.0 / @as(f64, @floatFromInt(streets_left)));
+    return (root - 1.0) / 2.0;
+}
+
+pub fn geometricStreetCount(encoded: i32, streets_left: i32, facing: bool, num_raises: i32) i32 {
+    const base = if (encoded <= 0) @max(streets_left, @as(i32, 1)) else encoded;
+    if (!facing) return @max(base, @as(i32, 1));
+    const left = base - @max(num_raises, @as(i32, 0));
+    return @max(left, @as(i32, 1));
+}
+
+pub const SpecContext = struct {
+    basis: i32 = 0,
+    to_call: i32 = 0,
+    contrib: i32 = 0,
+    max_add: i32 = 0,
+    committed: i32 = 0,
+    streets_left: i32 = 1,
+    num_raises: i32 = 0,
+    facing: bool = false,
+};
+
+pub const SpecEmit = struct {
+    add: i32 = 0,
+    force_all_in: bool = false,
+};
+
+pub fn listOffersSize(specs: []const f64) bool {
+    if (isExplicitEmptyList(specs)) return false;
+    for (specs) |spec| {
+        if (!isExplicitEmptySpec(spec)) return true;
+    }
+    return false;
+}
+
+pub fn mergeCloseAmounts(amounts: []i32, count: *i32, threshold_fraction: f64) void {
+    if (!(threshold_fraction > 0.0) or count.* < 2) return;
+    var write: i32 = 0;
+    var index: i32 = 0;
+    while (index < count.*) : (index += 1) {
+        if (write == 0) {
+            amounts[@intCast(write)] = amounts[@intCast(index)];
+            write += 1;
+            continue;
+        }
+        const previous = amounts[@intCast(write - 1)];
+        const current = amounts[@intCast(index)];
+        const denom = @max(previous, current);
+        const gap = if (previous > current) previous - current else current - previous;
+        if (denom > 0 and @as(f64, @floatFromInt(gap)) <= threshold_fraction * @as(f64, @floatFromInt(denom))) {
+            amounts[@intCast(write - 1)] = @max(previous, current);
+            continue;
+        }
+        amounts[@intCast(write)] = current;
+        write += 1;
+    }
+    count.* = write;
+}
+
+/// Expand one Pio size list into chip adds at this node.
+/// `cb` is a struct with `fn call(self: @This(), emitted: SpecEmit) void`.
+pub fn forEachSpecAdd(specs: []const f64, ctx: SpecContext, cb: anytype) void {
+    if (isExplicitEmptyList(specs)) return;
+    for (specs) |spec| {
+        if (isExplicitEmptySpec(spec)) continue;
+        if (isAllInSpec(spec)) {
+            cb.call(.{ .add = ctx.max_add, .force_all_in = true });
+            continue;
+        }
+        if (isGeometricSpec(spec)) {
+            const streets = geometricStreetCount(
+                geometricStreetsOf(spec),
+                ctx.streets_left,
+                ctx.facing,
+                ctx.num_raises,
+            );
+            const stack_left = if (ctx.facing)
+                @max(@as(i32, 0), ctx.max_add - ctx.to_call)
+            else
+                @max(@as(i32, 0), ctx.max_add);
+            const fraction = geometricPotFraction(ctx.basis, stack_left, streets);
+            const sized: i32 = @intFromFloat(@round(fraction * @as(f64, @floatFromInt(ctx.basis))));
+            const add = if (ctx.facing) ctx.to_call + sized else sized;
+            cb.call(.{ .add = add, .force_all_in = false });
+            continue;
+        }
+        if (isMultipleSpec(spec)) {
+            if (!ctx.facing or ctx.committed <= 0) continue;
+            const multiple = multipleOf(spec);
+            if (!(multiple > 0.0)) continue;
+            const street_total: i32 = @intFromFloat(@round(multiple * @as(f64, @floatFromInt(ctx.committed))));
+            cb.call(.{ .add = street_total - ctx.contrib, .force_all_in = false });
+            continue;
+        }
+        const sized = if (isChipSpec(spec))
+            blk: {
+                const t = chips.absoluteChipsToTenths(-spec) catch 0;
+                break :blk t;
+            }
+        else if (spec < 0.0)
+            @as(i32, 0)
+        else
+            @as(i32, @intFromFloat(@round(spec * @as(f64, @floatFromInt(ctx.basis)))));
+        const add = if (ctx.facing) ctx.to_call + sized else sized;
+        cb.call(.{ .add = add, .force_all_in = false });
+    }
+}
+
 fn toLowerInPlace(buf: []u8) void {
     for (buf) |*c| {
         if (c.* >= 'A' and c.* <= 'Z') c.* = c.* - 'A' + 'a';
@@ -97,9 +212,9 @@ pub fn parseSizeToken(token: []const u8, allow_multiple: bool) SpecError!f64 {
     }
     if (lower[lower.len - 1] == 'c') {
         const prefix = lower[0 .. lower.len - 1];
-        const chips = std.fmt.parseFloat(f64, prefix) catch return error.InvalidSizeSpec;
-        if (!(chips > 0.0)) return error.InvalidSizeSpec;
-        return -chips;
+        const chip_amt = std.fmt.parseFloat(f64, prefix) catch return error.InvalidSizeSpec;
+        if (!(chip_amt > 0.0)) return error.InvalidSizeSpec;
+        return -chip_amt;
     }
     const fraction = std.fmt.parseFloat(f64, lower) catch return error.InvalidSizeSpec;
     if (!std.math.isFinite(fraction) or fraction < 0.0) return error.InvalidSizeSpec;
