@@ -74,6 +74,14 @@ pub fn build(b: *std.Build) void {
         .name = "solver-engine",
         .root_module = host_mod,
     });
+    // Packaged Study spawns this under a Windows-subsystem (GUI) shell with
+    // inherited pipes. Default Console PE subsystem allocates a blank console
+    // window; closing that window sends CTRL_CLOSE_EVENT and kills the sidecar
+    // (Study then bricks on IPC). Prefer GUI subsystem so no console appears;
+    // Tauri also passes CREATE_NO_WINDOW as defense in depth.
+    if (target.result.os.tag == .windows) {
+        solver_engine.subsystem = .Windows;
+    }
     b.installArtifact(solver_engine);
 
     const engine_tests = b.addTest(.{

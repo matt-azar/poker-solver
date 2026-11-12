@@ -30,6 +30,12 @@ beside the app (basename of `binaries/solver-engine`).
 The shell always spawns the absolute path beside the app (or
 `sidecar("solver-engine")` as a fallback).
 
+**Windows console footgun:** `solver-engine` is linked with PE subsystem
+`WINDOWS` (not `CONSOLE`) so a packaged Study spawn does not allocate a blank
+console. The Tauri host also passes `CREATE_NO_WINDOW`. A Console-subsystem
+sidecar under a GUI parent flashes a terminal; closing it kills the child and
+bricks Study IPC.
+
 ## Source binary
 
 ```bash
