@@ -411,6 +411,7 @@ test "multi-iter train forces publish at completion" {
     try std.testing.expectEqual(@as(i32, 5), sess.training.?.trained);
     // First iter + completion flush (cadence bound never hit).
     try std.testing.expectEqual(@as(i32, 5), sess.last_published_trained);
+    try std.testing.expectEqual(@as(i32, 5), sess.last_committed_trained);
     try std.testing.expectEqual(@as(u64, 2), sess.policyRevision());
     try std.testing.expect(sess.phase == .published);
 }
@@ -489,6 +490,157 @@ test "adequate river budget begin succeeds and tracks live bytes" {
     // Publish may allocate an average buffer; still under the declared ceiling.
     try std.testing.expect(sess.allocatedBytes() <= sess.memory_budget_bytes);
 }
+
+test "mid-pass train fault keeps published browsable and blocks Continue" {
+    // ZR-145: partial CFR+ mutation must not resume from dirty tables.
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(2);
+    try std.testing.expect(sess.canContinue());
+    const published_rev = sess.policyRevision();
+    const committed = sess.last_committed_trained;
+    try std.testing.expect(committed >= 2);
+    try std.testing.expect(sess.published != null);
+
+    sess.inject_mid_pass_fault = true;
+    try std.testing.expectError(error.InvalidFrozen, sess.train(1));
+    try std.testing.expect(sess.published != null);
+    try std.testing.expectEqual(published_rev, sess.policyRevision());
+    try std.testing.expectEqual(committed, sess.last_committed_trained);
+    try std.testing.expect(!sess.has_training);
+    try std.testing.expect(!sess.canContinue());
+    // Browse-only published phase: recoverTrainReady is a no-op; train still refuses.
+    try std.testing.expect(sess.phase == .published);
+    try sess.recoverTrainReady();
+    try std.testing.expect(!sess.canContinue());
+    try std.testing.expectError(error.InvalidSession, sess.train(1));
+}
+
+test "Continue after mid-pass fault requires open checkpoint or fresh begin" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(path);
+    const ckpt = try std.fs.path.join(std.testing.allocator, &.{ path, "zr145_midpass.psol" });
+    defer std.testing.allocator.free(ckpt);
+
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(2);
+    try sess.save(ckpt);
+
+    sess.inject_mid_pass_fault = true;
+    try std.testing.expectError(error.InvalidFrozen, sess.train(1));
+    try std.testing.expect(!sess.canContinue());
+
+    // Open checkpoint restores resume-safe trainer tables.
+    try sess.open(ckpt);
+    try std.testing.expect(sess.has_training);
+    try std.testing.expect(sess.canContinue());
+    try std.testing.expectEqual(@as(i32, 2), sess.last_committed_trained);
+    try sess.train(1);
+    try std.testing.expect(sess.phase == .published);
+    try std.testing.expectEqual(@as(i32, 3), sess.last_committed_trained);
+
+    // Fresh begin also restores Continue after a mid-pass fault.
+    sess.inject_mid_pass_fault = true;
+    try std.testing.expectError(error.InvalidFrozen, sess.train(1));
+    try std.testing.expect(!sess.canContinue());
+    try sess.begin(text);
+    try std.testing.expect(sess.has_training);
+    try std.testing.expect(!sess.canContinue()); // no published yet
+    try sess.train(1);
+    try std.testing.expect(sess.canContinue());
+}
+
+test "strategy publish failure is distinct from mid-pass train failure" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    // First iter always publishes; complete one clean iter first.
+    try sess.train(1);
+    const prior_rev = sess.policyRevision();
+    try std.testing.expect(prior_rev >= 1);
+    try std.testing.expectEqual(@as(i32, 1), sess.last_committed_trained);
+
+    // Force publish on the next committed iter, then fail that publish.
+    sess.publish_every = 1;
+    sess.inject_publish_fault = true;
+    try std.testing.expectError(error.StrategyPublishFailed, sess.train(1));
+    // Iteration committed even though average install failed.
+    try std.testing.expectEqual(@as(i32, 2), sess.last_committed_trained);
+    try std.testing.expectEqual(@as(i32, 2), sess.training.?.trained);
+    try std.testing.expect(sess.has_training);
+    try std.testing.expect(sess.published != null);
+    try std.testing.expectEqual(prior_rev, sess.policyRevision());
+    try std.testing.expect(sess.canContinue());
+    try std.testing.expect(sess.phase == .published);
+
+    // Continue / further train still works (tables are coherent).
+    try sess.train(1);
+    try std.testing.expectEqual(@as(i32, 3), sess.last_committed_trained);
+    try std.testing.expect(sess.policyRevision() > prior_rev);
+}
+
 
 test {
     _ = session;

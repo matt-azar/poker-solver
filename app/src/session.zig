@@ -13,6 +13,9 @@ pub const SessionError = error{
     OutOfMemory,
     BudgetExceeded,
     InvalidStrategy,
+    /// Average install failed after a committed CFR+ iteration (ZR-145).
+    /// Trainer tables remain resumable; distinct from mid-pass corruption.
+    StrategyPublishFailed,
 } || poker_formats.OpenError || poker_engine.game.street_config.ConfigError || poker_engine.game.compile.CompileError || poker_engine.solve.training_state.TrainError || poker_engine.solve.cfr_plus.CfrError || poker_engine.solve.frozen_walk.FrozenError;
 
 pub const Phase = enum {
@@ -114,6 +117,15 @@ pub const Session = struct {
     force_next_publish: bool = false,
     /// Recycled average buffer after readers release (C++ ensure_average reuse).
     average_spare: ?[]f32 = null,
+    /// Last fully completed CFR+ iteration (both player passes). Matches
+    /// `training.trained` when clean; used to refuse resume after mid-pass faults (ZR-145).
+    last_committed_trained: i32 = 0,
+    /// True while an in-flight CFR+ iteration has mutated tables but not committed.
+    cfr_pass_mutated: bool = false,
+    /// Test fault injection: fail after OOP pass (partial tables) on the next train.
+    inject_mid_pass_fault: bool = false,
+    /// Test fault injection: fail the next strategy publish after a committed iter.
+    inject_publish_fault: bool = false,
 
     pub fn init(parent: std.mem.Allocator) SessionError!Session {
         const budget = parent.create(BudgetAllocator) catch return error.OutOfMemory;
@@ -225,10 +237,23 @@ pub const Session = struct {
         self.iters_since_publish = 0;
         self.last_published_trained = 0;
         self.force_next_publish = false;
+        self.last_committed_trained = 0;
+        self.cfr_pass_mutated = false;
+        self.inject_mid_pass_fault = false;
+        self.inject_publish_fault = false;
         if (self.average_spare) |buf| {
             self.allocator.free(buf);
             self.average_spare = null;
         }
+    }
+
+    /// After a mid-pass train fault: keep the last published average browsable,
+    /// but refuse Continue until an open checkpoint or fresh begin/solve (ZR-145).
+    fn invalidateTrainerForResumeLocked(self: *Session) void {
+        self.has_training = false;
+        self.cfr_pass_mutated = false;
+        self.inject_mid_pass_fault = false;
+        self.inject_publish_fault = false;
     }
 
     fn clearSolution(self: *Session) void {
@@ -592,22 +617,52 @@ pub const Session = struct {
         return published.average;
     }
 
-    /// After each completed CFR iteration: bump cadence counter; publish only on bound.
+    /// After each committed CFR iteration: bump cadence counter; publish only on bound.
     fn onTrainIterDone(ctx: *anyopaque, trained: i32) anyerror!void {
         const self: *Session = @ptrCast(@alignCast(ctx));
         _ = trained;
         self.mu.lock();
+        if (self.inject_publish_fault) {
+            self.inject_publish_fault = false;
+            self.mu.unlock();
+            return error.StrategyPublishFailed;
+        }
         self.iters_since_publish += 1;
         const want = self.shouldPublishCadenceLocked();
         self.mu.unlock();
         if (!want) return;
-        try self.publishExactAverage();
+        self.publishExactAverage() catch return error.StrategyPublishFailed;
+    }
+
+    /// Stage hook: mark mutation window, inject mid-pass faults, stamp commit (ZR-145).
+    fn onTrainStage(ctx: *anyopaque, stage: poker_engine.solve.frozen_walk.TrainStage) anyerror!void {
+        const self: *Session = @ptrCast(@alignCast(ctx));
+        self.mu.lock();
+        defer self.mu.unlock();
+        switch (stage) {
+            .before_passes => {
+                self.cfr_pass_mutated = true;
+            },
+            .after_oop_pass => {
+                if (self.inject_mid_pass_fault) {
+                    self.inject_mid_pass_fault = false;
+                    return error.InvalidFrozen;
+                }
+            },
+            .committed => {
+                if (self.training) |state| {
+                    self.last_committed_trained = state.trained;
+                }
+                self.cfr_pass_mutated = false;
+            },
+        }
     }
 
     /// Durable recovery after a real train failure left `.failed` (ZR-123).
     /// Cooperative early stop/pause already returns `.paused` (#311); this path
     /// covers errdefer / hard train faults so Continue/Solve can restart when
     /// trainer state is still present — without requiring a full re-begin.
+    /// Mid-pass corruption clears `has_training` (ZR-145) and refuses recovery.
     pub fn recoverTrainReady(self: *Session) SessionError!void {
         self.mu.lock();
         defer self.mu.unlock();
@@ -623,6 +678,7 @@ pub const Session = struct {
     pub fn train(self: *Session, iterations: i32) SessionError!void {
         self.mu.lock();
         // Recover sticky `.failed` before the ready-phase gate (ZR-123).
+        // ZR-145: only when trainer tables are still resume-safe (`has_training`).
         if (self.phase == .failed) {
             if (!self.has_training or self.training == null or self.game == null) {
                 self.mu.unlock();
@@ -658,12 +714,26 @@ pub const Session = struct {
         // Do not clear stop/pause here — host admits a fresh job by clearing first;
         // mid-loop trainGated must observe flags set while the prior step ran.
         self.phase = .training;
+        self.cfr_pass_mutated = false;
         self.mu.unlock();
         defer if (locks_snapshot.len != 0) self.allocator.free(locks_snapshot);
-        errdefer {
+        errdefer |err| {
             self.mu.lock();
-            self.phase = if (self.published != null) .published else .failed;
-            self.mu.unlock();
+            defer self.mu.unlock();
+            if (err == error.StrategyPublishFailed) {
+                // Tables committed; prior published average stays browsable; Continue OK.
+                if (self.training) |ts| self.last_committed_trained = ts.trained;
+                self.cfr_pass_mutated = false;
+                self.has_training = true;
+                self.phase = if (self.published != null) .published else .paused;
+            } else if (self.cfr_pass_mutated) {
+                // Partial CFR+ mutation — browse last published only; need ckpt/begin.
+                self.invalidateTrainerForResumeLocked();
+                self.phase = if (self.published != null) .published else .failed;
+            } else {
+                self.cfr_pass_mutated = false;
+                self.phase = if (self.published != null) .published else .failed;
+            }
         }
 
         var locks_owned: ?poker_engine.solve.node_lock.LockSet = null;
@@ -678,13 +748,15 @@ pub const Session = struct {
         const ctx = try self.ensureFrozenCtx();
         ctx.locks = if (locks_owned) |*owned| owned else null;
         defer ctx.locks = null;
-        var stub = try poker_engine.solve.frozen_walk.trainFrozenCfrPlusOnCtx(
+        var stub = try poker_engine.solve.frozen_walk.trainFrozenCfrPlusOnCtxStaged(
             ctx,
             state,
             iterations,
             onTrainIterDone,
             self,
             shouldStopTrain,
+            self,
+            onTrainStage,
             self,
         );
         // Cadence may have deferred the last average; stub has no owned buffer.
@@ -696,10 +768,11 @@ pub const Session = struct {
         // Single-iter Acc `train(1)` carries cadence; trainGated / save force when needed.
         const force_final = stopped or paused or iterations != 1;
         if (force_final) {
-            try self.ensurePublishedExact();
+            self.ensurePublishedExact() catch return error.StrategyPublishFailed;
         }
 
         self.mu.lock();
+        if (self.training) |ts| self.last_committed_trained = ts.trained;
         if (stopped) {
             self.last_terminal = .cancelled;
             // No publish yet: return to post-begin `.paused` so Solve/Continue can
@@ -715,6 +788,7 @@ pub const Session = struct {
             self.phase = if (self.published != null) .published else .paused;
         }
         self.has_training = true;
+        self.cfr_pass_mutated = false;
         self.mu.unlock();
         self.clearControlFlags();
     }
@@ -909,6 +983,8 @@ pub const Session = struct {
             // Next train iter must publish a fresh average for the reset tables.
             self.iters_since_publish = 0;
             self.last_published_trained = 0;
+            self.last_committed_trained = 0;
+            self.cfr_pass_mutated = false;
             self.force_next_publish = true;
         }
 
@@ -1116,6 +1192,8 @@ pub const Session = struct {
         self.training = training;
         self.published = published;
         self.last_published_trained = published.trained;
+        self.last_committed_trained = if (want_training) doc.trained else 0;
+        self.cfr_pass_mutated = false;
         self.iters_since_publish = 0;
         self.force_next_publish = false;
         self.locks_text = owned_locks;
