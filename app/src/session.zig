@@ -425,8 +425,33 @@ pub const Session = struct {
         self.installPublishedLocked(next);
     }
 
+    /// Durable recovery after a real train failure left `.failed` (ZR-123).
+    /// Cooperative early stop/pause already returns `.paused` (#311); this path
+    /// covers errdefer / hard train faults so Continue/Solve can restart when
+    /// trainer state is still present — without requiring a full re-begin.
+    pub fn recoverTrainReady(self: *Session) SessionError!void {
+        self.mu.lock();
+        defer self.mu.unlock();
+        if (self.phase == .paused or self.phase == .published) return;
+        if (self.phase != .failed) return error.InvalidSession;
+        if (!self.has_training or self.training == null or self.game == null) {
+            return error.InvalidSession;
+        }
+        self.phase = if (self.published != null) .published else .paused;
+        self.clearControlFlags();
+    }
+
     pub fn train(self: *Session, iterations: i32) SessionError!void {
         self.mu.lock();
+        // Recover sticky `.failed` before the ready-phase gate (ZR-123).
+        if (self.phase == .failed) {
+            if (!self.has_training or self.training == null or self.game == null) {
+                self.mu.unlock();
+                return error.InvalidSession;
+            }
+            self.phase = if (self.published != null) .published else .paused;
+            self.clearControlFlags();
+        }
         if (self.phase != .paused and self.phase != .published) {
             self.mu.unlock();
             return error.InvalidSession;

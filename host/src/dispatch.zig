@@ -383,6 +383,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     if (active) |jid| {
         if (state.isCancelled(jid)) cancelled = true;
     }
+    const failed = phase == .failed and !running;
 
     var list = std.ArrayList(u8).init(allocator);
     errdefer list.deinit();
@@ -393,6 +394,8 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     try w.writeAll(if (paused) "true" else "false");
     try w.writeAll(",\"cancelled\":");
     try w.writeAll(if (cancelled) "true" else "false");
+    try w.writeAll(",\"failed\":");
+    try w.writeAll(if (failed) "true" else "false");
     try w.print(",\"status_generation\":{d}", .{gen});
     if (solution_id == 0) {
         try w.writeAll(",\"solution_id\":null,\"root_node_id\":null");

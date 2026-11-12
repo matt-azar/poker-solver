@@ -111,6 +111,11 @@ export class EngineClient {
     return this.lastJobId;
   }
 
+  /** Drop stale Study job id after sidecar respawn / session recovery (ZR-123). */
+  clearLastStudyJobId(): void {
+    this.lastJobId = null;
+  }
+
   /** Packaged Study sets this after `ensureEngine()` resolves the owned sidecar. */
   setBaseUrl(baseUrl: string | null | undefined): void {
     if (baseUrl == null || baseUrl.trim() === "") {

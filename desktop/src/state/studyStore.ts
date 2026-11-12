@@ -82,6 +82,15 @@ import {
   type StrategyEditRecord,
   type StrategyEditsPayload,
 } from "../domain/strategyEdits";
+import {
+  classifyEngineSessionFault,
+  ensureFailedRecoveryMessage,
+  normalizeStatusForPhase,
+  phaseAfterSessionFault,
+  reconnectedMessage,
+  reconnectingMessage,
+  sessionDeadUiPatch,
+} from "../domain/sessionRecovery";
 import { presentUserText } from "../domain/userText";
 import {
   DEFAULT_SPOT,
@@ -120,7 +129,7 @@ import {
   type StudyIpcFeature,
 } from "../engine/ipcCapabilities";
 import { isTauriRuntime } from "../platform";
-import { readEngineStatus } from "../platform/engine";
+import { ensureEngine, readEngineStatus } from "../platform/engine";
 
 function rejectUnavailableIpcFeature(feature: StudyIpcFeature): string | null {
   if (studyIpcFeatureAvailable(feature)) {
@@ -430,6 +439,16 @@ interface StudyState {
 
   startPolling: () => void;
   stopPolling: () => void;
+  /**
+   * Durable recovery: stop polls, clear sticky busy/cancel, re-ensure engine,
+   * restart status. Used by Reconnect and after session-dead faults (ZR-123).
+   */
+  recoverEngineSession: () => Promise<{ ok: boolean; error?: string }>;
+  /** Mark unreachable + clear sticky busy without re-ensure (Reconnect follows). */
+  markEngineSessionDead: (
+    detail: string,
+    opts?: { message?: string },
+  ) => void;
   refresh: () => Promise<void>;
   solve: () => Promise<void>;
   continueSolve: () => Promise<void>;
@@ -1738,10 +1757,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (get().solutionId !== solutionId) {
         return;
       }
+      // ZR-119 classifier + ZR-123 durable sticky clear / Reconnect path.
       const classified = classifyStrategyEditFailure(error);
       if (classified.sessionDead) {
-        set({
-          connection: "disconnected",
+        get().markEngineSessionDead(classified.detail, {
           message: classified.message,
         });
         return;
@@ -1789,9 +1808,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (get().solutionId !== solutionId) {
         return;
       }
-      set({
-        message: error instanceof EngineError ? error.message : "Clear strategy edit failed",
-      });
+      const classified = classifyStrategyEditFailure(error);
+      if (classified.sessionDead) {
+        get().markEngineSessionDead(classified.detail, {
+          message: classified.message,
+        });
+        return;
+      }
+      set({ message: classified.message });
     }
   },
   async clearStrategyEditNode() {
@@ -1827,9 +1851,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (get().solutionId !== solutionId) {
         return;
       }
-      set({
-        message: error instanceof EngineError ? error.message : "Clear node strategy edits failed",
-      });
+      const classified = classifyStrategyEditFailure(error);
+      if (classified.sessionDead) {
+        get().markEngineSessionDead(classified.detail, {
+          message: classified.message,
+        });
+        return;
+      }
+      set({ message: classified.message });
     }
   },
   async clearAllStrategyEdits() {
@@ -1863,9 +1892,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (get().solutionId !== solutionId) {
         return;
       }
-      set({
-        message: error instanceof EngineError ? error.message : "Clear strategy edits failed",
-      });
+      const classified = classifyStrategyEditFailure(error);
+      if (classified.sessionDead) {
+        get().markEngineSessionDead(classified.detail, {
+          message: classified.message,
+        });
+        return;
+      }
+      set({ message: classified.message });
     }
   },
 
@@ -1896,6 +1930,81 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
   stopPolling() {
     stopStatusPolling();
+  },
+
+  markEngineSessionDead(detail, opts) {
+    continuationPending = false;
+    pendingReloadNodeId = undefined;
+    invalidateLifecycleRequests();
+    const patch = sessionDeadUiPatch({
+      detail,
+      phase: get().phase,
+      solutionId: get().solutionId,
+    });
+    if (opts?.message?.trim()) {
+      patch.message = opts.message.trim();
+    }
+    set(patch);
+  },
+
+  async recoverEngineSession() {
+    get().stopPolling();
+    continuationPending = false;
+    pendingReloadNodeId = undefined;
+    invalidateLifecycleRequests();
+    dropAnalysisCaches();
+    // Cold sidecar must not cancel/stop against a pre-death job id.
+    engineClient.clearLastStudyJobId();
+    const priorPhase = get().phase;
+    const hadSolution = Boolean(get().solutionId);
+    set({
+      connection: "connecting",
+      message: reconnectingMessage(),
+      phase: phaseAfterSessionFault(priorPhase, { hadSolution }),
+      status: null,
+    });
+    const result = await ensureEngine();
+    if (!result.ok) {
+      set({
+        connection: "disconnected",
+        message: ensureFailedRecoveryMessage(result.error),
+        phase: phaseAfterSessionFault(get().phase, {
+          hadSolution: Boolean(get().solutionId),
+        }),
+      });
+      return { ok: false, error: result.error };
+    }
+    set({
+      connection: "connected",
+      message: reconnectedMessage(
+        result.transport.kind === "ipc" ? result.transport.label : result.status,
+      ),
+    });
+    get().startPolling();
+    await get().refresh();
+    // Fresh engine has no published solution — drop stale Study identity.
+    const status = get().status;
+    if (!status?.solution_id) {
+      set({
+        solutionId: null,
+        baselineSolutionId: null,
+        currentNode: null,
+        pathTrail: [],
+        boardChangeChanceNode: null,
+        boardChangeStreet: null,
+        navHistory: [],
+        navHistoryIndex: -1,
+        canNavBack: false,
+        canNavForward: false,
+        ...emptyAnalysisState(),
+        strategyEditScope: null,
+        strategyEditDraft: defaultLockDraft(0),
+        strategyEditDraftBaseline: null,
+        strategyEditDrawerOpen: false,
+        compareNote: null,
+      });
+    }
+    return { ok: true };
   },
 
   async refresh() {
@@ -1934,55 +2043,58 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           setSeenGeneration(decision.generation);
           setStatusConsecutiveFailures(0);
           outcome = "success";
+          const normalized = normalizeStatusForPhase(status);
           const reload = solutionNeedsReload(
-            status,
+            normalized,
             get().solutionId,
             continuationPending,
           );
           const baselineSolutionId = resolveBaselineSolutionId(
-            status.baseline_solution_id,
+            normalized.baseline_solution_id,
             get().baselineSolutionId,
           );
           const nextSolutionId =
-            reload && status.solution_id ? status.solution_id : get().solutionId;
+            reload && normalized.solution_id
+              ? normalized.solution_id
+              : get().solutionId;
           const clearCompare = shouldClearCompareNote(
             get().compareNote,
             baselineSolutionId,
-            nextSolutionId ?? status.solution_id,
+            nextSolutionId ?? normalized.solution_id,
           );
           set({
-            status,
+            status: normalized,
             connection: "connected",
-            phase: phaseFromStatus(status, get().phase),
+            phase: phaseFromStatus(normalized, get().phase),
             baselineSolutionId,
             ...(clearCompare ? { compareNote: null } : {}),
           });
-          if (reload && status.solution_id) {
+          if (reload && normalized.solution_id) {
             continuationPending = false;
             const reloadTarget =
               pendingReloadNodeId === undefined
-                ? get().currentNode?.node_id || rootNodeId(status.root_node_id)
+                ? get().currentNode?.node_id || rootNodeId(normalized.root_node_id)
                 : pendingReloadNodeId === null
-                  ? rootNodeId(status.root_node_id)
+                  ? rootNodeId(normalized.root_node_id)
                   : pendingReloadNodeId;
             pendingReloadNodeId = undefined;
             set({
-              solutionId: status.solution_id,
-              message: status.paused
+              solutionId: normalized.solution_id,
+              message: normalized.paused
                 ? "Paused — browsing available. Continue to resume."
-                : status.cancelled
+                : normalized.cancelled
                   ? "Stopped — keeping completed iterations."
                   : "Solve complete.",
             });
             await get().navigateTo(reloadTarget, { history: "replace" });
-          } else if (status.running) {
-            const requested = status.iterations_requested;
+          } else if (normalized.running) {
+            const requested = normalized.iterations_requested;
             const iterLabel =
               requested != null && Number(requested) > 0
-                ? `${status.iterations ?? 0}/${requested}`
-                : `${status.iterations ?? 0}`;
+                ? `${normalized.iterations ?? 0}/${requested}`
+                : `${normalized.iterations ?? 0}`;
             set({
-              message: status.paused
+              message: normalized.paused
                 ? "Pause requested — finishing current sample…"
                 : `Solving — ${iterLabel} iterations`,
             });
@@ -2013,10 +2125,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               shellHint = ` Shell: ${shellStatus}.`;
             }
           }
-          set({
-            connection: "disconnected",
-            message: `Engine unreachable: ${detail}.${shellHint} Use Reconnect — the installer should have placed solver-engine beside the app.`,
-          });
+          // Durable path: clear sticky busy/cancel; Reconnect re-ensures (ZR-123).
+          get().markEngineSessionDead(
+            shellHint ? `${detail}.${shellHint}` : detail,
+          );
         } finally {
           timed.dispose();
           if (getStatusAbortController() === abort) {
@@ -2091,6 +2203,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         return;
       }
       pendingReloadNodeId = undefined;
+      const fault = classifyEngineSessionFault(error);
+      if (fault.sessionDead) {
+        get().markEngineSessionDead(fault.detail);
+        return;
+      }
       set({
         ...prior,
         phase: "failed",
@@ -2137,6 +2254,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         return;
       }
       pendingReloadNodeId = undefined;
+      const fault = classifyEngineSessionFault(error);
+      if (fault.sessionDead) {
+        get().markEngineSessionDead(fault.detail);
+        return;
+      }
       set({
         ...prior,
         phase: "failed",
@@ -2193,6 +2315,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         return;
       }
       pendingReloadNodeId = undefined;
+      const fault = classifyEngineSessionFault(error);
+      if (fault.sessionDead) {
+        get().markEngineSessionDead(fault.detail);
+        return;
+      }
       set({
         ...prior,
         phase: "failed",
@@ -2206,8 +2333,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     try {
       await engineClient.pause();
     } catch (error) {
+      const fault = classifyEngineSessionFault(error);
+      if (fault.sessionDead) {
+        get().markEngineSessionDead(fault.detail);
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Pause failed",
+        // Soft pause failure must not leave sticky pause_requested forever.
+        phase: phaseFromStatus(get().status, get().phase === "pause_requested" ? "solving" : get().phase),
       });
     }
   },
@@ -2217,8 +2351,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     try {
       await engineClient.stop();
     } catch (error) {
+      const fault = classifyEngineSessionFault(error);
+      if (fault.sessionDead) {
+        get().markEngineSessionDead(fault.detail);
+        return;
+      }
       set({
         message: error instanceof EngineError ? error.message : "Stop failed",
+        // Soft stop failure must not leave sticky stop_requested forever.
+        phase: phaseFromStatus(get().status, get().phase === "stop_requested" ? "solving" : get().phase),
       });
     }
   },
