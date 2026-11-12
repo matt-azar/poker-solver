@@ -4,12 +4,13 @@ Tauri `bundle.externalBin` lists:
 
 | Entry | Product role |
 | --- | --- |
-| `binaries/holdem-explorer` | Shipping C++ HTTP explorer (default Study path) |
-| `binaries/solver-engine` | Zig typed-IPC tech-preview (`solver-engine` / `.exe`) |
+| `binaries/holdem-explorer` | C++ HTTP explorer. Browser development, and the packaged fallback when `solver-engine` is missing or fails ready. |
+| `binaries/solver-engine` | Zig IPC sidecar (`solver-engine` / `.exe`). The packaged shell starts this first (protocol 2). |
 
-Zig Study path **prefers** inherited-pipe IPC to `solver-engine` (protocol 2).
-HTTP `holdem-explorer` remains a **temporary labeled fallback** when the Zig
-sidecar is missing or fails ready (`VITE_SOLVER_TRANSPORT=http` forces HTTP).
+The packaged shell starts `solver-engine` over inherited pipes (protocol 2).
+It starts `holdem-explorer` when the Zig sidecar is missing or fails ready
+(`VITE_SOLVER_TRANSPORT=http` forces HTTP). The published `v0.1.2-windows`
+installer does not include `solver-engine`.
 
 ## Naming (required by Tauri)
 
@@ -52,7 +53,7 @@ loopback port, spawns this sidecar with `--launch-id` and `--study-packaged`,
 and returns after `GET /api/ready` matches protocol 1 and that launch id.
 Browser development still uses an explorer on port 8765.
 
-## Zig `solver-engine` (Phase 6 tech-preview)
+## Zig `solver-engine`
 
 ```bash
 zig build

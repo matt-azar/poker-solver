@@ -1,6 +1,6 @@
 # Unrestricted heads-up no-limit Hold'em
 
-The production solvers find an equilibrium of a finite bet-size tree: a river, turn, or flop small enough to store under the engine budget. Unrestricted HUNL — any legal chip amount at every decision, full unbucketed postflop — exceeds commodity memory. The largest exact tree measured here is a uniform full-range check-down on `Ah Kd 7c`: 5,197,920 stored information sets and about 399 MiB of solver-owned heap inside the default 1024 MiB budget. Expanded histories on that tree are in the billions. Smaller checked abstractions include a `22+` versus `22+` river with two bet sizes (882 information sets) and a one-combo check-only flop (4,052). See [BENCHMARKS.md](../engineering/BENCHMARKS.md).
+The C++ solvers find an equilibrium of a finite bet-size tree: a river, turn, or flop small enough to store under the engine budget. The sizes below were measured on that engine. The Zig sidecar is a separate CFR+ implementation and is not in these counts. Unrestricted HUNL — any legal chip amount at every decision, full unbucketed postflop — exceeds commodity memory. The largest exact tree measured here is a uniform full-range check-down on `Ah Kd 7c`: 5,197,920 stored information sets and about 399 MiB of solver-owned heap inside the default 1024 MiB budget. Expanded histories on that tree are in the billions. Smaller checked abstractions include a `22+` versus `22+` river with two bet sizes (882 information sets) and a one-combo check-only flop (4,052). See [BENCHMARKS.md](../engineering/BENCHMARKS.md).
 
 ## Abstraction choices
 
@@ -12,7 +12,7 @@ The production solvers find an equilibrium of a finite bet-size tree: a river, t
 
 **Monte Carlo CFR.** MCCFR samples outcomes or information sets. Traversals here walk every outcome. This repository has no sampled run.
 
-**Discounted CFR.** Linear CFR weights iteration `t` by `t` on both the regret increment and the average. Fixed DCFR(α=1.5, β=0, γ=2) is an optional production algorithm: alternating OOP/IP frozen passes, signed regrets discounted once per completed pass with `t^1.5/(t^1.5+1)` on positives and `0.5` on non-positives, and average weight `t^2`. CFR+ remains the default. See [STREETS.md](../../STREETS.md).
+**Discounted CFR.** Linear CFR weights iteration `t` by `t` on both the regret increment and the average. Fixed DCFR(α=1.5, β=0, γ=2) is an optional C++ algorithm: alternating OOP/IP frozen passes, signed regrets discounted once per completed pass with `t^1.5/(t^1.5+1)` on positives and `0.5` on non-positives, and average weight `t^2`. CFR+ remains the C++ default. The Zig sidecar trains CFR+ only. See [STREETS.md](../../STREETS.md).
 
 **Subgame solving.** Libratus-style resolving re-solves a public state with a gadget for the opponent's range. The river/street solvers take a pot and two ranges and solve that subtree; the caller supplies the ranges.
 

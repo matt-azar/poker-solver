@@ -79,6 +79,20 @@ A flop, turn, and river are **one** betting tree with two, one, or zero cards le
 **Don't:** Reintroduce `RiverBatchSolver` as the product `river_solver` path. Don't delete `RiverGame` or RiverBatch oracle tests.  
 **Pointers:** `docs/ARCHITECTURE.md`, `docs/auxiliary/planning/ROADMAP.md` M6, `include/game/street_game.hpp`, `src/cli/river_main.cpp`.
 
+### Study shell and the Zig sidecar
+
+The packaged Tauri shell starts Zig `solver-engine` first (IPC protocol 2, inherited pipes). `holdem-explorer` starts when that sidecar is missing or fails ready. Browser development still uses `explorer` on port 8765. `VITE_SOLVER_TRANSPORT=http` forces HTTP.
+
+The IPC client sends status, solve (`begin_config` then `solve`), and root action values (`node_index` 0). Pause, stop, continue, node browse, equity, locks, and save still use the HTTP client. After a successful IPC start those HTTP calls go to `http://127.0.0.1:8765` with no owned explorer.
+
+Zig trains CFR+ and writes PSOL v4. It rejects C++ checkpoints and kind-2 river files. `street-config-check` and `gate-bench` are not `street_solver`.
+
+The published `v0.1.2-windows` installer starts `holdem-explorer` on port 8765 and does not include `solver-engine`. Docs that describe that tag as the current shell are stale.
+
+**Do:** Keep the C++ CLI and HTTP engine. Describe IPC coverage as the three calls above. Point quality numbers at `docs/auxiliary/engineering/ZIG_RELEASE_GATES.md`.  
+**Don't:** Delete `StreetBatchSolver` or `explorer` because the shell prefers IPC. Don't claim a quality cutover. Don't treat an existing listener on port 8765 as the owned engine. Don't open a C++ PSOL in `solver-engine`.  
+**Pointers:** `desktop/src-tauri/src/lib.rs`, `desktop/src/engine/client.ts`, `host/src/dispatch.zig`, `formats/src/psol_v4.zig`.
+
 ### `*Game` vs `*Batch`
 
 - `RiverGame` / `StreetGame` — full deal enumeration; oracle for strategy, values, best response.
@@ -168,7 +182,7 @@ At a flop root, `t-1.r-1` is both the node id and the line key — **do not infe
 
 - Study node `/equity` uses `StreetBatchSolver::checkdown_equity` (cached rank tables / blocker masses) — same check-down math, much faster than pair enumeration (#191).
 - Equity Calculator / CLI stay on `showdown_equity` + `kDefaultMaxPairRunouts` (~1.1M).
-- Packaged Study raises `--max-pair-runouts` to `kStudyExplorerMaxPairRunouts` (= full-range turn, ~51.4M). Dense flop check-downs can still exceed that. **Never silently sample** when over the limit.
+- The HTTP fallback raises `--max-pair-runouts` to `kStudyExplorerMaxPairRunouts` (= full-range turn, ~51.4M). A successful `solver-engine` start does not launch `explorer`. Dense flop check-downs can still exceed that ceiling. **Never silently sample** when over the limit.
 - Study ceiling is a **packaging knob**: keep C++ `kStudyExplorerMaxPairRunouts` and Tauri `STUDY_EXPLORER_MAX_PAIR_RUNOUTS` aligned; raising only an env var does nothing for the packaged desktop spawn (#188).
 - Warm the **current** decision (queue + identity-keyed cache). Do **not** full-tree frontload EV/equity into the save — commercial “always ready” is kernel speed + non-thrashing plumbing (#184, #190, #191).
 
@@ -251,8 +265,8 @@ Matrix, Hands, Node Locking, and the Actions mix bar paint **passive → aggress
 - **Desktop `tsc -b`:** Study store nullability (`node` / `liveEquity` unnarrowed) fails `desktop` and `windows-installer` CI even when vitest is green (#190/#191). After lifecycle/analysis changes, run `cd desktop && npx tsc -b`.
 - **CI path gate:** `dorny/paths-filter` needs `pull-requests: read` under restricted `GITHUB_TOKEN` scopes; fail the aggregate `ci` job if the path gate itself fails (#200).
 - **NSIS / installer hooks:** wait for **`windows-installer`** green before merge. A green non-installer subset is not enough — #158/#159 landed broken PREINSTALL arity / duplicate `kill:` labels and needed follow-ups (#161).
-- **Tauri sidecar spawn:** `bundle.externalBin` may be `binaries/holdem-explorer`, but the installed file is `<exe_dir>/holdem-explorer.exe`. `shell().sidecar("binaries/holdem-explorer")` looks under a non-existent `binaries/` folder (os error 3). Spawn the absolute path beside the app (or `sidecar("holdem-explorer")`). Packaged UI must also **statically import** `@tauri-apps/api/core` — `@vite-ignore` dynamic imports leave a bare specifier that fails at runtime. Packaged Study owns the child via `/api/ready` + launch id (not “any TCP on 8765”).
-- **NSIS upgrade + sidecar lock:** A running/orphaned `holdem-explorer.exe` keeps the file locked → "Error opening file for writing: …\holdem-explorer.exe" (Ignore leaves a stale engine). PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning` — its `kill:` labels collide with the template's insert), then `taskkill /F /T /IM holdem-explorer.exe`, Sleep, and `Delete` the old sidecar. Never `taskkill` `explorer.exe`.
+- **Tauri sidecars:** `externalBin` lists `binaries/holdem-explorer` and `binaries/solver-engine`. Installed files are `<exe_dir>/holdem-explorer.exe` and `<exe_dir>/solver-engine.exe`. `shell().sidecar("binaries/holdem-explorer")` looks under a non-existent `binaries/` folder (os error 3). Spawn the absolute path beside the app. Packaged UI must **statically import** `@tauri-apps/api/core`. The shell starts `solver-engine` first (IPC protocol 2). `holdem-explorer` starts only on IPC failure, then `/api/ready` must match protocol 1 and the launch id. A listener already on port 8765 is not the owned engine. See the Zig sidecar section above.
+- **NSIS upgrade + sidecar lock:** A running/orphaned `holdem-explorer.exe` or `solver-engine.exe` keeps the file locked → "Error opening file for writing". PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning` — its `kill:` labels collide with the template's insert), then `taskkill /F /T /IM` both sidecars, Sleep, and `Delete` the old files. Never `taskkill` `explorer.exe`.
 
 ### Licensing
 

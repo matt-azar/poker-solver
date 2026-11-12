@@ -1,6 +1,6 @@
 # Benchmarks
 
-Primary production measurements are the **Street** and **River** sections below and [benchmarks/study/](../../../benchmarks/study/).
+The tables below are C++ `street_solver` / `river_solver` runs, plus [benchmarks/study/](../../../benchmarks/study/). Zig gate measurements are a separate procedure: [ZIG_RELEASE_GATES.md](ZIG_RELEASE_GATES.md).
 
 ## Five-card evaluator
 

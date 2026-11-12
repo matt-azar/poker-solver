@@ -60,7 +60,7 @@ Use this when answering **how-to / product** questions via `answer_user`. Numeri
 ## What this product is
 
 - Everyday postflop study: Build a spot → Solve → browse strategy on Study → optional Equity / Compare / Library.
-- Numerical kernels run locally via the `explorer` HTTP API. Solving does not require OpenAI.
+- Solving runs on the local engine. Browser development uses the `explorer` HTTP API. The packaged shell starts `solver-engine` (typed IPC) first. Solving does not require OpenAI.
 
 ## Core workflow
 
@@ -109,12 +109,12 @@ Give the applicable reason and one next action:
 
 ## Credentials / AI
 
-- OpenAI required in the product UI for the Study assistant. Keys may live in Tauri app-config secrets or browser `localStorage` demos — never bundled.
+- OpenAI is required in the product UI for the Study assistant. The packaged app stores the key in the OS credential store (`assistant_secret_*`). A legacy `assistant_secrets.json` file is migrated on read when the OS store works. Browser demos may use `holdem-study-openai-key` in localStorage. Never bundle a key.
 - Distributed products should use a backend proxy.
 
 ## Product surface (mounted UI)
 
-- Local postflop solver: React Study UI + `explorer` engine. OpenAI is optional; **Solve** is local.
+- Local postflop solver: React Study UI. Browser development uses `explorer` over HTTP. The packaged shell starts `solver-engine` typed IPC first, and starts `explorer` when that sidecar is missing or fails ready. OpenAI is optional for **Solve**; **Solve** is local.
 - Workspaces (menu bar tabs): **Study**, **Build**, **Equity**, **Compare**, **Library**.
 - Primary AI surface: floating **Study assistant** — menu bar **Assistant** toggle. Hideable, movable, resizable. Available on every workspace. Keyboard shortcuts stay on `?` (Help overlay).
 - There is **no** separate Build-page Setup assistant and **no** Help-menu “Study assistant…” entry.

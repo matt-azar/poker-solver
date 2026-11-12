@@ -2,7 +2,7 @@
 
 Heads-up NLHE study application with solving, analysis, automation, persistence, training, and interface capabilities comparable to PioSolver/PioViewer — in this project's own design. Target includes postflop and Edge-style preflop. Living ledger: [FEATURE_PARITY.md](FEATURE_PARITY.md).
 
-Finished means a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train through a GUI without a terminal. Study surface today: `explorer` + React desktop client ([DESKTOP_UI.md](../../DESKTOP_UI.md)). Comparison target: documented PioSolver 3.11 [S1][S2]. Mark unverified details unverified. “All features” means the audited list.
+Finished means a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train through a GUI without a terminal. Study surface today: the React desktop client ([DESKTOP_UI.md](../../DESKTOP_UI.md)). Browser development uses `explorer`. The packaged shell in this tree starts Zig `solver-engine` first and starts `holdem-explorer` when that sidecar is missing or fails ready. C++ `StreetBatchSolver` remains the CLI and the HTTP engine. The Zig sidecar trains CFR+ and is not a recorded quality cutover. Comparison target: documented PioSolver 3.11 [S1][S2]. Mark unverified details unverified. “All features” means the audited list.
 
 Separate three releases:
 
@@ -18,7 +18,7 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 Foundation in place: shared street/river public tree, pass-frozen CFR variants, active-player CFR+ flooring, blocker-aware showdowns, first-public-card parallelism, engine allocation budgets (default 1024 MiB), node-scoped browsing, Hold’em reference enumerators on `CfrTrainer`. Threads default to one.
 
-Flop, turn, and river are one betting tree (two, one, or zero cards left). `StreetGame` / `StreetBatchSolver` accept 3/4/5-card boards. Five-card pins match `RiverGame`. Explorer and `river_solver` both use that shared tree; `river_solver` is a thin CLI, not a separate `RiverBatchSolver` product path. `RiverGame` is the five-card oracle.
+Flop, turn, and river are one betting tree (two, one, or zero cards left). `StreetGame` / `StreetBatchSolver` accept 3/4/5-card boards. Five-card pins match `RiverGame`. Explorer and `river_solver` both use that shared tree; `river_solver` is a thin CLI, not a separate `RiverBatchSolver` product path. `RiverGame` is the five-card oracle. Zig `solver-engine` is a second CFR+ implementation used by the packaged shell. It writes PSOL v4 and rejects C++ checkpoints.
 
 Also landed: conditional action EV on flop/turn/river decisions; stop-and-keep / pause / continue; versioned PSOL; runout EV comparison; check-down equity (+ buckets); five-card made-hand categories; node locks + compare; pot rake / ICM / action-label incentives; Windows NSIS Study installer; flop/turn draw and backdoor tags in Study. Compact saves, a durable batch queue, trainer packs, and preflop are still open. No head-to-head Pio performance or solution-quality equivalence.
 

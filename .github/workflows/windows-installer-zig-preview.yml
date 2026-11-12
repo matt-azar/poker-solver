@@ -1,8 +1,8 @@
 # Labeled Zig tech-preview Windows installer (Phase 7 / D8 scaffolding).
 #
-# Builds the stable holdem-explorer sidecar (Study default transport) plus
-# Zig solver-engine, then packages a distinctly named NSIS artifact.
-# Does NOT publish a GitHub Release and does NOT claim shipping cutover.
+# Builds holdem-explorer and solver-engine, then packages a distinctly named
+# NSIS artifact. The shell starts solver-engine first.
+# Does NOT publish a GitHub Release and does NOT record a quality cutover.
 #
 # Trigger: manual, or push to zig-rewrite that touches Zig / desktop / this file.
 
@@ -185,8 +185,8 @@ jobs:
             ""
             "productName: $($env:PREVIEW_PRODUCT_NAME)"
             "Zig: $($env:ZIG_VERSION)"
-            "Sidecars: holdem-explorer.exe (Study default) + solver-engine.exe (Zig IPC host)"
-            "Default Study transport remains HTTP holdem-explorer until cutover criteria pass."
+            "Sidecars: solver-engine.exe (started first, IPC protocol 2) + holdem-explorer.exe (HTTP fallback)"
+            "This artifact is a labeled preview. It does not record a quality cutover."
             "See docs/auxiliary/engineering/ZIG_RELEASE_GATES.md"
           ) -join "`r`n"
           Set-Content -Encoding utf8 "$nsisDir/ZIG_TECH_PREVIEW.txt" $note

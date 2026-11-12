@@ -5,7 +5,7 @@ Supporting material outside the main CFR+ workflow and Study UI docs. Prefer the
 | Folder | Contents |
 | --- | --- |
 | [planning/](planning/) | Roadmap, feature-parity ledger, study baseline |
-| [engineering/](engineering/) | Testing, benchmarks, agent lessons |
+| [engineering/](engineering/) | Testing, benchmarks, Zig release gates, agent lessons |
 | [payoffs/](payoffs/) | Rake, ICM, action-label incentives |
 | [reference/](reference/) | HUNL abstraction limits and research notes |
 | [notes/](notes/) | Hand-history export contract; historical river-integration note |
@@ -22,6 +22,7 @@ Supporting material outside the main CFR+ workflow and Study UI docs. Prefer the
 
 - [TESTING.md](engineering/TESTING.md)
 - [BENCHMARKS.md](engineering/BENCHMARKS.md)
+- [ZIG_RELEASE_GATES.md](engineering/ZIG_RELEASE_GATES.md) — Zig toolchain, fixtures, and what the sidecar does and does not replace
 - [AGENT_LESSONS.md](engineering/AGENT_LESSONS.md)
 - [AGENT_LESSONS_REFRESH.md](engineering/AGENT_LESSONS_REFRESH.md)
 

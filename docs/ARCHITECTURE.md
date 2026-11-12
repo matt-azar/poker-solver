@@ -1,8 +1,25 @@
 # Architecture
 
-Production postflop solving uses one public betting tree. Flop, turn, and river differ only by how many cards remain (two, one, or zero). `StreetBatchSolver` is the production engine; `StreetGame` + `CfrTrainer` is the reference enumerator (`--reference`). `RiverGame` is the five-card oracle.
+The C++ postflop solver uses one public betting tree. Flop, turn, and river differ only by how many cards remain (two, one, or zero). `StreetBatchSolver` is that engine; `StreetGame` + `CfrTrainer` is the reference enumerator (`--reference`). `RiverGame` is the five-card oracle.
 
-Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [EXPLORER.md](EXPLORER.md), [HOLDEM.md](HOLDEM.md).
+A second engine, Zig `solver-engine`, is in this tree. It trains CFR+. It is the sidecar the packaged Study shell starts first. It is not the CLI, and this file does not record a quality cutover.
+
+Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [EXPLORER.md](EXPLORER.md), [HOLDEM.md](HOLDEM.md), [ZIG_RELEASE_GATES.md](auxiliary/engineering/ZIG_RELEASE_GATES.md).
+
+## Runtimes
+
+| Runtime | Role | Save format |
+| --- | --- | --- |
+| C++ `StreetBatchSolver` | `street_solver`, `river_solver`, HTTP `explorer` / `holdem-explorer` | PSOL v1–v3. Kind 2 files open on `RiverBatchSolver`. |
+| Zig `solver-engine` | Packaged Study sidecar. Typed IPC protocol 2: little-endian `u32` length, then a JSON envelope. | PSOL v4. Older files and kind 2 are rejected. |
+
+Browser development runs `explorer` on `127.0.0.1:8765`. Vite proxies `/api` there.
+
+The packaged Tauri shell starts `solver-engine` first. If spawn or the ready handshake fails, it starts `holdem-explorer` on a free loopback port and waits for `GET /api/ready` protocol 1 and the launch id. `VITE_SOLVER_TRANSPORT=http` forces that HTTP path. A process already listening on port 8765 is not the owned HTTP sidecar.
+
+On the IPC path the Study client sends status, solve (`begin_config`, then `solve`), and root action values (`node_index` 0) over IPC. Pause, stop, continue, node browse, equity, locks, and save still use the HTTP client. A successful IPC start does not launch `holdem-explorer`, so those HTTP calls go to `http://127.0.0.1:8765`.
+
+Zig tools `street-config-check` and `gate-bench` are not `street_solver`. Build them with `zig build` (toolchain 0.14.1).
 
 ## One postflop tree
 
@@ -65,7 +82,8 @@ Read `src/solver/postflop/algorithms/cfr_plus.hpp` for one complete CFR+ iterati
 | `poker::solver::CfrTrainer<Game>` | Vanilla CFR, CFR+, linear CFR, DCFR, PCFR+ for any extensive-game type |
 | `regret_matching` | Current strategy from cumulative regret; reach-weighted accumulation |
 | `compute_best_response` | Exact best response, deepest information set first |
-| `explorer` | Local Study HTTP server; serves `desktop/dist` or `legacy/ui/`; fresh solves use `StreetBatchSolver` |
+| `explorer` | C++ local Study HTTP server; serves `desktop/dist` or `legacy/ui/`; fresh solves use `StreetBatchSolver`. Browser dev and the packaged HTTP fallback. |
+| `solver-engine` | Zig IPC sidecar (protocol 2). CFR+ only. Preferred packaged Study process. |
 
 ## Extensive-game interface
 

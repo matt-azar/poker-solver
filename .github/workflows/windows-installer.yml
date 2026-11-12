@@ -1,8 +1,10 @@
-# Windows NSIS installer for Hold'em Study (Tauri + explorer sidecar).
+# Windows NSIS installer for Hold'em Study (Tauri + two sidecars).
 #
 # Prerequisites (not owned by this workflow):
 # - desktop/package.json must define "tauri": "tauri" and depend on @tauri-apps/cli
-# - desktop/src-tauri must be configured for an externalBin sidecar named "holdem-explorer"
+# - desktop/src-tauri externalBin lists "holdem-explorer" and "solver-engine"
+# - The shell starts solver-engine first. holdem-explorer starts if that sidecar
+#   is missing or fails ready.
 # - No code signing is required or performed
 #
 # Artifact: holdem-study-windows-installer (NSIS *.exe under bundle/nsis)
@@ -116,9 +118,8 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
         run: cmake --build build --config Release --parallel --target explorer
 
-      # tauri.conf.json externalBin lists both holdem-explorer and solver-engine
-      # (Phase 6). Study still defaults to HTTP holdem-explorer; solver-engine is
-      # bundled dormant until cutover. Zig pin matches .github/workflows/zig.yml.
+      # tauri.conf.json externalBin lists both holdem-explorer and solver-engine.
+      # The shell starts solver-engine first. Zig pin matches .github/workflows/zig.yml.
       - name: Install Zig 0.14.1
         shell: pwsh
         env:
@@ -283,7 +284,9 @@ jobs:
             Unsigned Windows NSIS installer for Holdem Study.
 
             - Installs for the current user
-            - Starts the holdem-explorer engine sidecar and opens the Study UI
+            - Installs solver-engine.exe and holdem-explorer.exe
+            - Starts solver-engine (IPC protocol 2). Starts holdem-explorer if that sidecar is missing or fails ready
+            - Opens the Study UI
             - No CMake or npm required
             - Windows SmartScreen may warn because the binary is not code-signed — More info → Run anyway
             - WebView2 may install on first launch if missing

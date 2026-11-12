@@ -37,8 +37,9 @@
 ; and writes a short setup note next to the binaries.
 
 !define SIDECAR_EXE "holdem-explorer.exe"
-; Zig typed-IPC host (tauri.conf externalBin). Present in shipping and
-; Zig tech-preview installers; Study still defaults to holdem-explorer.
+; Zig typed-IPC host (tauri.conf externalBin). Present in this tree's installer
+; and in the labeled tech-preview installer. The shell starts this sidecar
+; first. holdem-explorer starts when it is missing or fails ready.
 !define ZIG_ENGINE_EXE "solver-engine.exe"
 ; Prefer Tauri's MAINBINARYNAME so Zig tech-preview productName renames work.
 !define APP_EXE "${MAINBINARYNAME}.exe"
@@ -122,10 +123,11 @@
 
   ; Tiny marker so support can confirm engine install ran.
   FileOpen $1 "$INSTDIR\engine-setup.txt" w
-  FileWrite $1 "Hold'em Study engine sidecar: ${SIDECAR_EXE}$\r$\n"
-  FileWrite $1 "Zig IPC host (dormant until cutover): ${ZIG_ENGINE_EXE}$\r$\n"
+  FileWrite $1 "Hold'em Study sidecars: ${SIDECAR_EXE} and ${ZIG_ENGINE_EXE}$\r$\n"
+  FileWrite $1 "The shell starts ${ZIG_ENGINE_EXE} (IPC protocol 2) first.$\r$\n"
+  FileWrite $1 "It starts ${SIDECAR_EXE} when ${ZIG_ENGINE_EXE} is missing or fails ready.$\r$\n"
   FileWrite $1 "Installed beside the UI in:$\r$\n$INSTDIR$\r$\n"
-  FileWrite $1 "Default Study still launches ${SIDECAR_EXE} on 127.0.0.1:8765.$\r$\n"
+  FileWrite $1 "Browser development uses explorer on 127.0.0.1:8765.$\r$\n"
   FileClose $1
   DetailPrint "Engine sidecars ready: $INSTDIR\${SIDECAR_EXE} + $INSTDIR\${ZIG_ENGINE_EXE}"
 !macroend

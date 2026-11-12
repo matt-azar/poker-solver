@@ -92,7 +92,7 @@ Exact catalogue match still preferred when a reliable pack exists.
 | Browser prototype credential | Optional `localStorage` key `holdem-study-openai-key`, or paste in the OpenAI provider UI |
 | Authenticated backend proxy | **Not built** — required for a distributed product so clients do not hold long-lived vendor keys |
 
-Credential lookup prefers Tauri storage when running inside the shell, then the browser prototype key. Solving remains local via `explorer`. Product UI requires an OpenAI key for the Study assistant (fake provider retained for tests only).
+Credential lookup prefers Tauri storage when running inside the shell, then the browser prototype key. Solving stays on the local engine. Browser development uses `explorer`. The packaged shell starts `solver-engine` first. Product UI requires an OpenAI key for the Study assistant (fake provider retained for tests only).
 
 External processing disclosure: the OpenAI path sends setup summaries, preference summaries, and catalogue **metadata** (ids, labels, stacks, pot type) — not full private range strings when identifiers suffice.
 

@@ -2,6 +2,8 @@
 
 Primary docs cover the **CFR+ postflop workflow** and the **Study UI**. Everything else lives under [`auxiliary/`](auxiliary/README.md).
 
+Two engines are in this tree. The C++ docs below describe `StreetBatchSolver`, `explorer`, and the CLIs. The Zig sidecar is `solver-engine` (IPC protocol 2, PSOL v4, CFR+). The packaged shell starts the Zig sidecar first and starts `holdem-explorer` when that sidecar is missing or fails ready. Procedure and limits: [`auxiliary/engineering/ZIG_RELEASE_GATES.md`](auxiliary/engineering/ZIG_RELEASE_GATES.md). Layout: [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## CFR+ workflow
 
 | Doc | Contents |
