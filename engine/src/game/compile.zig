@@ -659,7 +659,21 @@ fn buildPublicTree(allocator: std.mem.Allocator, game: *CompiledGame, spec: stre
     }
 }
 
-fn buildNode(
+fn appendTerminalNode(
+    allocator: std.mem.Allocator,
+    nodes: *std.ArrayList(Node),
+    state: betting.BetState,
+    path: []const u8,
+) CompileError!u32 {
+    var node = Node{ .kind = .terminal, .street = state.street, .folded = state.folded };
+    node.contrib = state.contrib;
+    node.path = allocator.dupe(u8, path) catch return error.OutOfMemory;
+    const id: u32 = @intCast(nodes.items.len);
+    nodes.append(node) catch return error.OutOfMemory;
+    return id;
+}
+
+fn appendChanceNode(
     allocator: std.mem.Allocator,
     spec: street_spec.StreetSpec,
     game: *CompiledGame,
@@ -670,71 +684,57 @@ fn buildNode(
     depth: i32,
     edit_statuses: []betting.EditApplyStatus,
 ) CompileError!u32 {
-    if (depth > 48) return error.InvalidCompile;
-    if (state.terminal) {
-        var node = Node{ .kind = .terminal, .street = state.street, .folded = state.folded };
-        node.contrib = state.contrib;
-        node.path = allocator.dupe(u8, path) catch return error.OutOfMemory;
-        const id: u32 = @intCast(nodes.items.len);
-        nodes.append(node) catch return error.OutOfMemory;
-        return id;
-    }
-    if (state.chance) {
-        var node = Node{
-            .kind = .chance,
-            .street = state.street,
-            .deal_which = state.deal_which,
-            .contrib = state.contrib,
-        };
-        node.path = allocator.dupe(u8, path) catch return error.OutOfMemory;
-        const id: u32 = @intCast(nodes.items.len);
-        nodes.append(node) catch return error.OutOfMemory;
-        var next = state;
-        next.chance = false;
-        next.deal_which = 0;
-        next.acting = spec.first_to_act;
-        next.pending_check = false;
-        next.last_raise = 0;
-        next.num_raises = 0;
-        next.committed = next.contrib[0];
-        const child = try buildNode(allocator, spec, game, nodes, decision_ids, next, path, depth, edit_statuses);
-        nodes.items[@intCast(id)].child[0] = child;
-        nodes.items[@intCast(child)].parent = @intCast(id);
-        nodes.items[@intCast(child)].parent_action = -1;
-        nodes.items[@intCast(child)].from_chance = true;
-        return id;
-    }
-
-    var legal = betting.legalActions(spec, state) catch return error.InvalidCompile;
-    const statuses_arg: ?[]betting.EditApplyStatus = if (edit_statuses.len != 0) edit_statuses else null;
-    betting.applyTreeEdits(&legal, spec, state, path, statuses_arg) catch return error.InvalidCompile;
-    const facing = state.committed > state.contrib[@intCast(state.acting)];
-
     var node = Node{
-        .kind = .decision,
-        .player = state.acting,
+        .kind = .chance,
         .street = state.street,
+        .deal_which = state.deal_which,
         .contrib = state.contrib,
-        .n_actions = @intCast(legal.count),
     };
     node.path = allocator.dupe(u8, path) catch return error.OutOfMemory;
+    const id: u32 = @intCast(nodes.items.len);
+    nodes.append(node) catch return error.OutOfMemory;
+    var next = state;
+    next.chance = false;
+    next.deal_which = 0;
+    next.acting = spec.first_to_act;
+    next.pending_check = false;
+    next.last_raise = 0;
+    next.num_raises = 0;
+    next.committed = next.contrib[0];
+    const child = try buildNode(allocator, spec, game, nodes, decision_ids, next, path, depth, edit_statuses);
+    nodes.items[@intCast(id)].child[0] = child;
+    nodes.items[@intCast(child)].parent = @intCast(id);
+    nodes.items[@intCast(child)].parent_action = -1;
+    nodes.items[@intCast(child)].from_chance = true;
+    return id;
+}
 
-    if (spec.board.len == 3) {
-        if (state.street == 0) {
+fn setDecisionCardMode(node: *Node, board_len: usize, street: i32) void {
+    if (board_len == 3) {
+        if (street == 0) {
             node.card_mode = 0;
-        } else if (state.street == 1) {
+        } else if (street == 1) {
             node.card_mode = 1;
             node.mode1_is_turn = true;
         } else {
             node.card_mode = 2;
         }
-    } else if (spec.board.len == 5) {
+    } else if (board_len == 5) {
         node.card_mode = 0;
     } else {
-        node.card_mode = if (state.street == 0) 0 else 1;
+        node.card_mode = if (street == 0) 0 else 1;
         node.mode1_is_turn = false;
     }
+}
 
+fn labelDecisionActions(
+    allocator: std.mem.Allocator,
+    node: *Node,
+    spec: street_spec.StreetSpec,
+    state: betting.BetState,
+    legal: betting.Legal,
+    facing: bool,
+) CompileError!void {
     var action: i32 = 0;
     while (action < legal.count) : (action += 1) {
         const street_total = state.contrib[@intCast(state.acting)] + legal.add[@intCast(action)];
@@ -750,12 +750,22 @@ fn buildNode(
         ) catch return error.InvalidCompile;
         node.action_labels[@intCast(action)] = allocator.dupe(u8, label) catch return error.OutOfMemory;
     }
+}
 
-    const id: u32 = @intCast(nodes.items.len);
-    nodes.append(node) catch return error.OutOfMemory;
-    decision_ids.append(id) catch return error.OutOfMemory;
-
-    action = 0;
+fn linkDecisionChildren(
+    allocator: std.mem.Allocator,
+    spec: street_spec.StreetSpec,
+    game: *CompiledGame,
+    nodes: *std.ArrayList(Node),
+    decision_ids: *std.ArrayList(u32),
+    state: betting.BetState,
+    path: []const u8,
+    depth: i32,
+    edit_statuses: []betting.EditApplyStatus,
+    id: u32,
+    legal: betting.Legal,
+) CompileError!void {
+    var action: i32 = 0;
     while (action < legal.count) : (action += 1) {
         const label = nodes.items[@intCast(id)].action_labels[@intCast(action)];
         var next_path_buf: [512]u8 = undefined;
@@ -781,6 +791,48 @@ fn buildNode(
         nodes.items[@intCast(child)].parent_action = action;
         nodes.items[@intCast(child)].from_chance = false;
     }
+}
+
+fn buildNode(
+    allocator: std.mem.Allocator,
+    spec: street_spec.StreetSpec,
+    game: *CompiledGame,
+    nodes: *std.ArrayList(Node),
+    decision_ids: *std.ArrayList(u32),
+    state: betting.BetState,
+    path: []const u8,
+    depth: i32,
+    edit_statuses: []betting.EditApplyStatus,
+) CompileError!u32 {
+    if (depth > 48) return error.InvalidCompile;
+    if (state.terminal) {
+        return appendTerminalNode(allocator, nodes, state, path);
+    }
+    if (state.chance) {
+        return appendChanceNode(allocator, spec, game, nodes, decision_ids, state, path, depth, edit_statuses);
+    }
+
+    var legal = betting.legalActions(spec, state) catch return error.InvalidCompile;
+    const statuses_arg: ?[]betting.EditApplyStatus = if (edit_statuses.len != 0) edit_statuses else null;
+    betting.applyTreeEdits(&legal, spec, state, path, statuses_arg) catch return error.InvalidCompile;
+    const facing = state.committed > state.contrib[@intCast(state.acting)];
+
+    var node = Node{
+        .kind = .decision,
+        .player = state.acting,
+        .street = state.street,
+        .contrib = state.contrib,
+        .n_actions = @intCast(legal.count),
+    };
+    node.path = allocator.dupe(u8, path) catch return error.OutOfMemory;
+    setDecisionCardMode(&node, spec.board.len, state.street);
+    try labelDecisionActions(allocator, &node, spec, state, legal, facing);
+
+    const id: u32 = @intCast(nodes.items.len);
+    nodes.append(node) catch return error.OutOfMemory;
+    decision_ids.append(id) catch return error.OutOfMemory;
+
+    try linkDecisionChildren(allocator, spec, game, nodes, decision_ids, state, path, depth, edit_statuses, id, legal);
     return id;
 }
 
