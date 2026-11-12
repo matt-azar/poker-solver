@@ -96,24 +96,28 @@ These do not replace the three reference cases.
 
 ## How to run
 
-Build only the two solver binaries in this worktree. From the worktree root:
+**Historical (pre-#287):** this harness drove C++ `street_solver` / `river_solver`
+via CMake `build/Release`. That tree is removed on `zig-rewrite`. Do not treat
+the cmake commands as a live product how-to.
+
+**Current Zig Study contract smoke** (real sidecar, no Acc wall):
 
 ```text
-cmake -S . -B build
-cmake --build build --config Release --target river_solver --target street_solver
+zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2
+python3 scripts/zig/study-contract-smoke.py ./zig-out/bin/solver-engine
 ```
 
-On a single-config generator, omit `--config Release` and pass the directory that contains the binaries.
+Optional bounded digs: `scripts/zig/run-gate-bounded.sh`, `node-ev-latency.py`
+(see [ZIG_RELEASE_GATES.md](../../docs/auxiliary/engineering/ZIG_RELEASE_GATES.md)).
+Acc / time-to-Accuracy walls are not cutover blockers.
 
-Smoke the taxonomy:
+Fixture configs under `configs/` (including `river_gate_smoke.txt`) remain useful
+inputs for Zig smokes. The Python study-benchmark runner below is **retired as a
+shipping how-to** until retargeted at Zig binaries; kept for archaeology:
 
 ```text
+# historical only — requires deleted C++ binaries
 python benchmarks/run_study_benchmarks.py --bin-dir build/Release --cases smoke_success,smoke_invalid,smoke_timeout,smoke_resource --output-dir benchmarks/study/out/smoke --timing-label contended
-```
-
-Reference cases, sequentially, with the iteration caps and walls stored in the fixtures:
-
-```text
 python benchmarks/run_study_benchmarks.py --bin-dir build/Release --cases reference --output-dir benchmarks/study/out/reference --timing-label quiet
 ```
 

@@ -84,7 +84,7 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 | Continue re-begins config | Continue broken after pause | `continueSolve` = host `solve` on the **open** session (no `begin_config`); mint a fresh job id (#292) |
 | Study `stop` ≠ host cancel | Stop leaves jobs running | Map Study stop → host job **cancel** (#284) |
 | Fake node equity | Equity looks like root on every node | Study node equity must **replay reach weights** (own actions × card removal) then check-down on the node board (#293). Calculator jobs (`start_equity_job`…) are a **different** IPC surface (#297). |
-| Starting-board equity gate | Desktop 501 on non-root equity | Drop non-root 501 once reach-aware host equity exists; don't ship `node_equity_unsupported` forever (#291→#293) |
+| Starting-board equity gate (fixed) | Historical desktop 501 / `node_equity_unsupported` on non-root equity | Reach-aware host equity shipped (#291→#293); do not reintroduce the 501 gate |
 | Tree-edit path tokens | Soft-unapplied edits / wrong AddSize | Match compact↔display labels (Bet/Raise/all-in); Apply AddSize with pot-cap / all-in / min-raise rules; report unapplied edits (#296) |
 | `parseConfig` over host | Library Apply template 501 | Street-config parse may stay **local TS** (no host op, no session mutation) (#294) |
 
@@ -104,39 +104,36 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 
 ### One production postflop engine (M6)
 
-A flop, turn, and river are **one** betting tree with two, one, or zero cards left. Production paths share `StreetBatchSolver`:
+A flop, turn, and river are **one** betting tree with two, one, or zero cards left. On `zig-rewrite`, production Study uses the Zig Session frozen public-tree path for all three board lengths.
 
-| Board | Production path | Reference enumerator |
+| Board | Current product path | Historical C++ reference |
 | --- | --- | --- |
-| 3, 4, or 5 cards | `StreetBatchSolver` | `StreetGame` + `CfrTrainer` (`--reference`) |
+| 3, 4, or 5 cards | Zig Session / `solver-engine` IPC | `StreetBatchSolver` vs `StreetGame` + `CfrTrainer` (`--reference`) |
 
-`river_solver` is a thin CLI that maps river JSON/flags into five-card `StreetConfig` and solves on that path. `RiverGame` remains the five-card oracle forever; `RiverBatchSolver` remains for internal oracle and legacy fixtures only.
-
-**Do:** Keep `RiverGame` as the five-card oracle forever. Keep five-card StreetBatch pins against `RiverGame`.  
-**Don't:** Reintroduce `RiverBatchSolver` as the product `river_solver` path. Don't delete `RiverGame` or RiverBatch oracle tests.  
-**Pointers:** `docs/ARCHITECTURE.md`, `docs/auxiliary/planning/ROADMAP.md` M6, `include/game/street_game.hpp`, `src/cli/river_main.cpp`.
+**Do:** Keep five-card rematch/oracle pins in `zig build test`.  
+**Don't:** Reintroduce C++ `RiverBatchSolver` / `holdem-explorer` as a shipping path.  
+**Pointers:** `docs/ARCHITECTURE.md`, `docs/auxiliary/planning/ROADMAP.md` M6, `engine/`.
 
 ### `*Game` vs `*Batch`
 
-- `RiverGame` / `StreetGame` — full deal enumeration; oracle for strategy, values, best response.
-- `StreetBatchSolver` — one public betting tree; production default for flop/turn/river.
-- `RiverBatchSolver` — public-tree river helper for oracle/legacy fixtures only (not the product CLI path).
+- Zig Session / frozen public-tree CFR — **current** production default for flop/turn/river Study.
+- Historical C++: `RiverGame` / `StreetGame` (deal enumeration oracle), `StreetBatchSolver` (public tree), `RiverBatchSolver` (oracle/legacy only).
 
-**Do:** Pin batch changes against `--reference` / `CfrTrainer<*Game>` on small fixtures.  
-**Don't:** “Optimize” by changing only the batch kernel without an oracle gate.
+**Do:** Pin public-tree changes against rematch/oracle fixtures (`zig build test`) before scaling.  
+**Don't:** “Optimize” by changing only the batch/frozen kernel without an oracle gate.
 
-### `include/` must not depend on UI trees
+### Archive: `include/` must not depend on UI trees (pre-#287)
 
-Engine and session types live under `include/game`, `include/solver`, `include/explorer`, `include/poker`. HTTP and static files are `src/cli/explorer_main.cpp` + `src/explorer/` (serves `desktop/dist` or `legacy/ui/`).
+Historical C++ layout: engine/session under `include/game|solver|explorer|poker`; HTTP in `src/cli/explorer_main.cpp` + `src/explorer/`. That tree is removed. Zig keeps engine code under `engine/` / `host/` with no desktop imports.
 
-**Don't:** `#include` anything from `legacy/ui/` or `desktop/` in `include/`.
+**Don't:** reintroduce a C++ `include/` product tree or couple engine modules to `desktop/`.
 
 ### Utility sign and player index
 
 - River/street: **player 0 = OOP**, terminal utility is **P0 net chips** (root-centered); IP is the negation under chip zero-sum.
 
 **Do:** Treat reported solver EV as OOP/`u0` unless a dual-payoff API says otherwise.  
-**Pointers:** `docs/RIVER.md`, `docs/MATHEMATICS.md`, `include/solver/trainer.hpp`.
+**Pointers:** `docs/RIVER.md`, `docs/MATHEMATICS.md`, Zig Session / CFR modules under `engine/`.
 
 ### Frozen pass, threads, CFR+ floor
 
@@ -147,25 +144,23 @@ Engine and session types live under `include/game`, `include/solver`, `include/e
 - PCFR+: same alternating schedule and CFR+ floor / linear own-reach average; match on \(R+m\) with \(m=\) last instantaneous CF regret (cold-start zeros \(m\); PSOL v3 may restore \(m\), v1/v2 reload zeros \(m\)).
 - DCFR: same alternating frozen passes; after each pass **discount** the updating player's full regret row (signed; no CFR+ floor) with `t^α/(t^α+1)` on positives and `t^β/(t^β+1)` on non-positives; average with `t^γ` own-reach (defaults α=1.5, β=0, γ=2). PSOL v3 stores the actual params used. Reject DCFR and PCFR+ on the non-frozen walk and on legacy `RiverBatchSolver`.
 
-**Pointers:** `docs/STREETS.md` (frozen threads), `src/solver/postflop/algorithms/cfr_plus.hpp` (CFR+ schedule), `src/solver/postflop/schedules.cpp` (`train_frozen` dispatch), commits `9e0d87d`, `6a597df`, `e2ad8df`.
+**Pointers:** `docs/STREETS.md` (frozen threads), Zig frozen CFR under `engine/`, historical commits `9e0d87d`, `6a597df`, `e2ad8df`.
 
 ### Session / publication lifecycle
 
 - Build completed status **before** marking a solution queryable (a throw must not leave a half-published browseable solve).
 - Stop before any completed iteration publishes **nothing**.
-- Stop-and-keep / continue keep solution identity; join the value worker on shutdown before destroying the session.
+- Stop-and-keep / continue keep solution identity; join analysis workers on shutdown before destroying the session.
 
-**Pointers:** commits `8ab3503`, `27236ac`, `40e81d6`, `docs/EXPLORER.md`, ROADMAP M0/M4.
+**Pointers:** ROADMAP M0/M4; Zig host job lifecycle; historical commits `8ab3503`, `27236ac`, `40e81d6`.
 
-### Explorer HTTP is single-threaded (open/save vs status)
+### Archive: Explorer HTTP single-threaded open/save (pre-#287)
 
-The explorer accept loop handles **one client at a time** (`accept` → `handle_client` → close). `POST /api/open` and solution save are **overlay jobs** on `g_app.worker` (HTTP **202** + `/api/status` progress with additive `file_op`). They must not block the accept thread the way a sync checkpoint read/write used to. Status polls every 250ms with a 4s abort timeout.
+The retired C++ explorer accept loop handled **one client at a time**. Open/save were overlay jobs (HTTP **202** + `/api/status` `file_op`). That HTTP surface is gone.
 
-**Do:** Keep Study status polling running across Open/Save; let `engineClient.open/save` wait on status until `running` clears. Treat `stopPolling` aborts as shutdown cancel, not unreachable. Never surface raw AbortError text in the status bar. Failed Open must leave the prior `solution_id` intact (`finish_file_job`, not `begin()`).
+**Still true on Zig IPC Study:** Keep status polling across Open/Save; let `engineClient.open/save` wait until `running` clears. Treat `stopPolling` aborts as shutdown cancel, not unreachable. Never surface raw AbortError text in the status bar. Failed Open must leave the prior `solution_id` intact.
 
-**Don't:** Stop status polling for Open/Save, or treat a timeout abort during a file job as a dead engine. A failed Open must not call `begin()`.
-
-**Pointers:** `src/explorer/server_run.cpp`, `desktop/src/state/studyStore.ts` (`openSolution` / `saveSolution`), `desktop/src/domain/requestScope.ts`.
+**Pointers:** `desktop/src/state/studyStore.ts` (`openSolution` / `saveSolution`), `desktop/src/domain/requestScope.ts`.
 
 ### Study analysis scheduling (EV / equity / runouts)
 
@@ -240,16 +235,16 @@ Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fract
 
 **Don't:** Invent JSON street configs or put iteration caps inside `street-config 1`.
 
-### Explorer JSON bet arrays
+### Study / street-config bet arrays
 
-- **Absent** `oop_bets` / `ip_bets` → defaults `{0.5, 1}`.
+- **Absent** bet lists → defaults `{0.5, 1}` (same empty≠absent rule as historical explorer Job JSON).
 - **Present empty array** → check-only.
-- Raise lists are separate from bets: absent `oop_raises` / `ip_raises` copies bets when multiples are also empty; present empty stays empty. The engine does not copy bets into an empty C++ raise vector. Study copies a blank raise box into that street's raise list before sending.
+- Raise lists are separate from bets: absent raises copy bets when multiples are also empty; present empty stays empty. The engine does not copy bets into an empty raise list. Study copies a blank raise box into that street's raise list before sending.
 - A zero-length per-street list still falls back to the shared list. A one-element explicit-empty sentinel (`-`, stored as `-4e9`) does not. `e` / `2e` / `3e` / `a` / `Nx` stay sentinels until the decision node. Study Build blank bet = check-only; on import, empty street lists are resolved into shared sizes so rebuild keeps the same tree.
 - `max_raises` counts facing raises only (opening street bets do not consume the cap). All-in is added only when that situation already lists a size, or the token `a` put one there. There is no `geometric` config/CLI/job flag — list `e` / `a` per street.
 - **Build donk UI:** Turn/River donk size fields only — there is no Flop donk control (#195). AI context packs CI-reject stale “Flop donk” claims.
 
-**Don't:** “Normalize” empty arrays back to defaults (`docs/EXPLORER.md`).
+**Don't:** “Normalize” empty arrays back to defaults (historical note: [EXPLORER.md](../../EXPLORER.md)).
 
 ### Betting-tree files vs spot drafts
 
@@ -270,16 +265,13 @@ Matrix, Hands, Node Locking, and the Actions mix bar paint **passive → aggress
 - Bounded Study evidence tools (`query_node_strategy`, `list_bluff_candidates`, `query_selected_hand_analysis`) read the **current** Study decision only; they may peek ≤2 hops for a path hint and wait on the analysis scheduler, but must **not** start solves, open filesystem/HTTP beyond the engine client, or **navigate the Study tree**. Prefer honest absences over invented mixes (#197).
 - Unified chat: help/how-to stays on `answer_user` + evidence tools; poker terms (3BP, 100NL) alone never force setup. Assemble `unified.md` once (no re-injecting help+setup wholes). Serialize evidence by trimming rows **before** JSON so tool results stay valid.
 - `contextSnapshot` v2 carries published-solution identity, node path/seat/board, strategy, selected-hand analysis, and readiness — including equity + NashConv/Accuracy gaps. Published/node boards must **not** fall back to the Build draft board.
-- Build Preview and Solve must share one `buildJob` serializer with `/api/tree-preview` (#192).
+- Build Preview and Solve must share one `buildJob` serializer with host `tree_preview` (#192).
 
 **Pointers:** `docs/ai-context/README.md`, `docs/STUDY_SETUP_ASSISTANT.md`.
 
-### CMake and tests
+### Archive: CMake and tests (pre-#287)
 
-- Prefer explicit targets (`street_solver`, `river_solver`, `explorer`, `poker_engine_tests`, `poker_study_tests`, `poker_http_tests`). `poker_solver_tests` is a CMake target that builds those three test binaries. It is not an executable. Run the binaries or `ctest`.
-- Full bare `cmake --build` also builds long optional benches that are **not** CTest.
-- MSVC tests need a larger stack (`/STACK:8388608` in CMake).
-- On Linux cloud images, prefer `CXX=g++` if `clang++` lacks libstdc++.
+Historical C++ targets (`street_solver`, `river_solver`, `explorer`, `poker_*_tests`) and `ctest` are removed. **Current product testing:** `zig build test`, `scripts/zig/study-contract-smoke.py`, `cd desktop && npm test` / `npx tsc -b` — see [TESTING.md](TESTING.md).
 
 ### Platform gaps
 
@@ -329,7 +321,7 @@ When blocker subtraction cancels the live compatible mass, **sum compatible oppo
 
 ### Chance
 
-Next public cards are **pair-conditional** (remaining deck given both holes + board). At zero joint reach, chance card weights are null. Chance probabilities stay independent of thread count. Action EV is not defined on chance nodes (HTTP 400).
+Next public cards are **pair-conditional** (remaining deck given both holes + board). At zero joint reach, chance card weights are null. Chance probabilities stay independent of thread count. Action EV is not defined on chance nodes (host rejects; historical explorer returned HTTP 400).
 
 ### Conditional action EV
 
@@ -362,18 +354,18 @@ Made-hand **categories** (when present) are category mass on a **five-card** boa
 | Study equity ceiling ~51.4e6 | packaged Study `--max-pair-runouts` | Dense flop check-down can still exceed; raise explicitly |
 | Public tree depth / history caps | street index | Pathological trees |
 
-### Labels and HTTP ids
+### Labels and node ids
 
 - Infosets: `OOP AhAd | <place> | <path>` (five-card street labels may omit place to match river — follow the branch you are on).
-- Actions: `Check`, `Call`, `Bet N`, `Raise to N`, all-in variants via `chip_label`.
-- Node ids: `p0.t-1.r-1` style; leading zeros OK; overflow/junk → 400; wrong solution → 404.
+- Actions: `Check`, `Call`, `Bet N`, `Raise to N`, all-in variants via chip labels.
+- Node ids: `p0.t-1.r-1` style; leading zeros OK; overflow/junk / wrong solution → host error reply (historical explorer used HTTP 400/404 — do not cite those as live coverage).
 - Solution/job tokens: `sN` / `jN`, whole-token parse.
 
 ### Betting semantics (street)
 
-Sizes are pot fractions unless negative / `Nc` chip form, or a Pio sentinel (`e`, `Ne`, `a`, `Nx`, `-`). Street-specific lists replace shared lists on that street. Empty raise list with non-empty raise-multiples does not fall back to bet sizes. Geometric = equal pot fractions over streets left at that node (river = all-in fraction). `2e` is two equal bets from the current pot and stack, not twice the root fraction — TS encoding matches `size_spec.hpp`; do not revive helpers that multiply the geometric fraction or a global geometric flag. Donk sizes only after IP aggression previous street; explicit-empty donk checks. `--no-three-bet` removes the re-raise. All-in threshold snaps large commitments to all-in when allowed. Blank list does not invent an all-in; list `a` explicitly.
+Sizes are pot fractions unless negative / `Nc` chip form, or a Pio sentinel (`e`, `Ne`, `a`, `Nx`, `-`). Street-specific lists replace shared lists on that street. Empty raise list with non-empty raise-multiples does not fall back to bet sizes. Geometric = equal pot fractions over streets left at that node (river = all-in fraction). `2e` is two equal bets from the current pot and stack, not twice the root fraction — TS encoding must match the engine size rules; do not revive helpers that multiply the geometric fraction or a global geometric flag. Donk sizes only after IP aggression previous street; explicit-empty donk checks. `--no-three-bet` removes the re-raise. All-in threshold snaps large commitments to all-in when allowed. Blank list does not invent an all-in; list `a` explicitly.
 
-**Pointers:** `docs/STREETS.md`, `StreetConfig` comments in `street_config.hpp`.
+**Pointers:** `docs/STREETS.md`, Zig `street_config` under `engine/`.
 
 ### Five-card / river join specifics
 
@@ -393,12 +385,12 @@ Release A emphasis: M0→M5 plus **core M6**. Most `FEATURE_PARITY.md` rows are 
 | Conditional action EV “done” | M1 gate: profile epoch, tiny compatible mass, value-worker shutdown |
 | M2 study screen “done” | Categories/draws/composition/undo still thin even if one slice lands |
 | M5 saves “done” | PSOL exists; compact/lazy/multi-file library does not |
-| M6 “done” | Five-card StreetBatch pins against `RiverGame` **and** `river_solver` on StreetBatch (not RiverBatch product path) |
-| M8 rake/ICM | Needs dual-player payoff first; chip path is still player-0 scalar + negation |
-| “As fast as Pio” | Forbidden without matched protocol (`docs/auxiliary/planning/ROADMAP.md` §6) |
+| M6 “done” | Zig Session five-card pins + study corpus; Pio timing/quality unproven |
+| M8 rake/ICM | Pot-rake on Zig path; **ICM Study solves reject until ZR-93** (low priority) |
+| “As fast as Pio” | Forbidden without matched protocol (`docs/auxiliary/planning/ROADMAP.md` §6); Acc walls ≠ cutover gates |
 
 **Do:** Update ledger rows only with the demonstrating commit.  
-**Don't:** Mark milestones complete from a single happy-path HTTP smoke.
+**Don't:** Mark milestones complete from a single happy-path smoke (IPC contract or otherwise). Do not cite deleted C++ HTTP suites as coverage.
 
 Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, zero-own-reach counterfactuals, own-reach averaging, pass-level updates, utility signs, immutable published analysis. Faster code that breaks these fails the project contract.
 
@@ -406,11 +398,11 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 
 ## 6. What worked (keep doing)
 
-- Oracle pins: batch vs `CfrTrainer<*Game>` on tiny fixtures before scaling.
-- Flush solver phase lines so interrupted study runs still show construction/cache/last eval (`381c9a5`).
+- Oracle / rematch pins on tiny fixtures before scaling (`zig build test`).
+- Flush solver phase lines so interrupted study runs still show construction/cache/last eval.
 - Explicit units in UI/API (`chips` / `root_centered` vs `fraction of the pot` / Equity).
 - Parent-integrated parallel tracks with disjoint paths and immediate PR open after push.
-- `zig build test` + desktop vitest/`tsc -b` locally before push; watch for unexpected SKIP / 501 stubs.
+- `zig build test` + `scripts/zig/study-contract-smoke.py` + desktop vitest/`tsc -b` locally before push; watch for unexpected SKIP / soft-gated IPC stubs.
 - After Study client/analysis changes: desktop vitest **and** `npx tsc -b`; after assistant/UI label moves: `npm run check:ai-context`.
 - Pin numerical rematch parity for EV/BR/Acc-stop; treat wall-clock scoreboard asserts as soft.
 - Restack parallel Zig IPC slices onto tip carefully; keep `dispatch.zig` / `client.ts` append-friendly.

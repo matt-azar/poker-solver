@@ -1,6 +1,10 @@
 # Check-down showdown equity
 
-Exact check-down showdown equity for a flop, turn, or river. Library, `equity_calculator`, and `equity_tests`. Explorer calls it with strategy-conditioned reaching weights. Does not edit ranges, build a betting tree, or read solver state. Default work limit admits a full-range river and rejects a full-range turn. Not a Pio equity-parity claim.
+Exact check-down showdown equity for a flop, turn, or river.
+
+**Shipping on `zig-rewrite`:** Study node equity and the Equity Calculator use Zig host IPC (`equity`, `start_equity_job` / `get_equity_job` / `cancel_equity_job`). C++ `equity_calculator` / `equity_tests` / Explorer `/equity` names below are **historical** — algorithm notes still apply. Not a Pio equity-parity claim.
+
+Does not edit ranges, build a betting tree, or read solver state beyond the requested weights/board. Default work limit admits a full-range river and rejects a full-range turn.
 
 ## Model
 
@@ -24,7 +28,9 @@ Positive-weight combos are returned in ascending combo index, including board-bl
 
 Invalid boards, invalid range syntax, nonfinite or negative weights, cancellation, an exceeded work limit, and a finite input whose derived mass is not a finite double are different errors (`EquityFailure`). A structurally empty legal joint is success. An underflowed or overflowed product is not.
 
-## API
+## API (historical C++ shape)
+
+The Zig engine exposes equivalent check-down equity over typed IPC / engine modules. The C++ sketch below is retained so older rematch notes stay readable:
 
 ```cpp
 poker::holdem::ShowdownEquityOptions options;
@@ -101,7 +107,9 @@ The oracle in `tests/equity/test_equity.cpp` stores each pair's runout results, 
 
 ## Tests
 
-`equity_tests` is its own executable and CTest target. It does not use the shared harness. Directory `build-review`, MSVC 19.40.33811.0, Visual Studio 17 2022, Release. Direct total after rejecting an all-subnormal joint: `equity_tests` `passed=845 failed=0`.
+**Current:** Zig equity rematch / engine tests via `zig build test`; Study node equity + calculator via host IPC contract smoke and desktop Vitest. See [TESTING.md](auxiliary/engineering/TESTING.md).
+
+**Historical (pre-#287 C++):** `equity_tests` was its own CTest target. Directory `build-review`, MSVC 19.40.33811.0, Visual Studio 17 2022, Release. Direct total after rejecting an all-subnormal joint: `equity_tests` `passed=845 failed=0`. The paragraphs below are archaeology from that suite — not current CI coverage.
 
 The same Release `equity_calculator` reproduces the two review inputs on `Kh Kd 7c 4s 2h`. `AhAd:1e-200` against `2c3d:1e-200` exits 0 with `joint_defined` true, OOP equity 1, IP equity 0, and both marginals 1. Input weights and compatible masses stay at the parsed `1e-200` value (`9.9999999999999998e-201`). Before the correction this request exited 0 with `legal_pairs` 1, `joint_defined` false, null overall equities, and an `AhAd` marginal of 0. `AhAd` against `2c3d:1e308,5c6d:1e308,8c9d:1e308` now exits 5 with `equity numerical range exceeded: compatible mass is not representable` and no JSON. Before the correction it exited 0 with `legal_pairs` 3 and `joint_defined` false. `AhAd` against `AhAc` on that river still exits 0 with `legal_pairs` 0 and `joint_defined` false.
 
@@ -111,9 +119,9 @@ Coverage includes river certainty, a royal-flush tie, 990 and 44 completions, bl
 
 One earlier direct development-suite run, before this correction, reported `passed=438629 failed=1` at `test_value_worker.cpp:149` (`reader_count() == 0` immediately after resubmitting node A). Resubmitting A is a new request on the current solution, so the worker may borrow before that assertion. An isolated rerun was clean and is not the fix. Equity code does not call that worker, and this commit does not change that test.
 
-## Explorer / study use
+## Study use
 
-Explorer Study node `/equity` uses `StreetBatchSolver::checkdown_equity`: typed strategy-conditioned reaching weights plus the solver's cached showdown rank tables and blocker/prefix masses. On a flop it averages one representative per unordered board completion; on a turn or river it uses the node's board. The result is the same check-down fraction as `showdown_equity` on those reaches. The standalone pair enumerator remains the Equity Calculator / CLI path and keeps `kDefaultMaxPairRunouts`. The JSON keeps the ten-bucket histogram and compact `oop_hands` / `ip_hands` rows (`combo`, check-down `equity`, raw `weight`) so the desktop Study Equity tab can filter histogram bands and plot an OOP vs IP equity distribution chart. Zero-weight and undefined combos remain omitted from those rows. Ledger status: [FEATURE_PARITY.md](auxiliary/planning/FEATURE_PARITY.md).
+Study node equity uses host IPC `equity` with **reach-weighted** strategy-conditioned masses at the selected node (own actions × card removal), plus showdown rank tables. On a flop it averages one representative per unordered board completion; on a turn or river it uses the node's board. The result is the same check-down fraction as the standalone enumerator on those reaches. The Equity Calculator remains a separate IPC job surface and keeps the pair-runout work limit. The payload keeps the ten-bucket histogram and compact `oop_hands` / `ip_hands` rows (`combo`, check-down `equity`, raw `weight`) so the desktop Study Equity tab can filter histogram bands and plot an OOP vs IP equity distribution chart. Zero-weight and undefined combos remain omitted from those rows. Ledger status: [FEATURE_PARITY.md](auxiliary/planning/FEATURE_PARITY.md).
 
 ## Standalone Equity calculator
 

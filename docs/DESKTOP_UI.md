@@ -28,44 +28,45 @@ Browser-only `npm run dev` does not start an engine.
 
 ## Capability map
 
-| Backend operation | Endpoint | Legacy UI (`legacy/ui/`) | New Study UI destination | Limitations | Tests |
-| --- | --- | --- | --- | --- | --- |
-| Status | `GET /api/status` | Poll 250ms | Status bar + solve strip (`gap_series` retained in payload) | Metrics null when unset; Iter n/x every iteration; EV/gap at least every 10 iters | `status.test.ts`; `test_explorer_http.cpp`, `test_session.cpp` |
-| Solve | `POST /api/solve` | Setup form | Build workspace + Solve | 409 if running; empty≠absent bets | HTTP + session |
-| Pause / Stop | `POST /api/pause`, `/stop` | Buttons | Solve controls | Chunk boundary before publish | session; HTTP stop |
-| Continue | `POST …/continue` | Continue | Solve controls | Same solution id | HTTP |
-| Browse node | `GET …/nodes/{id}` | Tree + matrix | Action history + matrix + combo inspector | One node at a time; root from `root_node_id` | browse + HTTP |
-| Action EV | `GET …/values` | Calculate EVs | Inspector / Analysis | Decision only; may 202 | value worker |
-| Runouts | `GET …/runouts` | — | Engine endpoint remains; Study has no Runouts tab | Chance / street only | engine; sparse HTTP |
-| Next-card picker | chance `cards[]` (+ legacy `children`) | Card grid | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout (400/404 → child id); flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
-| Equity (node) | `GET …/equity` | Averages + hist | Study Equity tab: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); buckets + `oop_hands`/`ip_hands` | equity tests; `analysis.test.ts` |
-| Equity calculator | `POST/GET /api/equity/jobs…` | — | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | `equity_calculator_tests`; desktop Equity UI |
-| Value / Bluffs | Client join of node `strategy` + `/equity` (node or Call-child) + `/values` for EV | — | Study **Value / Bluffs** tab: betting hands with equity vs user threshold (default 30%; toggle exclusive &lt; bluffs / &gt; value), bet freq ≥ 1% (settings), reach ≥ 0.005 (settings), sortable columns Hand / Bet % / EV / Eq / Reach / Size; gear settings menu; row selects matrix cell; **At this node** / **After call** toggle | After call = `/equity` on Call child of each hand’s max-prob bet/raise; EV is mixed chip EV via existing `/values` (`comboEv`, Study local/global basis); Reach is node reach mass (2 decimals); bare All-in counts; no new explorer API | `valueBluffs.test.ts` |
-| Categories | `GET …/categories` | Table | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | hand categories; `analysis.test.ts` |
-| Locks | PUT/DELETE `…/locks` (`scope` node\|line) | Hand detail | Dedicated Node Locking workspace (Tree → Node locking…): strategy-colored 13×13 paint grid, frequency sliders, Lock selected (this board) + Lock line across runouts, overall/selected bars, Save & Close; Hands panel is read-only | Default scope is this board; line lock is explicit; all-zero PUT rejected; 0%≠unlock | HTTP + `locks.test.ts` |
-| Strategy edits | PUT/DELETE `…/strategy-edits` | Hand detail | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | HTTP + `strategyEdits.test.ts` |
-| Resolve locked | `POST …/resolve-locked` | Resolve + warm-start | Solver menu + drawer | New solution + baseline | HTTP |
-| Compare | `GET /api/compare` | Note | Compare workspace | Decision node | HTTP |
-| Save / Open | `POST …/save`, `/open` | File fields | File menu / Build | PSOL v2 + locks; browser path fields | checkpoint HTTP |
-| Recent | `GET /api/recent-solutions` | Dropdown | Library + File menu | Cap 10 | recent_files |
-| Templates / ranges | `GET /api/templates`, `/ranges` | Dropdowns | Library (ranges grouped by folder). Build Catalogue uses Vite-bundled seat×action packs (`configs/range-profiles`), not these APIs | Nested `configs/ranges` folders; flat `configs/templates`; packaged Study stages both via Tauri `bundle.resources` and sets `POKER_SOLVER_TEMPLATES` / `POKER_SOLVER_RANGES` on the sidecar | templates/range lib; `check:library-assets` |
-| Config parse | `POST /api/config` | Load config | Build | street/river text only; street echoes `tree_edits` | indirect |
-| Memory plan dry-run | `POST /api/plan-memory` (also nested `plan` on tree-preview) | Build Preview tree | Collapsible Build preflight shows labeled peak vs budget | Labeled `estimated_peak_bytes`; not RSS | explorer HTTP + TreeLineEditor |
-| Tree preview / line edits | `POST /api/tree-preview` | Build Preview tree | Mounted collapsible Preview tree; Force/Remove/Add size → draft `tree_edits`; same `buildJob` serializer as Solve | Canonical labels; stale preview clears on draft change; failed preview leaves Study solution | explorer HTTP + tree_edit |
-| Betting tree Save / Open | Client JSON (`holdem-study-betting-tree` v1) in localStorage | — | Build → Betting tree: Save tree / Open tree opens a one-level in-app catalogue (save / open / rename / delete; no OS file dialog) | Sizes, caps, `tree_edits` only; leaves board/ranges/stop alone; flat list (no folders) | `bettingTreeCatalogue` + `BettingTreeCatalogue` |
-| Compare runouts | Client `getNode` + rewrite | Study dock tab + context-strip button (right side, beside Save / Open) | Same betting line across turn/river cards; line uses the study path abbreviation (`x/b20/c - x`); suit symbols; EV/equity cells use a red-to-green fill; seat labeled OOP or IP | Desktop orchestration; no dedicated explorer report endpoint yet | `lineCardReport` + LowerDock |
-| Create Build spot from here | Client draft from node + `GET …/config` | Context strip | Street-start turn/river OOP decision → Build draft (raw reaches, pot, effective stack); donk baked into starting bets; root actions checked via tree-preview | Midstreet (facing bet / contrib) not supported; asymmetric stacks use `min` | `build/transferFromStudy` |
-| Study assistant (AI) | Client-side unified chat: help answers + setup interpret → catalogue / generate / interpolate → `SpotDraft`; bounded Study evidence tools (node strategy / bluffs / selected hand) via analysis scheduler | — | Floating Study assistant (menu bar **Assistant** toggle) | OpenAI credentials required in product UI; fake provider retained for tests only; tools (`answer_user` / `emit_study_setup_proposal` / `query_node_strategy` / `list_bluff_candidates` / `query_selected_hand_analysis`); context packs in `docs/ai-context/` (generated from `docs/ai-context/source/`, CI `check:ai-context`); no autonomous solve / filesystem; pot type required; silent rake → cEV, silent stack → 100bb; auto-write with conflict Apply | `src/domain/{setup,profiles,assistant}` (help clients under `assistant/help/`), `features/assistant/StudyAssistantWindow`, credentials — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md), [ai-context](ai-context/README.md) |
+IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/transport.ts`). Retired C++ HTTP `/api/*` paths are historical only ([EXPLORER.md](EXPLORER.md)). Soft-gated features: `desktop/src/engine/ipcCapabilities.ts`.
+
+| Backend operation | IPC op(s) | Study UI destination | Limitations | Tests |
+| --- | --- | --- | --- | --- |
+| Status | `status` | Status bar + solve strip (`gap_series` retained in payload) | Metrics null when unset; Iter n/x every iteration; EV/gap at least every 10 iters | `status.test.ts`; contract smoke |
+| Solve | `begin_config` + `solve` | Build workspace + Solve | Reject if already running; empty≠absent bets; short-admit `{accepted,running}` | `client.test.ts`; contract smoke |
+| Pause / Stop | `pause`, `cancel` | Solve controls | Chunk boundary before publish; Study stop → host cancel | client + store lifecycle tests |
+| Continue | `solve` on open session (no `begin_config`) | Solve controls | Same solution id; browse-only checkpoints disable Continue | store lifecycle; ZR-115 |
+| Browse node | `node` | Action history + matrix + combo inspector | One node at a time; root from `root_node_id` | browse vitest; contract smoke |
+| Action EV | `values` | Inspector / Analysis | Decision only; mid-train demux by `request_id` | analysis vitest; node-EV scripts |
+| Runouts | *(soft-gated)* | Study has no Runouts tab | Host `runouts` not enabled in `ipcCapabilities` | — |
+| Next-card picker | chance `cards[]` on `node` | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout; flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
+| Equity (node) | `equity` | Study Equity tab: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); reach-weighted at selected node; buckets + `oop_hands`/`ip_hands` | analysis vitest; contract smoke |
+| Equity calculator | `start_equity_job` / `get_equity_job` / `cancel_equity_job` | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | desktop Equity UI tests; `scripts/zig/equity-smoke.py` |
+| Value / Bluffs | Client join of node `strategy` + `equity` + `values` | Study **Value / Bluffs** tab | After call = equity on Call child of each hand’s max-prob bet/raise; EV via `values` (`comboEv`); Reach is node reach mass | `valueBluffs.test.ts` |
+| Categories | `categories` | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | analysis vitest (ZR-103) |
+| Locks | `list_locks` / `put_lock` / `delete_lock` (`scope` node\|line) | Node Locking workspace (Tree → Node locking…) | Default scope is this board; line lock is explicit; all-zero PUT rejected; 0%≠unlock | `locks.test.ts` |
+| Strategy edits | `list_strategy_edits` / `put_strategy_edit` / `delete_strategy_edit` | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | `strategyEdits.test.ts` (ZR-101) |
+| Resolve locked | `resolve_locked` | Solver menu + drawer | New solution + baseline | client IPC tests (ZR-100) |
+| Compare | *(soft-gated)* | Compare workspace | Dual-session baseline not available over Zig IPC yet (`compare: false`) | — |
+| Save / Open | `save`, `open` | File menu / Build | PSOL + locks; invalid strategy rows rejected before replace | contract smoke; checkpoint vitest |
+| Recent / templates / ranges | Tauri FS `library_*` (not engine HTTP) | Library + File menu | Nested `configs/ranges`; flat `configs/templates`; staged via `bundle.resources` | library IPC vitest; `check:library-assets` |
+| Config parse | local TS (`streetConfigText`) | Build | street/river text only; street echoes `tree_edits`; no host session mutate | `streetConfigText.test.ts` |
+| Memory plan dry-run | `plan_memory` | Collapsible Build preflight shows labeled peak vs budget | Labeled `estimated_peak_bytes`; not RSS; temp compile | TreeLineEditor tests |
+| Tree preview / line edits | `tree_preview` | Mounted collapsible Preview tree; Force/Remove/Add size → draft `tree_edits`; same `buildJob` serializer as Solve | Canonical labels; must not wipe loaded Study; failed preview leaves solution | tree-edit vitest |
+| Betting tree Save / Open | Client JSON (`holdem-study-betting-tree` v1) in localStorage | Build → Betting tree catalogue | Sizes, caps, `tree_edits` only; flat list (no folders) | `bettingTreeCatalogue` |
+| Compare runouts | Client `getNode` + rewrite | Study dock + context-strip | Desktop orchestration; no dedicated host report op | `lineCardReport` + LowerDock |
+| Create Build spot from here | Client draft from node + `get_config` | Context strip → Build draft | Midstreet (facing bet / contrib) not supported; asymmetric stacks use `min` | `build/transferFromStudy` |
+| Study assistant (AI) | Client-side unified chat + bounded Study evidence tools | Floating Study assistant (menu bar **Assistant**) | OpenAI credentials required in product UI; no autonomous solve / filesystem; pot type required; silent rake → cEV, silent stack → 100bb | assistant domain vitest — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md), [ai-context](ai-context/README.md) |
 
 ## Numerical labels (do not relabel without math)
 
 - Chip EV (engine / status root EV): root-centered, units `chips`
-- Action EV display: local decision EV by default (Fold = 0; `local_offset` from `/values`); Global toggle keeps root-centered
-- Accuracy: Pio exploitability (average of BR gains = NashConv/2); targets are Accuracy/pot by default
+- Action EV display: local decision EV by default (Fold = 0; `local_offset` from `values`); Global toggle keeps root-centered
+- Accuracy: Pio exploitability (average of BR gains = NashConv/2); targets are Accuracy/pot by default (not a cutover Acc wall)
 - Equity: fraction of pot — not chip EV
 - Equity histograms: ten fixed buckets on [0,1]; weights are raw input masses (`equity_distribution` OOP, `ip_equity_distribution` IP); Study filters bands client-side using `oop_hands`/`ip_hands`
 - Categories: strategy-weighted reach; seat fractions align with the `categories` name list; `exclusive` false for draw tags
-- A 0% action inside a lock row that sums to 1 is a constraint; unlock is DELETE. All-zero PUT rows are rejected by the engine.
+- A 0% action inside a lock row that sums to 1 is a constraint; unlock is `delete_lock`. All-zero PUT rows are rejected by the engine.
 
 ## Status
 
@@ -124,19 +125,20 @@ npm run tauri:build
 
 | Lock / strategy / compare op | UI | Backend |
 | --- | --- | --- |
-| Apply selected/full lock | Node Locking workspace (paint hand classes) | `PUT …/locks` |
-| Unlock | Node Locking workspace | `DELETE …/locks` |
-| Apply free-form strategy edit | Strategy editor / inspector | `PUT …/strategy-edits` |
-| Clear strategy edits | Strategy editor | `DELETE …/strategy-edits` |
-| Resolve locked | Solve/Tree menus + drawer | `POST …/resolve-locked` |
-| Compare revisions | Compare workspace | `GET /api/compare` |
+| Apply selected/full lock | Node Locking workspace (paint hand classes) | `put_lock` |
+| Unlock | Node Locking workspace | `delete_lock` |
+| Apply free-form strategy edit | Strategy editor / inspector | `put_strategy_edit` |
+| Clear strategy edits | Strategy editor | `delete_strategy_edit` |
+| Resolve locked | Solve/Tree menus + drawer | `resolve_locked` |
+| Compare revisions | Compare workspace | soft-gated (`compare: false`) until dual-session IPC lands |
 
 ## Validation notes
 
-- Unit: `cd desktop && npm test` (browse, locks, strategy edits, status/`gap_series`, cards, analysis helpers, action colors)
+- Unit: `cd desktop && npm test` (Vitest — browse, locks, strategy edits, status/`gap_series`, cards, analysis helpers, action colors)
+- Typecheck: `cd desktop && npx tsc -b`
 - Build: `cd desktop && npm run build`
-- Engine: `zig build test` (+ optional `scripts/build.sh` ready smoke)
+- Engine: `zig build test` (+ `scripts/zig/ready-smoke.py`, `scripts/zig/study-contract-smoke.py`)
 - Live: solve via Tauri + `solver-engine` IPC; Status bar shows EV / NashConv / mem (`gap_series` in status payload, no Graphs UI)
 - Visual targets: 1440×900 dark/light, 1920×1080 dual-range, 1280×800 compact
-- C++ `poker_http_tests` / spawned `explorer` were removed on `zig-rewrite`. Re-validate Tauri webview lifecycle, native Open/Save dialogs, and the NSIS packaged install on Windows before a Study release.
+- Do not cite deleted C++ HTTP suites or explorer HTTP status codes as current coverage. Re-validate Tauri webview lifecycle, native Open/Save dialogs, and the NSIS packaged install on Windows before a Study release. Full guide: [TESTING.md](auxiliary/engineering/TESTING.md).
 - Changing the flop, and changing an earlier street after a later card is dealt, are unsupported. Turn and river card changes keep the betting line when the deal-chance ancestor is known. See [EQUITY.md](EQUITY.md) for check-down equity limits.
