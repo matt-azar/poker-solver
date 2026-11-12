@@ -13,4 +13,5 @@ test {
     _ = traversal;
     _ = frozen_walk;
     _ = algorithms;
+    _ = @import("strategy_parity_test.zig");
 }
