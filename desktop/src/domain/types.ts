@@ -170,6 +170,10 @@ export interface StatusPayload {
   message?: string | null;
   spot?: string | null;
   plays?: string | null;
+  /** Host: published average came from train or a checkpoint with flag_training. */
+  has_training?: boolean;
+  /** Host: Continue / further train is legal (requires trainer tables). */
+  can_continue?: boolean;
   [key: string]: unknown;
 }
 

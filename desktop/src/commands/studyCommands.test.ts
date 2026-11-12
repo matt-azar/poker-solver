@@ -15,6 +15,7 @@ import {
   executeOpenLockEditor,
   executeSolve,
   executeSolveAndOpenStudy,
+  trainerContinueFromStatus,
   type StudyCommandContext,
 } from "./studyCommands";
 
@@ -120,6 +121,54 @@ describe("canExecuteSave / Calculate EV / lock / strategy", () => {
       canExecuteContinue(ctx({ phase: "paused", solutionId: "s1" })).ok,
     ).toBe(true);
   });
+
+  it("disables Continue for browse-only (no trainer) even when complete", () => {
+    const gate = canExecuteContinue(
+      ctx({
+        phase: "complete",
+        solutionId: "s1",
+        canContinueTraining: false,
+      }),
+    );
+    expect(gate.ok).toBe(false);
+    expect(gate.reason).toMatch(/browse-only|trainer/i);
+  });
+
+  it("keeps Continue when host reports can_continue", () => {
+    expect(
+      canExecuteContinue(
+        ctx({
+          phase: "complete",
+          solutionId: "s1",
+          canContinueTraining: true,
+        }),
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("trainerContinueFromStatus prefers can_continue over has_training", () => {
+    expect(trainerContinueFromStatus(null)).toBeNull();
+    expect(trainerContinueFromStatus({})).toBeNull();
+    expect(
+      trainerContinueFromStatus({
+        running: false,
+        paused: false,
+        cancelled: false,
+        status_generation: 1,
+        can_continue: false,
+        has_training: true,
+      }),
+    ).toBe(false);
+    expect(
+      trainerContinueFromStatus({
+        running: false,
+        paused: false,
+        cancelled: false,
+        status_generation: 1,
+        has_training: true,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("IPC soft-disable gates (ZR-102)", () => {
@@ -128,7 +177,7 @@ describe("IPC soft-disable gates (ZR-102)", () => {
     setHttpFallbackTransport();
   });
 
-  it("allows Resolve locked + Categories; keeps compare/strategy soft-disabled", () => {
+  it("allows Resolve locked + Categories + strategy edits; keeps compare soft-disabled", () => {
     setIpcTransport({
       protocol: 2,
       launchId: "test",
@@ -143,7 +192,8 @@ describe("IPC soft-disable gates (ZR-102)", () => {
     });
     expect(canExecuteResolveLocked(study).ok).toBe(true);
     expect(canExecuteCompareToBaseline(study).ok).toBe(false);
-    expect(canExecuteOpenStrategyEditor(study).ok).toBe(false);
+    // ZR-101 (#303) enabled strategy edits over IPC.
+    expect(canExecuteOpenStrategyEditor(study).ok).toBe(true);
     expect(canExecuteLoadCategories(study).ok).toBe(true);
   });
 });
