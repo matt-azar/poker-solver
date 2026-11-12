@@ -628,6 +628,33 @@ mod tests {
     }
 
     #[test]
+    fn encode_put_strategy_edit_keeps_envelope_kind_before_body_kind() {
+        // Defense in depth for ZR-119: with preserve_order, json! insertion
+        // order keeps envelope "kind" ahead of nested body "kind":"full".
+        let envelope = json!({
+            "v": PROTOCOL,
+            "kind": "request",
+            "request_id": "r12",
+            "job_id": null,
+            "op": "put_strategy_edit",
+            "body": {
+                "node_id": "p0.t-1.r-1",
+                "kind": "full",
+                "probs": [0.0, 1.0]
+            }
+        });
+        let frame = encode_frame(&envelope).expect("encode");
+        let payload = std::str::from_utf8(&frame[4..]).expect("utf8");
+        let envelope_kind = payload.find("\"kind\":\"request\"").expect("envelope kind");
+        let body_kind = payload.find("\"kind\":\"full\"").expect("body kind");
+        assert!(
+            envelope_kind < body_kind,
+            "envelope kind must precede nested body kind; payload={payload}"
+        );
+        assert!(payload.contains("\"op\":\"put_strategy_edit\""));
+    }
+
+    #[test]
     fn request_ids_unique_under_contention() {
         let next = Arc::new(AtomicU64::new(1));
         let barrier = Arc::new(Barrier::new(8));

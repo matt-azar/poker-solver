@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyStrategyEditFailure,
   editForNode,
   isHandEdited,
+  isStrategyEditSessionDead,
   strategyMutationCompletion,
 } from "./strategyEdits";
 
@@ -52,5 +54,25 @@ describe("strategy edit helpers", () => {
         liveNodeId: "p0",
       }),
     ).toEqual({ applyEditsList: false, applyDraft: false, reloadNode: false });
+  });
+
+  it("classifies pipe/InvalidFrame deaths vs recoverable Apply rejects (ZR-119)", () => {
+    expect(isStrategyEditSessionDead("solver-engine pipe closed")).toBe(true);
+    expect(isStrategyEditSessionDead("invalid_frame: InvalidFrame")).toBe(true);
+    expect(isStrategyEditSessionDead("invalid_request: invalid strategy probability row")).toBe(
+      false,
+    );
+
+    const dead = classifyStrategyEditFailure(new Error("solver-engine pipe closed"));
+    expect(dead.sessionDead).toBe(true);
+    expect(dead.message).toMatch(/Reconnect/);
+    expect(dead.message).toMatch(/pipe closed/);
+
+    const soft = classifyStrategyEditFailure(
+      new Error("invalid_request: probs length must match action arity"),
+    );
+    expect(soft.sessionDead).toBe(false);
+    expect(soft.message).toContain("probs length must match action arity");
+    expect(soft.message).not.toMatch(/Engine unreachable/);
   });
 });

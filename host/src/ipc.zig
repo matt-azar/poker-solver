@@ -112,14 +112,76 @@ pub fn encodeFrame(allocator: std.mem.Allocator, env: Envelope) IpcError![]u8 {
     return frame;
 }
 
-fn findStringField(json: []const u8, key: []const u8) ?[]const u8 {
+/// Locate the start index of a top-level object value for `key` (after `:`).
+/// Skips nested objects/arrays and string contents so body fields like
+/// `"kind":"full"` cannot shadow envelope `"kind":"request"` when serde_json
+/// (BTreeMap) emits alphabetical key order with `body` first (ZR-119).
+fn findTopLevelValueStart(json: []const u8, key: []const u8) ?usize {
     var needle_buf: [64]u8 = undefined;
-    const needle = std.fmt.bufPrint(&needle_buf, "\"{s}\":", .{key}) catch return null;
-    const start = std.mem.indexOf(u8, json, needle) orelse return null;
-    var i = start + needle.len;
-    while (i < json.len and (json[i] == ' ' or json[i] == '\t')) : (i += 1) {}
-    if (i >= json.len or json[i] != '"') return null;
+    const needle = std.fmt.bufPrint(&needle_buf, "\"{s}\"", .{key}) catch return null;
+
+    var i: usize = 0;
+    while (i < json.len and (json[i] == ' ' or json[i] == '\t' or json[i] == '\n' or json[i] == '\r')) : (i += 1) {}
+    if (i >= json.len or json[i] != '{') return null;
     i += 1;
+
+    var obj_depth: i32 = 1;
+    var arr_depth: i32 = 0;
+    var in_string = false;
+    var escape = false;
+
+    while (i < json.len) {
+        const c = json[i];
+        if (in_string) {
+            if (escape) {
+                escape = false;
+                i += 1;
+                continue;
+            }
+            if (c == '\\') {
+                escape = true;
+                i += 1;
+                continue;
+            }
+            if (c == '"') in_string = false;
+            i += 1;
+            continue;
+        }
+
+        if (c == '"') {
+            // Candidate key only at object depth 1 / array depth 0.
+            if (obj_depth == 1 and arr_depth == 0 and std.mem.startsWith(u8, json[i..], needle)) {
+                var j = i + needle.len;
+                while (j < json.len and (json[j] == ' ' or json[j] == '\t')) : (j += 1) {}
+                if (j < json.len and json[j] == ':') {
+                    j += 1;
+                    while (j < json.len and (json[j] == ' ' or json[j] == '\t')) : (j += 1) {}
+                    if (j < json.len) return j;
+                }
+            }
+            in_string = true;
+            i += 1;
+            continue;
+        }
+
+        switch (c) {
+            '{' => obj_depth += 1,
+            '}' => {
+                obj_depth -= 1;
+                if (obj_depth <= 0) return null;
+            },
+            '[' => arr_depth += 1,
+            ']' => arr_depth -= 1,
+            else => {},
+        }
+        i += 1;
+    }
+    return null;
+}
+
+fn readJsonString(json: []const u8, start: usize) ?[]const u8 {
+    if (start >= json.len or json[start] != '"') return null;
+    var i = start + 1;
     const from = i;
     while (i < json.len) : (i += 1) {
         if (json[i] == '\\') {
@@ -131,43 +193,62 @@ fn findStringField(json: []const u8, key: []const u8) ?[]const u8 {
     return null;
 }
 
-fn findRawField(json: []const u8, key: []const u8) ?[]const u8 {
-    var needle_buf: [64]u8 = undefined;
-    const needle = std.fmt.bufPrint(&needle_buf, "\"{s}\":", .{key}) catch return null;
-    const start = std.mem.indexOf(u8, json, needle) orelse return null;
-    var i = start + needle.len;
-    while (i < json.len and (json[i] == ' ' or json[i] == '\t')) : (i += 1) {}
-    if (i >= json.len) return null;
-    if (json[i] == '"') {
-        const from = i + 1;
-        var j = from;
-        while (j < json.len) : (j += 1) {
-            if (json[j] == '\\') {
-                j += 1;
+fn readJsonContainer(json: []const u8, start: usize, open: u8, close: u8) ?[]const u8 {
+    if (start >= json.len or json[start] != open) return null;
+    var depth: i32 = 0;
+    var in_string = false;
+    var escape = false;
+    var i = start;
+    while (i < json.len) : (i += 1) {
+        const c = json[i];
+        if (in_string) {
+            if (escape) {
+                escape = false;
                 continue;
             }
-            if (json[j] == '"') return json[from..j];
-        }
-        return null;
-    }
-    if (json[i] == '{') {
-        var depth: i32 = 0;
-        const from = i;
-        while (i < json.len) : (i += 1) {
-            if (json[i] == '{') depth += 1;
-            if (json[i] == '}') {
-                depth -= 1;
-                if (depth == 0) return json[from .. i + 1];
+            if (c == '\\') {
+                escape = true;
+                continue;
             }
+            if (c == '"') in_string = false;
+            continue;
         }
-        return null;
+        if (c == '"') {
+            in_string = true;
+            continue;
+        }
+        if (c == open) depth += 1;
+        if (c == close) {
+            depth -= 1;
+            if (depth == 0) return json[start .. i + 1];
+        }
     }
-    if (std.mem.startsWith(u8, json[i..], "null")) return "null";
-    if (std.mem.startsWith(u8, json[i..], "true")) return "true";
-    if (std.mem.startsWith(u8, json[i..], "false")) return "false";
-    const from = i;
-    while (i < json.len and json[i] != ',' and json[i] != '}') : (i += 1) {}
-    return std.mem.trim(u8, json[from..i], " \t\r\n");
+    return null;
+}
+
+fn findStringField(json: []const u8, key: []const u8) ?[]const u8 {
+    const start = findTopLevelValueStart(json, key) orelse return null;
+    return readJsonString(json, start);
+}
+
+fn findRawField(json: []const u8, key: []const u8) ?[]const u8 {
+    const start = findTopLevelValueStart(json, key) orelse return null;
+    if (start >= json.len) return null;
+    if (json[start] == '"') {
+        return readJsonString(json, start);
+    }
+    if (json[start] == '{') {
+        return readJsonContainer(json, start, '{', '}');
+    }
+    if (json[start] == '[') {
+        return readJsonContainer(json, start, '[', ']');
+    }
+    if (std.mem.startsWith(u8, json[start..], "null")) return "null";
+    if (std.mem.startsWith(u8, json[start..], "true")) return "true";
+    if (std.mem.startsWith(u8, json[start..], "false")) return "false";
+    var i = start;
+    while (i < json.len and json[i] != ',' and json[i] != '}' and json[i] != ']') : (i += 1) {}
+    return std.mem.trim(u8, json[start..i], " \t\r\n");
 }
 
 /// Decode payload JSON (without length prefix) into an owned envelope.
@@ -299,4 +380,29 @@ test "frame roundtrip ready" {
     try std.testing.expectEqualStrings("r1", decoded.request_id);
     try std.testing.expectEqualStrings("ready", decoded.op);
     try std.testing.expect(decoded.ok);
+}
+
+test "decodePayload ignores nested body kind under alphabetical key order" {
+    // serde_json without preserve_order emits BTreeMap alphabetical keys:
+    // body before kind. Nested body "kind":"full" must not shadow envelope kind.
+    const json =
+        \\{"body":{"hand_indices":[],"kind":"full","node_id":"p0.t-1.r-1","probs":[0.0,1.0]},"job_id":null,"kind":"request","op":"put_strategy_edit","request_id":"r12","v":2}
+    ;
+    var decoded = try decodePayload(std.testing.allocator, json);
+    defer decoded.deinit();
+    try std.testing.expect(decoded.kind == .request);
+    try std.testing.expectEqualStrings("put_strategy_edit", decoded.op);
+    try std.testing.expectEqualStrings("r12", decoded.request_id);
+    try std.testing.expect(std.mem.indexOf(u8, decoded.body_json, "\"kind\":\"full\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, decoded.body_json, "\"probs\":[0.0,1.0]") != null);
+}
+
+test "decodePayload put_lock alphabetical order with nested kind" {
+    const json =
+        \\{"body":{"hand_indices":[0],"kind":"full","node_id":"p0.t-1.r-1","probs":[1.0,0.0],"scope":"node"},"job_id":null,"kind":"request","op":"put_lock","request_id":"r3","v":2}
+    ;
+    var decoded = try decodePayload(std.testing.allocator, json);
+    defer decoded.deinit();
+    try std.testing.expect(decoded.kind == .request);
+    try std.testing.expectEqualStrings("put_lock", decoded.op);
 }
