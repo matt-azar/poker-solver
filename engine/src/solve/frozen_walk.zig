@@ -51,13 +51,30 @@ fn runoutKey(turn: i32, river: i32) i32 {
     return (turn + 1) * 64 + (river + 1);
 }
 
+/// Immutable showdown facts for one runout (C++ Engine::RunoutRanks).
+/// Order is rank then hand index over every indexed hand.
 const RunoutRanks = struct {
-    rank0: []u32,
-    rank1: []u32,
+    rank: [2][]u32 = .{ &.{}, &.{} },
+    order: [2][]u16 = .{ &.{}, &.{} },
+    pos: [2][]u16 = .{ &.{}, &.{} },
+    worse_end: [2][]u16 = .{ &.{}, &.{} },
+    better_begin: [2][]u16 = .{ &.{}, &.{} },
+    /// Four opponent-list cuts per hero hand: a@L, b@L, a@U, b@U.
+    card_cut: [2][]u16 = .{ &.{}, &.{} },
+    card_pos: [2][]u16 = .{ &.{}, &.{} },
+    card_off: [2][]u32 = .{ &.{}, &.{} },
 
     fn deinit(self: *RunoutRanks, allocator: std.mem.Allocator) void {
-        allocator.free(self.rank0);
-        allocator.free(self.rank1);
+        inline for (0..2) |side| {
+            if (self.rank[side].len != 0) allocator.free(self.rank[side]);
+            if (self.order[side].len != 0) allocator.free(self.order[side]);
+            if (self.pos[side].len != 0) allocator.free(self.pos[side]);
+            if (self.worse_end[side].len != 0) allocator.free(self.worse_end[side]);
+            if (self.better_begin[side].len != 0) allocator.free(self.better_begin[side]);
+            if (self.card_cut[side].len != 0) allocator.free(self.card_cut[side]);
+            if (self.card_pos[side].len != 0) allocator.free(self.card_pos[side]);
+            if (self.card_off[side].len != 0) allocator.free(self.card_off[side]);
+        }
         self.* = undefined;
     }
 };
@@ -87,21 +104,39 @@ const Scratch = struct {
 const WorkerLocal = struct {
     live0: []bool,
     live1: []bool,
+    /// Compact live hand indexes for the current board (C++ BoardSupport::idx*).
+    idx0: []u16,
+    idx1: []u16,
+    idx0_len: usize = 0,
+    idx1_len: usize = 0,
     amount0: []f64,
     amount1: []f64,
     by_card0: [52]f64 = .{0} ** 52,
     by_card1: [52]f64 = .{0} ** 52,
+    /// Showdown prefix scratch (C++ prefix_buf / ordered_buf / block_buf).
+    prefix_buf: []f64,
+    ordered_buf: []f64,
+    block_buf: []f64,
+    block_base: [52]u32 = .{0} ** 52,
     support_turn: i32 = -2,
     support_river: i32 = -2,
     scratch: [max_depth]Scratch = undefined,
     scratch_len: usize = 0,
 
     fn init(allocator: std.mem.Allocator, n0: usize, n1: usize) FrozenError!WorkerLocal {
+        const wide = @max(n0, n1);
+        // Compact card prefixes: one initial zero per card, then one weight per hole card.
+        const block_cap = wide * 2 + 52;
         var w = WorkerLocal{
             .live0 = try allocator.alloc(bool, n0),
             .live1 = try allocator.alloc(bool, n1),
+            .idx0 = try allocator.alloc(u16, n0),
+            .idx1 = try allocator.alloc(u16, n1),
             .amount0 = try allocator.alloc(f64, n0),
             .amount1 = try allocator.alloc(f64, n1),
+            .prefix_buf = try allocator.alloc(f64, wide + 1),
+            .ordered_buf = try allocator.alloc(f64, wide),
+            .block_buf = try allocator.alloc(f64, block_cap),
         };
         errdefer w.deinit(allocator);
         @memset(w.live0, true);
@@ -129,14 +164,21 @@ const WorkerLocal = struct {
         }
         allocator.free(self.live0);
         allocator.free(self.live1);
+        allocator.free(self.idx0);
+        allocator.free(self.idx1);
         allocator.free(self.amount0);
         allocator.free(self.amount1);
+        allocator.free(self.prefix_buf);
+        allocator.free(self.ordered_buf);
+        allocator.free(self.block_buf);
         self.* = undefined;
     }
 
     fn resetSupport(self: *WorkerLocal) void {
         self.support_turn = -2;
         self.support_river = -2;
+        self.idx0_len = 0;
+        self.idx1_len = 0;
     }
 };
 
@@ -341,14 +383,28 @@ pub const FrozenCtx = struct {
 
     fn ensureBoardSupport(self: *FrozenCtx, w: *WorkerLocal, turn: i32, river: i32) void {
         if (w.support_turn == turn and w.support_river == river) return;
+        var n0_live: usize = 0;
         var h: usize = 0;
         while (h < self.n0) : (h += 1) {
-            w.live0[h] = self.handSupported(0, h, turn, river);
+            const live = self.handSupported(0, h, turn, river);
+            w.live0[h] = live;
+            if (live) {
+                w.idx0[n0_live] = @intCast(h);
+                n0_live += 1;
+            }
         }
+        w.idx0_len = n0_live;
+        var n1_live: usize = 0;
         h = 0;
         while (h < self.n1) : (h += 1) {
-            w.live1[h] = self.handSupported(1, h, turn, river);
+            const live = self.handSupported(1, h, turn, river);
+            w.live1[h] = live;
+            if (live) {
+                w.idx1[n1_live] = @intCast(h);
+                n1_live += 1;
+            }
         }
+        w.idx1_len = n1_live;
         w.support_turn = turn;
         w.support_river = river;
     }
@@ -435,11 +491,160 @@ pub const FrozenCtx = struct {
         return a0 == b0 or a0 == b1 or a1 == b0 or a1 == b1;
     }
 
+    fn listCut(table: *const RunoutRanks, opponent: usize, card_id: i32, order_end: i32) FrozenError!u16 {
+        const begin = table.card_off[opponent][@intCast(card_id)];
+        const end = table.card_off[opponent][@intCast(card_id + 1)];
+        var lower = begin;
+        var upper = end;
+        const target: u16 = @intCast(order_end);
+        while (lower < upper) {
+            const mid = lower + (upper - lower) / 2;
+            if (table.card_pos[opponent][mid] < target) {
+                lower = mid + 1;
+            } else {
+                upper = mid;
+            }
+        }
+        const cut = lower - begin;
+        if (cut > 65535) return error.InvalidFrozen;
+        return @intCast(cut);
+    }
+
+    fn fillShowdown(self: *FrozenCtx, table: *RunoutRanks) FrozenError!void {
+        inline for (0..2) |side| {
+            const hands = if (side == 0) self.n0 else self.n1;
+            table.order[side] = try self.allocator.alloc(u16, hands);
+            table.pos[side] = try self.allocator.alloc(u16, hands);
+            table.card_off[side] = try self.allocator.alloc(u32, 53);
+            table.card_pos[side] = try self.allocator.alloc(u16, hands * 2);
+            var hand: usize = 0;
+            while (hand < hands) : (hand += 1) {
+                table.order[side][hand] = @intCast(hand);
+            }
+            // Sort by rank ascending, then hand index (C++ fill_showdown).
+            std.mem.sort(u16, table.order[side], table.rank[side], struct {
+                fn lessThan(ranks: []u32, a: u16, b: u16) bool {
+                    const ra = ranks[a];
+                    const rb = ranks[b];
+                    if (ra != rb) return ra < rb;
+                    return a < b;
+                }
+            }.lessThan);
+            var counts: [52]u32 = .{0} ** 52;
+            var index: usize = 0;
+            while (index < hands) : (index += 1) {
+                const h: usize = table.order[side][index];
+                table.pos[side][h] = @intCast(index);
+                counts[@intCast(self.game.hands.hole_low[side][h])] += 1;
+                counts[@intCast(self.game.hands.hole_high[side][h])] += 1;
+            }
+            table.card_off[side][0] = 0;
+            var card_i: usize = 0;
+            while (card_i < 52) : (card_i += 1) {
+                table.card_off[side][card_i + 1] = table.card_off[side][card_i] + counts[card_i];
+            }
+            if (table.card_off[side][52] != hands * 2) return error.InvalidFrozen;
+            var cursor: [52]u32 = undefined;
+            card_i = 0;
+            while (card_i < 52) : (card_i += 1) {
+                cursor[card_i] = table.card_off[side][card_i];
+            }
+            index = 0;
+            while (index < hands) : (index += 1) {
+                const h: usize = table.order[side][index];
+                const first: usize = @intCast(self.game.hands.hole_low[side][h]);
+                const second: usize = @intCast(self.game.hands.hole_high[side][h]);
+                table.card_pos[side][cursor[first]] = @intCast(index);
+                cursor[first] += 1;
+                table.card_pos[side][cursor[second]] = @intCast(index);
+                cursor[second] += 1;
+            }
+        }
+
+        inline for (0..2) |hero| {
+            const opponent: usize = 1 - hero;
+            const hero_hands = if (hero == 0) self.n0 else self.n1;
+            const opp_hands = if (opponent == 0) self.n0 else self.n1;
+            table.worse_end[hero] = try self.allocator.alloc(u16, hero_hands);
+            table.better_begin[hero] = try self.allocator.alloc(u16, hero_hands);
+            table.card_cut[hero] = try self.allocator.alloc(u16, hero_hands * 4);
+            var hand: usize = 0;
+            while (hand < hero_hands) : (hand += 1) {
+                const rank = table.rank[hero][hand];
+                // First opponent order index with rank >= hero rank.
+                var lower: i32 = 0;
+                var upper: i32 = @intCast(opp_hands);
+                while (lower < upper) {
+                    const mid = lower + @divTrunc(upper - lower, 2);
+                    const opp_hand = table.order[opponent][@intCast(mid)];
+                    if (table.rank[opponent][opp_hand] < rank) {
+                        lower = mid + 1;
+                    } else {
+                        upper = mid;
+                    }
+                }
+                const worse = lower;
+                lower = 0;
+                upper = @intCast(opp_hands);
+                while (lower < upper) {
+                    const mid = lower + @divTrunc(upper - lower, 2);
+                    const opp_hand = table.order[opponent][@intCast(mid)];
+                    if (table.rank[opponent][opp_hand] <= rank) {
+                        lower = mid + 1;
+                    } else {
+                        upper = mid;
+                    }
+                }
+                const better = lower;
+                const c0 = self.game.hands.hole_low[hero][hand];
+                const c1 = self.game.hands.hole_high[hero][hand];
+                table.worse_end[hero][hand] = @intCast(worse);
+                table.better_begin[hero][hand] = @intCast(better);
+                const cut_at = hand * 4;
+                table.card_cut[hero][cut_at] = try listCut(table, opponent, c0, worse);
+                table.card_cut[hero][cut_at + 1] = try listCut(table, opponent, c1, worse);
+                table.card_cut[hero][cut_at + 2] = try listCut(table, opponent, c0, better);
+                table.card_cut[hero][cut_at + 3] = try listCut(table, opponent, c1, better);
+            }
+        }
+    }
+
+    /// Fill every five-card runout rank/showdown table on the calling thread
+    /// before a multithreaded pass (C++ `ensure_ranks`). Workers then only read.
+    fn ensureAllRanks(self: *FrozenCtx) FrozenError!void {
+        var dead: [52]bool = .{false} ** 52;
+        for (self.game.board) |c| dead[@intCast(c)] = true;
+        if (self.game.board.len == 5) {
+            _ = try self.ensureRanks(-1, -1);
+            return;
+        }
+        if (self.game.board.len == 4) {
+            var river: i32 = 0;
+            while (river < 52) : (river += 1) {
+                if (dead[@intCast(river)]) continue;
+                _ = try self.ensureRanks(-1, river);
+            }
+            return;
+        }
+        if (self.game.board.len != 3) return error.InvalidFrozen;
+        var turn: i32 = 0;
+        while (turn < 52) : (turn += 1) {
+            if (dead[@intCast(turn)]) continue;
+            var river: i32 = 0;
+            while (river < 52) : (river += 1) {
+                if (dead[@intCast(river)] or river == turn) continue;
+                _ = try self.ensureRanks(turn, river);
+            }
+        }
+    }
+
     fn ensureRanks(self: *FrozenCtx, turn: i32, river: i32) FrozenError!*const RunoutRanks {
         const key = runoutKey(turn, river);
         self.ranks_mu.lock();
         defer self.ranks_mu.unlock();
-        if (self.ranks.getPtr(key)) |existing| return existing;
+        if (self.ranks.getPtr(key)) |existing| {
+            if (existing.order[0].len != 0) return existing;
+        }
 
         var board_buf: [5]card.Card = undefined;
         var board_len: usize = 0;
@@ -458,13 +663,12 @@ pub const FrozenCtx = struct {
         if (board_len != 5) return error.InvalidFrozen;
         const board = board_buf[0..board_len];
 
-        var table = RunoutRanks{
-            .rank0 = try self.allocator.alloc(u32, self.n0),
-            .rank1 = try self.allocator.alloc(u32, self.n1),
-        };
+        var table = RunoutRanks{};
         errdefer table.deinit(self.allocator);
-        @memset(table.rank0, 0);
-        @memset(table.rank1, 0);
+        table.rank[0] = try self.allocator.alloc(u32, self.n0);
+        table.rank[1] = try self.allocator.alloc(u32, self.n1);
+        @memset(table.rank[0], 0);
+        @memset(table.rank[1], 0);
 
         var cards: [7]card.Card = undefined;
         @memcpy(cards[2..7], board);
@@ -474,7 +678,7 @@ pub const FrozenCtx = struct {
             cards[0] = self.game.hands.hole_low[0][h0];
             cards[1] = self.game.hands.hole_high[0][h0];
             const value = hand_eval.evaluate(cards[0..7]) catch continue;
-            table.rank0[h0] = packRank(value);
+            table.rank[0][h0] = packRank(value);
         }
         var h1: usize = 0;
         while (h1 < self.n1) : (h1 += 1) {
@@ -482,11 +686,210 @@ pub const FrozenCtx = struct {
             cards[0] = self.game.hands.hole_low[1][h1];
             cards[1] = self.game.hands.hole_high[1][h1];
             const value = hand_eval.evaluate(cards[0..7]) catch continue;
-            table.rank1[h1] = packRank(value);
+            table.rank[1][h1] = packRank(value);
+        }
+        try self.fillShowdown(&table);
+
+        const gop = try self.ranks.getOrPut(key);
+        if (gop.found_existing) {
+            gop.value_ptr.deinit(self.allocator);
+        }
+        gop.value_ptr.* = table;
+        return gop.value_ptr;
+    }
+
+    fn differenceIsStable(total: f64, removed: f64, difference: f64) bool {
+        if (!std.math.isFinite(total) or !std.math.isFinite(removed) or !std.math.isFinite(difference)) {
+            return false;
+        }
+        if (difference < 0.0) return false;
+        if (difference == 0.0) return total == 0.0 and removed == 0.0;
+        const scale = @max(total, @abs(removed));
+        return difference > scale * 1e-3;
+    }
+
+    fn sharesHole(self: *const FrozenCtx, hero: usize, hero_hand: usize, opponent: usize, opponent_hand: usize) bool {
+        const c0 = self.game.hands.hole_low[hero][hero_hand];
+        const c1 = self.game.hands.hole_high[hero][hero_hand];
+        const o0 = self.game.hands.hole_low[opponent][opponent_hand];
+        const o1 = self.game.hands.hole_high[opponent][opponent_hand];
+        return c0 == o0 or c0 == o1 or c1 == o0 or c1 == o1;
+    }
+
+    fn directRankMasses(
+        self: *const FrozenCtx,
+        table: *const RunoutRanks,
+        hero: usize,
+        hand: usize,
+        opp_amount: []const f64,
+        worse_mass: *f64,
+        better_mass: *f64,
+        tie_mass: ?*f64,
+    ) void {
+        const opponent: usize = 1 - hero;
+        const worse = table.worse_end[hero][hand];
+        const after_tie = table.better_begin[hero][hand];
+        worse_mass.* = 0;
+        better_mass.* = 0;
+        if (tie_mass) |tm| tm.* = 0;
+        var other: usize = 0;
+        while (other < opp_amount.len) : (other += 1) {
+            const piece = opp_amount[other];
+            if (!(piece > 0.0) or self.sharesHole(hero, hand, opponent, other)) continue;
+            const at = table.pos[opponent][other];
+            if (at < worse) {
+                worse_mass.* += piece;
+            } else if (at >= after_tie) {
+                better_mass.* += piece;
+            } else if (tie_mass) |tm| {
+                tm.* += piece;
+            }
+        }
+    }
+
+    fn orderReach(
+        self: *const FrozenCtx,
+        w: *WorkerLocal,
+        player: usize,
+        amount: []const f64,
+        table: *const RunoutRanks,
+    ) FrozenError!void {
+        const hands = amount.len;
+        if (table.order[player].len != hands) return error.InvalidFrozen;
+        if (table.card_off[player].len != 53) return error.InvalidFrozen;
+        if (table.card_off[player][52] != hands * 2) return error.InvalidFrozen;
+        if (w.prefix_buf.len < hands + 1 or w.ordered_buf.len < hands) return error.InvalidFrozen;
+        if (w.block_buf.len < hands * 2 + 52) return error.InvalidFrozen;
+
+        const order = table.order[player];
+        const prefix = w.prefix_buf;
+        const ordered = w.ordered_buf;
+        prefix[0] = 0;
+        var running: f64 = 0;
+        var index: usize = 0;
+        while (index < hands) : (index += 1) {
+            const piece = amount[order[index]];
+            ordered[index] = piece;
+            running += piece;
+            prefix[index + 1] = running;
         }
 
-        try self.ranks.put(key, table);
-        return self.ranks.getPtr(key).?;
+        const block = w.block_buf;
+        const card_off = table.card_off[player];
+        const card_pos = table.card_pos[player];
+        var card_i: usize = 0;
+        while (card_i < 52) : (card_i += 1) {
+            const begin = card_off[card_i];
+            const end = card_off[card_i + 1];
+            const base = begin + @as(u32, @intCast(card_i));
+            w.block_base[card_i] = base;
+            block[base] = 0;
+            var total: f64 = 0;
+            var at = begin;
+            while (at < end) : (at += 1) {
+                total += ordered[card_pos[at]];
+                block[base + (at - begin) + 1] = total;
+            }
+        }
+        _ = self;
+    }
+
+    fn showdownSide(
+        self: *FrozenCtx,
+        w: *WorkerLocal,
+        hero: usize,
+        table: *const RunoutRanks,
+        win_pay: f64,
+        lose_pay: f64,
+        tie_pay: f64,
+        opp_amount: []const f64,
+        ev: []f64,
+        stable: bool,
+    ) FrozenError!void {
+        const opp: usize = 1 - hero;
+        try self.orderReach(w, opp, opp_amount, table);
+        const opp_hands = opp_amount.len;
+        var amount_total: f64 = 0;
+        if (stable) {
+            for (opp_amount) |piece| {
+                if (piece > 0.0) amount_total += piece;
+            }
+        }
+        const need_ties = tie_pay != 0.0;
+        const live_idx = if (hero == 0) w.idx0[0..w.idx0_len] else w.idx1[0..w.idx1_len];
+        @memset(ev, 0);
+        const prefix = w.prefix_buf;
+        const block = w.block_buf;
+        const block_base = &w.block_base;
+        const worse_end = table.worse_end[hero];
+        const better_begin = table.better_begin[hero];
+        const card_cut = table.card_cut[hero];
+        const card_off = table.card_off[opp];
+        const pos = table.pos[opp];
+        const twins = if (hero == 0) self.twin0 else self.twin1;
+        const weights = self.game.hands.range_w[hero];
+        const low_pay = if (hero == 0) win_pay else lose_pay;
+        const high_pay = if (hero == 0) lose_pay else win_pay;
+        const scale = self.joint_scale;
+        const prefix_end = prefix[opp_hands];
+
+        for (live_idx) |hand_u| {
+            const hand: usize = hand_u;
+            const worse: i32 = worse_end[hand];
+            const after_tie: i32 = better_begin[hand];
+            const c0: usize = @intCast(self.game.hands.hole_low[hero][hand]);
+            const c1: usize = @intCast(self.game.hands.hole_high[hero][hand]);
+            const cut_at = hand * 4;
+            const cut0_worse: u32 = card_cut[cut_at];
+            const cut1_worse: u32 = card_cut[cut_at + 1];
+            const cut0_better: u32 = card_cut[cut_at + 2];
+            const cut1_better: u32 = card_cut[cut_at + 3];
+            const base0 = block_base[c0];
+            const base1 = block_base[c1];
+            const len0 = card_off[c0 + 1] - card_off[c0];
+            const len1 = card_off[c1 + 1] - card_off[c1];
+            const b0_0 = block[base0];
+            const b0_w = block[base0 + cut0_worse];
+            const b0_b = block[base0 + cut0_better];
+            const b0_l = block[base0 + len0];
+            const b1_0 = block[base1];
+            const b1_w = block[base1 + cut1_worse];
+            const b1_b = block[base1 + cut1_better];
+            const b1_l = block[base1 + len1];
+            const twin = twins[hand];
+            const add_hand: i32 = if (twin >= 0 and opp_amount[@intCast(twin)] != 0.0) twin else -1;
+            const add_at: i32 = if (add_hand >= 0) @intCast(pos[@intCast(add_hand)]) else -1;
+            const add_piece: f64 = if (add_hand >= 0) opp_amount[@intCast(add_hand)] else 0.0;
+
+            var worse_mass = prefix[@intCast(worse)] - (b0_w - b0_0) - (b1_w - b1_0);
+            if (add_at >= 0 and add_at < worse) worse_mass += add_piece;
+            var better_mass = prefix_end - prefix[@intCast(after_tie)] - (b0_l - b0_b) - (b1_l - b1_b);
+            if (add_at >= after_tie and add_at < @as(i32, @intCast(opp_hands))) better_mass += add_piece;
+            var tie_mass: f64 = 0;
+            if (need_ties) {
+                tie_mass = prefix[@intCast(after_tie)] - prefix[@intCast(worse)] - (b0_b - b0_w) - (b1_b - b1_w);
+                if (add_at >= worse and add_at < after_tie) tie_mass += add_piece;
+            }
+            if (stable) {
+                const worse_ok = differenceIsStable(amount_total, amount_total - worse_mass, worse_mass);
+                const better_ok = differenceIsStable(amount_total, amount_total - better_mass, better_mass);
+                const tie_ok = !need_ties or differenceIsStable(amount_total, amount_total - tie_mass, tie_mass);
+                if (!worse_ok or !better_ok or !tie_ok) {
+                    self.directRankMasses(
+                        table,
+                        hero,
+                        hand,
+                        opp_amount,
+                        &worse_mass,
+                        &better_mass,
+                        if (need_ties) &tie_mass else null,
+                    );
+                }
+            }
+            var weighted = low_pay * worse_mass + high_pay * better_mass;
+            if (need_ties) weighted += tie_pay * tie_mass;
+            ev[hand] = weights[hand] * scale * weighted;
+        }
     }
 
     fn applyTerminal(
@@ -499,6 +902,7 @@ pub const FrozenCtx = struct {
         pi1: []const f64,
         ev0: []f64,
         ev1: []f64,
+        stable: bool,
     ) FrozenError!void {
         self.ensureBoardSupport(w, turn, river);
         @memset(ev0, 0);
@@ -517,23 +921,20 @@ pub const FrozenCtx = struct {
             );
             paid.utility[0] += node.incentive_u0;
             paid.utility[1] += node.incentive_u1;
-            var h0: usize = 0;
-            while (h0 < self.n0) : (h0 += 1) {
-                if (!w.live0[h0]) continue;
+            for (w.idx0[0..w.idx0_len]) |h0u| {
+                const h0: usize = h0u;
                 const open = total1 - self.blockedReach(0, h0, &w.by_card1, w.amount1);
                 ev0[h0] = paid.utility[0] * self.game.hands.range_w[0][h0] * self.joint_scale * open;
             }
-            var h1: usize = 0;
-            while (h1 < self.n1) : (h1 += 1) {
-                if (!w.live1[h1]) continue;
+            for (w.idx1[0..w.idx1_len]) |h1u| {
+                const h1: usize = h1u;
                 const open = total0 - self.blockedReach(1, h1, &w.by_card0, w.amount0);
                 ev1[h1] = paid.utility[1] * self.game.hands.range_w[1][h1] * self.joint_scale * open;
             }
             return;
         }
 
-        // Five-card showdown: evaluate each hand once per runout, then O(n0·n1)
-        // packed-rank compares (avoids re-running evaluate in the inner loop).
+        // Ordered prefix/block showdown (C++ showdown_side) — O(n) per side, not O(n0·n1).
         const ranks = try self.ensureRanks(turn, river);
         _ = self.collectReach(w, 0, pi0, w.amount0, null);
         _ = self.collectReach(w, 1, pi1, w.amount1, null);
@@ -551,22 +952,9 @@ pub const FrozenCtx = struct {
             break :blk [2]f64{ p.utility[0] + node.incentive_u0, p.utility[1] + node.incentive_u1 };
         };
 
-        var h0: usize = 0;
-        while (h0 < self.n0) : (h0 += 1) {
-            if (!w.live0[h0]) continue;
-            const r0 = ranks.rank0[h0];
-            const rw0 = self.game.hands.range_w[0][h0];
-            var h1: usize = 0;
-            while (h1 < self.n1) : (h1 += 1) {
-                if (!w.live1[h1]) continue;
-                if (self.handsBlock(h0, h1)) continue;
-                const r1 = ranks.rank1[h1];
-                const u = if (r0 > r1) win_u else if (r0 < r1) lose_u else tie_u;
-                const rw1 = self.game.hands.range_w[1][h1];
-                ev0[h0] += u[0] * rw0 * self.joint_scale * w.amount1[h1];
-                ev1[h1] += u[1] * rw1 * self.joint_scale * w.amount0[h0];
-            }
-        }
+        try self.showdownSide(w, 0, ranks, win_u[0], lose_u[0], tie_u[0], w.amount1, ev0, stable);
+        // Pass player-1 utilities: showdownSide swaps win/lose for hero 1.
+        try self.showdownSide(w, 1, ranks, win_u[1], lose_u[1], tie_u[1], w.amount0, ev1, stable);
     }
 
     pub fn walk(
@@ -585,7 +973,8 @@ pub const FrozenCtx = struct {
         const here = &w.scratch[depth];
 
         if (node.kind == .terminal) {
-            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1);
+            // Train path: stable=false (C++ frozen_walk).
+            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1, false);
             return;
         }
 
@@ -808,7 +1197,8 @@ pub const FrozenCtx = struct {
         const here = &w.scratch[depth];
 
         if (node.kind == .terminal) {
-            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1);
+            // Response/eval path: stable=true (C++ response_walk).
+            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1, true);
             return;
         }
 
@@ -1287,6 +1677,8 @@ pub fn trainFrozenCfrPlusThreaded(
     if (iterations < 1) return error.InvalidFrozen;
     var ctx = try FrozenCtx.initThreaded(allocator, game, state, threads);
     defer ctx.deinit();
+    // Match C++ train_frozen: materialize all runout showdown tables before walks.
+    try ctx.ensureAllRanks();
     const w = &ctx.workspace;
     var published = training_state.PublishedPolicy{ .allocator = allocator };
     var step: i32 = 0;
@@ -1357,6 +1749,7 @@ pub fn evaluatePublishedFrozenThreaded(
 
     var ctx = try FrozenCtx.initEvalThreaded(allocator, game, threads);
     defer ctx.deinit();
+    try ctx.ensureAllRanks();
     const w = &ctx.workspace;
 
     ctx.prepareResponseRoot(w);
