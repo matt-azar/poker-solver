@@ -1,0 +1,202 @@
+# Labeled Zig tech-preview Windows installer (Phase 7 / D8 scaffolding).
+#
+# Builds the stable holdem-explorer sidecar (Study default transport) plus
+# Zig solver-engine, then packages a distinctly named NSIS artifact.
+# Does NOT publish a GitHub Release and does NOT claim shipping cutover.
+#
+# Trigger: manual, or push to zig-rewrite that touches Zig / desktop / this file.
+
+name: Windows installer (Zig tech preview)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [zig-rewrite]
+    paths:
+      - "build.zig"
+      - "build.zig.zon"
+      - "engine/**"
+      - "app/**"
+      - "formats/**"
+      - "host/**"
+      - "cli/**"
+      - "desktop/**"
+      - "cmake/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/windows-installer-zig-preview.yml"
+      - "scripts/zig/**"
+
+concurrency:
+  group: windows-installer-zig-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  ZIG_VERSION: "0.14.1"
+  ZIG_WINDOWS_SHA256: "554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c"
+  PREVIEW_PRODUCT_NAME: "Holdem Study Zig Tech Preview"
+  PREVIEW_ARTIFACT_NAME: "holdem-study-zig-tech-preview-windows-installer"
+  PREVIEW_INSTALLER_LABEL: "Zig tech preview — not the shipping installer"
+
+jobs:
+  build-zig-preview-installer:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+          shared-key: windows-installer-zig-preview
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure CMake (Release, static MSVC CRT)
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Build explorer (Release)
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: cmake --build build --config Release --parallel --target explorer
+
+      - name: Install Zig ${{ env.ZIG_VERSION }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ver = $env:ZIG_VERSION
+          $zip = "$env:RUNNER_TEMP\zig.zip"
+          $url = "https://ziglang.org/download/$ver/zig-x86_64-windows-$ver.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          $expected = $env:ZIG_WINDOWS_SHA256.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Zig zip sha256 mismatch: got $actual want $expected"
+          }
+          $dest = Join-Path $env:LOCALAPPDATA "zig-$ver"
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Expand-Archive -Path $zip -DestinationPath $dest
+          $binDir = Join-Path $dest "zig-x86_64-windows-$ver"
+          Add-Content $env:GITHUB_PATH $binDir
+
+      - name: Build solver-engine (ReleaseFast)
+        shell: pwsh
+        run: |
+          zig version
+          zig build -Doptimize=ReleaseFast
+          if (-not (Test-Path "zig-out/bin/solver-engine.exe")) {
+            throw "solver-engine.exe missing after zig build"
+          }
+
+      - name: Install desktop npm dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Label product as Zig tech preview
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $conf = "desktop/src-tauri/tauri.conf.json"
+          $raw = Get-Content $conf -Raw
+          $json = $raw | ConvertFrom-Json
+          $json.productName = $env:PREVIEW_PRODUCT_NAME
+          $json | ConvertTo-Json -Depth 100 | Set-Content -Encoding utf8NoBOM $conf
+          Write-Host "productName -> $($json.productName)"
+          Write-Host "PREVIEW LABEL: $env:PREVIEW_INSTALLER_LABEL"
+
+      - name: Build desktop UI
+        working-directory: desktop
+        run: npm run build
+
+      - name: Prepare sidecars (holdem-explorer + solver-engine)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path desktop/src-tauri/binaries | Out-Null
+          $hostTriple = (rustc -vV | Select-String "host:").ToString().Split()[1]
+          Write-Host "rustc host triple: $hostTriple"
+
+          Copy-Item -Force build/Release/explorer.exe `
+            "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe"
+          Copy-Item -Force zig-out/bin/solver-engine.exe `
+            "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe"
+
+          Get-Item "desktop/src-tauri/binaries/holdem-explorer-x86_64-pc-windows-msvc.exe",
+                   "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe" |
+            Format-List FullName, Length, LastWriteTime
+
+      - name: Build Tauri NSIS installer (Zig tech preview)
+        working-directory: desktop
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
+        run: npm run tauri build
+
+      - name: Verify preview payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $releaseRoot = "desktop/src-tauri/target/release"
+
+          foreach ($name in @("holdem-explorer*.exe", "solver-engine*.exe")) {
+            $hit = Get-ChildItem -Recurse $releaseRoot -Filter $name -ErrorAction SilentlyContinue |
+              Select-Object -First 3 FullName, Length
+            if (-not $hit) { throw "missing sidecar pattern: $name" }
+            $hit | Format-Table -AutoSize
+          }
+
+          $nsisDir = "desktop/src-tauri/target/release/bundle/nsis"
+          $nsis = Get-ChildItem $nsisDir -Filter "*.exe" -ErrorAction SilentlyContinue
+          if (-not $nsis) {
+            throw "NSIS installer exe missing under bundle/nsis"
+          }
+          Write-Host "PREVIEW LABEL: $env:PREVIEW_INSTALLER_LABEL"
+          Write-Host "NSIS installer(s):"
+          $nsis | Format-Table FullName, Length -AutoSize
+
+          $note = @(
+            $env:PREVIEW_INSTALLER_LABEL
+            ""
+            "productName: $($env:PREVIEW_PRODUCT_NAME)"
+            "Zig: $($env:ZIG_VERSION)"
+            "Sidecars: holdem-explorer.exe (Study default) + solver-engine.exe (Zig IPC host)"
+            "Default Study transport remains HTTP holdem-explorer until cutover criteria pass."
+            "See docs/auxiliary/engineering/ZIG_RELEASE_GATES.md"
+          ) -join "`r`n"
+          Set-Content -Encoding utf8 "$nsisDir/ZIG_TECH_PREVIEW.txt" $note
+
+      - name: Upload Zig tech-preview NSIS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PREVIEW_ARTIFACT_NAME }}
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/nsis/**/*.exe
+            desktop/src-tauri/target/release/bundle/nsis/ZIG_TECH_PREVIEW.txt
+          if-no-files-found: error

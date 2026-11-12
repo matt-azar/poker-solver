@@ -37,7 +37,11 @@
 ; and writes a short setup note next to the binaries.
 
 !define SIDECAR_EXE "holdem-explorer.exe"
-!define APP_EXE "Holdem Study.exe"
+; Zig typed-IPC host (tauri.conf externalBin). Present in shipping and
+; Zig tech-preview installers; Study still defaults to holdem-explorer.
+!define ZIG_ENGINE_EXE "solver-engine.exe"
+; Prefer Tauri's MAINBINARYNAME so Zig tech-preview productName renames work.
+!define APP_EXE "${MAINBINARYNAME}.exe"
 
 !macro KillHoldemStudyUi
   ; Same helpers CheckIfAppIsRunning uses on its kill path (no duplicate labels).
@@ -61,9 +65,17 @@
   Pop $0
 !macroend
 
+!macro KillZigSolverEngine
+  ; Safe: solver-engine.exe is not explorer.exe. Missing process is fine.
+  DetailPrint "Stopping ${ZIG_ENGINE_EXE} if running..."
+  nsExec::ExecToLog 'taskkill /F /T /IM "${ZIG_ENGINE_EXE}"'
+  Pop $0
+!macroend
+
 !macro StopHoldemStudyForInstall
   !insertmacro KillHoldemStudyUi
   !insertmacro KillHoldemStudySidecar
+  !insertmacro KillZigSolverEngine
   ; Give Windows time to release the exe image section after Stop-Process.
   Sleep 1500
   ClearErrors
@@ -72,6 +84,13 @@
     DetailPrint "Old ${SIDECAR_EXE} still present; File copy will overwrite if unlocked."
   ${Else}
     DetailPrint "Removed previous ${SIDECAR_EXE} so setup can replace it."
+  ${EndIf}
+  ClearErrors
+  Delete "$INSTDIR\${ZIG_ENGINE_EXE}"
+  ${If} ${Errors}
+    DetailPrint "Old ${ZIG_ENGINE_EXE} still present; File copy will overwrite if unlocked."
+  ${Else}
+    DetailPrint "Removed previous ${ZIG_ENGINE_EXE} so setup can replace it."
   ${EndIf}
 !macroend
 
@@ -88,18 +107,27 @@
     Quit
   sidecar_ok:
 
-  ; Clear Mark-of-the-Web on the app + engine so the first launch is not blocked.
+  DetailPrint "Verifying Zig solver-engine sidecar..."
+  IfFileExists "$INSTDIR\${ZIG_ENGINE_EXE}" zig_ok zig_missing
+  zig_missing:
+    MessageBox MB_ICONSTOP|MB_OK "Installation incomplete: ${ZIG_ENGINE_EXE} is missing from:$\r$\n$INSTDIR$\r$\n$\r$\nRebuild the Windows installer so both externalBin sidecars are present."
+    SetErrorLevel 3
+    Quit
+  zig_ok:
+
+  ; Clear Mark-of-the-Web on the app + engines so the first launch is not blocked.
   DetailPrint "Unblocking installed executables (Zone.Identifier)..."
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=''SilentlyContinue''; Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${APP_EXE}''); Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${SIDECAR_EXE}''); Get-ChildItem -LiteralPath ''$INSTDIR'' -Filter ''*.exe'' -File | Unblock-File"'
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=''SilentlyContinue''; Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${APP_EXE}''); Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${SIDECAR_EXE}''); Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${ZIG_ENGINE_EXE}''); Get-ChildItem -LiteralPath ''$INSTDIR'' -Filter ''*.exe'' -File | Unblock-File"'
   Pop $0
 
   ; Tiny marker so support can confirm engine install ran.
   FileOpen $1 "$INSTDIR\engine-setup.txt" w
   FileWrite $1 "Hold'em Study engine sidecar: ${SIDECAR_EXE}$\r$\n"
+  FileWrite $1 "Zig IPC host (dormant until cutover): ${ZIG_ENGINE_EXE}$\r$\n"
   FileWrite $1 "Installed beside the UI in:$\r$\n$INSTDIR$\r$\n"
-  FileWrite $1 "The app launches this process on 127.0.0.1:8765.$\r$\n"
+  FileWrite $1 "Default Study still launches ${SIDECAR_EXE} on 127.0.0.1:8765.$\r$\n"
   FileClose $1
-  DetailPrint "Engine sidecar ready: $INSTDIR\${SIDECAR_EXE}"
+  DetailPrint "Engine sidecars ready: $INSTDIR\${SIDECAR_EXE} + $INSTDIR\${ZIG_ENGINE_EXE}"
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

@@ -1,0 +1,142 @@
+# Zig rewrite gates (D8 / Phase 7 scaffolding).
+# Runs on zig-rewrite and on PRs that touch the Zig tree / this workflow.
+# Does not replace the C++ matrix in ci.yml; path filters there still skip
+# C++ when only Zig/desktop paths change.
+
+name: Zig
+
+on:
+  push:
+    branches: [zig-rewrite]
+    paths:
+      - "build.zig"
+      - "build.zig.zon"
+      - "engine/**"
+      - "app/**"
+      - "formats/**"
+      - "host/**"
+      - "cli/**"
+      - "tests/zig/**"
+      - ".github/workflows/zig.yml"
+      - "scripts/zig/**"
+      - "docs/auxiliary/engineering/ZIG_*.md"
+  pull_request:
+    paths:
+      - "build.zig"
+      - "build.zig.zon"
+      - "engine/**"
+      - "app/**"
+      - "formats/**"
+      - "host/**"
+      - "cli/**"
+      - "tests/zig/**"
+      - ".github/workflows/zig.yml"
+      - "scripts/zig/**"
+      - "docs/auxiliary/engineering/ZIG_*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: zig-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: "0.14.1"
+  # Official shasums from https://ziglang.org/download/index.json (0.14.1).
+  ZIG_LINUX_SHA256: "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c"
+  ZIG_WINDOWS_SHA256: "554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c"
+
+jobs:
+  zig-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig ${{ env.ZIG_VERSION }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
+            -o /tmp/zig.tar.xz
+          echo "${ZIG_LINUX_SHA256}  /tmp/zig.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/.local"
+          tar -xJf /tmp/zig.tar.xz -C "$HOME/.local"
+          echo "$HOME/.local/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: zig version
+        run: zig version
+
+      - name: Build (ReleaseFast)
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Test
+        run: zig build test
+
+      - name: IPC ready smoke
+        run: |
+          set -euo pipefail
+          test -x ./zig-out/bin/solver-engine
+          python3 scripts/zig/ready-smoke.py ./zig-out/bin/solver-engine
+
+  zig-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig ${{ env.ZIG_VERSION }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ver = $env:ZIG_VERSION
+          $zip = "$env:RUNNER_TEMP\zig.zip"
+          $url = "https://ziglang.org/download/$ver/zig-x86_64-windows-$ver.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          $expected = $env:ZIG_WINDOWS_SHA256.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Zig zip sha256 mismatch: got $actual want $expected"
+          }
+          $dest = Join-Path $env:LOCALAPPDATA "zig-$ver"
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Expand-Archive -Path $zip -DestinationPath $dest
+          $binDir = Join-Path $dest "zig-x86_64-windows-$ver"
+          Add-Content $env:GITHUB_PATH $binDir
+
+      - name: zig version
+        shell: pwsh
+        run: zig version
+
+      - name: Build (ReleaseFast)
+        shell: pwsh
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Test
+        shell: pwsh
+        run: zig build test
+
+      - name: IPC ready smoke
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "zig-out/bin/solver-engine.exe")) {
+            throw "solver-engine.exe missing"
+          }
+          python scripts/zig/ready-smoke.py zig-out/bin/solver-engine.exe
+
+      - name: Upload solver-engine (Windows)
+        uses: actions/upload-artifact@v4
+        with:
+          name: solver-engine-windows-x86_64
+          path: zig-out/bin/solver-engine.exe
+          if-no-files-found: error
+
+  zig-gate:
+    needs: [zig-linux, zig-windows]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both OS jobs
+        run: |
+          set -euo pipefail
+          [[ "${{ needs.zig-linux.result }}" == "success" ]]
+          [[ "${{ needs.zig-windows.result }}" == "success" ]]
