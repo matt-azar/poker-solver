@@ -4,6 +4,10 @@
 Uses one long-lived `solver-engine` process (stdin/stdout frames). Train and
 values each have wall budgets — prefer short iteration counts for agent digs.
 
+Idle / post-train baseline only. For live-under-train concurrency probe +
+interleaved proxy, see `scripts/zig/node-ev-live-under-train.py` (host IPC is
+sync-only today — that script documents the gap).
+
 Example:
   ./scripts/zig/node-ev-latency.py \\
       --binary ./zig-out/bin/solver-engine \\
