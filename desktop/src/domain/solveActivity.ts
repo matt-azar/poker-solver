@@ -1,3 +1,4 @@
+import { statusStickyError } from "./sessionRecovery";
 import { statusRootEv } from "./status";
 import type { SolvePhase, StatusPayload } from "./types";
 import { presentUserText } from "./userText";
@@ -110,32 +111,31 @@ function iterationsPerSecond(status: StatusPayload | null | undefined): number |
   return iterations / runtime;
 }
 
+function jobIdPart(status: StatusPayload | null | undefined): string {
+  const jobId =
+    typeof status?.job_id === "string" && status.job_id.trim()
+      ? status.job_id.trim()
+      : "";
+  return jobId ? ` · ${jobId}` : "";
+}
+
 /**
  * Primary status-bar sentence: what the engine is doing right now.
- * Prefer backend `message` when present; otherwise derive from phase + status.
+ * Prefer sticky last_error / host message when present; otherwise derive from
+ * phase + status. Never let a stale store fallback ("Solve complete." /
+ * "Engine unreachable…") win over Failed or live solve chrome (ZR-148).
  */
 export function engineActivityMessage(
   phase: SolvePhase,
   status: StatusPayload | null | undefined,
   fallbackMessage: string,
 ): string {
-  if (status?.error) {
-    return presentUserText(String(status.error));
+  const sticky = statusStickyError(status);
+  if (sticky) {
+    return presentUserText(sticky);
   }
   if (status?.message && String(status.message).trim()) {
     return String(status.message).trim();
-  }
-  if (fallbackMessage && fallbackMessage.trim()) {
-    const trimmed = fallbackMessage.trim();
-    // Prefer richer derived copy while a solve is live.
-    if (
-      phase !== "solving" &&
-      phase !== "building" &&
-      phase !== "pause_requested" &&
-      phase !== "stop_requested"
-    ) {
-      return trimmed;
-    }
   }
 
   const iter = status?.iterations ?? 0;
@@ -155,26 +155,29 @@ export function engineActivityMessage(
   const rate = iterationsPerSecond(status);
   const ratePart = rate != null ? ` · ${rate.toFixed(1)} it/s` : "";
   const timePart = runtime ? ` · ${runtime}` : "";
+  const jobPart = jobIdPart(status);
 
+  // Derive live / terminal copy before store fallback so "Solve complete." or
+  // sticky unreachable text cannot lie over Failed / Solving / Complete.
   switch (phase) {
     case "building":
-      return "Building public tree and allocating engine memory…";
+      return `Building public tree and allocating engine memory…${jobPart}`;
     case "solving":
-      return `Solving — ${iterPart}${gapPart}${ratePart}${timePart}`;
+      return `Solving — ${iterPart}${gapPart}${ratePart}${timePart}${jobPart}`;
     case "pause_requested":
-      return `Pausing after current sample — ${iterPart}${gapPart}`;
+      return `Pausing after current sample — ${iterPart}${gapPart}${jobPart}`;
     case "paused":
       return `Paused at ${iterPart}${gapPart}. Browse freely; Continue resumes.`;
     case "stop_requested":
-      return `Stopping — keeping completed iterations (${iterPart})…`;
+      return `Stopping — keeping completed iterations (${iterPart})…${jobPart}`;
     case "complete":
       return status?.cancelled
-        ? `Stopped at ${iterPart}${gapPart}${timePart}`
+        ? `Stopped at ${iterPart}${gapPart}${timePart}${jobPart}`
         : status?.time_limit_reached
-          ? `Time limit at ${iterPart}${gapPart}${timePart}`
-          : `Solve complete — ${iterPart}${gapPart}${timePart}`;
+          ? `Time limit at ${iterPart}${gapPart}${timePart}${jobPart}`
+          : `Solve complete — ${iterPart}${gapPart}${timePart}${jobPart}`;
     case "failed":
-      return status?.error ? presentUserText(String(status.error)) : "Solve failed.";
+      return "Solve failed.";
     case "loading":
       return "Loading solution…";
     case "saving":
@@ -182,8 +185,13 @@ export function engineActivityMessage(
     case "analysis_pending":
       return "Computing EV / analysis…";
     default:
-      return fallbackMessage?.trim() || "Ready";
+      break;
   }
+
+  if (fallbackMessage && fallbackMessage.trim()) {
+    return fallbackMessage.trim();
+  }
+  return "Ready";
 }
 
 export function statusMetrics(status: StatusPayload | null | undefined): {
@@ -195,12 +203,17 @@ export function statusMetrics(status: StatusPayload | null | undefined): {
   rate: string;
   memory: string;
   eta: string;
+  job: string;
 } {
   const ev = statusRootEv(status);
   const rate = iterationsPerSecond(status);
   const runtime = formatRuntime(
     status?.runtime_seconds ?? status?.runtime ?? null,
   );
+  const jobId =
+    typeof status?.job_id === "string" && status.job_id.trim()
+      ? status.job_id.trim()
+      : "";
   return {
     iterations:
       status?.iterations == null ? "—" : String(status.iterations),
@@ -217,6 +230,7 @@ export function statusMetrics(status: StatusPayload | null | undefined): {
       status?.engine_allocated ?? status?.engine_heap_bytes,
     ),
     eta: formatEta(estimateRemainingSeconds(status)),
+    job: jobId || "—",
   };
 }
 

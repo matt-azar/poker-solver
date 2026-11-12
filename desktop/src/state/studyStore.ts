@@ -85,11 +85,15 @@ import {
 import {
   classifyEngineSessionFault,
   ensureFailedRecoveryMessage,
+  isRecoveryOrUnreachableMessage,
   normalizeStatusForPhase,
   phaseAfterSessionFault,
   reconnectedMessage,
   reconnectingMessage,
   sessionDeadUiPatch,
+  shouldMarkStatusPollDead,
+  statusIndicatesFailure,
+  statusStickyError,
 } from "../domain/sessionRecovery";
 import { presentUserText } from "../domain/userText";
 import {
@@ -2044,30 +2048,80 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           setStatusConsecutiveFailures(0);
           outcome = "success";
           const normalized = normalizeStatusForPhase(status);
+          const prior = get();
+          const nextPhase = phaseFromStatus(normalized, prior.phase);
           const reload = solutionNeedsReload(
             normalized,
-            get().solutionId,
+            prior.solutionId,
             continuationPending,
           );
           const baselineSolutionId = resolveBaselineSolutionId(
             normalized.baseline_solution_id,
-            get().baselineSolutionId,
+            prior.baselineSolutionId,
           );
           const nextSolutionId =
             reload && normalized.solution_id
               ? normalized.solution_id
-              : get().solutionId;
+              : prior.solutionId;
           const clearCompare = shouldClearCompareNote(
-            get().compareNote,
+            prior.compareNote,
             baselineSolutionId,
             nextSolutionId ?? normalized.solution_id,
           );
+          const failed = statusIndicatesFailure(normalized);
+          const sticky = statusStickyError(normalized);
+          // Clear stale unreachable / reconnect copy once live status returns.
+          const clearUnreachable =
+            prior.connection !== "connected" ||
+            isRecoveryOrUnreachableMessage(prior.message);
+          let liveMessage: string | undefined;
+          if (failed) {
+            liveMessage = sticky
+              ? presentUserText(sticky)
+              : "Solve failed.";
+          } else if (reload && normalized.solution_id) {
+            liveMessage = normalized.paused
+              ? "Paused — browsing available. Continue to resume."
+              : normalized.cancelled
+                ? "Stopped — keeping completed iterations."
+                : "Solve complete.";
+          } else if (normalized.running) {
+            const hostPhase =
+              typeof normalized.phase === "string"
+                ? normalized.phase.toLowerCase()
+                : "";
+            if (hostPhase === "compiling" || nextPhase === "building") {
+              liveMessage = "Building public tree…";
+            } else if (
+              nextPhase === "pause_requested" ||
+              (normalized.paused && normalized.running)
+            ) {
+              liveMessage = "Pause requested — finishing current sample…";
+            } else if (nextPhase === "stop_requested") {
+              liveMessage = "Stop requested — finishing current sample…";
+            } else {
+              const requested = normalized.iterations_requested;
+              const iterLabel =
+                requested != null && Number(requested) > 0
+                  ? `${normalized.iterations ?? 0}/${requested}`
+                  : `${normalized.iterations ?? 0}`;
+              liveMessage = `Solving — ${iterLabel} iterations`;
+            }
+          } else if (clearUnreachable) {
+            liveMessage =
+              nextPhase === "complete"
+                ? "Solve complete."
+                : nextPhase === "paused"
+                  ? "Paused — browsing available. Continue to resume."
+                  : "Engine ready.";
+          }
           set({
             status: normalized,
             connection: "connected",
-            phase: phaseFromStatus(normalized, get().phase),
+            phase: nextPhase,
             baselineSolutionId,
             ...(clearCompare ? { compareNote: null } : {}),
+            ...(liveMessage !== undefined ? { message: liveMessage } : {}),
           });
           if (reload && normalized.solution_id) {
             continuationPending = false;
@@ -2080,34 +2134,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
             pendingReloadNodeId = undefined;
             set({
               solutionId: normalized.solution_id,
-              message: normalized.paused
-                ? "Paused — browsing available. Continue to resume."
-                : normalized.cancelled
-                  ? "Stopped — keeping completed iterations."
-                  : "Solve complete.",
             });
             await get().navigateTo(reloadTarget, { history: "replace" });
-          } else if (normalized.running) {
-            const hostPhase =
-              typeof normalized.phase === "string"
-                ? normalized.phase.toLowerCase()
-                : "";
-            if (hostPhase === "compiling") {
-              set({
-                message: "Building public tree…",
-              });
-            } else {
-              const requested = normalized.iterations_requested;
-              const iterLabel =
-                requested != null && Number(requested) > 0
-                  ? `${normalized.iterations ?? 0}/${requested}`
-                  : `${normalized.iterations ?? 0}`;
-              set({
-                message: normalized.paused
-                  ? "Pause requested — finishing current sample…"
-                  : `Solving — ${iterLabel} iterations`,
-              });
-            }
           }
         } catch (error) {
           const classified = classifyStatusPollError(error, {
@@ -2135,10 +2163,17 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               shellHint = ` Shell: ${shellStatus}.`;
             }
           }
-          // Durable path: clear sticky busy/cancel; Reconnect re-ensures (ZR-123).
-          get().markEngineSessionDead(
-            shellHint ? `${detail}.${shellHint}` : detail,
-          );
+          const fullDetail = shellHint ? `${detail}.${shellHint}` : detail;
+          // Soft blips: backoff only. Hard session-dead or N consecutive
+          // failures: paint disconnected + clear sticky busy (ZR-123 / ZR-148).
+          if (
+            shouldMarkStatusPollDead({
+              consecutiveFailures: getStatusConsecutiveFailures(),
+              detail: fullDetail,
+            })
+          ) {
+            get().markEngineSessionDead(fullDetail);
+          }
         } finally {
           timed.dispose();
           if (getStatusAbortController() === abort) {

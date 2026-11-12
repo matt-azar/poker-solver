@@ -7,6 +7,7 @@ import {
   createTimeoutSignal,
   isAbortError,
   nextStatusPollDelay,
+  raceWithAbort,
   statusPollFailureDetail,
   STATUS_POLL_BACKOFF_INITIAL_MS,
   STATUS_POLL_BACKOFF_MAX_MS,
@@ -162,5 +163,17 @@ describe("status poll scheduling", () => {
       "connection refused",
     );
     expect(statusPollFailureDetail(null)).toBe("engine unreachable");
+  });
+
+  it("raceWithAbort rejects with AbortError when signal fires (ZR-148)", async () => {
+    const controller = new AbortController();
+    let resolveLate: ((value: string) => void) | null = null;
+    const late = new Promise<string>((resolve) => {
+      resolveLate = resolve;
+    });
+    const raced = raceWithAbort(late, controller.signal);
+    controller.abort();
+    await expect(raced).rejects.toMatchObject({ name: "AbortError" });
+    resolveLate?.("too-late");
   });
 });

@@ -46,6 +46,59 @@ describe("solveActivity", () => {
     expect(message).toMatch(/Building public tree/i);
   });
 
+  it("does not prefer stale Solve complete fallback over Failed (ZR-148)", () => {
+    const message = engineActivityMessage(
+      "failed",
+      {
+        running: false,
+        failed: true,
+        phase: "failed",
+        iterations: 12,
+        iterations_requested: 200,
+      },
+      "Solve complete.",
+    );
+    expect(message).toBe("Solve failed.");
+    expect(message).not.toMatch(/complete/i);
+  });
+
+  it("surfaces sticky last_error over unreachable store fallback (ZR-148)", () => {
+    const message = engineActivityMessage(
+      "failed",
+      {
+        running: false,
+        failed: true,
+        last_error: "InvalidSession",
+        phase: "published",
+      },
+      "Engine unreachable: status request timed out. Use Reconnect — Study will re-ensure the local solver-engine.",
+    );
+    expect(message).toBe("InvalidSession");
+  });
+
+  it("includes job id on live Solving copy", () => {
+    const message = engineActivityMessage(
+      "solving",
+      {
+        running: true,
+        phase: "training",
+        iterations: 5,
+        iterations_requested: 100,
+        job_id: "j-study-9",
+      },
+      "",
+    );
+    expect(message).toContain("j-study-9");
+  });
+
+  it("exposes job id in tabular metrics", () => {
+    const metrics = statusMetrics({
+      iterations: 1,
+      job_id: "j-study-3",
+    });
+    expect(metrics.job).toBe("j-study-3");
+  });
+
   it("exposes tabular status metrics", () => {
     const metrics = statusMetrics({
       iterations: 12,
