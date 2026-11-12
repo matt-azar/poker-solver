@@ -12,19 +12,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const app_mod = b.addModule("poker_app", .{
-        .root_source_file = b.path("app/src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    app_mod.addImport("poker_engine", engine_mod);
-
     const formats_mod = b.addModule("poker_formats", .{
         .root_source_file = b.path("formats/src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
     formats_mod.addImport("poker_engine", engine_mod);
+
+    const app_mod = b.addModule("poker_app", .{
+        .root_source_file = b.path("app/src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    app_mod.addImport("poker_engine", engine_mod);
+    app_mod.addImport("poker_formats", formats_mod);
 
     const host_mod = b.createModule(.{
         .root_source_file = b.path("host/src/main.zig"),
