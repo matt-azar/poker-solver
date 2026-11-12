@@ -380,36 +380,88 @@ pub fn decode(allocator: std.mem.Allocator, file: []const u8) OpenError!Document
 
 pub const max_psol_bytes: usize = 512 * 1024 * 1024;
 
-/// Atomic save: write a sibling temp file, then rename over the destination (ZR-92).
-/// On Windows, rename-over-existing may fail — delete the destination then retry.
+/// Injectable save faults for unit tests (ZR-144). Production callers use `.none`.
+/// Every non-`.none` fault must leave an existing destination checkpoint readable.
+pub const SaveFault = enum {
+    none,
+    /// Fail while streaming bytes to the sibling temp (disk-full class).
+    write,
+    /// Fail after a complete write when flushing/syncing the temp.
+    sync,
+    /// Fail the single replace/rename step (file-in-use / AccessDenied class).
+    rename,
+    /// Write+sync succeed but replace never runs (interrupted / crash-before-rename).
+    interrupt_before_replace,
+};
+
+/// Atomic save (ZR-92 / ZR-144): stream encoded bytes to a same-directory sibling
+/// temp, require write+flush success, then replace the destination in one rename.
+/// Never deletes the destination on failure — a failed overwrite must leave the
+/// previous checkpoint readable so Save is safe to retry.
 pub fn writeFile(allocator: std.mem.Allocator, path: []const u8, document: Document) OpenError!void {
+    return writeFileInjected(allocator, path, document, .none);
+}
+
+pub fn writeFileInjected(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    document: Document,
+    fault: SaveFault,
+) OpenError!void {
     const bytes = try encode(allocator, document);
     defer allocator.free(bytes);
     if (bytes.len > max_psol_bytes) return error.InvalidPsol;
 
-    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
-    // Prefer a same-directory sibling. Avoid embedding path separators that JSON
-    // might mis-handle; callers must pass an already-unescaped filesystem path.
-    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp-{d}", .{ path, std.time.milliTimestamp() }) catch {
-        return error.InvalidPsol;
-    };
-    {
-        const file = std.fs.cwd().createFile(tmp_path, .{}) catch return error.InvalidPsol;
-        defer file.close();
-        file.writeAll(bytes) catch {
-            std.fs.cwd().deleteFile(tmp_path) catch {};
-            return error.InvalidPsol;
-        };
-        file.sync() catch {};
+    // Callers pass an already-unescaped filesystem path (host JSON unescape).
+    const dirname = std.fs.path.dirname(path) orelse ".";
+    const basename = std.fs.path.basename(path);
+    if (basename.len == 0) return error.InvalidPsol;
+
+    var dir = std.fs.cwd().openDir(dirname, .{}) catch return error.InvalidPsol;
+    defer dir.close();
+
+    var tmp_name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    // Same-directory sibling so rename stays atomic (incl. Windows ReplaceIfExists).
+    const tmp_name = std.fmt.bufPrint(&tmp_name_buf, ".{s}.tmp-{d}", .{
+        basename,
+        std.time.nanoTimestamp(),
+    }) catch return error.InvalidPsol;
+
+    const file = dir.createFile(tmp_name, .{ .exclusive = true }) catch return error.InvalidPsol;
+    var file_open = true;
+    errdefer {
+        if (file_open) file.close();
+        // Temp only — never touch the destination on the failure path.
+        dir.deleteFile(tmp_name) catch {};
     }
-    std.fs.cwd().rename(tmp_path, path) catch {
-        // Windows: replace existing destination.
-        std.fs.cwd().deleteFile(path) catch {};
-        std.fs.cwd().rename(tmp_path, path) catch {
-            std.fs.cwd().deleteFile(tmp_path) catch {};
-            return error.InvalidPsol;
-        };
-    };
+
+    if (fault == .write) {
+        // Partial write then fail: models ENOSPC mid-stream without truncating dest.
+        const n = @min(bytes.len, @as(usize, 32));
+        if (n != 0) file.writeAll(bytes[0..n]) catch {};
+        return error.InvalidPsol;
+    }
+
+    file.writeAll(bytes) catch return error.InvalidPsol;
+
+    if (fault == .sync) return error.InvalidPsol;
+    file.sync() catch return error.InvalidPsol;
+
+    file.close();
+    file_open = false;
+
+    if (fault == .interrupt_before_replace) {
+        // Crash-before-rename: dest untouched; errdefer removes the orphan temp.
+        return error.InvalidPsol;
+    }
+    if (fault == .rename) {
+        // Rename/replace refused (e.g. Windows file-in-use). Dest stays intact.
+        return error.InvalidPsol;
+    }
+
+    // Single replace. Zig's renameat uses MOVEFILE_REPLACE_EXISTING on Windows —
+    // do not delete-then-retry (that race deletes the only good checkpoint).
+    dir.rename(tmp_name, basename) catch return error.InvalidPsol;
 }
 
 pub fn readFile(allocator: std.mem.Allocator, path: []const u8) OpenError!Document {
@@ -567,4 +619,154 @@ test "empty average with non-empty slots rejects" {
     const file = try sealTestFile(std.testing.allocator, 0, payload.items);
     defer std.testing.allocator.free(file);
     try std.testing.expectError(error.InvalidPsol, decode(std.testing.allocator, file));
+}
+
+fn testDoc(allocator: std.mem.Allocator, marker: []const u8) !Document {
+    var doc = Document{ .allocator = allocator };
+    errdefer doc.deinit();
+    doc.config_text = try std.fmt.allocPrint(allocator, "street-config 1\nboard Ah Kd 7c\npot 100\n# {s}\n", .{marker});
+    doc.oop_combos = try allocator.dupe(i32, &.{1, 2});
+    doc.ip_combos = try allocator.dupe(i32, &.{3});
+    doc.slot_actions = try allocator.dupe(u16, &.{2});
+    doc.average = try allocator.dupe(f32, &.{ 0.4, 0.6 });
+    return doc;
+}
+
+fn expectReadableMarker(allocator: std.mem.Allocator, path: []const u8, marker: []const u8) !void {
+    var loaded = try readFile(allocator, path);
+    defer loaded.deinit();
+    try std.testing.expect(std.mem.indexOf(u8, loaded.config_text, marker) != null);
+}
+
+test "writeFile overwrite replaces and stays readable" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "ckpt.psol" });
+    defer std.testing.allocator.free(path);
+
+    var first = try testDoc(std.testing.allocator, "first");
+    defer first.deinit();
+    try writeFile(std.testing.allocator, path, first);
+    try expectReadableMarker(std.testing.allocator, path, "first");
+
+    var second = try testDoc(std.testing.allocator, "second");
+    defer second.deinit();
+    try writeFile(std.testing.allocator, path, second);
+    try expectReadableMarker(std.testing.allocator, path, "second");
+}
+
+test "injected write fault leaves prior checkpoint readable" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "ckpt.psol" });
+    defer std.testing.allocator.free(path);
+
+    var prior = try testDoc(std.testing.allocator, "prior-write");
+    defer prior.deinit();
+    try writeFile(std.testing.allocator, path, prior);
+
+    var next = try testDoc(std.testing.allocator, "next-write");
+    defer next.deinit();
+    try std.testing.expectError(error.InvalidPsol, writeFileInjected(std.testing.allocator, path, next, .write));
+    try expectReadableMarker(std.testing.allocator, path, "prior-write");
+}
+
+test "injected sync fault leaves prior checkpoint readable" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "ckpt.psol" });
+    defer std.testing.allocator.free(path);
+
+    var prior = try testDoc(std.testing.allocator, "prior-sync");
+    defer prior.deinit();
+    try writeFile(std.testing.allocator, path, prior);
+
+    var next = try testDoc(std.testing.allocator, "next-sync");
+    defer next.deinit();
+    try std.testing.expectError(error.InvalidPsol, writeFileInjected(std.testing.allocator, path, next, .sync));
+    try expectReadableMarker(std.testing.allocator, path, "prior-sync");
+}
+
+test "injected rename fault leaves prior checkpoint readable" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "ckpt.psol" });
+    defer std.testing.allocator.free(path);
+
+    var prior = try testDoc(std.testing.allocator, "prior-rename");
+    defer prior.deinit();
+    try writeFile(std.testing.allocator, path, prior);
+
+    var next = try testDoc(std.testing.allocator, "next-rename");
+    defer next.deinit();
+    try std.testing.expectError(error.InvalidPsol, writeFileInjected(std.testing.allocator, path, next, .rename));
+    try expectReadableMarker(std.testing.allocator, path, "prior-rename");
+}
+
+test "interrupted save before replace leaves prior checkpoint readable" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "ckpt.psol" });
+    defer std.testing.allocator.free(path);
+
+    var prior = try testDoc(std.testing.allocator, "prior-interrupt");
+    defer prior.deinit();
+    try writeFile(std.testing.allocator, path, prior);
+
+    var next = try testDoc(std.testing.allocator, "next-interrupt");
+    defer next.deinit();
+    try std.testing.expectError(
+        error.InvalidPsol,
+        writeFileInjected(std.testing.allocator, path, next, .interrupt_before_replace),
+    );
+    try expectReadableMarker(std.testing.allocator, path, "prior-interrupt");
+}
+
+test "windows file-in-use replace failure leaves prior checkpoint readable" {
+    // Linux rename succeeds while the destination is open. Zig's default Windows
+    // opens also grant FILE_SHARE_DELETE, so a std.fs handle alone does not block
+    // MoveFileEx REPLACE. Open with share_access=0 to model Explorer/AV file-in-use.
+    // Injected `.rename` covers the class on every OS (incl. Linux cloud); this
+    // case is for zig-windows CI.
+    if (@import("builtin").os.tag != .windows) return;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "ckpt.psol" });
+    defer std.testing.allocator.free(path);
+
+    var prior = try testDoc(std.testing.allocator, "prior-in-use");
+    defer prior.deinit();
+    try writeFile(std.testing.allocator, path, prior);
+
+    const w = std.os.windows;
+    const path_w = try std.unicode.wtf8ToWtf16LeAllocZ(std.testing.allocator, path);
+    defer std.testing.allocator.free(path_w);
+    {
+        const held = try w.OpenFile(path_w, .{
+            .access_mask = w.GENERIC_READ | w.SYNCHRONIZE,
+            .share_access = 0,
+            .creation = w.FILE_OPEN,
+            .filter = .any,
+        });
+        defer w.CloseHandle(held);
+
+        var next = try testDoc(std.testing.allocator, "next-in-use");
+        defer next.deinit();
+        try std.testing.expectError(error.InvalidPsol, writeFile(std.testing.allocator, path, next));
+    }
+    // Prior bytes must still decode after the failed replace attempt.
+    try expectReadableMarker(std.testing.allocator, path, "prior-in-use");
 }

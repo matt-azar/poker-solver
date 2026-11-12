@@ -11,7 +11,9 @@ pub const Metrics = psol_v4.Metrics;
 
 pub const encode = psol_v4.encode;
 pub const decode = psol_v4.decode;
+pub const SaveFault = psol_v4.SaveFault;
 pub const writeFile = psol_v4.writeFile;
+pub const writeFileInjected = psol_v4.writeFileInjected;
 pub const readFile = psol_v4.readFile;
 
 test {
