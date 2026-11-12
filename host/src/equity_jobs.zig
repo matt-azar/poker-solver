@@ -209,6 +209,21 @@ pub const Manager = struct {
                 return;
             }
             self.stop = true;
+            // Cancel queued work immediately so join cannot drain heavy MC jobs after stop.
+            var qi: usize = 0;
+            while (qi < self.queue.items.len) : (qi += 1) {
+                const id = self.queue.items[qi];
+                if (self.jobs.getPtr(id)) |snap| {
+                    if (snap.state == .queued) {
+                        snap.state = .cancelled;
+                        if (snap.error_message.len != 0) self.allocator.free(snap.error_message);
+                        if (snap.error_kind.len != 0) self.allocator.free(snap.error_kind);
+                        snap.error_message = self.allocator.dupe(u8, "cancelled on shutdown") catch &.{};
+                        snap.error_kind = self.allocator.dupe(u8, "cancelled") catch &.{};
+                    }
+                }
+            }
+            self.queue.clearRetainingCapacity();
             self.cancel_current.store(true, .release);
             self.cv.broadcast();
             self.mu.unlock();
@@ -239,6 +254,11 @@ pub const Manager = struct {
                     self.mu.unlock();
                     continue;
                 }
+                if (self.stop) {
+                    // Queue already cleared in shutdown; exit without starting more work.
+                    self.mu.unlock();
+                    return;
+                }
                 job_id = self.queue.orderedRemove(0);
                 const snap = self.jobs.getPtr(job_id) orelse {
                     self.mu.unlock();
@@ -249,7 +269,9 @@ pub const Manager = struct {
                     continue;
                 }
                 self.current_id = job_id;
-                self.cancel_current.store(false, .release);
+                // Keep cancel asserted across shutdown; otherwise only the first
+                // in-flight job aborts and remaining queue work runs to completion.
+                if (!self.stop) self.cancel_current.store(false, .release);
                 snap.state = .preparing;
                 request_copy = cloneRequest(self.allocator, snap.request) catch {
                     snap.state = .failed;
@@ -376,7 +398,9 @@ pub const Manager = struct {
 
 fn cancelPoll(ctx: ?*anyopaque) bool {
     const self: *Manager = @ptrCast(@alignCast(ctx.?));
-    return self.cancel_current.load(.acquire);
+    // Honor Manager.stop so a mid-calc job aborts during shutdown even after
+    // the worker cleared cancel_current when dequeuing the next job.
+    return self.stop or self.cancel_current.load(.acquire);
 }
 
 fn progressCb(ctx: ?*anyopaque, done: u64, total: u64) void {
@@ -589,6 +613,50 @@ pub fn parseJobRequest(allocator: std.mem.Allocator, body_json: []const u8) !Job
         };
     }
     return request;
+}
+
+test "shutdown cancels queued jobs and does not drain heavy work" {
+    var mgr = Manager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    const mk = struct {
+        fn req(allocator: std.mem.Allocator) !JobRequest {
+            var request = JobRequest{
+                .client_revision = try allocator.dupe(u8, "shutdown"),
+                .options = .{
+                    .method = .monte_carlo,
+                    .target_samples = 5_000_000,
+                    .max_attempts = 50_000_000,
+                    .seed = 1,
+                },
+            };
+            errdefer request.deinit(allocator);
+            request.players = try allocator.alloc(PlayerSpec, 2);
+            request.players[0] = .{
+                .id = try allocator.dupe(u8, "p1"),
+                .range_text = try allocator.dupe(u8, "AsAd"),
+            };
+            request.players[1] = .{
+                .id = try allocator.dupe(u8, "p2"),
+                .range_text = try allocator.dupe(u8, "KcKd"),
+            };
+            request.board = try allocator.dupe(card.Card, &.{});
+            request.dead_cards = try allocator.dupe(card.Card, &.{});
+            return request;
+        }
+    };
+
+    var ids: [4][]const u8 = undefined;
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        ids[i] = try mgr.enqueue(try mk.req(std.testing.allocator));
+    }
+    // shutdown via deinit must return promptly (cancelPoll honors stop; queue cleared).
+    const t0 = std.time.milliTimestamp();
+    mgr.shutdown();
+    const elapsed = std.time.milliTimestamp() - t0;
+    try std.testing.expect(elapsed < 2_000);
+    try std.testing.expect(mgr.queue.items.len == 0);
 }
 
 test "pack status includes completed result shape" {
