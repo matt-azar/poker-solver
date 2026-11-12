@@ -91,6 +91,78 @@ test "session train save open roundtrip" {
     try std.testing.expectEqual(legacy_phase, other.phase);
 }
 
+test "browse-only open keeps has_training false and continue disabled" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var sess = Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(1);
+    try std.testing.expect(sess.has_training);
+    try std.testing.expect(sess.canContinue());
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const with_train = try std.fs.path.join(std.testing.allocator, &.{ abs, "with_train.psol" });
+    defer std.testing.allocator.free(with_train);
+    const browse_only = try std.fs.path.join(std.testing.allocator, &.{ abs, "browse_only.psol" });
+    defer std.testing.allocator.free(browse_only);
+
+    try sess.save(with_train);
+
+    // Force a browse-only document by clearing the training flag in a copy.
+    var doc = try poker_formats.readFile(std.testing.allocator, with_train);
+    defer doc.deinit();
+    try std.testing.expect(doc.hasTraining());
+    doc.has_training_flag = false;
+    if (doc.regret.len != 0) {
+        std.testing.allocator.free(doc.regret);
+        doc.regret = &.{};
+    }
+    if (doc.strategy_sum.len != 0) {
+        std.testing.allocator.free(doc.strategy_sum);
+        doc.strategy_sum = &.{};
+    }
+    try poker_formats.writeFile(std.testing.allocator, browse_only, doc);
+
+    var other = Session.init(std.testing.allocator);
+    defer other.deinit();
+    try other.open(browse_only);
+    try std.testing.expect(!other.has_training);
+    try std.testing.expect(other.training == null);
+    try std.testing.expect(!other.canContinue());
+    try other.save(browse_only);
+
+    var reloaded = try poker_formats.readFile(std.testing.allocator, browse_only);
+    defer reloaded.deinit();
+    try std.testing.expect(!reloaded.hasTraining());
+
+    var resumed = Session.init(std.testing.allocator);
+    defer resumed.deinit();
+    try resumed.open(with_train);
+    try std.testing.expect(resumed.has_training);
+    try std.testing.expect(resumed.canContinue());
+}
+
 test {
     _ = session;
 }

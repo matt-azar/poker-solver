@@ -8,6 +8,8 @@ pub const SessionError = error{
     NothingPublished,
     OpenFailed,
     OutOfMemory,
+    BudgetExceeded,
+    InvalidStrategy,
 } || poker_formats.OpenError || poker_engine.game.street_config.ConfigError || poker_engine.game.compile.CompileError || poker_engine.solve.training_state.TrainError || poker_engine.solve.cfr_plus.CfrError || poker_engine.solve.frozen_walk.FrozenError;
 
 pub const Phase = enum {
@@ -17,6 +19,15 @@ pub const Phase = enum {
     paused,
     published,
     failed,
+};
+
+/// Why the latest train loop returned (ZR-90).
+pub const TrainTerminal = enum {
+    completed,
+    paused,
+    cancelled,
+    accuracy_reached,
+    time_limit_reached,
 };
 
 pub const Metrics = poker_formats.Metrics;
@@ -71,9 +82,81 @@ pub const Session = struct {
     quiet: std.Thread.Condition = .{},
     /// Signaled when a new policy_revision is installed (values waiters).
     published_cv: std.Thread.Condition = .{},
+    /// True when training tables came from a real train or a checkpoint with flag_training.
+    /// Browse-only opens leave this false so Continue stays disabled (ZR-96).
+    has_training: bool = false,
+    /// Cooperative control flags polled at iteration boundaries (ZR-90).
+    stop_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    pause_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    last_terminal: TrainTerminal = .completed,
+    /// Config memory budget in bytes (0 = unset / unlimited for legacy).
+    memory_budget_bytes: u64 = 0,
 
     pub fn init(allocator: std.mem.Allocator) Session {
         return .{ .allocator = allocator };
+    }
+
+    pub fn canContinue(self: *const Session) bool {
+        return self.has_training and self.published != null and
+            (self.phase == .paused or self.phase == .published);
+    }
+
+    pub fn requestStop(self: *Session) void {
+        self.stop_requested.store(true, .release);
+    }
+
+    pub fn requestPause(self: *Session) void {
+        self.pause_requested.store(true, .release);
+    }
+
+    pub fn clearControlFlags(self: *Session) void {
+        self.stop_requested.store(false, .release);
+        self.pause_requested.store(false, .release);
+    }
+
+    fn shouldStopTrain(ctx: *anyopaque) bool {
+        const self: *Session = @ptrCast(@alignCast(ctx));
+        return self.stop_requested.load(.acquire) or self.pause_requested.load(.acquire);
+    }
+
+    fn busyForReplace(self: *const Session) bool {
+        return self.phase == .training or self.phase == .compiling;
+    }
+
+    /// Rough peak for compiled game + training tables + one published average.
+    fn estimateSolutionBytes(game: poker_engine.game.compile.CompiledGame) u64 {
+        const te: u64 = @intCast(@max(game.table_entries, 0));
+        const deal_bytes = game.deals.len * @sizeOf(poker_engine.game.compile.Deal);
+        const slot_bytes = game.slots.len * @sizeOf(poker_engine.game.compile.Slot);
+        const node_bytes = game.nodes.len * @sizeOf(poker_engine.game.compile.Node);
+        // regret + strategy_sum + sigma + published average
+        const table_bytes = te * @sizeOf(f32) * 4;
+        // Conservative scratch / ranks / maps overhead for flop-scale trees.
+        const overhead = te * 32 + game.deals.len * 16;
+        return deal_bytes + slot_bytes + node_bytes + table_bytes + overhead;
+    }
+
+    fn validateAveragePolicy(
+        game: poker_engine.game.compile.CompiledGame,
+        average: []const f32,
+    ) bool {
+        if (average.len != @as(usize, @intCast(game.table_entries))) return false;
+        for (game.slots) |slot| {
+            const n_actions: usize = game.nodes[@intCast(slot.node)].n_actions;
+            if (n_actions == 0) continue;
+            const base: usize = @intCast(slot.base);
+            if (base + n_actions > average.len) return false;
+            var probs: [8]f64 = undefined;
+            if (n_actions > probs.len) return false;
+            var a: usize = 0;
+            while (a < n_actions) : (a += 1) {
+                probs[a] = average[base + a];
+            }
+            if (!poker_engine.solve.node_lock.validateActionRow(probs[0..n_actions], @intCast(n_actions))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     pub fn deinit(self: *Session) void {
@@ -120,6 +203,10 @@ pub const Session = struct {
         self.has_metrics = false;
         self.frozen = false;
         self.threads = 1;
+        self.has_training = false;
+        self.memory_budget_bytes = 0;
+        self.last_terminal = .completed;
+        self.clearControlFlags();
         self.phase = .idle;
     }
 
@@ -169,7 +256,7 @@ pub const Session = struct {
     /// Begin a new solve from street-config text. On failure, prior solution is kept.
     pub fn begin(self: *Session, config_text: []const u8) SessionError!void {
         self.mu.lock();
-        if (self.phase == .training or self.phase == .compiling) {
+        if (self.busyForReplace()) {
             self.mu.unlock();
             return error.Busy;
         }
@@ -177,8 +264,14 @@ pub const Session = struct {
 
         var spec = try poker_engine.game.parseStreetConfig(self.allocator, config_text);
         defer spec.deinit();
+        if (spec.memory_mib <= 0) return error.BudgetExceeded;
+        const budget_bytes: u64 = @as(u64, @intCast(spec.memory_mib)) * 1024 * 1024;
+
         var game = try poker_engine.game.compile.compile(self.allocator, spec);
         errdefer game.deinit();
+        const estimated = estimateSolutionBytes(game);
+        if (estimated > budget_bytes) return error.BudgetExceeded;
+
         var training = try poker_engine.solve.training_state.TrainingState.init(self.allocator, game);
         errdefer training.deinit();
         const owned_config = self.allocator.dupe(u8, config_text) catch return error.OutOfMemory;
@@ -188,7 +281,7 @@ pub const Session = struct {
         // Install only after compile+train tables succeed (fail-closed).
         self.mu.lock();
         defer self.mu.unlock();
-        if (self.phase == .training or self.phase == .compiling) return error.Busy;
+        if (self.busyForReplace()) return error.Busy;
         while (self.readers != 0) {
             self.quiet.wait(&self.mu);
         }
@@ -197,9 +290,13 @@ pub const Session = struct {
         self.game = game;
         self.training = training;
         self.threads = threads;
+        self.memory_budget_bytes = budget_bytes;
+        self.has_training = true;
         self.solution_id = self.next_id;
         self.next_id += 1;
         self.baseline_id = 0;
+        self.clearControlFlags();
+        self.last_terminal = .completed;
         // Ready to train; not yet published. Open may still replace (fail-closed).
         self.phase = .paused;
     }
@@ -231,6 +328,10 @@ pub const Session = struct {
             self.mu.unlock();
             return error.InvalidSession;
         }
+        if (!self.has_training) {
+            self.mu.unlock();
+            return error.InvalidSession;
+        }
         const state = &(self.training orelse {
             self.mu.unlock();
             return error.InvalidSession;
@@ -243,6 +344,8 @@ pub const Session = struct {
             })
         else
             &.{};
+        // Do not clear stop/pause here — host admits a fresh job by clearing first;
+        // mid-loop trainGated must observe flags set while the prior step ran.
         self.phase = .training;
         self.mu.unlock();
         defer if (locks_snapshot.len != 0) self.allocator.free(locks_snapshot);
@@ -270,13 +373,96 @@ pub const Session = struct {
             iterations,
             onTrainPublished,
             self,
+            shouldStopTrain,
+            self,
         );
         // Average already installed by the hook; stub carries revision only.
         stub.deinit();
 
+        const stopped = self.stop_requested.load(.acquire);
+        const paused = self.pause_requested.load(.acquire);
         self.mu.lock();
-        self.phase = .published;
+        if (stopped) {
+            self.last_terminal = .cancelled;
+            self.phase = if (self.published != null) .paused else .failed;
+        } else if (paused) {
+            self.last_terminal = .paused;
+            self.phase = if (self.published != null) .paused else .failed;
+        } else {
+            self.last_terminal = .completed;
+            self.phase = .published;
+        }
+        self.has_training = true;
         self.mu.unlock();
+        self.clearControlFlags();
+    }
+
+    /// Accuracy / time gated train loop shared with gate-bench (ZR-91).
+    /// Each step is `train(1)` so pause/stop still land on iteration boundaries.
+    pub fn trainGated(
+        self: *Session,
+        max_iterations: i32,
+        accuracy_pot_fraction: f64,
+        eval_every: i32,
+        time_limit_seconds: f64,
+    ) SessionError!void {
+        if (max_iterations < 1) return error.InvalidSession;
+        const every: i32 = if (eval_every < 1) 1 else eval_every;
+        const pot: f64 = if (self.game) |g| @floatFromInt(g.pot) else 0;
+        const threshold_chips = if (accuracy_pot_fraction > 0 and pot > 0)
+            accuracy_pot_fraction * pot
+        else
+            -1.0;
+        const use_time = time_limit_seconds >= 0;
+        const t0 = std.time.nanoTimestamp();
+        var completed: i32 = 0;
+        var fresh_eval = false;
+
+        while (completed < max_iterations) {
+            if (self.stop_requested.load(.acquire)) {
+                self.last_terminal = .cancelled;
+                self.mu.lock();
+                self.phase = if (self.published != null) .paused else .failed;
+                self.mu.unlock();
+                self.clearControlFlags();
+                return;
+            }
+            if (self.pause_requested.load(.acquire)) {
+                self.last_terminal = .paused;
+                self.mu.lock();
+                self.phase = if (self.published != null) .paused else .failed;
+                self.mu.unlock();
+                self.clearControlFlags();
+                return;
+            }
+            try self.train(1);
+            if (self.last_terminal == .cancelled or self.last_terminal == .paused) return;
+            completed += 1;
+            fresh_eval = false;
+
+            if (@rem(completed, every) == 0 and threshold_chips >= 0) {
+                const published = self.published orelse return error.NothingPublished;
+                const eval = try self.evaluateFrozen(published.average);
+                fresh_eval = true;
+                if (eval.accuracy <= threshold_chips) {
+                    self.last_terminal = .accuracy_reached;
+                    return;
+                }
+            }
+            if (use_time) {
+                const elapsed = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e9;
+                if (elapsed >= time_limit_seconds) {
+                    if (!fresh_eval and threshold_chips >= 0) {
+                        if (self.published) |published| {
+                            _ = try self.evaluateFrozen(published.average);
+                        }
+                    }
+                    self.last_terminal = .time_limit_reached;
+                    return;
+                }
+            }
+        }
+        self.last_terminal = .completed;
     }
 
     /// Frozen NashConv / Accuracy on the Session-owned engine (reuses ranks).
@@ -335,7 +521,12 @@ pub const Session = struct {
     pub fn pause(self: *Session) SessionError!void {
         self.mu.lock();
         defer self.mu.unlock();
-        if (self.phase != .published and self.phase != .training) return error.InvalidSession;
+        if (self.phase == .training) {
+            // Cooperative: train loop stops at the next iteration boundary.
+            self.pause_requested.store(true, .release);
+            return;
+        }
+        if (self.phase != .published) return error.InvalidSession;
         if (self.published == null) return error.NothingPublished;
         self.phase = .paused;
     }
@@ -374,8 +565,11 @@ pub const Session = struct {
         }
         doc.average = self.allocator.dupe(f32, published.average) catch return error.OutOfMemory;
 
-        if (self.training) |state| {
-            if (state.regret.len != 0) {
+        // Preserve browse-only: never invent training tables on save (ZR-96).
+        // Degenerate check-only trees may have empty tables but still continue.
+        if (self.has_training) {
+            doc.has_training_flag = true;
+            if (self.training) |state| {
                 doc.trained = state.trained;
                 doc.regret = self.allocator.dupe(f32, state.regret) catch return error.OutOfMemory;
                 doc.strategy_sum = self.allocator.dupe(f32, state.strategy_sum) catch return error.OutOfMemory;
@@ -395,6 +589,12 @@ pub const Session = struct {
     }
 
     pub fn save(self: *Session, path: []const u8) SessionError!void {
+        self.mu.lock();
+        if (self.busyForReplace()) {
+            self.mu.unlock();
+            return error.Busy;
+        }
+        self.mu.unlock();
         var doc = try self.buildDocument();
         defer doc.deinit();
         try poker_formats.writeFile(self.allocator, path, doc);
@@ -402,7 +602,7 @@ pub const Session = struct {
 
     /// Open for study (and optional resume). Fail-closed: on error prior session unchanged.
     pub fn open(self: *Session, path: []const u8) SessionError!void {
-        if (self.phase == .training or self.phase == .compiling) return error.Busy;
+        if (self.busyForReplace()) return error.Busy;
 
         var doc = poker_formats.readFile(self.allocator, path) catch |err| {
             return err;
@@ -424,14 +624,19 @@ pub const Session = struct {
             if (doc.slot_actions[i] != game.nodes[@intCast(slot.node)].n_actions) return error.InvalidPsol;
         }
         if (doc.average.len != @as(usize, @intCast(game.table_entries))) return error.InvalidPsol;
+        // Reject invalid strategy rows before replacing the active solution (ZR-96).
+        if (!validateAveragePolicy(game, doc.average)) return error.InvalidStrategy;
 
-        var training = try poker_engine.solve.training_state.TrainingState.init(self.allocator, game);
-        errdefer training.deinit();
-        if (doc.hasTraining()) {
-            if (doc.regret.len != training.regret.len) return error.InvalidPsol;
-            @memcpy(training.regret, doc.regret);
-            @memcpy(training.strategy_sum, doc.strategy_sum);
-            training.trained = doc.trained;
+        const want_training = doc.hasTraining();
+        var training: ?poker_engine.solve.training_state.TrainingState = null;
+        errdefer if (training) |*owned| owned.deinit();
+        if (want_training) {
+            var tables = try poker_engine.solve.training_state.TrainingState.init(self.allocator, game);
+            errdefer tables.deinit();
+            if (doc.regret.len != tables.regret.len) return error.InvalidPsol;
+            @memcpy(tables.regret, doc.regret);
+            @memcpy(tables.strategy_sum, doc.strategy_sum);
+            tables.trained = doc.trained;
             var open_locks: ?poker_engine.solve.node_lock.LockSet = null;
             defer if (open_locks) |*owned| owned.deinit();
             if (doc.locks_text.len != 0) {
@@ -441,9 +646,11 @@ pub const Session = struct {
             }
             try poker_engine.solve.training_state.freezeSigma(
                 game,
-                &training,
+                &tables,
                 if (open_locks) |*owned| owned else null,
             );
+            tables.policy_revision = 1;
+            training = tables;
         }
 
         var published = poker_engine.solve.training_state.PublishedPolicy{
@@ -453,7 +660,6 @@ pub const Session = struct {
             .trained = doc.trained,
         };
         errdefer published.deinit();
-        training.policy_revision = 1;
 
         const owned_config = self.allocator.dupe(u8, doc.config_text) catch return error.OutOfMemory;
         errdefer self.allocator.free(owned_config);
@@ -474,9 +680,16 @@ pub const Session = struct {
         self.metrics = doc.metrics;
         self.has_metrics = doc.has_metrics;
         self.threads = clampThreads(spec.threads);
+        self.has_training = want_training;
+        self.memory_budget_bytes = if (spec.memory_mib > 0)
+            @as(u64, @intCast(spec.memory_mib)) * 1024 * 1024
+        else
+            0;
         self.solution_id = self.next_id;
         self.next_id += 1;
         self.baseline_id = 0;
+        self.clearControlFlags();
+        self.last_terminal = .completed;
         self.phase = .published;
     }
 

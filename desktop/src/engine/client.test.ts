@@ -43,12 +43,7 @@ describe("EngineClient Slice A IPC branches", () => {
     });
 
     invoke.mockResolvedValueOnce(okBody("cancel", { cancelled: true }));
-    await expect(client.stop()).resolves.toEqual({ cancelled: true });
-    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
-      op: "cancel",
-      body: null,
-      jobId: "j-study",
-    });
+    await expect(client.stop()).rejects.toMatchObject({ name: "EngineError" });
 
     invoke.mockResolvedValueOnce(okBody("cancel", { cancelled: true }));
     await client.stop("j-custom");

@@ -156,11 +156,11 @@ describe("Slice A IPC lifecycle + node helpers", () => {
       ok: true,
       body: { cancelled: true },
     });
-    await ipcCancel();
+    await ipcCancel("j1");
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "cancel",
       body: null,
-      jobId: "j-study",
+      jobId: "j1",
     });
 
     invoke.mockResolvedValue({
