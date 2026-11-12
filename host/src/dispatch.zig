@@ -387,6 +387,327 @@ fn reapplyStrategyEdits(state: *HostState, edits: *const strategy_edit.StrategyE
     try state.session.bumpPolicyRevision();
 }
 
+/// ZR-136: fat `put_lock` body extracted from `handle` (op discriminator stays in parent).
+fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
+    if (state.train_running.load(.acquire) or state.session.phase == .training) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+    }
+    var lease = state.session.borrowPublished() catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+    };
+    defer lease.deinit();
+
+    const node_id_text = bodyStringField(req.body_json, "node_id") orelse
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "node_id required");
+    const located = poker_engine.analysis.node_id.locateNode(lease.game, node_id_text) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
+    };
+    var page = poker_engine.analysis.inspect.inspectNode(
+        state.allocator,
+        lease.game,
+        lease.published,
+        located.node_index,
+        located.turn,
+        located.river,
+    ) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "inspect_failed", @errorName(err));
+    };
+    defer page.deinit();
+    if (page.player < 0 or page.n_actions == 0) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "locks apply only to decision nodes");
+    }
+
+    const kind_text = bodyStringField(req.body_json, "kind") orelse "full";
+    const scope_text = bodyStringField(req.body_json, "scope") orelse "node";
+    if (!std.mem.eql(u8, scope_text, "node") and !std.mem.eql(u8, scope_text, "line")) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "scope must be node or line");
+    }
+    const probs_slice = bodyArraySlice(req.body_json, "probs") orelse
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs required");
+    const probs = parseF64Array(state.allocator, probs_slice) catch {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad probs");
+    };
+    defer state.allocator.free(probs);
+    if (probs.len != page.n_actions) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs length must match action arity");
+    }
+
+    var lock = node_lock.NodeLock{
+        .infoset_id = located.node_index,
+    };
+    errdefer lock.deinit(state.allocator);
+    if (std.mem.eql(u8, scope_text, "line")) {
+        lock.scope = .line;
+        lock.turn = -1;
+        lock.river = -1;
+    } else {
+        lock.scope = .node;
+        lock.turn = @intCast(located.turn);
+        lock.river = @intCast(located.river);
+    }
+    if (std.mem.eql(u8, kind_text, "full")) {
+        lock.kind = .full_node;
+    } else if (std.mem.eql(u8, kind_text, "selected")) {
+        lock.kind = .selected_combos;
+        const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse "";
+        const hands = parseUsizeArray(state.allocator, hands_slice) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_indices");
+        };
+        const n_hands: usize = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
+        for (hands) |hand| {
+            if (hand >= n_hands) {
+                state.allocator.free(hands);
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
+            }
+        }
+        // Ownership transfers to lock (and then LockSet); do not free `hands` separately.
+        lock.combo_indices = hands;
+    } else {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "kind must be full or selected");
+    }
+    lock.actions = node_lock.makeActionLockRow(state.allocator, probs, @intCast(page.n_actions)) catch {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid lock row");
+    };
+
+    var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
+    };
+    defer locks.deinit();
+    locks.upsert(lock) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+    };
+    // LockSet now owns the NodeLock storage; neutralize errdefer.
+    lock = .{};
+    persistLocksText(state, &locks) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+    };
+    return replyLocksBody(state, req, &locks);
+}
+
+/// ZR-136: sibling of `handlePutLock` (cheap extract with the put path).
+fn handleDeleteLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
+    if (state.train_running.load(.acquire) or state.session.phase == .training) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+    }
+    if (state.session.solution_id == 0) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
+    }
+    var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
+    };
+    defer locks.deinit();
+
+    if (bodyStringField(req.body_json, "node_id")) |node_id_text| {
+        const parsed = poker_engine.analysis.node_id.parseNodeId(node_id_text) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad node_id");
+        };
+        const key = node_lock.makeLockKey(parsed.node_index, parsed.turn, parsed.river);
+        if (bodyIntField(req.body_json, "hand_index")) |hand_i32| {
+            if (hand_i32 < 0) {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_index");
+            }
+            const hand_index: usize = @intCast(hand_i32);
+            if (locks.findExactKey(key)) |existing| {
+                if (existing.kind == .full_node) {
+                    return ipc.makeErrorReply(
+                        state.allocator,
+                        req.request_id,
+                        req.job_id,
+                        req.op,
+                        "invalid_request",
+                        "full-node locks unlock with node_id only; omit hand_index",
+                    );
+                }
+            }
+            _ = locks.eraseComboKey(key, hand_index);
+        } else {
+            _ = locks.eraseKey(key);
+        }
+    } else {
+        locks.clear();
+    }
+
+    persistLocksText(state, &locks) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+    };
+    return replyLocksBody(state, req, &locks);
+}
+
+/// ZR-136: fat `put_strategy_edit` body extracted from `handle`.
+fn handlePutStrategyEdit(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
+    if (state.train_running.load(.acquire) or state.session.phase == .training) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+    }
+    var lease = state.session.borrowPublished() catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+    };
+    defer lease.deinit();
+
+    const node_id_text = bodyStringField(req.body_json, "node_id") orelse
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "node_id required");
+    const located = poker_engine.analysis.node_id.locateNode(lease.game, node_id_text) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
+    };
+    var page = poker_engine.analysis.inspect.inspectNode(
+        state.allocator,
+        lease.game,
+        lease.published,
+        located.node_index,
+        located.turn,
+        located.river,
+    ) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "inspect_failed", @errorName(err));
+    };
+    defer page.deinit();
+    if (page.player < 0 or page.n_actions == 0) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "strategy edits apply only to decision nodes");
+    }
+
+    const kind_text = bodyStringField(req.body_json, "kind") orelse "selected";
+    const probs_slice = bodyArraySlice(req.body_json, "probs") orelse
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs required");
+    const probs = parseF64Array(state.allocator, probs_slice) catch {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad probs");
+    };
+    defer state.allocator.free(probs);
+    if (probs.len != page.n_actions) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs length must match action arity");
+    }
+    if (!strategy_edit.validateStrategyProbs(probs, @intCast(page.n_actions))) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid strategy probability row");
+    }
+
+    var edit = strategy_edit.StrategyEdit{
+        .infoset_id = located.node_index,
+        .turn = @intCast(located.turn),
+        .river = @intCast(located.river),
+    };
+    errdefer edit.deinit(state.allocator);
+    edit.probs = strategy_edit.makeStrategyProbs(state.allocator, probs, @intCast(page.n_actions)) catch {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid strategy probability row");
+    };
+    if (std.mem.eql(u8, kind_text, "full")) {
+        edit.kind = .full_node;
+    } else if (std.mem.eql(u8, kind_text, "selected")) {
+        edit.kind = .selected_combos;
+        const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse "";
+        const hands = parseUsizeArray(state.allocator, hands_slice) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_indices");
+        };
+        const n_hands: usize = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
+        for (hands) |hand| {
+            if (hand >= n_hands) {
+                state.allocator.free(hands);
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
+            }
+            const supported = strategy_edit.handHasInfoset(
+                lease.game,
+                located.node_index,
+                located.turn,
+                located.river,
+                hand,
+            ) catch {
+                state.allocator.free(hands);
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
+            };
+            if (!supported) {
+                state.allocator.free(hands);
+                return ipc.makeErrorReply(
+                    state.allocator,
+                    req.request_id,
+                    req.job_id,
+                    req.op,
+                    "invalid_request",
+                    "hand has no information set on this node",
+                );
+            }
+        }
+        edit.hand_indices = hands;
+    } else {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "kind must be full or selected");
+    }
+
+    // Drop inspect lease before mutating published average / baseline.
+    lease.deinit();
+
+    state.session.ensureStrategyEditBaseline() catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+    };
+
+    var edits = strategy_edits_json.parseSessionStrategyEdits(state.allocator, state.session.strategy_edits_text) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_strategy_edits", @errorName(err));
+    };
+    defer edits.deinit();
+    edits.upsert(edit) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", @errorName(err));
+    };
+    // Ownership transferred into the set.
+    edit = .{};
+
+    reapplyStrategyEdits(state, &edits) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_apply_failed", @errorName(err));
+    };
+    persistStrategyEditsText(state, &edits) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_persist_failed", @errorName(err));
+    };
+    return replyStrategyEditsBody(state, req, &edits);
+}
+
+/// ZR-136: sibling of `handlePutStrategyEdit` (cheap extract with the put path).
+fn handleDeleteStrategyEdit(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
+    if (state.train_running.load(.acquire) or state.session.phase == .training) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+    }
+    if (state.session.solution_id == 0) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
+    }
+    var edits = strategy_edits_json.parseSessionStrategyEdits(state.allocator, state.session.strategy_edits_text) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_strategy_edits", @errorName(err));
+    };
+    defer edits.deinit();
+
+    if (bodyStringField(req.body_json, "node_id")) |node_id_text| {
+        const parsed = poker_engine.analysis.node_id.parseNodeId(node_id_text) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad node_id");
+        };
+        const key = node_lock.makeLockKey(parsed.node_index, parsed.turn, parsed.river);
+        if (bodyIntField(req.body_json, "hand_index")) |hand_i32| {
+            if (hand_i32 < 0) {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_index");
+            }
+            const hand_index: usize = @intCast(hand_i32);
+            if (edits.findExactKey(key)) |existing| {
+                if (existing.kind == .full_node) {
+                    return ipc.makeErrorReply(
+                        state.allocator,
+                        req.request_id,
+                        req.job_id,
+                        req.op,
+                        "invalid_request",
+                        "full-node strategy edits clear with node_id only; omit hand_index",
+                    );
+                }
+            }
+            _ = edits.eraseHand(key, hand_index);
+        } else {
+            _ = edits.eraseKey(key);
+        }
+    } else {
+        edits.clear();
+    }
+
+    state.session.ensureStrategyEditBaseline() catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+    };
+    reapplyStrategyEdits(state, &edits) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_apply_failed", @errorName(err));
+    };
+    persistStrategyEditsText(state, &edits) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_persist_failed", @errorName(err));
+    };
+    return replyStrategyEditsBody(state, req, &edits);
+}
+
 fn resolveLocatedNode(
     game: poker_engine.game.CompiledGame,
     body_json: []const u8,
@@ -1112,147 +1433,11 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "put_lock")) {
-        if (state.train_running.load(.acquire) or state.session.phase == .training) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
-        }
-        var lease = state.session.borrowPublished() catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
-        };
-        defer lease.deinit();
-
-        const node_id_text = bodyStringField(req.body_json, "node_id") orelse
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "node_id required");
-        const located = poker_engine.analysis.node_id.locateNode(lease.game, node_id_text) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
-        };
-        var page = poker_engine.analysis.inspect.inspectNode(
-            state.allocator,
-            lease.game,
-            lease.published,
-            located.node_index,
-            located.turn,
-            located.river,
-        ) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "inspect_failed", @errorName(err));
-        };
-        defer page.deinit();
-        if (page.player < 0 or page.n_actions == 0) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "locks apply only to decision nodes");
-        }
-
-        const kind_text = bodyStringField(req.body_json, "kind") orelse "full";
-        const scope_text = bodyStringField(req.body_json, "scope") orelse "node";
-        if (!std.mem.eql(u8, scope_text, "node") and !std.mem.eql(u8, scope_text, "line")) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "scope must be node or line");
-        }
-        const probs_slice = bodyArraySlice(req.body_json, "probs") orelse
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs required");
-        const probs = parseF64Array(state.allocator, probs_slice) catch {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad probs");
-        };
-        defer state.allocator.free(probs);
-        if (probs.len != page.n_actions) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs length must match action arity");
-        }
-
-        var lock = node_lock.NodeLock{
-            .infoset_id = located.node_index,
-        };
-        errdefer lock.deinit(state.allocator);
-        if (std.mem.eql(u8, scope_text, "line")) {
-            lock.scope = .line;
-            lock.turn = -1;
-            lock.river = -1;
-        } else {
-            lock.scope = .node;
-            lock.turn = @intCast(located.turn);
-            lock.river = @intCast(located.river);
-        }
-        if (std.mem.eql(u8, kind_text, "full")) {
-            lock.kind = .full_node;
-        } else if (std.mem.eql(u8, kind_text, "selected")) {
-            lock.kind = .selected_combos;
-            const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse "";
-            const hands = parseUsizeArray(state.allocator, hands_slice) catch {
-                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_indices");
-            };
-            const n_hands: usize = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
-            for (hands) |hand| {
-                if (hand >= n_hands) {
-                    state.allocator.free(hands);
-                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
-                }
-            }
-            // Ownership transfers to lock (and then LockSet); do not free `hands` separately.
-            lock.combo_indices = hands;
-        } else {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "kind must be full or selected");
-        }
-        lock.actions = node_lock.makeActionLockRow(state.allocator, probs, @intCast(page.n_actions)) catch {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid lock row");
-        };
-
-        var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
-        };
-        defer locks.deinit();
-        locks.upsert(lock) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
-        };
-        // LockSet now owns the NodeLock storage; neutralize errdefer.
-        lock = .{};
-        persistLocksText(state, &locks) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
-        };
-        return replyLocksBody(state, req, &locks);
+        return handlePutLock(state, req);
     }
 
     if (std.mem.eql(u8, req.op, "delete_lock")) {
-        if (state.train_running.load(.acquire) or state.session.phase == .training) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
-        }
-        if (state.session.solution_id == 0) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
-        }
-        var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
-        };
-        defer locks.deinit();
-
-        if (bodyStringField(req.body_json, "node_id")) |node_id_text| {
-            const parsed = poker_engine.analysis.node_id.parseNodeId(node_id_text) catch {
-                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad node_id");
-            };
-            const key = node_lock.makeLockKey(parsed.node_index, parsed.turn, parsed.river);
-            if (bodyIntField(req.body_json, "hand_index")) |hand_i32| {
-                if (hand_i32 < 0) {
-                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_index");
-                }
-                const hand_index: usize = @intCast(hand_i32);
-                if (locks.findExactKey(key)) |existing| {
-                    if (existing.kind == .full_node) {
-                        return ipc.makeErrorReply(
-                            state.allocator,
-                            req.request_id,
-                            req.job_id,
-                            req.op,
-                            "invalid_request",
-                            "full-node locks unlock with node_id only; omit hand_index",
-                        );
-                    }
-                }
-                _ = locks.eraseComboKey(key, hand_index);
-            } else {
-                _ = locks.eraseKey(key);
-            }
-        } else {
-            locks.clear();
-        }
-
-        persistLocksText(state, &locks) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
-        };
-        return replyLocksBody(state, req, &locks);
+        return handleDeleteLock(state, req);
     }
 
     // Study strategy-edits CRUD over Session.strategy_edits_text + published average overlays.
@@ -1268,176 +1453,11 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "put_strategy_edit")) {
-        if (state.train_running.load(.acquire) or state.session.phase == .training) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
-        }
-        var lease = state.session.borrowPublished() catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
-        };
-        defer lease.deinit();
-
-        const node_id_text = bodyStringField(req.body_json, "node_id") orelse
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "node_id required");
-        const located = poker_engine.analysis.node_id.locateNode(lease.game, node_id_text) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
-        };
-        var page = poker_engine.analysis.inspect.inspectNode(
-            state.allocator,
-            lease.game,
-            lease.published,
-            located.node_index,
-            located.turn,
-            located.river,
-        ) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "inspect_failed", @errorName(err));
-        };
-        defer page.deinit();
-        if (page.player < 0 or page.n_actions == 0) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "strategy edits apply only to decision nodes");
-        }
-
-        const kind_text = bodyStringField(req.body_json, "kind") orelse "selected";
-        const probs_slice = bodyArraySlice(req.body_json, "probs") orelse
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs required");
-        const probs = parseF64Array(state.allocator, probs_slice) catch {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad probs");
-        };
-        defer state.allocator.free(probs);
-        if (probs.len != page.n_actions) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs length must match action arity");
-        }
-        if (!strategy_edit.validateStrategyProbs(probs, @intCast(page.n_actions))) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid strategy probability row");
-        }
-
-        var edit = strategy_edit.StrategyEdit{
-            .infoset_id = located.node_index,
-            .turn = @intCast(located.turn),
-            .river = @intCast(located.river),
-        };
-        errdefer edit.deinit(state.allocator);
-        edit.probs = strategy_edit.makeStrategyProbs(state.allocator, probs, @intCast(page.n_actions)) catch {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid strategy probability row");
-        };
-        if (std.mem.eql(u8, kind_text, "full")) {
-            edit.kind = .full_node;
-        } else if (std.mem.eql(u8, kind_text, "selected")) {
-            edit.kind = .selected_combos;
-            const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse "";
-            const hands = parseUsizeArray(state.allocator, hands_slice) catch {
-                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_indices");
-            };
-            const n_hands: usize = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
-            for (hands) |hand| {
-                if (hand >= n_hands) {
-                    state.allocator.free(hands);
-                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
-                }
-                const supported = strategy_edit.handHasInfoset(
-                    lease.game,
-                    located.node_index,
-                    located.turn,
-                    located.river,
-                    hand,
-                ) catch {
-                    state.allocator.free(hands);
-                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
-                };
-                if (!supported) {
-                    state.allocator.free(hands);
-                    return ipc.makeErrorReply(
-                        state.allocator,
-                        req.request_id,
-                        req.job_id,
-                        req.op,
-                        "invalid_request",
-                        "hand has no information set on this node",
-                    );
-                }
-            }
-            edit.hand_indices = hands;
-        } else {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "kind must be full or selected");
-        }
-
-        // Drop inspect lease before mutating published average / baseline.
-        lease.deinit();
-
-        state.session.ensureStrategyEditBaseline() catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
-        };
-
-        var edits = strategy_edits_json.parseSessionStrategyEdits(state.allocator, state.session.strategy_edits_text) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_strategy_edits", @errorName(err));
-        };
-        defer edits.deinit();
-        edits.upsert(edit) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", @errorName(err));
-        };
-        // Ownership transferred into the set.
-        edit = .{};
-
-        reapplyStrategyEdits(state, &edits) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_apply_failed", @errorName(err));
-        };
-        persistStrategyEditsText(state, &edits) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_persist_failed", @errorName(err));
-        };
-        return replyStrategyEditsBody(state, req, &edits);
+        return handlePutStrategyEdit(state, req);
     }
 
     if (std.mem.eql(u8, req.op, "delete_strategy_edit")) {
-        if (state.train_running.load(.acquire) or state.session.phase == .training) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
-        }
-        if (state.session.solution_id == 0) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
-        }
-        var edits = strategy_edits_json.parseSessionStrategyEdits(state.allocator, state.session.strategy_edits_text) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_strategy_edits", @errorName(err));
-        };
-        defer edits.deinit();
-
-        if (bodyStringField(req.body_json, "node_id")) |node_id_text| {
-            const parsed = poker_engine.analysis.node_id.parseNodeId(node_id_text) catch {
-                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad node_id");
-            };
-            const key = node_lock.makeLockKey(parsed.node_index, parsed.turn, parsed.river);
-            if (bodyIntField(req.body_json, "hand_index")) |hand_i32| {
-                if (hand_i32 < 0) {
-                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_index");
-                }
-                const hand_index: usize = @intCast(hand_i32);
-                if (edits.findExactKey(key)) |existing| {
-                    if (existing.kind == .full_node) {
-                        return ipc.makeErrorReply(
-                            state.allocator,
-                            req.request_id,
-                            req.job_id,
-                            req.op,
-                            "invalid_request",
-                            "full-node strategy edits clear with node_id only; omit hand_index",
-                        );
-                    }
-                }
-                _ = edits.eraseHand(key, hand_index);
-            } else {
-                _ = edits.eraseKey(key);
-            }
-        } else {
-            edits.clear();
-        }
-
-        state.session.ensureStrategyEditBaseline() catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
-        };
-        reapplyStrategyEdits(state, &edits) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_apply_failed", @errorName(err));
-        };
-        persistStrategyEditsText(state, &edits) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_persist_failed", @errorName(err));
-        };
-        return replyStrategyEditsBody(state, req, &edits);
+        return handleDeleteStrategyEdit(state, req);
     }
 
     // Standalone Equity calculator jobs (no Study session). Distinct from Study `equity`.
