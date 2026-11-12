@@ -1,4 +1,4 @@
-//! poker_engine — Zig postflop engine (Phase 1: primitives + StreetSpec parse).
+//! poker_engine — Zig postflop engine (Phase 3: compile + kernel + CFR+).
 const std = @import("std");
 
 pub const poker = @import("poker/root.zig");

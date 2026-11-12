@@ -30,6 +30,32 @@ pub const Node = struct {
     mode1_is_turn: bool = false,
     incentive_u0: f64 = 0,
     incentive_u1: f64 = 0,
+    hands: i32 = 0,
+    parent: i32 = -1,
+    parent_action: i32 = -1,
+    from_chance: bool = false,
+    /// Dense slot index per card_key; -1 if no multi-action row. Owned.
+    slot_of: []i32 = &.{},
+};
+
+pub const Deal = struct {
+    h0: i32 = 0,
+    h1: i32 = 0,
+    combo0: i32 = 0,
+    combo1: i32 = 0,
+    c0: card.Card = 0,
+    c1: card.Card = 0,
+    d0: card.Card = 0,
+    d1: card.Card = 0,
+    probability: f64 = 0,
+};
+
+pub const Slot = struct {
+    node: i32 = 0,
+    base: i32 = 0,
+    hand: u16 = 0,
+    turn: i8 = -1,
+    river: i8 = -1,
 };
 
 pub const RunoutIndex = struct {
@@ -82,21 +108,27 @@ pub const PrivateHandIndex = struct {
     }
 };
 
-/// Immutable compiled postflop game (Phase 2). Policy / training tables are Phase 3.
+/// Immutable compiled postflop game. Numeric training tables live in solve/.
 pub const CompiledGame = struct {
     allocator: std.mem.Allocator,
     board: []card.Card = &.{},
     pot: chips.Chip = 0,
     stack: chips.Chip = 0,
+    first_to_act: i32 = 0,
     rake: payoff.RakeConfig = .{},
     icm_stacks: []f64 = &.{},
     icm_payouts: []f64 = &.{},
+    incentive_rules: []street_spec.IncentiveRule = &.{},
+    incentive_edge_tags: []street_spec.IncentiveEdgeTagSpec = &.{},
     nodes: []Node = &.{},
     decision_ids: []u32 = &.{},
     public_decisions: u64 = 0,
     public_terminals: u64 = 0,
     runouts: RunoutIndex = .{},
     hands: PrivateHandIndex = .{},
+    deals: []Deal = &.{},
+    slots: []Slot = &.{},
+    table_entries: i32 = 0,
 
     pub fn icmConfig(self: CompiledGame) icm.IcmConfig {
         return .{ .stacks = self.icm_stacks, .payouts = self.icm_payouts };
@@ -109,15 +141,42 @@ pub const CompiledGame = struct {
             while (a < node.n_actions) : (a += 1) {
                 if (node.action_labels[a].len != 0) self.allocator.free(node.action_labels[a]);
             }
+            if (node.slot_of.len != 0) self.allocator.free(node.slot_of);
         }
         if (self.nodes.len != 0) self.allocator.free(self.nodes);
         if (self.decision_ids.len != 0) self.allocator.free(self.decision_ids);
         if (self.board.len != 0) self.allocator.free(self.board);
         if (self.icm_stacks.len != 0) self.allocator.free(self.icm_stacks);
         if (self.icm_payouts.len != 0) self.allocator.free(self.icm_payouts);
+        for (self.incentive_rules) |rule| {
+            if (rule.key.len != 0) self.allocator.free(rule.key);
+        }
+        if (self.incentive_rules.len != 0) self.allocator.free(self.incentive_rules);
+        for (self.incentive_edge_tags) |spec| {
+            if (spec.action_key.len != 0) self.allocator.free(spec.action_key);
+            for (spec.tags) |tag| self.allocator.free(tag);
+            if (spec.tags.len != 0) self.allocator.free(spec.tags);
+        }
+        if (self.incentive_edge_tags.len != 0) self.allocator.free(self.incentive_edge_tags);
+        if (self.deals.len != 0) self.allocator.free(self.deals);
+        if (self.slots.len != 0) self.allocator.free(self.slots);
         self.runouts.deinit(self.allocator);
         self.hands.deinit(self.allocator);
         self.* = .{ .allocator = self.allocator };
+    }
+
+    pub fn cardKey(self: CompiledGame, node: Node, hand: i32, turn: i32, river: i32) CompileError!i32 {
+        if (node.card_mode == 0) return hand;
+        if (node.card_mode == 1) {
+            const c = if (node.mode1_is_turn) turn else river;
+            const runout = self.runouts.mode1_of[@intCast(c)];
+            if (runout < 0) return error.InvalidCompile;
+            return runout * node.hands + hand;
+        }
+        if (self.runouts.mode2_of.len == 0) return error.InvalidCompile;
+        const runout = self.runouts.mode2_of[@intCast(turn * 52 + river)];
+        if (runout < 0) return error.InvalidCompile;
+        return runout * node.hands + hand;
     }
 };
 
@@ -138,16 +197,321 @@ pub fn compile(allocator: std.mem.Allocator, spec: street_spec.StreetSpec) Compi
     game.board = allocator.dupe(card.Card, spec.board) catch return error.OutOfMemory;
     game.pot = spec.pot;
     game.stack = spec.stack;
+    game.first_to_act = spec.first_to_act;
     game.rake = .{ .rate = spec.rake.rate, .cap = spec.rake.cap };
     if (spec.icm.stacks.len != 0) {
         game.icm_stacks = allocator.dupe(f64, spec.icm.stacks) catch return error.OutOfMemory;
         game.icm_payouts = allocator.dupe(f64, spec.icm.payouts) catch return error.OutOfMemory;
     }
+    try copyIncentives(allocator, &game, spec);
 
     try buildRunoutIndex(allocator, &game);
     try buildPublicTree(allocator, &game, spec);
     try buildHandIndex(allocator, &game, spec);
+    try setHandCounts(&game);
+    try fillTerminalIncentives(allocator, &game);
+    try buildDeals(allocator, &game, spec);
+    try buildPolicyMap(allocator, &game);
     return game;
+}
+
+fn copyIncentives(allocator: std.mem.Allocator, game: *CompiledGame, spec: street_spec.StreetSpec) CompileError!void {
+    if (spec.incentives.rules.len != 0) {
+        var rules = allocator.alloc(street_spec.IncentiveRule, spec.incentives.rules.len) catch return error.OutOfMemory;
+        errdefer allocator.free(rules);
+        for (spec.incentives.rules, 0..) |rule, i| {
+            rules[i] = .{
+                .kind = rule.kind,
+                .player = rule.player,
+                .key = allocator.dupe(u8, rule.key) catch return error.OutOfMemory,
+                .delta = rule.delta,
+            };
+        }
+        game.incentive_rules = rules;
+    }
+    if (spec.incentives.edge_tags.len != 0) {
+        var tags = allocator.alloc(street_spec.IncentiveEdgeTagSpec, spec.incentives.edge_tags.len) catch return error.OutOfMemory;
+        errdefer allocator.free(tags);
+        for (spec.incentives.edge_tags, 0..) |spec_tag, i| {
+            var owned_tags = allocator.alloc([]const u8, spec_tag.tags.len) catch return error.OutOfMemory;
+            for (spec_tag.tags, 0..) |tag, ti| {
+                owned_tags[ti] = allocator.dupe(u8, tag) catch return error.OutOfMemory;
+            }
+            tags[i] = .{
+                .player = spec_tag.player,
+                .action_key = allocator.dupe(u8, spec_tag.action_key) catch return error.OutOfMemory,
+                .tags = owned_tags,
+            };
+        }
+        game.incentive_edge_tags = tags;
+    }
+}
+
+fn setHandCounts(game: *CompiledGame) CompileError!void {
+    for (game.nodes) |*node| {
+        if (node.kind != .decision) continue;
+        node.hands = if (node.player == 0) game.hands.nHands(0) else game.hands.nHands(1);
+    }
+}
+
+fn compactFromDisplay(label: []const u8, buf: []u8) []const u8 {
+    if (std.mem.eql(u8, label, "Fold")) return "f";
+    if (std.mem.eql(u8, label, "Check")) return "c";
+    if (std.mem.eql(u8, label, "Call")) return "call";
+    var core = label;
+    var all_in = false;
+    if (std.mem.endsWith(u8, core, " all-in")) {
+        all_in = true;
+        core = core[0 .. core.len - " all-in".len];
+    }
+    var fbs = std.io.fixedBufferStream(buf);
+    const w = fbs.writer();
+    if (core.len > 4 and std.mem.eql(u8, core[0..4], "Bet ")) {
+        w.print("b{s}", .{core[4..]}) catch return label;
+        if (all_in) w.writeAll("ai") catch {};
+        return fbs.getWritten();
+    }
+    if (core.len > 9 and std.mem.eql(u8, core[0..9], "Raise to ")) {
+        w.print("r{s}", .{core[9..]}) catch return label;
+        if (all_in) w.writeAll("ai") catch {};
+        return fbs.getWritten();
+    }
+    return label;
+}
+
+fn fillTerminalIncentives(allocator: std.mem.Allocator, game: *CompiledGame) CompileError!void {
+    if (game.incentive_rules.len == 0) return;
+    _ = allocator;
+    var index: i32 = 0;
+    while (index < @as(i32, @intCast(game.nodes.len))) : (index += 1) {
+        if (game.nodes[@intCast(index)].kind != .terminal) continue;
+        var path_players: [64]i32 = undefined;
+        var path_display: [64][]const u8 = undefined;
+        var path_compact_bufs: [64][64]u8 = undefined;
+        var path_compact: [64][]const u8 = undefined;
+        var path_len: usize = 0;
+        var at = index;
+        while (at >= 0) {
+            const link_parent = game.nodes[@intCast(at)].parent;
+            if (link_parent < 0) break;
+            const from_chance = game.nodes[@intCast(at)].from_chance;
+            const action = game.nodes[@intCast(at)].parent_action;
+            if (!from_chance and action >= 0) {
+                const parent = game.nodes[@intCast(link_parent)];
+                const display = parent.action_labels[@intCast(action)];
+                path_players[path_len] = parent.player;
+                path_display[path_len] = display;
+                path_compact[path_len] = compactFromDisplay(display, &path_compact_bufs[path_len]);
+                path_len += 1;
+            }
+            at = link_parent;
+        }
+        // Reverse to root→terminal order (walk collected leaf→root).
+        var lo: usize = 0;
+        var hi = path_len;
+        while (lo < hi) {
+            hi -= 1;
+            if (lo >= hi) break;
+            const tp = path_players[lo];
+            path_players[lo] = path_players[hi];
+            path_players[hi] = tp;
+            const td = path_display[lo];
+            path_display[lo] = path_display[hi];
+            path_display[hi] = td;
+            const tc = path_compact[lo];
+            path_compact[lo] = path_compact[hi];
+            path_compact[hi] = tc;
+            lo += 1;
+        }
+        var incentive0: f64 = 0;
+        var incentive1: f64 = 0;
+        var step: usize = 0;
+        while (step < path_len) : (step += 1) {
+            for (game.incentive_rules) |rule| {
+                if (rule.player != path_players[step]) continue;
+                if (rule.kind == .action_label_match) {
+                    if (std.mem.eql(u8, rule.key, path_compact[step]) or std.mem.eql(u8, rule.key, path_display[step])) {
+                        if (rule.player == 0) incentive0 += rule.delta else incentive1 += rule.delta;
+                    }
+                }
+                // CategoryTag needs edge tags — attach_edge_tags omitted unless tags present.
+                if (rule.kind == .category_tag) {
+                    for (game.incentive_edge_tags) |etag| {
+                        if (etag.player >= 0 and etag.player != path_players[step]) continue;
+                        if (!std.mem.eql(u8, etag.action_key, path_compact[step]) and !std.mem.eql(u8, etag.action_key, path_display[step])) continue;
+                        for (etag.tags) |tag| {
+                            if (std.mem.eql(u8, tag, rule.key)) {
+                                if (rule.player == 0) incentive0 += rule.delta else incentive1 += rule.delta;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        game.nodes[@intCast(index)].incentive_u0 = incentive0;
+        game.nodes[@intCast(index)].incentive_u1 = incentive1;
+    }
+}
+
+fn buildDeals(allocator: std.mem.Allocator, game: *CompiledGame, spec: street_spec.StreetSpec) CompileError!void {
+    var deals = std.ArrayList(Deal).init(allocator);
+    errdefer deals.deinit();
+    var first: i32 = 0;
+    while (first < card.combo_count) : (first += 1) {
+        const w0 = spec.oop.weights[@intCast(first)];
+        if (w0 == 0.0) continue;
+        const h0 = game.hands.combo_to_hand[0][@intCast(first)];
+        if (h0 < 0) continue;
+        var second: i32 = 0;
+        while (second < card.combo_count) : (second += 1) {
+            const w1 = spec.ip.weights[@intCast(second)];
+            if (w1 == 0.0) continue;
+            const h1 = game.hands.combo_to_hand[1][@intCast(second)];
+            if (h1 < 0) continue;
+            const pair0 = range_mod.Range.comboCards(first) catch continue;
+            const pair1 = range_mod.Range.comboCards(second) catch continue;
+            if (pair0[0] == pair1[0] or pair0[0] == pair1[1] or pair0[1] == pair1[0] or pair0[1] == pair1[1]) continue;
+            var blocked = false;
+            for (game.board) |b| {
+                if (b == pair0[0] or b == pair0[1] or b == pair1[0] or b == pair1[1]) {
+                    blocked = true;
+                    break;
+                }
+            }
+            if (blocked) continue;
+            deals.append(.{
+                .h0 = h0,
+                .h1 = h1,
+                .combo0 = first,
+                .combo1 = second,
+                .c0 = pair0[0],
+                .c1 = pair0[1],
+                .d0 = pair1[0],
+                .d1 = pair1[1],
+                .probability = (w0 * w1) / game.hands.joint_mass,
+            }) catch return error.OutOfMemory;
+        }
+    }
+    if (deals.items.len != game.hands.counted_deals) return error.InvalidCompile;
+    game.deals = deals.toOwnedSlice() catch return error.OutOfMemory;
+}
+
+const Support = struct {
+    compatible: i32 = 0,
+    contain: [52]i32 = .{0} ** 52,
+};
+
+fn buildPolicyMap(allocator: std.mem.Allocator, game: *CompiledGame) CompileError!void {
+    var on_board: [52]bool = .{false} ** 52;
+    for (game.board) |c| on_board[@intCast(c)] = true;
+
+    var support: [2][]Support = .{ &.{}, &.{} };
+    defer {
+        if (support[0].len != 0) allocator.free(support[0]);
+        if (support[1].len != 0) allocator.free(support[1]);
+    }
+    inline for (0..2) |player| {
+        const count = game.hands.combos[player].len;
+        support[player] = allocator.alloc(Support, count) catch return error.OutOfMemory;
+        @memset(support[player], .{});
+        const opp = 1 - player;
+        const opp_count = game.hands.combos[opp].len;
+        var hand: usize = 0;
+        while (hand < count) : (hand += 1) {
+            const c0 = game.hands.hole_low[player][hand];
+            const c1 = game.hands.hole_high[player][hand];
+            var other: usize = 0;
+            while (other < opp_count) : (other += 1) {
+                const d0 = game.hands.hole_low[opp][other];
+                const d1 = game.hands.hole_high[opp][other];
+                if (d0 == c0 or d0 == c1 or d1 == c0 or d1 == c1) continue;
+                support[player][hand].compatible += 1;
+                support[player][hand].contain[@intCast(d0)] += 1;
+                support[player][hand].contain[@intCast(d1)] += 1;
+            }
+        }
+    }
+
+    // Allocate slot_of maps.
+    for (game.nodes) |*node| {
+        if (node.kind != .decision or node.n_actions <= 1) continue;
+        const dim = game.runouts.runoutDim(node.*) * @as(u64, @intCast(node.hands));
+        node.slot_of = allocator.alloc(i32, @intCast(dim)) catch return error.OutOfMemory;
+        @memset(node.slot_of, -1);
+    }
+
+    var slots = std.ArrayList(Slot).init(allocator);
+    errdefer slots.deinit();
+    var cursor: i32 = 0;
+
+    var node_index: i32 = 0;
+    while (node_index < @as(i32, @intCast(game.nodes.len))) : (node_index += 1) {
+        const node = &game.nodes[@intCast(node_index)];
+        if (node.kind != .decision) continue;
+        const player: usize = @intCast(node.player);
+        var hand: i32 = 0;
+        while (hand < node.hands) : (hand += 1) {
+            const row = support[player][@intCast(hand)];
+            const c0 = game.hands.hole_low[player][@intCast(hand)];
+            const c1 = game.hands.hole_high[player][@intCast(hand)];
+            if (node.card_mode == 0) {
+                try considerSlot(game, &slots, &cursor, node_index, hand, -1, -1);
+                continue;
+            }
+            if (node.card_mode == 1) {
+                var c: i32 = 0;
+                while (c < 52) : (c += 1) {
+                    if (on_board[@intCast(c)] or c == c0 or c == c1) continue;
+                    if (row.compatible - row.contain[@intCast(c)] <= 0) continue;
+                    if (node.mode1_is_turn) {
+                        try considerSlot(game, &slots, &cursor, node_index, hand, c, -1);
+                    } else {
+                        try considerSlot(game, &slots, &cursor, node_index, hand, -1, c);
+                    }
+                }
+                continue;
+            }
+            var turn: i32 = 0;
+            while (turn < 52) : (turn += 1) {
+                if (on_board[@intCast(turn)] or turn == c0 or turn == c1) continue;
+                var river: i32 = 0;
+                while (river < 52) : (river += 1) {
+                    if (river == turn or on_board[@intCast(river)] or river == c0 or river == c1) continue;
+                    var blocked = row.contain[@intCast(turn)] + row.contain[@intCast(river)];
+                    const pair = range_mod.Range.comboIndex(turn, river) catch continue;
+                    if (game.hands.combo_to_hand[1 - player][@intCast(pair)] >= 0) blocked -= 1;
+                    if (row.compatible - blocked <= 0) continue;
+                    try considerSlot(game, &slots, &cursor, node_index, hand, turn, river);
+                }
+            }
+        }
+    }
+    game.slots = slots.toOwnedSlice() catch return error.OutOfMemory;
+    game.table_entries = cursor;
+}
+
+fn considerSlot(
+    game: *CompiledGame,
+    slots: *std.ArrayList(Slot),
+    cursor: *i32,
+    node_index: i32,
+    hand: i32,
+    turn: i32,
+    river: i32,
+) CompileError!void {
+    const node = &game.nodes[@intCast(node_index)];
+    if (node.n_actions <= 1) return;
+    const key = try game.cardKey(node.*, hand, turn, river);
+    const slot_index: i32 = @intCast(slots.items.len);
+    node.slot_of[@intCast(key)] = slot_index;
+    slots.append(.{
+        .node = node_index,
+        .base = cursor.*,
+        .hand = @intCast(hand),
+        .turn = @intCast(turn),
+        .river = @intCast(river),
+    }) catch return error.OutOfMemory;
+    cursor.* += node.n_actions;
 }
 
 fn buildRunoutIndex(allocator: std.mem.Allocator, game: *CompiledGame) CompileError!void {
@@ -264,6 +628,9 @@ fn buildNode(
         next.committed = next.contrib[0];
         const child = try buildNode(allocator, spec, game, nodes, decision_ids, next, path, depth);
         nodes.items[@intCast(id)].child[0] = child;
+        nodes.items[@intCast(child)].parent = @intCast(id);
+        nodes.items[@intCast(child)].parent_action = -1;
+        nodes.items[@intCast(child)].from_chance = true;
         return id;
     }
 
@@ -337,6 +704,9 @@ fn buildNode(
             depth + 1,
         );
         nodes.items[@intCast(id)].child[@intCast(action)] = child;
+        nodes.items[@intCast(child)].parent = @intCast(id);
+        nodes.items[@intCast(child)].parent_action = action;
+        nodes.items[@intCast(child)].from_chance = false;
     }
     return id;
 }
