@@ -229,3 +229,54 @@ describe("EngineClient empty-base refuse", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+describe("EngineClient parseConfig IPC (ZR-86)", () => {
+  let client: EngineClient;
+
+  beforeEach(() => {
+    invoke.mockReset();
+    client = new EngineClient({ baseUrl: "http://unused" });
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("parses street-config locally without solver_engine_request", async () => {
+    const text = [
+      "street-config 1",
+      "board Ah Kd 7c",
+      "pot 100",
+      "stack 100",
+      "oop-range AcAd:1",
+      "ip-range 2c3d:1",
+      "max-raises 0",
+      "allow-all-in 0",
+      "allow-three-bet 1",
+      "memory-mib 64",
+      "threads 1",
+      "",
+    ].join("\n");
+    const parsed = await client.parseConfig(text);
+    expect(parsed.kind).toBe("street");
+    expect(parsed.board).toEqual(["Ah", "Kd", "7c"]);
+    expect(parsed.oop_range).toBe("AcAd:1");
+    expect(parsed.ip_range).toBe("2c3d:1");
+    expect(parsed.pot).toBe(100);
+    expect(parsed.tree_edits).toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith(
+      "solver_engine_request",
+      expect.anything(),
+    );
+  });
+
+  it("maps invalid text to EngineError 400 (not 501)", async () => {
+    await expect(client.parseConfig("")).rejects.toMatchObject({
+      name: "EngineError",
+      status: 400,
+    });
+    await expect(client.parseConfig("not-a-config\n")).rejects.toMatchObject({
+      name: "EngineError",
+      status: 400,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});

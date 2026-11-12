@@ -7,6 +7,7 @@ import type { SolveJobRequest } from "../domain/types";
 import {
   formatSolveJobStreetConfig,
   formatStreetConfigSpec,
+  parseStreetConfigTextToSolutionConfig,
 } from "./streetConfigText";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -82,5 +83,65 @@ describe("formatSolveJobStreetConfig", () => {
     expect(text).toContain("oop-bets 0.5\n");
     expect(text).toContain("ip-raises 0.75\n");
     expect(fixture).toContain("board Js 8h 3h");
+  });
+});
+
+describe("parseStreetConfigTextToSolutionConfig", () => {
+  it("sets Apply-ready kind + tree_edits and maps flop-check-down", () => {
+    const text = readFileSync(
+      resolve(repoRoot, "configs/templates/flop-check-down.txt"),
+      "utf8",
+    );
+    const parsed = parseStreetConfigTextToSolutionConfig(text);
+    expect(parsed.kind).toBe("street");
+    expect(parsed.tree_edits).toEqual([]);
+    expect(parsed.incentives).toEqual([]);
+    expect(parsed.edge_tags).toEqual([]);
+    expect(parsed.board).toEqual(["Ah", "Kd", "7c"]);
+    expect(parsed.pot).toBe(100);
+    expect(parsed.stack).toBe(100);
+    expect(parsed.oop_range).toBe("AcAd:1");
+    expect(parsed.ip_range).toBe("2c3d:1");
+    expect(parsed.max_raises).toBe(0);
+    expect(parsed.allow_all_in).toBe(0);
+    expect(parsed.allow_three_bet).toBe(1);
+    expect(parsed.memory_mib).toBe(64);
+    expect(parsed.threads).toBe(1);
+    expect(parsed.street_config_text).toBe(text);
+  });
+
+  it("parses incentive / edge-tag / tree-edit lines", () => {
+    const text = [
+      "street-config 1",
+      "board Ah Kd 7c",
+      "pot 100",
+      "stack 100",
+      "oop-range AcAd:1",
+      "ip-range 2c3d:1",
+      "incentive label 0 Check 1.5",
+      "incentive tag 1 flush 0.25",
+      "edge-tag 0 Check value",
+      "edge-tag Call bluff",
+      "tree-edit force - c",
+      "",
+    ].join("\n");
+    const parsed = parseStreetConfigTextToSolutionConfig(text);
+    expect(parsed.kind).toBe("street");
+    expect(parsed.incentives).toEqual([
+      { kind: "label", player: 0, key: "Check", delta: 1.5 },
+      { kind: "tag", player: 1, key: "flush", delta: 0.25 },
+    ]);
+    expect(parsed.edge_tags).toEqual([
+      { player: 0, action: "Check", tags: ["value"] },
+      { action: "Call", tags: ["bluff"] },
+    ]);
+    expect(parsed.tree_edits).toEqual(["force - c"]);
+  });
+
+  it("rejects empty and header-less text", () => {
+    expect(() => parseStreetConfigTextToSolutionConfig("")).toThrow(/empty/i);
+    expect(() => parseStreetConfigTextToSolutionConfig("board Ah Kd 7c\n")).toThrow(
+      /street-config 1/i,
+    );
   });
 });
