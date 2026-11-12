@@ -2,7 +2,7 @@
 
 Heads-up NLHE study application with solving, analysis, automation, persistence, training, and interface capabilities comparable to PioSolver/PioViewer — in this project's own design. Target includes postflop and Edge-style preflop. Living ledger: [FEATURE_PARITY.md](FEATURE_PARITY.md).
 
-Finished means a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train through a GUI without a terminal. Study surface today: `explorer` + React desktop client ([DESKTOP_UI.md](../../DESKTOP_UI.md)). Comparison target: documented PioSolver 3.11 [S1][S2]. Mark unverified details unverified. “All features” means the audited list.
+Finished means a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train through a GUI without a terminal. Study surface today: Zig `solver-engine` typed IPC + React desktop client ([DESKTOP_UI.md](../../DESKTOP_UI.md)). The C++ `explorer` HTTP server is retired. Comparison target: documented PioSolver 3.11 [S1][S2]. Mark unverified details unverified. “All features” means the audited list.
 
 Separate three releases:
 
@@ -18,9 +18,9 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 Foundation in place: shared street/river public tree, pass-frozen CFR variants, active-player CFR+ flooring, blocker-aware showdowns, first-public-card parallelism, engine allocation budgets (default 1024 MiB), node-scoped browsing, Hold’em reference enumerators on `CfrTrainer`. Threads default to one.
 
-Flop, turn, and river are one betting tree (two, one, or zero cards left). `StreetGame` / `StreetBatchSolver` accept 3/4/5-card boards. Five-card pins match `RiverGame`. Explorer and `river_solver` both use that shared tree; `river_solver` is a thin CLI, not a separate `RiverBatchSolver` product path. `RiverGame` is the five-card oracle.
+Flop, turn, and river are one betting tree (two, one, or zero cards left) in the Zig engine Session. Historical C++ names `StreetGame` / `StreetBatchSolver` / `RiverGame` describe the same public-tree idea in older math docs; they are not a shipping binary path on `zig-rewrite`.
 
-Also landed: conditional action EV on flop/turn/river decisions; stop-and-keep / pause / continue; versioned PSOL; runout EV comparison; check-down equity (+ buckets); five-card made-hand categories; node locks + compare; pot rake / ICM / action-label incentives; Windows NSIS Study installer; flop/turn draw and backdoor tags in Study. Compact saves, a durable batch queue, trainer packs, and preflop are still open. No head-to-head Pio performance or solution-quality equivalence.
+Also landed on the Zig Study path: conditional action EV; stop-and-keep / pause / continue; versioned PSOL; check-down equity (+ buckets); made-hand categories; node locks + strategy edits; pot rake wiring; Windows NSIS Study installer (Zig sidecar only); flop/turn draw and backdoor tags in Study. Compact saves, a durable batch queue, trainer packs, preflop, dual-session Compare, and **complete ICM Study solves (ZR-93 — reject until done; low priority)** are still open. No head-to-head Pio performance or solution-quality equivalence. Acc / time-to-Accuracy walls are not cutover blockers.
 
 Full-range check-down measures whether a large tree fits. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them. Assertion counts and sanitizer notes: [TESTING.md](../engineering/TESTING.md), [BENCHMARKS.md](../engineering/BENCHMARKS.md).
 
@@ -30,22 +30,22 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 
 | Feature family | Current position | Delivery |
 |---|---|---|
-| Heads-up postflop CFR, chance, blocker handling, best responses | Shared tree for 3/4/5 cards; pins against `RiverGame`; explorer and `river_solver` on that path | M0, M6 |
-| Conditional combo/action EV; both-player values | Flop, turn, and river decision nodes on the shared street tree | M1 |
+| Heads-up postflop CFR, chance, blocker handling, best responses | Zig Session frozen CFR+ public tree for 3/4/5 cards; `zig build test` pins | M0, M6 |
+| Conditional combo/action EV; both-player values | Host `values` IPC on decision nodes | M1 |
 | Equity, action ranges, distributions, hand categories | Check-down equity + buckets; made-hand categories; flop/turn draw and backdoor tags | M2 |
-| Weighted range editing, range libraries, board input | 13×13 paint, presets, nested folders under `configs/ranges` | M2–M3 |
-| Configurable betting trees and visual line editing | `street-config 1` + TreeEditSet; Study Build line editor + `plan-memory` dry-run | M3 |
-| Stop-and-keep, pause/continue, accuracy stopping | Present; construction-time stop/pause still publishes nothing | M4 |
+| Weighted range editing, range libraries, board input | 13×13 paint, presets, nested folders under `configs/ranges` (Tauri FS Library) | M2–M3 |
+| Configurable betting trees and visual line editing | `street-config 1` + tree edits; Study Build `tree_preview` / `plan_memory` | M3 |
+| Stop-and-keep, pause/continue, accuracy stopping | Present over IPC; construction-time stop/pause still publishes nothing; Acc walls ≠ cutover gates | M4 |
 | Full saves, resumable checkpoints, compact saves, lazy load | Versioned PSOL + recent files; compact/lazy open | M5, M10 |
-| Broad practical betting-tree scale and competitive convergence | Study corpus + benches; Pio parity unproven | M6 |
-| Full and combo node locking, editing, re-solving | Street-first locks + compare; StrategyEditSet + Study editor drawer | M7 |
-| Rake, ICM, opponent incentives | Pot-rake + ICM + incentives on solve path; CategoryTag via `edge-tag`, dual-utility CFR/BR, explorer `incentives`/`edge_tags`; scenario persistence / combo auto-tags open | M8 |
-| Turn/river and multi-flop aggregation, filtered reports | `strategy-report 1` root export; aggregation open | M9 |
-| Scriptable engine, durable batch queue, exports | CLI + HTTP; durable queue open | M9 |
+| Broad practical betting-tree scale and competitive convergence | Study corpus + Zig digs; Pio parity unproven | M6 |
+| Full and combo node locking, editing, re-solving | Locks + resolve_locked + strategy edits over IPC; Compare still soft-gated | M7 |
+| Rake, ICM, opponent incentives | Pot-rake on Zig path; ICM reject-until-ZR-93 (low priority); incentives docs remain partial | M8 |
+| Turn/river and multi-flop aggregation, filtered reports | Client Compare runouts; aggregation open | M9 |
+| Scriptable engine, durable batch queue, exports | Zig CLI + typed IPC; durable queue open | M9 |
 | Drill trainer, packs, session statistics, hand histories | `hand-history 1` schema only | M11 |
 | Preflop solver, weighted flop subsets, chart editor | Missing | M12 |
 | Modern study GUI: layouts, two-player grids, shortcuts, themes, localization | React Study UI + themes/shortcuts; saved layouts / localization open | Land with each feature; finish in M13 |
-| Stable delivery, help, upgrade/recovery, complete validation | Unsigned Windows installer + CI; signed upgrade story open | Continuous; M13 release gate |
+| Stable delivery, help, upgrade/recovery, complete validation | Unsigned Windows NSIS (Zig sidecar) + `zig.yml` / desktop CI; signed upgrade story open | Continuous; M13 release gate |
 
 The audit must also inspect small utilities: standalone equity calculator, preflop chart image export, clipboard formats, all-lines/line-frequency views, strategy simplification tools, range selection predicates, links/bookmarks, report exports, settings persistence, and diagnostics. Determine exact reference behavior before claiming each utility matches. Compare desktop Pro and Edge. PioCloud hosting, commercial licensing, and proprietary file compatibility enter the ledger only after an explicit scope decision.
 

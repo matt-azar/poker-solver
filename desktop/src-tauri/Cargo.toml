@@ -1,7 +1,7 @@
 [package]
 name = "poker-solver-study"
 version = "0.1.2"
-description = "Hold'em Study desktop shell (Tauri 2 + explorer sidecar)"
+description = "Hold'em Study desktop shell (Tauri 2 + solver-engine IPC sidecar)"
 authors = ["Matt Azar"]
 edition = "2021"
 # No license is granted. Do not treat this as MIT / open source.
