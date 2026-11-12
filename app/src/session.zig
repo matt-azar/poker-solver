@@ -748,11 +748,14 @@ pub const Session = struct {
         doc.oop_combos = self.allocator.dupe(i32, game.hands.combos[0]) catch return error.OutOfMemory;
         doc.ip_combos = self.allocator.dupe(i32, game.hands.combos[1]) catch return error.OutOfMemory;
 
-        doc.slot_actions = self.allocator.alloc(u16, game.slots.len) catch return error.OutOfMemory;
-        for (game.slots, 0..) |slot, i| {
-            doc.slot_actions[i] = game.nodes[@intCast(slot.node)].n_actions;
-        }
-        doc.average = self.allocator.dupe(f32, published.average) catch return error.OutOfMemory;
+        // PSOL wire order stays decision→hand→runout; memory is runout-major.
+        var layout = poker_engine.game.compile.buildPsolLayoutMap(self.allocator, game) catch return error.InvalidSession;
+        defer layout.deinit();
+        doc.slot_actions = self.allocator.dupe(u16, layout.psol_actions) catch return error.OutOfMemory;
+        doc.average = self.allocator.alloc(f32, @intCast(layout.psol_table_entries)) catch return error.OutOfMemory;
+        poker_engine.game.compile.copyTableMemoryToPsol(game, layout, published.average, doc.average) catch {
+            return error.InvalidSession;
+        };
 
         // Preserve browse-only: never invent training tables on save (ZR-96).
         // Degenerate check-only trees may have empty tables but still continue.
@@ -760,8 +763,14 @@ pub const Session = struct {
             doc.has_training_flag = true;
             if (self.training) |state| {
                 doc.trained = state.trained;
-                doc.regret = self.allocator.dupe(f32, state.regret) catch return error.OutOfMemory;
-                doc.strategy_sum = self.allocator.dupe(f32, state.strategy_sum) catch return error.OutOfMemory;
+                doc.regret = self.allocator.alloc(f32, @intCast(layout.psol_table_entries)) catch return error.OutOfMemory;
+                poker_engine.game.compile.copyTableMemoryToPsol(game, layout, state.regret, doc.regret) catch {
+                    return error.InvalidSession;
+                };
+                doc.strategy_sum = self.allocator.alloc(f32, @intCast(layout.psol_table_entries)) catch return error.OutOfMemory;
+                poker_engine.game.compile.copyTableMemoryToPsol(game, layout, state.strategy_sum, doc.strategy_sum) catch {
+                    return error.InvalidSession;
+                };
             }
         }
         if (self.locks_text.len != 0) {
@@ -803,18 +812,25 @@ pub const Session = struct {
         var game = try poker_engine.game.compile.compile(self.allocator, spec);
         errdefer game.deinit();
 
-        // Logical index must match compile (combo order + slot arities).
+        // Logical index must match compile (combo order + PSOL hand-major slot arities).
         if (doc.oop_combos.len != game.hands.combos[0].len) return error.InvalidPsol;
         if (doc.ip_combos.len != game.hands.combos[1].len) return error.InvalidPsol;
         if (!std.mem.eql(i32, doc.oop_combos, game.hands.combos[0])) return error.InvalidPsol;
         if (!std.mem.eql(i32, doc.ip_combos, game.hands.combos[1])) return error.InvalidPsol;
-        if (doc.slot_actions.len != game.slots.len) return error.InvalidPsol;
-        for (game.slots, 0..) |slot, i| {
-            if (doc.slot_actions[i] != game.nodes[@intCast(slot.node)].n_actions) return error.InvalidPsol;
-        }
-        if (doc.average.len != @as(usize, @intCast(game.table_entries))) return error.InvalidPsol;
+        var layout = poker_engine.game.compile.buildPsolLayoutMap(self.allocator, game) catch return error.InvalidPsol;
+        defer layout.deinit();
+        if (doc.slot_actions.len != layout.psol_actions.len) return error.InvalidPsol;
+        if (!std.mem.eql(u16, doc.slot_actions, layout.psol_actions)) return error.InvalidPsol;
+        if (doc.average.len != @as(usize, @intCast(layout.psol_table_entries))) return error.InvalidPsol;
+
+        const average_mem = self.allocator.alloc(f32, @intCast(game.table_entries)) catch return error.OutOfMemory;
+        var average_owned = true;
+        errdefer if (average_owned) self.allocator.free(average_mem);
+        poker_engine.game.compile.copyTablePsolToMemory(game, layout, doc.average, average_mem) catch {
+            return error.InvalidPsol;
+        };
         // Reject invalid strategy rows before replacing the active solution (ZR-96).
-        if (!validateAveragePolicy(game, doc.average)) return error.InvalidStrategy;
+        if (!validateAveragePolicy(game, average_mem)) return error.InvalidStrategy;
 
         const want_training = doc.hasTraining();
         var training: ?poker_engine.solve.training_state.TrainingState = null;
@@ -822,9 +838,14 @@ pub const Session = struct {
         if (want_training) {
             var tables = try poker_engine.solve.training_state.TrainingState.init(self.allocator, game);
             errdefer tables.deinit();
-            if (doc.regret.len != tables.regret.len) return error.InvalidPsol;
-            @memcpy(tables.regret, doc.regret);
-            @memcpy(tables.strategy_sum, doc.strategy_sum);
+            if (doc.regret.len != @as(usize, @intCast(layout.psol_table_entries))) return error.InvalidPsol;
+            if (doc.strategy_sum.len != doc.regret.len) return error.InvalidPsol;
+            poker_engine.game.compile.copyTablePsolToMemory(game, layout, doc.regret, tables.regret) catch {
+                return error.InvalidPsol;
+            };
+            poker_engine.game.compile.copyTablePsolToMemory(game, layout, doc.strategy_sum, tables.strategy_sum) catch {
+                return error.InvalidPsol;
+            };
             tables.trained = doc.trained;
             var open_locks: ?poker_engine.solve.node_lock.LockSet = null;
             defer if (open_locks) |*owned| owned.deinit();
@@ -844,10 +865,11 @@ pub const Session = struct {
 
         var published = poker_engine.solve.training_state.PublishedPolicy{
             .allocator = self.allocator,
-            .average = self.allocator.dupe(f32, doc.average) catch return error.OutOfMemory,
+            .average = average_mem,
             .revision = 1,
             .trained = doc.trained,
         };
+        average_owned = false; // ownership moved into published
         errdefer published.deinit();
 
         const owned_config = self.allocator.dupe(u8, doc.config_text) catch return error.OutOfMemory;

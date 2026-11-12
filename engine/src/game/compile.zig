@@ -466,43 +466,48 @@ fn buildPolicyMap(allocator: std.mem.Allocator, game: *CompiledGame) CompileErro
     var cursor: i32 = 0;
     var implicit: u64 = 0;
 
+    // In-memory order: public decision → runout → hand → action.
+    // The frozen walk fixes a runout and scans hands, so those rows stay contiguous.
+    // PSOL on-disk order remains decision → hand → runout → action (see PsolLayoutMap).
     var node_index: i32 = 0;
     while (node_index < @as(i32, @intCast(game.nodes.len))) : (node_index += 1) {
         const node = &game.nodes[@intCast(node_index)];
         if (node.kind != .decision) continue;
         const player: usize = @intCast(node.player);
-        var hand: i32 = 0;
-        while (hand < node.hands) : (hand += 1) {
-            const row = support[player][@intCast(hand)];
-            const c0 = game.hands.hole_low[player][@intCast(hand)];
-            const c1 = game.hands.hole_high[player][@intCast(hand)];
-            if (node.card_mode == 0) {
+        if (node.card_mode == 0) {
+            var hand: i32 = 0;
+            while (hand < node.hands) : (hand += 1) {
                 try considerSlot(game, &slots, &cursor, &implicit, node_index, hand, -1, -1);
-                continue;
             }
-            if (node.card_mode == 1) {
-                var c: i32 = 0;
-                while (c < 52) : (c += 1) {
-                    if (on_board[@intCast(c)] or c == c0 or c == c1) continue;
-                    if (row.compatible - row.contain[@intCast(c)] <= 0) continue;
+            continue;
+        }
+        if (node.card_mode == 1) {
+            var c: i32 = 0;
+            while (c < 52) : (c += 1) {
+                if (on_board[@intCast(c)]) continue;
+                var hand: i32 = 0;
+                while (hand < node.hands) : (hand += 1) {
+                    if (!slotHandLegal(game, support[player], player, hand, if (node.mode1_is_turn) c else -1, if (node.mode1_is_turn) -1 else c)) {
+                        continue;
+                    }
                     if (node.mode1_is_turn) {
                         try considerSlot(game, &slots, &cursor, &implicit, node_index, hand, c, -1);
                     } else {
                         try considerSlot(game, &slots, &cursor, &implicit, node_index, hand, -1, c);
                     }
                 }
-                continue;
             }
-            var turn: i32 = 0;
-            while (turn < 52) : (turn += 1) {
-                if (on_board[@intCast(turn)] or turn == c0 or turn == c1) continue;
-                var river: i32 = 0;
-                while (river < 52) : (river += 1) {
-                    if (river == turn or on_board[@intCast(river)] or river == c0 or river == c1) continue;
-                    var blocked = row.contain[@intCast(turn)] + row.contain[@intCast(river)];
-                    const pair = range_mod.Range.comboIndex(turn, river) catch continue;
-                    if (game.hands.combo_to_hand[1 - player][@intCast(pair)] >= 0) blocked -= 1;
-                    if (row.compatible - blocked <= 0) continue;
+            continue;
+        }
+        var turn: i32 = 0;
+        while (turn < 52) : (turn += 1) {
+            if (on_board[@intCast(turn)]) continue;
+            var river: i32 = 0;
+            while (river < 52) : (river += 1) {
+                if (river == turn or on_board[@intCast(river)]) continue;
+                var hand: i32 = 0;
+                while (hand < node.hands) : (hand += 1) {
+                    if (!slotHandLegal(game, support[player], player, hand, turn, river)) continue;
                     try considerSlot(game, &slots, &cursor, &implicit, node_index, hand, turn, river);
                 }
             }
@@ -511,6 +516,30 @@ fn buildPolicyMap(allocator: std.mem.Allocator, game: *CompiledGame) CompileErro
     game.slots = slots.toOwnedSlice() catch return error.OutOfMemory;
     game.implicit_infosets = implicit;
     game.table_entries = cursor;
+}
+
+fn slotHandLegal(
+    game: *const CompiledGame,
+    support: []const Support,
+    player: usize,
+    hand: i32,
+    turn: i32,
+    river: i32,
+) bool {
+    const row = support[@intCast(hand)];
+    const c0 = game.hands.hole_low[player][@intCast(hand)];
+    const c1 = game.hands.hole_high[player][@intCast(hand)];
+    if (turn >= 0 and (turn == c0 or turn == c1)) return false;
+    if (river >= 0 and (river == c0 or river == c1)) return false;
+    if (turn >= 0 and river >= 0) {
+        var blocked = row.contain[@intCast(turn)] + row.contain[@intCast(river)];
+        const pair = range_mod.Range.comboIndex(turn, river) catch return false;
+        if (game.hands.combo_to_hand[1 - player][@intCast(pair)] >= 0) blocked -= 1;
+        return row.compatible - blocked > 0;
+    }
+    if (turn >= 0) return row.compatible - row.contain[@intCast(turn)] > 0;
+    if (river >= 0) return row.compatible - row.contain[@intCast(river)] > 0;
+    return true;
 }
 
 fn considerSlot(
@@ -540,6 +569,103 @@ fn considerSlot(
         .river = @intCast(river),
     }) catch return error.OutOfMemory;
     cursor.* += node.n_actions;
+}
+
+/// Maps legacy PSOL row order (decision → hand → runout → action) onto the
+/// in-memory runout-major Slot layout. Wire format stays hand-major so older
+/// checkpoints reopen without a layout id bump.
+pub const PsolLayoutMap = struct {
+    allocator: std.mem.Allocator,
+    /// psol_slot_index → memory slot index
+    mem_of_psol: []u32 = &.{},
+    /// Slot.base equivalents in PSOL emission order
+    psol_base: []i32 = &.{},
+    psol_actions: []u16 = &.{},
+    psol_table_entries: i32 = 0,
+
+    pub fn deinit(self: *PsolLayoutMap) void {
+        if (self.mem_of_psol.len != 0) self.allocator.free(self.mem_of_psol);
+        if (self.psol_base.len != 0) self.allocator.free(self.psol_base);
+        if (self.psol_actions.len != 0) self.allocator.free(self.psol_actions);
+        self.* = .{ .allocator = self.allocator };
+    }
+};
+
+fn psolSlotLessThan(game: CompiledGame, a_index: u32, b_index: u32) bool {
+    const a = game.slots[a_index];
+    const b = game.slots[b_index];
+    // Legacy wire order: decision → hand → runout(card) → action.
+    if (a.node != b.node) return a.node < b.node;
+    if (a.hand != b.hand) return a.hand < b.hand;
+    if (a.turn != b.turn) return a.turn < b.turn;
+    if (a.river != b.river) return a.river < b.river;
+    return a_index < b_index;
+}
+
+/// Build the hand-major PSOL order for `game` (must already be compiled runout-major).
+/// Sorts existing slots — no second legality pass — so flop save/open stays cheap.
+pub fn buildPsolLayoutMap(allocator: std.mem.Allocator, game: CompiledGame) CompileError!PsolLayoutMap {
+    const n = game.slots.len;
+    var mem_of_psol = allocator.alloc(u32, n) catch return error.OutOfMemory;
+    errdefer allocator.free(mem_of_psol);
+    var psol_base = allocator.alloc(i32, n) catch return error.OutOfMemory;
+    errdefer allocator.free(psol_base);
+    var psol_actions = allocator.alloc(u16, n) catch return error.OutOfMemory;
+    errdefer allocator.free(psol_actions);
+
+    var i: usize = 0;
+    while (i < n) : (i += 1) mem_of_psol[i] = @intCast(i);
+    std.sort.pdq(u32, mem_of_psol, game, psolSlotLessThan);
+
+    var cursor: i32 = 0;
+    i = 0;
+    while (i < n) : (i += 1) {
+        const mem_i = mem_of_psol[i];
+        const slot = game.slots[mem_i];
+        const n_actions = game.nodes[@intCast(slot.node)].n_actions;
+        psol_base[i] = cursor;
+        psol_actions[i] = n_actions;
+        cursor += n_actions;
+    }
+    if (cursor != game.table_entries) return error.InvalidCompile;
+
+    return .{
+        .allocator = allocator,
+        .mem_of_psol = mem_of_psol,
+        .psol_base = psol_base,
+        .psol_actions = psol_actions,
+        .psol_table_entries = cursor,
+    };
+}
+
+/// Copy one policy/regret table from PSOL hand-major order into memory runout-major order.
+pub fn copyTablePsolToMemory(game: CompiledGame, map: PsolLayoutMap, psol_src: []const f32, mem_dst: []f32) CompileError!void {
+    if (psol_src.len != @as(usize, @intCast(map.psol_table_entries))) return error.InvalidCompile;
+    if (mem_dst.len != @as(usize, @intCast(game.table_entries))) return error.InvalidCompile;
+    var psol_i: usize = 0;
+    while (psol_i < map.mem_of_psol.len) : (psol_i += 1) {
+        const mem_i = map.mem_of_psol[psol_i];
+        const n: usize = map.psol_actions[psol_i];
+        const src_base: usize = @intCast(map.psol_base[psol_i]);
+        const dst_base: usize = @intCast(game.slots[mem_i].base);
+        if (src_base + n > psol_src.len or dst_base + n > mem_dst.len) return error.InvalidCompile;
+        @memcpy(mem_dst[dst_base..][0..n], psol_src[src_base..][0..n]);
+    }
+}
+
+/// Copy one policy/regret table from memory runout-major order into PSOL hand-major order.
+pub fn copyTableMemoryToPsol(game: CompiledGame, map: PsolLayoutMap, mem_src: []const f32, psol_dst: []f32) CompileError!void {
+    if (mem_src.len != @as(usize, @intCast(game.table_entries))) return error.InvalidCompile;
+    if (psol_dst.len != @as(usize, @intCast(map.psol_table_entries))) return error.InvalidCompile;
+    var psol_i: usize = 0;
+    while (psol_i < map.mem_of_psol.len) : (psol_i += 1) {
+        const mem_i = map.mem_of_psol[psol_i];
+        const n: usize = map.psol_actions[psol_i];
+        const dst_base: usize = @intCast(map.psol_base[psol_i]);
+        const src_base: usize = @intCast(game.slots[mem_i].base);
+        if (src_base + n > mem_src.len or dst_base + n > psol_dst.len) return error.InvalidCompile;
+        @memcpy(psol_dst[dst_base..][0..n], mem_src[src_base..][0..n]);
+    }
 }
 
 fn buildRunoutIndex(allocator: std.mem.Allocator, game: *CompiledGame) CompileError!void {
@@ -975,4 +1101,80 @@ test "compile flop runout index size" {
     defer game.deinit();
     try std.testing.expectEqual(@as(usize, 49), game.runouts.mode1_cards.len);
     try std.testing.expectEqual(@as(usize, 49 * 48), game.runouts.mode2_turn.len);
+}
+
+test "policy rows are runout-major; PSOL map is hand-major" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 2s
+        \\pot 100
+        \\stack 100
+        \\oop-range QcQd:1,JcJd:1
+        \\ip-range 9c9d:1,8c8d:1
+        \\first-to-act 0
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\oop-raises 1.0
+        \\ip-raises 1.0
+        \\max-raises 1
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var spec = try @import("street_config.zig").parseStreetConfig(std.testing.allocator, text);
+    defer spec.deinit();
+    var game = try compile(std.testing.allocator, spec);
+    defer game.deinit();
+    try std.testing.expect(game.slots.len > 2);
+
+    // Same public node + same runout: consecutive memory slots advance hand (runout-major).
+    var found_runout_span = false;
+    var i: usize = 0;
+    while (i + 1 < game.slots.len) : (i += 1) {
+        const a = game.slots[i];
+        const b = game.slots[i + 1];
+        if (a.node != b.node) continue;
+        if (a.river != b.river or a.turn != b.turn) continue;
+        try std.testing.expectEqual(@as(u16, a.hand + 1), b.hand);
+        try std.testing.expectEqual(a.base + game.nodes[@intCast(a.node)].n_actions, b.base);
+        found_runout_span = true;
+        break;
+    }
+    try std.testing.expect(found_runout_span);
+
+    var layout = try buildPsolLayoutMap(std.testing.allocator, game);
+    defer layout.deinit();
+    try std.testing.expectEqual(game.slots.len, layout.mem_of_psol.len);
+    try std.testing.expectEqual(game.table_entries, layout.psol_table_entries);
+
+    // Hand-major PSOL order: same node, consecutive psol rows share hand before advancing runout.
+    var found_hand_span = false;
+    i = 0;
+    while (i + 1 < layout.mem_of_psol.len) : (i += 1) {
+        const a = game.slots[layout.mem_of_psol[i]];
+        const b = game.slots[layout.mem_of_psol[i + 1]];
+        if (a.node != b.node) continue;
+        if (a.hand != b.hand) continue;
+        try std.testing.expect(a.turn < b.turn or a.river < b.river or (a.turn == b.turn and a.river == b.river));
+        found_hand_span = true;
+        break;
+    }
+    try std.testing.expect(found_hand_span);
+
+    const mem = try std.testing.allocator.alloc(f32, @intCast(game.table_entries));
+    defer std.testing.allocator.free(mem);
+    for (mem, 0..) |*v, idx| v.* = @floatFromInt(idx + 1);
+    const psol = try std.testing.allocator.alloc(f32, @intCast(layout.psol_table_entries));
+    defer std.testing.allocator.free(psol);
+    try copyTableMemoryToPsol(game, layout, mem, psol);
+    const back = try std.testing.allocator.alloc(f32, mem.len);
+    defer std.testing.allocator.free(back);
+    try copyTablePsolToMemory(game, layout, psol, back);
+    try std.testing.expectEqualSlices(f32, mem, back);
 }
