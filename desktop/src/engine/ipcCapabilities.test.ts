@@ -23,7 +23,7 @@ describe("studyIpcFeatureAvailable", () => {
     expect(studyIpcFeatureAvailable("categories")).toBe(true);
   });
 
-  it("soft-disables unwired features when solver-engine IPC is active", () => {
+  it("enables wired IPC features and soft-disables the rest", () => {
     setIpcTransport({
       protocol: 2,
       launchId: "test",
@@ -31,8 +31,8 @@ describe("studyIpcFeatureAvailable", () => {
       workers: 1,
     });
     expect(studyUsesIpcFeatureGates()).toBe(true);
+    expect(studyIpcFeatureAvailable("resolveLocked")).toBe(true);
     expect(studyIpcFeatureAvailable("compare")).toBe(false);
-    expect(studyIpcFeatureAvailable("resolveLocked")).toBe(false);
     expect(studyIpcFeatureAvailable("strategyEdits")).toBe(false);
     // ZR-103 wired host `categories` + client IPC branch.
     expect(studyIpcFeatureAvailable("categories")).toBe(true);
