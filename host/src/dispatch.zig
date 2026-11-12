@@ -833,9 +833,13 @@ test "pause cancel and status-shaped open reply" {
     try std.testing.expect(cancel_reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, cancel_reply.body_json, "\"cancelled\":true") != null);
 
-    // Save + open round-trip for status-shaped open body (path under /tmp — no parent mkdir).
-    const tmp_path = "/tmp/poker-solver-slice-a-open.psol";
-    defer std.fs.cwd().deleteFile(tmp_path) catch {};
+    // Save + open round-trip for status-shaped open body (portable tmpDir — Windows CI has no /tmp).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const tmp_path = try std.fs.path.join(std.testing.allocator, &.{ abs, "slice-a-open.psol" });
+    defer std.testing.allocator.free(tmp_path);
     var save_req: ipc.Envelope = .{
         .allocator = std.testing.allocator,
         .kind = .request,
@@ -846,6 +850,13 @@ test "pause cancel and status-shaped open reply" {
     defer save_req.deinit();
     var save_reply = try handle(&state, save_req);
     defer save_reply.deinit();
+    if (!save_reply.ok) {
+        std.debug.print("save failed code={s} msg={s} path={s}\n", .{
+            save_reply.error_code orelse "",
+            save_reply.error_message orelse "",
+            tmp_path,
+        });
+    }
     try std.testing.expect(save_reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, save_reply.body_json, "\"saved\":true") != null);
 
@@ -859,6 +870,12 @@ test "pause cancel and status-shaped open reply" {
     defer open_req.deinit();
     var open_reply = try handle(&state, open_req);
     defer open_reply.deinit();
+    if (!open_reply.ok) {
+        std.debug.print("open failed code={s} msg={s}\n", .{
+            open_reply.error_code orelse "",
+            open_reply.error_message orelse "",
+        });
+    }
     try std.testing.expect(open_reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"running\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"paused\":") != null);
