@@ -385,6 +385,26 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     return try list.toOwnedSlice();
 }
 
+fn appendFloatArray(list: *std.ArrayList(u8), values: []const f32) !void {
+    const w = list.writer();
+    try w.writeAll("[");
+    for (values, 0..) |value, i| {
+        if (i > 0) try w.writeAll(",");
+        try w.print("{d:.6}", .{@as(f64, @floatCast(value))});
+    }
+    try w.writeAll("]");
+}
+
+fn appendStringArray(list: *std.ArrayList(u8), values: []const []const u8) !void {
+    const w = list.writer();
+    try w.writeAll("[");
+    for (values, 0..) |value, i| {
+        if (i > 0) try w.writeAll(",");
+        try appendJsonString(list, value);
+    }
+    try w.writeAll("]");
+}
+
 fn formatNodeBody(
     allocator: std.mem.Allocator,
     page: *const poker_engine.analysis.inspect.NodePage,
@@ -405,31 +425,83 @@ fn formatNodeBody(
 
     const n_actions: usize = page.actions.len;
     const n_hands: usize = page.combos.len;
+    const kind_text: []const u8 = switch (page.kind) {
+        .decision => "decision",
+        .chance => "chance",
+        .terminal => "terminal",
+    };
 
     try w.writeAll("{\"solution_id\":\"s");
     try w.print("{d}", .{solution_id});
     try w.writeAll("\",\"node_id\":");
     try appendJsonString(&list, node_id_text);
-    try w.print(",\"node_index\":{d},\"kind\":\"decision\",\"player\":{d},\"policy_revision\":{d}", .{
-        page.node_index,
-        page.player,
-        page.policy_revision,
+    try w.print(",\"node_index\":{d},\"kind\":\"{s}\"", .{ page.node_index, kind_text });
+    if (page.player >= 0) {
+        try w.print(",\"player\":{d}", .{page.player});
+    } else {
+        try w.writeAll(",\"player\":null");
+    }
+    try w.print(",\"policy_revision\":{d}", .{page.policy_revision});
+    try w.print(",\"n_actions\":{d},\"n_hands\":{d},\"reach_defined\":{}", .{
+        if (page.kind == .decision) n_actions else 0,
+        n_hands,
+        page.reach_defined,
     });
-    try w.print(",\"n_actions\":{d},\"n_hands\":{d},\"reach_defined\":false", .{ n_actions, n_hands });
+    try w.print(",\"pot\":{d:.6},\"stack\":{d:.6},\"to_call\":{d:.6},\"joint\":{d:.6}", .{
+        page.pot,
+        page.stack,
+        page.to_call,
+        page.joint,
+    });
+    try w.print(",\"stacks\":[{d:.6},{d:.6}],\"contrib\":[{d:.6},{d:.6}]", .{
+        page.stacks[0],
+        page.stacks[1],
+        page.contrib[0],
+        page.contrib[1],
+    });
+    try w.writeAll(",\"board\":");
+    try appendStringArray(&list, page.board);
+    try w.writeAll(",\"parent_id\":");
+    if (page.parent_id) |pid| {
+        try appendJsonString(&list, pid);
+    } else {
+        try w.writeAll("null");
+    }
 
-    try w.writeAll(",\"actions\":[");
-    for (page.actions, 0..) |label, i| {
-        if (i > 0) try w.writeAll(",");
-        try appendJsonString(&list, label);
+    try w.writeAll(",\"actions\":");
+    try appendStringArray(&list, page.actions);
+    try w.writeAll(",\"children\":");
+    try appendStringArray(&list, page.children);
+    try w.writeAll(",\"combos\":");
+    try appendStringArray(&list, page.combos);
+    try w.writeAll(",\"reach\":");
+    try appendFloatArray(&list, page.reach);
+    try w.writeAll(",\"marginal\":");
+    try appendFloatArray(&list, page.marginal);
+
+    if (page.opponent_player >= 0) {
+        try w.print(",\"opponent_player\":{d}", .{page.opponent_player});
+        try w.writeAll(",\"opponent_combos\":");
+        try appendStringArray(&list, page.opponent_combos);
+        try w.writeAll(",\"opponent_reach\":");
+        try appendFloatArray(&list, page.opponent_reach);
+        try w.writeAll(",\"opponent_marginal\":");
+        try appendFloatArray(&list, page.opponent_marginal);
     }
-    try w.writeAll("],\"combos\":[");
-    for (page.combos, 0..) |label, i| {
+
+    try w.writeAll(",\"cards\":[");
+    for (page.cards, 0..) |row, i| {
         if (i > 0) try w.writeAll(",");
-        try appendJsonString(&list, label);
+        try w.writeAll("{\"card\":");
+        try appendJsonString(&list, row.card);
+        try w.writeAll(",\"child_id\":");
+        try appendJsonString(&list, row.child_id);
+        try w.print(",\"weight\":{d:.6}}}", .{row.weight});
     }
-    try w.writeAll("],\"strategy\":");
-    if (n_actions == 0 or page.strategy.len == 0) {
-        // Implicit σ=1 (n_actions <= 1) — no stored rows; Study treats null as absent.
+    try w.writeAll("]");
+
+    try w.writeAll(",\"strategy\":");
+    if (page.kind != .decision or n_actions == 0 or page.strategy.len == 0) {
         try w.writeAll("null");
     } else {
         try w.writeAll("[");
@@ -1190,11 +1262,18 @@ test "node accepts Study node_id and returns strategy tables" {
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"actions\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"combos\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"kind\":\"decision\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"reach_defined\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"children\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"reach\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"marginal\":[") != null);
     // Root river with bets usually has strategy rows; either 2D array or null (check-only).
     try std.testing.expect(
         std.mem.indexOf(u8, reply.body_json, "\"strategy\":[") != null or
             std.mem.indexOf(u8, reply.body_json, "\"strategy\":null") != null,
     );
+
+    // First action child must be a navigable Study id (path nav / ActionNavBar).
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"children\":[\"p") != null);
 
     var bad: ipc.Envelope = .{
         .allocator = std.testing.allocator,
@@ -1208,6 +1287,100 @@ test "node accepts Study node_id and returns strategy tables" {
     defer bad_reply.deinit();
     try std.testing.expect(!bad_reply.ok);
     try std.testing.expect(std.mem.eql(u8, bad_reply.error_code orelse "", "unknown_node"));
+}
+
+test "node chance after check-check returns cards for river deal" {
+    // Empty size fields (no trailing space) → check-only turn line → river chance.
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh
+        \\pot 100
+        \\stack 200
+        \\oop-range AsQs:1
+        \\ip-range 2d2h:1
+        \\oop-bets
+        \\ip-bets
+        \\oop-raises
+        \\ip-raises
+        \\oop-river-bets 0.5
+        \\ip-river-bets 0.5
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "node-chance");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    var root_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "nr"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer root_req.deinit();
+    var root_reply = try handle(&state, root_req);
+    defer root_reply.deinit();
+    try std.testing.expect(root_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, root_reply.body_json, "\"reach_defined\":true") != null);
+    // Empty bet arrays → check-only root; child after Check should exist.
+    try std.testing.expect(std.mem.indexOf(u8, root_reply.body_json, "\"children\":[\"p") != null);
+
+    // Locate the chance node id from children[0] of the IP check response path:
+    // p0 Check → p1 (IP) Check → chance. Fetch p1 then its check child.
+    const p1_start = std.mem.indexOf(u8, root_reply.body_json, "\"children\":[\"") orelse return error.TestUnexpectedResult;
+    const p1_id_start = p1_start + "\"children\":[\"".len;
+    const p1_id_end = std.mem.indexOfPos(u8, root_reply.body_json, p1_id_start, "\"") orelse return error.TestUnexpectedResult;
+    const p1_id = root_reply.body_json[p1_id_start..p1_id_end];
+
+    var p1_body = std.ArrayList(u8).init(std.testing.allocator);
+    defer p1_body.deinit();
+    try p1_body.writer().print("{{\"node_id\":\"{s}\"}}", .{p1_id});
+    var p1_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "np1"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try p1_body.toOwnedSlice(),
+    };
+    defer p1_req.deinit();
+    var p1_reply = try handle(&state, p1_req);
+    defer p1_reply.deinit();
+    try std.testing.expect(p1_reply.ok);
+
+    const ch_start = std.mem.indexOf(u8, p1_reply.body_json, "\"children\":[\"") orelse return error.TestUnexpectedResult;
+    const ch_id_start = ch_start + "\"children\":[\"".len;
+    const ch_id_end = std.mem.indexOfPos(u8, p1_reply.body_json, ch_id_start, "\"") orelse return error.TestUnexpectedResult;
+    const chance_id = p1_reply.body_json[ch_id_start..ch_id_end];
+
+    var ch_body = std.ArrayList(u8).init(std.testing.allocator);
+    defer ch_body.deinit();
+    try ch_body.writer().print("{{\"node_id\":\"{s}\"}}", .{chance_id});
+    var ch_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "nch"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try ch_body.toOwnedSlice(),
+    };
+    defer ch_req.deinit();
+    var ch_reply = try handle(&state, ch_req);
+    defer ch_reply.deinit();
+    try std.testing.expect(ch_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, ch_reply.body_json, "\"kind\":\"chance\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ch_reply.body_json, "\"cards\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ch_reply.body_json, "\"child_id\":\"p") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ch_reply.body_json, "\"reach_defined\":true") != null);
 }
 
 test "pause cancel and status-shaped open reply" {

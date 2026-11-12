@@ -311,8 +311,43 @@ export class EngineClient {
     solutionId: string,
     body: { iterations: number; time_limit?: number },
   ): Promise<unknown> {
-    // Continue IPC wiring owned by parallel UI audit worker (ZR-98). Host already
-    // exposes has_training / can_continue on status for that work.
+    if (isIpcTransport()) {
+      // Host has no dedicated `continue` op: resume training on the open
+      // session via `solve` (begin_config would wipe the trainer / has_training).
+      // Mint a fresh job id (ZR-90); host rejects browse-only via has_training.
+      void solutionId;
+      const iterations = Math.max(1, Math.trunc(body.iterations || 1));
+      const jobId = mintStudyJobId();
+      this.lastJobId = jobId;
+      const time_limit =
+        typeof body.time_limit === "number" && Number.isFinite(body.time_limit)
+          ? body.time_limit
+          : undefined;
+      const reply = (await ipcSolve({
+        iterations,
+        time_limit,
+        jobId,
+      })) as {
+        solution_id?: number;
+        policy_revision?: number;
+        trained?: number;
+        terminal_reason?: string;
+        threads?: number;
+      };
+      return {
+        running: false,
+        job_id: jobId,
+        solution_id:
+          reply.solution_id != null && reply.solution_id > 0
+            ? `s${reply.solution_id}`
+            : solutionId,
+        policy_revision: reply.policy_revision ?? 0,
+        trained: reply.trained ?? iterations,
+        terminal_reason: reply.terminal_reason ?? "completed",
+        threads: reply.threads,
+        transport: "ipc",
+      };
+    }
     const { response, data } = await this.request(
       "POST",
       `/api/solutions/${solutionId}/continue`,
@@ -332,6 +367,15 @@ export class EngineClient {
       time_limit?: number;
     },
   ): Promise<unknown> {
+    if (isIpcTransport()) {
+      void solutionId;
+      void body;
+      throw new EngineError(
+        "resolveLocked is not available over solver-engine IPC yet",
+        501,
+        null,
+      );
+    }
     const { response, data } = await this.request(
       "POST",
       `/api/solutions/${solutionId}/resolve-locked`,
@@ -394,6 +438,12 @@ export class EngineClient {
     nodeId: string,
     signal?: AbortSignal,
   ): Promise<RunoutsModel> {
+    if (isIpcTransport()) {
+      void solutionId;
+      void nodeId;
+      void signal;
+      throw new EngineError("getRunouts is not available over solver-engine IPC yet", 501, null);
+    }
     const { response, data } = await this.request(
       "GET",
       `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/runouts`,
@@ -739,6 +789,14 @@ export class EngineClient {
   }
 
   async listStrategyEdits(solutionId: string): Promise<unknown> {
+    if (isIpcTransport()) {
+      void solutionId;
+      throw new EngineError(
+        "strategy edits are not available over solver-engine IPC yet",
+        501,
+        null,
+      );
+    }
     const { response, data } = await this.request(
       "GET",
       `/api/solutions/${solutionId}/strategy-edits`,
@@ -756,6 +814,15 @@ export class EngineClient {
       probs: number[];
     },
   ): Promise<unknown> {
+    if (isIpcTransport()) {
+      void solutionId;
+      void body;
+      throw new EngineError(
+        "strategy edits are not available over solver-engine IPC yet",
+        501,
+        null,
+      );
+    }
     const { response, data } = await this.request(
       "PUT",
       `/api/solutions/${solutionId}/strategy-edits`,
@@ -770,6 +837,16 @@ export class EngineClient {
     nodeId?: string,
     handIndex?: number,
   ): Promise<unknown> {
+    if (isIpcTransport()) {
+      void solutionId;
+      void nodeId;
+      void handIndex;
+      throw new EngineError(
+        "strategy edits are not available over solver-engine IPC yet",
+        501,
+        null,
+      );
+    }
     const query = new URLSearchParams();
     if (nodeId) {
       query.set("node_id", nodeId);
@@ -791,12 +868,29 @@ export class EngineClient {
     body: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<{ job_id: string; state: string }> {
+    if (isIpcTransport()) {
+      void body;
+      throw new EngineError(
+        "Equity calculator jobs are not available over solver-engine IPC yet",
+        501,
+        null,
+      );
+    }
     const { response, data } = await this.request("POST", "/api/equity/jobs", body, { signal });
     this.ensureOk(response, data, true);
     return data as { job_id: string; state: string };
   }
 
   async getEquityJob(jobId: string, signal?: AbortSignal): Promise<unknown> {
+    if (isIpcTransport()) {
+      void jobId;
+      void signal;
+      throw new EngineError(
+        "Equity calculator jobs are not available over solver-engine IPC yet",
+        501,
+        null,
+      );
+    }
     const { response, data } = await this.request(
       "GET",
       `/api/equity/jobs/${encodeURIComponent(jobId)}`,
@@ -808,6 +902,15 @@ export class EngineClient {
   }
 
   async getEquityJobResult(jobId: string, signal?: AbortSignal): Promise<unknown> {
+    if (isIpcTransport()) {
+      void jobId;
+      void signal;
+      throw new EngineError(
+        "Equity calculator jobs are not available over solver-engine IPC yet",
+        501,
+        null,
+      );
+    }
     const { response, data } = await this.request(
       "GET",
       `/api/equity/jobs/${encodeURIComponent(jobId)}/result`,
@@ -819,6 +922,14 @@ export class EngineClient {
   }
 
   async cancelEquityJob(jobId: string): Promise<unknown> {
+    if (isIpcTransport()) {
+      void jobId;
+      throw new EngineError(
+        "Equity calculator jobs are not available over solver-engine IPC yet",
+        501,
+        null,
+      );
+    }
     const { response, data } = await this.request(
       "POST",
       `/api/equity/jobs/${encodeURIComponent(jobId)}/cancel`,
