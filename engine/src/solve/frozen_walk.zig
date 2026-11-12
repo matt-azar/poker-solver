@@ -1,5 +1,7 @@
 //! StreetBatch-style frozen CFR+ walk (C++ frozen_walk).
 //! First-future-card chance steal when threads > 1 (C++ parallel_chance); nested chance stays serial.
+//! Persistent chance worker pool (C++ Engine::workers_): lazy-start on first
+//! dispatch so `*FrozenCtx` is already at its final address (init returns by value).
 //! Replaces deal-by-deal chance expansion for flop/turn scale.
 const std = @import("std");
 const card = @import("../poker/card.zig");
@@ -210,6 +212,17 @@ pub const FrozenCtx = struct {
     /// Set after a successful `ensureAllRanksReady` so Acc-stop `train(1)` / eval
     /// can reuse Session-owned ctx without rebuilding runout tables.
     ranks_ready: bool = false,
+    /// Persistent chance workers (C++ `Engine::workers_`). Spawn once per
+    /// FrozenCtx lifetime; wake/join per chance instead of `Thread.spawn` each
+    /// dispatch. Stopped in `deinit` / Session `begin`. Slots stay separate.
+    pool_threads: []std.Thread = &.{},
+    pool_mu: std.Thread.Mutex = .{},
+    pool_work_cv: std.Thread.Condition = .{},
+    pool_done_cv: std.Thread.Condition = .{},
+    pool_epoch: u64 = 0,
+    pool_finished: u32 = 0,
+    pool_stop: bool = false,
+    pool_job: ?*const ChanceJob = null,
 
     pub fn init(allocator: std.mem.Allocator, game: compile.CompiledGame, state: *training_state.TrainingState) FrozenError!FrozenCtx {
         return initCommon(allocator, game, state, 1);
@@ -283,11 +296,15 @@ pub const FrozenCtx = struct {
             }
             ctx.result0 = try allocator.alloc(f64, 52 * n0);
             ctx.result1 = try allocator.alloc(f64, 52 * n1);
+            // Chance pool starts lazily on first dispatch: FrozenCtx is returned
+            // by value from init, so spawning here would pin a dangling `self`.
         }
         return ctx;
     }
 
     pub fn deinit(self: *FrozenCtx) void {
+        // Join pool before freeing WorkerLocal scratch workers still touch.
+        self.stopChancePool();
         if (self.result0.len != 0) self.allocator.free(self.result0);
         if (self.result1.len != 0) self.allocator.free(self.result1);
         if (self.extras.len != 0) {
@@ -309,6 +326,72 @@ pub const FrozenCtx = struct {
         self.allocator.free(self.twin0);
         self.allocator.free(self.twin1);
         self.* = undefined;
+    }
+
+    fn startChancePool(self: *FrozenCtx) FrozenError!void {
+        if (self.threads <= 1) return;
+        const n: usize = self.threads - 1;
+        self.pool_threads = try self.allocator.alloc(std.Thread, n);
+        errdefer {
+            self.allocator.free(self.pool_threads);
+            self.pool_threads = &.{};
+        }
+        var spawned: usize = 0;
+        errdefer {
+            self.pool_mu.lock();
+            self.pool_stop = true;
+            self.pool_mu.unlock();
+            self.pool_work_cv.broadcast();
+            var i: usize = 0;
+            while (i < spawned) : (i += 1) self.pool_threads[i].join();
+            self.allocator.free(self.pool_threads);
+            self.pool_threads = &.{};
+            self.pool_stop = false;
+        }
+        while (spawned < n) : (spawned += 1) {
+            const idx = spawned + 1;
+            self.pool_threads[spawned] = try std.Thread.spawn(.{}, chancePoolMain, .{ self, idx });
+        }
+    }
+
+    fn stopChancePool(self: *FrozenCtx) void {
+        if (self.pool_threads.len == 0) return;
+        self.pool_mu.lock();
+        self.pool_stop = true;
+        self.pool_mu.unlock();
+        self.pool_work_cv.broadcast();
+        for (self.pool_threads) |t| t.join();
+        self.allocator.free(self.pool_threads);
+        self.pool_threads = &.{};
+        self.pool_job = null;
+        self.pool_finished = 0;
+        self.pool_epoch = 0;
+        self.pool_stop = false;
+    }
+
+    fn chancePoolMain(self: *FrozenCtx, worker_index: usize) void {
+        var seen: u64 = 0;
+        while (true) {
+            self.pool_mu.lock();
+            while (!self.pool_stop and self.pool_epoch == seen) {
+                self.pool_work_cv.wait(&self.pool_mu);
+            }
+            if (self.pool_stop) {
+                self.pool_mu.unlock();
+                return;
+            }
+            seen = self.pool_epoch;
+            const job = self.pool_job.?;
+            self.pool_mu.unlock();
+
+            runChanceSteal(worker_index, job);
+
+            self.pool_mu.lock();
+            self.pool_finished += 1;
+            const done = self.pool_finished == self.threads - 1;
+            if (done) self.pool_done_cv.signal();
+            self.pool_mu.unlock();
+        }
     }
 
     fn workerAt(self: *FrozenCtx, index: usize) *WorkerLocal {
@@ -1598,22 +1681,41 @@ pub const FrozenCtx = struct {
         }
     }
 
+    fn ensureChancePool(self: *FrozenCtx) FrozenError!void {
+        if (self.threads <= 1) return;
+        if (self.pool_threads.len != 0) return;
+        try self.startChancePool();
+    }
+
     fn dispatchChanceWorkers(self: *FrozenCtx, job: *const ChanceJob) FrozenError!void {
-        const workers = self.threads;
-        var threads = try self.allocator.alloc(std.Thread, workers - 1);
-        defer self.allocator.free(threads);
-        var spawned: usize = 0;
-        errdefer {
-            // Best-effort: join anything already started.
-            var i: usize = 0;
-            while (i < spawned) : (i += 1) threads[i].join();
+        // Persistent pool: wake workers for this job (C++ dispatch_chance).
+        // Lazy-start once FrozenCtx lives at a stable address (Session field or
+        // caller's stack after by-value init return).
+        if (self.threads <= 1) {
+            runChanceSteal(0, job);
+            if (job.first_err.*) |err| return err;
+            return;
         }
-        while (spawned < workers - 1) : (spawned += 1) {
-            const idx = spawned + 1;
-            threads[spawned] = try std.Thread.spawn(.{}, runChanceSteal, .{ idx, job });
+        try self.ensureChancePool();
+        {
+            self.pool_mu.lock();
+            defer self.pool_mu.unlock();
+            self.pool_job = job;
+            self.pool_finished = 0;
+            self.pool_epoch += 1;
         }
+        self.pool_work_cv.broadcast();
+
         runChanceSteal(0, job);
-        for (threads) |t| t.join();
+
+        {
+            self.pool_mu.lock();
+            defer self.pool_mu.unlock();
+            while (self.pool_finished != self.threads - 1) {
+                self.pool_done_cv.wait(&self.pool_mu);
+            }
+            self.pool_job = null;
+        }
         if (job.first_err.*) |err| return err;
     }
 
