@@ -179,7 +179,11 @@ pub fn main() !void {
     try stdout.print("phase: construction\n", .{});
     try stdout.print("begin_seconds: {d:.6}\n", .{@as(f64, @floatFromInt(begin_ns)) / 1e9});
     try stdout.print("deals: {d}\n", .{game.deals.len});
-    try stdout.print("infosets: {d}\n", .{game.slots.len});
+    // C++ street_solver / --plan-memory infosets = stored slots + one-action implicits.
+    // Keep both lines so scoreboard digs can separate storage from logical count.
+    try stdout.print("slots: {d}\n", .{game.slots.len});
+    try stdout.print("implicit_infosets: {d}\n", .{game.implicit_infosets});
+    try stdout.print("infosets: {d}\n", .{game.infosetCount()});
     try stdout.print("public_decisions: {d}\n", .{game.nodes.len});
     try stdout.print("threads: {d}\n", .{sess.threads});
 
