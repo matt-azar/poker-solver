@@ -12,15 +12,22 @@ pub const ConfigError = error{
 };
 
 pub fn parseStreetConfig(allocator: std.mem.Allocator, text: []const u8) ConfigError!street_spec.StreetSpec {
+    // Require a trailing LF. CRLF (`\r\n`) is accepted: Windows checkouts normalize
+    // by stripping a trailing CR from each line (shipping path; Git may check out CRLF).
     if (text.len == 0 or text[text.len - 1] != '\n') return error.InvalidStreetConfig;
-    if (std.mem.indexOfScalar(u8, text, '\r') != null) return error.InvalidStreetConfig;
 
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
     var start: usize = 0;
     while (start < text.len) {
         const end = std.mem.indexOfScalarPos(u8, text, start, '\n') orelse text.len;
-        lines.append(text[start..end]) catch return error.OutOfMemory;
+        var line = text[start..end];
+        if (line.len > 0 and line[line.len - 1] == '\r') {
+            line = line[0 .. line.len - 1];
+        }
+        // Bare CR mid-line (not CRLF) is invalid.
+        if (std.mem.indexOfScalar(u8, line, '\r') != null) return error.InvalidStreetConfig;
+        lines.append(line) catch return error.OutOfMemory;
         start = end + 1;
     }
     if (lines.items.len > 0 and lines.items[lines.items.len - 1].len == 0) {
@@ -488,6 +495,42 @@ test "reject bad version" {
 
 test "reject missing trailing newline" {
     try std.testing.expectError(error.InvalidStreetConfig, parseStreetConfig(std.testing.allocator, "street-config 1"));
+    try std.testing.expectError(error.InvalidStreetConfig, parseStreetConfig(std.testing.allocator, "street-config 1\r"));
+}
+
+test "accept CRLF line endings" {
+    // Same fixture as "parse street default fixture", but Windows CRLF.
+    const text =
+        "street-config 1\r\n" ++
+        "board Kh Kd 7c 4s\r\n" ++
+        "pot 100\r\n" ++
+        "stack 100\r\n" ++
+        "oop-range AhAd:1\r\n" ++
+        "ip-range 3d2c:1\r\n" ++
+        "first-to-act 0\r\n" ++
+        "max-raises 1\r\n" ++
+        "allow-all-in 0\r\n" ++
+        "allow-three-bet 1\r\n" ++
+        "all-in-threshold 0\r\n" ++
+        "pot-cap 0\r\n" ++
+        "rake-rate 0\r\n" ++
+        "rake-cap 0\r\n" ++
+        "memory-mib 1024\r\n" ++
+        "threads 1\r\n" ++
+        "oop-bets 1\r\n" ++
+        "oop-raises 1\r\n";
+    var config = try parseStreetConfig(std.testing.allocator, text);
+    defer config.deinit();
+    try std.testing.expectEqual(@as(usize, 4), config.board.len);
+    try std.testing.expectEqual(chips.chipUnits(100), config.pot);
+    try std.testing.expectEqual(@as(usize, 1), config.oop_bet_sizes.len);
+}
+
+test "reject bare CR mid-line" {
+    try std.testing.expectError(
+        error.InvalidStreetConfig,
+        parseStreetConfig(std.testing.allocator, "street-config 1\npot 1\r00\n"),
+    );
 }
 
 test "tree-edit round trip line" {
