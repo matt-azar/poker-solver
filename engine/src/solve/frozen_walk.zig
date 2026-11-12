@@ -1,4 +1,5 @@
-//! Single-thread StreetBatch-style frozen CFR+ walk (C++ frozen_walk).
+//! StreetBatch-style frozen CFR+ walk (C++ frozen_walk).
+//! First-future-card chance steal when threads > 1 (C++ parallel_chance); nested chance stays serial.
 //! Replaces deal-by-deal chance expansion for flop/turn scale.
 const std = @import("std");
 const card = @import("../poker/card.zig");
@@ -9,7 +10,14 @@ const compile = @import("../game/compile.zig");
 const regret_matching = @import("regret_matching.zig");
 const training_state = @import("training_state.zig");
 
-pub const FrozenError = error{ InvalidFrozen, OutOfMemory } || hand_eval.EvalError || payoff.PayoffError || training_state.TrainError;
+pub const FrozenError = error{
+    InvalidFrozen,
+    OutOfMemory,
+    ThreadQuotaExceeded,
+    LockedMemoryLimitExceeded,
+    SystemResources,
+    Unexpected,
+} || hand_eval.EvalError || payoff.PayoffError || training_state.TrainError;
 
 /// Avoid importing analysis/ from solve/ (cycle). Same fields as EvaluationResult.
 pub const FrozenEval = struct {
@@ -75,6 +83,65 @@ const Scratch = struct {
     }
 };
 
+/// Per-worker mutable buffers (C++ WorkerContext). Shared tables stay on FrozenCtx.
+const WorkerLocal = struct {
+    live0: []bool,
+    live1: []bool,
+    amount0: []f64,
+    amount1: []f64,
+    by_card0: [52]f64 = .{0} ** 52,
+    by_card1: [52]f64 = .{0} ** 52,
+    support_turn: i32 = -2,
+    support_river: i32 = -2,
+    scratch: [max_depth]Scratch = undefined,
+    scratch_len: usize = 0,
+
+    fn init(allocator: std.mem.Allocator, n0: usize, n1: usize) FrozenError!WorkerLocal {
+        var w = WorkerLocal{
+            .live0 = try allocator.alloc(bool, n0),
+            .live1 = try allocator.alloc(bool, n1),
+            .amount0 = try allocator.alloc(f64, n0),
+            .amount1 = try allocator.alloc(f64, n1),
+        };
+        errdefer w.deinit(allocator);
+        @memset(w.live0, true);
+        @memset(w.live1, true);
+        var d: usize = 0;
+        while (d < max_depth) : (d += 1) {
+            w.scratch[d] = .{
+                .pi0 = try allocator.alloc(f64, n0),
+                .pi1 = try allocator.alloc(f64, n1),
+                .ev0 = try allocator.alloc(f64, n0),
+                .ev1 = try allocator.alloc(f64, n1),
+                .aev0 = try allocator.alloc(f64, max_actions * n0),
+                .aev1 = try allocator.alloc(f64, max_actions * n1),
+                .slot_base = try allocator.alloc(i32, @max(n0, n1)),
+            };
+            w.scratch_len = d + 1;
+        }
+        return w;
+    }
+
+    fn deinit(self: *WorkerLocal, allocator: std.mem.Allocator) void {
+        var d: usize = 0;
+        while (d < self.scratch_len) : (d += 1) {
+            self.scratch[d].deinit(allocator);
+        }
+        allocator.free(self.live0);
+        allocator.free(self.live1);
+        allocator.free(self.amount0);
+        allocator.free(self.amount1);
+        self.* = undefined;
+    }
+
+    fn resetSupport(self: *WorkerLocal) void {
+        self.support_turn = -2;
+        self.support_river = -2;
+    }
+};
+
+const k_max_threads: u32 = 64;
+
 pub const FrozenCtx = struct {
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
@@ -85,34 +152,55 @@ pub const FrozenCtx = struct {
     joint_scale: f64,
     support0: []HandSupport,
     support1: []HandSupport,
-    live0: []bool,
-    live1: []bool,
     /// Opponent hand with the same combo, or -1 (C++ twin_hand).
     twin0: []i32,
     twin1: []i32,
-    amount0: []f64,
-    amount1: []f64,
-    by_card0: [52]f64 = .{0} ** 52,
-    by_card1: [52]f64 = .{0} ** 52,
-    support_turn: i32 = -2,
-    support_river: i32 = -2,
     ranks: std.AutoHashMap(i32, RunoutRanks),
-    scratch: [max_depth]Scratch = undefined,
-    scratch_len: usize = 0,
+    ranks_mu: std.Thread.Mutex = .{},
+    threads: u32 = 1,
+    workspace: WorkerLocal = undefined,
+    workspace_ready: bool = false,
+    extras: []WorkerLocal = &.{},
+    result0: []f64 = &.{},
+    result1: []f64 = &.{},
 
     pub fn init(allocator: std.mem.Allocator, game: compile.CompiledGame, state: *training_state.TrainingState) FrozenError!FrozenCtx {
-        return initCommon(allocator, game, state);
+        return initCommon(allocator, game, state, 1);
+    }
+
+    pub fn initThreaded(
+        allocator: std.mem.Allocator,
+        game: compile.CompiledGame,
+        state: *training_state.TrainingState,
+        threads: u32,
+    ) FrozenError!FrozenCtx {
+        return initCommon(allocator, game, state, threads);
     }
 
     pub fn initEval(allocator: std.mem.Allocator, game: compile.CompiledGame) FrozenError!FrozenCtx {
-        return initCommon(allocator, game, null);
+        return initCommon(allocator, game, null, 1);
     }
 
-    fn initCommon(allocator: std.mem.Allocator, game: compile.CompiledGame, state: ?*training_state.TrainingState) FrozenError!FrozenCtx {
+    pub fn initEvalThreaded(allocator: std.mem.Allocator, game: compile.CompiledGame, threads: u32) FrozenError!FrozenCtx {
+        return initCommon(allocator, game, null, threads);
+    }
+
+    fn clampThreads(threads: u32) u32 {
+        if (threads < 1) return 1;
+        return @min(threads, k_max_threads);
+    }
+
+    fn initCommon(
+        allocator: std.mem.Allocator,
+        game: compile.CompiledGame,
+        state: ?*training_state.TrainingState,
+        threads_in: u32,
+    ) FrozenError!FrozenCtx {
         const n0: usize = @intCast(game.hands.nHands(0));
         const n1: usize = @intCast(game.hands.nHands(1));
         if (n0 == 0 or n1 == 0) return error.InvalidFrozen;
         if (game.hands.joint_mass <= 0) return error.InvalidFrozen;
+        const threads = clampThreads(threads_in);
         var ctx = FrozenCtx{
             .allocator = allocator,
             .game = game,
@@ -122,40 +210,46 @@ pub const FrozenCtx = struct {
             .joint_scale = 1.0 / game.hands.joint_mass,
             .support0 = try allocator.alloc(HandSupport, n0),
             .support1 = try allocator.alloc(HandSupport, n1),
-            .live0 = try allocator.alloc(bool, n0),
-            .live1 = try allocator.alloc(bool, n1),
             .twin0 = try allocator.alloc(i32, n0),
             .twin1 = try allocator.alloc(i32, n1),
-            .amount0 = try allocator.alloc(f64, n0),
-            .amount1 = try allocator.alloc(f64, n1),
             .ranks = std.AutoHashMap(i32, RunoutRanks).init(allocator),
+            .threads = threads,
         };
         errdefer ctx.deinit();
         @memset(ctx.support0, .{});
         @memset(ctx.support1, .{});
         try ctx.buildSupport();
         try ctx.buildTwins();
-        @memset(ctx.live0, true);
-        @memset(ctx.live1, true);
-        var d: usize = 0;
-        while (d < max_depth) : (d += 1) {
-            ctx.scratch[d] = .{
-                .pi0 = try allocator.alloc(f64, n0),
-                .pi1 = try allocator.alloc(f64, n1),
-                .ev0 = try allocator.alloc(f64, n0),
-                .ev1 = try allocator.alloc(f64, n1),
-                .aev0 = try allocator.alloc(f64, max_actions * n0),
-                .aev1 = try allocator.alloc(f64, max_actions * n1),
-                .slot_base = try allocator.alloc(i32, @max(n0, n1)),
-            };
-            ctx.scratch_len = d + 1;
+        ctx.workspace = try WorkerLocal.init(allocator, n0, n1);
+        ctx.workspace_ready = true;
+        if (threads > 1) {
+            ctx.extras = try allocator.alloc(WorkerLocal, threads - 1);
+            var i: usize = 0;
+            errdefer {
+                var j: usize = 0;
+                while (j < i) : (j += 1) ctx.extras[j].deinit(allocator);
+                allocator.free(ctx.extras);
+                ctx.extras = &.{};
+            }
+            while (i < threads - 1) : (i += 1) {
+                ctx.extras[i] = try WorkerLocal.init(allocator, n0, n1);
+            }
+            ctx.result0 = try allocator.alloc(f64, 52 * n0);
+            ctx.result1 = try allocator.alloc(f64, 52 * n1);
         }
         return ctx;
     }
+
     pub fn deinit(self: *FrozenCtx) void {
-        var d: usize = 0;
-        while (d < self.scratch_len) : (d += 1) {
-            self.scratch[d].deinit(self.allocator);
+        if (self.result0.len != 0) self.allocator.free(self.result0);
+        if (self.result1.len != 0) self.allocator.free(self.result1);
+        if (self.extras.len != 0) {
+            for (self.extras) |*extra| extra.deinit(self.allocator);
+            self.allocator.free(self.extras);
+        }
+        if (self.workspace_ready) {
+            self.workspace.deinit(self.allocator);
+            self.workspace_ready = false;
         }
         var it = self.ranks.iterator();
         while (it.next()) |entry| {
@@ -164,13 +258,14 @@ pub const FrozenCtx = struct {
         self.ranks.deinit();
         self.allocator.free(self.support0);
         self.allocator.free(self.support1);
-        self.allocator.free(self.live0);
-        self.allocator.free(self.live1);
         self.allocator.free(self.twin0);
         self.allocator.free(self.twin1);
-        self.allocator.free(self.amount0);
-        self.allocator.free(self.amount1);
         self.* = undefined;
+    }
+
+    fn workerAt(self: *FrozenCtx, index: usize) *WorkerLocal {
+        if (index == 0) return &self.workspace;
+        return &self.extras[index - 1];
     }
 
     fn buildTwins(self: *FrozenCtx) FrozenError!void {
@@ -244,36 +339,36 @@ pub const FrozenCtx = struct {
         return self.compatibleOn(player, hand, turn, river) > 0;
     }
 
-    fn ensureBoardSupport(self: *FrozenCtx, turn: i32, river: i32) void {
-        if (self.support_turn == turn and self.support_river == river) return;
+    fn ensureBoardSupport(self: *FrozenCtx, w: *WorkerLocal, turn: i32, river: i32) void {
+        if (w.support_turn == turn and w.support_river == river) return;
         var h: usize = 0;
         while (h < self.n0) : (h += 1) {
-            self.live0[h] = self.handSupported(0, h, turn, river);
+            w.live0[h] = self.handSupported(0, h, turn, river);
         }
         h = 0;
         while (h < self.n1) : (h += 1) {
-            self.live1[h] = self.handSupported(1, h, turn, river);
+            w.live1[h] = self.handSupported(1, h, turn, river);
         }
-        self.support_turn = turn;
-        self.support_river = river;
+        w.support_turn = turn;
+        w.support_river = river;
     }
 
-    fn cardReachesPair(self: *FrozenCtx, turn: i32, river: i32, pi0: []const f64, pi1: []const f64) bool {
-        self.ensureBoardSupport(turn, river);
+    fn cardReachesPair(self: *FrozenCtx, w: *WorkerLocal, turn: i32, river: i32, pi0: []const f64, pi1: []const f64) bool {
+        self.ensureBoardSupport(w, turn, river);
         var h: usize = 0;
         while (h < self.n0) : (h += 1) {
-            if (pi0[h] > 0 and self.live0[h]) return true;
+            if (pi0[h] > 0 and w.live0[h]) return true;
         }
         h = 0;
         while (h < self.n1) : (h += 1) {
-            if (pi1[h] > 0 and self.live1[h]) return true;
+            if (pi1[h] > 0 and w.live1[h]) return true;
         }
         return false;
     }
-    fn fillActorSlotBases(self: *FrozenCtx, here: *Scratch, node: compile.Node, turn: i32, river: i32) FrozenError!void {
+    fn fillActorSlotBases(self: *FrozenCtx, w: *WorkerLocal, here: *Scratch, node: compile.Node, turn: i32, river: i32) FrozenError!void {
         const player: usize = @intCast(node.player);
         const hands = if (player == 0) self.n0 else self.n1;
-        const live = if (player == 0) self.live0 else self.live1;
+        const live = if (player == 0) w.live0 else w.live1;
         var hand: usize = 0;
         while (hand < hands) : (hand += 1) {
             if (!live[hand]) {
@@ -290,13 +385,14 @@ pub const FrozenCtx = struct {
 
     fn collectReach(
         self: *FrozenCtx,
+        w: *WorkerLocal,
         player: usize,
         pi: []const f64,
         amount: []f64,
         by_card: ?*[52]f64,
     ) f64 {
         const hands = if (player == 0) self.n0 else self.n1;
-        const live = if (player == 0) self.live0 else self.live1;
+        const live = if (player == 0) w.live0 else w.live1;
         const weights = self.game.hands.range_w[player];
         @memset(amount, 0);
         if (by_card) |bc| @memset(bc, 0);
@@ -341,6 +437,8 @@ pub const FrozenCtx = struct {
 
     fn ensureRanks(self: *FrozenCtx, turn: i32, river: i32) FrozenError!*const RunoutRanks {
         const key = runoutKey(turn, river);
+        self.ranks_mu.lock();
+        defer self.ranks_mu.unlock();
         if (self.ranks.getPtr(key)) |existing| return existing;
 
         var board_buf: [5]card.Card = undefined;
@@ -393,6 +491,7 @@ pub const FrozenCtx = struct {
 
     fn applyTerminal(
         self: *FrozenCtx,
+        w: *WorkerLocal,
         node: compile.Node,
         turn: i32,
         river: i32,
@@ -401,13 +500,13 @@ pub const FrozenCtx = struct {
         ev0: []f64,
         ev1: []f64,
     ) FrozenError!void {
-        self.ensureBoardSupport(turn, river);
+        self.ensureBoardSupport(w, turn, river);
         @memset(ev0, 0);
         @memset(ev1, 0);
 
         if (node.folded >= 0) {
-            const total0 = self.collectReach(0, pi0, self.amount0, &self.by_card0);
-            const total1 = self.collectReach(1, pi1, self.amount1, &self.by_card1);
+            const total0 = self.collectReach(w, 0, pi0, w.amount0, &w.by_card0);
+            const total1 = self.collectReach(w, 1, pi1, w.amount1, &w.by_card1);
             var paid = try payoff.chipTerminal(
                 self.game.pot,
                 node.contrib[0],
@@ -420,14 +519,14 @@ pub const FrozenCtx = struct {
             paid.utility[1] += node.incentive_u1;
             var h0: usize = 0;
             while (h0 < self.n0) : (h0 += 1) {
-                if (!self.live0[h0]) continue;
-                const open = total1 - self.blockedReach(0, h0, &self.by_card1, self.amount1);
+                if (!w.live0[h0]) continue;
+                const open = total1 - self.blockedReach(0, h0, &w.by_card1, w.amount1);
                 ev0[h0] = paid.utility[0] * self.game.hands.range_w[0][h0] * self.joint_scale * open;
             }
             var h1: usize = 0;
             while (h1 < self.n1) : (h1 += 1) {
-                if (!self.live1[h1]) continue;
-                const open = total0 - self.blockedReach(1, h1, &self.by_card0, self.amount0);
+                if (!w.live1[h1]) continue;
+                const open = total0 - self.blockedReach(1, h1, &w.by_card0, w.amount0);
                 ev1[h1] = paid.utility[1] * self.game.hands.range_w[1][h1] * self.joint_scale * open;
             }
             return;
@@ -436,8 +535,8 @@ pub const FrozenCtx = struct {
         // Five-card showdown: evaluate each hand once per runout, then O(n0·n1)
         // packed-rank compares (avoids re-running evaluate in the inner loop).
         const ranks = try self.ensureRanks(turn, river);
-        _ = self.collectReach(0, pi0, self.amount0, null);
-        _ = self.collectReach(1, pi1, self.amount1, null);
+        _ = self.collectReach(w, 0, pi0, w.amount0, null);
+        _ = self.collectReach(w, 1, pi1, w.amount1, null);
 
         const win_u = blk: {
             const p = try payoff.chipTerminal(self.game.pot, node.contrib[0], node.contrib[1], -1, 1, self.game.rake);
@@ -454,70 +553,76 @@ pub const FrozenCtx = struct {
 
         var h0: usize = 0;
         while (h0 < self.n0) : (h0 += 1) {
-            if (!self.live0[h0]) continue;
+            if (!w.live0[h0]) continue;
             const r0 = ranks.rank0[h0];
             const rw0 = self.game.hands.range_w[0][h0];
             var h1: usize = 0;
             while (h1 < self.n1) : (h1 += 1) {
-                if (!self.live1[h1]) continue;
+                if (!w.live1[h1]) continue;
                 if (self.handsBlock(h0, h1)) continue;
                 const r1 = ranks.rank1[h1];
                 const u = if (r0 > r1) win_u else if (r0 < r1) lose_u else tie_u;
                 const rw1 = self.game.hands.range_w[1][h1];
-                ev0[h0] += u[0] * rw0 * self.joint_scale * self.amount1[h1];
-                ev1[h1] += u[1] * rw1 * self.joint_scale * self.amount0[h0];
+                ev0[h0] += u[0] * rw0 * self.joint_scale * w.amount1[h1];
+                ev1[h1] += u[1] * rw1 * self.joint_scale * w.amount0[h0];
             }
         }
     }
+
     pub fn walk(
         self: *FrozenCtx,
+        w: *WorkerLocal,
         node_index: u32,
         turn: i32,
         river: i32,
         depth: usize,
         updating: i32,
         weight_iter: f64,
+        serial_chance: bool,
     ) FrozenError!void {
         if (depth >= max_depth) return error.InvalidFrozen;
         const node = self.game.nodes[node_index];
-        const here = &self.scratch[depth];
+        const here = &w.scratch[depth];
 
         if (node.kind == .terminal) {
-            try self.applyTerminal(node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1);
+            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1);
             return;
         }
 
         if (node.kind == .chance) {
+            if (!serial_chance and self.threads > 1) {
+                try self.parallelChance(w, node, turn, river, depth, updating, weight_iter);
+                return;
+            }
             @memset(here.ev0, 0);
             @memset(here.ev1, 0);
             var dead: [52]bool = .{false} ** 52;
             for (self.game.board) |c| dead[@intCast(c)] = true;
             if (turn >= 0) dead[@intCast(turn)] = true;
             if (river >= 0) dead[@intCast(river)] = true;
-            // Mark holes? Chance doesn't know deals — denom is board-only like C++.
             // Match C++: 52 - board - 4 hole cards, then minus dealt turn/river.
             var denom: i32 = 52 - @as(i32, @intCast(self.game.board.len)) - 4;
             if (turn >= 0) denom -= 1;
             if (river >= 0) denom -= 1;
             if (denom <= 0) return error.InvalidFrozen;
             const probability = 1.0 / @as(f64, @floatFromInt(denom));
-            const child = &self.scratch[depth + 1];
+            const child = &w.scratch[depth + 1];
             var c: i32 = 0;
             while (c < 52) : (c += 1) {
                 if (dead[@intCast(c)]) continue;
                 var next_turn = turn;
                 var next_river = river;
                 if (node.deal_which == 1) next_turn = c else next_river = c;
-                if (!self.cardReachesPair(next_turn, next_river, here.pi0, here.pi1)) continue;
+                if (!self.cardReachesPair(w, next_turn, next_river, here.pi0, here.pi1)) continue;
                 var h0: usize = 0;
                 while (h0 < self.n0) : (h0 += 1) {
-                    child.pi0[h0] = if (self.live0[h0]) here.pi0[h0] else 0;
+                    child.pi0[h0] = if (w.live0[h0]) here.pi0[h0] else 0;
                 }
                 var h1: usize = 0;
                 while (h1 < self.n1) : (h1 += 1) {
-                    child.pi1[h1] = if (self.live1[h1]) here.pi1[h1] else 0;
+                    child.pi1[h1] = if (w.live1[h1]) here.pi1[h1] else 0;
                 }
-                try self.walk(node.child[0], next_turn, next_river, depth + 1, updating, weight_iter);
+                try self.walk(w, node.child[0], next_turn, next_river, depth + 1, updating, weight_iter, true);
                 h0 = 0;
                 while (h0 < self.n0) : (h0 += 1) here.ev0[h0] += probability * child.ev0[h0];
                 h1 = 0;
@@ -526,39 +631,39 @@ pub const FrozenCtx = struct {
             return;
         }
 
-        self.ensureBoardSupport(turn, river);
-        const child = &self.scratch[depth + 1];
+        self.ensureBoardSupport(w, turn, river);
+        const child = &w.scratch[depth + 1];
         if (node.n_actions <= 1) {
             if (node.player == 0) {
                 var h0: usize = 0;
                 while (h0 < self.n0) : (h0 += 1) {
-                    child.pi0[h0] = if (self.live0[h0]) here.pi0[h0] else 0;
+                    child.pi0[h0] = if (w.live0[h0]) here.pi0[h0] else 0;
                 }
                 @memcpy(child.pi1, here.pi1);
             } else {
                 @memcpy(child.pi0, here.pi0);
                 var h1: usize = 0;
                 while (h1 < self.n1) : (h1 += 1) {
-                    child.pi1[h1] = if (self.live1[h1]) here.pi1[h1] else 0;
+                    child.pi1[h1] = if (w.live1[h1]) here.pi1[h1] else 0;
                 }
             }
-            try self.walk(node.child[0], turn, river, depth + 1, updating, weight_iter);
-            self.ensureBoardSupport(turn, river);
+            try self.walk(w, node.child[0], turn, river, depth + 1, updating, weight_iter, serial_chance);
+            self.ensureBoardSupport(w, turn, river);
             @memcpy(here.ev0, child.ev0);
             @memcpy(here.ev1, child.ev1);
             var z0: usize = 0;
             while (z0 < self.n0) : (z0 += 1) {
-                if (!self.live0[z0]) here.ev0[z0] = 0;
+                if (!w.live0[z0]) here.ev0[z0] = 0;
             }
             var z1: usize = 0;
             while (z1 < self.n1) : (z1 += 1) {
-                if (!self.live1[z1]) here.ev1[z1] = 0;
+                if (!w.live1[z1]) here.ev1[z1] = 0;
             }
             return;
         }
 
         if (node.n_actions > max_actions) return error.InvalidFrozen;
-        try self.fillActorSlotBases(here, node, turn, river);
+        try self.fillActorSlotBases(w, here, node, turn, river);
         const n_act: usize = node.n_actions;
 
         var action: usize = 0;
@@ -588,7 +693,7 @@ pub const FrozenCtx = struct {
                     child.pi1[h1] = here.pi1[h1] * self.state.?.sigma[b + action];
                 }
             }
-            try self.walk(node.child[action], turn, river, depth + 1, updating, weight_iter);
+            try self.walk(w, node.child[action], turn, river, depth + 1, updating, weight_iter, serial_chance);
             if (node.player == 0) {
                 @memcpy(here.aev0[action * self.n0 ..][0..self.n0], child.ev0);
                 if (action == 0) {
@@ -608,11 +713,11 @@ pub const FrozenCtx = struct {
             }
         }
 
-        self.ensureBoardSupport(turn, river);
+        self.ensureBoardSupport(w, turn, river);
         if (node.player == 0) {
             var h0: usize = 0;
             while (h0 < self.n0) : (h0 += 1) {
-                if (!self.live0[h0]) {
+                if (!w.live0[h0]) {
                     here.ev0[h0] = 0;
                     continue;
                 }
@@ -644,16 +749,16 @@ pub const FrozenCtx = struct {
             }
             var h1: usize = 0;
             while (h1 < self.n1) : (h1 += 1) {
-                if (!self.live1[h1]) here.ev1[h1] = 0;
+                if (!w.live1[h1]) here.ev1[h1] = 0;
             }
         } else {
             var h0: usize = 0;
             while (h0 < self.n0) : (h0 += 1) {
-                if (!self.live0[h0]) here.ev0[h0] = 0;
+                if (!w.live0[h0]) here.ev0[h0] = 0;
             }
             var h1: usize = 0;
             while (h1 < self.n1) : (h1 += 1) {
-                if (!self.live1[h1]) {
+                if (!w.live1[h1]) {
                     here.ev1[h1] = 0;
                     continue;
                 }
@@ -689,23 +794,29 @@ pub const FrozenCtx = struct {
     /// C++ `response_walk`: on-profile (`responding == -1`) or unilateral BR.
     pub fn responseWalk(
         self: *FrozenCtx,
+        w: *WorkerLocal,
         node_index: u32,
         turn: i32,
         river: i32,
         depth: usize,
         responding: i32,
         sigma: []const f32,
+        serial_chance: bool,
     ) FrozenError!void {
         if (depth >= max_depth) return error.InvalidFrozen;
         const node = self.game.nodes[node_index];
-        const here = &self.scratch[depth];
+        const here = &w.scratch[depth];
 
         if (node.kind == .terminal) {
-            try self.applyTerminal(node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1);
+            try self.applyTerminal(w, node, turn, river, here.pi0, here.pi1, here.ev0, here.ev1);
             return;
         }
 
         if (node.kind == .chance) {
+            if (!serial_chance and self.threads > 1) {
+                try self.parallelResponseChance(w, node, turn, river, depth, responding, sigma);
+                return;
+            }
             @memset(here.ev0, 0);
             @memset(here.ev1, 0);
             var dead: [52]bool = .{false} ** 52;
@@ -717,23 +828,23 @@ pub const FrozenCtx = struct {
             if (river >= 0) denom -= 1;
             if (denom <= 0) return error.InvalidFrozen;
             const probability = 1.0 / @as(f64, @floatFromInt(denom));
-            const child = &self.scratch[depth + 1];
+            const child = &w.scratch[depth + 1];
             var c: i32 = 0;
             while (c < 52) : (c += 1) {
                 if (dead[@intCast(c)]) continue;
                 var next_turn = turn;
                 var next_river = river;
                 if (node.deal_which == 1) next_turn = c else next_river = c;
-                if (!self.cardReachesPair(next_turn, next_river, here.pi0, here.pi1)) continue;
+                if (!self.cardReachesPair(w, next_turn, next_river, here.pi0, here.pi1)) continue;
                 var h0: usize = 0;
                 while (h0 < self.n0) : (h0 += 1) {
-                    child.pi0[h0] = if (self.live0[h0]) here.pi0[h0] else 0;
+                    child.pi0[h0] = if (w.live0[h0]) here.pi0[h0] else 0;
                 }
                 var h1: usize = 0;
                 while (h1 < self.n1) : (h1 += 1) {
-                    child.pi1[h1] = if (self.live1[h1]) here.pi1[h1] else 0;
+                    child.pi1[h1] = if (w.live1[h1]) here.pi1[h1] else 0;
                 }
-                try self.responseWalk(node.child[0], next_turn, next_river, depth + 1, responding, sigma);
+                try self.responseWalk(w, node.child[0], next_turn, next_river, depth + 1, responding, sigma, true);
                 h0 = 0;
                 while (h0 < self.n0) : (h0 += 1) here.ev0[h0] += probability * child.ev0[h0];
                 h1 = 0;
@@ -742,8 +853,8 @@ pub const FrozenCtx = struct {
             return;
         }
 
-        self.ensureBoardSupport(turn, river);
-        const child = &self.scratch[depth + 1];
+        self.ensureBoardSupport(w, turn, river);
+        const child = &w.scratch[depth + 1];
         if (node.n_actions <= 1) {
             if (node.player == 0) {
                 var h0: usize = 0;
@@ -758,14 +869,14 @@ pub const FrozenCtx = struct {
                     child.pi1[h1] = if (self.handSupported(1, h1, turn, river)) here.pi1[h1] else 0;
                 }
             }
-            try self.responseWalk(node.child[0], turn, river, depth + 1, responding, sigma);
+            try self.responseWalk(w, node.child[0], turn, river, depth + 1, responding, sigma, serial_chance);
             @memcpy(here.ev0, child.ev0);
             @memcpy(here.ev1, child.ev1);
             return;
         }
 
         if (node.n_actions > max_actions) return error.InvalidFrozen;
-        try self.fillActorSlotBases(here, node, turn, river);
+        try self.fillActorSlotBases(w, here, node, turn, river);
         const n_act: usize = node.n_actions;
         const choosing = node.player == responding;
 
@@ -804,15 +915,15 @@ pub const FrozenCtx = struct {
                     }
                 }
             }
-            try self.responseWalk(node.child[action], turn, river, depth + 1, responding, sigma);
+            try self.responseWalk(w, node.child[action], turn, river, depth + 1, responding, sigma, serial_chance);
             @memcpy(here.aev0[action * self.n0 ..][0..self.n0], child.ev0);
             @memcpy(here.aev1[action * self.n1 ..][0..self.n1], child.ev1);
         }
 
-        self.ensureBoardSupport(turn, river);
+        self.ensureBoardSupport(w, turn, river);
         var h0: usize = 0;
         while (h0 < self.n0) : (h0 += 1) {
-            if (!self.live0[h0]) {
+            if (!w.live0[h0]) {
                 here.ev0[h0] = 0;
                 continue;
             }
@@ -850,7 +961,7 @@ pub const FrozenCtx = struct {
         }
         var h1: usize = 0;
         while (h1 < self.n1) : (h1 += 1) {
-            if (!self.live1[h1]) {
+            if (!w.live1[h1]) {
                 here.ev1[h1] = 0;
                 continue;
             }
@@ -894,12 +1005,262 @@ pub const FrozenCtx = struct {
         return total;
     }
 
-    fn prepareResponseRoot(self: *FrozenCtx) void {
-        @memset(self.scratch[0].pi0, 1.0);
-        @memset(self.scratch[0].pi1, 1.0);
-        self.support_turn = -2;
+    fn prepareResponseRoot(_: *FrozenCtx, w: *WorkerLocal) void {
+        @memset(w.scratch[0].pi0, 1.0);
+        @memset(w.scratch[0].pi1, 1.0);
+        w.resetSupport();
+    }
+
+    fn chanceDenom(self: *const FrozenCtx, turn: i32, river: i32) FrozenError!i32 {
+        var denom: i32 = 52 - @as(i32, @intCast(self.game.board.len)) - 4;
+        if (turn >= 0) denom -= 1;
+        if (river >= 0) denom -= 1;
+        if (denom <= 0) return error.InvalidFrozen;
+        return denom;
+    }
+
+    fn collectActiveCards(
+        self: *FrozenCtx,
+        w: *WorkerLocal,
+        node: compile.Node,
+        turn: i32,
+        river: i32,
+        pi0: []const f64,
+        pi1: []const f64,
+        active_cards: *[52]i32,
+    ) FrozenError!usize {
+        var dead: [52]bool = .{false} ** 52;
+        for (self.game.board) |c| dead[@intCast(c)] = true;
+        if (turn >= 0) dead[@intCast(turn)] = true;
+        if (river >= 0) dead[@intCast(river)] = true;
+        var count: usize = 0;
+        var c: i32 = 0;
+        while (c < 52) : (c += 1) {
+            if (dead[@intCast(c)]) continue;
+            var next_turn = turn;
+            var next_river = river;
+            if (node.deal_which == 1) next_turn = c else next_river = c;
+            if (!self.cardReachesPair(w, next_turn, next_river, pi0, pi1)) continue;
+            active_cards[count] = c;
+            count += 1;
+        }
+        return count;
+    }
+
+    fn reduceChildEv(
+        self: *const FrozenCtx,
+        here: *Scratch,
+        active_cards: []const i32,
+        probability: f64,
+    ) void {
+        for (active_cards) |dealt| {
+            const ev0_at = @as(usize, @intCast(dealt)) * self.n0;
+            const ev1_at = @as(usize, @intCast(dealt)) * self.n1;
+            var h0: usize = 0;
+            while (h0 < self.n0) : (h0 += 1) {
+                here.ev0[h0] += probability * self.result0[ev0_at + h0];
+            }
+            var h1: usize = 0;
+            while (h1 < self.n1) : (h1 += 1) {
+                here.ev1[h1] += probability * self.result1[ev1_at + h1];
+            }
+        }
+    }
+
+    const ChanceJob = struct {
+        engine: *FrozenCtx,
+        next_index: *std.atomic.Value(usize),
+        active_cards: []const i32,
+        child_node: u32,
+        turn: i32,
+        river: i32,
+        depth: usize,
+        deal_which: i32,
+        pi0: []const f64,
+        pi1: []const f64,
+        updating: i32,
+        weight_iter: f64,
+        responding: i32,
+        sigma: []const f32,
+        mode: enum { train, response },
+        err_mu: *std.Thread.Mutex,
+        first_err: *?FrozenError,
+    };
+
+    fn recordErr(job: *const ChanceJob, err: FrozenError) void {
+        job.err_mu.lock();
+        defer job.err_mu.unlock();
+        if (job.first_err.* == null) job.first_err.* = err;
+    }
+
+    fn runChanceSteal(worker_index: usize, job: *const ChanceJob) void {
+        const self = job.engine;
+        const w = self.workerAt(worker_index);
+        const child = &w.scratch[job.depth];
+        while (true) {
+            const index = job.next_index.fetchAdd(1, .monotonic);
+            if (index >= job.active_cards.len) break;
+            const dealt = job.active_cards[index];
+            var next_turn = job.turn;
+            var next_river = job.river;
+            if (job.deal_which == 1) next_turn = dealt else next_river = dealt;
+            self.ensureBoardSupport(w, next_turn, next_river);
+            var h0: usize = 0;
+            while (h0 < self.n0) : (h0 += 1) {
+                child.pi0[h0] = if (w.live0[h0]) job.pi0[h0] else 0;
+            }
+            var h1: usize = 0;
+            while (h1 < self.n1) : (h1 += 1) {
+                child.pi1[h1] = if (w.live1[h1]) job.pi1[h1] else 0;
+            }
+            const walk_err = switch (job.mode) {
+                .train => self.walk(w, job.child_node, next_turn, next_river, job.depth, job.updating, job.weight_iter, true),
+                .response => self.responseWalk(w, job.child_node, next_turn, next_river, job.depth, job.responding, job.sigma, true),
+            };
+            walk_err catch |err| {
+                recordErr(job, err);
+                return;
+            };
+            const ev0_at = @as(usize, @intCast(dealt)) * self.n0;
+            const ev1_at = @as(usize, @intCast(dealt)) * self.n1;
+            @memcpy(self.result0[ev0_at..][0..self.n0], child.ev0);
+            @memcpy(self.result1[ev1_at..][0..self.n1], child.ev1);
+        }
+    }
+
+    fn dispatchChanceWorkers(self: *FrozenCtx, job: *const ChanceJob) FrozenError!void {
+        const workers = self.threads;
+        var threads = try self.allocator.alloc(std.Thread, workers - 1);
+        defer self.allocator.free(threads);
+        var spawned: usize = 0;
+        errdefer {
+            // Best-effort: join anything already started.
+            var i: usize = 0;
+            while (i < spawned) : (i += 1) threads[i].join();
+        }
+        while (spawned < workers - 1) : (spawned += 1) {
+            const idx = spawned + 1;
+            threads[spawned] = try std.Thread.spawn(.{}, runChanceSteal, .{ idx, job });
+        }
+        runChanceSteal(0, job);
+        for (threads) |t| t.join();
+        if (job.first_err.*) |err| return err;
+    }
+
+    fn parallelChance(
+        self: *FrozenCtx,
+        w: *WorkerLocal,
+        node: compile.Node,
+        turn: i32,
+        river: i32,
+        depth: usize,
+        updating: i32,
+        weight_iter: f64,
+    ) FrozenError!void {
+        const here = &w.scratch[depth];
+        @memset(here.ev0, 0);
+        @memset(here.ev1, 0);
+        const denom = try self.chanceDenom(turn, river);
+        const probability = 1.0 / @as(f64, @floatFromInt(denom));
+        var active_cards: [52]i32 = undefined;
+        const active_count = try self.collectActiveCards(w, node, turn, river, here.pi0, here.pi1, &active_cards);
+        if (active_count == 0) return;
+        var next_index = std.atomic.Value(usize).init(0);
+        var err_mu: std.Thread.Mutex = .{};
+        var first_err: ?FrozenError = null;
+        const job = ChanceJob{
+            .engine = self,
+            .next_index = &next_index,
+            .active_cards = active_cards[0..active_count],
+            .child_node = node.child[0],
+            .turn = turn,
+            .river = river,
+            .depth = depth + 1,
+            .deal_which = node.deal_which,
+            .pi0 = here.pi0,
+            .pi1 = here.pi1,
+            .updating = updating,
+            .weight_iter = weight_iter,
+            .responding = -1,
+            .sigma = &.{},
+            .mode = .train,
+            .err_mu = &err_mu,
+            .first_err = &first_err,
+        };
+        try self.dispatchChanceWorkers(&job);
+        // Reduce in ascending card order (parity with C++).
+        var ordered: [52]i32 = undefined;
+        var n_ord: usize = 0;
+        var dealt_i: i32 = 0;
+        while (dealt_i < 52) : (dealt_i += 1) {
+            for (active_cards[0..active_count]) |a| {
+                if (a == dealt_i) {
+                    ordered[n_ord] = dealt_i;
+                    n_ord += 1;
+                    break;
+                }
+            }
+        }
+        self.reduceChildEv(here, ordered[0..n_ord], probability);
+    }
+
+    fn parallelResponseChance(
+        self: *FrozenCtx,
+        w: *WorkerLocal,
+        node: compile.Node,
+        turn: i32,
+        river: i32,
+        depth: usize,
+        responding: i32,
+        sigma: []const f32,
+    ) FrozenError!void {
+        const here = &w.scratch[depth];
+        @memset(here.ev0, 0);
+        @memset(here.ev1, 0);
+        const denom = try self.chanceDenom(turn, river);
+        const probability = 1.0 / @as(f64, @floatFromInt(denom));
+        var active_cards: [52]i32 = undefined;
+        const active_count = try self.collectActiveCards(w, node, turn, river, here.pi0, here.pi1, &active_cards);
+        if (active_count == 0) return;
+        var next_index = std.atomic.Value(usize).init(0);
+        var err_mu: std.Thread.Mutex = .{};
+        var first_err: ?FrozenError = null;
+        const job = ChanceJob{
+            .engine = self,
+            .next_index = &next_index,
+            .active_cards = active_cards[0..active_count],
+            .child_node = node.child[0],
+            .turn = turn,
+            .river = river,
+            .depth = depth + 1,
+            .deal_which = node.deal_which,
+            .pi0 = here.pi0,
+            .pi1 = here.pi1,
+            .updating = -1,
+            .weight_iter = 0,
+            .responding = responding,
+            .sigma = sigma,
+            .mode = .response,
+            .err_mu = &err_mu,
+            .first_err = &first_err,
+        };
+        try self.dispatchChanceWorkers(&job);
+        var ordered: [52]i32 = undefined;
+        var n_ord: usize = 0;
+        var dealt_i: i32 = 0;
+        while (dealt_i < 52) : (dealt_i += 1) {
+            for (active_cards[0..active_count]) |a| {
+                if (a == dealt_i) {
+                    ordered[n_ord] = dealt_i;
+                    n_ord += 1;
+                    break;
+                }
+            }
+        }
+        self.reduceChildEv(here, ordered[0..n_ord], probability);
     }
 };
+
 /// CFR+ frozen schedule matching C++ train_frozen_cfr_plus_iterations.
 pub fn trainFrozenCfrPlus(
     allocator: std.mem.Allocator,
@@ -907,24 +1268,35 @@ pub fn trainFrozenCfrPlus(
     state: *training_state.TrainingState,
     iterations: i32,
 ) FrozenError!training_state.PublishedPolicy {
+    return trainFrozenCfrPlusThreaded(allocator, game, state, iterations, 1);
+}
+
+pub fn trainFrozenCfrPlusThreaded(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    state: *training_state.TrainingState,
+    iterations: i32,
+    threads: u32,
+) FrozenError!training_state.PublishedPolicy {
     if (iterations < 1) return error.InvalidFrozen;
-    var ctx = try FrozenCtx.init(allocator, game, state);
+    var ctx = try FrozenCtx.initThreaded(allocator, game, state, threads);
     defer ctx.deinit();
+    const w = &ctx.workspace;
     var published = training_state.PublishedPolicy{ .allocator = allocator };
     var step: i32 = 0;
     while (step < iterations) : (step += 1) {
         state.trained += 1;
         const weight_iter: f64 = @floatFromInt(state.trained);
         training_state.freezeSigma(game, state);
-        @memset(ctx.scratch[0].pi0, 1.0);
-        @memset(ctx.scratch[0].pi1, 1.0);
-        ctx.support_turn = -2;
-        try ctx.walk(0, -1, -1, 0, 0, weight_iter);
+        @memset(w.scratch[0].pi0, 1.0);
+        @memset(w.scratch[0].pi1, 1.0);
+        w.resetSupport();
+        try ctx.walk(w, 0, -1, -1, 0, 0, weight_iter, false);
         training_state.floorAndFreeze(game, state, 0);
-        @memset(ctx.scratch[0].pi0, 1.0);
-        @memset(ctx.scratch[0].pi1, 1.0);
-        ctx.support_turn = -2;
-        try ctx.walk(0, -1, -1, 0, 1, weight_iter);
+        @memset(w.scratch[0].pi0, 1.0);
+        @memset(w.scratch[0].pi1, 1.0);
+        w.resetSupport();
+        try ctx.walk(w, 0, -1, -1, 0, 1, weight_iter, false);
         training_state.floorPlayer(game, state, 1);
         if (published.average.len != 0) published.deinit();
         published = try training_state.publishAverage(allocator, game, state);
@@ -933,11 +1305,20 @@ pub fn trainFrozenCfrPlus(
 }
 
 /// Frozen evaluate_profile: on-path + unilateral BR → NashConv / Accuracy.
-/// Matches C++ `StreetBatchSolver::Engine::evaluate_profile` (single-thread).
+/// Matches C++ `StreetBatchSolver::Engine::evaluate_profile`.
 pub fn evaluatePublishedFrozen(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
     average: []const f32,
+) FrozenError!FrozenEval {
+    return evaluatePublishedFrozenThreaded(allocator, game, average, 1);
+}
+
+pub fn evaluatePublishedFrozenThreaded(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    average: []const f32,
+    threads: u32,
 ) FrozenError!FrozenEval {
     var owned: ?[]f32 = null;
     defer if (owned) |buf| allocator.free(buf);
@@ -951,21 +1332,22 @@ pub fn evaluatePublishedFrozen(
         return error.InvalidFrozen;
     }
 
-    var ctx = try FrozenCtx.initEval(allocator, game);
+    var ctx = try FrozenCtx.initEvalThreaded(allocator, game, threads);
     defer ctx.deinit();
+    const w = &ctx.workspace;
 
-    ctx.prepareResponseRoot();
-    try ctx.responseWalk(0, -1, -1, 0, -1, sigma);
-    const util0 = FrozenCtx.sumScratch(ctx.scratch[0].ev0);
-    const util1 = FrozenCtx.sumScratch(ctx.scratch[0].ev1);
+    ctx.prepareResponseRoot(w);
+    try ctx.responseWalk(w, 0, -1, -1, 0, -1, sigma, false);
+    const util0 = FrozenCtx.sumScratch(w.scratch[0].ev0);
+    const util1 = FrozenCtx.sumScratch(w.scratch[0].ev1);
 
-    ctx.prepareResponseRoot();
-    try ctx.responseWalk(0, -1, -1, 0, 0, sigma);
-    const br_util0 = FrozenCtx.sumScratch(ctx.scratch[0].ev0);
+    ctx.prepareResponseRoot(w);
+    try ctx.responseWalk(w, 0, -1, -1, 0, 0, sigma, false);
+    const br_util0 = FrozenCtx.sumScratch(w.scratch[0].ev0);
 
-    ctx.prepareResponseRoot();
-    try ctx.responseWalk(0, -1, -1, 0, 1, sigma);
-    const br_util1 = FrozenCtx.sumScratch(ctx.scratch[0].ev1);
+    ctx.prepareResponseRoot(w);
+    try ctx.responseWalk(w, 0, -1, -1, 0, 1, sigma, false);
+    const br_util1 = FrozenCtx.sumScratch(w.scratch[0].ev1);
 
     const nash_gap = (br_util0 - util0) + (br_util1 - util1);
     return .{
@@ -1012,4 +1394,57 @@ test "frozen river smoke trains" {
     const eval = try evaluatePublishedFrozen(std.testing.allocator, game, published.average);
     try std.testing.expect(eval.nash_gap >= 0);
     try std.testing.expectApproxEqAbs(eval.accuracy, 0.5 * eval.nash_gap, 1e-12);
+
+    // 4-thread path should match 1-thread even when chance steal is a no-op (river).
+    var state4 = try training_state.TrainingState.init(std.testing.allocator, game);
+    defer state4.deinit();
+    var published4 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state4, 5, 4);
+    defer published4.deinit();
+    try std.testing.expectEqual(published.trained, published4.trained);
+    const eval4 = try evaluatePublishedFrozenThreaded(std.testing.allocator, game, published4.average, 4);
+    try std.testing.expectApproxEqAbs(eval.u0, eval4.u0, 1e-9);
+    try std.testing.expectApproxEqAbs(eval.nash_gap, eval4.nash_gap, 1e-9);
+}
+
+test "frozen flop multithread matches serial" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range QcQd:1
+        \\ip-range JcJd:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var spec = try @import("../game/street_config.zig").parseStreetConfig(std.testing.allocator, text);
+    defer spec.deinit();
+    var game = try compile.compile(std.testing.allocator, spec);
+    defer game.deinit();
+    var state1 = try training_state.TrainingState.init(std.testing.allocator, game);
+    defer state1.deinit();
+    var pub1 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state1, 2, 1);
+    defer pub1.deinit();
+    var state4 = try training_state.TrainingState.init(std.testing.allocator, game);
+    defer state4.deinit();
+    var pub4 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state4, 2, 4);
+    defer pub4.deinit();
+    try std.testing.expectEqual(pub1.average.len, pub4.average.len);
+    // Strict float parity after ordered EV reduce (C++ parallel_chance).
+    for (pub1.average, pub4.average) |a, b| {
+        try std.testing.expectApproxEqAbs(@as(f64, a), @as(f64, b), 1e-5);
+    }
+    const e1 = try evaluatePublishedFrozenThreaded(std.testing.allocator, game, pub1.average, 1);
+    const e4 = try evaluatePublishedFrozenThreaded(std.testing.allocator, game, pub4.average, 4);
+    try std.testing.expectApproxEqAbs(e1.u0, e4.u0, 1e-9);
+    try std.testing.expectApproxEqAbs(e1.nash_gap, e4.nash_gap, 1e-9);
 }

@@ -1,6 +1,6 @@
 //! Phase 7 interim gate bench (Linux ReleaseFast approximation).
 //! Windows Release remains authoritative for cutover (D10/D12).
-//! Usage: gate-bench <street-config.txt> [--iterations N] [--label NAME]
+//! Usage: gate-bench <street-config.txt> [--iterations N] [--threads N] [--label NAME]
 //!          [--skip-eval | --eval-root]
 //!
 //! Always wrap flop-scale runs with `scripts/zig/run-gate-bounded.sh` (or GNU
@@ -22,11 +22,12 @@ pub fn main() !void {
     _ = args.next();
 
     const path = args.next() orelse {
-        std.debug.print("usage: gate-bench <street-config.txt> [--iterations N] [--label NAME] [--skip-eval|--eval-root]\n", .{});
+        std.debug.print("usage: gate-bench <street-config.txt> [--iterations N] [--threads N] [--label NAME] [--skip-eval|--eval-root]\n", .{});
         std.process.exit(2);
     };
 
     var iterations: i32 = 2;
+    var threads_override: ?u32 = null;
     var label: []const u8 = "unnamed";
     var skip_eval = false;
     var eval_root = false;
@@ -37,6 +38,12 @@ pub fn main() !void {
                 std.process.exit(2);
             };
             iterations = try std.fmt.parseInt(i32, v, 10);
+        } else if (std.mem.eql(u8, arg, "--threads")) {
+            const v = args.next() orelse {
+                std.debug.print("--threads needs a value\n", .{});
+                std.process.exit(2);
+            };
+            threads_override = try std.fmt.parseInt(u32, v, 10);
         } else if (std.mem.eql(u8, arg, "--label")) {
             label = args.next() orelse {
                 std.debug.print("--label needs a value\n", .{});
@@ -76,6 +83,13 @@ pub fn main() !void {
 
     const t_begin0 = std.time.nanoTimestamp();
     try sess.begin(text);
+    if (threads_override) |n| {
+        if (n < 1 or n > 64) {
+            std.debug.print("--threads must be 1..64\n", .{});
+            std.process.exit(2);
+        }
+        sess.setThreads(n);
+    }
     const begin_ns = std.time.nanoTimestamp() - t_begin0;
     const game = sess.game orelse return error.InvalidSession;
     try stdout.print("phase: construction\n", .{});
@@ -83,6 +97,7 @@ pub fn main() !void {
     try stdout.print("deals: {d}\n", .{game.deals.len});
     try stdout.print("infosets: {d}\n", .{game.slots.len});
     try stdout.print("public_decisions: {d}\n", .{game.nodes.len});
+    try stdout.print("threads: {d}\n", .{sess.threads});
 
     const t_train0 = std.time.nanoTimestamp();
     try sess.train(iterations);
@@ -117,10 +132,17 @@ pub fn main() !void {
     }
 
     const t_eval0 = std.time.nanoTimestamp();
-    const eval = try poker_engine.analysis.best_response.evaluatePublished(
+    const frozen_eval = try poker_engine.solve.frozen_walk.evaluatePublishedFrozenThreaded(
         allocator,
         game,
         published.average,
+        sess.threads,
+    );
+    const eval = poker_engine.analysis.evaluation.makeEvaluation(
+        frozen_eval.u0,
+        frozen_eval.u1,
+        frozen_eval.br0,
+        frozen_eval.br1,
     );
     const eval_ns = std.time.nanoTimestamp() - t_eval0;
     // StreetSpec / CompiledGame pot is tenths-of-a-chip (matches C++ Chip).
