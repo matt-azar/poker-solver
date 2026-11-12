@@ -28,6 +28,13 @@ const EXPLORER_EXTERNAL_BIN: &str = "binaries/holdem-explorer";
 /// Runtime sidecar basename beside the app executable (and under target/debug).
 const EXPLORER_SIDECAR_BASENAME: &str = "holdem-explorer";
 
+/// Zig typed-IPC sidecar (Phase 6 tech-preview). Default Study still uses
+/// `holdem-explorer` over HTTP; cutover will spawn this with inherited pipes.
+#[allow(dead_code)]
+const SOLVER_ENGINE_EXTERNAL_BIN: &str = "binaries/solver-engine";
+#[allow(dead_code)]
+const SOLVER_ENGINE_SIDECAR_BASENAME: &str = "solver-engine";
+
 /// How long to wait for the owned sidecar's `/api/ready` after spawn.
 const ENGINE_READY_TIMEOUT: Duration = Duration::from_secs(12);
 const ENGINE_READY_POLL: Duration = Duration::from_millis(100);

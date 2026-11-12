@@ -40,7 +40,10 @@
       "icons/icon.png",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/holdem-explorer"],
+    "externalBin": [
+      "binaries/holdem-explorer",
+      "binaries/solver-engine"
+    ],
     "resources": {
       "../../configs/templates": "configs/templates",
       "../../configs/ranges": "configs/ranges"

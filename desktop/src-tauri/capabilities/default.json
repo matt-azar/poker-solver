@@ -18,6 +18,16 @@
           "name": "binaries/holdem-explorer",
           "sidecar": true,
           "args": true
+        },
+        {
+          "name": "solver-engine",
+          "sidecar": true,
+          "args": true
+        },
+        {
+          "name": "binaries/solver-engine",
+          "sidecar": true,
+          "args": true
         }
       ]
     }
