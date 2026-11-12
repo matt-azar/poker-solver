@@ -1,0 +1,18 @@
+street-config 1
+board Ah Kh Qh Jh 2c
+pot 100
+stack 100
+oop-range AsQs:1,2d2h:1
+ip-range AsQs:1,2d2h:1
+oop-river-bets 1
+ip-river-bets 1
+first-to-act 0
+max-raises 0
+allow-all-in 1
+allow-three-bet 1
+all-in-threshold 0
+pot-cap 0
+rake-rate 0
+rake-cap 0
+memory-mib 256
+threads 1
