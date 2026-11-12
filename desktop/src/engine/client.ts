@@ -13,7 +13,14 @@ import { decodeReadyPayload, type ReadyPayload } from "./contracts/ready";
 import { decodeStatusPayload } from "./contracts/status";
 import { normalizeRunoutsPayload, type RunoutsModel } from "./runouts";
 import { formatSolveJobStreetConfig } from "./streetConfigText";
-import { ipcBeginConfig, ipcSolve, ipcStatus, ipcValues, isIpcTransport } from "./transport";
+import {
+  ipcBeginConfig,
+  ipcEquity,
+  ipcSolve,
+  ipcStatus,
+  ipcValues,
+  isIpcTransport,
+} from "./transport";
 
 function defaultEngineBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_ENGINE_URL;
@@ -304,6 +311,22 @@ export class EngineClient {
   }
 
   async getEquity(solutionId: string, nodeId?: string, signal?: AbortSignal): Promise<unknown> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      // Host equity resolves Study node_id for identity; math is still
+      // starting-range/board check-down (strategy-reach residual).
+      const data = await ipcEquity(
+        nodeId ? { nodeId } : { nodeIndex: 0, nodeId: "p0.t-1.r-1" },
+      );
+      return {
+        ...(data as object),
+        solution_id: solutionId,
+        ...(nodeId ? { node_id: nodeId } : {}),
+        pending: false,
+      };
+    }
     const path = nodeId
       ? `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/equity`
       : `/api/solutions/${solutionId}/equity`;
@@ -319,6 +342,23 @@ export class EngineClient {
     metrics: Array<"values" | "equity" | "runouts"> = ["values", "equity"],
     signal?: AbortSignal,
   ): Promise<unknown> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      // Thin sync warm: Study still polls getValues/getEquity. No 202 job handle yet.
+      // Skip runouts on IPC until a host op exists.
+      const wanted = metrics.filter((m) => m === "values" || m === "equity");
+      void nodeId;
+      return {
+        pending: false,
+        ok: true,
+        solution_id: solutionId,
+        node_id: nodeId,
+        metrics: wanted,
+        transport: "ipc",
+      };
+    }
     const { response, data } = await this.request(
       "POST",
       `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/analysis`,

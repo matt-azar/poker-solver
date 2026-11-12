@@ -4,6 +4,7 @@ const poker_app = @import("poker_app");
 const poker_engine = @import("poker_engine");
 const ipc = @import("ipc.zig");
 const workers = @import("workers.zig");
+const equity_json = @import("equity_json.zig");
 
 const TrainTask = struct {
     state: *HostState,
@@ -451,6 +452,67 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, "{\"ok\":true}");
     }
 
+    if (std.mem.eql(u8, req.op, "equity")) {
+        state.budget.prioritizeAnalysis(1);
+        defer state.budget.returnToTraining();
+        const wait_ns: u64 = 120 * std.time.ns_per_s;
+        var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+        defer lease.deinit();
+        // Accept Study node_id / node_index for identity; math is still starting-range
+        // check-down on the compiled board (strategy-reach residual).
+        const located = resolveValuesNode(lease.game, req.body_json) catch |err| {
+            const code: []const u8 = switch (err) {
+                error.UnknownNode => "unknown_node",
+                error.OutOfMemory => "oom",
+            };
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        const node_id_text = poker_engine.analysis.node_id.formatNodeId(
+            state.allocator,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "equity_pack_failed", @errorName(err));
+        };
+        defer state.allocator.free(node_id_text);
+        const t0 = std.time.nanoTimestamp();
+        var page = poker_engine.analysis.equity.checkdownEquity(
+            state.allocator,
+            lease.game,
+            poker_engine.analysis.equity.study_explorer_max_pair_runouts,
+        ) catch |err| {
+            const code: []const u8 = switch (err) {
+                error.WorkLimit => "work_limit",
+                error.InvalidEquity => "invalid_equity",
+                error.InvalidWeight => "invalid_weight",
+                error.OutOfMemory => "oom",
+            };
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        defer page.deinit();
+        const elapsed_ns = std.time.nanoTimestamp() - t0;
+        const elapsed_ms: i64 = @intCast(@divTrunc(elapsed_ns, 1_000_000));
+        const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
+        const body = equity_json.packStudyEquityBody(state.allocator, .{
+            .solution_id = lease.solution_id,
+            .node_id = node_id_text,
+            .node_index = located.node_index,
+            .policy_revision = state.session.policyRevision(),
+            .status_generation = state.session.solution_id + state.session.policyRevision(),
+            .query_seconds = query_seconds,
+            .elapsed_ms = elapsed_ms,
+            .live_under_train = state.train_running.load(.acquire),
+            .page = &page,
+        }) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "equity_pack_failed", @errorName(err));
+        };
+        defer state.allocator.free(body);
+        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+    }
+
     return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_op", req.op);
 }
 
@@ -637,4 +699,55 @@ test "values accepts Study node_id and returns hand×action tables" {
     defer bad_reply.deinit();
     try std.testing.expect(!bad_reply.ok);
     try std.testing.expect(std.mem.eql(u8, bad_reply.error_code orelse "", "unknown_node"));
+}
+
+test "equity dispatch river smoke Study shape" {
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "equity-smoke");
+    defer state.deinit();
+    try state.session.begin(text);
+    try state.session.train(2);
+
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "r-eq"),
+        .op = try std.testing.allocator.dupe(u8, "equity"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_index\":0,\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"kind\":\"equity\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"model\":\"check-down\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"defined\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"oop_equity\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"ip_equity\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"equity_distribution\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"ip_equity_distribution\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"oop_hands\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"ip_hands\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"engine\":\"checkdown_equity\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "AsQs") != null);
 }
