@@ -838,8 +838,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
         defer lease.deinit();
-        // Starting-range check-down only — reject non-root so Study never shows
-        // root equity under a selected node (audit P0-2 gate).
+        // Reach-weighted node check-down (audit P0-2 / ZR-95): board through the
+        // selected node + both players' strategy-conditioned reach.
         const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
             const code: []const u8 = switch (err) {
                 error.UnknownNode => "unknown_node",
@@ -847,16 +847,6 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             };
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };
-        if (located.node_index != 0 or located.turn != -1 or located.river != -1) {
-            return ipc.makeErrorReply(
-                state.allocator,
-                req.request_id,
-                req.job_id,
-                req.op,
-                "node_equity_unsupported",
-                "node-conditioned equity is not available yet; equity is root/starting-board only",
-            );
-        }
         const node_id_text = poker_engine.analysis.node_id.formatNodeId(
             state.allocator,
             located.node_index,
@@ -867,9 +857,13 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         };
         defer state.allocator.free(node_id_text);
         const t0 = std.time.nanoTimestamp();
-        var page = poker_engine.analysis.equity.checkdownEquity(
+        var page = poker_engine.analysis.equity.checkdownEquityAtNode(
             state.allocator,
             lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
             poker_engine.analysis.equity.study_explorer_max_pair_runouts,
         ) catch |err| {
             const code: []const u8 = switch (err) {
@@ -1535,7 +1529,7 @@ test "begin_config rejects 1 MiB flop resource fixture" {
     try std.testing.expect(std.mem.eql(u8, reply.error_code orelse "", "budget_exceeded"));
 }
 
-test "equity rejects non-root node until reach-aware path exists" {
+test "equity at non-root decision uses reach-weighted node board" {
     const config =
         \\street-config 1
         \\board Ah Kh Qh Jh 2c
@@ -1557,7 +1551,7 @@ test "equity rejects non-root node until reach-aware path exists" {
         \\threads 1
         \\
     ;
-    var state = try HostState.init(std.testing.allocator, "equity-gate");
+    var state = try HostState.init(std.testing.allocator, "equity-node");
     defer state.deinit();
     try state.session.begin(config);
     try state.session.train(1);
@@ -1565,15 +1559,17 @@ test "equity rejects non-root node until reach-aware path exists" {
     var req: ipc.Envelope = .{
         .allocator = std.testing.allocator,
         .kind = .request,
-        .request_id = try std.testing.allocator.dupe(u8, "eq-bad"),
+        .request_id = try std.testing.allocator.dupe(u8, "eq-node"),
         .op = try std.testing.allocator.dupe(u8, "equity"),
         .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p1.t-1.r-1\"}"),
     };
     defer req.deinit();
     var reply = try handle(&state, req);
     defer reply.deinit();
-    try std.testing.expect(!reply.ok);
-    try std.testing.expect(std.mem.eql(u8, reply.error_code orelse "", "node_equity_unsupported"));
+    try std.testing.expect(reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"kind\":\"equity\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"node_id\":\"p1.t-1.r-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"defined\":true") != null);
 }
 
 test "values accepts Study node_id and returns hand×action tables" {

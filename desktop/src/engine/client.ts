@@ -81,11 +81,6 @@ async function readBody(response: Response): Promise<unknown> {
   }
 }
 
-function isRootStudyNodeId(nodeId: string | undefined): boolean {
-  if (!nodeId) return true;
-  return /^p0\.t-1\.r-1$/i.test(nodeId.trim());
-}
-
 export class EngineClient {
   private readonly constructorBaseUrl: string | undefined;
   private runtimeBaseUrl: string | undefined;
@@ -459,14 +454,6 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      // Gate incorrect node equity: only root/starting-board until reach-aware path.
-      if (nodeId && !isRootStudyNodeId(nodeId)) {
-        throw new EngineError(
-          "node-conditioned equity is not available yet; equity is root/starting-board only",
-          501,
-          { code: "node_equity_unsupported", node_id: nodeId },
-        );
-      }
       const data = await ipcEquity(
         nodeId ? { nodeId } : { nodeIndex: 0, nodeId: "p0.t-1.r-1" },
       );
@@ -475,7 +462,7 @@ export class EngineClient {
         solution_id: solutionId,
         ...(nodeId ? { node_id: nodeId } : { node_id: "p0.t-1.r-1" }),
         pending: false,
-        equity_scope: "starting_board",
+        equity_scope: "node_reach",
       };
     }
     const path = nodeId
@@ -498,10 +485,9 @@ export class EngineClient {
         throw new EngineError("aborted", 0, null);
       }
       // Thin sync warm: Study still polls getValues/getEquity. No 202 job handle yet.
-      // Skip runouts on IPC until a host op exists. Skip non-root equity (gate).
+      // Skip runouts on IPC until a host op exists. Equity is reach-weighted at any node.
       const wanted = metrics.filter((m) => {
-        if (m === "values") return true;
-        if (m === "equity") return isRootStudyNodeId(nodeId);
+        if (m === "values" || m === "equity") return true;
         return false;
       });
       return {

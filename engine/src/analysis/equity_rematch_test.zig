@@ -213,3 +213,213 @@ test "checkdownEquity on compiled river matches showdownEquity" {
 
     _ = try comboOf("AcAd");
 }
+
+test "node equity pins turn root 18.1818 and Ac river 100 (audit P0-2)" {
+    const compile = @import("../game/compile.zig");
+    const street_config = @import("../game/street_config.zig");
+    const training_state = @import("../solve/training_state.zig");
+    const node_id = @import("node_id.zig");
+
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh
+        \\pot 100
+        \\stack 200
+        \\oop-range AsQs:1
+        \\ip-range 2d2h:1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\oop-turn-bets 0.5
+        \\ip-turn-bets 0.5
+        \\oop-river-bets 0.5
+        \\ip-river-bets 0.5
+        \\first-to-act 0
+        \\max-raises 1
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var cfg = try street_config.parseStreetConfig(std.testing.allocator, text);
+    defer cfg.deinit();
+    var game = try compile.compile(std.testing.allocator, cfg);
+    defer game.deinit();
+
+    var root = try equity.checkdownEquity(std.testing.allocator, game, equity.study_explorer_max_pair_runouts);
+    defer root.deinit();
+    try std.testing.expect(root.joint_defined);
+    try std.testing.expectApproxEqAbs(@as(f64, 2.0 / 11.0), root.player0.equity, 1e-9);
+
+    const empty_pub = training_state.PublishedPolicy{ .allocator = std.testing.allocator };
+    var at_root = try equity.checkdownEquityAtNode(
+        std.testing.allocator,
+        game,
+        empty_pub,
+        0,
+        -1,
+        -1,
+        equity.study_explorer_max_pair_runouts,
+    );
+    defer at_root.deinit();
+    try std.testing.expectApproxEqAbs(root.player0.equity, at_root.player0.equity, 1e-12);
+
+    // Fresh river solve on Ac: OOP aces full → 100%.
+    const river_text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh Ac
+        \\pot 100
+        \\stack 200
+        \\oop-range AsQs:1
+        \\ip-range 2d2h:1
+        \\oop-river-bets 0.5
+        \\ip-river-bets 0.5
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var river_cfg = try street_config.parseStreetConfig(std.testing.allocator, river_text);
+    defer river_cfg.deinit();
+    var river_game = try compile.compile(std.testing.allocator, river_cfg);
+    defer river_game.deinit();
+    var river_root = try equity.checkdownEquity(std.testing.allocator, river_game, equity.default_max_pair_runouts);
+    defer river_root.deinit();
+    try std.testing.expect(river_root.joint_defined);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.0), river_root.player0.equity, 1e-12);
+
+    // Same turn tree: check→check→Ac river decision must report 100%, not root 18.18%.
+    const root_node = game.nodes[0];
+    try std.testing.expect(root_node.kind == .decision);
+    var check0: ?u32 = null;
+    var a: usize = 0;
+    while (a < root_node.n_actions) : (a += 1) {
+        if (std.mem.eql(u8, root_node.action_labels[a], "Check")) {
+            check0 = root_node.child[a];
+            break;
+        }
+    }
+    const after_oop = check0 orelse return error.TestUnexpectedResult;
+    const ip_node = game.nodes[after_oop];
+    try std.testing.expect(ip_node.kind == .decision);
+    var check1: ?u32 = null;
+    a = 0;
+    while (a < ip_node.n_actions) : (a += 1) {
+        if (std.mem.eql(u8, ip_node.action_labels[a], "Check")) {
+            check1 = ip_node.child[a];
+            break;
+        }
+    }
+    const chance_idx = check1 orelse return error.TestUnexpectedResult;
+    try std.testing.expect(game.nodes[chance_idx].kind == .chance);
+
+    const ac = try card.parseCard("Ac");
+    var buf: [64]u8 = undefined;
+    const river_id = try std.fmt.bufPrint(&buf, "p{d}.t-1.r{d}", .{ game.nodes[chance_idx].child[0], ac });
+    const located = try node_id.locateNode(game, river_id);
+
+    var at_ac = try equity.checkdownEquityAtNode(
+        std.testing.allocator,
+        game,
+        empty_pub,
+        located.node_index,
+        located.turn,
+        located.river,
+        equity.study_explorer_max_pair_runouts,
+    );
+    defer at_ac.deinit();
+    try std.testing.expect(at_ac.joint_defined);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.0), at_ac.player0.equity, 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), at_ac.player1.equity, 1e-9);
+    try std.testing.expect(at_ac.player0.combos.len >= 1);
+    try std.testing.expect(at_ac.player0.combos[0].input_weight > 0);
+}
+
+test "same board different lines reach-weight distinct ranges" {
+    // Two OOP combos; IP one combo. After OOP Bet, only the betting mass remains for OOP.
+    const compile = @import("../game/compile.zig");
+    const street_config = @import("../game/street_config.zig");
+    const training_state = @import("../solve/training_state.zig");
+    const frozen_walk = @import("../solve/frozen_walk.zig");
+
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh Ac
+        \\pot 100
+        \\stack 200
+        \\oop-range AsQs:1,2c2d:1
+        \\ip-range 3c3d:1
+        \\oop-river-bets 0.5
+        \\ip-river-bets 0.5
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var cfg = try street_config.parseStreetConfig(std.testing.allocator, text);
+    defer cfg.deinit();
+    var game = try compile.compile(std.testing.allocator, cfg);
+    defer game.deinit();
+
+    var state = try training_state.TrainingState.init(std.testing.allocator, game);
+    defer state.deinit();
+    var published = try frozen_walk.trainFrozenCfrPlus(std.testing.allocator, game, &state, 20, null);
+    defer published.deinit();
+
+    const root_node = game.nodes[0];
+    const bet = blk: {
+        var i: usize = 0;
+        while (i < root_node.n_actions) : (i += 1) {
+            if (std.mem.startsWith(u8, root_node.action_labels[i], "Bet")) break :blk i;
+        }
+        return error.TestUnexpectedResult;
+    };
+    const facing = root_node.child[bet];
+    try std.testing.expect(game.nodes[facing].kind == .decision);
+    try std.testing.expect(game.nodes[facing].player == 1);
+
+    const empty = training_state.PublishedPolicy{ .allocator = std.testing.allocator };
+    var at_root = try equity.checkdownEquityAtNode(
+        std.testing.allocator,
+        game,
+        published,
+        0,
+        -1,
+        -1,
+        equity.default_max_pair_runouts,
+    );
+    defer at_root.deinit();
+    var at_bet = try equity.checkdownEquityAtNode(
+        std.testing.allocator,
+        game,
+        published,
+        facing,
+        -1,
+        -1,
+        equity.default_max_pair_runouts,
+    );
+    defer at_bet.deinit();
+    try std.testing.expect(at_root.joint_defined);
+    try std.testing.expect(at_bet.joint_defined);
+    // Same five-card board, different reached OOP masses → aggregate equity must move.
+    try std.testing.expect(@abs(at_root.player0.equity - at_bet.player0.equity) > 1e-6);
+    _ = empty;
+}
