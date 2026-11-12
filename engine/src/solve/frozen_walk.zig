@@ -197,7 +197,9 @@ pub const FrozenCtx = struct {
     /// Opponent hand with the same combo, or -1 (C++ twin_hand).
     twin0: []i32,
     twin1: []i32,
-    ranks: std.AutoHashMap(i32, RunoutRanks),
+    /// Heap-stable tables: HashMap stores pointers so rehash under MT cannot
+    /// invalidate `*const RunoutRanks` still in use by other workers (UAF).
+    ranks: std.AutoHashMap(i32, *RunoutRanks),
     ranks_mu: std.Thread.Mutex = .{},
     threads: u32 = 1,
     workspace: WorkerLocal = undefined,
@@ -254,7 +256,7 @@ pub const FrozenCtx = struct {
             .support1 = try allocator.alloc(HandSupport, n1),
             .twin0 = try allocator.alloc(i32, n0),
             .twin1 = try allocator.alloc(i32, n1),
-            .ranks = std.AutoHashMap(i32, RunoutRanks).init(allocator),
+            .ranks = std.AutoHashMap(i32, *RunoutRanks).init(allocator),
             .threads = threads,
         };
         errdefer ctx.deinit();
@@ -295,7 +297,8 @@ pub const FrozenCtx = struct {
         }
         var it = self.ranks.iterator();
         while (it.next()) |entry| {
-            entry.value_ptr.deinit(self.allocator);
+            entry.value_ptr.*.deinit(self.allocator);
+            self.allocator.destroy(entry.value_ptr.*);
         }
         self.ranks.deinit();
         self.allocator.free(self.support0);
@@ -640,10 +643,11 @@ pub const FrozenCtx = struct {
 
     fn ensureRanks(self: *FrozenCtx, turn: i32, river: i32) FrozenError!*const RunoutRanks {
         const key = runoutKey(turn, river);
-        self.ranks_mu.lock();
-        defer self.ranks_mu.unlock();
-        if (self.ranks.getPtr(key)) |existing| {
-            if (existing.order[0].len != 0) return existing;
+        // Fast path: published tables are immutable; pointer stays valid across rehash.
+        {
+            self.ranks_mu.lock();
+            defer self.ranks_mu.unlock();
+            if (self.ranks.get(key)) |existing| return existing;
         }
 
         var board_buf: [5]card.Card = undefined;
@@ -663,8 +667,14 @@ pub const FrozenCtx = struct {
         if (board_len != 5) return error.InvalidFrozen;
         const board = board_buf[0..board_len];
 
-        var table = RunoutRanks{};
-        errdefer table.deinit(self.allocator);
+        // Build off-lock so other workers can keep reading published tables.
+        var owned = true;
+        const table = try self.allocator.create(RunoutRanks);
+        errdefer if (owned) {
+            table.deinit(self.allocator);
+            self.allocator.destroy(table);
+        };
+        table.* = .{};
         table.rank[0] = try self.allocator.alloc(u32, self.n0);
         table.rank[1] = try self.allocator.alloc(u32, self.n1);
         @memset(table.rank[0], 0);
@@ -688,14 +698,20 @@ pub const FrozenCtx = struct {
             const value = hand_eval.evaluate(cards[0..7]) catch continue;
             table.rank[1][h1] = packRank(value);
         }
-        try self.fillShowdown(&table);
+        try self.fillShowdown(table);
 
-        const gop = try self.ranks.getOrPut(key);
-        if (gop.found_existing) {
-            gop.value_ptr.deinit(self.allocator);
+        self.ranks_mu.lock();
+        defer self.ranks_mu.unlock();
+        // Another worker may have won the insert while we filled.
+        if (self.ranks.get(key)) |existing| {
+            table.deinit(self.allocator);
+            self.allocator.destroy(table);
+            owned = false;
+            return existing;
         }
-        gop.value_ptr.* = table;
-        return gop.value_ptr;
+        try self.ranks.put(key, table);
+        owned = false;
+        return table;
     }
 
     fn differenceIsStable(total: f64, removed: f64, difference: f64) bool {
@@ -1863,4 +1879,49 @@ test "frozen flop multithread matches serial" {
     const e4 = try evaluatePublishedFrozenThreaded(std.testing.allocator, game, pub4.average, 4);
     try std.testing.expectApproxEqAbs(e1.u0, e4.u0, 1e-9);
     try std.testing.expectApproxEqAbs(e1.nash_gap, e4.nash_gap, 1e-9);
+}
+
+// Acc-stop / gate-bench calls train(1)+eval repeatedly; each call builds a fresh
+// FrozenCtx and fills the runout rank cache under MT. By-value HashMap storage
+// previously UAF'd when rehash invalidated `*const RunoutRanks` mid-showdown.
+test "frozen flop multithread survives many train-eval cycles" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range QcQd:1,JcJd:1
+        \\ip-range TcTd:1,9c9d:1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\first-to-act 0
+        \\max-raises 1
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var spec = try @import("../game/street_config.zig").parseStreetConfig(std.testing.allocator, text);
+    defer spec.deinit();
+    var game = try compile.compile(std.testing.allocator, spec);
+    defer game.deinit();
+    var state = try training_state.TrainingState.init(std.testing.allocator, game);
+    defer state.deinit();
+    var last_acc: f64 = std.math.inf(f64);
+    var cycle: i32 = 0;
+    while (cycle < 40) : (cycle += 1) {
+        var published = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state, 1, 4, null, null);
+        defer published.deinit();
+        const eval = try evaluatePublishedFrozenThreaded(std.testing.allocator, game, published.average, 4);
+        try std.testing.expect(eval.nash_gap >= 0);
+        try std.testing.expectApproxEqAbs(eval.accuracy, 0.5 * eval.nash_gap, 1e-12);
+        last_acc = eval.accuracy;
+    }
+    try std.testing.expect(state.trained == 40);
+    try std.testing.expect(std.math.isFinite(last_acc));
 }
