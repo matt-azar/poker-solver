@@ -26,11 +26,18 @@ describe("solver-engine ipc protocol", () => {
     expect(decoded?.envelope.op).toBe("values");
   });
 
-  it("encodes Study node_id on values requests", () => {
-    const frame = encodeIpcFrame(
+  it("encodes Study node_id on values and node requests", () => {
+    const valuesFrame = encodeIpcFrame(
       makeRequest("r3", "values", { node_id: "p0.t-1.r-1" }),
     );
-    const decoded = tryDecodeIpcFrame(frame);
-    expect(decoded?.envelope.body).toEqual({ node_id: "p0.t-1.r-1" });
+    expect(tryDecodeIpcFrame(valuesFrame)?.envelope.body).toEqual({
+      node_id: "p0.t-1.r-1",
+    });
+    const nodeFrame = encodeIpcFrame(
+      makeRequest("r4", "node", { node_id: "p2.t-1.r-1" }),
+    );
+    const nodeDecoded = tryDecodeIpcFrame(nodeFrame);
+    expect(nodeDecoded?.envelope.op).toBe("node");
+    expect(nodeDecoded?.envelope.body).toEqual({ node_id: "p2.t-1.r-1" });
   });
 });

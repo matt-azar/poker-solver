@@ -179,6 +179,41 @@ export async function ipcEquity(opts?: {
   return env.body;
 }
 
+/** Study node inspect (`pN.tT.rR`) or legacy numeric node_index (root = 0). */
+export async function ipcNode(nodeIdOrIndex: string | number = 0): Promise<unknown> {
+  const body =
+    typeof nodeIdOrIndex === "string"
+      ? { node_id: nodeIdOrIndex }
+      : { node_index: nodeIdOrIndex };
+  const env = await solverEngineRequest("node", body);
+  return env.body;
+}
+
+export async function ipcPause(jobId?: string | null): Promise<unknown> {
+  const env = await solverEngineRequest("pause", null, jobId ?? null);
+  return env.body;
+}
+
+/**
+ * Host cancel (Study stop). Requires a job_id — defaults to the Study train id
+ * used by `ipcSolve` (`j-study`). This is cancel-of-job, not stop-and-keep;
+ * Session continue-on-same-id remains a follow-on.
+ */
+export async function ipcCancel(jobId?: string | null): Promise<unknown> {
+  const env = await solverEngineRequest("cancel", null, jobId ?? "j-study");
+  return env.body;
+}
+
+export async function ipcOpen(path: string): Promise<unknown> {
+  const env = await solverEngineRequest("open", { path });
+  return env.body;
+}
+
+export async function ipcSave(path: string): Promise<unknown> {
+  const env = await solverEngineRequest("save", { path });
+  return env.body;
+}
+
 export async function ipcBeginConfig(configText: string): Promise<unknown> {
   const env = await solverEngineRequest("begin_config", { config_text: configText });
   return env.body;

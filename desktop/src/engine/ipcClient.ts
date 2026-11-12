@@ -136,8 +136,13 @@ export class SolverEngineIpcClient {
     return env.body;
   }
 
-  async node(nodeIndex = 0): Promise<unknown> {
-    const env = await this.request("node", { node_index: nodeIndex });
+  /** Study node inspect. Accepts Study `pN.tT.rR` or legacy numeric index. */
+  async node(nodeIdOrIndex: string | number = 0): Promise<unknown> {
+    const body =
+      typeof nodeIdOrIndex === "string"
+        ? { node_id: nodeIdOrIndex }
+        : { node_index: nodeIdOrIndex };
+    const env = await this.request("node", body);
     return env.body;
   }
 

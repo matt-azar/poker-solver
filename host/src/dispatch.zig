@@ -122,7 +122,7 @@ fn bodyIntField(body: []const u8, key: []const u8) ?i32 {
     return std.fmt.parseInt(i32, body[from..i], 10) catch null;
 }
 
-fn resolveValuesNode(
+fn resolveLocatedNode(
     game: poker_engine.game.CompiledGame,
     body_json: []const u8,
 ) poker_engine.analysis.node_id.NodeIdError!poker_engine.analysis.node_id.ParsedNodeId {
@@ -136,6 +136,99 @@ fn resolveValuesNode(
     var buf: [64]u8 = undefined;
     const text = std.fmt.bufPrint(&buf, "p{d}.t{d}.r{d}", .{ node_index, turn, river }) catch return error.UnknownNode;
     return poker_engine.analysis.node_id.locateNode(game, text);
+}
+
+fn formatStatusBody(allocator: std.mem.Allocator, state: *const HostState) ![]u8 {
+    const running = state.session.phase == .training or state.session.phase == .compiling;
+    const paused = state.session.phase == .paused;
+    var list = std.ArrayList(u8).init(allocator);
+    errdefer list.deinit();
+    const w = list.writer();
+    try w.writeAll("{\"running\":");
+    try w.writeAll(if (running) "true" else "false");
+    try w.writeAll(",\"paused\":");
+    try w.writeAll(if (paused) "true" else "false");
+    try w.writeAll(",\"cancelled\":false");
+    try w.print(",\"status_generation\":{d}", .{state.session.solution_id + state.session.policyRevision()});
+    if (state.session.solution_id == 0) {
+        try w.writeAll(",\"solution_id\":null,\"job_id\":null,\"root_node_id\":null");
+    } else {
+        try w.print(",\"solution_id\":\"s{d}\",\"job_id\":null,\"root_node_id\":\"p0.t-1.r-1\"", .{state.session.solution_id});
+    }
+    try w.print(",\"phase\":\"{s}\",\"policy_revision\":{d},\"workers_training\":{d},\"workers_analysis\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}", .{
+        @tagName(state.session.phase),
+        state.session.policyRevision(),
+        state.budget.training,
+        state.budget.analysis,
+    });
+    return try list.toOwnedSlice();
+}
+
+fn formatNodeBody(
+    allocator: std.mem.Allocator,
+    page: *const poker_engine.analysis.inspect.NodePage,
+    located: poker_engine.analysis.node_id.ParsedNodeId,
+    solution_id: u64,
+) ![]u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    errdefer list.deinit();
+    const w = list.writer();
+
+    const node_id_text = try poker_engine.analysis.node_id.formatNodeId(
+        allocator,
+        located.node_index,
+        located.turn,
+        located.river,
+    );
+    defer allocator.free(node_id_text);
+
+    const n_actions: usize = page.actions.len;
+    const n_hands: usize = page.combos.len;
+
+    try w.writeAll("{\"solution_id\":\"s");
+    try w.print("{d}", .{solution_id});
+    try w.writeAll("\",\"node_id\":");
+    try appendJsonString(&list, node_id_text);
+    try w.print(",\"node_index\":{d},\"kind\":\"decision\",\"player\":{d},\"policy_revision\":{d}", .{
+        page.node_index,
+        page.player,
+        page.policy_revision,
+    });
+    try w.print(",\"n_actions\":{d},\"n_hands\":{d},\"reach_defined\":false", .{ n_actions, n_hands });
+
+    try w.writeAll(",\"actions\":[");
+    for (page.actions, 0..) |label, i| {
+        if (i > 0) try w.writeAll(",");
+        try appendJsonString(&list, label);
+    }
+    try w.writeAll("],\"combos\":[");
+    for (page.combos, 0..) |label, i| {
+        if (i > 0) try w.writeAll(",");
+        try appendJsonString(&list, label);
+    }
+    try w.writeAll("],\"strategy\":");
+    if (n_actions == 0 or page.strategy.len == 0) {
+        // Implicit σ=1 (n_actions <= 1) — no stored rows; Study treats null as absent.
+        try w.writeAll("null");
+    } else {
+        try w.writeAll("[");
+        var hand: usize = 0;
+        while (hand < n_hands) : (hand += 1) {
+            if (hand > 0) try w.writeAll(",");
+            try w.writeAll("[");
+            var action: usize = 0;
+            while (action < n_actions) : (action += 1) {
+                if (action > 0) try w.writeAll(",");
+                const idx = hand * n_actions + action;
+                const value: f64 = if (idx < page.strategy.len) page.strategy[idx] else 0;
+                try w.print("{d:.6}", .{value});
+            }
+            try w.writeAll("]");
+        }
+        try w.writeAll("]");
+    }
+    try w.writeAll("}");
+    return try list.toOwnedSlice();
 }
 
 fn appendJsonString(list: *std.ArrayList(u8), value: []const u8) !void {
@@ -305,30 +398,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
 
     if (std.mem.eql(u8, req.op, "status")) {
         // Study-compatible flags (decodeStatusPayload) + Zig session fields.
-        const running = state.session.phase == .training or state.session.phase == .compiling;
-        const paused = state.session.phase == .paused;
-        var buf: [512]u8 = undefined;
-        const body = if (state.session.solution_id == 0)
-            try std.fmt.bufPrint(&buf, "{{\"running\":{},\"paused\":{},\"cancelled\":false,\"status_generation\":{d},\"solution_id\":null,\"job_id\":null,\"root_node_id\":null,\"phase\":\"{s}\",\"policy_revision\":{d},\"workers_training\":{d},\"workers_analysis\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}", .{
-                running,
-                paused,
-                state.session.solution_id + state.session.policyRevision(),
-                @tagName(state.session.phase),
-                state.session.policyRevision(),
-                state.budget.training,
-                state.budget.analysis,
-            })
-        else
-            try std.fmt.bufPrint(&buf, "{{\"running\":{},\"paused\":{},\"cancelled\":false,\"status_generation\":{d},\"solution_id\":\"s{d}\",\"job_id\":null,\"root_node_id\":\"p0.t-1.r-1\",\"phase\":\"{s}\",\"policy_revision\":{d},\"workers_training\":{d},\"workers_analysis\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}", .{
-                running,
-                paused,
-                state.session.solution_id + state.session.policyRevision(),
-                state.session.solution_id,
-                @tagName(state.session.phase),
-                state.session.policyRevision(),
-                state.budget.training,
-                state.budget.analysis,
-            });
+        const body = try formatStatusBody(state.allocator, state);
+        defer state.allocator.free(body);
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
@@ -375,11 +446,9 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         state.session.open(path) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "open_failed", @errorName(err));
         };
-        var buf: [128]u8 = undefined;
-        const body = try std.fmt.bufPrint(&buf, "{{\"solution_id\":{d},\"policy_revision\":{d}}}", .{
-            state.session.solution_id,
-            state.session.policyRevision(),
-        });
+        // Same Study status shape as `status` so EngineClient.open can decodeStatusPayload.
+        const body = try formatStatusBody(state.allocator, state);
+        defer state.allocator.free(body);
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
@@ -390,19 +459,24 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
         defer lease.deinit();
-        const node_index: u32 = @intCast(bodyIntField(req.body_json, "node_index") orelse 0);
-        var page = poker_engine.analysis.inspect.inspectNode(state.allocator, lease.game, lease.published, node_index, -1, -1) catch |err| {
+        const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
+        };
+        var page = poker_engine.analysis.inspect.inspectNode(
+            state.allocator,
+            lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "inspect_failed", @errorName(err));
         };
         defer page.deinit();
-        var buf: [192]u8 = undefined;
-        const body = try std.fmt.bufPrint(&buf, "{{\"node_index\":{d},\"player\":{d},\"n_actions\":{d},\"n_hands\":{d},\"policy_revision\":{d}}}", .{
-            page.node_index,
-            page.player,
-            page.n_actions,
-            page.n_hands,
-            page.policy_revision,
-        });
+        const body = formatNodeBody(state.allocator, &page, located, lease.solution_id) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "inspect_failed", @errorName(err));
+        };
+        defer state.allocator.free(body);
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
@@ -415,7 +489,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
         defer lease.deinit();
-        const located = resolveValuesNode(lease.game, req.body_json) catch |err| {
+        const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
         };
         const t0 = std.time.nanoTimestamp();
@@ -462,7 +536,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         defer lease.deinit();
         // Accept Study node_id / node_index for identity; math is still starting-range
         // check-down on the compiled board (strategy-reach residual).
-        const located = resolveValuesNode(lease.game, req.body_json) catch |err| {
+        const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
             const code: []const u8 = switch (err) {
                 error.UnknownNode => "unknown_node",
                 error.OutOfMemory => "oom",
@@ -641,6 +715,156 @@ test "ready dispatch" {
     defer reply.deinit();
     try std.testing.expect(reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "solver-engine") != null);
+}
+
+test "node accepts Study node_id and returns strategy tables" {
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "node-inspect");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "n1"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"node_id\":\"p0.t-1.r-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"actions\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"combos\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"kind\":\"decision\"") != null);
+    // Root river with bets usually has strategy rows; either 2D array or null (check-only).
+    try std.testing.expect(
+        std.mem.indexOf(u8, reply.body_json, "\"strategy\":[") != null or
+            std.mem.indexOf(u8, reply.body_json, "\"strategy\":null") != null,
+    );
+
+    var bad: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "n2"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p999.t-1.r-1\"}"),
+    };
+    defer bad.deinit();
+    var bad_reply = try handle(&state, bad);
+    defer bad_reply.deinit();
+    try std.testing.expect(!bad_reply.ok);
+    try std.testing.expect(std.mem.eql(u8, bad_reply.error_code orelse "", "unknown_node"));
+}
+
+test "pause cancel and status-shaped open reply" {
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "lifecycle");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    var pause_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "p1"),
+        .op = try std.testing.allocator.dupe(u8, "pause"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer pause_req.deinit();
+    var pause_reply = try handle(&state, pause_req);
+    defer pause_reply.deinit();
+    try std.testing.expect(pause_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, pause_reply.body_json, "\"phase\":\"paused\"") != null);
+
+    var cancel_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "c1"),
+        .job_id = try std.testing.allocator.dupe(u8, "j-study"),
+        .op = try std.testing.allocator.dupe(u8, "cancel"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer cancel_req.deinit();
+    var cancel_reply = try handle(&state, cancel_req);
+    defer cancel_reply.deinit();
+    try std.testing.expect(cancel_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, cancel_reply.body_json, "\"cancelled\":true") != null);
+
+    // Save + open round-trip for status-shaped open body (path under /tmp — no parent mkdir).
+    const tmp_path = "/tmp/poker-solver-slice-a-open.psol";
+    defer std.fs.cwd().deleteFile(tmp_path) catch {};
+    var save_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "s1"),
+        .op = try std.testing.allocator.dupe(u8, "save"),
+        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"path\":\"{s}\"}}", .{tmp_path}),
+    };
+    defer save_req.deinit();
+    var save_reply = try handle(&state, save_req);
+    defer save_reply.deinit();
+    try std.testing.expect(save_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, save_reply.body_json, "\"saved\":true") != null);
+
+    var open_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "o1"),
+        .op = try std.testing.allocator.dupe(u8, "open"),
+        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"path\":\"{s}\"}}", .{tmp_path}),
+    };
+    defer open_req.deinit();
+    var open_reply = try handle(&state, open_req);
+    defer open_reply.deinit();
+    try std.testing.expect(open_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"running\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"paused\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"cancelled\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"status_generation\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"solution_id\":\"s") != null);
 }
 
 test "values accepts Study node_id and returns hand×action tables" {
