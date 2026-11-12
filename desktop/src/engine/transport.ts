@@ -273,6 +273,18 @@ export async function ipcGetConfig(): Promise<unknown> {
   return env.body;
 }
 
+/** Side-effect-free public tree + nested memory plan (ZR-83). */
+export async function ipcTreePreview(configText: string): Promise<unknown> {
+  const env = await solverEngineRequest("tree_preview", { config_text: configText });
+  return env.body;
+}
+
+/** Side-effect-free memory plan only (ZR-83). */
+export async function ipcPlanMemory(configText: string): Promise<unknown> {
+  const env = await solverEngineRequest("plan_memory", { config_text: configText });
+  return env.body;
+}
+
 export type IpcSolveOptions = {
   iterations: number;
   accuracy?: number;

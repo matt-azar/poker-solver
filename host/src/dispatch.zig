@@ -718,6 +718,33 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
+    // ZR-83: side-effect-free preview/plan — never begin_config / clearSolution.
+    if (std.mem.eql(u8, req.op, "tree_preview")) {
+        const escaped = bodyStringField(req.body_json, "config_text") orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
+        const config = try unescapeConfig(state.allocator, escaped);
+        defer state.allocator.free(config);
+        const body = poker_app.plan_preview.treePreviewJson(state.allocator, config) catch |err| {
+            const code: []const u8 = if (err == error.OutOfMemory) "out_of_memory" else "invalid_config";
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        defer state.allocator.free(body);
+        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+    }
+
+    if (std.mem.eql(u8, req.op, "plan_memory")) {
+        const escaped = bodyStringField(req.body_json, "config_text") orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
+        const config = try unescapeConfig(state.allocator, escaped);
+        defer state.allocator.free(config);
+        const body = poker_app.plan_preview.planMemoryJson(state.allocator, config) catch |err| {
+            const code: []const u8 = if (err == error.OutOfMemory) "out_of_memory" else "invalid_config";
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        defer state.allocator.free(body);
+        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+    }
+
     if (std.mem.eql(u8, req.op, "pause")) {
         state.session.pause() catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "pause_failed", @errorName(err));
@@ -1487,6 +1514,98 @@ test "pause cancel and status-shaped open reply" {
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"has_training\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"status_generation\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"solution_id\":\"s") != null);
+}
+
+test "tree_preview and plan_memory leave begun session unchanged" {
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range 2c3d:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "preview");
+    defer state.deinit();
+    try state.session.begin(config);
+    const prior_id = state.session.solution_id;
+    const prior_phase = state.session.phase;
+
+    var preview_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "tp1"),
+        .op = try std.testing.allocator.dupe(u8, "tree_preview"),
+        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"config_text\":{s}}}", .{std.json.fmt(config, .{})}),
+    };
+    defer preview_req.deinit();
+    var preview_reply = try handle(&state, preview_req);
+    defer preview_reply.deinit();
+    try std.testing.expect(preview_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, preview_reply.body_json, "\"nodes\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, preview_reply.body_json, "\"path\":\"\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, preview_reply.body_json, "\"compact\":\"c\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, preview_reply.body_json, "\"plan\":{") != null);
+    try std.testing.expect(std.mem.indexOf(u8, preview_reply.body_json, "\"dry_run\":true") != null);
+    try std.testing.expectEqual(prior_id, state.session.solution_id);
+    try std.testing.expectEqual(prior_phase, state.session.phase);
+
+    var plan_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "pm1"),
+        .op = try std.testing.allocator.dupe(u8, "plan_memory"),
+        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"config_text\":{s}}}", .{std.json.fmt(config, .{})}),
+    };
+    defer plan_req.deinit();
+    var plan_reply = try handle(&state, plan_req);
+    defer plan_reply.deinit();
+    try std.testing.expect(plan_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, plan_reply.body_json, "\"estimated_peak_bytes\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, plan_reply.body_json, "\"fits_budget\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, plan_reply.body_json, "\"decision_nodes\":6") != null);
+    // Nested plan on tree_preview matches standalone plan_memory numbers.
+    try std.testing.expect(std.mem.indexOf(u8, preview_reply.body_json, plan_reply.body_json) != null);
+    try std.testing.expectEqual(prior_id, state.session.solution_id);
+    try std.testing.expectEqual(prior_phase, state.session.phase);
+
+    var missing: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "tp-miss"),
+        .op = try std.testing.allocator.dupe(u8, "tree_preview"),
+        .body_json = try std.testing.allocator.dupe(u8, "{}"),
+    };
+    defer missing.deinit();
+    var missing_reply = try handle(&state, missing);
+    defer missing_reply.deinit();
+    try std.testing.expect(!missing_reply.ok);
+    try std.testing.expect(std.mem.eql(u8, missing_reply.error_code orelse "", "invalid_request"));
+
+    var bad: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "tp-bad"),
+        .op = try std.testing.allocator.dupe(u8, "tree_preview"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"config_text\":\"not-a-config\\n\"}"),
+    };
+    defer bad.deinit();
+    var bad_reply = try handle(&state, bad);
+    defer bad_reply.deinit();
+    try std.testing.expect(!bad_reply.ok);
+    try std.testing.expect(std.mem.eql(u8, bad_reply.error_code orelse "", "invalid_config"));
+    try std.testing.expectEqual(prior_id, state.session.solution_id);
 }
 
 test "begin_config rejects 1 MiB flop resource fixture" {

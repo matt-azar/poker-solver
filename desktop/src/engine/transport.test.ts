@@ -18,8 +18,10 @@ import {
   ipcNode,
   ipcOpen,
   ipcPause,
+  ipcPlanMemory,
   ipcPutLock,
   ipcSave,
+  ipcTreePreview,
   ipcValues,
   setHttpFallbackTransport,
   setIpcTransport,
@@ -196,6 +198,45 @@ describe("Slice A IPC lifecycle + node helpers", () => {
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "save",
       body: { path: "/tmp/x.psol" },
+      jobId: null,
+    });
+  });
+});
+
+describe("ZR-83 tree_preview / plan_memory IPC helpers", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("sends config_text for tree_preview and plan_memory", async () => {
+    invoke.mockResolvedValue({
+      v: 2,
+      kind: "reply",
+      request_id: "tp",
+      op: "tree_preview",
+      ok: true,
+      body: { nodes: [], tree_edits: [], plan: { dry_run: true } },
+    });
+    await ipcTreePreview("street-config 1\nboard Ah Kd 7c\n");
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "tree_preview",
+      body: { config_text: "street-config 1\nboard Ah Kd 7c\n" },
+      jobId: null,
+    });
+
+    invoke.mockResolvedValue({
+      v: 2,
+      kind: "reply",
+      request_id: "pm",
+      op: "plan_memory",
+      ok: true,
+      body: { estimated_peak_bytes: 1, fits_budget: true, dry_run: true },
+    });
+    await ipcPlanMemory("street-config 1\n");
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "plan_memory",
+      body: { config_text: "street-config 1\n" },
       jobId: null,
     });
   });

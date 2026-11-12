@@ -4,6 +4,7 @@ const poker_engine = @import("poker_engine");
 const poker_formats = @import("poker_formats");
 
 pub const session = @import("session.zig");
+pub const plan_preview = @import("plan_preview.zig");
 pub const Session = session.Session;
 pub const Phase = session.Phase;
 pub const PublishedLease = session.PublishedLease;
@@ -165,4 +166,5 @@ test "browse-only open keeps has_training false and continue disabled" {
 
 test {
     _ = session;
+    _ = plan_preview;
 }
