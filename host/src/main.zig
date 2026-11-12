@@ -47,6 +47,7 @@ pub fn main() !void {
     var state = try dispatch.HostState.init(allocator, launch_id);
     defer {
         // Fail pending on exit (D1).
+        state.joinBegin();
         state.joinTrain();
         for (state.pending.items) |rid| {
             var err_reply = ipc.makeErrorReply(allocator, rid, null, "exit", "sidecar_exit", "solver-engine exiting") catch continue;
@@ -99,7 +100,15 @@ pub fn main() !void {
             continue;
         }
 
-        // Async train ops: keep stdin free so values can run under train (R10).
+        // Async begin/train: keep stdin free so status/values stay live (R10 / ZR-120).
+        if (std.mem.eql(u8, req.op, "begin_config")) {
+            dispatch.startBeginConfig(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
         if (std.mem.eql(u8, req.op, "solve")) {
             dispatch.startSolve(&state, req) catch |err| {
                 var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));

@@ -32,6 +32,20 @@ describe("solveActivity", () => {
     expect(message).toContain("10.0 it/s");
   });
 
+  it("prefers Building copy over a stale Solving fallback while compiling", () => {
+    const message = engineActivityMessage(
+      "building",
+      {
+        running: true,
+        phase: "compiling",
+        iterations: 0,
+        iterations_requested: 0,
+      },
+      "Solving — 0 iterations",
+    );
+    expect(message).toMatch(/Building public tree/i);
+  });
+
   it("exposes tabular status metrics", () => {
     const metrics = statusMetrics({
       iterations: 12,

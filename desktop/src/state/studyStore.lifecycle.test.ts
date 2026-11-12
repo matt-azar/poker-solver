@@ -221,6 +221,54 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     expect(engineMocks.engineClient.getNode).toHaveBeenCalledWith("s2", "root");
   });
 
+  it("ZR-120: status polling surfaces live iterations while train is running", async () => {
+    let releaseSolve: (() => void) | null = null;
+    const solveGate = new Promise<void>((resolve) => {
+      releaseSolve = resolve;
+    });
+    let admitStarted = false;
+    engineMocks.engineClient.solve.mockImplementationOnce(async () => {
+      admitStarted = true;
+      await solveGate;
+    });
+    engineMocks.setStatusImpl(async () => {
+      if (!admitStarted) {
+        return {
+          running: false,
+          paused: false,
+          cancelled: false,
+          phase: "idle",
+          status_generation: 1,
+        };
+      }
+      return {
+        running: true,
+        paused: false,
+        cancelled: false,
+        phase: "training",
+        iterations: 37,
+        iterations_requested: 200,
+        solution_id: "s2",
+        root_node_id: "root",
+        status_generation: 9,
+      };
+    });
+
+    const pending = useStudyStore.getState().solve();
+    // Yield until solve RPC is in-flight (after orphan probe).
+    for (let i = 0; i < 20 && !admitStarted; i += 1) {
+      await Promise.resolve();
+    }
+    expect(admitStarted).toBe(true);
+    await useStudyStore.getState().refresh();
+    expect(useStudyStore.getState().phase).toBe("solving");
+    expect(useStudyStore.getState().message).toMatch(/37\/200/);
+
+    releaseSolve?.();
+    await pending;
+    useStudyStore.getState().stopPolling();
+  });
+
   it("R09: failed solve restores the last published study", async () => {
     engineMocks.engineClient.solve.mockRejectedValueOnce(
       new engineMocks.EngineError("engine rejected solve"),
