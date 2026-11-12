@@ -189,6 +189,59 @@ pub fn actionValuesFrozen(
     return page;
 }
 
+/// True when every multi-action decision on the path to `target` is card_mode 0
+/// (hand-only slots). Enables opponent betting-path reach without turn/river keys.
+fn pathDecisionsAreMode0(game: compile.CompiledGame, target: u32) bool {
+    var cur = target;
+    while (true) {
+        const n = game.nodes[cur];
+        if (n.kind == .decision and n.n_actions > 1 and n.card_mode != 0) return false;
+        if (n.parent < 0) return true;
+        cur = @intCast(n.parent);
+    }
+}
+
+/// Opponent average-policy mass along betting edges to `target` (hero reach omitted).
+fn opponentBettingReach(
+    game: compile.CompiledGame,
+    sigma: []const f32,
+    target: u32,
+    actor: i32,
+    deal: compile.Deal,
+    turn: i32,
+    river: i32,
+) ActionEvError!f64 {
+    var parents: [64]u32 = undefined;
+    var parent_actions: [64]i32 = undefined;
+    var depth: usize = 0;
+    var cur = target;
+    while (game.nodes[cur].parent >= 0) {
+        if (depth >= parents.len) return error.InvalidAnalysis;
+        parents[depth] = @intCast(game.nodes[cur].parent);
+        parent_actions[depth] = game.nodes[cur].parent_action;
+        cur = parents[depth];
+        depth += 1;
+    }
+    var reach: f64 = 1.0;
+    var i = depth;
+    while (i > 0) {
+        i -= 1;
+        const pnode = game.nodes[parents[i]];
+        const pa = parent_actions[i];
+        if (pnode.kind != .decision or pa < 0 or pnode.n_actions <= 1) continue;
+        if (pnode.player == actor) continue;
+        const hand = if (pnode.player == 0) deal.h0 else deal.h1;
+        if (hand < 0) return error.InvalidAnalysis;
+        const key = game.cardKey(pnode, hand, turn, river) catch return error.InvalidAnalysis;
+        if (key < 0 or @as(usize, @intCast(key)) >= pnode.slot_of.len) return error.InvalidAnalysis;
+        const slot_i = pnode.slot_of[@intCast(key)];
+        if (slot_i < 0) return error.InvalidAnalysis;
+        const base: usize = @intCast(game.slots[@intCast(slot_i)].base);
+        reach *= @as(f64, @floatCast(sigma[base + @as(usize, @intCast(pa))]));
+    }
+    return reach;
+}
+
 /// Deal-by-deal conditional action EV (oracle / non-root). Do not use on flop-scale roots.
 pub fn actionValuesDealByDeal(
     allocator: std.mem.Allocator,
@@ -249,13 +302,23 @@ pub fn actionValuesDealByDeal(
     defer allocator.free(mass);
     @memset(mass, 0);
 
+    // Non-root river (mode-0 path): weight deals by opponent betting reach so
+    // facing-Bet Call EV matches C++ q_opp posterior (MATHEMATICS.md Q_i).
+    const weight_by_opp_reach = node_index != 0 and pathDecisionsAreMode0(game, node_index);
+
     var reach_mass: f64 = 0;
     for (game.deals) |deal| {
         const hero_hand: i32 = if (node.player == 0) deal.h0 else deal.h1;
         if (hero_hand < 0 or @as(usize, @intCast(hero_hand)) >= hands) continue;
-        reach_mass += deal.probability;
+        const opp_w: f64 = if (weight_by_opp_reach)
+            (opponentBettingReach(game, sigma, node_index, node.player, deal, turn, river) catch return error.InvalidAnalysis)
+        else
+            1.0;
+        if (!(opp_w > 0)) continue;
+        const w = deal.probability * opp_w;
+        reach_mass += w;
         const hh: usize = @intCast(hero_hand);
-        mass[hh] += deal.probability;
+        mass[hh] += w;
 
         var action: usize = 0;
         while (action < node.n_actions) : (action += 1) {
@@ -268,7 +331,7 @@ pub fn actionValuesDealByDeal(
                 turn,
                 river,
             ) catch return error.InvalidAnalysis;
-            action_sum[hh * node.n_actions + action] += deal.probability * child.utility[actor];
+            action_sum[hh * node.n_actions + action] += w * child.utility[actor];
         }
     }
     page.reach_defined = reach_mass > 0;

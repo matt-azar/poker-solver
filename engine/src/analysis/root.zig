@@ -13,4 +13,5 @@ test {
     _ = action_ev;
     _ = equity;
     _ = @import("phase4_test.zig");
+    _ = @import("action_ev_rematch_test.zig");
 }
