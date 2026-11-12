@@ -1,26 +1,18 @@
-# Shared Windows configure/build/test entry point (mirrors CI Release defaults).
+# Local Zig build + test entry point (mirrors .github/workflows/zig.yml defaults).
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-$BuildDir = if ($env:BUILD_DIR) { $env:BUILD_DIR } else { Join-Path $Root "build" }
-$BuildBenchmarks = if ($env:BUILD_BENCHMARKS) { $env:BUILD_BENCHMARKS } else { "ON" }
+Set-Location $Root
 
-cmake -S $Root -B $BuildDir `
-  -G "Visual Studio 17 2022" -A x64 `
-  -DBUILD_TESTING=ON `
-  -DPOKER_SOLVER_BUILD_BENCHMARKS=$BuildBenchmarks
+$Optimize = if ($env:ZIG_OPTIMIZE) { $env:ZIG_OPTIMIZE } else { "ReleaseFast" }
 
-$targets = @(
-  "river_solver", "street_solver", "explorer", "equity_calculator",
-  "poker_solver_tests", "poker_engine_tests", "poker_study_tests", "poker_http_tests",
-  "equity_tests", "equity_calculator_tests"
-)
-if ($BuildBenchmarks -eq "ON") {
-  $targets += @("street_memory_bench", "street_betting_bench", "street_parallel_bench")
+zig build "-Doptimize=$Optimize"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+zig build test
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+$engine = "zig-out/bin/solver-engine.exe"
+if (-not (Test-Path $engine)) {
+  Write-Error "solver-engine.exe missing under zig-out/bin"
 }
-
-$targetArgs = @()
-foreach ($t in $targets) {
-  $targetArgs += @("--target", $t)
-}
-cmake --build $BuildDir --config Release --parallel @targetArgs
-ctest --test-dir $BuildDir -C Release --output-on-failure
+python scripts/zig/ready-smoke.py $engine
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

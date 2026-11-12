@@ -48,7 +48,7 @@ pub struct SolverEngineInfo {
     pub launch_id: String,
     pub sidecar: String,
     pub workers: u32,
-    /// HTTP explorer remains a labeled temporary fallback when IPC is unavailable.
+    /// Label shown when IPC is unavailable (browser/dev has no engine process).
     pub http_fallback_label: String,
 }
 
@@ -313,7 +313,7 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
             launch_id: launch_id.to_string(),
             sidecar: SIDECAR_BASENAME.into(),
             workers: 0,
-            http_fallback_label: "HTTP explorer (browser/dev only — packaged Study uses solver-engine IPC)"
+            http_fallback_label: "no engine (browser/dev — Study requires Tauri + solver-engine IPC)"
                 .into(),
         },
     })
@@ -417,7 +417,7 @@ fn ready_handshake(io: &Arc<SessionIo>, launch_id: &str) -> Result<SolverEngineI
                     launch_id: launch_id.to_string(),
                     sidecar: SIDECAR_BASENAME.into(),
                     workers,
-                    http_fallback_label: "HTTP explorer (browser/dev only — packaged Study uses solver-engine IPC)"
+                    http_fallback_label: "no engine (browser/dev — Study requires Tauri + solver-engine IPC)"
                         .into(),
                 });
             }
@@ -443,7 +443,7 @@ fn session_io(state: &SolverEngineState) -> Result<Arc<SessionIo>, String> {
         .ok_or_else(|| "solver-engine not started — call ensure_solver_engine first".to_string())
 }
 
-/// Prefer Zig typed IPC. Callers may fall back to HTTP explorer when this fails.
+/// Prefer Zig typed IPC. Callers surface a non-engine label when this fails.
 pub fn ensure_solver_engine_session(
     app: &AppHandle,
     state: &SolverEngineState,

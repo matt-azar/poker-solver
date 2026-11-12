@@ -7,7 +7,7 @@ describe("ensureEngine", () => {
     const result = await ensureEngine();
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.status).toMatch(/browser/i);
+      expect(result.status).toMatch(/Tauri shell/i);
       expect(result.endpoint).toBeUndefined();
       expect(result.transport.kind).toBe("http-fallback");
     }

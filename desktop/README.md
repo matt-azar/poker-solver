@@ -1,20 +1,19 @@
 # Hold'em Study client
 
-React + TypeScript + Vite UI for the `explorer` HTTP API. See [docs/DESKTOP_UI.md](../docs/DESKTOP_UI.md).
+React + TypeScript + Vite UI. Packaged Study talks to the Zig `solver-engine` sidecar over typed IPC (protocol 2). See [docs/DESKTOP_UI.md](../docs/DESKTOP_UI.md).
 
 ## Develop
 
 ```sh
-# from repo root — build and run the engine
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target explorer
-./build/explorer --port 8765
+# from repo root — Zig engine
+zig build -Doptimize=ReleaseFast
 
-# from desktop/
+# from desktop/ — Tauri shell (spawns solver-engine)
 npm ci
-npm run dev
+npm run tauri dev
 ```
 
-Open the Vite URL (default `http://127.0.0.1:5173`). `/api` is proxied to the explorer.
+Browser-only `npm run dev` does not start an engine (HTTP `holdem-explorer` was removed).
 
 ## Test / build
 
@@ -28,8 +27,6 @@ Live OpenAI interpretation eval (skipped without a key; **not** part of ordinary
 ```sh
 HOLDEM_STUDY_OPENAI_KEY=sk-... npm run test:assistant-live
 ```
-
-After `npm run build`, `explorer` prefers `desktop/dist` over `legacy/ui/` when both are present.
 
 ## Setup assistant notes
 

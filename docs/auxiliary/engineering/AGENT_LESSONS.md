@@ -4,6 +4,8 @@ Mistakes, friction, and correctness traps observed in this repository’s histor
 
 Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor/rules/licensing.mdc`. Refresh playbook: [`AGENT_LESSONS_REFRESH.md`](AGENT_LESSONS_REFRESH.md).
 
+**`zig-rewrite` product path (owner GO 2026-11-12):** Study ships Zig `solver-engine` typed IPC only. The C++ `holdem-explorer` / CMake tree, HTTP `:8765` fallbacks, and dual-sidecar packaging are removed. Sections below that mention CMake / `explorer` / `poker_http_tests` are **historical traps** from the C++ era — do not treat them as a mandate to restore those paths.
+
 ---
 
 ## 1. Parallel Cursor agents (operational friction)

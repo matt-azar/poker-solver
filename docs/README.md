@@ -20,11 +20,11 @@ Start with architecture, then streets + mathematics for how a solve runs.
 | Doc | Contents |
 | --- | --- |
 | [DESKTOP_UI.md](DESKTOP_UI.md) | React Study workstation + Windows packaging |
-| [EXPLORER.md](EXPLORER.md) | Local engine HTTP API |
+| [EXPLORER.md](EXPLORER.md) | Retired C++ HTTP explorer (historical) |
 | [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md) | Floating Study assistant |
 | [ai-context/](ai-context/README.md) | Model-facing context packs (imported by the desktop app) |
 
-Product entry: `explorer` + `desktop/`. Installer and packaging notes are in DESKTOP_UI.
+Product entry: Zig `solver-engine` + `desktop/`. Installer and packaging notes are in DESKTOP_UI. The C++ HTTP explorer doc is historical only.
 
 ## Auxiliary
 

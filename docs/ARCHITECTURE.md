@@ -1,20 +1,22 @@
 # Architecture
 
-Production postflop solving uses one public betting tree. Flop, turn, and river differ only by how many cards remain (two, one, or zero). `StreetBatchSolver` is the production engine; `StreetGame` + `CfrTrainer` is the reference enumerator (`--reference`). `RiverGame` is the five-card oracle.
+**Shipping on `zig-rewrite`:** the production Study engine is Zig (`engine/`, `app/`, `host/`, `cli/` → `solver-engine` typed IPC). The C++ `holdem-explorer` / CMake library tree described in older revisions of this doc is **removed**. Algorithmic concepts below (one postflop tree, NashConv, CFR+ schedules) still apply; treat C++ path / `include/` / `src/` names as historical vocabulary unless a Zig module is named explicitly.
 
-Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [EXPLORER.md](EXPLORER.md), [HOLDEM.md](HOLDEM.md).
+Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [DESKTOP_UI.md](DESKTOP_UI.md), [HOLDEM.md](HOLDEM.md). Retired HTTP explorer notes: [EXPLORER.md](EXPLORER.md).
 
 ## One postflop tree
 
-| Board | Production path | Reference enumerator |
+| Board | Production idea | Reference / oracle idea |
 | --- | --- | --- |
-| 3, 4, or 5 cards | `StreetBatchSolver` | `StreetGame` + `CfrTrainer` (`--reference`) |
+| 3, 4, or 5 cards | Shared public betting tree (Zig port of StreetBatch) | Exact enumerator / five-card oracle pins |
 
-`explorer` and `river_solver` both route five-card boards through that shared tree. `river_solver` maps river JSON/CLI flags into `StreetConfig` and solves with `StreetBatchSolver` (or `StreetGame` under `--reference`). `RiverBatchSolver` remains for internal oracle and legacy fixtures only. Nothing under `include/` includes `legacy/ui/` or `desktop/`.
+Canonical range catalogue assets live under `configs/range-profiles/`; the Study client imports them directly (no `desktop/` copies).
 
-## Modules
+## Modules (historical C++ map)
 
-### Build libraries
+The following CMake targets and `include/` / `src/` layout are **gone** from the tree. Kept here so older rematch notes and store digs remain readable:
+
+### Build libraries (retired)
 
 | Target | Role | Depends on |
 | --- | --- | --- |
@@ -25,13 +27,9 @@ Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER
 | `poker_equity` | Check-down equity | primitives only |
 | `poker_solver_core` | INTERFACE alias → `poker_study` (legacy name) | study |
 
-Shared solve declarations (`Algorithm`, `SolveConfig`, `SolveStats`) live in `include/solver/solve_types.hpp` so batch headers need not pull the full `CfrTrainer` template. `StreetConfig` / sizing rules live in `include/game/street_config.hpp`; `RiverConfig` in `include/game/river_config.hpp`. Reference enumerators (`StreetGame`, `RiverGame`) and `CfrTrainer` remain header-only under `include/game/` and `include/solver/trainer.hpp`. Hold’em `--reference` on `street_solver` / `river_solver` is always available. Production `poker_solver` never links the legacy river target.
+### Production postflop layout (retired C++ sources)
 
-Canonical range catalogue assets live under `configs/range-profiles/`; the Study client imports them directly (no `desktop/` copies).
-
-### Production postflop layout
-
-`StreetBatchSolver` is a public facade (`include/solver/street_batch.hpp`, `src/solver/street_batch.cpp`). The private engine is split under `src/solver/postflop/`:
+`StreetBatchSolver` was a public facade (`include/solver/street_batch.hpp`, `src/solver/street_batch.cpp`). The private engine was split under `src/solver/postflop/`:
 
 | Path | Responsibility |
 | --- | --- |
@@ -65,7 +63,7 @@ Read `src/solver/postflop/algorithms/cfr_plus.hpp` for one complete CFR+ iterati
 | `poker::solver::CfrTrainer<Game>` | Vanilla CFR, CFR+, linear CFR, DCFR, PCFR+ for any extensive-game type |
 | `regret_matching` | Current strategy from cumulative regret; reach-weighted accumulation |
 | `compute_best_response` | Exact best response, deepest information set first |
-| `explorer` | Local Study HTTP server; serves `desktop/dist` or `legacy/ui/`; fresh solves use `StreetBatchSolver` |
+| `explorer` | *(retired)* Local Study HTTP server; Zig Study uses `solver-engine` IPC instead |
 
 ## Extensive-game interface
 

@@ -10,12 +10,7 @@ export default defineConfig({
       // Allow importing model context packs from docs/ai-context/*.md
       allow: [".."],
     },
-    proxy: {
-      "/api": {
-        target: "http://127.0.0.1:8765",
-        changeOrigin: false,
-      },
-    },
+    // No HTTP explorer proxy — packaged and Tauri-dev Study use solver-engine IPC.
   },
   build: {
     outDir: "dist",

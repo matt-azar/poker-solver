@@ -33,6 +33,8 @@ __pycache__/
 *.dylib
 
 # Tauri sidecar binaries (CI-produced)
+desktop/src-tauri/binaries/solver-engine-*
+# Legacy C++ sidecar names (ignore local leftovers after cutover)
 desktop/src-tauri/binaries/holdem-explorer-*
 desktop/src-tauri/binaries/explorer-*
 !desktop/src-tauri/binaries/.gitkeep
