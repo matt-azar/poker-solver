@@ -117,7 +117,7 @@ Explorer Study node `/equity` uses `StreetBatchSolver::checkdown_equity`: typed 
 
 ## Standalone Equity calculator
 
-The desktop **Equity** workspace is independent of any solution. It posts background jobs to:
+The desktop **Equity** workspace is independent of any solution. On `zig-rewrite`, packaged Study uses solver-engine IPC ops `start_equity_job` / `get_equity_job` / `cancel_equity_job` (result embedded on completed/stopped status). Legacy HTTP paths (removed on this branch) were:
 
 | Method | Path |
 | --- | --- |

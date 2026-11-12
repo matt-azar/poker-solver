@@ -316,3 +316,21 @@ export async function ipcSolve(
   const env = await solverEngineRequest("solve", body, opts.jobId ?? null);
   return env.body;
 }
+
+/** Standalone Equity calculator job start (ZR-84; no Study session). */
+export async function ipcStartEquityJob(body: Record<string, unknown>): Promise<unknown> {
+  const env = await solverEngineRequest("start_equity_job", body);
+  return env.body;
+}
+
+/** Poll Equity calculator job status / embedded result. */
+export async function ipcGetEquityJob(jobId: string): Promise<unknown> {
+  const env = await solverEngineRequest("get_equity_job", { job_id: jobId });
+  return env.body;
+}
+
+/** Cancel / stop an Equity calculator job. */
+export async function ipcCancelEquityJob(jobId: string): Promise<unknown> {
+  const env = await solverEngineRequest("cancel_equity_job", { job_id: jobId });
+  return env.body;
+}

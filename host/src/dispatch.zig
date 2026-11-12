@@ -5,6 +5,7 @@ const poker_engine = @import("poker_engine");
 const ipc = @import("ipc.zig");
 const workers = @import("workers.zig");
 const equity_json = @import("equity_json.zig");
+const equity_jobs = @import("equity_jobs.zig");
 const locks_json = @import("locks_json.zig");
 const node_lock = poker_engine.solve.node_lock;
 
@@ -37,6 +38,8 @@ pub const HostState = struct {
     job_mu: std.Thread.Mutex = .{},
     status_generation: u64 = 1,
     last_cancelled: bool = false,
+    /// Standalone Equity calculator jobs (ZR-84); independent of Study Session.
+    equity_jobs: equity_jobs.Manager,
 
     pub fn init(allocator: std.mem.Allocator, launch_id: []const u8) !HostState {
         return .{
@@ -46,11 +49,13 @@ pub const HostState = struct {
             .launch_id = try allocator.dupe(u8, launch_id),
             .pending = std.ArrayList([]u8).init(allocator),
             .cancelled_jobs = std.StringHashMap(void).init(allocator),
+            .equity_jobs = equity_jobs.Manager.init(allocator),
         };
     }
 
     pub fn deinit(self: *HostState) void {
         self.joinTrain();
+        self.equity_jobs.deinit();
         self.clearPending();
         self.session.deinit();
         if (self.launch_id.len != 0) self.allocator.free(self.launch_id);
@@ -1078,6 +1083,48 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return replyLocksBody(state, req, &locks);
     }
 
+    // Standalone Equity calculator jobs (no Study session). Distinct from Study `equity`.
+    if (std.mem.eql(u8, req.op, "start_equity_job")) {
+        var request = equity_jobs.parseJobRequest(state.allocator, req.body_json) catch |err| {
+            const code = if (err == error.InvalidInput or err == error.InvalidWeight) "invalid_request" else "equity_job_failed";
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        const job_id = state.equity_jobs.enqueue(request) catch |err| {
+            request.deinit(state.allocator);
+            const code = if (err == error.QueueFull) "busy" else "invalid_request";
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        // enqueue took ownership of request; job_id is owned by the manager map key.
+        var buf: [96]u8 = undefined;
+        const body = try std.fmt.bufPrint(&buf, "{{\"job_id\":\"{s}\",\"state\":\"queued\"}}", .{job_id});
+        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+    }
+
+    if (std.mem.eql(u8, req.op, "get_equity_job")) {
+        const job_id = bodyStringField(req.body_json, "job_id") orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "job_id required");
+        const status = try state.equity_jobs.statusJson(state.allocator, job_id);
+        if (status == null) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_job", "equity job not found");
+        }
+        defer state.allocator.free(status.?);
+        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, status.?);
+    }
+
+    if (std.mem.eql(u8, req.op, "cancel_equity_job")) {
+        const job_id = bodyStringField(req.body_json, "job_id") orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "job_id required");
+        if (!state.equity_jobs.cancel(job_id)) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_job", "equity job not found");
+        }
+        const status = try state.equity_jobs.statusJson(state.allocator, job_id);
+        if (status == null) {
+            return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, "{\"cancelled\":true}");
+        }
+        defer state.allocator.free(status.?);
+        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, status.?);
+    }
+
     return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_op", req.op);
 }
 
@@ -1882,4 +1929,55 @@ test "locks list put delete Study CRUD" {
     defer del_reply.deinit();
     try std.testing.expect(del_reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, del_reply.body_json, "\"locks\":[]") != null);
+}
+
+test "equity calculator jobs start get complete without session" {
+    var state = try HostState.init(std.testing.allocator, "eq-jobs");
+    defer state.deinit();
+
+    const body =
+        \\{"version":1,"client_revision":"r-test","method":"exact","target_samples":1000,"seed":1,"board":["2c","3d","7h","9s","Jc"],"dead_cards":[],"players":[{"id":"p1","range":"AsAd"},{"id":"p2","range":"KcKd"}]}
+    ;
+    var start_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "eq-start"),
+        .op = try std.testing.allocator.dupe(u8, "start_equity_job"),
+        .body_json = try std.testing.allocator.dupe(u8, body),
+    };
+    defer start_req.deinit();
+    var start_reply = try handle(&state, start_req);
+    defer start_reply.deinit();
+    try std.testing.expect(start_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, start_reply.body_json, "\"job_id\":\"eq1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, start_reply.body_json, "\"state\":\"queued\"") != null);
+
+    var completed = false;
+    var attempt: usize = 0;
+    while (attempt < 200) : (attempt += 1) {
+        std.Thread.sleep(5 * std.time.ns_per_ms);
+        var get_req: ipc.Envelope = .{
+            .allocator = std.testing.allocator,
+            .kind = .request,
+            .request_id = try std.testing.allocator.dupe(u8, "eq-get"),
+            .op = try std.testing.allocator.dupe(u8, "get_equity_job"),
+            .body_json = try std.testing.allocator.dupe(u8, "{\"job_id\":\"eq1\"}"),
+        };
+        defer get_req.deinit();
+        var get_reply = try handle(&state, get_req);
+        defer get_reply.deinit();
+        try std.testing.expect(get_reply.ok);
+        if (std.mem.indexOf(u8, get_reply.body_json, "\"state\":\"completed\"") != null) {
+            try std.testing.expect(std.mem.indexOf(u8, get_reply.body_json, "\"result\":") != null);
+            try std.testing.expect(std.mem.indexOf(u8, get_reply.body_json, "\"model\":\"check-down\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, get_reply.body_json, "\"joint_defined\":true") != null);
+            completed = true;
+            break;
+        }
+        if (std.mem.indexOf(u8, get_reply.body_json, "\"state\":\"failed\"") != null) {
+            std.debug.print("equity job failed: {s}\n", .{get_reply.body_json});
+            try std.testing.expect(false);
+        }
+    }
+    try std.testing.expect(completed);
 }

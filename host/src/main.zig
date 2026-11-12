@@ -9,6 +9,7 @@ const ipc = @import("ipc.zig");
 const dispatch = @import("dispatch.zig");
 const workers = @import("workers.zig");
 const equity_json = @import("equity_json.zig");
+const equity_jobs = @import("equity_jobs.zig");
 const locks_json = @import("locks_json.zig");
 
 pub const sidecar_name = "solver-engine";
@@ -19,6 +20,7 @@ pub fn linkedLayers() []const []const u8 {
     _ = poker_engine;
     _ = poker_formats;
     _ = workers;
+    _ = equity_jobs;
     return &.{ "poker_engine", "poker_app", "poker_formats" };
 }
 

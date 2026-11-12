@@ -368,3 +368,75 @@ describe("EngineClient ZR-83 treePreview / planMemory IPC", () => {
     });
   });
 });
+
+describe("EngineClient Equity calculator jobs IPC (ZR-84)", () => {
+  let client: EngineClient;
+
+  beforeEach(() => {
+    invoke.mockReset();
+    client = new EngineClient({ baseUrl: "http://unused" });
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("routes start/get/cancel equity jobs over IPC", async () => {
+    const startBody = {
+      version: 1,
+      client_revision: "r1",
+      method: "exact",
+      board: ["2c", "3d", "7h", "9s", "Jc"],
+      dead_cards: [],
+      players: [
+        { id: "p1", range: "AsAd" },
+        { id: "p2", range: "KcKd" },
+      ],
+      target_samples: 100000,
+      seed: 1,
+    };
+    invoke.mockResolvedValueOnce(okBody("start_equity_job", { job_id: "eq1", state: "queued" }));
+    await expect(client.startEquityJob(startBody)).resolves.toEqual({
+      job_id: "eq1",
+      state: "queued",
+    });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "start_equity_job",
+      body: startBody,
+      jobId: null,
+    });
+
+    invoke.mockResolvedValueOnce(
+      okBody("get_equity_job", {
+        job_id: "eq1",
+        state: "completed",
+        client_revision: "r1",
+        progress_done: 1,
+        progress_total: 1,
+        elapsed_seconds: 0.01,
+        result: { joint_defined: true },
+      }),
+    );
+    const status = await client.getEquityJob("eq1");
+    expect((status as { state: string }).state).toBe("completed");
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "get_equity_job",
+      body: { job_id: "eq1" },
+      jobId: null,
+    });
+
+    invoke.mockResolvedValueOnce(
+      okBody("cancel_equity_job", {
+        job_id: "eq1",
+        state: "cancelled",
+        client_revision: "r1",
+        progress_done: 0,
+        progress_total: 0,
+        elapsed_seconds: 0,
+      }),
+    );
+    await client.cancelEquityJob("eq1");
+    expect(invoke).toHaveBeenLastCalledWith("solver_engine_request", {
+      op: "cancel_equity_job",
+      body: { job_id: "eq1" },
+      jobId: null,
+    });
+  });
+});
