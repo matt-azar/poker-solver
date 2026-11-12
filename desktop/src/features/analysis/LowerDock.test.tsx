@@ -42,7 +42,8 @@ describe("LowerDock tabs", () => {
 
   it("sends a stored Runouts tab to Equity", async () => {
     useStudyStore.setState({
-      analysisTab: "runouts",
+      // Legacy persisted tab id — migrate off after dock removal.
+      analysisTab: "runouts" as "equity",
       layout: { ...useStudyStore.getState().layout, lowerDock: false },
     });
     render(<LowerDock />);

@@ -15,12 +15,7 @@ async function bootEngineThenRender(): Promise<void> {
   // Packaged Tauri: solver-engine IPC only.
   const result = await ensureEngine();
   if (result.ok) {
-    console.info(
-      "[tauri] ensure_engine",
-      result.status,
-      result.transport.kind,
-      result.endpoint?.baseUrl ?? "",
-    );
+    console.info("[tauri] ensure_engine", result.status, result.transport.kind);
   } else {
     console.warn("[tauri] ensure_engine failed", result.error, result.status);
     useStudyStore.setState({

@@ -10,9 +10,7 @@ import type {
 import { presentUserText } from "../domain/userText";
 import { isTauriRuntime } from "../platform";
 import { decodeErrorPayload } from "./contracts/error";
-import { decodeReadyPayload, type ReadyPayload } from "./contracts/ready";
 import { decodeStatusPayload } from "./contracts/status";
-import { normalizeRunoutsPayload, type RunoutsModel } from "./runouts";
 import { formatSolveJobStreetConfig, parseStreetConfigTextToSolutionConfig } from "./streetConfigText";
 import {
   ipcBeginConfig,
@@ -55,8 +53,8 @@ function defaultEngineBaseUrl(): string {
   if (typeof fromEnv === "string" && fromEnv.length > 0) {
     return fromEnv;
   }
-  // Packaged Study uses solver-engine IPC — never default to explorer :8765.
-  // Browser/dev may still set VITE_ENGINE_URL for fixture/HTTP unit tests only.
+  // Packaged Study uses solver-engine IPC — never invent an HTTP base URL.
+  // Vitest may still set VITE_ENGINE_URL for fixture-only request() tests.
   return "";
 }
 
@@ -145,7 +143,7 @@ export class EngineClient {
     body?: unknown,
     init: RequestInit = {},
   ): Promise<{ response: Response; data: unknown }> {
-    // Packaged Zig path must never fall through to explorer HTTP (:8765).
+    // Packaged Zig path must never fall through to HTTP fetch.
     if (isIpcTransport()) {
       throw new EngineError(
         `HTTP ${method} ${path} is unavailable over solver-engine IPC`,
@@ -154,7 +152,7 @@ export class EngineClient {
       );
     }
     // Empty base URL + fetch("") paints "Engine unreachable: Failed to fetch"
-    // (same class as #288). Refuse before dialing — HTTP is test/fixture only.
+    // (same class as #288). Refuse before dialing — HTTP is fixture-only.
     const base = this.baseUrl();
     if (!base) {
       throw new EngineError(
@@ -191,20 +189,6 @@ export class EngineClient {
     const message =
       decodeErrorPayload(data) ?? (response.statusText || `HTTP ${response.status}`);
     throw new EngineError(message, response.status, data);
-  }
-
-  async ready(signal?: AbortSignal): Promise<ReadyPayload> {
-    const { response, data } = await this.request("GET", "/api/ready", undefined, { signal });
-    this.ensureOk(response, data);
-    try {
-      return decodeReadyPayload(data);
-    } catch (err) {
-      throw new EngineError(
-        err instanceof Error ? err.message : String(err),
-        response.status,
-        data,
-      );
-    }
   }
 
   async status(signal?: AbortSignal): Promise<StatusPayload> {
@@ -499,27 +483,6 @@ export class EngineClient {
     return data as ActionValuesPayload;
   }
 
-  async getRunouts(
-    solutionId: string,
-    nodeId: string,
-    signal?: AbortSignal,
-  ): Promise<RunoutsModel> {
-    if (isIpcTransport()) {
-      void solutionId;
-      void nodeId;
-      void signal;
-      throw new EngineError("getRunouts is not available over solver-engine IPC yet", 501, null);
-    }
-    const { response, data } = await this.request(
-      "GET",
-      `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/runouts`,
-      undefined,
-      { signal },
-    );
-    this.ensureOk(response, data, true);
-    return normalizeRunoutsPayload(data);
-  }
-
   async getEquity(solutionId: string, nodeId?: string, signal?: AbortSignal): Promise<unknown> {
     if (isIpcTransport()) {
       if (signal?.aborted) {
@@ -548,7 +511,7 @@ export class EngineClient {
   async startNodeAnalysis(
     solutionId: string,
     nodeId: string,
-    metrics: Array<"values" | "equity" | "runouts"> = ["values", "equity"],
+    metrics: Array<"values" | "equity"> = ["values", "equity"],
     signal?: AbortSignal,
   ): Promise<unknown> {
     if (isIpcTransport()) {
@@ -556,11 +519,7 @@ export class EngineClient {
         throw new EngineError("aborted", 0, null);
       }
       // Thin sync warm: Study still polls getValues/getEquity. No 202 job handle yet.
-      // Skip runouts on IPC until a host op exists. Equity is reach-weighted at any node.
-      const wanted = metrics.filter((m) => {
-        if (m === "values" || m === "equity") return true;
-        return false;
-      });
+      const wanted = metrics.filter((m) => m === "values" || m === "equity");
       return {
         pending: false,
         ok: true,
@@ -574,22 +533,6 @@ export class EngineClient {
       "POST",
       `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/analysis`,
       { metrics, priority: "foreground" },
-      { signal },
-    );
-    this.ensureOk(response, data, true);
-    return data;
-  }
-
-  /** Passive read of Study analysis handle state (never starts work). */
-  async getNodeAnalysis(
-    solutionId: string,
-    nodeId: string,
-    signal?: AbortSignal,
-  ): Promise<unknown> {
-    const { response, data } = await this.request(
-      "GET",
-      `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/analysis`,
-      undefined,
       { signal },
     );
     this.ensureOk(response, data, true);
@@ -618,7 +561,7 @@ export class EngineClient {
     return data;
   }
 
-  /** Poll `/api/status` until a file/solve overlay leaves `running`. */
+  /** Poll status until a file/solve overlay leaves `running` (fixture HTTP path). */
   private async waitUntilIdle(signal?: AbortSignal): Promise<StatusPayload> {
     for (let attempt = 0; attempt < 600; ++attempt) {
       if (signal?.aborted) {
@@ -635,7 +578,7 @@ export class EngineClient {
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    throw new EngineError("timed out waiting for explorer job", 504, null);
+    throw new EngineError("timed out waiting for engine job", 504, null);
   }
 
   async save(solutionId: string, path: string, signal?: AbortSignal): Promise<unknown> {
@@ -963,24 +906,6 @@ export class EngineClient {
     const { response, data } = await this.request(
       "GET",
       `/api/equity/jobs/${encodeURIComponent(jobId)}`,
-      undefined,
-      { signal },
-    );
-    this.ensureOk(response, data);
-    return data;
-  }
-
-  async getEquityJobResult(jobId: string, signal?: AbortSignal): Promise<unknown> {
-    if (isIpcTransport()) {
-      if (signal?.aborted) {
-        throw new EngineError("aborted", 0, null);
-      }
-      // Result is embedded on completed/stopped status payloads.
-      return ipcGetEquityJob(jobId);
-    }
-    const { response, data } = await this.request(
-      "GET",
-      `/api/equity/jobs/${encodeURIComponent(jobId)}/result`,
       undefined,
       { signal },
     );

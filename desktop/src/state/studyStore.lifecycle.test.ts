@@ -110,7 +110,6 @@ function seedPublishedStudy() {
     canNavForward: false,
     nodeValues: { node_id: "p0.child", value: [1] },
     equity: { node_id: "p0.child", pending: false },
-    runouts: null,
     categories: null,
     compareNote: null,
     setupMeta: {

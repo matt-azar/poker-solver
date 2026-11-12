@@ -6,16 +6,16 @@ import {
   studyIpcUnavailableReason,
   studyUsesIpcFeatureGates,
 } from "./ipcCapabilities";
-import { setHttpFallbackTransport, setIpcTransport } from "./transport";
+import { setNoEngineTransport, setIpcTransport } from "./transport";
 
 afterEach(() => {
   clearStudyIpcFeatureOverridesForTests();
-  setHttpFallbackTransport();
+  setNoEngineTransport();
 });
 
 describe("studyIpcFeatureAvailable", () => {
   it("leaves features available outside the packaged IPC shell", () => {
-    setHttpFallbackTransport();
+    setNoEngineTransport();
     expect(studyUsesIpcFeatureGates()).toBe(false);
     expect(studyIpcFeatureAvailable("compare")).toBe(true);
     expect(studyIpcFeatureAvailable("resolveLocked")).toBe(true);
@@ -37,7 +37,6 @@ describe("studyIpcFeatureAvailable", () => {
     expect(studyIpcFeatureAvailable("strategyEdits")).toBe(true);
     // ZR-103 wired host `categories` + client IPC branch.
     expect(studyIpcFeatureAvailable("categories")).toBe(true);
-    expect(studyIpcFeatureAvailable("runouts")).toBe(false);
   });
 
   it("honors test overrides as a thin sibling hook", () => {

@@ -1,9 +1,7 @@
 /**
  * Client-side analysis page cache + serialized ValueWorker queue.
  *
- * Explorer's ValueWorker accepts multiple queued metrics and serves cache hits
- * while busy, but Study still serializes client polls so navigation/prefetch
- * stay orderly. This module:
+ * Study serializes client polls so navigation/prefetch stay orderly. This module:
  *   1. Remembers ready pages by solution/node/revision/kind so navigation is free.
  *   2. Runs worker-bound kinds one at a time (user jobs before prefetch).
  *   3. Requires each job's run() to await the full poll lifecycle (not the first 202).
@@ -11,7 +9,7 @@
  * that too expensive; we warm the live node and optionally its children.
  */
 
-export type WorkerAnalysisKind = "values" | "equity" | "runouts";
+export type WorkerAnalysisKind = "values" | "equity";
 
 export type AnalysisCacheKey = {
   solutionId: string;

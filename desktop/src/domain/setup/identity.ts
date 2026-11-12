@@ -12,7 +12,7 @@ import {
 import type { ComparePayload } from "../locks";
 import { DEFAULT_SPOT, type NodePayload, type SpotDraft, type StatusPayload } from "../types";
 
-export type AnalysisKind = "values" | "runouts" | "equity" | "categories";
+export type AnalysisKind = "values" | "equity" | "categories";
 
 /** Identity key for one in-flight or published analysis result. */
 export interface AnalysisIdentity {

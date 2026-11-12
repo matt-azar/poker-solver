@@ -27,7 +27,7 @@ describe("analysis identity", () => {
       revision: 3,
       kind: "equity" as const,
     };
-    const b = { ...a, kind: "runouts" as const };
+    const b = { ...a, kind: "categories" as const };
     expect(analysisIdentityKey(a)).not.toBe(analysisIdentityKey(b));
     expect(analysisIdentitiesEqual(a, { ...a })).toBe(true);
     expect(analysisIdentitiesEqual(a, b)).toBe(false);

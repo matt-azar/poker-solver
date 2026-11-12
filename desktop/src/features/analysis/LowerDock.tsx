@@ -31,11 +31,12 @@ export function LowerDock() {
 
   // Migrate removed / renamed dock tabs without editing studyStore.
   useEffect(() => {
-    if (analysisTab === "explorer" || analysisTab === "runouts") {
+    const tab = analysisTab as string;
+    if (tab === "explorer" || tab === "runouts") {
       setAnalysisTab("equity");
       return;
     }
-    if ((analysisTab as string) === "bluffs") {
+    if (tab === "bluffs") {
       setAnalysisTab("value-bluffs");
     }
   }, [analysisTab, setAnalysisTab]);

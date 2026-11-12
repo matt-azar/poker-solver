@@ -27,22 +27,23 @@ import {
   ipcSave,
   ipcTreePreview,
   ipcValues,
-  setHttpFallbackTransport,
+  setNoEngineTransport,
   setIpcTransport,
+  solverEngineRequest,
 } from "./transport";
 
 describe("solver transport selection", () => {
   beforeEach(() => {
     invoke.mockReset();
-    setHttpFallbackTransport();
+    setNoEngineTransport();
   });
 
-  it("labels HTTP as browser/dev only (not packaged)", () => {
-    const http = setHttpFallbackTransport();
-    expect(http.kind).toBe("http-fallback");
-    expect(http.label.toLowerCase()).toContain("browser/dev");
-    expect(http.label.toLowerCase()).toContain("solver-engine");
-    expect(getActiveTransport().kind).toBe("http-fallback");
+  it("labels no-engine as browser/dev only (not packaged)", () => {
+    const none = setNoEngineTransport();
+    expect(none.kind).toBe("no-engine");
+    expect(none.label.toLowerCase()).toContain("browser/dev");
+    expect(none.label.toLowerCase()).toContain("solver-engine");
+    expect(getActiveTransport().kind).toBe("no-engine");
   });
 
   it("records solver-engine IPC as the packaged Zig transport", () => {
@@ -55,7 +56,7 @@ describe("solver transport selection", () => {
     expect(ipc.kind).toBe("ipc");
     expect(ipc.label).toContain("protocol 2");
     expect(getActiveTransport().kind).toBe("ipc");
-    setHttpFallbackTransport();
+    setNoEngineTransport();
   });
 });
 
@@ -331,6 +332,29 @@ describe("Slice C locks IPC helpers", () => {
       body: { iterations: 4, warm_start: 1, time_limit: 9 },
       jobId: "j-rl",
     });
+  });
+});
+
+describe("solverEngineRequest honest errors", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("surfaces invalid_frame error_code / message from ok:false replies", async () => {
+    invoke.mockResolvedValue({
+      v: 2,
+      kind: "reply",
+      request_id: "r-bad",
+      op: "node",
+      ok: false,
+      error_code: "invalid_frame",
+      error_message: "expected request",
+      body: null,
+    });
+    await expect(solverEngineRequest("node", { node_id: "p0.t-1.r-1" })).rejects.toThrow(
+      /expected request|invalid_frame/i,
+    );
   });
 });
 

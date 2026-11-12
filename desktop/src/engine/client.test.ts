@@ -13,7 +13,7 @@ vi.mock("../platform", () => ({
 import { EngineClient } from "./client";
 import {
   resetStudyJobIdCounterForTests,
-  setHttpFallbackTransport,
+  setNoEngineTransport,
   setIpcTransport,
 } from "./transport";
 
@@ -187,18 +187,19 @@ describe("EngineClient Slice A IPC branches", () => {
     await expect(client.save("s2", "/tmp/demo.psol")).resolves.toEqual({ saved: true });
   });
 
-  it("refuses HTTP in the Tauri shell when transport is fallback", async () => {
-    setHttpFallbackTransport();
+  it("refuses HTTP in the Tauri shell when transport is no-engine", async () => {
+    setNoEngineTransport();
     const fetchImpl = vi.fn(async () => {
       return new Response(JSON.stringify({ phase: "paused" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     });
-    client = new EngineClient({ baseUrl: "http://127.0.0.1:8765", fetchImpl });
+    client = new EngineClient({ baseUrl: "http://127.0.0.1:9", fetchImpl });
     await expect(client.pause("j1")).rejects.toMatchObject({
       name: "EngineError",
       status: 501,
+      message: expect.stringMatching(/unavailable in the packaged Study shell/i),
     });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
@@ -259,18 +260,19 @@ describe("EngineClient Slice C locks IPC branches", () => {
     });
   });
 
-  it("refuses locks HTTP in the Tauri shell when transport is fallback", async () => {
-    setHttpFallbackTransport();
+  it("refuses locks HTTP in the Tauri shell when transport is no-engine", async () => {
+    setNoEngineTransport();
     const fetchImpl = vi.fn(async () => {
       return new Response(JSON.stringify({ locks: [] }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     });
-    client = new EngineClient({ baseUrl: "http://127.0.0.1:8765", fetchImpl });
+    client = new EngineClient({ baseUrl: "http://127.0.0.1:9", fetchImpl });
     await expect(client.listLocks("s9")).rejects.toMatchObject({
       name: "EngineError",
       status: 501,
+      message: expect.stringMatching(/unavailable in the packaged Study shell/i),
     });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
@@ -348,7 +350,7 @@ describe("EngineClient ZR-101 strategy-edits IPC branches", () => {
 describe("EngineClient empty-base refuse", () => {
   beforeEach(() => {
     invoke.mockReset();
-    setHttpFallbackTransport();
+    setNoEngineTransport();
   });
 
   it("does not fetch when base URL is empty (Failed-to-fetch class)", async () => {
