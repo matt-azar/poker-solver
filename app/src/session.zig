@@ -60,8 +60,10 @@ pub const Session = struct {
     frozen: bool = false,
     /// Shared worker budget for frozen chance steal (D3). From config `threads` or host override.
     threads: u32 = 1,
-    /// Persistent StreetBatch-style engine: ranks + worker scratch survive Acc-stop
-    /// `train(1)` / eval cycles (C++ Engine lifetime). Cleared on `begin` / deinit.
+    /// Persistent StreetBatch-style engine: ranks + worker scratch + chance pool
+    /// survive Acc-stop `train(1)` / eval cycles (C++ Engine lifetime).
+    /// Cleared on `begin` / deinit / thread-count change. Do not move after the
+    /// chance pool has started (lazy on first parallel chance dispatch).
     frozen_ctx: ?poker_engine.solve.frozen_walk.FrozenCtx = null,
     /// Protects phase / published swap / reader count (mid-train Study browse).
     mu: std.Thread.Mutex = .{},
