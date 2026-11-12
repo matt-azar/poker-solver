@@ -15,7 +15,12 @@ import { normalizeRunoutsPayload, type RunoutsModel } from "./runouts";
 import { formatSolveJobStreetConfig } from "./streetConfigText";
 import {
   ipcBeginConfig,
+  ipcCancel,
   ipcEquity,
+  ipcNode,
+  ipcOpen,
+  ipcPause,
+  ipcSave,
   ipcSolve,
   ipcStatus,
   ipcValues,
@@ -207,6 +212,9 @@ export class EngineClient {
   }
 
   async pause(jobId?: string): Promise<unknown> {
+    if (isIpcTransport()) {
+      return ipcPause(jobId ?? null);
+    }
     const { response, data } = await this.request(
       "POST",
       "/api/pause",
@@ -216,7 +224,15 @@ export class EngineClient {
     return data;
   }
 
+  /**
+   * Stop a train/analysis job.
+   * On IPC this maps to host `cancel` (job cancel), not HTTP stop-and-keep.
+   * Missing jobId defaults to the Study train id (`j-study`).
+   */
   async stop(jobId?: string): Promise<unknown> {
+    if (isIpcTransport()) {
+      return ipcCancel(jobId ?? null);
+    }
     const { response, data } = await this.request(
       "POST",
       "/api/stop",
@@ -259,6 +275,17 @@ export class EngineClient {
   }
 
   async getNode(solutionId: string, nodeId: string, signal?: AbortSignal): Promise<NodePayload> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const data = await ipcNode(nodeId);
+      return {
+        ...(data as object),
+        solution_id: solutionId,
+        node_id: nodeId,
+      } as NodePayload;
+    }
     const { response, data } = await this.request(
       "GET",
       `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}`,
@@ -415,6 +442,14 @@ export class EngineClient {
   }
 
   async save(solutionId: string, path: string, signal?: AbortSignal): Promise<unknown> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      // Host save is sync; solutionId is Study-side identity (host uses current session).
+      void solutionId;
+      return ipcSave(path);
+    }
     const { response, data } = await this.request(
       "POST",
       `/api/solutions/${solutionId}/save`,
@@ -430,6 +465,17 @@ export class EngineClient {
   }
 
   async open(path: string, signal?: AbortSignal): Promise<StatusPayload> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const data = await ipcOpen(path);
+      try {
+        return decodeStatusPayload(data);
+      } catch (err) {
+        throw new EngineError(err instanceof Error ? err.message : String(err), 0, data);
+      }
+    }
     const { response, data } = await this.request("POST", "/api/open", { path }, { signal });
     this.ensureOk(response, data, true);
     if (response.status === 202) {
