@@ -28,6 +28,7 @@ import {
   ipcPause,
   ipcPlanMemory,
   ipcPutLock,
+  ipcResolveLocked,
   ipcSave,
   ipcSolve,
   ipcStartEquityJob,
@@ -375,13 +376,51 @@ export class EngineClient {
     },
   ): Promise<unknown> {
     if (isIpcTransport()) {
+      // Host resolve_locked: baseline stamp + optional reset + train under locks.
       void solutionId;
-      void body;
-      throw new EngineError(
-        "resolveLocked is not available over solver-engine IPC yet",
-        501,
-        null,
-      );
+      const iterations = Math.max(1, Math.trunc(body.iterations || 1));
+      const jobId = mintStudyJobId();
+      this.lastJobId = jobId;
+      const time_limit =
+        typeof body.time_limit === "number" && Number.isFinite(body.time_limit)
+          ? body.time_limit
+          : undefined;
+      const accuracy =
+        typeof body.accuracy === "number" && Number.isFinite(body.accuracy)
+          ? body.accuracy
+          : undefined;
+      const samples =
+        typeof body.samples === "number" && Number.isFinite(body.samples)
+          ? body.samples
+          : undefined;
+      const reply = (await ipcResolveLocked({
+        iterations,
+        warm_start: body.warm_start ? 1 : 0,
+        accuracy,
+        samples,
+        time_limit,
+        jobId,
+      })) as {
+        solution_id?: number;
+        policy_revision?: number;
+        trained?: number;
+        terminal_reason?: string;
+        threads?: number;
+      };
+      return {
+        running: false,
+        job_id: jobId,
+        solution_id:
+          reply.solution_id != null && reply.solution_id > 0
+            ? `s${reply.solution_id}`
+            : solutionId,
+        policy_revision: reply.policy_revision ?? 0,
+        trained: reply.trained ?? iterations,
+        terminal_reason: reply.terminal_reason ?? "completed",
+        threads: reply.threads,
+        transport: "ipc",
+        warm_start: body.warm_start ? "continue" : "reset",
+      };
     }
     const { response, data } = await this.request(
       "POST",

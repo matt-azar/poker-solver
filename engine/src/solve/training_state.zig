@@ -44,6 +44,19 @@ pub const TrainingState = struct {
         if (self.sigma.len != 0) self.allocator.free(self.sigma);
         self.* = .{ .allocator = self.allocator };
     }
+
+    /// Zero regrets / strategy sums and re-freeze σ (resolve-locked reset path).
+    pub fn resetForResolve(
+        self: *TrainingState,
+        game: compile.CompiledGame,
+        locks: ?*const node_lock.LockSet,
+    ) TrainError!void {
+        if (self.regret.len != 0) @memset(self.regret, 0);
+        if (self.strategy_sum.len != 0) @memset(self.strategy_sum, 0);
+        if (self.sigma.len != 0) @memset(self.sigma, 0);
+        self.trained = 0;
+        try freezeSigma(game, self, locks);
+    }
 };
 
 pub const PublishedPolicy = struct {

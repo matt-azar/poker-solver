@@ -317,6 +317,34 @@ export async function ipcSolve(
   return env.body;
 }
 
+export type IpcResolveLockedOptions = {
+  iterations: number;
+  warm_start?: number;
+  accuracy?: number;
+  samples?: number;
+  time_limit?: number;
+  jobId?: string | null;
+};
+
+/** Locked re-solve: host stamps baseline, optional reset, trains under locks. */
+export async function ipcResolveLocked(opts: IpcResolveLockedOptions): Promise<unknown> {
+  const body: Record<string, unknown> = {
+    iterations: Math.max(1, Math.trunc(opts.iterations || 1)),
+    warm_start: opts.warm_start ? 1 : 0,
+  };
+  if (opts.accuracy != null && Number.isFinite(opts.accuracy) && opts.accuracy > 0) {
+    body.accuracy = opts.accuracy;
+  }
+  if (opts.samples != null && Number.isFinite(opts.samples) && opts.samples > 0) {
+    body.samples = Math.trunc(opts.samples);
+  }
+  if (opts.time_limit != null && Number.isFinite(opts.time_limit) && opts.time_limit >= 0) {
+    body.time_limit = opts.time_limit;
+  }
+  const env = await solverEngineRequest("resolve_locked", body, opts.jobId ?? null);
+  return env.body;
+}
+
 /** Standalone Equity calculator job start (ZR-84; no Study session). */
 export async function ipcStartEquityJob(body: Record<string, unknown>): Promise<unknown> {
   const env = await solverEngineRequest("start_equity_job", body);
