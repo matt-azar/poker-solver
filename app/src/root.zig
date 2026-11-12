@@ -90,6 +90,50 @@ test "session train save open roundtrip" {
     try std.testing.expectError(error.LegacyCheckpointRejected, err);
     try std.testing.expectEqual(legacy_id, other.solution_id);
     try std.testing.expectEqual(legacy_phase, other.phase);
+
+    // Fail-closed: damaged/truncated v4 (oversized array count) must not clobber.
+    const damaged_path = try std.fs.path.join(std.testing.allocator, &.{ abs, "damaged_oversized.psol" });
+    defer std.testing.allocator.free(damaged_path);
+    {
+        // Craft a sealed v4 file whose average count cannot fit remaining payload.
+        var payload = std.ArrayList(u8).init(std.testing.allocator);
+        defer payload.deinit();
+        try payload.append(poker_formats.psol_v4.algorithm_cfr_plus);
+        try payload.append(0);
+        try payload.appendSlice(&[_]u8{ 0, 0 });
+        try payload.appendSlice(&[_]u8{ 1, 0, 0, 0 });
+        try payload.append('x');
+        try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+        try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+        try payload.appendSlice(&[_]u8{ 0, 0, 0, 0 });
+        try payload.appendSlice(&[_]u8{ 0x00, 0x00, 0x00, 0x10 }); // 0x10000000 f32s
+
+        var hash: u64 = 0xcbf29ce484222325;
+        for (payload.items) |b| {
+            hash ^= b;
+            hash *%= 0x100000001b3;
+        }
+        var header: [32]u8 = undefined;
+        @memcpy(header[0..4], "PSOL");
+        std.mem.writeInt(u32, header[4..8], 4, .little);
+        std.mem.writeInt(u32, header[8..12], 0, .little);
+        std.mem.writeInt(u64, header[12..20], payload.items.len, .little);
+        std.mem.writeInt(u64, header[20..28], hash, .little);
+        std.mem.writeInt(u32, header[28..32], 0, .little);
+
+        const file = try std.fs.cwd().createFile(damaged_path, .{});
+        defer file.close();
+        try file.writeAll(&header);
+        try file.writeAll(payload.items);
+    }
+    const damaged_id = other.solution_id;
+    const damaged_phase = other.phase;
+    const damaged_rev = other.policyRevision();
+    const damaged_err = other.open(damaged_path);
+    try std.testing.expectError(error.InvalidPsol, damaged_err);
+    try std.testing.expectEqual(damaged_id, other.solution_id);
+    try std.testing.expectEqual(damaged_phase, other.phase);
+    try std.testing.expectEqual(damaged_rev, other.policyRevision());
 }
 
 test "browse-only open keeps has_training false and continue disabled" {
