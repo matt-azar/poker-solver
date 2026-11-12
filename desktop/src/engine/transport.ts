@@ -106,7 +106,12 @@ export type IpcRequestEnvelope = {
   body?: unknown;
 };
 
-/** Framed request/reply via the Tauri-owned pipe ends. */
+/**
+ * Framed request/reply via the Tauri-owned pipe ends.
+ * Safe to overlap mid-train `values` with an in-flight `solve`: the shell
+ * demuxes replies by `request_id` and does not hold the session mutex across
+ * the blocking wait (host stdin already serves live-under-train).
+ */
 export async function solverEngineRequest(
   op: string,
   body: unknown = null,
