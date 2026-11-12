@@ -3,6 +3,7 @@ pub const chips = @import("chips.zig");
 pub const range = @import("range.zig");
 pub const size_spec = @import("size_spec.zig");
 pub const hand_eval = @import("hand_eval.zig");
+pub const hand_categories = @import("hand_categories.zig");
 pub const payoff = @import("payoff.zig");
 pub const icm = @import("icm.zig");
 pub const incentives = @import("incentives.zig");
@@ -18,4 +19,5 @@ test {
     _ = @import("payoff_rematch_test.zig");
     _ = @import("icm_rematch_test.zig");
     _ = incentives;
+    _ = hand_categories;
 }

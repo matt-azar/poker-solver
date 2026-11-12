@@ -1,3 +1,7 @@
+import {
+  studyIpcFeatureAvailable,
+  studyIpcUnavailableReason,
+} from "../engine/ipcCapabilities";
 import { validateSetupForSolve } from "../domain/setup";
 import { solveControlFlags } from "../domain/solveControls";
 import type { NodePayload, SolvePhase, SpotDraft } from "../domain/types";
@@ -124,6 +128,9 @@ export function canExecuteOpenLockEditor(
 export function canExecuteOpenStrategyEditor(
   ctx: StudyCommandContext,
 ): CommandEligibility {
+  if (!studyIpcFeatureAvailable("strategyEdits")) {
+    return eligible(false, studyIpcUnavailableReason("strategyEdits"));
+  }
   if (ctx.workspace !== "study") {
     return eligible(false, "Open Study to edit strategy");
   }
@@ -134,6 +141,49 @@ export function canExecuteOpenStrategyEditor(
     return eligible(false, "Strategy edits require a decision node");
   }
   return eligible(true, "Open the strategy editor for the current decision");
+}
+
+export function canExecuteResolveLocked(
+  ctx: StudyCommandContext,
+): CommandEligibility {
+  if (!studyIpcFeatureAvailable("resolveLocked")) {
+    return eligible(false, studyIpcUnavailableReason("resolveLocked"));
+  }
+  if (!ctx.solutionId) {
+    return eligible(false, "Solve first");
+  }
+  const flags = solveControlFlags(ctx.phase);
+  if (flags.busy) {
+    return eligible(false, "Wait for the current solve to finish");
+  }
+  return eligible(true, "Re-solve with current node locks applied");
+}
+
+export function canExecuteCompareToBaseline(
+  ctx: StudyCommandContext,
+): CommandEligibility {
+  if (!studyIpcFeatureAvailable("compare")) {
+    return eligible(false, studyIpcUnavailableReason("compare"));
+  }
+  if (!ctx.solutionId) {
+    return eligible(false, "Solve first");
+  }
+  return eligible(true, "Compare the current solution to a resolve-locked baseline");
+}
+
+export function canExecuteLoadCategories(
+  ctx: StudyCommandContext,
+): CommandEligibility {
+  if (!studyIpcFeatureAvailable("categories")) {
+    return eligible(false, studyIpcUnavailableReason("categories"));
+  }
+  if (!ctx.solutionId) {
+    return eligible(false, "Solve first");
+  }
+  if (!ctx.currentNode) {
+    return eligible(false, "Select a node before loading categories");
+  }
+  return eligible(true, "Load hand categories for the current node");
 }
 
 export interface SolveCommandDeps {
@@ -279,6 +329,28 @@ export function executeOpenStrategyEditor(
     return { ok: false, reason: gate.reason };
   }
   deps.setStrategyEditDrawerOpen(true);
+  return { ok: true };
+}
+
+export async function executeResolveLocked(
+  deps: SimpleCommandDeps & { resolveLocked: () => Promise<void> },
+): Promise<CommandResult> {
+  const gate = canExecuteResolveLocked(deps.getContext());
+  if (!gate.ok) {
+    return { ok: false, reason: gate.reason };
+  }
+  await deps.resolveLocked();
+  return { ok: true };
+}
+
+export async function executeCompareToBaseline(
+  deps: SimpleCommandDeps & { loadCompare: () => Promise<void> },
+): Promise<CommandResult> {
+  const gate = canExecuteCompareToBaseline(deps.getContext());
+  if (!gate.ok) {
+    return { ok: false, reason: gate.reason };
+  }
+  await deps.loadCompare();
   return { ok: true };
 }
 

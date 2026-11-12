@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import {
+  studyIpcFeatureAvailable,
+  studyIpcUnavailableReason,
+} from "../../engine/ipcCapabilities";
 import { compareNoteIsValid } from "../../domain/setup";
 import { useStudyStore } from "../../state/studyStore";
 import { CompareHeader } from "./CompareHeader";
@@ -22,9 +26,14 @@ export function CompareWorkspace() {
   const [sort, setSort] = useState<HandSort>("delta");
   const [busy, setBusy] = useState(false);
 
+  const compareAvailable = studyIpcFeatureAvailable("compare");
+  const compareUnavailableReason = studyIpcUnavailableReason("compare");
+
   // Prefer the live Study node; never fall back to a stale compare root across solutions.
   const nodeId = currentNode?.node_id ?? null;
-  const canCompare = Boolean(baselineSolutionId && solutionId && nodeId);
+  const canCompare = Boolean(
+    compareAvailable && baselineSolutionId && solutionId && nodeId,
+  );
   const missingBaseline = !baselineSolutionId;
   const noteValid = compareNoteIsValid(
     compareNote,
@@ -68,6 +77,31 @@ export function CompareWorkspace() {
     if (target) {
       await navigateTo(target);
     }
+  }
+
+  if (!compareAvailable) {
+    return (
+      <div className="compare-workspace">
+        <div className="compare-toolbar">
+          <div className="compare-toolbar__title">
+            <h1>Compare</h1>
+          </div>
+          <div className="compare-toolbar__actions">
+            <button
+              type="button"
+              className="toolbar-btn primary"
+              onClick={() => setWorkspace("study")}
+            >
+              Back to Study
+            </button>
+          </div>
+        </div>
+        <div className="compare-empty" role="status">
+          <h2>Unavailable over IPC</h2>
+          <p>{compareUnavailableReason}</p>
+        </div>
+      </div>
+    );
   }
 
   return (

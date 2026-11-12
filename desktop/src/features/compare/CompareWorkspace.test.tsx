@@ -1,6 +1,8 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearStudyIpcFeatureOverridesForTests } from "../../engine/ipcCapabilities";
+import { setHttpFallbackTransport, setIpcTransport } from "../../engine/transport";
 import type { ComparePayload } from "../../domain/locks";
 import type { NodePayload } from "../../domain/types";
 
@@ -78,6 +80,21 @@ describe("CompareWorkspace busy state (R12)", () => {
 
   afterEach(() => {
     cleanup();
+    clearStudyIpcFeatureOverridesForTests();
+    setHttpFallbackTransport();
+  });
+
+  it("shows an honest unavailable empty when compare lacks IPC", () => {
+    setIpcTransport({
+      protocol: 2,
+      launchId: "test",
+      sidecar: "solver-engine",
+      workers: 1,
+    });
+    render(<CompareWorkspace />);
+    expect(screen.getByText("Unavailable over IPC")).toBeTruthy();
+    expect(screen.getByText(/dual-session baseline/i)).toBeTruthy();
+    expect(useStudyStore.getState().loadCompare).not.toHaveBeenCalled();
   });
 
   it("re-enables Refresh after a successful auto-load leaves a valid note", async () => {

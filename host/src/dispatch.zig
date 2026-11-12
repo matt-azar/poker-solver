@@ -6,6 +6,7 @@ const ipc = @import("ipc.zig");
 const workers = @import("workers.zig");
 const equity_json = @import("equity_json.zig");
 const equity_jobs = @import("equity_jobs.zig");
+const categories_json = @import("categories_json.zig");
 const locks_json = @import("locks_json.zig");
 const node_lock = poker_engine.solve.node_lock;
 
@@ -334,6 +335,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     state.session.mu.lock();
     const phase = state.session.phase;
     const solution_id = state.session.solution_id;
+    const baseline_id = state.session.baseline_id;
     const policy_revision = state.session.policyRevision();
     const has_training = state.session.has_training;
     const can_continue = state.session.canContinue();
@@ -369,6 +371,11 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
         try w.writeAll(",\"solution_id\":null,\"root_node_id\":null");
     } else {
         try w.print(",\"solution_id\":\"s{d}\",\"root_node_id\":\"p0.t-1.r-1\"", .{solution_id});
+    }
+    if (baseline_id == 0) {
+        try w.writeAll(",\"baseline_solution_id\":null");
+    } else {
+        try w.print(",\"baseline_solution_id\":\"s{d}\"", .{baseline_id});
     }
     if (active) |jid| {
         try w.print(",\"job_id\":\"{s}\"", .{jid});
@@ -927,7 +934,61 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
-    // Study locks CRUD over Session.locks_text (node_lock codec). No resolveLocked.
+    // Study Categories (made-hand on five-card boards; short boards → available=false).
+    if (std.mem.eql(u8, req.op, "categories")) {
+        state.budget.prioritizeAnalysis(1);
+        defer state.budget.returnToTraining();
+        const wait_ns: u64 = 120 * std.time.ns_per_s;
+        var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+        defer lease.deinit();
+        const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
+        };
+        const node_id_text = poker_engine.analysis.node_id.formatNodeId(
+            state.allocator,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "categories_failed", @errorName(err));
+        };
+        defer state.allocator.free(node_id_text);
+        const t0 = std.time.nanoTimestamp();
+        const report = poker_engine.analysis.categories.categoriesAtNode(
+            state.allocator,
+            lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch |err| {
+            const code: []const u8 = switch (err) {
+                error.InvalidEquity, error.InvalidCategories => "invalid_categories",
+                error.InvalidWeight => "invalid_weight",
+                error.WorkLimit => "work_limit",
+                error.OutOfMemory => "oom",
+            };
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        const elapsed_ns = std.time.nanoTimestamp() - t0;
+        const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
+        const body = categories_json.packStudyCategoriesBody(state.allocator, .{
+            .solution_id = lease.solution_id,
+            .node_id = node_id_text,
+            .policy_revision = state.session.policyRevision(),
+            .query_seconds = query_seconds,
+            .report = &report,
+        }) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "categories_pack_failed", @errorName(err));
+        };
+        defer state.allocator.free(body);
+        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+    }
+
+    // Study locks CRUD over Session.locks_text (node_lock codec).
+    // resolve_locked is async (main.zig → startResolveLocked), like solve.
     if (std.mem.eql(u8, req.op, "list_locks")) {
         if (state.session.solution_id == 0) {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
@@ -1145,87 +1206,71 @@ fn trainWorker(task: *TrainTask) void {
     }
 
     const use_gated = task.accuracy > 0 or task.time_limit >= 0;
-    const train_result = if (use_gated)
-        state.session.trainGated(task.iterations, task.accuracy, task.eval_every, task.time_limit)
-    else
-        state.session.train(task.iterations);
-
-    var reply: ipc.Envelope = undefined;
-    if (train_result) |_| {
-        var buf: [320]u8 = undefined;
-        const trained: i32 = if (state.session.published) |p| p.trained else 0;
-        const body = std.fmt.bufPrint(&buf, "{{\"solution_id\":{d},\"policy_revision\":{d},\"trained\":{d},\"terminal_reason\":\"{s}\",\"async\":true,\"threads\":{d}}}", .{
-            state.session.solution_id,
-            state.session.policyRevision(),
-            trained,
-            @tagName(state.session.last_terminal),
-            state.session.threads,
-        }) catch {
-            reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "solve_failed", "format") catch return;
-            defer reply.deinit();
-            state.writeReply(reply) catch {};
-            return;
-        };
-        reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, task.op, body) catch {
-            reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "solve_failed", "oom") catch return;
-            defer reply.deinit();
-            state.writeReply(reply) catch {};
-            return;
-        };
-    } else |err| {
-        reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "solve_failed", @errorName(err)) catch return;
+    // ZR-106 / ZR-90: admission already replied. Completion is visible via
+    // `status` (`running` / phase / terminal_reason) — do not write a second
+    // solve reply on the same request_id (would be orphaned after short admit).
+    if (use_gated) {
+        state.session.trainGated(task.iterations, task.accuracy, task.eval_every, task.time_limit) catch {};
+    } else {
+        state.session.train(task.iterations) catch {};
     }
-    defer reply.deinit();
-    state.writeReply(reply) catch {};
 }
 
-/// Spawn background CFR+ train so the stdin loop can serve `values` mid-train (R10).
-/// Does not write a sync reply; the worker emits the solve reply when finished.
-pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
-    try state.track(req.request_id);
-    errdefer state.untrack(req.request_id);
+fn writeTrainAdmitReply(state: *HostState, req: ipc.Envelope) !void {
+    var buf: [192]u8 = undefined;
+    const body = try std.fmt.bufPrint(
+        &buf,
+        "{{\"accepted\":true,\"running\":true,\"solution_id\":{d},\"async\":true,\"threads\":{d}}}",
+        .{ state.session.solution_id, state.session.threads },
+    );
+    var reply = try ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+    defer reply.deinit();
+    try state.writeReply(reply);
+}
 
+fn admitTrainJob(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
     // Stale cancelled id: reject only while that cancel is still sticky mid-flight.
     // After a worker finishes it clears the id so a fresh mint can reuse names.
     if (state.isCancelled(req.job_id) and state.train_running.load(.acquire)) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "cancelled", "job cancelled");
         defer err_reply.deinit();
-        state.untrack(req.request_id);
         try state.writeReply(err_reply);
-        return;
+        return .replied;
     }
     if (req.job_id) |jid| state.clearCancelled(jid);
 
     if (state.session.phase == .idle) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_session", "call begin_config before solve");
         defer err_reply.deinit();
-        state.untrack(req.request_id);
         try state.writeReply(err_reply);
-        return;
+        return .replied;
     }
 
     if (!state.session.has_training) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "cannot_continue", "browse-only solution has no trainer state");
         defer err_reply.deinit();
-        state.untrack(req.request_id);
         try state.writeReply(err_reply);
-        return;
+        return .replied;
     }
 
     if (state.train_running.load(.acquire)) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "train already running");
         defer err_reply.deinit();
-        state.untrack(req.request_id);
         try state.writeReply(err_reply);
-        return;
+        return .replied;
     }
     // Reap a finished worker before starting another.
     state.joinTrain();
+    return .ok;
+}
 
+fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
     const iterations = bodyIntField(req.body_json, "iterations") orelse 1;
     const accuracy = bodyFloatField(req.body_json, "accuracy") orelse 0;
     const time_limit = bodyFloatField(req.body_json, "time_limit") orelse -1;
-    const eval_every = bodyIntField(req.body_json, "eval_every") orelse 20;
+    // C++ resolve-locked `samples` mapped to eval chunking; honor as eval_every when set.
+    const samples = bodyIntField(req.body_json, "samples");
+    const eval_every = bodyIntField(req.body_json, "eval_every") orelse (samples orelse 20);
     state.budget.returnToTraining();
     // Honor config threads; never raise above Session/config (ZR-91). Cap by host budget.
     if (state.budget.training > 0 and state.session.threads > state.budget.training) {
@@ -1264,8 +1309,62 @@ pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "solve_failed", @errorName(err));
         defer err_reply.deinit();
         try state.writeReply(err_reply);
+        return .replied;
+    };
+    return .ok;
+}
+
+/// Spawn background CFR+ train so the stdin loop can serve `values` mid-train (R10).
+/// Writes a short admit reply immediately; Study polls `status` for completion (ZR-90/ZR-106).
+pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
+    try state.track(req.request_id);
+    errdefer state.untrack(req.request_id);
+
+    switch (try admitTrainJob(state, req)) {
+        .replied => {
+            state.untrack(req.request_id);
+            return;
+        },
+        .ok => {},
+    }
+    switch (try spawnTrainWorker(state, req)) {
+        .replied => return,
+        .ok => try writeTrainAdmitReply(state, req),
+    }
+}
+
+/// Study Resolve Locked: stamp baseline, mint new solution id, optional reset, then train under locks.
+pub fn startResolveLocked(state: *HostState, req: ipc.Envelope) !void {
+    try state.track(req.request_id);
+    errdefer state.untrack(req.request_id);
+
+    switch (try admitTrainJob(state, req)) {
+        .replied => {
+            state.untrack(req.request_id);
+            return;
+        },
+        .ok => {},
+    }
+
+    const warm_start = (bodyIntField(req.body_json, "warm_start") orelse 0) != 0;
+    state.session.prepareResolveLocked(warm_start) catch |err| {
+        const code: []const u8 = switch (err) {
+            error.Busy => "busy",
+            error.NothingPublished => "nothing_published",
+            error.InvalidSession => "cannot_continue",
+            else => "resolve_locked_failed",
+        };
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
         return;
     };
+
+    switch (try spawnTrainWorker(state, req)) {
+        .replied => return,
+        .ok => try writeTrainAdmitReply(state, req),
+    }
 }
 
 test "ready dispatch" {
@@ -1334,6 +1433,21 @@ test "node accepts Study node_id and returns strategy tables" {
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"children\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"reach\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"marginal\":[") != null);
+    // ZR-105: root unit-weight hands must report range-weight reach ≈ 1, not deal mass ≪ 1.
+    {
+        const reach_key = "\"reach\":[";
+        const reach_at = std.mem.indexOf(u8, reply.body_json, reach_key) orelse unreachable;
+        const after = reply.body_json[reach_at + reach_key.len ..];
+        const end = std.mem.indexOfScalar(u8, after, ']') orelse unreachable;
+        const slice = after[0..end];
+        var max_r: f64 = 0;
+        var it = std.mem.tokenizeScalar(u8, slice, ',');
+        while (it.next()) |tok| {
+            const v = std.fmt.parseFloat(f64, tok) catch continue;
+            if (v > max_r) max_r = v;
+        }
+        try std.testing.expect(max_r > 0.9);
+    }
     // Root river with bets usually has strategy rows; either 2D array or null (check-only).
     try std.testing.expect(
         std.mem.indexOf(u8, reply.body_json, "\"strategy\":[") != null or
@@ -1931,6 +2045,74 @@ test "locks list put delete Study CRUD" {
     try std.testing.expect(std.mem.indexOf(u8, del_reply.body_json, "\"locks\":[]") != null);
 }
 
+test "resolve_locked stamps baseline, mints solution id, trains under lock" {
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "resolve-locked");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(2);
+    const prior_id = state.session.solution_id;
+    const prior_trained = state.session.training.?.trained;
+
+    var put_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "rl-put"),
+        .op = try std.testing.allocator.dupe(u8, "put_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\",\"kind\":\"full\",\"scope\":\"node\",\"probs\":[1,0]}"),
+    };
+    defer put_req.deinit();
+    var put_reply = try handle(&state, put_req);
+    defer put_reply.deinit();
+    try std.testing.expect(put_reply.ok);
+
+    // startResolveLocked writes via writeReply (stdout); exercise Session prepare
+    // + train directly for the reset path, then verify status baseline encoding.
+    try state.session.prepareResolveLocked(false);
+    try std.testing.expect(state.session.baseline_id == prior_id);
+    try std.testing.expect(state.session.solution_id != prior_id);
+    try std.testing.expect(state.session.training.?.trained == 0);
+    try std.testing.expect(prior_trained >= 2);
+    try state.session.train(2);
+    try std.testing.expect(state.session.training.?.trained >= 2);
+    try std.testing.expect(state.session.phase == .published);
+
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"baseline_solution_id\":\"s") != null);
+    var baseline_buf: [32]u8 = undefined;
+    const baseline_needle = try std.fmt.bufPrint(&baseline_buf, "\"baseline_solution_id\":\"s{d}\"", .{prior_id});
+    try std.testing.expect(std.mem.indexOf(u8, status_body, baseline_needle) != null);
+
+    // Warm-start path keeps iteration count and still bumps id once.
+    const mid_id = state.session.solution_id;
+    const mid_trained = state.session.training.?.trained;
+    try state.session.prepareResolveLocked(true);
+    try std.testing.expect(state.session.baseline_id == prior_id);
+    try std.testing.expect(state.session.solution_id != mid_id);
+    try std.testing.expect(state.session.training.?.trained == mid_trained);
+}
+
 test "equity calculator jobs start get complete without session" {
     var state = try HostState.init(std.testing.allocator, "eq-jobs");
     defer state.deinit();
@@ -1980,4 +2162,53 @@ test "equity calculator jobs start get complete without session" {
         }
     }
     try std.testing.expect(completed);
+}
+
+test "categories dispatch river made-hand Study shape" {
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "categories-smoke");
+    defer state.deinit();
+    try state.session.begin(text);
+    try state.session.train(1);
+
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "r-cat"),
+        .op = try std.testing.allocator.dupe(u8, "categories"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"kind\":\"categories\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"model\":\"made-hand\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"available\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"exclusive\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"node_id\":\"p0.t-1.r-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"oop\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"ip\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"categories\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "four of a kind") != null);
 }

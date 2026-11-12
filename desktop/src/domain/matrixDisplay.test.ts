@@ -144,6 +144,34 @@ describe("overlay labels and weight fill", () => {
     expect(weightFillFraction(true, null)).toBe(0);
     expect(weightFillFraction(true, 1.5)).toBe(1);
   });
+
+  it("full range-weight reach fills cell height; deal-mass scale would stay flat", () => {
+    // IPC contract: reach is replay_weights (unit-weight root hands ≈ 1).
+    // Absolute deal-joint mass (~1e-3) must not be what the host emits (ZR-105).
+    const full = {
+      node_id: "n",
+      reach_defined: true,
+      actions: ["Check", "Allin"],
+      combos: ["AhAd", "AsAc"],
+      reach: [1, 1],
+      marginal: [0.5, 0.5],
+      strategy: [
+        [0.6, 0.4],
+        [0.6, 0.4],
+      ],
+    };
+    const aaFull = groupHands(full).find((c) => c.text === "AA")!;
+    const inclusionFull = aaFull.reachSum / aaFull.range_combos;
+    expect(weightFillFraction(true, inclusionFull)).toBeCloseTo(1, 12);
+
+    const dealMass = {
+      ...full,
+      reach: [0.001, 0.001],
+    };
+    const aaFlat = groupHands(dealMass).find((c) => c.text === "AA")!;
+    const inclusionFlat = aaFlat.reachSum / aaFlat.range_combos;
+    expect(weightFillFraction(true, inclusionFlat)).toBeLessThan(0.01);
+  });
 });
 
 describe("comboBadgeCards", () => {

@@ -164,6 +164,41 @@ test "browse-only open keeps has_training false and continue disabled" {
     try std.testing.expect(resumed.canContinue());
 }
 
+test "prepareResolveLocked reset stamps baseline and zeros trained" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var sess = Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(3);
+    const prior = sess.solution_id;
+    try std.testing.expect(sess.training.?.trained >= 3);
+    try sess.prepareResolveLocked(false);
+    try std.testing.expectEqual(prior, sess.baseline_id);
+    try std.testing.expect(sess.solution_id != prior);
+    try std.testing.expectEqual(@as(i32, 0), sess.training.?.trained);
+    try sess.train(1);
+    try std.testing.expect(sess.training.?.trained >= 1);
+    try std.testing.expectEqual(prior, sess.baseline_id);
+}
+
 test {
     _ = session;
     _ = plan_preview;

@@ -129,7 +129,15 @@ export async function solverEngineRequest(
   if (!raw || typeof raw !== "object") {
     throw new Error("solver_engine_request returned a non-object");
   }
-  return raw as IpcRequestEnvelope;
+  const env = raw as IpcRequestEnvelope;
+  if (env.ok === false) {
+    const detail =
+      (typeof env.error_message === "string" && env.error_message.trim()) ||
+      (typeof env.error_code === "string" && env.error_code.trim()) ||
+      `${op} failed`;
+    throw new Error(detail);
+  }
+  return env;
 }
 
 export async function ipcReady(): Promise<{
@@ -317,6 +325,34 @@ export async function ipcSolve(
   return env.body;
 }
 
+export type IpcResolveLockedOptions = {
+  iterations: number;
+  warm_start?: number;
+  accuracy?: number;
+  samples?: number;
+  time_limit?: number;
+  jobId?: string | null;
+};
+
+/** Locked re-solve: host stamps baseline, optional reset, trains under locks. */
+export async function ipcResolveLocked(opts: IpcResolveLockedOptions): Promise<unknown> {
+  const body: Record<string, unknown> = {
+    iterations: Math.max(1, Math.trunc(opts.iterations || 1)),
+    warm_start: opts.warm_start ? 1 : 0,
+  };
+  if (opts.accuracy != null && Number.isFinite(opts.accuracy) && opts.accuracy > 0) {
+    body.accuracy = opts.accuracy;
+  }
+  if (opts.samples != null && Number.isFinite(opts.samples) && opts.samples > 0) {
+    body.samples = Math.trunc(opts.samples);
+  }
+  if (opts.time_limit != null && Number.isFinite(opts.time_limit) && opts.time_limit >= 0) {
+    body.time_limit = opts.time_limit;
+  }
+  const env = await solverEngineRequest("resolve_locked", body, opts.jobId ?? null);
+  return env.body;
+}
+
 /** Standalone Equity calculator job start (ZR-84; no Study session). */
 export async function ipcStartEquityJob(body: Record<string, unknown>): Promise<unknown> {
   const env = await solverEngineRequest("start_equity_job", body);
@@ -332,5 +368,17 @@ export async function ipcGetEquityJob(jobId: string): Promise<unknown> {
 /** Cancel / stop an Equity calculator job. */
 export async function ipcCancelEquityJob(jobId: string): Promise<unknown> {
   const env = await solverEngineRequest("cancel_equity_job", { job_id: jobId });
+  return env.body;
+}
+
+/** Study Categories (made-hand on five-card boards; host `categories`). */
+export async function ipcCategories(opts?: {
+  nodeIndex?: number;
+  nodeId?: string;
+}): Promise<unknown> {
+  const env = await solverEngineRequest("categories", {
+    node_index: opts?.nodeIndex ?? 0,
+    ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
+  });
   return env.body;
 }

@@ -1,10 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { clearStudyIpcFeatureOverridesForTests } from "../engine/ipcCapabilities";
+import { setHttpFallbackTransport, setIpcTransport } from "../engine/transport";
 import { DEFAULT_SPOT, type SpotDraft } from "../domain/types";
 import {
   canExecuteCalculateEv,
+  canExecuteCompareToBaseline,
   canExecuteContinue,
+  canExecuteLoadCategories,
   canExecuteOpenLockEditor,
   canExecuteOpenStrategyEditor,
+  canExecuteResolveLocked,
   canExecuteSave,
   canExecuteSolve,
   executeOpenLockEditor,
@@ -114,6 +119,33 @@ describe("canExecuteSave / Calculate EV / lock / strategy", () => {
     expect(
       canExecuteContinue(ctx({ phase: "paused", solutionId: "s1" })).ok,
     ).toBe(true);
+  });
+});
+
+describe("IPC soft-disable gates (ZR-102)", () => {
+  afterEach(() => {
+    clearStudyIpcFeatureOverridesForTests();
+    setHttpFallbackTransport();
+  });
+
+  it("blocks resolve / compare / strategy while IPC is unwired; categories wired (ZR-103)", () => {
+    setIpcTransport({
+      protocol: 2,
+      launchId: "test",
+      sidecar: "solver-engine",
+      workers: 1,
+    });
+    const decision = { node_id: "p0", kind: "decision" as const };
+    const study = ctx({
+      solutionId: "s1",
+      currentNode: decision,
+      workspace: "study",
+    });
+    expect(canExecuteResolveLocked(study).ok).toBe(false);
+    expect(canExecuteResolveLocked(study).reason).toMatch(/not available/i);
+    expect(canExecuteCompareToBaseline(study).ok).toBe(false);
+    expect(canExecuteOpenStrategyEditor(study).ok).toBe(false);
+    expect(canExecuteLoadCategories(study).ok).toBe(true);
   });
 });
 

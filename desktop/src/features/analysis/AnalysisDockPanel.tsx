@@ -1,5 +1,9 @@
 import { useMemo, useState } from "react";
 import {
+  studyIpcFeatureAvailable,
+  studyIpcUnavailableReason,
+} from "../../engine/ipcCapabilities";
+import {
   buildEquityChartCurve,
   categorySeatView,
   filterHandsByEquityBands,
@@ -381,6 +385,8 @@ export function AnalysisDockPanel() {
   const exclusive = categories?.exclusive !== false;
   const title =
     model === "draws" ? "Draw / Backdoor Categories" : "Made-hand Categories";
+  const categoriesAvailable = studyIpcFeatureAvailable("categories");
+  const categoriesUnavailableReason = studyIpcUnavailableReason("categories");
 
   return (
     <div className="range-explorer">
@@ -392,6 +398,7 @@ export function AnalysisDockPanel() {
               type="button"
               className="toolbar-btn"
               aria-pressed={categorySeat === "oop"}
+              disabled={!categoriesAvailable}
               onClick={() => setCategorySeat("oop")}
             >
               OOP
@@ -400,17 +407,28 @@ export function AnalysisDockPanel() {
               type="button"
               className="toolbar-btn"
               aria-pressed={categorySeat === "ip"}
+              disabled={!categoriesAvailable}
               onClick={() => setCategorySeat("ip")}
             >
               IP
             </button>
           </div>
-          <button type="button" className="toolbar-btn" onClick={() => void loadCategories()}>
+          <button
+            type="button"
+            className="toolbar-btn"
+            disabled={!categoriesAvailable}
+            title={categoriesAvailable ? undefined : categoriesUnavailableReason}
+            onClick={() => void loadCategories()}
+          >
             Refresh
           </button>
         </div>
       </div>
-      {!categories ? (
+      {!categoriesAvailable ? (
+        <p className="empty-hint" role="status">
+          {categoriesUnavailableReason}
+        </p>
+      ) : !categories ? (
         <p className="empty-hint">Click Refresh to load categories.</p>
       ) : categories.pending ? (
         <p className="empty-hint">Loading…</p>

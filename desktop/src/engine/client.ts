@@ -18,6 +18,7 @@ import {
   ipcBeginConfig,
   ipcCancel,
   ipcCancelEquityJob,
+  ipcCategories,
   ipcDeleteLock,
   ipcEquity,
   ipcGetConfig,
@@ -28,6 +29,7 @@ import {
   ipcPause,
   ipcPlanMemory,
   ipcPutLock,
+  ipcResolveLocked,
   ipcSave,
   ipcSolve,
   ipcStartEquityJob,
@@ -254,22 +256,28 @@ export class EngineClient {
         time_limit,
         jobId,
       })) as {
+        accepted?: boolean;
+        running?: boolean;
         solution_id?: number;
         policy_revision?: number;
         trained?: number;
         terminal_reason?: string;
         threads?: number;
       };
+      // Host short-admits train (ZR-90/ZR-106); Study polls status for completion.
+      const admitted = body.accepted === true || body.running === true;
       return {
-        running: false,
+        running: admitted ? true : false,
         job_id: jobId,
         solution_id:
           body.solution_id != null && body.solution_id > 0
             ? `s${body.solution_id}`
             : null,
         policy_revision: body.policy_revision ?? 0,
-        trained: body.trained ?? iterations,
-        terminal_reason: body.terminal_reason ?? "completed",
+        trained: admitted ? 0 : (body.trained ?? iterations),
+        terminal_reason: admitted
+          ? "admitted"
+          : (body.terminal_reason ?? "completed"),
         threads: body.threads,
         transport: "ipc",
       };
@@ -335,22 +343,27 @@ export class EngineClient {
         time_limit,
         jobId,
       })) as {
+        accepted?: boolean;
+        running?: boolean;
         solution_id?: number;
         policy_revision?: number;
         trained?: number;
         terminal_reason?: string;
         threads?: number;
       };
+      const admitted = reply.accepted === true || reply.running === true;
       return {
-        running: false,
+        running: admitted ? true : false,
         job_id: jobId,
         solution_id:
           reply.solution_id != null && reply.solution_id > 0
             ? `s${reply.solution_id}`
             : solutionId,
         policy_revision: reply.policy_revision ?? 0,
-        trained: reply.trained ?? iterations,
-        terminal_reason: reply.terminal_reason ?? "completed",
+        trained: admitted ? 0 : (reply.trained ?? iterations),
+        terminal_reason: admitted
+          ? "admitted"
+          : (reply.terminal_reason ?? "completed"),
         threads: reply.threads,
         transport: "ipc",
       };
@@ -375,13 +388,56 @@ export class EngineClient {
     },
   ): Promise<unknown> {
     if (isIpcTransport()) {
+      // Host resolve_locked: baseline stamp + optional reset + train under locks.
       void solutionId;
-      void body;
-      throw new EngineError(
-        "resolveLocked is not available over solver-engine IPC yet",
-        501,
-        null,
-      );
+      const iterations = Math.max(1, Math.trunc(body.iterations || 1));
+      const jobId = mintStudyJobId();
+      this.lastJobId = jobId;
+      const time_limit =
+        typeof body.time_limit === "number" && Number.isFinite(body.time_limit)
+          ? body.time_limit
+          : undefined;
+      const accuracy =
+        typeof body.accuracy === "number" && Number.isFinite(body.accuracy)
+          ? body.accuracy
+          : undefined;
+      const samples =
+        typeof body.samples === "number" && Number.isFinite(body.samples)
+          ? body.samples
+          : undefined;
+      const reply = (await ipcResolveLocked({
+        iterations,
+        warm_start: body.warm_start ? 1 : 0,
+        accuracy,
+        samples,
+        time_limit,
+        jobId,
+      })) as {
+        accepted?: boolean;
+        running?: boolean;
+        solution_id?: number;
+        policy_revision?: number;
+        trained?: number;
+        terminal_reason?: string;
+        threads?: number;
+      };
+      const admitted = reply.accepted === true || reply.running === true;
+      return {
+        running: admitted ? true : false,
+        job_id: jobId,
+        solution_id:
+          reply.solution_id != null && reply.solution_id > 0
+            ? `s${reply.solution_id}`
+            : solutionId,
+        policy_revision: reply.policy_revision ?? 0,
+        trained: admitted ? 0 : (reply.trained ?? iterations),
+        terminal_reason: admitted
+          ? "admitted"
+          : (reply.terminal_reason ?? "completed"),
+        threads: reply.threads,
+        transport: "ipc",
+        warm_start: body.warm_start ? "continue" : "reset",
+      };
     }
     const { response, data } = await this.request(
       "POST",
@@ -538,6 +594,19 @@ export class EngineClient {
   }
 
   async getCategories(solutionId: string, nodeId?: string, signal?: AbortSignal): Promise<unknown> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const data = await ipcCategories({
+        nodeId: nodeId ?? "p0.t-1.r-1",
+      });
+      return {
+        ...(data as object),
+        solution_id: solutionId,
+        ...(nodeId ? { node_id: nodeId } : {}),
+      };
+    }
     const path = nodeId
       ? `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/categories`
       : `/api/solutions/${solutionId}/categories`;
@@ -723,7 +792,16 @@ export class EngineClient {
 
   async compare(baseline: string, scenario: string, nodeId: string): Promise<unknown> {
     if (isIpcTransport()) {
-      throw new EngineError("compare is not available over solver-engine IPC yet", 501, null);
+      void baseline;
+      void scenario;
+      void nodeId;
+      // Dual-session immutable baseline is deferred (audit §6). Soft-gate UI
+      // should avoid calling this; keep a clear 501 if something still does.
+      throw new EngineError(
+        "Compare needs an immutable dual-session baseline; not available over Zig IPC yet",
+        501,
+        { code: "compare_dual_session_deferred" },
+      );
     }
     const query = new URLSearchParams({ baseline, scenario, node_id: nodeId });
     const { response, data } = await this.request("GET", `/api/compare?${query}`);

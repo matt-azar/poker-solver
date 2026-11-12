@@ -62,21 +62,20 @@ describe("EngineClient Slice A IPC branches", () => {
   it("routes continueSolve over IPC as solve without begin_config", async () => {
     invoke.mockResolvedValueOnce(
       okBody("solve", {
+        accepted: true,
+        running: true,
         solution_id: 1,
-        policy_revision: 4,
-        trained: 15,
-        terminal_reason: "completed",
         async: true,
+        threads: 1,
       }),
     );
     const reply = await client.continueSolve("s1", { iterations: 5, time_limit: 30 });
     expect(reply).toMatchObject({
-      running: false,
+      running: true,
       job_id: "j1",
       solution_id: "s1",
-      policy_revision: 4,
-      trained: 15,
-      terminal_reason: "completed",
+      trained: 0,
+      terminal_reason: "admitted",
       transport: "ipc",
     });
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -84,6 +83,70 @@ describe("EngineClient Slice A IPC branches", () => {
       op: "solve",
       body: { iterations: 5, time_limit: 30 },
       jobId: "j1",
+    });
+  });
+
+  it("routes resolveLocked over IPC as resolve_locked", async () => {
+    invoke.mockResolvedValueOnce(
+      okBody("resolve_locked", {
+        accepted: true,
+        running: true,
+        solution_id: 2,
+        async: true,
+        threads: 1,
+      }),
+    );
+    const reply = await client.resolveLocked("s1", {
+      iterations: 8,
+      warm_start: 0,
+      time_limit: 12,
+    });
+    expect(reply).toMatchObject({
+      running: true,
+      job_id: "j1",
+      solution_id: "s2",
+      trained: 0,
+      terminal_reason: "admitted",
+      transport: "ipc",
+      warm_start: "reset",
+    });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "resolve_locked",
+      body: { iterations: 8, warm_start: 0, time_limit: 12 },
+      jobId: "j1",
+    });
+  });
+
+  it("admits solve quickly and leaves completion to status polling", async () => {
+    invoke
+      .mockResolvedValueOnce(okBody("begin_config", { solution_id: 3 }))
+      .mockResolvedValueOnce(
+        okBody("solve", {
+          accepted: true,
+          running: true,
+          solution_id: 3,
+          async: true,
+          threads: 2,
+        }),
+      );
+    const reply = await client.solve({
+      board: ["Ah", "Kd", "7c"],
+      pot: 100,
+      stack: 200,
+      oop_range: "AA",
+      ip_range: "KK",
+      oop_bets: [],
+      ip_bets: [],
+      iterations: 200,
+      memory_mib: 1024,
+      threads: 2,
+    });
+    expect(reply).toMatchObject({
+      running: true,
+      job_id: "j1",
+      solution_id: "s3",
+      terminal_reason: "admitted",
+      transport: "ipc",
     });
   });
 
@@ -438,5 +501,53 @@ describe("EngineClient Equity calculator jobs IPC (ZR-84)", () => {
       body: { job_id: "eq1" },
       jobId: null,
     });
+  });
+});
+
+describe("EngineClient ZR-103 getCategories / compare IPC", () => {
+  let client: EngineClient;
+
+  beforeEach(() => {
+    invoke.mockReset();
+    client = new EngineClient({ baseUrl: "http://unused" });
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("routes getCategories over IPC (no HTTP categories 501 string)", async () => {
+    invoke.mockResolvedValueOnce(
+      okBody("categories", {
+        pending: false,
+        kind: "categories",
+        model: "made-hand",
+        available: true,
+        exclusive: true,
+        categories: ["high card", "pair"],
+        oop: { defined: true, total_mass: 1, fractions: [0, 1], mass: [0, 1] },
+        ip: { defined: true, total_mass: 1, fractions: [1, 0], mass: [1, 0] },
+        node_id: "p0.t-1.r-1",
+      }),
+    );
+    const body = (await client.getCategories("s1", "p0.t-1.r-1")) as {
+      solution_id?: string;
+      node_id?: string;
+      available?: boolean;
+    };
+    expect(body.solution_id).toBe("s1");
+    expect(body.node_id).toBe("p0.t-1.r-1");
+    expect(body.available).toBe(true);
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "categories",
+      body: { node_index: 0, node_id: "p0.t-1.r-1" },
+      jobId: null,
+    });
+  });
+
+  it("compare stays explicit dual-session deferred 501 on IPC", async () => {
+    await expect(client.compare("base", "s1", "p0.t-1.r-1")).rejects.toMatchObject({
+      name: "EngineError",
+      status: 501,
+      message: expect.stringMatching(/dual-session baseline/i),
+    });
+    expect(invoke).not.toHaveBeenCalled();
   });
 });

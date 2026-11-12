@@ -5,6 +5,7 @@ pub const inspect = @import("inspect.zig");
 pub const action_ev = @import("action_ev.zig");
 pub const equity = @import("equity.zig");
 pub const equity_calculator = @import("equity_calculator.zig");
+pub const categories = @import("categories.zig");
 pub const node_id = @import("node_id.zig");
 pub const phase = "phase-4";
 
@@ -15,6 +16,7 @@ test {
     _ = action_ev;
     _ = equity;
     _ = equity_calculator;
+    _ = categories;
     _ = node_id;
     _ = @import("phase4_test.zig");
     _ = @import("action_ev_rematch_test.zig");

@@ -72,9 +72,17 @@ pub fn main() !void {
             continue;
         }
 
-        // Async solve: keep stdin free so values can run under train (R10).
+        // Async train ops: keep stdin free so values can run under train (R10).
         if (std.mem.eql(u8, req.op, "solve")) {
             dispatch.startSolve(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
+        if (std.mem.eql(u8, req.op, "resolve_locked")) {
+            dispatch.startResolveLocked(&state, req) catch |err| {
                 var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
                 defer fail.deinit();
                 try state.writeReply(fail);

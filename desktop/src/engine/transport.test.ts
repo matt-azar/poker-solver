@@ -20,6 +20,7 @@ import {
   ipcPause,
   ipcPlanMemory,
   ipcPutLock,
+  ipcResolveLocked,
   ipcSave,
   ipcTreePreview,
   ipcValues,
@@ -304,6 +305,28 @@ describe("Slice C locks IPC helpers", () => {
       op: "delete_lock",
       body: { node_id: "p0.t-1.r-1", hand_index: 1 },
       jobId: null,
+    });
+  });
+
+  it("routes resolve_locked with warm_start and job id", async () => {
+    invoke.mockResolvedValue({
+      v: 2,
+      kind: "reply",
+      request_id: "rl",
+      op: "resolve_locked",
+      ok: true,
+      body: { solution_id: 3, trained: 4, terminal_reason: "completed" },
+    });
+    await ipcResolveLocked({
+      iterations: 4,
+      warm_start: 1,
+      time_limit: 9,
+      jobId: "j-rl",
+    });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "resolve_locked",
+      body: { iterations: 4, warm_start: 1, time_limit: 9 },
+      jobId: "j-rl",
     });
   });
 });
