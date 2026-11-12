@@ -14,7 +14,9 @@ rake-rate 0
 rake-cap 0
 memory-mib 4096
 threads 1
-oop-bets 0.333333 0.75
-ip-bets 0.333333 0.75
+oop-bets 0.5
+ip-bets 0.5
+oop-flop-bets 0.333333 0.75
+ip-flop-bets 0.333333 0.75
 oop-raises 0.75
 ip-raises 0.75

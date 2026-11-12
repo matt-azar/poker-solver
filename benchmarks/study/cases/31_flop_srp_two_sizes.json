@@ -10,18 +10,18 @@
   "algorithm": "cfr_plus",
   "iteration_cap": 400,
   "threads": 4,
-  "memory_mib": 8192,
-  "memory_note": "Plan peak exceeds the one-size 4096 MiB budget (~6.5 GiB estimated). Raise --memory-mib for train; Windows Release remains authoritative.",
+  "memory_mib": 4096,
+  "memory_note": "Flop-only openings (oop-flop-bets/ip-flop-bets). Shared oop-bets/ip-bets stay 0.5 for turn/river. Linux plan peak ~2.63 GiB fits 4096 MiB.",
   "accuracy_fraction_of_pot": 0.001,
   "quality_target_accuracy_over_pot": 0.001,
-  "betting_note": "oop-bets/ip-bets are 0.333333 0.75; raises remain 0.75 as in flop_srp_one_size.",
+  "betting_note": "D12: only flop openings are 0.333333 0.75 via oop-flop-bets/ip-flop-bets; shared bets/raises otherwise match flop_srp_one_size.",
   "config": "benchmarks/study/configs/flop_srp_two_sizes.txt",
   "argv": [
     "--config", "benchmarks/study/configs/flop_srp_two_sizes.txt",
     "--iterations", "400",
     "--algorithm", "cfr_plus",
     "--accuracy", "0.001",
-    "--memory-mib", "8192",
+    "--memory-mib", "4096",
     "--threads", "4",
     "--frozen"
   ]
