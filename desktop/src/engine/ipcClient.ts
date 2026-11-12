@@ -141,9 +141,13 @@ export class SolverEngineIpcClient {
     return env.body;
   }
 
-  /** Node action-EV summary (root-centered + local_offset). */
-  async values(nodeIndex = 0): Promise<unknown> {
-    const env = await this.request("values", { node_index: nodeIndex });
+  /** Node action-EV tables (root-centered + local_offset). Accepts Study `pN.tT.rR` or index. */
+  async values(nodeIdOrIndex: string | number = 0): Promise<unknown> {
+    const body =
+      typeof nodeIdOrIndex === "string"
+        ? { node_id: nodeIdOrIndex }
+        : { node_index: nodeIdOrIndex };
+    const env = await this.request("values", body);
     return env.body;
   }
 }
