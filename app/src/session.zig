@@ -267,14 +267,22 @@ pub const Session = struct {
         if (spec.memory_mib <= 0) return error.BudgetExceeded;
         const budget_bytes: u64 = @as(u64, @intCast(spec.memory_mib)) * 1024 * 1024;
 
-        var game = try poker_engine.game.compile.compile(self.allocator, spec);
+        // Under a declared budget, construction OOM is a budget failure (Windows CI
+        // may OOM during flop compile before the post-compile estimate runs).
+        var game = poker_engine.game.compile.compile(self.allocator, spec) catch |err| {
+            if (err == error.OutOfMemory) return error.BudgetExceeded;
+            return err;
+        };
         errdefer game.deinit();
         const estimated = estimateSolutionBytes(game);
         if (estimated > budget_bytes) return error.BudgetExceeded;
 
-        var training = try poker_engine.solve.training_state.TrainingState.init(self.allocator, game);
+        var training = poker_engine.solve.training_state.TrainingState.init(self.allocator, game) catch |err| {
+            if (err == error.OutOfMemory) return error.BudgetExceeded;
+            return err;
+        };
         errdefer training.deinit();
-        const owned_config = self.allocator.dupe(u8, config_text) catch return error.OutOfMemory;
+        const owned_config = self.allocator.dupe(u8, config_text) catch return error.BudgetExceeded;
         errdefer self.allocator.free(owned_config);
         const threads = clampThreads(spec.threads);
 

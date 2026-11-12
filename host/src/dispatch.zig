@@ -569,34 +569,15 @@ fn formatValuesBody(
 }
 
 fn unescapeConfig(allocator: std.mem.Allocator, escaped: []const u8) ![]u8 {
-    var raw = std.ArrayList(u8).init(allocator);
-    errdefer raw.deinit();
-    var i: usize = 0;
-    while (i < escaped.len) : (i += 1) {
-        if (escaped[i] == '\\' and i + 1 < escaped.len) {
-            switch (escaped[i + 1]) {
-                'n' => {
-                    try raw.append('\n');
-                    i += 1;
-                    continue;
-                },
-                '\\' => {
-                    try raw.append('\\');
-                    i += 1;
-                    continue;
-                },
-                '"' => {
-                    try raw.append('"');
-                    i += 1;
-                    continue;
-                },
-                else => {},
-            }
-        }
-        try raw.append(escaped[i]);
+    // Same JSON unescape as paths (handles Windows CRLF fixtures: `\r\n`).
+    var raw = try unescapeJsonString(allocator, escaped);
+    errdefer allocator.free(raw);
+    if (raw.len == 0 or raw[raw.len - 1] != '\n') {
+        const grown = try allocator.realloc(raw, raw.len + 1);
+        grown[grown.len - 1] = '\n';
+        raw = grown;
     }
-    if (raw.items.len == 0 or raw.items[raw.items.len - 1] != '\n') try raw.append('\n');
-    return raw.toOwnedSlice();
+    return raw;
 }
 
 pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
@@ -1292,12 +1273,15 @@ test "pause cancel and status-shaped open reply" {
     defer std.testing.allocator.free(abs);
     const tmp_path = try std.fs.path.join(std.testing.allocator, &.{ abs, "slice-a-open.psol" });
     defer std.testing.allocator.free(tmp_path);
+    // JSON-escape the path — raw `{s}` breaks on Windows (`\t` in `\tmp`).
+    const path_json = try std.fmt.allocPrint(std.testing.allocator, "{s}", .{std.json.fmt(tmp_path, .{})});
+    defer std.testing.allocator.free(path_json);
     var save_req: ipc.Envelope = .{
         .allocator = std.testing.allocator,
         .kind = .request,
         .request_id = try std.testing.allocator.dupe(u8, "s1"),
         .op = try std.testing.allocator.dupe(u8, "save"),
-        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"path\":\"{s}\"}}", .{tmp_path}),
+        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"path\":{s}}}", .{path_json}),
     };
     defer save_req.deinit();
     var save_reply = try handle(&state, save_req);
@@ -1317,7 +1301,7 @@ test "pause cancel and status-shaped open reply" {
         .kind = .request,
         .request_id = try std.testing.allocator.dupe(u8, "o1"),
         .op = try std.testing.allocator.dupe(u8, "open"),
-        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"path\":\"{s}\"}}", .{tmp_path}),
+        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"path\":{s}}}", .{path_json}),
     };
     defer open_req.deinit();
     var open_reply = try handle(&state, open_req);
@@ -1339,12 +1323,22 @@ test "pause cancel and status-shaped open reply" {
 }
 
 test "begin_config rejects 1 MiB flop resource fixture" {
-    const config = try std.fs.cwd().readFileAlloc(
+    const config_raw = try std.fs.cwd().readFileAlloc(
         std.testing.allocator,
         "benchmarks/study/configs/smoke_resource_flop.txt",
         64 * 1024,
     );
-    defer std.testing.allocator.free(config);
+    defer std.testing.allocator.free(config_raw);
+    // Normalize CRLF checkouts so JSON round-trip matches Linux fixtures.
+    var config_buf = std.ArrayList(u8).init(std.testing.allocator);
+    defer config_buf.deinit();
+    for (config_raw) |c| {
+        if (c != '\r') try config_buf.append(c);
+    }
+    if (config_buf.items.len == 0 or config_buf.items[config_buf.items.len - 1] != '\n') {
+        try config_buf.append('\n');
+    }
+    const config = config_buf.items;
     var state = try HostState.init(std.testing.allocator, "budget");
     defer state.deinit();
     var req: ipc.Envelope = .{
@@ -1357,6 +1351,13 @@ test "begin_config rejects 1 MiB flop resource fixture" {
     defer req.deinit();
     var reply = try handle(&state, req);
     defer reply.deinit();
+    if (reply.ok or !std.mem.eql(u8, reply.error_code orelse "", "budget_exceeded")) {
+        std.debug.print("budget test reply ok={any} code={s} msg={s}\n", .{
+            reply.ok,
+            reply.error_code orelse "",
+            reply.error_message orelse "",
+        });
+    }
     try std.testing.expect(!reply.ok);
     try std.testing.expect(std.mem.eql(u8, reply.error_code orelse "", "budget_exceeded"));
 }

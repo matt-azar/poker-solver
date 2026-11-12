@@ -370,12 +370,15 @@ pub fn decode(allocator: std.mem.Allocator, file: []const u8) OpenError!Document
 pub const max_psol_bytes: usize = 512 * 1024 * 1024;
 
 /// Atomic save: write a sibling temp file, then rename over the destination (ZR-92).
+/// On Windows, rename-over-existing may fail — delete the destination then retry.
 pub fn writeFile(allocator: std.mem.Allocator, path: []const u8, document: Document) OpenError!void {
     const bytes = try encode(allocator, document);
     defer allocator.free(bytes);
     if (bytes.len > max_psol_bytes) return error.InvalidPsol;
 
     var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    // Prefer a same-directory sibling. Avoid embedding path separators that JSON
+    // might mis-handle; callers must pass an already-unescaped filesystem path.
     const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp-{d}", .{ path, std.time.milliTimestamp() }) catch {
         return error.InvalidPsol;
     };
@@ -389,8 +392,12 @@ pub fn writeFile(allocator: std.mem.Allocator, path: []const u8, document: Docum
         file.sync() catch {};
     }
     std.fs.cwd().rename(tmp_path, path) catch {
-        std.fs.cwd().deleteFile(tmp_path) catch {};
-        return error.InvalidPsol;
+        // Windows: replace existing destination.
+        std.fs.cwd().deleteFile(path) catch {};
+        std.fs.cwd().rename(tmp_path, path) catch {
+            std.fs.cwd().deleteFile(tmp_path) catch {};
+            return error.InvalidPsol;
+        };
     };
 }
 
