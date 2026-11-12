@@ -6,11 +6,11 @@ Primary docs cover the **CFR+ postflop workflow** and the **Study UI**. Everythi
 
 | Doc | Contents |
 | --- | --- |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Modules, `StreetBatchSolver`, CFR+ schedules |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Zig ship banner + historical public-tree / CFR+ map |
 | [STREETS.md](STREETS.md) | Flop / turn / river public tree, config, frozen passes |
 | [MATHEMATICS.md](MATHEMATICS.md) | Regret matching, NashConv, EV definitions |
 | [HOLDEM.md](HOLDEM.md) | Cards, hand evaluator, ranges |
-| [RIVER.md](RIVER.md) | Five-card CLI onto the shared street tree |
+| [RIVER.md](RIVER.md) | Five-card river semantics (Zig Session; C++ names historical) |
 | [EQUITY.md](EQUITY.md) | Check-down showdown equity (not chip EV) |
 
 Start with architecture, then streets + mathematics for how a solve runs.

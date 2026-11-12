@@ -2,11 +2,9 @@
 
 One no-limit betting street on a fixed five-card board. Equilibrium of the configured bet-size tree.
 
-`RiverGame` + `CfrTrainer` is the five-card oracle. `RiverBatchSolver` is for internal oracle and legacy fixtures only.
+**Shipping on `zig-rewrite`:** five-card Study solves go through Zig `solver-engine` IPC (same Session path as flop/turn). C++ `RiverGame` / `river_solver` / Explorer names below are **historical** algorithm vocabulary — not a live product binary. See [STREETS.md](STREETS.md), [DESKTOP_UI.md](DESKTOP_UI.md).
 
-`river_solver` maps river JSON/CLI flags into a `StreetConfig` (`street_config_from_river`) and solves with `StreetBatchSolver` (or `StreetGame` under `--reference`). Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 OOP, player 1 IP; a hand pair is legal only when the four private cards and the board are disjoint. No RNG.
-
-Explorer uses the same shared street tree for five cards and saves street-config PSOL files. Five-card `StreetBatchSolver` pins match `RiverGame` in `tests/unit/test_streets.cpp`. See [STREETS.md](STREETS.md).
+Historically, `RiverGame` + `CfrTrainer` was the five-card oracle and `RiverBatchSolver` was for internal oracle/legacy fixtures. Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 OOP, player 1 IP; a hand pair is legal only when the four private cards and the board are disjoint. No RNG.
 
 ## Chips
 
@@ -24,7 +22,7 @@ Optional pot rake (`RiverConfig::rake`, CLI `--rake-rate` / `--rake-cap`, and `r
 
 ## Sizes
 
-Fractions are of the pot, rounded to the nearest tenth of a chip, with ties away from zero. Internally pot/stack/contrib are tenths (`include/game/chips.hpp`); config text and CLI still write chip units (`pot 100` = 100.0 chips). Utilities report chips.
+Fractions are of the pot, rounded to the nearest tenth of a chip, with ties away from zero. Internally pot/stack/contrib are tenths (historical C++ `include/game/chips.hpp`; Zig chip helpers under `engine/`); config text still writes chip units (`pot 100` = 100.0 chips). Utilities report chips.
 
 - An opening size `f` bets `round(f * pot)` tenths (0.1-chip units).
 - A raise size `f` raises by `round(f * pot_after_the_call)` tenths. `pot_after_the_call` is the pot once the facing bet has been called. The raiser also puts in the call.

@@ -1,157 +1,56 @@
 # Testing
 
-In-repo harness (`tests/harness.hpp`) + CTest. No Catch2/GoogleTest.
+Product validation on `zig-rewrite` is **Zig engine tests**, **desktop Vitest**, and **real-sidecar IPC contract smokes**. The C++ `ctest` / `poker_http_tests` / spawned-`explorer` matrix is removed (#286–#287).
+
+## Quick commands
 
 ```sh
-cmake --build build
-ctest --test-dir build --output-on-failure
-# Suites: poker_engine_tests, poker_study_tests, poker_http_tests, equity_tests, equity_calculator_tests
+# Zig engine + host unit/integration tests
+zig build test -Dcpu=x86_64_v2
+
+# Optional ready handshake smoke
+python3 scripts/zig/ready-smoke.py ./zig-out/bin/solver-engine
+
+# Study IPC contract smoke (ready → begin_config → solve → status → node →
+# equity → pause/stop → save/open/continue). River gate fixture; ≤60s; no Acc wall.
+python3 scripts/zig/study-contract-smoke.py ./zig-out/bin/solver-engine
+
+# Desktop unit tests (Vitest) + typecheck
+cd desktop && npm ci && npm test && npx tsc -b
+
+# After assistant / help-body label moves
+cd desktop && npm run check:ai-context
 ```
 
-On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
+Windows: use `python` and `zig-out/bin/solver-engine.exe` the same way. Prefer `-Dcpu=x86_64_v2` for any sidecar that may leave the builder host.
 
-Build production binaries without tests or benchmarks:
+## What each layer covers
 
-```sh
-cmake --build build --config Release --target street_solver --target river_solver --target explorer --target equity_calculator
-```
+| Layer | Entry | Covers |
+| --- | --- | --- |
+| Zig unit / integration | `zig build test` | Engine CFR/frozen/locks/equity/ICM math pins, Session train/eval, host dispatch envelopes under `tests/zig/` + `engine/` |
+| Ready smoke | `scripts/zig/ready-smoke.py` | Protocol-2 ready handshake on a live `solver-engine` process |
+| Study contract smoke | `scripts/zig/study-contract-smoke.py` | Real-sidecar typed IPC lifecycle used by Study (ZR-104). Uses `benchmarks/study/configs/river_gate_smoke.txt`. **No Accuracy wall.** |
+| Desktop Vitest | `cd desktop && npm test` | `EngineClient` IPC branches, Study store/lifecycle, locks/strategy-edits soft gates, analysis helpers, UI domain |
+| Desktop typecheck | `cd desktop && npx tsc -b` | Store/client nullability that vitest can miss |
+| AI context packs | `cd desktop && npm run check:ai-context` | Generated packs match `docs/ai-context/source/` |
 
-Omit `--config Release` on a single-config generator. Unit tests are gated by `BUILD_TESTING` (default ON). Micro-benchmarks are opt-in with `-DPOKER_SOLVER_BUILD_BENCHMARKS=ON` and stay outside CTest. CTest uses the source tree as `WORKING_DIRECTORY` so `configs/` fixtures resolve from an out-of-tree build directory; Study asset tests also compile in `POKER_SOLVER_SOURCE_DIR`. Temp checkpoint/fixture paths use unique names under the OS temp directory.
+Do **not** claim coverage from deleted C++ HTTP suites (`test_explorer_http.cpp`, `poker_http_tests`, HTTP 400/404/409 explorer replies). Those strings and binaries are not a shipping surface on this branch. Prefer IPC envelope errors / host `error` replies and the contract smoke above.
 
-JavaScript checks from the repository root:
+## CI
 
-```sh
-node tests/legacy_ui/browse.test.js
-```
+| Workflow | Role |
+| --- | --- |
+| `.github/workflows/zig.yml` | `zig build` / `zig build test` + ready smoke + Study contract smoke (Linux + Windows; Windows pins `-Dcpu=x86_64_v2`) |
+| `.github/workflows/ci.yml` | Desktop Vitest / `tsc` / build (C++ explorer matrices removed) |
+| `.github/workflows/windows-installer.yml` | NSIS packs Zig `solver-engine` only; rejects leftover `holdem-explorer*.exe` |
 
-Explorer HTTP cases spawn a local `explorer` on an ephemeral port on Windows and Linux. [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) builds production targets, runs the C++ suite, and runs the JavaScript file on Windows and Linux. A second Linux job repeats the C++ suite under AddressSanitizer and UndefinedBehaviorSanitizer.
+Packaged Tauri webview lifecycle and the Windows installer remain a release gate (Actions → **Windows Installer**). See [DESKTOP_UI.md](../../DESKTOP_UI.md).
 
-**Desktop acceptance** (`tests/unit/test_explorer_workflow.cpp`) is the scripted real-engine lifecycle over that same spawn: Build `plan-memory` → solve → pause/inspect → save → open → continue → lock/compare, plus failed Open and memory-budget rejection. It runs inside `poker_http_tests` on Linux and Windows. `poker_solver_tests` is only a CMake target that builds the three suite binaries. The workflow does **not** drive the React Study UI, Tauri sidecar lifecycle, or a packaged Windows installer — those remain manual / Windows-only before release (see [DESKTOP_UI.md](../../DESKTOP_UI.md)). Deeper Open races and stale stop replies stay in `test_explorer_http.cpp` / `test_session.cpp` rather than duplicated here.
+## Optional digs (not product CI)
 
-## Categories
+Bounded flop microbenches / node-EV latency scripts under `scripts/zig/` are agent dig tools. Owner preference: Accuracy / time-to-Accuracy / NashConv walls are **not** cutover blockers and are not required for merge. See [ZIG_RELEASE_GATES.md](ZIG_RELEASE_GATES.md).
 
-**CFR primitives** (`tests/unit/test_cfr.cpp`)
+## Historical (pre-#287 C++ tree)
 
-- CancelGame / ZeroReachGame pass-level floor contracts
-- All-negative regrets → uniform
-- Mixed positive regrets → normalized positive regrets
-- Reach-weighted average accumulation on a hand-constructed two-action path
-- Tiny river `StreetGame` trainer lifecycle: early stop, eval history, wall-time stop, Linear CFR determinism
-- FullNode lock and unlocked-row ≡ null locks on `CfrTrainer<StreetGame>`
-
-**DCFR(1.5, 0, 2)** (`tests/unit/test_dcfr.cpp`)
-
-- Independent scalar oracle for positive/negative/zero increments, sign crossings, and `t=1`
-- Non-updating player's regrets unchanged; negatives stay signed
-- Frozen batch vs `CfrTrainer` parity on tiny river (exact regrets), turn (strategy/NashConv + CFR+-matched chance scale), and flop
-- Continuation and save/load/continue match uninterrupted training
-- Algorithm tag `3` round-trip; unknown tags and algorithm switches reject without mutation
-- Single/multi-thread frozen parity; DCFR rejected on non-frozen walk and legacy river batch
-
-**Hold'em fundamentals** (`tests/unit/test_holdem.cpp`)
-
-- Card ids 0..51, parse/format including `10h`, deck removal
-- Board sizes, duplicate cards, and private hands that use a board card
-- Wheel, six-high straight, royal flush, flush, full house, quads, two pair, and kicker order
-- Seven-card hands, including a straight that uses both hole cards
-- Board-only ties (quads on board, royal on board) and a hole card that wins with ace-high
-- All 1,326 combo indexes round-trip, and all 2,598,960 five-card hands are invariant to order
-- `AA`, `AKs`, `AKo`, `AK`, `QQ+`, dashed ranges, `random`, weights, and last-assignment-wins
-- Dead-card conditioning, ordered joint probabilities, and the uniform masses `1326 * 1225` and `1176 * 1081`
-- JSON array of 1,326 weights
-
-**River** (`tests/unit/test_river.cpp`)
-
-- Blocked ranges leave no deals and are rejected
-- More than eight actions at one decision is rejected; seven bet sizes plus check is accepted
-- All-in sizes are capped at the stack, and disallowed all-ins are omitted
-- Two opponent hands that share the actor's hand and the public line share an information set
-- Check-down with the nuts is worth exactly half the pot and has Nash gap 0
-- A board that neither hand improves is a tie worth 0
-- Fold, call, and min-raise accounting, including an uncalled raise
-- Weighted deals use the ordered joint distribution
-- On the aces-or-fives versus kings toy, 4,000 CFR+ iterations move the value to +25, the bet and call frequencies toward the known mixture, and the Nash gap below the 40-iteration gap
-- CFR+ regrets stay non-negative, and a second 40-iteration run matches
-- On `AA` versus `KK` and on the all-in toy, the public-tree solver matches the reference strategy to `1e-8` and the value and Nash gap to `1e-6`, for both vanilla CFR and CFR+
-- On `22+` versus `22+`, three vanilla iterations match the reference strategy to `1e-8` without running the reference best response; a separate 30-iteration public-tree solve reports its own gap
-
-**Turn and flop** (`tests/unit/test_streets.cpp`)
-
-- A blocked hand is rejected
-- Turn check-down matches an independent average over the remaining rivers, and the only strategy has Nash gap 0
-- Two opponent hands share the actor's information set on the turn and on a river card neither of them holds; two river cards do not
-- A weighted pair of hands uses the joint distribution
-- Aces versus `2c3d` on `Kh Kd 7c 4s` win every river and check down for +50
-- A turn bet that is called, then a river bet that is folded, loses `pot / 2` plus the folding player's investment
-- On that same lock, 400 CFR+ iterations move the value to +50 and the Nash gap below the 20-iteration gap
-- Flop check-down matches the average over every turn and river
-- A geometric size on the turn is the equal-fraction split of the stack, and the same size on the river is the rest of the stack
-- A turn size and a river size can differ, and two river cards offer the same actions
-- A bet that commits more than the all-in threshold becomes all-in, and a bet under the threshold stays as listed
-- A fixed chip size bets that many chips, a 3x raise raises to three times the bet, a pot cap of 1 cuts a larger size to the pot, and turning off the 3-bet leaves only fold and call after a raise
-- OOP uses the donk size after IP bets and OOP calls, and uses the normal bet size when the previous street checks through
-- The public turn and flop tree matches `StreetGame` action by action: check-down, a shared turn infoset with two hands, a different river size, and a geometric size. The largest strategy difference in those tests was 0
-- Continuing a fresh public street solver for 4 iterations matches one that was reset and run for those same 4 iterations
-- The frozen combo pass matches check-down equity on the turn and on the flop. On the nuts-versus-air turn lock, 400 CFR+ iterations reach a value within 1 chip of +50 and a smaller Nash gap than 20 iterations
-- The budget resource accepts an allocation that fills its limit, refuses one byte past that limit, counts an old block and a new block together, returns to zero after deallocation, and rolls the charge back when the upstream allocator throws
-- A zero memory budget is rejected. A 1 MiB budget rejects a `77+` versus `77+` check-down flop and names the budget, the current allocation, and the denied request. A later solve with a sufficient budget still runs
-- The same 1 MiB budget rejects the branching flop `Ah Kd 7c`, pot 100, stack 10000, `QcQd` versus `JcJd`, bet sizes 0.25/0.5/1, raise sizes 0.5/1, all-in, max raises 3. An independent allocation observer records a peak at or below 1,048,576 bytes and a live total of zero after the exception
-- Two sufficient budgets on the `77+` flop produce the same value and the same Nash gap. The report's scratch and rank-cache components are live allocations, reservation credit is zero, and one training pass does not change the live total. The peak is larger than the regret-plus-strategy-sum figure
-- A finished solve's live bytes match that independent observer, including a turn tree whose action paths are longer than a check-down
-- A weighted turn and a blocker turn match the existing closed form or `StreetGame` strategy check
-- Expanded terminal and decision counts on that flop are 64-bit products of the deal count and the runout count
-- Continuing a fresh public-tree solver for 40 iterations matches a solver that was reset and run for those same 40 iterations
-
-`street_memory_bench` repeats the uniform full-range check-down on the turn and the flop and checks the centered value. It runs outside CTest and has no wall-time limit. `street_betting_bench` continues one frozen CFR+ solve through the checkpoints in [BENCHMARKS.md](BENCHMARKS.md) and is also outside CTest. Each case stops after ten minutes of wall time. `street_parallel_bench` times 1, 2, 4, and 8 frozen threads on those two betting trees and is outside CTest as well.
-
-The street tests also compare one, two, four, and 64 frozen threads on small turn and flop trees. The raw regret and strategy-sum tables match, including a weighted range, a tied board, a shared card, a vanilla pass, a delayed card order, and a solve continued in pieces. One player's pass leaves the other player's regrets unchanged. A worker exception joins the batch and then refuses another pass or an evaluation. A thread count of 0 is rejected. More than one thread on the per-deal walk is rejected. A 64-thread request that does not fit the measured budget throws, releases the charge, and a one-thread solve of that budget still runs. The first frozen pass and the next one do not allocate. On the two betting trees in [BENCHMARKS.md](BENCHMARKS.md), two, four, and eight threads matched the one-thread raw tables at iterations 3, 30, and 100. ThreadSanitizer was not run. WSL g++ 11.4.0 is available, and the build was skipped because the machine was on battery. The card-delay stress is a Windows test.
-
-An independent review of `e2ad8df` reported GCC 13.3.0 Release at 337,238 assertions and 0 failures. The Windows suite has one more assertion. That review's `street_memory_bench` reproduced the full-range check-down values, with engine heap 60,888,693 bytes on the turn and 418,369,763 bytes on the flop. A focused ThreadSanitizer run, GCC with `-O1 -g -fsanitize=thread -fno-omit-frame-pointer -pthread` on the core sources and `test_streets.cpp`, called `run_street_workspace_tests` and `run_street_parallel_tests` under `TSAN_OPTIONS=halt_on_error=1`. It passed 2,443 assertions with no race reports. That run covers those tests.
-
-An independent review of `29cf58f` reported GCC 13.3.0 Release at 337,820 assertions and 0 failures. The Windows suite after the compact kernel was 337,821 assertions and 0 failures. The same review's focused ThreadSanitizer build used those flags on the core sources and `test_streets.cpp`, and the test called `run_street_workspace_tests`, `run_street_parallel_tests`, and `run_street_showdown_tests`. It passed 3,025 assertions with no race reports. That run covers those street tests. Linux engine heap on the full-range check-down was 62,647,533 and 81,082,053 bytes on the turn at one and four threads, and 531,364,379 and 550,581,875 bytes on the flop. The Windows heaps and the reset-30 comparison are in [BENCHMARKS.md](BENCHMARKS.md). Bit-exact agreement with the `e2ad8df` pins holds through iteration 300 on both betting trees at one and four threads.
-
-The Windows suite after the chance-page and frequency pass is 364,982 assertions and 0 failures. That count includes the session state machine, a local explorer process on port 18765, and the chance-page oracle. An independent review of `70ccabc` reported GCC 13.3.0 Release at 346,787 assertions and 0 failures, and a focused ThreadSanitizer run at 11,992 assertions with no race reports. That sanitizer run covered the core sources and `test_streets.cpp`, including inspection. It did not cover the HTTP session. A later attempt to run the session state machine under WSL g++ 11.4.0 with `-fsanitize=thread` aborted before the test with `unexpected memory mapping`. The session tests passed in the Windows suite.
-
-The session tests drive stop and publication with gates. A stop before construction, during a chunk, and after the chunk but before publication publishes nothing. A stop after `commit_success` returns already complete and the solution stays borrowable. A stop for the finished job does not set the stop flag on its replacement. A failed constructor or publication leaves the job failed, and `borrow` returns nothing. A replacement waits out a held reader, and a weak pointer to the old resource is expired at the release hook before the next construction flag is set.
-
-The HTTP test launches `explorer --port <ephemeral>` (or `explorer.exe` on Windows), waits until `/api/status` responds, and stops that process when the test ends. On `Kh Kd 7c 4s 2h`, `AhAd` versus `2c3d`, pot 100, empty bet arrays, all-in off, three river iterations on the shared street tree, status and export both report iterations 3, value 50, and root `p0.t-1.r-1`. Root node browse and `/values` succeed with node EV 50. The same agreement holds for a one-iteration frozen turn of that matchup. `s18446744073709551617`, `s1x`, and `s+1` return 400. `s2` while `s1` is current returns 404. Stopping the finished river job returns `complete` and the export remains. A node id with an overflowing index returns 400. Leading zeros in `p00.t-1.r-1` select the root.
-
-Chance weights on a weighted flop and a weighted turn match an independent pair-and-card enumeration and sum to 1 over the undealt cards. A hand that always holds a card gives that card weight 0. A joint reach of 1e-18 still defines the marginals and the card weights. Forcing OOP to keep only AdAc and IP to keep only AcKh leaves both of those reaches positive and the child joint at 0, with null card weights. Inspecting the root, an action child, and a chance node does not change the regret table or the strategy-sum table.
-
-`node tests/legacy_ui/browse.test.js` checks the group frequencies and the stale-response guard. One hand with Check 0.20, Bet 50 0.30, and Bet 100 0.50 reports total aggression 0.80. A slower JSON body that belongs to an older selection is not applied, including an error body. An older status generation is ignored. Two equally weighted suited broadway combos, one always taking action A and the other always taking action B, each with mixed EV 10, have group mixed EV 10. The same group's forced-action values are 5 and 5. A group whose marginals are zero has a null aggregate.
-
-The Windows suite after conditional action EV is 408,504 assertions and 0 failures. That count includes the publication tests, the action-value oracle, and the values HTTP cases. Publication builds the status string before it stores a terminal phase. A throw on the accepted path and on the cancelled path leaves the job running, and the following failure record publishes nothing. The action-value tests cover the turn bluff, an in-position sign change, scale invariance, a zero hero reach with a defined continuation, a zero opponent denominator, blockers, a tie, a flop, and a later-street decision. A chance node is rejected. Regret, strategy sum, average strategy, iteration count, and evaluation time are unchanged by a query. The HTTP case is the one-iteration frozen check-down of `AhAd` versus `2c3d` on `Kh Kd 7c 4s`. The root value is 50. A second read returns the same body. Status and export are byte-for-byte unchanged, and the export has no action values. A chance node returns 400. A five-card street solve also exposes root `/values` with node EV 50. The replaced solution returns 404.
-
-The profile cache follows mutations. On the turn bluff board `Kh Kd 7c 4s`, pot 100, stack 100, OOP `KcKs,2c3d`, IP `AhAd`, OOP turn bet `{1.0}`, all-in off, one raise, one frozen iteration reports node EV 12.5. Continuing 29 iterations after an intervening inspect, expected utility, average-strategy read, inspection prepare, or profile-epoch read used to return that same 12.5 page with `query_seconds` 0. A fresh 30-iteration solver reports 24.987324159506588. After the fix the continued solver matches the fresh one. `p00.t-1.r-1` is a cache hit for the root. `run`, `continue`, `solve`, a frozen reset to a different iteration count, and an explicit average edit each invalidate the page. A cancelled walk, a chance-node rejection, and an injected allocation failure leave the previous page unpublished.
-
-Tiny compatible mass is summed directly when subtracting the blocked mass would cancel it. Before that change, IP `AhAc:1,2c3d:1e-12` made OOP `AhAd` check 49.995555366013498, and `1e-18` left the value undefined. Both are now defined at +50 within 1e-9, and the street oracle agrees. Swapping the ranges makes IP `AhAc` check +50. A blocked opponent that would have won (`AhKc` plus a tiny `2c3d`) does not leak into that +50. `9c9d` against `9c2c:1,AhAc:1e-18` stays the river-aware equity near −45.4545, between −50 and −40, rather than a leaked win. A true zero compatible opponent stays undefined. Rescaling the opponent and changing the hero prior leave the conditional value unchanged. Flop chance weights stay finite and sum to 1. A later decision with zero hero reach stays defined. Well-conditioned ranges stay on the subtraction path. The node value matches `expected_utility()`.
-
-The value worker is the object under test, not only `action_values`. A newer node supersedes a paused walk and the paused result is not published. Resubmitting that paused node is a new request, so the reader count is checked only after the replacement walk has entered its borrow. Replacing the solution while a walk holds the reader destroys the old engine before the next one is constructed, and the reader count returns to zero. An evaluation exception is returned, and the next node succeeds. Idle shutdown, a second shutdown, and shutdown during an active query with another request pending leave no live worker and no reader. Destroying a worker that has started its thread joins it. Scope exit without an explicit shutdown also joins that thread and leaves no reader.
-
-A published solution can take more iterations without a new solution id. The session test holds a reader across the claim, then publishes the same resource after a stop. A mismatched job does not commit, and aborting the continuation leaves the solution borrowable. If the engine has finished iterations the retained record does not yet name, the record takes that count, job, and value before the history point is added. A later continuation starts from the retained count. The HTTP case continues the one-iteration frozen turn of `AhAd` versus `2c3d` by one iteration. The solution id stays, the iteration count becomes 2, and the value stays 50. Zero iterations is 400. A missing value, a non-finite value, and a non-integer value are 400, including a body of `{"note":"iterations"}`, and a following status read still succeeds. An unknown solution is 404. A stop on a new solve still publishes nothing. The page drops the displayed node when continuation is accepted and loads that same solution id again when the run finishes. The Windows suite after these checks is 438,731 assertions and 0 failures. The MSVC test binary reserves an 8 MiB stack; a fresh compile of the street fixtures overflowed the 1 MiB default.
-
-This Windows run did not use ThreadSanitizer or AddressSanitizer. MSVC does not provide ThreadSanitizer. A focused WSL g++ 11.4.0 ThreadSanitizer build of the value-worker tests, with `-O1 -g -fsanitize=thread -fno-omit-frame-pointer -pthread`, aborted at startup with `unexpected memory mapping` before any assertion ran. The value-worker tests were not executed under a sanitizer here. No 300-iteration campaign was run. The pinned engine heaps above were not remeasured; the epoch, the retained page, and the HTTP body remain outside the engine object.
-
-One frozen iteration, pot 100, stack 100, bet 0.5, all-in, one raise, 1024 MiB, one thread. On the full-range turn `Ah Kd 7c 4s` the root conditional values took 0.1227594 seconds and the repeat took 0. The values JSON, with solution `s1`, job `j1`, and status generation 1, was 80,322 bytes. The root value was 15.1234567901, matching the stored EV, and the Nash gap was 81.2343664183. Engine allocated and peak stayed 143,384,982 bytes. Process RSS was 149,512,192 before the query and 150,056,960 after. The first river decision, `p3.t-1.r0`, took 0.0016188 seconds and was 77,848 bytes; the repeat took 0. On the paired flop `Ah Kd 7c`, `QQ,JJ,TT,99` versus the same range, the root took 0.3370098 seconds and the repeat took 0. That same JSON shape was 2,042 bytes. The value was 16.2637174211 and the Nash gap was 89.2478513202. Engine allocated and peak stayed 176,211,150 bytes. Process RSS was 183,361,536 before the query and 183,365,632 after. The first turn decision, `p3.t0.r-1`, took 0.0035858 seconds and was 2,053 bytes; the repeat took 0. Evaluation seconds were unchanged on both trees. The retained page and its profile epoch sit outside the engine budget. These are measurements from that run. The timing tables in [BENCHMARKS.md](BENCHMARKS.md) stay as recorded.
-
-This Windows run did not use ThreadSanitizer or AddressSanitizer. MSVC does not provide ThreadSanitizer. The earlier WSL g++ 11.4.0 ThreadSanitizer attempt aborted at startup with `unexpected memory mapping`, so the new evaluator, its scratch lock, and the publication fix were not run under a sanitizer here. The Windows Release suite covers those paths.
-
-One frozen iteration, pot 100, stack 100, bet 0.5, all-in, one raise, 1024 MiB, one thread. The full-range turn `Ah Kd 7c 4s` returned a status of 827 bytes, value 15.1234567901, Nash gap 81.2343664183, engine allocated and peak 143,384,982 bytes, process RSS 184,279,040. The root page was 86,174 bytes in 0.0282 seconds, the first action 86,174 bytes in 0.0136 seconds, and the chance page 3,404 bytes in 0.0018 seconds with 48 cards whose weights sum to 1. The paired flop `Ah Kd 7c`, `QQ,JJ,TT,99` versus the same range, returned a status of 831 bytes, value 16.2637174211, Nash gap 89.2478513202, engine allocated and peak 176,211,150 bytes, process RSS 184,565,760. Its root was 2,214 bytes in 0.0057 seconds, the first action 2,214 bytes in 0.0036 seconds, and the chance page 3,468 bytes in 0.0033 seconds with 49 cards whose weights sum to 1. A follow-up read of that flop chance page reported query 0.0000243 seconds and serialization 0.0000676 seconds. These are measurements from that run. The earlier full-range kernel heaps in [BENCHMARKS.md](BENCHMARKS.md) stay as recorded.
-
-The explorer page at `http://127.0.0.1:8765` solved that paired flop for one frozen iteration. The root frequency menu listed Bet or raise, Check, Bet 50, and Bet 100 all-in. Bet 50 opened the IP node, whose menu listed Fold and Call. Selecting Fold showed `6 combos, Fold 0.500`. The turn card `2c` was labeled with weight 0.022 and opened the turn decision.
-
-**Linear CFR** (`tests/unit/test_cfr.cpp`)
-
-- Tiny river `StreetGame` Linear CFR runs are deterministic
-- The average strategy differs from vanilla CFR at the same iteration count
-- At least one cumulative regret is negative
-
-Payoff accounting and exact best response are tested separately from the Nash gap.
-
-## CLI smoke
-
-```sh
-street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1
-```
-
-Prints value and Nash gap for the check-only flop. Reference enumerator smoke: `street_solver --board Ah,Kd,7c,4s,2h --oop-range AcAd --ip-range KsKc --iterations 20 --reference`.
+Older revisions of this file described CMake/`ctest` targets (`poker_engine_tests`, `poker_study_tests`, `poker_http_tests`, `equity_tests`) and assertion archaeology against `include/` / `src/` / `explorer --port`. That tree is gone. Do not restore cmake how-tos as present-tense product testing. Archaeology: [PROJECT_HISTORY.md](../notes/PROJECT_HISTORY.md), git history before the C++ strip.

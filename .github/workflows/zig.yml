@@ -1,7 +1,7 @@
-# Zig rewrite gates (D8 / Phase 7 scaffolding).
+# Zig engine gate (build/test + ready/contract smokes).
 # Runs on zig-rewrite and on PRs that touch the Zig tree / this workflow.
-# Does not replace the C++ matrix in ci.yml; path filters there still skip
-# C++ when only Zig/desktop paths change.
+# Desktop Vitest/tsc lives in ci.yml; NSIS packaging in windows-installer.yml.
+# C++ explorer matrices were removed with the strip (#286–#287).
 
 name: Zig
 

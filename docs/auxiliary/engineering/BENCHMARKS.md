@@ -1,6 +1,13 @@
 # Benchmarks
 
-Primary production measurements are the **Street** and **River** sections below and [benchmarks/study/](../../../benchmarks/study/).
+**Historical C++ measurement corpus.** Tables below record C++ `street_solver` /
+`river_solver` / `build\Release\*.exe` runs from before the Zig cutover. They
+are not the `zig-rewrite` shipping path. For current product validation see
+[TESTING.md](TESTING.md) and optional Zig digs in [ZIG_RELEASE_GATES.md](ZIG_RELEASE_GATES.md).
+Study fixtures still live under [benchmarks/study/](../../../benchmarks/study/).
+
+Owner preference: Accuracy / time-to-Accuracy scoreboard campaigns are **not**
+cutover blockers.
 
 ## Five-card evaluator
 

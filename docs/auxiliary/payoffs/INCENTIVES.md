@@ -105,21 +105,11 @@ player 1 best-responds. `nash_gap` is the sum of unilateral BR **gains** in
 modeled utility (general-sum NashConv). **Do not claim chip Nash-gap / NashConv
 under active incentives** (same family of caveat as positive rake or ICM).
 
-## Explorer Job JSON / GUI
+## Config / GUI
 
-`/api/solve` accepts and status echoes:
-
-```json
-"incentives": [
-  {"kind": "label", "player": 0, "key": "b100", "delta": 3.5},
-  {"kind": "tag", "player": 1, "key": "bluff", "delta": -2}
-],
-"edge_tags": [
-  {"player": -1, "action": "b100", "tags": ["bluff"]},
-  {"player": 1, "action": "f", "tags": ["give_up"]}
-]
-```
-
-Omit both (or send empty arrays) for the chip/ICM path. Desktop Study Build and
-`legacy/ui/` exposes matching text fields (`;`-separated lines with the same
-spelling as street-config).
+Incentives and edge tags round-trip in `street-config 1` text (and historical
+Explorer Job JSON keys `incentives` / `edge_tags` on the retired HTTP surface).
+Omit both (or send empty arrays) for the chip/ICM path. Desktop Study Build
+exposes matching text fields (`;`-separated lines with the same spelling as
+street-config). Do not treat retired `/api/solve` HTTP examples as a live
+shipping contract.
