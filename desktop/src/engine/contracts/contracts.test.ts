@@ -31,6 +31,7 @@ describe("decodeStatusPayload", () => {
       paused: false,
       cancelled: false,
       failed: false,
+      last_error: null,
       status_generation: 2,
       solution_id: "s1",
       job_id: null,
@@ -47,6 +48,29 @@ describe("decodeStatusPayload", () => {
     expect(compiling.phase).toBe("compiling");
     expect(compiling.iterations).toBe(0);
     expect(compiling.iterations_requested).toBe(0);
+  });
+
+  it("accepts sticky last_error string or null (ZR-130)", () => {
+    const failed = decodeStatusPayload({
+      running: false,
+      paused: false,
+      cancelled: false,
+      failed: true,
+      last_error: "InvalidSession",
+      status_generation: 4,
+    });
+    expect(failed.last_error).toBe("InvalidSession");
+    expect(failed.failed).toBe(true);
+
+    const clear = decodeStatusPayload({
+      running: false,
+      paused: false,
+      cancelled: false,
+      failed: false,
+      last_error: null,
+      status_generation: 5,
+    });
+    expect(clear.last_error).toBeNull();
   });
 
   it("rejects wrong types for Zig progress fields when present", () => {

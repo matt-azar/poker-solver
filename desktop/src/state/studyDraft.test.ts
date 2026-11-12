@@ -31,6 +31,23 @@ describe("phaseFromStatus", () => {
     ).toBe("idle");
   });
 
+  it("maps sticky last_error to failed even when phase stayed published (ZR-130)", () => {
+    expect(
+      phaseFromStatus(
+        {
+          running: false,
+          paused: false,
+          cancelled: false,
+          failed: true,
+          last_error: "InvalidSession",
+          status_generation: 3,
+          phase: "published",
+        },
+        "solving",
+      ),
+    ).toBe("failed");
+  });
+
   it("maps host compiling to Building (ZR-120)", () => {
     expect(
       phaseFromStatus(

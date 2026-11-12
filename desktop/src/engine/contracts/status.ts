@@ -46,6 +46,10 @@ export function decodeStatusPayload(data: unknown): StatusPayload {
   if ("failed" in data) {
     requireBoolean(data, "failed");
   }
+  // ZR-130: sticky async-train fault code (null when clear).
+  if ("last_error" in data) {
+    optionalStringOrNull(data, "last_error");
+  }
   return {
     ...data,
     running,

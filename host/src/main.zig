@@ -52,6 +52,8 @@ pub fn main() !void {
         for (state.pending.items) |rid| {
             var err_reply = ipc.makeErrorReply(allocator, rid, null, "exit", "sidecar_exit", "solver-engine exiting") catch continue;
             defer err_reply.deinit();
+            // Intentional best-effort (Tiger Style Phase 2): stdout may already
+            // be closed on process exit; do not escalate into a panic here.
             state.writeReply(err_reply) catch {};
         }
         state.deinit();

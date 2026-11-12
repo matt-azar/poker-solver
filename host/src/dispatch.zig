@@ -53,6 +53,10 @@ pub const HostState = struct {
     last_cancelled: bool = false,
     /// Absolute iteration target for the active/last train job (start_trained + job iters).
     train_iterations_requested: i32 = 0,
+    /// Sticky async-train failure code (ZR-130 / Tiger Phase 2). Set when the
+    /// post-admit worker hits a train fault; surfaced on `status` because short
+    /// admit already replied on that request_id (no second solve reply).
+    last_error: ?[]u8 = null,
     /// Standalone Equity calculator jobs (ZR-84); independent of Study Session.
     equity_jobs: equity_jobs.Manager,
 
@@ -84,7 +88,25 @@ pub const HostState = struct {
         if (self.active_job_id) |jid| self.allocator.free(jid);
         self.active_job_id = null;
         self.job_mu.unlock();
+        self.clearLastError();
         self.pending.deinit();
+    }
+
+    /// Clear sticky async-train error (fresh admit / successful train / teardown).
+    pub fn clearLastError(self: *HostState) void {
+        self.job_mu.lock();
+        defer self.job_mu.unlock();
+        if (self.last_error) |err| self.allocator.free(err);
+        self.last_error = null;
+    }
+
+    /// Record a train-worker operating error for `status.last_error` (ZR-130).
+    pub fn setLastError(self: *HostState, code: []const u8) void {
+        self.job_mu.lock();
+        defer self.job_mu.unlock();
+        if (self.last_error) |prev| self.allocator.free(prev);
+        self.last_error = self.allocator.dupe(u8, code) catch null;
+        self.status_generation += 1;
     }
 
     pub fn joinTrain(self: *HostState) void {
@@ -412,6 +434,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
 
     state.job_mu.lock();
     const active = state.active_job_id;
+    const sticky_error = state.last_error;
     const gen = state.status_generation + solution_id + policy_revision;
     state.job_mu.unlock();
 
@@ -419,7 +442,9 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     if (active) |jid| {
         if (state.isCancelled(jid)) cancelled = true;
     }
-    const failed = phase == .failed and !running;
+    // ZR-130: sticky last_error marks failed even when Session errdefer kept
+    // phase at `.published` (prior average still installed).
+    const failed = (phase == .failed or sticky_error != null) and !running;
 
     var list = std.ArrayList(u8).init(allocator);
     errdefer list.deinit();
@@ -452,6 +477,12 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     try w.writeAll(if (has_training) "true" else "false");
     try w.writeAll(",\"can_continue\":");
     try w.writeAll(if (can_continue) "true" else "false");
+    // Sticky async-train code (null when clear). Desktop also reads legacy `error`.
+    if (sticky_error) |code| {
+        try w.print(",\"last_error\":\"{s}\",\"error\":\"{s}\"", .{ code, code });
+    } else {
+        try w.writeAll(",\"last_error\":null,\"error\":\"\"");
+    }
     try w.print(
         ",\"phase\":\"{s}\",\"iterations\":{d},\"iterations_requested\":{d},\"policy_revision\":{d},\"terminal_reason\":\"{s}\",\"workers_training\":{d},\"workers_analysis\":{d},\"threads\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}",
         .{
@@ -1471,14 +1502,22 @@ fn trainWorker(task: *TrainTask) void {
     }
 
     const use_gated = task.accuracy > 0 or task.time_limit >= 0;
-    // ZR-106 / ZR-90: admission already replied. Completion is visible via
-    // `status` (`running` / phase / terminal_reason) — do not write a second
-    // solve reply on the same request_id (would be orphaned after short admit).
+    // ZR-106 / ZR-90 / ZR-130: admission already replied. Completion and faults
+    // are visible via `status` (`running` / phase / terminal_reason / last_error)
+    // — do not write a second solve reply on the same request_id (would be
+    // orphaned after short admit). Catch records sticky last_error instead.
     if (use_gated) {
-        state.session.trainGated(task.iterations, task.accuracy, task.eval_every, task.time_limit) catch {};
+        state.session.trainGated(task.iterations, task.accuracy, task.eval_every, task.time_limit) catch |err| {
+            state.setLastError(@errorName(err));
+            return;
+        };
     } else {
-        state.session.train(task.iterations) catch {};
+        state.session.train(task.iterations) catch |err| {
+            state.setLastError(@errorName(err));
+            return;
+        };
     }
+    state.clearLastError();
 }
 
 /// ZR-106 short-admit JSON (Study polls `status` for completion).
@@ -1554,6 +1593,8 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
     }
     state.session.clearControlFlags();
     state.last_cancelled = false;
+    // Fresh job: drop sticky train fault so status is not still "failed".
+    state.clearLastError();
     try state.setActiveJob(req.job_id);
 
     // Absolute target for Study progress: start_trained + this job's iterations.
@@ -1613,15 +1654,19 @@ fn beginWorker(task: *BeginTask) void {
         const code: []const u8 = if (err == error.BudgetExceeded) "budget_exceeded" else "begin_failed";
         var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, "begin_config", code, @errorName(err)) catch return;
         defer err_reply.deinit();
+        // Intentional best-effort: worker exit must not panic if stdout is gone.
         state.writeReply(err_reply) catch {};
         return;
     };
     state.last_cancelled = false;
     state.train_iterations_requested = 0;
+    state.clearLastError();
     var buf: [64]u8 = undefined;
     const body = std.fmt.bufPrint(&buf, "{{\"solution_id\":{d}}}", .{state.session.solution_id}) catch return;
     var reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, "begin_config", body) catch return;
     defer reply.deinit();
+    // Intentional best-effort: same short-admit honesty as train — do not
+    // escalate a late write failure into a worker abort after Session installed.
     state.writeReply(reply) catch {};
 }
 
@@ -2734,6 +2779,57 @@ test "status publishes failed flag when session phase is failed" {
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"failed\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"phase\":\"failed\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"running\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"last_error\":null") != null);
+}
+
+test "forced train failure surfaces sticky last_error on status" {
+    // ZR-130 / Tiger Phase 2: async train faults must not write a second solve
+    // reply; sticky last_error on status carries the Zig error name instead.
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "train-last-error");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    // Mirror trainWorker catch path: force InvalidSession, record sticky code.
+    state.session.phase = .idle;
+    const train_err = state.session.train(1);
+    try std.testing.expectError(error.InvalidSession, train_err);
+    state.setLastError(@errorName(error.InvalidSession));
+
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"last_error\":\"InvalidSession\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"error\":\"InvalidSession\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"failed\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"running\":false") != null);
+
+    // Fresh admit clears sticky fault so Study is not stuck failed forever.
+    state.clearLastError();
+    const cleared = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(cleared);
+    try std.testing.expect(std.mem.indexOf(u8, cleared, "\"last_error\":null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cleared, "\"failed\":false") != null);
 }
 
 test "strategy edits list put delete Study CRUD" {
