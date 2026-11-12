@@ -3334,15 +3334,17 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         connection: "connected",
       });
     } catch (error) {
+      // Library catalogue failures must not paint "Engine unreachable" over a
+      // healthy solver-engine IPC session (post-#286 Zig-only packaging).
+      const detail =
+        error instanceof EngineError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Failed to load recent solutions";
       set({
         libraryLists: { ...get().libraryLists, recent: [], loading: false },
-        connection: "disconnected",
-        message:
-          error instanceof EngineError
-            ? error.message
-            : error instanceof Error
-              ? `Engine unreachable: ${error.message}`
-              : "Failed to load recent solutions",
+        message: `Library recent list unavailable: ${detail}`,
       });
     }
   },
@@ -3362,15 +3364,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         connection: "connected",
       });
     } catch (error) {
+      const detail =
+        error instanceof EngineError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Failed to load templates";
       set({
         libraryLists: { ...get().libraryLists, templates: [], loading: false },
-        connection: "disconnected",
-        message:
-          error instanceof EngineError
-            ? error.message
-            : error instanceof Error
-              ? `Engine unreachable: ${error.message}`
-              : "Failed to load templates",
+        message: `Library templates unavailable: ${detail}`,
       });
     }
   },
@@ -3390,15 +3392,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         connection: "connected",
       });
     } catch (error) {
+      const detail =
+        error instanceof EngineError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Failed to load range presets";
       set({
         libraryLists: { ...get().libraryLists, ranges: [], loading: false },
-        connection: "disconnected",
-        message:
-          error instanceof EngineError
-            ? error.message
-            : error instanceof Error
-              ? `Engine unreachable: ${error.message}`
-              : "Failed to load range presets",
+        message: `Library ranges unavailable: ${detail}`,
       });
     }
   },

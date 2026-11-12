@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import type {
   ActionValuesPayload,
   MemoryPlanPayload,
@@ -34,10 +35,11 @@ function defaultEngineBaseUrl(): string {
   if (typeof fromEnv === "string" && fromEnv.length > 0) {
     return fromEnv;
   }
-  // Packaged Study uses solver-engine IPC (no HTTP explorer). Browser/dev may
-  // still set VITE_ENGINE_URL for fixture/HTTP unit tests only.
+  // Packaged Study uses solver-engine IPC — never default to explorer :8765.
+  // Browser/dev may still set VITE_ENGINE_URL for fixture/HTTP unit tests only.
   return "";
 }
+
 
 export class EngineError extends Error {
   status: number;
@@ -48,6 +50,14 @@ export class EngineError extends Error {
     this.name = "EngineError";
     this.status = status;
     this.body = body;
+  }
+}
+
+async function libraryInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return (await invoke(cmd, args ?? {})) as T;
+  } catch (err) {
+    throw new EngineError(err instanceof Error ? err.message : String(err), 0, null);
   }
 }
 
@@ -113,6 +123,14 @@ export class EngineClient {
     body?: unknown,
     init: RequestInit = {},
   ): Promise<{ response: Response; data: unknown }> {
+    // Packaged Zig path must never fall through to explorer HTTP (:8765).
+    if (isIpcTransport()) {
+      throw new EngineError(
+        `HTTP ${method} ${path} is unavailable over solver-engine IPC`,
+        501,
+        null,
+      );
+    }
     const headers = new Headers(init.headers);
     if (body !== undefined) {
       headers.set("Content-Type", "application/json");
@@ -502,54 +520,85 @@ export class EngineClient {
   }
 
   async recentSolutions(): Promise<unknown> {
+    if (isIpcTransport()) {
+      return libraryInvoke("library_list_recent");
+    }
     const { response, data } = await this.request("GET", "/api/recent-solutions");
     this.ensureOk(response, data);
     return data;
   }
 
   async templates(): Promise<unknown> {
+    if (isIpcTransport()) {
+      return libraryInvoke("library_list_templates");
+    }
     const { response, data } = await this.request("GET", "/api/templates");
     this.ensureOk(response, data);
     return data;
   }
 
   async template(id: string): Promise<{ id: string; text: string }> {
+    if (isIpcTransport()) {
+      return libraryInvoke("library_read_template", { id });
+    }
     const { response, data } = await this.request("GET", `/api/templates/${encodeURIComponent(id)}`);
     this.ensureOk(response, data);
     return data as { id: string; text: string };
   }
 
   async ranges(): Promise<unknown> {
+    if (isIpcTransport()) {
+      return libraryInvoke("library_list_ranges");
+    }
     const { response, data } = await this.request("GET", "/api/ranges");
     this.ensureOk(response, data);
     return data;
   }
 
   async rangePreset(id: string): Promise<{ id: string; text: string }> {
+    if (isIpcTransport()) {
+      return libraryInvoke("library_read_range", { id });
+    }
     const { response, data } = await this.request("GET", `/api/ranges/${encodeURIComponent(id)}`);
     this.ensureOk(response, data);
     return data as { id: string; text: string };
   }
 
   async parseConfig(text: string): Promise<Record<string, unknown>> {
+    if (isIpcTransport()) {
+      throw new EngineError(
+        "parseConfig is not available over solver-engine IPC yet (Library apply-template residual)",
+        501,
+        null,
+      );
+    }
     const { response, data } = await this.request("POST", "/api/config", { text });
     this.ensureOk(response, data);
     return data as Record<string, unknown>;
   }
 
   async planMemory(job: SolveJobRequest | { text: string }): Promise<MemoryPlanPayload> {
+    if (isIpcTransport()) {
+      throw new EngineError("planMemory is not available over solver-engine IPC yet", 501, null);
+    }
     const { response, data } = await this.request("POST", "/api/plan-memory", job);
     this.ensureOk(response, data);
     return data as MemoryPlanPayload;
   }
 
   async treePreview(job: SolveJobRequest | { text: string }): Promise<TreePreviewPayload> {
+    if (isIpcTransport()) {
+      throw new EngineError("treePreview is not available over solver-engine IPC yet", 501, null);
+    }
     const { response, data } = await this.request("POST", "/api/tree-preview", job);
     this.ensureOk(response, data);
     return data as TreePreviewPayload;
   }
 
   async compare(baseline: string, scenario: string, nodeId: string): Promise<unknown> {
+    if (isIpcTransport()) {
+      throw new EngineError("compare is not available over solver-engine IPC yet", 501, null);
+    }
     const query = new URLSearchParams({ baseline, scenario, node_id: nodeId });
     const { response, data } = await this.request("GET", `/api/compare?${query}`);
     this.ensureOk(response, data);

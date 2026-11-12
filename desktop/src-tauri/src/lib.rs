@@ -1,7 +1,8 @@
 // Copyright (c) Matt Azar. UNLICENSED — no license is granted.
-//! Hold'em Study Tauri shell: loads the Vite UI and manages the Zig solver-engine sidecar.
+//! Hold'em Study Tauri shell: loads the Vite UI and owns the Zig solver-engine IPC session.
 
 mod assistant_secrets;
+mod library;
 mod solver_engine;
 
 use tauri::{AppHandle, Manager, RunEvent};
@@ -69,6 +70,11 @@ pub fn run() {
             solver_engine::ensure_solver_engine,
             solver_engine::solver_engine_info,
             solver_engine::solver_engine_request,
+            library::library_list_templates,
+            library::library_list_ranges,
+            library::library_list_recent,
+            library::library_read_template,
+            library::library_read_range,
             assistant_secret_get,
             assistant_secret_set,
             assistant_secret_clear,
