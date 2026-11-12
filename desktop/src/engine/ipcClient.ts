@@ -140,4 +140,10 @@ export class SolverEngineIpcClient {
     const env = await this.request("node", { node_index: nodeIndex });
     return env.body;
   }
+
+  /** Node action-EV summary (root-centered + local_offset). */
+  async values(nodeIndex = 0): Promise<unknown> {
+    const env = await this.request("values", { node_index: nodeIndex });
+    return env.body;
+  }
 }
