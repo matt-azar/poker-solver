@@ -164,6 +164,49 @@ test "browse-only open keeps has_training false and continue disabled" {
     try std.testing.expect(resumed.canContinue());
 }
 
+test "early stop before publish leaves session paused and continuable" {
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var sess = Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try std.testing.expect(sess.phase == .paused);
+    try std.testing.expect(sess.published == null);
+
+    // Simulate Stop before first publish: requestStop then train exits immediately.
+    sess.requestStop();
+    try sess.train(2_000_000);
+    try std.testing.expect(sess.last_terminal == .cancelled);
+    try std.testing.expect(sess.phase == .paused);
+    try std.testing.expect(sess.published == null);
+    try std.testing.expect(sess.has_training);
+
+    // Fresh train without re-begin must succeed and publish.
+    try sess.train(2);
+    try std.testing.expect(sess.phase == .published);
+    try std.testing.expect(sess.last_terminal == .completed);
+    try std.testing.expect(sess.policyRevision() >= 1);
+}
+
 test "prepareResolveLocked reset stamps baseline and zeros trained" {
     const text =
         \\street-config 1
