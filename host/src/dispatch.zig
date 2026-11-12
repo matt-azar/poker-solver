@@ -23,6 +23,13 @@ const TrainTask = struct {
     eval_every: i32,
 };
 
+const BeginTask = struct {
+    state: *HostState,
+    request_id: []u8,
+    job_id: ?[]u8,
+    config: []u8,
+};
+
 pub const HostState = struct {
     allocator: std.mem.Allocator,
     session: poker_app.Session,
@@ -32,15 +39,20 @@ pub const HostState = struct {
     pending_mu: std.Thread.Mutex = .{},
     cancelled_jobs: std.StringHashMap(void),
     cancelled_mu: std.Thread.Mutex = .{},
-    /// Serialize stdout frames from stdin loop + train worker (R10).
+    /// Serialize stdout frames from stdin loop + train/begin workers (R10 / ZR-120).
     stdout_mu: std.Thread.Mutex = .{},
     train_thread: ?std.Thread = null,
     train_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// Flop/turn compile off the stdin loop so Study can poll `status` (ZR-120).
+    begin_thread: ?std.Thread = null,
+    begin_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     /// Active train job id (owned); null when idle.
     active_job_id: ?[]u8 = null,
     job_mu: std.Thread.Mutex = .{},
     status_generation: u64 = 1,
     last_cancelled: bool = false,
+    /// Absolute iteration target for the active/last train job (start_trained + job iters).
+    train_iterations_requested: i32 = 0,
     /// Standalone Equity calculator jobs (ZR-84); independent of Study Session.
     equity_jobs: equity_jobs.Manager,
 
@@ -57,6 +69,7 @@ pub const HostState = struct {
     }
 
     pub fn deinit(self: *HostState) void {
+        self.joinBegin();
         self.joinTrain();
         self.equity_jobs.deinit();
         self.clearPending();
@@ -79,6 +92,17 @@ pub const HostState = struct {
             t.join();
             self.train_thread = null;
         }
+    }
+
+    pub fn joinBegin(self: *HostState) void {
+        if (self.begin_thread) |t| {
+            t.join();
+            self.begin_thread = null;
+        }
+    }
+
+    pub fn beginOrTrainBusy(self: *HostState) bool {
+        return self.begin_running.load(.acquire) or self.train_running.load(.acquire);
     }
 
     pub fn writeReply(self: *HostState, reply: ipc.Envelope) !void {
@@ -368,11 +392,23 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     const can_continue = state.session.canContinue();
     const threads = state.session.threads;
     const terminal = state.session.last_terminal;
+    // Study progress (ZR-120): expose trained count so UI is not stuck at "0 iters".
+    var iterations: i32 = 0;
+    if (state.session.training) |*training| {
+        iterations = training.trained;
+    } else if (state.session.published) |published| {
+        iterations = published.trained;
+    }
     state.session.mu.unlock();
 
+    const begin_running = state.begin_running.load(.acquire);
     const train_running = state.train_running.load(.acquire);
-    const running = train_running or phase == .training or phase == .compiling;
+    const running = begin_running or train_running or phase == .training or phase == .compiling;
     const paused = phase == .paused and !running;
+    // While compile runs off-stdin, report compiling even though Session still
+    // holds the prior solution until fail-closed install (ZR-120).
+    const phase_name: []const u8 = if (begin_running) "compiling" else @tagName(phase);
+    const iterations_requested = state.train_iterations_requested;
 
     state.job_mu.lock();
     const active = state.active_job_id;
@@ -416,14 +452,19 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     try w.writeAll(if (has_training) "true" else "false");
     try w.writeAll(",\"can_continue\":");
     try w.writeAll(if (can_continue) "true" else "false");
-    try w.print(",\"phase\":\"{s}\",\"policy_revision\":{d},\"terminal_reason\":\"{s}\",\"workers_training\":{d},\"workers_analysis\":{d},\"threads\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}", .{
-        @tagName(phase),
-        policy_revision,
-        @tagName(terminal),
-        threads,
-        state.budget.analysis,
-        threads,
-    });
+    try w.print(
+        ",\"phase\":\"{s}\",\"iterations\":{d},\"iterations_requested\":{d},\"policy_revision\":{d},\"terminal_reason\":\"{s}\",\"workers_training\":{d},\"workers_analysis\":{d},\"threads\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}",
+        .{
+            phase_name,
+            iterations,
+            iterations_requested,
+            policy_revision,
+            @tagName(terminal),
+            threads,
+            state.budget.analysis,
+            threads,
+        },
+    );
     return try list.toOwnedSlice();
 }
 
@@ -746,6 +787,11 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "begin_config")) {
+        // Sync path for unit tests. Product stdin loop uses `startBeginConfig`
+        // so flop compile cannot starve status/control (ZR-120).
+        if (state.beginOrTrainBusy()) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
+        }
         const escaped = bodyStringField(req.body_json, "config_text") orelse
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
         const config = try unescapeConfig(state.allocator, escaped);
@@ -755,6 +801,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };
         state.last_cancelled = false;
+        state.train_iterations_requested = 0;
         var buf: [64]u8 = undefined;
         const body = try std.fmt.bufPrint(&buf, "{{\"solution_id\":{d}}}", .{state.session.solution_id});
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
@@ -806,6 +853,9 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "open")) {
+        if (state.beginOrTrainBusy()) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
+        }
         const path = (try bodyUnescapedStringField(state.allocator, req.body_json, "path")) orelse
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
         defer state.allocator.free(path);
@@ -1468,6 +1518,12 @@ fn admitTrainJob(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
         return .replied;
     }
 
+    if (state.begin_running.load(.acquire)) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin_config still compiling");
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return .replied;
+    }
     if (state.train_running.load(.acquire)) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "train already running");
         defer err_reply.deinit();
@@ -1494,6 +1550,13 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
     state.session.clearControlFlags();
     state.last_cancelled = false;
     try state.setActiveJob(req.job_id);
+
+    // Absolute target for Study progress: start_trained + this job's iterations.
+    state.session.mu.lock();
+    const start_trained: i32 = if (state.session.training) |*training| training.trained else 0;
+    state.session.mu.unlock();
+    const job_iters: i32 = if (iterations < 1) 1 else iterations;
+    state.train_iterations_requested = start_trained + job_iters;
 
     const task = try state.allocator.create(TrainTask);
     errdefer state.allocator.destroy(task);
@@ -1527,6 +1590,120 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
         return .replied;
     };
     return .ok;
+}
+
+fn beginWorker(task: *BeginTask) void {
+    const state = task.state;
+    defer {
+        state.untrack(task.request_id);
+        state.begin_running.store(false, .release);
+        state.status_generation += 1;
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.config);
+        state.allocator.destroy(task);
+    }
+
+    state.session.begin(task.config) catch |err| {
+        const code: []const u8 = if (err == error.BudgetExceeded) "budget_exceeded" else "begin_failed";
+        var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, "begin_config", code, @errorName(err)) catch return;
+        defer err_reply.deinit();
+        state.writeReply(err_reply) catch {};
+        return;
+    };
+    state.last_cancelled = false;
+    state.train_iterations_requested = 0;
+    var buf: [64]u8 = undefined;
+    const body = std.fmt.bufPrint(&buf, "{{\"solution_id\":{d}}}", .{state.session.solution_id}) catch return;
+    var reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, "begin_config", body) catch return;
+    defer reply.deinit();
+    state.writeReply(reply) catch {};
+}
+
+/// Compile street-config off the stdin loop so Study `status` stays live during flop tree
+/// build (ZR-120). Reply shape matches sync `begin_config` (solution_id on success).
+pub fn startBeginConfig(state: *HostState, req: ipc.Envelope) !void {
+    try state.track(req.request_id);
+    errdefer state.untrack(req.request_id);
+
+    if (state.beginOrTrainBusy()) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    }
+    state.session.mu.lock();
+    const replace_busy = state.session.phase == .training or state.session.phase == .compiling;
+    state.session.mu.unlock();
+    if (replace_busy) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "session busy");
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    }
+
+    const escaped = bodyStringField(req.body_json, "config_text") orelse {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    };
+    const config = unescapeConfig(state.allocator, escaped) catch |err| {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", @errorName(err));
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    };
+    var config_owned = true;
+    errdefer if (config_owned) state.allocator.free(config);
+
+    // Reap a prior begin worker handle before spawning another.
+    state.joinBegin();
+
+    const task = blk: {
+        const request_id = try state.allocator.dupe(u8, req.request_id);
+        errdefer state.allocator.free(request_id);
+        const job_id: ?[]u8 = if (req.job_id) |j| try state.allocator.dupe(u8, j) else null;
+        errdefer if (job_id) |j| state.allocator.free(j);
+        const created = try state.allocator.create(BeginTask);
+        created.* = .{
+            .state = state,
+            .request_id = request_id,
+            .job_id = job_id,
+            .config = config,
+        };
+        config_owned = false;
+        break :blk created;
+    };
+    // Worker (or spawn-failure path below) owns the task allocation from here.
+    var worker_owns_task = false;
+    errdefer if (!worker_owns_task) {
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.config);
+        state.allocator.destroy(task);
+    };
+
+    state.begin_running.store(true, .release);
+    state.status_generation += 1;
+    state.begin_thread = std.Thread.spawn(.{}, beginWorker, .{task}) catch |err| {
+        state.begin_running.store(false, .release);
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.config);
+        state.allocator.destroy(task);
+        worker_owns_task = true;
+        state.untrack(req.request_id);
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "begin_failed", @errorName(err));
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    };
+    worker_owns_task = true;
 }
 
 /// Spawn background CFR+ train so the stdin loop can serve `values` mid-train (R10).
@@ -2389,6 +2566,52 @@ test "resolve_locked stamps baseline, mints solution id, trains under lock" {
     try std.testing.expect(state.session.baseline_id == prior_id);
     try std.testing.expect(state.session.solution_id != mid_id);
     try std.testing.expect(state.session.training.?.trained == mid_trained);
+}
+
+test "status body exposes iterations and requested target" {
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "status-iters");
+    defer state.deinit();
+    try state.session.begin(config);
+    state.train_iterations_requested = 7;
+    try state.session.train(3);
+
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"iterations\":3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"iterations_requested\":7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"phase\":\"published\"") != null);
+}
+
+test "status reports compiling while begin_running" {
+    var state = try HostState.init(std.testing.allocator, "begin-running");
+    defer state.deinit();
+    state.begin_running.store(true, .release);
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"running\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"phase\":\"compiling\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"iterations\":0") != null);
 }
 
 test "strategy edits list put delete Study CRUD" {

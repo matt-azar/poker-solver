@@ -2088,16 +2088,26 @@ export const useStudyStore = create<StudyState>((set, get) => ({
             });
             await get().navigateTo(reloadTarget, { history: "replace" });
           } else if (normalized.running) {
-            const requested = normalized.iterations_requested;
-            const iterLabel =
-              requested != null && Number(requested) > 0
-                ? `${normalized.iterations ?? 0}/${requested}`
-                : `${normalized.iterations ?? 0}`;
-            set({
-              message: normalized.paused
-                ? "Pause requested — finishing current sample…"
-                : `Solving — ${iterLabel} iterations`,
-            });
+            const hostPhase =
+              typeof normalized.phase === "string"
+                ? normalized.phase.toLowerCase()
+                : "";
+            if (hostPhase === "compiling") {
+              set({
+                message: "Building public tree…",
+              });
+            } else {
+              const requested = normalized.iterations_requested;
+              const iterLabel =
+                requested != null && Number(requested) > 0
+                  ? `${normalized.iterations ?? 0}/${requested}`
+                  : `${normalized.iterations ?? 0}`;
+              set({
+                message: normalized.paused
+                  ? "Pause requested — finishing current sample…"
+                  : `Solving — ${iterLabel} iterations`,
+              });
+            }
           }
         } catch (error) {
           const classified = classifyStatusPollError(error, {
@@ -2169,8 +2179,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     dropAnalysisCaches();
     pendingReloadNodeId = null; // new solve always lands at root
     set({
-      phase: "solving",
-      message: "Solving…",
+      // Host begin_config may report phase=compiling (ZR-120); polling maps that
+      // to Building, then Solving once train is admitted with live iterations.
+      phase: "building",
+      message: "Building public tree…",
       solveValidationErrors: [],
       // Drop published identity so a delayed s1 node cannot rebind during s2.
       solutionId: null,
@@ -2190,8 +2202,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       strategyEditDrawerOpen: false,
       selectedCell: null,
     });
-    // Short-admit train (ZR-106): poll status for completion so flop cannot
-    // freeze Study behind a long sync solve RPC.
+    // Poll before begin+admit so status (iterations / compiling) stays live while
+    // the host compiles off-stdin and short-admits train (ZR-106 / ZR-120).
+    // Await admit only — completion is owned by status polling, not this RPC.
     continuationPending = true;
     get().startPolling();
     try {

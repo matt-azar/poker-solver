@@ -3,7 +3,7 @@ import { ALL_IN_SPEC } from "../domain/betSizes";
 import { DEFAULT_SPOT } from "../domain/types";
 import { buildJob, phaseFromStatus } from "./studyDraft";
 
-describe("phaseFromStatus recovery mapping", () => {
+describe("phaseFromStatus", () => {
   it("maps host phase=failed and clears sticky stop_requested when idle", () => {
     expect(
       phaseFromStatus(
@@ -29,6 +29,36 @@ describe("phaseFromStatus recovery mapping", () => {
         "stop_requested",
       ),
     ).toBe("idle");
+  });
+
+  it("maps host compiling to Building (ZR-120)", () => {
+    expect(
+      phaseFromStatus(
+        {
+          running: true,
+          paused: false,
+          cancelled: false,
+          phase: "compiling",
+          status_generation: 1,
+        },
+        "idle",
+      ),
+    ).toBe("building");
+  });
+
+  it("maps running train status to Solving with iteration fields intact", () => {
+    const status = {
+      running: true,
+      paused: false,
+      cancelled: false,
+      phase: "training",
+      iterations: 12,
+      iterations_requested: 200,
+      status_generation: 2,
+    };
+    expect(phaseFromStatus(status, "building")).toBe("solving");
+    expect(status.iterations).toBe(12);
+    expect(status.iterations_requested).toBe(200);
   });
 });
 

@@ -211,15 +211,20 @@ export function phaseFromStatus(status: StatusPayload | null, fallback: SolvePha
   if (!status) {
     return fallback;
   }
-  const hostPhase = typeof status.phase === "string" ? status.phase : null;
+  const hostPhase =
+    typeof status.phase === "string" ? status.phase.toLowerCase() : "";
   // Host publishes phase:"failed"; also honor legacy failed/error flags (ZR-123).
   if (status.failed || status.error || hostPhase === "failed") {
     return "failed";
   }
+  // Host begin_config compile (ZR-120): Building until train admits.
+  if (hostPhase === "compiling") {
+    return "building";
+  }
   if (status.running && status.paused) {
     return "pause_requested";
   }
-  if (status.running || hostPhase === "training" || hostPhase === "compiling") {
+  if (status.running || hostPhase === "training") {
     return "solving";
   }
   if (status.paused || hostPhase === "paused") {

@@ -241,7 +241,11 @@ def wait_until_training(
     *,
     timeout_s: float = 5.0,
 ) -> dict:
-    """Wait until session phase is training (pause needs phase!=paused from begin)."""
+    """Wait until train is live with at least one published revision.
+
+    Short-admit can report phase=training before the first publish; pause/stop
+    probes need a positive revision so early-stop assertions stay meaningful.
+    """
     deadline = time.perf_counter() + timeout_s
     n = 0
     while time.perf_counter() < deadline:
@@ -255,13 +259,15 @@ def wait_until_training(
             )
         )
         n += 1
-        if st.get("phase") == "training":
+        rev = int(st.get("policy_revision") or 0)
+        iters = int(st.get("iterations") or 0)
+        if st.get("phase") == "training" and (rev > 0 or iters > 0):
             return st
         if st.get("running") is False and st.get("phase") != "paused":
             # Finished before we observed training (should not with long_iters).
             raise ContractError(f"{label}: left running before phase=training: {st}")
         time.sleep(0.001)
-    raise ContractError(f"{label}: phase never became training")
+    raise ContractError(f"{label}: phase never became training with progress")
 
 
 def main() -> int:
@@ -371,17 +377,29 @@ def main() -> int:
             int(status1.get("policy_revision") or 0) == 10,
             f"solve-10 revision!=10: {status1}",
         )
+        # ZR-120: status must carry iteration progress for Study UI.
+        require(
+            int(status1.get("iterations") or -1) == 10,
+            f"solve-10 iterations!=10: {status1}",
+        )
+        require(
+            int(status1.get("iterations_requested") or -1) == 10,
+            f"solve-10 iterations_requested!=10: {status1}",
+        )
         stages["solve_10"] = {
             "admit": admit10,
             "terminal_reason": status1.get("terminal_reason"),
             "wall_s": round(time.perf_counter() - t_solve, 4),
             "policy_revision": status1.get("policy_revision"),
+            "iterations": status1.get("iterations"),
+            "iterations_requested": status1.get("iterations_requested"),
         }
         stages["status_after_solve"] = {
             "has_training": status1.get("has_training"),
             "can_continue": status1.get("can_continue"),
             "policy_revision": status1.get("policy_revision"),
             "phase": status1.get("phase"),
+            "iterations": status1.get("iterations"),
         }
 
         # Idle pause after publication (Study pause control when not training).

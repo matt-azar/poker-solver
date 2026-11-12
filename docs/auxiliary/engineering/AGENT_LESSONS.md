@@ -81,6 +81,7 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 | Lifecycle mutex around whole RPC | Mid-train `values` stalls behind `solve` | Hold lifecycle mutex only for spawn/take/kill; short stdin write lock; demux stdout by `request_id` (#282) |
 | Timeout kills train | One slow RPC aborts an in-flight solve | Kill on write/`Broken pipe`/shutdown; **don't** nuke train on a single RPC timeout (#289) |
 | Preview mutates session | Build Preview / plan-memory wipes a loaded Study | `tree_preview` / `plan_memory` must temp-compile **without** `begin_config` / `clearSolution` (#295) |
+| Status omits iterations / sync begin | Packaged flop Solve looks frozen at “Solving — 0” until done | Host `status` must publish `iterations` + `iterations_requested`; run `begin_config` **off** the stdin loop so polls stay live during flop compile; Study awaits admit only and polls for progress (ZR-120) |
 | Continue re-begins config | Continue broken after pause | `continueSolve` = host `solve` on the **open** session (no `begin_config`); mint a fresh job id (#292) |
 | Study `stop` ≠ host cancel | Stop leaves jobs running | Map Study stop → host job **cancel** (#284) |
 | Fake node equity | Equity looks like root on every node | Study node equity must **replay reach weights** (own actions × card removal) then check-down on the node board (#293). Calculator jobs (`start_equity_job`…) are a **different** IPC surface (#297). |
