@@ -1,2 +1,16 @@
 //! Inspect / EV / equity / BR — Phase 4.
+pub const evaluation = @import("evaluation.zig");
+pub const best_response = @import("best_response.zig");
+pub const inspect = @import("inspect.zig");
+pub const action_ev = @import("action_ev.zig");
+pub const equity = @import("equity.zig");
 pub const phase = "phase-4";
+
+test {
+    _ = evaluation;
+    _ = best_response;
+    _ = inspect;
+    _ = action_ev;
+    _ = equity;
+    _ = @import("phase4_test.zig");
+}
