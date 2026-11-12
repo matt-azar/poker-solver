@@ -122,6 +122,9 @@ jobs:
           if (-not (Test-Path "zig-out/bin/solver-engine.exe")) {
             throw "solver-engine.exe missing after zig build"
           }
+          # ZR-97/ZR-106: packaged Study must ship a GUI-subsystem sidecar so a
+          # blank console cannot appear (closing it kills IPC).
+          python scripts/zig/check-pe-subsystem.py zig-out/bin/solver-engine.exe --expect 2
 
       - name: Install desktop npm dependencies
         working-directory: desktop

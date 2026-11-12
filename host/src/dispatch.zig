@@ -1152,38 +1152,26 @@ fn trainWorker(task: *TrainTask) void {
     }
 
     const use_gated = task.accuracy > 0 or task.time_limit >= 0;
-    const train_result = if (use_gated)
-        state.session.trainGated(task.iterations, task.accuracy, task.eval_every, task.time_limit)
-    else
-        state.session.train(task.iterations);
-
-    var reply: ipc.Envelope = undefined;
-    if (train_result) |_| {
-        var buf: [320]u8 = undefined;
-        const trained: i32 = if (state.session.published) |p| p.trained else 0;
-        const body = std.fmt.bufPrint(&buf, "{{\"solution_id\":{d},\"policy_revision\":{d},\"trained\":{d},\"terminal_reason\":\"{s}\",\"async\":true,\"threads\":{d}}}", .{
-            state.session.solution_id,
-            state.session.policyRevision(),
-            trained,
-            @tagName(state.session.last_terminal),
-            state.session.threads,
-        }) catch {
-            reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "solve_failed", "format") catch return;
-            defer reply.deinit();
-            state.writeReply(reply) catch {};
-            return;
-        };
-        reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, task.op, body) catch {
-            reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "solve_failed", "oom") catch return;
-            defer reply.deinit();
-            state.writeReply(reply) catch {};
-            return;
-        };
-    } else |err| {
-        reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "solve_failed", @errorName(err)) catch return;
+    // ZR-106 / ZR-90: admission already replied. Completion is visible via
+    // `status` (`running` / phase / terminal_reason) — do not write a second
+    // solve reply on the same request_id (would be orphaned after short admit).
+    if (use_gated) {
+        state.session.trainGated(task.iterations, task.accuracy, task.eval_every, task.time_limit) catch {};
+    } else {
+        state.session.train(task.iterations) catch {};
     }
+}
+
+fn writeTrainAdmitReply(state: *HostState, req: ipc.Envelope) !void {
+    var buf: [192]u8 = undefined;
+    const body = try std.fmt.bufPrint(
+        &buf,
+        "{{\"accepted\":true,\"running\":true,\"solution_id\":{d},\"async\":true,\"threads\":{d}}}",
+        .{ state.session.solution_id, state.session.threads },
+    );
+    var reply = try ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     defer reply.deinit();
-    state.writeReply(reply) catch {};
+    try state.writeReply(reply);
 }
 
 fn admitTrainJob(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
@@ -1222,7 +1210,7 @@ fn admitTrainJob(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
     return .ok;
 }
 
-fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !void {
+fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
     const iterations = bodyIntField(req.body_json, "iterations") orelse 1;
     const accuracy = bodyFloatField(req.body_json, "accuracy") orelse 0;
     const time_limit = bodyFloatField(req.body_json, "time_limit") orelse -1;
@@ -1267,12 +1255,13 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !void {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "solve_failed", @errorName(err));
         defer err_reply.deinit();
         try state.writeReply(err_reply);
-        return;
+        return .replied;
     };
+    return .ok;
 }
 
 /// Spawn background CFR+ train so the stdin loop can serve `values` mid-train (R10).
-/// Does not write a sync reply; the worker emits the solve reply when finished.
+/// Writes a short admit reply immediately; Study polls `status` for completion (ZR-90/ZR-106).
 pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
     try state.track(req.request_id);
     errdefer state.untrack(req.request_id);
@@ -1284,7 +1273,10 @@ pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
         },
         .ok => {},
     }
-    try spawnTrainWorker(state, req);
+    switch (try spawnTrainWorker(state, req)) {
+        .replied => return,
+        .ok => try writeTrainAdmitReply(state, req),
+    }
 }
 
 /// Study Resolve Locked: stamp baseline, mint new solution id, optional reset, then train under locks.
@@ -1315,7 +1307,10 @@ pub fn startResolveLocked(state: *HostState, req: ipc.Envelope) !void {
         return;
     };
 
-    try spawnTrainWorker(state, req);
+    switch (try spawnTrainWorker(state, req)) {
+        .replied => return,
+        .ok => try writeTrainAdmitReply(state, req),
+    }
 }
 
 test "ready dispatch" {
