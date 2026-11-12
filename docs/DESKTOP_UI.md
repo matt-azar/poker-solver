@@ -103,8 +103,8 @@ Prefer the [latest GitHub Release download](https://github.com/matt-azar/poker-s
 
 Do **not** publish on every `main` merge. When a desktop cut is ready:
 
-1. Ensure `desktop/package.json` / `desktop/src-tauri/tauri.conf.json` version matches the intended cut (current package version is `0.1.2`).
-2. On the commit to ship: `git tag -a v0.1.2-windows -m "Holdem Study 0.1.2 (Windows)"` then `git push origin v0.1.2-windows`. Use the version you are cutting, not this example, if it has moved on.
+1. Ensure `desktop/package.json` / `desktop/src-tauri/tauri.conf.json` version matches the intended cut (current package version is `0.1.3`).
+2. On the commit to ship: `git tag -a v0.1.3-windows -m "Holdem Study 0.1.3 (Zig Windows)"` then `git push origin v0.1.3-windows`. Use the version you are cutting, not this example, if it has moved on.
 3. Workflow **Windows Installer Release** builds NSIS and attaches assets to the GitHub Release for that tag (stable name + versioned Tauri name).
 4. README already points at `/releases/latest/download/Holdem-Study-windows-x64-setup.exe` — no README edit required when the new release is the latest.
 
