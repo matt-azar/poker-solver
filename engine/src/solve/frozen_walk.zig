@@ -11,6 +11,7 @@ const range_mod = @import("../poker/range.zig");
 const compile = @import("../game/compile.zig");
 const regret_matching = @import("regret_matching.zig");
 const training_state = @import("training_state.zig");
+const node_lock = @import("node_lock.zig");
 
 pub const FrozenError = error{
     InvalidFrozen,
@@ -223,6 +224,9 @@ pub const FrozenCtx = struct {
     pool_finished: u32 = 0,
     pool_stop: bool = false,
     pool_job: ?*const ChanceJob = null,
+    /// Non-owning. When set, freeze / floorAndFreeze replace RM with locked rows
+    /// (C++ Engine::locks_). Null keeps unlocked freeze bit-identical.
+    locks: ?*const node_lock.LockSet = null,
 
     pub fn init(allocator: std.mem.Allocator, game: compile.CompiledGame, state: *training_state.TrainingState) FrozenError!FrozenCtx {
         return initCommon(allocator, game, state, 1);
@@ -1843,8 +1847,9 @@ pub fn trainFrozenCfrPlus(
     game: compile.CompiledGame,
     state: *training_state.TrainingState,
     iterations: i32,
+    locks: ?*const node_lock.LockSet,
 ) FrozenError!training_state.PublishedPolicy {
-    return trainFrozenCfrPlusThreaded(allocator, game, state, iterations, 1, null, null);
+    return trainFrozenCfrPlusThreaded(allocator, game, state, iterations, 1, null, null, locks);
 }
 
 /// Train on a caller-owned ctx (Session-persistent ranks / scratch).
@@ -1869,12 +1874,12 @@ pub fn trainFrozenCfrPlusOnCtx(
         state.trained += 1;
         const weight_iter: f64 = @floatFromInt(state.trained);
         // PoolJob::Slots: static partition when threads > 1 (D3 worker budget).
-        try training_state.freezeSigmaThreaded(allocator, game, state, slot_threads);
+        try training_state.freezeSigmaThreaded(allocator, game, state, slot_threads, ctx.locks);
         @memset(w.scratch[0].pi0, 1.0);
         @memset(w.scratch[0].pi1, 1.0);
         w.resetSupport();
         try ctx.walk(w, 0, -1, -1, 0, 0, weight_iter, false);
-        try training_state.floorAndFreezeThreaded(allocator, game, state, 0, slot_threads);
+        try training_state.floorAndFreezeThreaded(allocator, game, state, 0, slot_threads, ctx.locks);
         @memset(w.scratch[0].pi0, 1.0);
         @memset(w.scratch[0].pi1, 1.0);
         w.resetSupport();
@@ -1911,10 +1916,12 @@ pub fn trainFrozenCfrPlusThreaded(
     threads: u32,
     publish_hook: ?PublishHook,
     publish_ctx: ?*anyopaque,
+    locks: ?*const node_lock.LockSet,
 ) FrozenError!training_state.PublishedPolicy {
     if (iterations < 1) return error.InvalidFrozen;
     var ctx = try FrozenCtx.initThreaded(allocator, game, state, threads);
     defer ctx.deinit();
+    ctx.locks = locks;
     return trainFrozenCfrPlusOnCtx(&ctx, state, iterations, publish_hook, publish_ctx);
 }
 
@@ -2013,7 +2020,7 @@ test "frozen river smoke trains" {
     defer game.deinit();
     var state = try training_state.TrainingState.init(std.testing.allocator, game);
     defer state.deinit();
-    var published = try trainFrozenCfrPlus(std.testing.allocator, game, &state, 5);
+    var published = try trainFrozenCfrPlus(std.testing.allocator, game, &state, 5, null);
     defer published.deinit();
     try std.testing.expect(published.trained == 5);
     const eval = try evaluatePublishedFrozen(std.testing.allocator, game, published.average);
@@ -2023,7 +2030,7 @@ test "frozen river smoke trains" {
     // 4-thread path should match 1-thread even when chance steal is a no-op (river).
     var state4 = try training_state.TrainingState.init(std.testing.allocator, game);
     defer state4.deinit();
-    var published4 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state4, 5, 4, null, null);
+    var published4 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state4, 5, 4, null, null, null);
     defer published4.deinit();
     try std.testing.expectEqual(published.trained, published4.trained);
     const eval4 = try evaluatePublishedFrozenThreaded(std.testing.allocator, game, published4.average, 4);
@@ -2057,11 +2064,11 @@ test "frozen flop multithread matches serial" {
     defer game.deinit();
     var state1 = try training_state.TrainingState.init(std.testing.allocator, game);
     defer state1.deinit();
-    var pub1 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state1, 2, 1, null, null);
+    var pub1 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state1, 2, 1, null, null, null);
     defer pub1.deinit();
     var state4 = try training_state.TrainingState.init(std.testing.allocator, game);
     defer state4.deinit();
-    var pub4 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state4, 2, 4, null, null);
+    var pub4 = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state4, 2, 4, null, null, null);
     defer pub4.deinit();
     try std.testing.expectEqual(pub1.average.len, pub4.average.len);
     // Strict float parity after ordered EV reduce (C++ parallel_chance).
@@ -2108,7 +2115,7 @@ test "frozen flop multithread survives many train-eval cycles" {
     var last_acc: f64 = std.math.inf(f64);
     var cycle: i32 = 0;
     while (cycle < 40) : (cycle += 1) {
-        var published = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state, 1, 4, null, null);
+        var published = try trainFrozenCfrPlusThreaded(std.testing.allocator, game, &state, 1, 4, null, null, null);
         defer published.deinit();
         const eval = try evaluatePublishedFrozenThreaded(std.testing.allocator, game, published.average, 4);
         try std.testing.expect(eval.nash_gap >= 0);

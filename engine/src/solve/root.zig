@@ -18,4 +18,5 @@ test {
     _ = @import("strategy_parity_test.zig");
     _ = @import("turn_pot_bet_rematch_test.zig");
     _ = @import("node_lock_rematch_test.zig");
+    _ = @import("lock_apply_train_rematch_test.zig");
 }

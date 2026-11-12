@@ -26,7 +26,7 @@ test "river_gate_smoke frozen 40-iter strategy abs-diff pins vs tip C++" {
     defer game.deinit();
     var state = try training_state.TrainingState.init(std.testing.allocator, game);
     defer state.deinit();
-    var published = try frozen_walk.trainFrozenCfrPlus(std.testing.allocator, game, &state, 40);
+    var published = try frozen_walk.trainFrozenCfrPlus(std.testing.allocator, game, &state, 40, null);
     defer published.deinit();
 
     const eval = try frozen_walk.evaluatePublishedFrozen(std.testing.allocator, game, published.average);
