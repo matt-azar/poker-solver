@@ -18,7 +18,8 @@ alwaysApply: true
 
 **Architecture / Study correctness (short)**
 
-- On `main`, flop/turn/river (3/4/5 cards) use `StreetBatchSolver`. `river_solver` is a thin CLI onto that path. `RiverGame` stays the five-card oracle; `RiverBatchSolver` is oracle/legacy only.
+- On `main`, flop/turn/river CLI and HTTP (3/4/5 cards) use `StreetBatchSolver`. `river_solver` is a thin CLI onto that path. `RiverGame` stays the five-card oracle; `RiverBatchSolver` is oracle/legacy only.
+- Packaged Study starts Zig `solver-engine` (IPC protocol 2) first. HTTP `holdem-explorer` is the fallback and the browser path. IPC client coverage is status, solve, and root values. Zig PSOL v4 rejects C++ checkpoints. Do not claim a quality cutover or delete the C++ path. The published `v0.1.2-windows` installer is older (fixed port 8765, no Zig sidecar).
 - Pin production batch changes against `CfrTrainer<*Game>` / `--reference`. `include/` must not depend on `legacy/ui/` or `desktop/`.
 - Nash gap is NashConv (sum of BR gains). Accuracy / stop criterion is Pio’s average (NashConv/2); default unit is pot fraction.
 - Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; Equity (UI label) is check-down pot fraction ≠ chip EV.

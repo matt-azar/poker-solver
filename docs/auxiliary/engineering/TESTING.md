@@ -10,6 +10,14 @@ ctest --test-dir build --output-on-failure
 
 On Visual Studio multi-config builds, pass `-C Release` (or Debug) to `ctest`.
 
+Zig tests (toolchain 0.14.1):
+
+```sh
+zig build test
+```
+
+`zig build` also installs `solver-engine`, `street-config-check`, and `gate-bench`. Those binaries are not CTest targets. Gate procedure: [ZIG_RELEASE_GATES.md](ZIG_RELEASE_GATES.md).
+
 Build production binaries without tests or benchmarks:
 
 ```sh

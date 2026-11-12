@@ -1,6 +1,6 @@
 # Hold'em Study client
 
-React + TypeScript + Vite UI for the `explorer` HTTP API. See [docs/DESKTOP_UI.md](../docs/DESKTOP_UI.md).
+React + TypeScript + Vite Study UI. Browser development uses the `explorer` HTTP API. The packaged shell starts Zig `solver-engine` (IPC protocol 2) first. See [docs/DESKTOP_UI.md](../docs/DESKTOP_UI.md).
 
 ## Develop
 

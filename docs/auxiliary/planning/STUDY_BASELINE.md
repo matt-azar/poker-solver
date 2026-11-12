@@ -2,7 +2,7 @@
 
 Everyday postflop study surface after the river / street / pause / locking integrates on `main`.
 
-Product entry points: `explorer` + Study UI (`desktop/`), `street_solver`, and `river_solver` (thin five-card CLI onto `StreetBatchSolver`). Living status: [FEATURE_PARITY.md](FEATURE_PARITY.md). Ordered work: [ROADMAP.md](ROADMAP.md).
+Product entry points: Study UI (`desktop/`), C++ `explorer` (browser development and packaged HTTP fallback), Zig `solver-engine` (packaged shell, started first), `street_solver`, and `river_solver` (thin five-card CLI onto `StreetBatchSolver`). Living status: [FEATURE_PARITY.md](FEATURE_PARITY.md). Ordered work: [ROADMAP.md](ROADMAP.md).
 
 ## In place
 
@@ -13,7 +13,8 @@ Product entry points: `explorer` + Study UI (`desktop/`), `street_solver`, and `
 - Node locks, resolve-locked, baseline compare, and session strategy edits (street-first in explorer)
 - Build preview tree with force/remove/add-size edits and a memory-plan dry run
 - Pot rake, optional ICM, optional action-label incentives on street/river terminals, including explorer job JSON
-- Windows NSIS installer for Holdem Study ([DESKTOP_UI.md](../../DESKTOP_UI.md))
+- Windows NSIS installer for Holdem Study ([DESKTOP_UI.md](../../DESKTOP_UI.md)). The published `v0.1.2-windows` build starts `holdem-explorer` on port 8765. This tree's installer also ships `solver-engine` and starts that sidecar first.
+- Zig `solver-engine`: CFR+ over IPC protocol 2, PSOL v4. The Study client sends status, solve, and root action values over IPC. Other Study calls still use HTTP. Quality cutover is not recorded ([ZIG_RELEASE_GATES.md](../engineering/ZIG_RELEASE_GATES.md)).
 
 ## Still open
 

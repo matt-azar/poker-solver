@@ -2,13 +2,13 @@
 
 Heads-up no-limit Texas Hold'em GTO solver (C++20) with a local Study workstation.
 
-**Product surface:** postflop study through `explorer` and the React Study UI (`desktop/`) — solve, browse, lock, compare, save/reopen, and analyze. A Windows NSIS installer wraps that stack. Details: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md), [docs/EXPLORER.md](docs/EXPLORER.md). Doc index: [docs/README.md](docs/README.md).
+**Product surface:** postflop study in the React Study UI (`desktop/`). Browser development talks to the C++ `explorer` HTTP server. The packaged shell in this tree starts the Zig `solver-engine` sidecar first (typed IPC, protocol 2). If that sidecar is missing or fails ready, the shell starts `holdem-explorer`. CLI solves use `street_solver` and `river_solver`. Details: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md), [docs/EXPLORER.md](docs/EXPLORER.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Doc index: [docs/README.md](docs/README.md).
 
-Flop, turn, and river share one public betting tree (`StreetBatchSolver`). Convergence is an equilibrium of the configured bet-size tree.
+Flop, turn, and river share one public betting tree on the C++ path (`StreetBatchSolver`). Convergence is an equilibrium of the configured bet-size tree. The Zig sidecar is a second CFR+ implementation of `street-config 1`. It writes PSOL v4 and rejects older checkpoints.
 
 ## Windows installer
 
-Download the unsigned NSIS setup from the [latest GitHub Release](https://github.com/matt-azar/poker-solver/releases/latest) (current cut: `v0.1.2-windows`):
+The latest GitHub Release is [`v0.1.2-windows`](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.2-windows):
 
 **[Holdem Study (Windows)](https://github.com/matt-azar/poker-solver/releases/latest/download/Holdem-Study-windows-x64-setup.exe)** → `Holdem-Study-windows-x64-setup.exe`
 
@@ -17,9 +17,11 @@ Download the unsigned NSIS setup from the [latest GitHub Release](https://github
 
 Windows SmartScreen may warn because the binary is not code-signed — **More info → Run anyway**.
 
-The installer stops any running Study UI/engine, places `holdem-explorer.exe` next to the UI, unblocks both binaries, and fails if the engine is missing. On launch the shell picks a free `127.0.0.1` port, starts that sidecar with a launch id, and waits for `GET /api/ready` before the Study UI connects. A process already listening on port 8765 is not used. No CMake or npm required.
+That release starts `holdem-explorer.exe` on `127.0.0.1:8765`. If something is already listening on that port, the shell treats it as the engine. It does not start `solver-engine`. The installer stops a running Study UI and `holdem-explorer.exe`, places that engine next to the UI, unblocks the binaries, and fails if the engine is missing. No CMake or npm required.
 
-Maintainers: CI rebuilds the artifact on desktop changes (Actions → **Windows Installer**). Publishing a Release is intentional — push a `v*-windows` tag (see packaging notes). Packaging notes: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
+This tree is ahead of that release. Its installer ships `holdem-explorer.exe` and `solver-engine.exe`. On launch the shell starts `solver-engine` over inherited pipes (IPC protocol 2). If that sidecar is missing or fails ready, the shell picks a free `127.0.0.1` port, starts `holdem-explorer` with a launch id, and waits for `GET /api/ready`. A process already listening on port 8765 is not used. The package version in the tree is still `0.1.2`. A newer `v*-windows` tag has not been published. Packaging notes: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
+
+Maintainers: CI rebuilds the artifact on desktop changes (Actions → **Windows Installer**). Publishing a Release is intentional — push a `v*-windows` tag (see packaging notes).
 
 ## Study UI (developers)
 
@@ -48,8 +50,9 @@ Then open `http://127.0.0.1:8765`.
 - C++20 compiler: Visual Studio 2022 (MSVC) on Windows; GCC 13+ on Linux (CI). MinGW-w64 / Clang / older VS are untested without a smoke lane.
 - Node 22+ for `desktop/` (`engines.node` in `desktop/package.json`; CI uses Node 22 + `npm ci`)
 - Rust 1.83+ for the Tauri shell (`desktop/src-tauri/Cargo.toml` `rust-version`)
+- Zig 0.14.1 to build `solver-engine` (`./scripts/zig/install-toolchain.sh` on Linux x86_64). Pin, hashes, and commands: [docs/auxiliary/engineering/ZIG_RELEASE_GATES.md](docs/auxiliary/engineering/ZIG_RELEASE_GATES.md).
 
-No Python or third-party C++ libraries are required for the solver.
+The C++ solver does not need Python or third-party C++ libraries. Zig ready-smoke and gate scripts use Python 3.
 
 ## Build
 
@@ -94,7 +97,7 @@ river_solver --iterations 2000 --algorithm cfr_plus
 explorer
 ```
 
-`explorer` listens on `http://127.0.0.1:8765`. Save/Open a `.psol` file to resume the same regrets and strategy sums. In Study, Compare runouts shows one betting line across turn and river cards. Equity is a fraction of the pot and is separate from chip EV.
+`explorer` listens on `http://127.0.0.1:8765`. Save/Open a `.psol` file on that server resumes the same regrets and strategy sums (PSOL v1–v3). `solver-engine` writes PSOL v4 and rejects those older files. In Study, Compare runouts shows one betting line across turn and river cards. Equity is a fraction of the pot and is separate from chip EV.
 
 `street_solver` and `river_solver` both solve on `StreetBatchSolver` (or `StreetGame` with `--reference`). `river_solver` maps a fixed five-card board into that shared tree. `--memory-mib` is the engine allocation budget in mebibytes (default 1024). `--threads N` is the frozen-pass thread count including the caller (default 1; `N > 1` requires `--frozen`). No solver uses an RNG.
 
@@ -114,8 +117,13 @@ Raise or lower the work ceiling with `--max-pair-runouts` or `POKER_EQUITY_MAX_P
 
 ```text
 include/          Public C++ headers (game, solver, poker, explorer)
-src/              Engine libraries (poker/, solver/, game/, explorer/)
-src/cli/          Process entrypoints (street/river/explorer/equity)
+src/              C++ engine libraries (poker/, solver/, game/, explorer/)
+src/cli/          C++ process entrypoints (street/river/explorer/equity)
+engine/           Zig engine (cards, street-config, CFR+ train, inspect)
+app/              Zig session
+formats/          Zig PSOL v4
+host/             Zig solver-engine IPC host (protocol 2)
+cli/              Zig street-config-check and gate-bench
 desktop/          React Study UI + Tauri Windows shell (product UI)
 legacy/ui/        Legacy explorer static page (fallback + regression)
 benchmarks/       Study benchmark runner, cases, and street micro-benches
@@ -125,6 +133,7 @@ docs/             Primary CFR+/UI docs; auxiliary/ for the rest
 docs/ai-context/  Study assistant model packs (imported by desktop/)
 
 CMake libraries: poker_primitives → poker_solver → poker_study; poker_equity → primitives
+Zig build: zig build / zig build test  (see build.zig)
 ```
 
 ## Documentation

@@ -7,6 +7,7 @@ That file is the durable trap list (parallel agents, StreetBatch architecture, S
 Also:
 
 - Do not change `LICENSE` / SPDX (see `.cursor/rules/licensing.mdc`).
-- Prefer `StreetBatchSolver` for flop/turn/river production paths; keep `RiverGame` as the five-card oracle.
+- Prefer `StreetBatchSolver` for flop/turn/river CLI and HTTP paths; keep `RiverGame` as the five-card oracle.
+- Packaged Study starts Zig `solver-engine` IPC first; HTTP `explorer` is the fallback and the browser path. Zig PSOL v4 rejects C++ checkpoints. Do not claim a quality cutover.
 - After Study UI / analysis changes: desktop tests + `npx tsc -b`; after assistant/UI label moves: `cd desktop && npm run check:ai-context`.
 - Refresh playbook for this doc: [`docs/auxiliary/engineering/AGENT_LESSONS_REFRESH.md`](docs/auxiliary/engineering/AGENT_LESSONS_REFRESH.md).

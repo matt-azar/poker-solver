@@ -65,7 +65,7 @@ Street sizes stay on `treeEdits` / `intent.treePreset`: `oopFlop`, `ipFlop`, `oo
 
 ## Product surface (mounted UI)
 
-- Local postflop solver: React Study UI + `explorer` engine. OpenAI is optional; **Solve** is local.
+- Local postflop solver: React Study UI. Browser development uses `explorer` over HTTP. The packaged shell starts `solver-engine` typed IPC first, and starts `explorer` when that sidecar is missing or fails ready. OpenAI is optional for **Solve**; **Solve** is local.
 - Workspaces (menu bar tabs): **Study**, **Build**, **Equity**, **Compare**, **Library**.
 - Primary AI surface: floating **Study assistant** — menu bar **Assistant** toggle. Hideable, movable, resizable. Available on every workspace. Keyboard shortcuts stay on `?` (Help overlay).
 - There is **no** separate Build-page Setup assistant and **no** Help-menu “Study assistant…” entry.

@@ -6,7 +6,7 @@ One no-limit betting street on a fixed five-card board. Equilibrium of the confi
 
 `river_solver` maps river JSON/CLI flags into a `StreetConfig` (`street_config_from_river`) and solves with `StreetBatchSolver` (or `StreetGame` under `--reference`). Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 OOP, player 1 IP; a hand pair is legal only when the four private cards and the board are disjoint. No RNG.
 
-Explorer uses the same shared street tree for five cards and saves street-config PSOL files. Five-card `StreetBatchSolver` pins match `RiverGame` in `tests/unit/test_streets.cpp`. See [STREETS.md](STREETS.md).
+Explorer uses the same shared street tree for five cards and saves street-config PSOL files (v1–v3). Five-card `StreetBatchSolver` pins match `RiverGame` in `tests/unit/test_streets.cpp`. Zig `solver-engine` is a separate sidecar and writes PSOL v4. See [STREETS.md](STREETS.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Chips
 

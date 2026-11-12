@@ -14,8 +14,11 @@ what to run and what must stay blocked.
 | Phase exit gates | `zig-phase-checklist.md` |
 | Parity / oracle log | `zig-parity-oracle-log.md` |
 
-Do **not** claim Windows shipping cutover from this scaffolding. Stable Study
-still speaks HTTP to `holdem-explorer`.
+Do not record a quality cutover from this file. The packaged shell starts
+`solver-engine` first (IPC protocol 2). `holdem-explorer` starts when that
+sidecar is missing or fails ready. Browser development still uses `explorer`
+over HTTP. The published `v0.1.2-windows` installer starts `holdem-explorer`
+on port 8765 and does not include this sidecar.
 
 ## Locked fixtures (D12)
 
@@ -43,11 +46,12 @@ comparing Zig.
 | --- | --- |
 | `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke |
 | `.github/workflows/windows-installer-zig-preview.yml` | Labeled NSIS artifact `holdem-study-zig-tech-preview-windows-installer` (`productName`: Holdem Study Zig Tech Preview) |
-| `.github/workflows/windows-installer.yml` | Shipping-labeled installer; still bundles dormant `solver-engine.exe` because `externalBin` lists both |
+| `.github/workflows/windows-installer.yml` | Installer built from this tree. It bundles `holdem-explorer.exe` and `solver-engine.exe`. The shell starts `solver-engine` first. |
 
-Preview installers must stay clearly labeled. Shipping cutover flips the
-default Study transport only after cutover criteria are green and the owner
-records an explicit GO.
+Preview installers stay labeled **Holdem Study Zig Tech Preview**. Quality
+cutover (replacing the C++ CLI and HTTP engine, and accepting Zig numbers as
+the shipping measurement) still requires the store checklist and an explicit
+GO. The transport preference in this tree is already `solver-engine` first.
 
 ## Local toolchain
 
