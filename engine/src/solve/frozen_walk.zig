@@ -2043,7 +2043,13 @@ pub const FrozenCtx = struct {
 /// CFR+ frozen schedule matching C++ train_frozen_cfr_plus_iterations.
 /// Optional mid-train publish hook (Study live node-EV / R10).
 /// Receives ownership of each completed-iteration `PublishedPolicy`.
+/// Prefer `AfterIterHook` from Session so progress can advance without a full publish.
 pub const PublishHook = *const fn (*anyopaque, training_state.PublishedPolicy) anyerror!void;
+
+/// Called after each completed iteration when Session owns publication cadence (ZR-133).
+/// Progress (`trained`) is already advanced; the hook decides whether to materialize
+/// a strategy snapshot. Standalone callers with a null hook still publish every iter.
+pub const AfterIterHook = *const fn (*anyopaque, trained: i32) anyerror!void;
 
 /// Cooperative stop/pause check at a complete-iteration boundary (ZR-90).
 /// Return true to leave the loop before starting the next iteration.
@@ -2061,12 +2067,14 @@ pub fn trainFrozenCfrPlus(
 
 /// Train on a caller-owned ctx (Session-persistent ranks / scratch).
 /// Ensures ranks once; does not create or destroy the ctx.
+/// When `after_iter_hook` is set, iteration progress is separate from strategy
+/// publication — the hook owns cadence / buffer reuse (ZR-133 Change C).
 pub fn trainFrozenCfrPlusOnCtx(
     ctx: *FrozenCtx,
     state: *training_state.TrainingState,
     iterations: i32,
-    publish_hook: ?PublishHook,
-    publish_ctx: ?*anyopaque,
+    after_iter_hook: ?AfterIterHook,
+    after_iter_ctx: ?*anyopaque,
     stop_hook: ?StopHook,
     stop_ctx: ?*anyopaque,
 ) FrozenError!training_state.PublishedPolicy {
@@ -2098,22 +2106,20 @@ pub fn trainFrozenCfrPlusOnCtx(
         w.resetSupport();
         try ctx.walk(w, 0, -1, -1, 0, 1, weight_iter, false);
         try training_state.floorPlayerThreaded(allocator, game, state, 1, slot_threads);
-        const next = try training_state.publishAverageThreaded(allocator, game, state, slot_threads);
-        if (publish_hook) |hook| {
-            const hook_ctx = publish_ctx orelse return error.InvalidFrozen;
-            const rev = next.revision;
-            const trained = next.trained;
-            // Hook takes ownership of `next` (Session install / reader-lease swap).
-            hook(hook_ctx, next) catch return error.InvalidFrozen;
-            // Return value carries revision/trained only when hooked (average lives in Session).
+        if (after_iter_hook) |hook| {
+            const hook_ctx = after_iter_ctx orelse return error.InvalidFrozen;
+            // Session separates progress from full average materialization.
+            hook(hook_ctx, state.trained) catch return error.InvalidFrozen;
             if (published.average.len != 0) published.deinit();
             published = .{
                 .allocator = allocator,
                 .average = &.{},
-                .revision = rev,
-                .trained = trained,
+                .revision = state.policy_revision,
+                .trained = state.trained,
             };
         } else {
+            // Standalone / rematch path: publish every completed iteration.
+            const next = try training_state.publishAverageThreaded(allocator, game, state, slot_threads);
             if (published.average.len != 0) published.deinit();
             published = next;
         }
@@ -2127,8 +2133,8 @@ pub fn trainFrozenCfrPlusThreaded(
     state: *training_state.TrainingState,
     iterations: i32,
     threads: u32,
-    publish_hook: ?PublishHook,
-    publish_ctx: ?*anyopaque,
+    after_iter_hook: ?AfterIterHook,
+    after_iter_ctx: ?*anyopaque,
     stop_hook: ?StopHook,
     stop_ctx: ?*anyopaque,
     locks: ?*const node_lock.LockSet,
@@ -2137,7 +2143,7 @@ pub fn trainFrozenCfrPlusThreaded(
     var ctx = try FrozenCtx.initThreaded(allocator, game, state, threads);
     defer ctx.deinit();
     ctx.locks = locks;
-    return trainFrozenCfrPlusOnCtx(&ctx, state, iterations, publish_hook, publish_ctx, stop_hook, stop_ctx);
+    return trainFrozenCfrPlusOnCtx(&ctx, state, iterations, after_iter_hook, after_iter_ctx, stop_hook, stop_ctx);
 }
 
 /// Evaluate on a caller-owned ctx (reuses Session ranks). Match C++ evaluate_profile.

@@ -94,6 +94,18 @@ pub const Session = struct {
     last_terminal: TrainTerminal = .completed,
     /// Config memory budget in bytes (0 = unset / unlimited for legacy).
     memory_budget_bytes: u64 = 0,
+    /// Study live strategy publish cadence (ZR-133 Change C).
+    /// Iteration progress advances every train step; full average install is bounded.
+    /// Default 10 matches Study EV/gap refresh ("at least every 10 iters").
+    publish_every: i32 = 10,
+    /// Completed iters since the last installed strategy snapshot (carries across train(1)).
+    iters_since_publish: i32 = 0,
+    /// `training.trained` value of the last installed snapshot (0 = never).
+    last_published_trained: i32 = 0,
+    /// Force a publish on the next completed iteration (e.g. after resolve-locked reset).
+    force_next_publish: bool = false,
+    /// Recycled average buffer after readers release (C++ ensure_average reuse).
+    average_spare: ?[]f32 = null,
 
     pub fn init(allocator: std.mem.Allocator) Session {
         return .{ .allocator = allocator };
@@ -176,6 +188,16 @@ pub const Session = struct {
         self.* = .{ .allocator = self.allocator };
     }
 
+    fn clearPublishCadence(self: *Session) void {
+        self.iters_since_publish = 0;
+        self.last_published_trained = 0;
+        self.force_next_publish = false;
+        if (self.average_spare) |buf| {
+            self.allocator.free(buf);
+            self.average_spare = null;
+        }
+    }
+
     fn clearSolution(self: *Session) void {
         // Drop frozen engine before game tables it references.
         if (self.frozen_ctx) |*ctx| {
@@ -198,6 +220,7 @@ pub const Session = struct {
             policy.deinit();
             self.published = null;
         }
+        self.clearPublishCadence();
         if (self.locks_text.len != 0) {
             self.allocator.free(self.locks_text);
             self.locks_text = &.{};
@@ -324,13 +347,52 @@ pub const Session = struct {
         }
     }
 
+    fn recycleAverageBufferLocked(self: *Session, buf: []f32) void {
+        if (buf.len == 0) return;
+        if (self.average_spare) |spare| {
+            if (spare.len == buf.len) {
+                // Keep one matching spare; free the duplicate.
+                self.allocator.free(buf);
+                return;
+            }
+            self.allocator.free(spare);
+        }
+        self.average_spare = buf;
+    }
+
+    fn takeAverageBufferLocked(self: *Session, n: usize) error{OutOfMemory}![]f32 {
+        if (n == 0) return &.{};
+        if (self.average_spare) |spare| {
+            if (spare.len == n) {
+                self.average_spare = null;
+                return spare;
+            }
+            self.allocator.free(spare);
+            self.average_spare = null;
+        }
+        return self.allocator.alloc(f32, n) catch return error.OutOfMemory;
+    }
+
     fn installPublishedLocked(self: *Session, next: poker_engine.solve.training_state.PublishedPolicy) void {
         // Caller holds `mu`. Wait until no Study readers hold the prior average.
         while (self.readers != 0) {
             self.quiet.wait(&self.mu);
         }
-        if (self.published) |*old| old.deinit();
+        if (self.published) |*old| {
+            // Recycle the prior average into the spare once readers have released.
+            if (old.average.len != 0) {
+                const recycled = old.average;
+                old.average = &.{};
+                old.deinit();
+                self.recycleAverageBufferLocked(recycled);
+            } else {
+                old.deinit();
+            }
+        }
         self.published = next;
+        self.last_published_trained = next.trained;
+        self.iters_since_publish = 0;
+        self.force_next_publish = false;
         // Fresh CFR publish invalidates free-form overlays (C++ clear on solve).
         if (self.strategy_edits_text.len != 0) {
             self.allocator.free(self.strategy_edits_text);
@@ -338,6 +400,64 @@ pub const Session = struct {
         }
         self.clearStrategyEditBaseline();
         self.published_cv.broadcast();
+    }
+
+    fn shouldPublishCadenceLocked(self: *const Session) bool {
+        if (self.published == null) return true;
+        if (self.force_next_publish) return true;
+        if (self.publish_every <= 1) return true;
+        return self.iters_since_publish >= self.publish_every;
+    }
+
+    /// Materialize the exact average for the current `training.trained` and install it.
+    /// Used by cadence publishes, Acc eval, save, and pause/stop/completion flushes.
+    fn publishExactAverage(self: *Session) SessionError!void {
+        const game = self.game orelse return error.InvalidSession;
+        const state = &(self.training orelse return error.InvalidSession);
+        const n = state.strategy_sum.len;
+        const threads = if (self.threads < 1) @as(u32, 1) else self.threads;
+
+        self.mu.lock();
+        const buf = self.takeAverageBufferLocked(n) catch {
+            self.mu.unlock();
+            return error.OutOfMemory;
+        };
+        self.mu.unlock();
+        errdefer {
+            if (n != 0) {
+                self.mu.lock();
+                self.recycleAverageBufferLocked(buf);
+                self.mu.unlock();
+            }
+        }
+
+        poker_engine.solve.training_state.publishAverageIntoThreaded(
+            self.allocator,
+            game,
+            state,
+            buf,
+            threads,
+        ) catch return error.InvalidSession;
+
+        const next = poker_engine.solve.training_state.PublishedPolicy{
+            .allocator = self.allocator,
+            .average = buf,
+            .revision = state.policy_revision,
+            .trained = state.trained,
+        };
+        self.mu.lock();
+        defer self.mu.unlock();
+        self.installPublishedLocked(next);
+    }
+
+    /// Force-install the exact average when trainer progress leads the published snapshot.
+    pub fn ensurePublishedExact(self: *Session) SessionError!void {
+        self.mu.lock();
+        const trained: i32 = if (self.training) |state| state.trained else 0;
+        const need = trained > 0 and (self.published == null or self.last_published_trained != trained);
+        self.mu.unlock();
+        if (!need) return;
+        try self.publishExactAverage();
     }
 
     /// Ensure a restore baseline exists before mutating published average for edits.
@@ -418,11 +538,16 @@ pub const Session = struct {
         return published.average;
     }
 
-    fn onTrainPublished(ctx: *anyopaque, next: poker_engine.solve.training_state.PublishedPolicy) anyerror!void {
+    /// After each completed CFR iteration: bump cadence counter; publish only on bound.
+    fn onTrainIterDone(ctx: *anyopaque, trained: i32) anyerror!void {
         const self: *Session = @ptrCast(@alignCast(ctx));
+        _ = trained;
         self.mu.lock();
-        defer self.mu.unlock();
-        self.installPublishedLocked(next);
+        self.iters_since_publish += 1;
+        const want = self.shouldPublishCadenceLocked();
+        self.mu.unlock();
+        if (!want) return;
+        try self.publishExactAverage();
     }
 
     /// Durable recovery after a real train failure left `.failed` (ZR-123).
@@ -503,16 +628,23 @@ pub const Session = struct {
             ctx,
             state,
             iterations,
-            onTrainPublished,
+            onTrainIterDone,
             self,
             shouldStopTrain,
             self,
         );
-        // Average already installed by the hook; stub carries revision only.
+        // Cadence may have deferred the last average; stub has no owned buffer.
         stub.deinit();
 
         const stopped = self.stop_requested.load(.acquire);
         const paused = self.pause_requested.load(.acquire);
+        // Force exact publish on pause/stop, or when finishing a multi-iter batch.
+        // Single-iter Acc `train(1)` carries cadence; trainGated / save force when needed.
+        const force_final = stopped or paused or iterations != 1;
+        if (force_final) {
+            try self.ensurePublishedExact();
+        }
+
         self.mu.lock();
         if (stopped) {
             self.last_terminal = .cancelled;
@@ -524,7 +656,9 @@ pub const Session = struct {
             self.phase = .paused;
         } else {
             self.last_terminal = .completed;
-            self.phase = .published;
+            // Multi-iter / forced publish should have an average; train(1) mid-cadence
+            // may still be unpublished until Acc/save/pause flushes.
+            self.phase = if (self.published != null) .published else .paused;
         }
         self.has_training = true;
         self.mu.unlock();
@@ -576,6 +710,8 @@ pub const Session = struct {
             fresh_eval = false;
 
             if (@rem(completed, every) == 0 and threshold_chips >= 0) {
+                // Acc must see the exact average for this completed iteration.
+                try self.ensurePublishedExact();
                 const published = self.published orelse return error.NothingPublished;
                 const eval = try self.evaluateFrozen(published.average);
                 fresh_eval = true;
@@ -588,6 +724,7 @@ pub const Session = struct {
                 const elapsed = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e9;
                 if (elapsed >= time_limit_seconds) {
                     if (!fresh_eval and threshold_chips >= 0) {
+                        try self.ensurePublishedExact();
                         if (self.published) |published| {
                             _ = try self.evaluateFrozen(published.average);
                         }
@@ -597,6 +734,7 @@ pub const Session = struct {
                 }
             }
         }
+        try self.ensurePublishedExact();
         self.last_terminal = .completed;
     }
 
@@ -714,6 +852,10 @@ pub const Session = struct {
                     => error.InvalidSession,
                 };
             };
+            // Next train iter must publish a fresh average for the reset tables.
+            self.iters_since_publish = 0;
+            self.last_published_trained = 0;
+            self.force_next_publish = true;
         }
 
         if (self.baseline_id == 0) {
@@ -793,6 +935,8 @@ pub const Session = struct {
             return error.Busy;
         }
         self.mu.unlock();
+        // Checkpoint average must match the completed iteration being claimed.
+        try self.ensurePublishedExact();
         var doc = try self.buildDocument();
         defer doc.deinit();
         try poker_formats.writeFile(self.allocator, path, doc);
@@ -885,6 +1029,9 @@ pub const Session = struct {
         self.game = game;
         self.training = training;
         self.published = published;
+        self.last_published_trained = published.trained;
+        self.iters_since_publish = 0;
+        self.force_next_publish = false;
         self.locks_text = owned_locks;
         self.strategy_edits_text = owned_edits;
         self.frozen = doc.frozen;

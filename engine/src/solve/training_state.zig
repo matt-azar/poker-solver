@@ -335,6 +335,22 @@ pub fn republishAverageInto(
     try runSlotPassThreaded(allocator, game, state, .publish, -1, 1, average, null);
 }
 
+/// Normalize `strategy_sum` into a caller-owned buffer and bump `policy_revision`.
+/// Prefer this over `publishAverageThreaded` when Session recycles snapshot buffers.
+pub fn publishAverageIntoThreaded(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    state: *TrainingState,
+    average: []f32,
+    threads: u32,
+) TrainError!void {
+    state.policy_revision += 1;
+    if (state.strategy_sum.len == 0) return;
+    if (average.len != state.strategy_sum.len) return error.InvalidTrain;
+    @memset(average, 0);
+    try runSlotPassThreaded(allocator, game, state, .publish, -1, threads, average, null);
+}
+
 test "slot passes: 4-thread matches serial" {
     const text =
         \\street-config 1
