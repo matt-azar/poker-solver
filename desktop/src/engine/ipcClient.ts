@@ -189,4 +189,20 @@ export class SolverEngineIpcClient {
     const env = await this.request("delete_lock", opts ?? null);
     return env.body;
   }
+
+  /** Standalone Equity calculator job start (no Study session). */
+  async startEquityJob(body: Record<string, unknown>): Promise<unknown> {
+    const env = await this.request("start_equity_job", body);
+    return env.body;
+  }
+
+  async getEquityJob(jobId: string): Promise<unknown> {
+    const env = await this.request("get_equity_job", { job_id: jobId });
+    return env.body;
+  }
+
+  async cancelEquityJob(jobId: string): Promise<unknown> {
+    const env = await this.request("cancel_equity_job", { job_id: jobId });
+    return env.body;
+  }
 }

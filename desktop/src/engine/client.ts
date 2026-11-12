@@ -17,9 +17,11 @@ import { formatSolveJobStreetConfig, parseStreetConfigTextToSolutionConfig } fro
 import {
   ipcBeginConfig,
   ipcCancel,
+  ipcCancelEquityJob,
   ipcDeleteLock,
   ipcEquity,
   ipcGetConfig,
+  ipcGetEquityJob,
   ipcListLocks,
   ipcNode,
   ipcOpen,
@@ -28,6 +30,7 @@ import {
   ipcPutLock,
   ipcSave,
   ipcSolve,
+  ipcStartEquityJob,
   ipcStatus,
   ipcTreePreview,
   ipcValues,
@@ -872,12 +875,11 @@ export class EngineClient {
     signal?: AbortSignal,
   ): Promise<{ job_id: string; state: string }> {
     if (isIpcTransport()) {
-      void body;
-      throw new EngineError(
-        "Equity calculator jobs are not available over solver-engine IPC yet",
-        501,
-        null,
-      );
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const data = await ipcStartEquityJob(body);
+      return data as { job_id: string; state: string };
     }
     const { response, data } = await this.request("POST", "/api/equity/jobs", body, { signal });
     this.ensureOk(response, data, true);
@@ -886,13 +888,10 @@ export class EngineClient {
 
   async getEquityJob(jobId: string, signal?: AbortSignal): Promise<unknown> {
     if (isIpcTransport()) {
-      void jobId;
-      void signal;
-      throw new EngineError(
-        "Equity calculator jobs are not available over solver-engine IPC yet",
-        501,
-        null,
-      );
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      return ipcGetEquityJob(jobId);
     }
     const { response, data } = await this.request(
       "GET",
@@ -906,13 +905,11 @@ export class EngineClient {
 
   async getEquityJobResult(jobId: string, signal?: AbortSignal): Promise<unknown> {
     if (isIpcTransport()) {
-      void jobId;
-      void signal;
-      throw new EngineError(
-        "Equity calculator jobs are not available over solver-engine IPC yet",
-        501,
-        null,
-      );
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      // Result is embedded on completed/stopped status payloads.
+      return ipcGetEquityJob(jobId);
     }
     const { response, data } = await this.request(
       "GET",
@@ -926,12 +923,7 @@ export class EngineClient {
 
   async cancelEquityJob(jobId: string): Promise<unknown> {
     if (isIpcTransport()) {
-      void jobId;
-      throw new EngineError(
-        "Equity calculator jobs are not available over solver-engine IPC yet",
-        501,
-        null,
-      );
+      return ipcCancelEquityJob(jobId);
     }
     const { response, data } = await this.request(
       "POST",
