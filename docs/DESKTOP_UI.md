@@ -8,7 +8,7 @@ React study client (`desktop/`) over the `explorer` HTTP API. Numerical kernels 
 | --- | --- |
 | Web client | React 19 + TypeScript + Vite |
 | State | Zustand for study/layout/theme; query identity in the engine client |
-| Engine transport | Typed `EngineClient` over the localhost HTTP API |
+| Engine transport | Prefer Zig `solver-engine` typed IPC (protocol 2, inherited pipes via Tauri). HTTP `holdem-explorer` is a temporary labeled fallback when IPC is unavailable (`VITE_SOLVER_TRANSPORT=http` forces HTTP). |
 | Desktop shell | Tauri 2 + `holdem-explorer` sidecar; browser + Vite proxy still supported |
 | Static serving | Prefer `desktop/dist` when present; fall back to `legacy/ui/` |
 | Legacy UI | Kept under `legacy/ui/` for regression and fallback |

@@ -12,6 +12,7 @@ import { decodeErrorPayload } from "./contracts/error";
 import { decodeReadyPayload, type ReadyPayload } from "./contracts/ready";
 import { decodeStatusPayload } from "./contracts/status";
 import { normalizeRunoutsPayload, type RunoutsModel } from "./runouts";
+import { ipcStatus, ipcValues, isIpcTransport } from "./transport";
 
 function defaultEngineBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_ENGINE_URL;
@@ -138,6 +139,17 @@ export class EngineClient {
   }
 
   async status(signal?: AbortSignal): Promise<StatusPayload> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const data = await ipcStatus();
+      try {
+        return decodeStatusPayload(data);
+      } catch (err) {
+        throw new EngineError(err instanceof Error ? err.message : String(err), 0, data);
+      }
+    }
     const { response, data } = await this.request("GET", "/api/status", undefined, { signal });
     this.ensureOk(response, data);
     try {
@@ -152,6 +164,15 @@ export class EngineClient {
   }
 
   async solve(job: SolveJobRequest, signal?: AbortSignal): Promise<unknown> {
+    if (isIpcTransport()) {
+      // Gap: Study SolveJobRequest → street-config begin_config/solve not wired yet.
+      throw new EngineError(
+        "solver-engine IPC: Study solve job → begin_config not wired yet; " +
+          "use scripts/zig/node-ev-latency.py or HTTP explorer fallback (temporary)",
+        501,
+        { transport: "ipc", op: "solve", job },
+      );
+    }
     const { response, data } = await this.request("POST", "/api/solve", job, { signal });
     this.ensureOk(response, data, true);
     return data;
@@ -225,6 +246,20 @@ export class EngineClient {
     nodeId: string,
     signal?: AbortSignal,
   ): Promise<ActionValuesPayload> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      // IPC values currently key by node_index; Study root maps to 0.
+      // Full `pN.tT.rR` → index mapping remains a follow-on gap.
+      void nodeId;
+      const data = await ipcValues(0);
+      return {
+        ...(data as object),
+        solution_id: solutionId,
+        node_id: nodeId,
+      } as ActionValuesPayload;
+    }
     const { response, data } = await this.request(
       "GET",
       `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/values`,
