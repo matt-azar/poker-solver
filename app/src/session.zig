@@ -66,6 +66,9 @@ pub const Session = struct {
     published: ?poker_engine.solve.training_state.PublishedPolicy = null,
     locks_text: []u8 = &.{},
     strategy_edits_text: []u8 = &.{},
+    /// CFR / pre-edit baseline for strategy-edit restore (owned). Null until first edit
+    /// or when train replaces the published policy.
+    strategy_edit_baseline: ?[]f32 = null,
     metrics: Metrics = .{},
     has_metrics: bool = false,
     frozen: bool = false,
@@ -203,6 +206,7 @@ pub const Session = struct {
             self.allocator.free(self.strategy_edits_text);
             self.strategy_edits_text = &.{};
         }
+        self.clearStrategyEditBaseline();
         self.metrics = .{};
         self.has_metrics = false;
         self.frozen = false;
@@ -313,6 +317,13 @@ pub const Session = struct {
         self.phase = .paused;
     }
 
+    fn clearStrategyEditBaseline(self: *Session) void {
+        if (self.strategy_edit_baseline) |buf| {
+            self.allocator.free(buf);
+            self.strategy_edit_baseline = null;
+        }
+    }
+
     fn installPublishedLocked(self: *Session, next: poker_engine.solve.training_state.PublishedPolicy) void {
         // Caller holds `mu`. Wait until no Study readers hold the prior average.
         while (self.readers != 0) {
@@ -320,7 +331,91 @@ pub const Session = struct {
         }
         if (self.published) |*old| old.deinit();
         self.published = next;
+        // Fresh CFR publish invalidates free-form overlays (C++ clear on solve).
+        if (self.strategy_edits_text.len != 0) {
+            self.allocator.free(self.strategy_edits_text);
+            self.strategy_edits_text = &.{};
+        }
+        self.clearStrategyEditBaseline();
         self.published_cv.broadcast();
+    }
+
+    /// Ensure a restore baseline exists before mutating published average for edits.
+    pub fn ensureStrategyEditBaseline(self: *Session) SessionError!void {
+        self.mu.lock();
+        defer self.mu.unlock();
+        if (self.strategy_edit_baseline != null) return;
+        const published = self.published orelse return error.NothingPublished;
+        if (published.average.len == 0) return error.NothingPublished;
+        // Prefer a clean CFR republish when trainer tables exist.
+        if (self.has_training) {
+            if (self.training) |*state| {
+                if (self.game) |game| {
+                    const owned = self.allocator.alloc(f32, published.average.len) catch return error.OutOfMemory;
+                    errdefer self.allocator.free(owned);
+                    @memcpy(owned, published.average);
+                    poker_engine.solve.training_state.republishAverageInto(
+                        self.allocator,
+                        game,
+                        state,
+                        owned,
+                    ) catch {
+                        self.allocator.free(owned);
+                        return error.InvalidSession;
+                    };
+                    self.strategy_edit_baseline = owned;
+                    return;
+                }
+            }
+        }
+        const owned = self.allocator.dupe(f32, published.average) catch return error.OutOfMemory;
+        self.strategy_edit_baseline = owned;
+    }
+
+    /// Restore published average from baseline (or strategy_sum) then bump revision.
+    pub fn restoreStrategyEditBaseline(self: *Session) SessionError!void {
+        self.mu.lock();
+        defer self.mu.unlock();
+        const published = &(self.published orelse return error.NothingPublished);
+        if (published.average.len == 0) return error.NothingPublished;
+        if (self.has_training) {
+            if (self.training) |*state| {
+                if (self.game) |game| {
+                    poker_engine.solve.training_state.republishAverageInto(
+                        self.allocator,
+                        game,
+                        state,
+                        published.average,
+                    ) catch return error.InvalidSession;
+                    published.revision += 1;
+                    self.published_cv.broadcast();
+                    return;
+                }
+            }
+        }
+        const baseline = self.strategy_edit_baseline orelse return error.InvalidSession;
+        if (baseline.len != published.average.len) return error.InvalidSession;
+        @memcpy(published.average, baseline);
+        published.revision += 1;
+        self.published_cv.broadcast();
+    }
+
+    /// Bump published policy_revision after in-place average overlay writes.
+    pub fn bumpPolicyRevision(self: *Session) SessionError!void {
+        self.mu.lock();
+        defer self.mu.unlock();
+        const published = &(self.published orelse return error.NothingPublished);
+        published.revision += 1;
+        self.published_cv.broadcast();
+    }
+
+    /// Mutable view of published average (caller must not train/replace concurrently).
+    pub fn publishedAverageMut(self: *Session) SessionError![]f32 {
+        self.mu.lock();
+        defer self.mu.unlock();
+        const published = &(self.published orelse return error.NothingPublished);
+        if (published.average.len == 0) return error.NothingPublished;
+        return published.average;
     }
 
     fn onTrainPublished(ctx: *anyopaque, next: poker_engine.solve.training_state.PublishedPolicy) anyerror!void {

@@ -8,7 +8,9 @@ const equity_json = @import("equity_json.zig");
 const equity_jobs = @import("equity_jobs.zig");
 const categories_json = @import("categories_json.zig");
 const locks_json = @import("locks_json.zig");
+const strategy_edits_json = @import("strategy_edits_json.zig");
 const node_lock = poker_engine.solve.node_lock;
+const strategy_edit = poker_engine.solve.strategy_edit;
 
 const TrainTask = struct {
     state: *HostState,
@@ -312,6 +314,31 @@ fn replyLocksBody(state: *HostState, req: ipc.Envelope, locks: *const node_lock.
     };
     defer state.allocator.free(body);
     return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+}
+
+fn persistStrategyEditsText(state: *HostState, edits: *const strategy_edit.StrategyEditSet) !void {
+    const text = try strategy_edit.formatStrategyEditSet(state.allocator, edits);
+    defer state.allocator.free(text);
+    try state.session.setStrategyEditsText(text);
+}
+
+fn replyStrategyEditsBody(state: *HostState, req: ipc.Envelope, edits: *const strategy_edit.StrategyEditSet) !ipc.Envelope {
+    const body = strategy_edits_json.packStudyStrategyEditsBody(state.allocator, edits) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_pack_failed", @errorName(err));
+    };
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+}
+
+fn reapplyStrategyEdits(state: *HostState, edits: *const strategy_edit.StrategyEditSet) !void {
+    // Restore CFR / baseline average, then overlay remaining edits.
+    try state.session.restoreStrategyEditBaseline();
+    if (edits.empty()) return;
+    const game = state.session.game orelse return error.NothingPublished;
+    const average = try state.session.publishedAverageMut();
+    try strategy_edit.applyEditSetToAverage(game, average, edits);
+    // restore already bumped once; bump again so Study drops stale EV/equity caches.
+    try state.session.bumpPolicyRevision();
 }
 
 fn resolveLocatedNode(
@@ -1142,6 +1169,191 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
         };
         return replyLocksBody(state, req, &locks);
+    }
+
+    // Study strategy-edits CRUD over Session.strategy_edits_text + published average overlays.
+    if (std.mem.eql(u8, req.op, "list_strategy_edits")) {
+        if (state.session.solution_id == 0) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
+        }
+        var edits = strategy_edits_json.parseSessionStrategyEdits(state.allocator, state.session.strategy_edits_text) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_strategy_edits", @errorName(err));
+        };
+        defer edits.deinit();
+        return replyStrategyEditsBody(state, req, &edits);
+    }
+
+    if (std.mem.eql(u8, req.op, "put_strategy_edit")) {
+        if (state.train_running.load(.acquire) or state.session.phase == .training) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+        }
+        var lease = state.session.borrowPublished() catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+        defer lease.deinit();
+
+        const node_id_text = bodyStringField(req.body_json, "node_id") orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "node_id required");
+        const located = poker_engine.analysis.node_id.locateNode(lease.game, node_id_text) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
+        };
+        var page = poker_engine.analysis.inspect.inspectNode(
+            state.allocator,
+            lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "inspect_failed", @errorName(err));
+        };
+        defer page.deinit();
+        if (page.player < 0 or page.n_actions == 0) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "strategy edits apply only to decision nodes");
+        }
+
+        const kind_text = bodyStringField(req.body_json, "kind") orelse "selected";
+        const probs_slice = bodyArraySlice(req.body_json, "probs") orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs required");
+        const probs = parseF64Array(state.allocator, probs_slice) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad probs");
+        };
+        defer state.allocator.free(probs);
+        if (probs.len != page.n_actions) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs length must match action arity");
+        }
+        if (!strategy_edit.validateStrategyProbs(probs, @intCast(page.n_actions))) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid strategy probability row");
+        }
+
+        var edit = strategy_edit.StrategyEdit{
+            .infoset_id = located.node_index,
+            .turn = @intCast(located.turn),
+            .river = @intCast(located.river),
+        };
+        errdefer edit.deinit(state.allocator);
+        edit.probs = strategy_edit.makeStrategyProbs(state.allocator, probs, @intCast(page.n_actions)) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid strategy probability row");
+        };
+        if (std.mem.eql(u8, kind_text, "full")) {
+            edit.kind = .full_node;
+        } else if (std.mem.eql(u8, kind_text, "selected")) {
+            edit.kind = .selected_combos;
+            const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse "";
+            const hands = parseUsizeArray(state.allocator, hands_slice) catch {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_indices");
+            };
+            const n_hands: usize = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
+            for (hands) |hand| {
+                if (hand >= n_hands) {
+                    state.allocator.free(hands);
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
+                }
+                const supported = strategy_edit.handHasInfoset(
+                    lease.game,
+                    located.node_index,
+                    located.turn,
+                    located.river,
+                    hand,
+                ) catch {
+                    state.allocator.free(hands);
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
+                };
+                if (!supported) {
+                    state.allocator.free(hands);
+                    return ipc.makeErrorReply(
+                        state.allocator,
+                        req.request_id,
+                        req.job_id,
+                        req.op,
+                        "invalid_request",
+                        "hand has no information set on this node",
+                    );
+                }
+            }
+            edit.hand_indices = hands;
+        } else {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "kind must be full or selected");
+        }
+
+        // Drop inspect lease before mutating published average / baseline.
+        lease.deinit();
+
+        state.session.ensureStrategyEditBaseline() catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+
+        var edits = strategy_edits_json.parseSessionStrategyEdits(state.allocator, state.session.strategy_edits_text) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_strategy_edits", @errorName(err));
+        };
+        defer edits.deinit();
+        edits.upsert(edit) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", @errorName(err));
+        };
+        // Ownership transferred into the set.
+        edit = .{};
+
+        reapplyStrategyEdits(state, &edits) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_apply_failed", @errorName(err));
+        };
+        persistStrategyEditsText(state, &edits) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_persist_failed", @errorName(err));
+        };
+        return replyStrategyEditsBody(state, req, &edits);
+    }
+
+    if (std.mem.eql(u8, req.op, "delete_strategy_edit")) {
+        if (state.train_running.load(.acquire) or state.session.phase == .training) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+        }
+        if (state.session.solution_id == 0) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
+        }
+        var edits = strategy_edits_json.parseSessionStrategyEdits(state.allocator, state.session.strategy_edits_text) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_strategy_edits", @errorName(err));
+        };
+        defer edits.deinit();
+
+        if (bodyStringField(req.body_json, "node_id")) |node_id_text| {
+            const parsed = poker_engine.analysis.node_id.parseNodeId(node_id_text) catch {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad node_id");
+            };
+            const key = node_lock.makeLockKey(parsed.node_index, parsed.turn, parsed.river);
+            if (bodyIntField(req.body_json, "hand_index")) |hand_i32| {
+                if (hand_i32 < 0) {
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_index");
+                }
+                const hand_index: usize = @intCast(hand_i32);
+                if (edits.findExactKey(key)) |existing| {
+                    if (existing.kind == .full_node) {
+                        return ipc.makeErrorReply(
+                            state.allocator,
+                            req.request_id,
+                            req.job_id,
+                            req.op,
+                            "invalid_request",
+                            "full-node strategy edits clear with node_id only; omit hand_index",
+                        );
+                    }
+                }
+                _ = edits.eraseHand(key, hand_index);
+            } else {
+                _ = edits.eraseKey(key);
+            }
+        } else {
+            edits.clear();
+        }
+
+        state.session.ensureStrategyEditBaseline() catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+        reapplyStrategyEdits(state, &edits) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_apply_failed", @errorName(err));
+        };
+        persistStrategyEditsText(state, &edits) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_persist_failed", @errorName(err));
+        };
+        return replyStrategyEditsBody(state, req, &edits);
     }
 
     // Standalone Equity calculator jobs (no Study session). Distinct from Study `equity`.
@@ -2111,6 +2323,103 @@ test "resolve_locked stamps baseline, mints solution id, trains under lock" {
     try std.testing.expect(state.session.baseline_id == prior_id);
     try std.testing.expect(state.session.solution_id != mid_id);
     try std.testing.expect(state.session.training.?.trained == mid_trained);
+}
+
+test "strategy edits list put delete Study CRUD" {
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "strategy-edits-crud");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    var list_empty: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "e0"),
+        .op = try std.testing.allocator.dupe(u8, "list_strategy_edits"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer list_empty.deinit();
+    var empty_reply = try handle(&state, list_empty);
+    defer empty_reply.deinit();
+    try std.testing.expect(empty_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, empty_reply.body_json, "\"edits\":[]") != null);
+
+    // Capture root strategy for hand 0 before edit.
+    var node_before: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "e-node0"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer node_before.deinit();
+    var before_reply = try handle(&state, node_before);
+    defer before_reply.deinit();
+    try std.testing.expect(before_reply.ok);
+
+    var put_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "e1"),
+        .op = try std.testing.allocator.dupe(u8, "put_strategy_edit"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\",\"kind\":\"full\",\"probs\":[0.0,1.0]}"),
+    };
+    defer put_req.deinit();
+    var put_reply = try handle(&state, put_req);
+    defer put_reply.deinit();
+    try std.testing.expect(put_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, put_reply.body_json, "\"node_id\":\"p0.t-1.r-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, put_reply.body_json, "\"kind\":\"full\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, put_reply.body_json, "\"persisted\":false") != null);
+    try std.testing.expect(state.session.strategy_edits_text.len > 0);
+
+    var node_after: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "e-node1"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer node_after.deinit();
+    var after_reply = try handle(&state, node_after);
+    defer after_reply.deinit();
+    try std.testing.expect(after_reply.ok);
+    // Full-node edit forces action 1 mass — strategy table should mention 1.
+    try std.testing.expect(std.mem.indexOf(u8, after_reply.body_json, "\"strategy\":") != null);
+
+    var del_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "e2"),
+        .op = try std.testing.allocator.dupe(u8, "delete_strategy_edit"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer del_req.deinit();
+    var del_reply = try handle(&state, del_req);
+    defer del_reply.deinit();
+    try std.testing.expect(del_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, del_reply.body_json, "\"edits\":[]") != null);
 }
 
 test "equity calculator jobs start get complete without session" {

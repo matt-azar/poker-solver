@@ -4,7 +4,7 @@
  * Flip a flag to `true` in the same PR that wires the matching EngineClient
  * IPC branch / host op (do not invent fake host ops here):
  * - resolveLocked  → ZR-100 (#301) — enabled
- * - strategyEdits  → ZR-101 (#303) — flip after merge
+ * - strategyEdits  → ZR-101 (#303) — enabled
  * - categories / compare → ZR-103 (#302)
  * - runouts        → later (dock tab already removed; loadRunouts residual)
  *
@@ -20,7 +20,8 @@ export const STUDY_IPC_FEATURE_FLAGS = {
   compare: false,
   // ZR-103: host `categories` + EngineClient IPC branch (made-hand on 5-card boards).
   categories: true,
-  strategyEdits: false,
+  // Host strategy-edits CRUD + EngineClient IPC branch (#303).
+  strategyEdits: true,
   runouts: false,
 } as const;
 

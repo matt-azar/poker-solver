@@ -305,6 +305,20 @@ pub fn publishAverageThreaded(
     return published;
 }
 
+/// Rewrite an existing average buffer from `strategy_sum` (strategy-edit restore).
+/// Does not bump `policy_revision` — caller owns Study revision bookkeeping.
+pub fn republishAverageInto(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    state: *TrainingState,
+    average: []f32,
+) TrainError!void {
+    if (state.strategy_sum.len == 0) return;
+    if (average.len != state.strategy_sum.len) return error.InvalidTrain;
+    @memset(average, 0);
+    try runSlotPassThreaded(allocator, game, state, .publish, -1, 1, average, null);
+}
+
 test "slot passes: 4-thread matches serial" {
     const text =
         \\street-config 1

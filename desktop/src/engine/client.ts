@@ -20,15 +20,18 @@ import {
   ipcCancelEquityJob,
   ipcCategories,
   ipcDeleteLock,
+  ipcDeleteStrategyEdit,
   ipcEquity,
   ipcGetConfig,
   ipcGetEquityJob,
   ipcListLocks,
+  ipcListStrategyEdits,
   ipcNode,
   ipcOpen,
   ipcPause,
   ipcPlanMemory,
   ipcPutLock,
+  ipcPutStrategyEdit,
   ipcResolveLocked,
   ipcSave,
   ipcSolve,
@@ -874,12 +877,9 @@ export class EngineClient {
 
   async listStrategyEdits(solutionId: string): Promise<unknown> {
     if (isIpcTransport()) {
+      // Host Session is single-solution; solutionId is Study-side identity.
       void solutionId;
-      throw new EngineError(
-        "strategy edits are not available over solver-engine IPC yet",
-        501,
-        null,
-      );
+      return ipcListStrategyEdits();
     }
     const { response, data } = await this.request(
       "GET",
@@ -900,12 +900,7 @@ export class EngineClient {
   ): Promise<unknown> {
     if (isIpcTransport()) {
       void solutionId;
-      void body;
-      throw new EngineError(
-        "strategy edits are not available over solver-engine IPC yet",
-        501,
-        null,
-      );
+      return ipcPutStrategyEdit(body);
     }
     const { response, data } = await this.request(
       "PUT",
@@ -923,13 +918,7 @@ export class EngineClient {
   ): Promise<unknown> {
     if (isIpcTransport()) {
       void solutionId;
-      void nodeId;
-      void handIndex;
-      throw new EngineError(
-        "strategy edits are not available over solver-engine IPC yet",
-        501,
-        null,
-      );
+      return ipcDeleteStrategyEdit({ nodeId, handIndex });
     }
     const query = new URLSearchParams();
     if (nodeId) {

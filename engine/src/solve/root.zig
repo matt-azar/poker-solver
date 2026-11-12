@@ -6,6 +6,7 @@ pub const frozen_walk = @import("frozen_walk.zig");
 pub const algorithms = @import("algorithms/cfr_plus.zig");
 pub const cfr_plus = algorithms;
 pub const node_lock = @import("node_lock.zig");
+pub const strategy_edit = @import("strategy_edit.zig");
 pub const phase = "phase-3";
 
 test {
@@ -15,6 +16,7 @@ test {
     _ = frozen_walk;
     _ = algorithms;
     _ = node_lock;
+    _ = strategy_edit;
     _ = @import("strategy_parity_test.zig");
     _ = @import("turn_pot_bet_rematch_test.zig");
     _ = @import("node_lock_rematch_test.zig");

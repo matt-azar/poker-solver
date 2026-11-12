@@ -271,6 +271,38 @@ export async function ipcDeleteLock(opts?: {
   return env.body;
 }
 
+/** Study strategy-edits list (`{"edits":[...],"persisted":false}`). */
+export async function ipcListStrategyEdits(): Promise<unknown> {
+  const env = await solverEngineRequest("list_strategy_edits");
+  return env.body;
+}
+
+/** Upsert one free-form strategy edit; reply is full edits list. */
+export async function ipcPutStrategyEdit(body: {
+  node_id: string;
+  kind: "full" | "selected";
+  hand_indices?: number[];
+  probs: number[];
+}): Promise<unknown> {
+  const env = await solverEngineRequest("put_strategy_edit", body);
+  return env.body;
+}
+
+/** Delete one edit / combo / all; reply is full edits list. */
+export async function ipcDeleteStrategyEdit(opts?: {
+  nodeId?: string;
+  handIndex?: number;
+}): Promise<unknown> {
+  const body: Record<string, unknown> = {};
+  if (opts?.nodeId) body.node_id = opts.nodeId;
+  if (opts?.handIndex !== undefined) body.hand_index = opts.handIndex;
+  const env = await solverEngineRequest(
+    "delete_strategy_edit",
+    Object.keys(body).length > 0 ? body : null,
+  );
+  return env.body;
+}
+
 export async function ipcBeginConfig(configText: string): Promise<unknown> {
   const env = await solverEngineRequest("begin_config", { config_text: configText });
   return env.body;
