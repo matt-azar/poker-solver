@@ -33,7 +33,8 @@ describe("studyIpcFeatureAvailable", () => {
     expect(studyUsesIpcFeatureGates()).toBe(true);
     expect(studyIpcFeatureAvailable("resolveLocked")).toBe(true);
     expect(studyIpcFeatureAvailable("compare")).toBe(false);
-    expect(studyIpcFeatureAvailable("strategyEdits")).toBe(false);
+    // ZR-101 wired host strategy-edits CRUD + client IPC branch.
+    expect(studyIpcFeatureAvailable("strategyEdits")).toBe(true);
     // ZR-103 wired host `categories` + client IPC branch.
     expect(studyIpcFeatureAvailable("categories")).toBe(true);
     expect(studyIpcFeatureAvailable("runouts")).toBe(false);

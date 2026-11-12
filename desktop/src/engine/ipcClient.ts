@@ -205,6 +205,32 @@ export class SolverEngineIpcClient {
     return env.body;
   }
 
+  /** Study strategy-edits list. */
+  async listStrategyEdits(): Promise<unknown> {
+    const env = await this.request("list_strategy_edits");
+    return env.body;
+  }
+
+  /** Upsert a free-form strategy edit; reply is full edits list. */
+  async putStrategyEdit(body: {
+    node_id: string;
+    kind: "full" | "selected";
+    hand_indices?: number[];
+    probs: number[];
+  }): Promise<unknown> {
+    const env = await this.request("put_strategy_edit", body);
+    return env.body;
+  }
+
+  /** Delete strategy edit(s); reply is full edits list. */
+  async deleteStrategyEdit(opts?: {
+    node_id?: string;
+    hand_index?: number;
+  }): Promise<unknown> {
+    const env = await this.request("delete_strategy_edit", opts ?? null);
+    return env.body;
+  }
+
   /** Standalone Equity calculator job start (no Study session). */
   async startEquityJob(body: Record<string, unknown>): Promise<unknown> {
     const env = await this.request("start_equity_job", body);

@@ -277,6 +277,74 @@ describe("EngineClient Slice C locks IPC branches", () => {
   });
 });
 
+describe("EngineClient ZR-101 strategy-edits IPC branches", () => {
+  let client: EngineClient;
+
+  beforeEach(() => {
+    invoke.mockReset();
+    client = new EngineClient({ baseUrl: "http://unused" });
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("routes listStrategyEdits / putStrategyEdit / deleteStrategyEdit over IPC", async () => {
+    invoke.mockResolvedValueOnce(okBody("list_strategy_edits", { edits: [], persisted: false }));
+    await expect(client.listStrategyEdits("s1")).resolves.toEqual({
+      edits: [],
+      persisted: false,
+    });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "list_strategy_edits",
+      body: null,
+      jobId: null,
+    });
+
+    const putBody = {
+      node_id: "p0.t-1.r-1",
+      kind: "full" as const,
+      probs: [0.0, 1.0],
+    };
+    invoke.mockResolvedValueOnce(
+      okBody("put_strategy_edit", {
+        edits: [
+          {
+            node_id: "p0.t-1.r-1",
+            kind: "full",
+            hand_indices: [],
+            probs: [0.0, 1.0],
+          },
+        ],
+        persisted: false,
+      }),
+    );
+    const put = await client.putStrategyEdit("s1", putBody);
+    expect((put as { edits: unknown[] }).edits).toHaveLength(1);
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "put_strategy_edit",
+      body: putBody,
+      jobId: null,
+    });
+
+    invoke.mockResolvedValueOnce(okBody("delete_strategy_edit", { edits: [], persisted: false }));
+    await expect(client.deleteStrategyEdit("s1", "p0.t-1.r-1")).resolves.toEqual({
+      edits: [],
+      persisted: false,
+    });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "delete_strategy_edit",
+      body: { node_id: "p0.t-1.r-1" },
+      jobId: null,
+    });
+
+    invoke.mockResolvedValueOnce(okBody("delete_strategy_edit", { edits: [], persisted: false }));
+    await client.deleteStrategyEdit("s1", "p0.t-1.r-1", 2);
+    expect(invoke).toHaveBeenLastCalledWith("solver_engine_request", {
+      op: "delete_strategy_edit",
+      body: { node_id: "p0.t-1.r-1", hand_index: 2 },
+      jobId: null,
+    });
+  });
+});
+
 describe("EngineClient empty-base refuse", () => {
   beforeEach(() => {
     invoke.mockReset();
