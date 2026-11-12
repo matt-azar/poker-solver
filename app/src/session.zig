@@ -1,6 +1,9 @@
 const std = @import("std");
 const poker_engine = @import("poker_engine");
 const poker_formats = @import("poker_formats");
+const budget_allocator = @import("budget_allocator.zig");
+
+pub const BudgetAllocator = budget_allocator.BudgetAllocator;
 
 pub const SessionError = error{
     InvalidSession,
@@ -55,6 +58,11 @@ pub const PublishedLease = struct {
 
 /// Application-owned solution lifetime. Fail-closed on open/replace.
 pub const Session = struct {
+    /// Host/GPA for the budget wrapper itself (not charged).
+    parent: std.mem.Allocator,
+    /// Heap-stable so `allocator` stays valid when Session is moved by value.
+    budget: *BudgetAllocator,
+    /// Engine-owned heap: compile / tables / publish / analysis / checkpoint staging.
     allocator: std.mem.Allocator,
     phase: Phase = .idle,
     solution_id: u64 = 0,
@@ -107,8 +115,30 @@ pub const Session = struct {
     /// Recycled average buffer after readers release (C++ ensure_average reuse).
     average_spare: ?[]f32 = null,
 
-    pub fn init(allocator: std.mem.Allocator) Session {
-        return .{ .allocator = allocator };
+    pub fn init(parent: std.mem.Allocator) SessionError!Session {
+        const budget = parent.create(BudgetAllocator) catch return error.OutOfMemory;
+        budget.* = BudgetAllocator.init(parent);
+        return .{
+            .parent = parent,
+            .budget = budget,
+            .allocator = budget.allocator(),
+        };
+    }
+
+    /// Map allocator OOM to `BudgetExceeded` when a memory-mib ceiling is active.
+    pub fn mapAllocErr(self: *const Session, err: anyerror) SessionError {
+        if (err == error.OutOfMemory and self.budget.limit() > 0) return error.BudgetExceeded;
+        if (err == error.OutOfMemory) return error.OutOfMemory;
+        if (err == error.BudgetExceeded) return error.BudgetExceeded;
+        return error.InvalidSession;
+    }
+
+    pub fn allocatedBytes(self: *const Session) u64 {
+        return self.budget.live();
+    }
+
+    pub fn peakAllocatedBytes(self: *const Session) u64 {
+        return self.budget.peak();
     }
 
     pub fn canContinue(self: *const Session) bool {
@@ -185,7 +215,10 @@ pub const Session = struct {
         }
         self.mu.unlock();
         self.clearSolution();
-        self.* = .{ .allocator = self.allocator };
+        const parent = self.parent;
+        const budget = self.budget;
+        parent.destroy(budget);
+        self.* = undefined;
     }
 
     fn clearPublishCadence(self: *Session) void {
@@ -272,12 +305,15 @@ pub const Session = struct {
             ctx.deinit();
             self.frozen_ctx = null;
         }
-        var ctx = try poker_engine.solve.frozen_walk.FrozenCtx.initThreaded(
+        var ctx = poker_engine.solve.frozen_walk.FrozenCtx.initThreaded(
             self.allocator,
             game,
             state,
             self.threads,
-        );
+        ) catch |err| {
+            if (err == error.OutOfMemory) return self.mapAllocErr(err);
+            return err;
+        };
         errdefer ctx.deinit();
         try ctx.ensureAllRanksReady();
         self.frozen_ctx = ctx;
@@ -293,13 +329,27 @@ pub const Session = struct {
         }
         self.mu.unlock();
 
-        var spec = try poker_engine.game.parseStreetConfig(self.allocator, config_text);
+        // Parse against parent so a tiny over-budget config cannot fail on the
+        // street-config text itself when the session is already near its ceiling.
+        var spec = try poker_engine.game.parseStreetConfig(self.parent, config_text);
         defer spec.deinit();
         if (spec.memory_mib <= 0) return error.BudgetExceeded;
         const budget_bytes: u64 = @as(u64, @intCast(spec.memory_mib)) * 1024 * 1024;
 
-        // Under a declared budget, construction OOM is a budget failure (Windows CI
-        // may OOM during flop compile before the post-compile estimate runs).
+        // Hold the prior solution until install. Raise the ceiling so a full new
+        // solution may allocate up to `budget_bytes` while old live is still charged
+        // (peak overlap counts). Roll the limit back on any failure.
+        const prior_limit = self.budget.limit();
+        const prior_budget_field = self.memory_budget_bytes;
+        const old_live = self.budget.live();
+        self.budget.setLimit(old_live + budget_bytes);
+        errdefer {
+            self.budget.setLimit(prior_limit);
+            self.memory_budget_bytes = prior_budget_field;
+        }
+
+        // Under a declared budget, construction OOM is a budget failure (charge-
+        // before-allocate during compile growth + tables).
         var game = poker_engine.game.compile.compile(self.allocator, spec) catch |err| {
             if (err == error.OutOfMemory) return error.BudgetExceeded;
             return err;
@@ -325,6 +375,7 @@ pub const Session = struct {
             self.quiet.wait(&self.mu);
         }
         self.clearSolution();
+        self.budget.setLimit(budget_bytes);
         self.config_text = owned_config;
         self.game = game;
         self.training = training;
@@ -420,7 +471,7 @@ pub const Session = struct {
         self.mu.lock();
         const buf = self.takeAverageBufferLocked(n) catch {
             self.mu.unlock();
-            return error.OutOfMemory;
+            return self.mapAllocErr(error.OutOfMemory);
         };
         self.mu.unlock();
         errdefer {
@@ -437,7 +488,10 @@ pub const Session = struct {
             state,
             buf,
             threads,
-        ) catch return error.InvalidSession;
+        ) catch |err| {
+            if (err == error.OutOfMemory) return self.mapAllocErr(err);
+            return error.InvalidSession;
+        };
 
         const next = poker_engine.solve.training_state.PublishedPolicy{
             .allocator = self.allocator,
@@ -937,23 +991,45 @@ pub const Session = struct {
         self.mu.unlock();
         // Checkpoint average must match the completed iteration being claimed.
         try self.ensurePublishedExact();
-        var doc = try self.buildDocument();
+        var doc = self.buildDocument() catch |err| {
+            if (err == error.OutOfMemory) return self.mapAllocErr(err);
+            return err;
+        };
         defer doc.deinit();
-        try poker_formats.writeFile(self.allocator, path, doc);
+        poker_formats.writeFile(self.allocator, path, doc) catch |err| {
+            if (err == error.OutOfMemory) return self.mapAllocErr(err);
+            return err;
+        };
     }
 
     /// Open for study (and optional resume). Fail-closed: on error prior session unchanged.
     pub fn open(self: *Session, path: []const u8) SessionError!void {
         if (self.busyForReplace()) return error.Busy;
 
-        var doc = poker_formats.readFile(self.allocator, path) catch |err| {
+        // Read staging against parent first; enforce solution budget after we know memory-mib.
+        var doc = poker_formats.readFile(self.parent, path) catch |err| {
             return err;
         };
         defer doc.deinit();
 
-        var spec = try poker_engine.game.parseStreetConfig(self.allocator, doc.config_text);
+        var spec = try poker_engine.game.parseStreetConfig(self.parent, doc.config_text);
         defer spec.deinit();
-        var game = try poker_engine.game.compile.compile(self.allocator, spec);
+        if (spec.memory_mib <= 0) return error.BudgetExceeded;
+        const budget_bytes: u64 = @as(u64, @intCast(spec.memory_mib)) * 1024 * 1024;
+
+        const prior_limit = self.budget.limit();
+        const prior_budget_field = self.memory_budget_bytes;
+        const old_live = self.budget.live();
+        self.budget.setLimit(old_live + budget_bytes);
+        errdefer {
+            self.budget.setLimit(prior_limit);
+            self.memory_budget_bytes = prior_budget_field;
+        }
+
+        var game = poker_engine.game.compile.compile(self.allocator, spec) catch |err| {
+            if (err == error.OutOfMemory) return error.BudgetExceeded;
+            return err;
+        };
         errdefer game.deinit();
 
         // Logical index must match compile (combo order + PSOL hand-major slot arities).
@@ -961,13 +1037,19 @@ pub const Session = struct {
         if (doc.ip_combos.len != game.hands.combos[1].len) return error.InvalidPsol;
         if (!std.mem.eql(i32, doc.oop_combos, game.hands.combos[0])) return error.InvalidPsol;
         if (!std.mem.eql(i32, doc.ip_combos, game.hands.combos[1])) return error.InvalidPsol;
-        var layout = poker_engine.game.compile.buildPsolLayoutMap(self.allocator, game) catch return error.InvalidPsol;
+        var layout = poker_engine.game.compile.buildPsolLayoutMap(self.allocator, game) catch |err| {
+            if (err == error.OutOfMemory) return error.BudgetExceeded;
+            return error.InvalidPsol;
+        };
         defer layout.deinit();
         if (doc.slot_actions.len != layout.psol_actions.len) return error.InvalidPsol;
         if (!std.mem.eql(u16, doc.slot_actions, layout.psol_actions)) return error.InvalidPsol;
         if (doc.average.len != @as(usize, @intCast(layout.psol_table_entries))) return error.InvalidPsol;
 
-        const average_mem = self.allocator.alloc(f32, @intCast(game.table_entries)) catch return error.OutOfMemory;
+        const estimated = estimateSolutionBytes(game);
+        if (estimated > budget_bytes) return error.BudgetExceeded;
+
+        const average_mem = self.allocator.alloc(f32, @intCast(game.table_entries)) catch return error.BudgetExceeded;
         var average_owned = true;
         errdefer if (average_owned) self.allocator.free(average_mem);
         poker_engine.game.compile.copyTablePsolToMemory(game, layout, doc.average, average_mem) catch {
@@ -980,7 +1062,10 @@ pub const Session = struct {
         var training: ?poker_engine.solve.training_state.TrainingState = null;
         errdefer if (training) |*owned| owned.deinit();
         if (want_training) {
-            var tables = try poker_engine.solve.training_state.TrainingState.init(self.allocator, game);
+            var tables = poker_engine.solve.training_state.TrainingState.init(self.allocator, game) catch |err| {
+                if (err == error.OutOfMemory) return error.BudgetExceeded;
+                return err;
+            };
             errdefer tables.deinit();
             if (doc.regret.len != @as(usize, @intCast(layout.psol_table_entries))) return error.InvalidPsol;
             if (doc.strategy_sum.len != doc.regret.len) return error.InvalidPsol;
@@ -1016,15 +1101,16 @@ pub const Session = struct {
         average_owned = false; // ownership moved into published
         errdefer published.deinit();
 
-        const owned_config = self.allocator.dupe(u8, doc.config_text) catch return error.OutOfMemory;
+        const owned_config = self.allocator.dupe(u8, doc.config_text) catch return error.BudgetExceeded;
         errdefer self.allocator.free(owned_config);
-        const owned_locks = self.allocator.dupe(u8, doc.locks_text) catch return error.OutOfMemory;
+        const owned_locks = self.allocator.dupe(u8, doc.locks_text) catch return error.BudgetExceeded;
         errdefer self.allocator.free(owned_locks);
-        const owned_edits = self.allocator.dupe(u8, doc.strategy_edits_text) catch return error.OutOfMemory;
+        const owned_edits = self.allocator.dupe(u8, doc.strategy_edits_text) catch return error.BudgetExceeded;
         errdefer self.allocator.free(owned_edits);
 
         // Install only after full validation.
         self.clearSolution();
+        self.budget.setLimit(budget_bytes);
         self.config_text = owned_config;
         self.game = game;
         self.training = training;
@@ -1039,10 +1125,7 @@ pub const Session = struct {
         self.has_metrics = doc.has_metrics;
         self.threads = clampThreads(spec.threads);
         self.has_training = want_training;
-        self.memory_budget_bytes = if (spec.memory_mib > 0)
-            @as(u64, @intCast(spec.memory_mib)) * 1024 * 1024
-        else
-            0;
+        self.memory_budget_bytes = budget_bytes;
         self.solution_id = self.next_id;
         self.next_id += 1;
         self.baseline_id = 0;

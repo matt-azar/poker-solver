@@ -5,9 +5,11 @@ const poker_formats = @import("poker_formats");
 
 pub const session = @import("session.zig");
 pub const plan_preview = @import("plan_preview.zig");
+pub const budget_allocator = @import("budget_allocator.zig");
 pub const Session = session.Session;
 pub const Phase = session.Phase;
 pub const PublishedLease = session.PublishedLease;
+pub const BudgetAllocator = budget_allocator.BudgetAllocator;
 pub const phase = "phase-5";
 
 pub fn engineModuleName() []const u8 {
@@ -40,7 +42,7 @@ test "session train save open roundtrip" {
         \\threads 1
         \\
     ;
-    var sess = Session.init(std.testing.allocator);
+    var sess = try Session.init(std.testing.allocator);
     defer sess.deinit();
     try sess.begin(text);
     try sess.train(2);
@@ -63,7 +65,7 @@ test "session train save open roundtrip" {
     defer std.testing.allocator.free(path);
     try sess.save(path);
 
-    var other = Session.init(std.testing.allocator);
+    var other = try Session.init(std.testing.allocator);
     defer other.deinit();
     // Keep prior session if open fails: seed a different solution first.
     try other.begin(text);
@@ -156,7 +158,7 @@ test "browse-only open keeps has_training false and continue disabled" {
         \\threads 1
         \\
     ;
-    var sess = Session.init(std.testing.allocator);
+    var sess = try Session.init(std.testing.allocator);
     defer sess.deinit();
     try sess.begin(text);
     try sess.train(1);
@@ -189,7 +191,7 @@ test "browse-only open keeps has_training false and continue disabled" {
     }
     try poker_formats.writeFile(std.testing.allocator, browse_only, doc);
 
-    var other = Session.init(std.testing.allocator);
+    var other = try Session.init(std.testing.allocator);
     defer other.deinit();
     try other.open(browse_only);
     try std.testing.expect(!other.has_training);
@@ -201,7 +203,7 @@ test "browse-only open keeps has_training false and continue disabled" {
     defer reloaded.deinit();
     try std.testing.expect(!reloaded.hasTraining());
 
-    var resumed = Session.init(std.testing.allocator);
+    var resumed = try Session.init(std.testing.allocator);
     defer resumed.deinit();
     try resumed.open(with_train);
     try std.testing.expect(resumed.has_training);
@@ -230,7 +232,7 @@ test "train recovers from sticky failed phase without re-begin" {
         \\threads 1
         \\
     ;
-    var sess = Session.init(std.testing.allocator);
+    var sess = try Session.init(std.testing.allocator);
     defer sess.deinit();
     try sess.begin(text);
     try std.testing.expect(sess.has_training);
@@ -270,7 +272,7 @@ test "early stop before publish leaves session paused and continuable" {
         \\threads 1
         \\
     ;
-    var sess = Session.init(std.testing.allocator);
+    var sess = try Session.init(std.testing.allocator);
     defer sess.deinit();
     try sess.begin(text);
     try std.testing.expect(sess.phase == .paused);
@@ -311,7 +313,7 @@ test "prepareResolveLocked reset stamps baseline and zeros trained" {
         \\threads 1
         \\
     ;
-    var sess = Session.init(std.testing.allocator);
+    var sess = try Session.init(std.testing.allocator);
     defer sess.deinit();
     try sess.begin(text);
     try sess.train(3);
@@ -346,7 +348,7 @@ test "publish cadence carries across train(1) and flushes on exact" {
         \\threads 1
         \\
     ;
-    var sess = Session.init(std.testing.allocator);
+    var sess = try Session.init(std.testing.allocator);
     defer sess.deinit();
     try sess.begin(text);
     sess.publish_every = 3;
@@ -401,7 +403,7 @@ test "multi-iter train forces publish at completion" {
         \\threads 1
         \\
     ;
-    var sess = Session.init(std.testing.allocator);
+    var sess = try Session.init(std.testing.allocator);
     defer sess.deinit();
     try sess.begin(text);
     sess.publish_every = 100;
@@ -413,7 +415,83 @@ test "multi-iter train forces publish at completion" {
     try std.testing.expect(sess.phase == .published);
 }
 
+test "begin over budget preserves prior published solution" {
+    const small =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(small);
+    try sess.train(1);
+    try std.testing.expect(sess.phase == .published);
+    const prior_id = sess.solution_id;
+    const prior_rev = sess.policyRevision();
+    const prior_live = sess.allocatedBytes();
+    try std.testing.expect(prior_live > 0);
+
+    const fixture = try std.fs.cwd().readFileAlloc(
+        std.testing.allocator,
+        "benchmarks/study/configs/smoke_resource_flop.txt",
+        256 * 1024,
+    );
+    defer std.testing.allocator.free(fixture);
+    const begin_err = sess.begin(fixture);
+    try std.testing.expectError(error.BudgetExceeded, begin_err);
+    try std.testing.expectEqual(prior_id, sess.solution_id);
+    try std.testing.expectEqual(prior_rev, sess.policyRevision());
+    try std.testing.expect(sess.phase == .published);
+    try std.testing.expectEqual(prior_live, sess.allocatedBytes());
+}
+
+test "adequate river budget begin succeeds and tracks live bytes" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try std.testing.expect(sess.allocatedBytes() > 0);
+    try std.testing.expect(sess.allocatedBytes() <= sess.memory_budget_bytes);
+    try sess.train(1);
+    try std.testing.expect(sess.published != null);
+    // Publish may allocate an average buffer; still under the declared ceiling.
+    try std.testing.expect(sess.allocatedBytes() <= sess.memory_budget_bytes);
+}
+
 test {
     _ = session;
     _ = plan_preview;
+    _ = budget_allocator;
 }
