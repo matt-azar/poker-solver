@@ -14,4 +14,5 @@ test {
     _ = frozen_walk;
     _ = algorithms;
     _ = @import("strategy_parity_test.zig");
+    _ = @import("turn_pot_bet_rematch_test.zig");
 }
