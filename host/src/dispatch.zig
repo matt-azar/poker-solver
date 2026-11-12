@@ -62,9 +62,11 @@ pub const HostState = struct {
     equity_jobs: equity_jobs.Manager,
 
     pub fn init(allocator: std.mem.Allocator, launch_id: []const u8) !HostState {
+        var session = try poker_app.Session.init(allocator);
+        errdefer session.deinit();
         return .{
             .allocator = allocator,
-            .session = poker_app.Session.init(allocator),
+            .session = session,
             .budget = workers.WorkerBudget.initFromCpus(),
             .launch_id = try allocator.dupe(u8, launch_id),
             .pending = std.ArrayList([]u8).init(allocator),
@@ -738,7 +740,7 @@ fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     defer state.allocator.free(node_id_text);
     const t0 = std.time.nanoTimestamp();
     var page = poker_engine.analysis.equity.checkdownEquityAtNode(
-        state.allocator,
+        state.session.allocator,
         lease.game,
         lease.published,
         located.node_index,
@@ -750,7 +752,7 @@ fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             error.WorkLimit => "work_limit",
             error.InvalidEquity => "invalid_equity",
             error.InvalidWeight => "invalid_weight",
-            error.OutOfMemory => "oom",
+            error.OutOfMemory => if (state.session.budget.limit() > 0) "budget_exceeded" else "oom",
         };
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
     };
@@ -798,7 +800,7 @@ fn handleCategories(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     defer state.allocator.free(node_id_text);
     const t0 = std.time.nanoTimestamp();
     const report = poker_engine.analysis.categories.categoriesAtNode(
-        state.allocator,
+        state.session.allocator,
         lease.game,
         lease.published,
         located.node_index,
@@ -809,7 +811,7 @@ fn handleCategories(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             error.InvalidEquity, error.InvalidCategories => "invalid_categories",
             error.InvalidWeight => "invalid_weight",
             error.WorkLimit => "work_limit",
-            error.OutOfMemory => "oom",
+            error.OutOfMemory => if (state.session.budget.limit() > 0) "budget_exceeded" else "oom",
         };
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
     };
@@ -855,6 +857,9 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     const can_continue = state.session.canContinue();
     const threads = state.session.threads;
     const terminal = state.session.last_terminal;
+    const memory_budget_bytes = state.session.memory_budget_bytes;
+    const allocated_bytes = state.session.allocatedBytes();
+    const peak_allocated_bytes = state.session.peakAllocatedBytes();
     // Study progress (ZR-120): expose trained count so UI is not stuck at "0 iters".
     var iterations: i32 = 0;
     if (state.session.training) |*training| {
@@ -925,7 +930,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
         try w.writeAll(",\"last_error\":null,\"error\":\"\"");
     }
     try w.print(
-        ",\"phase\":\"{s}\",\"iterations\":{d},\"iterations_requested\":{d},\"policy_revision\":{d},\"terminal_reason\":\"{s}\",\"workers_training\":{d},\"workers_analysis\":{d},\"threads\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}",
+        ",\"phase\":\"{s}\",\"iterations\":{d},\"iterations_requested\":{d},\"policy_revision\":{d},\"terminal_reason\":\"{s}\",\"workers_training\":{d},\"workers_analysis\":{d},\"threads\":{d},\"memory_budget_bytes\":{d},\"allocated_bytes\":{d},\"peak_allocated_bytes\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}",
         .{
             phase_name,
             iterations,
@@ -935,6 +940,9 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
             threads,
             state.budget.analysis,
             threads,
+            memory_budget_bytes,
+            allocated_bytes,
+            peak_allocated_bytes,
         },
     );
     return try list.toOwnedSlice();
@@ -1064,7 +1072,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
         defer state.allocator.free(path);
         state.session.save(path) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "save_failed", @errorName(err));
+            const code: []const u8 = if (err == error.BudgetExceeded) "budget_exceeded" else "save_failed";
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, "{\"saved\":true}");
     }
@@ -1080,6 +1089,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             const code: []const u8 = switch (err) {
                 error.InvalidStrategy => "invalid_strategy",
                 error.Busy => "busy",
+                error.BudgetExceeded => "budget_exceeded",
                 else => "open_failed",
             };
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
@@ -1134,14 +1144,18 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         };
         const t0 = std.time.nanoTimestamp();
         var page = poker_engine.analysis.action_ev.actionValues(
-            state.allocator,
+            state.session.allocator,
             lease.game,
             lease.published,
             located.node_index,
             located.turn,
             located.river,
         ) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "values_failed", @errorName(err));
+            const code: []const u8 = if (err == error.OutOfMemory and state.session.budget.limit() > 0)
+                "budget_exceeded"
+            else
+                "values_failed";
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };
         defer page.deinit();
         const elapsed_ns = std.time.nanoTimestamp() - t0;
@@ -2088,6 +2102,67 @@ test "begin_config rejects 1 MiB flop resource fixture" {
     }
     try std.testing.expect(!reply.ok);
     try std.testing.expect(std.mem.eql(u8, reply.error_code orelse "", "budget_exceeded"));
+}
+
+test "budget reject preserves prior published solution" {
+    const small =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "budget-keep");
+    defer state.deinit();
+    try state.session.begin(small);
+    try state.session.train(1);
+    const prior_id = state.session.solution_id;
+    const prior_rev = state.session.policyRevision();
+    const prior_live = state.session.allocatedBytes();
+
+    const config_raw = try std.fs.cwd().readFileAlloc(
+        std.testing.allocator,
+        "benchmarks/study/configs/smoke_resource_flop.txt",
+        64 * 1024,
+    );
+    defer std.testing.allocator.free(config_raw);
+    var config_buf = std.ArrayList(u8).init(std.testing.allocator);
+    defer config_buf.deinit();
+    for (config_raw) |c| {
+        if (c != '\r') try config_buf.append(c);
+    }
+    if (config_buf.items.len == 0 or config_buf.items[config_buf.items.len - 1] != '\n') {
+        try config_buf.append('\n');
+    }
+    const config = config_buf.items;
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "b-keep"),
+        .op = try std.testing.allocator.dupe(u8, "begin_config"),
+        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"config_text\":{s}}}", .{std.json.fmt(config, .{})}),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(!reply.ok);
+    try std.testing.expect(std.mem.eql(u8, reply.error_code orelse "", "budget_exceeded"));
+    try std.testing.expectEqual(prior_id, state.session.solution_id);
+    try std.testing.expectEqual(prior_rev, state.session.policyRevision());
+    try std.testing.expect(state.session.phase == .published);
+    try std.testing.expectEqual(prior_live, state.session.allocatedBytes());
 }
 
 test "equity at non-root decision uses reach-weighted node board" {

@@ -4,6 +4,7 @@
 Spawns `solver-engine` over length-prefixed protocol-2 IPC and exercises:
   ready → begin_config → solve → status → node (links + weighted strategy)
   → equity → pause/stop mid-train → checkpoint save/open/continue
+  → 1 MiB smoke_resource_flop begin_config → budget_exceeded (ZR-142)
 
 Train uses ZR-106 short-admit (`{accepted,running}`); completion is polled
 via `status` (`running` / `terminal_reason` / `policy_revision` / `last_error`).
@@ -13,6 +14,9 @@ ZR-133 Change C: iteration progress (`iterations`) advances every train step;
 `policy_revision` advances only on strategy publish events (bounded cadence,
 default every 10 iters, plus first iter / pause / stop / completion flushes).
 Do not require revision == trained.
+
+ZR-142: over-budget begin must not wipe the last usable published solution;
+status exposes memory_budget_bytes / allocated_bytes / peak_allocated_bytes.
 
 Uses the tiny river_gate_smoke fixture. No Accuracy walls.
 Overall wall bound defaults to 60s.
@@ -737,6 +741,45 @@ def main() -> int:
                 "trainer.trained is 15; policy_revision advances on publish "
                 "events (ZR-133 cadence), open resets revision to 1"
             ),
+        }
+
+        # --- ZR-142 memory budget: 1 MiB flop must fail; prior solution kept ---
+        prior_status = body_dict(inbox.rpc(proc, "status", None, "c-budget-prior"))
+        prior_sid = prior_status.get("solution_id")
+        prior_rev_budget = int(prior_status.get("policy_revision") or 0)
+        require(prior_sid, f"missing prior solution before budget reject: {prior_status}")
+        flop_budget_path = ROOT / "benchmarks/study/configs/smoke_resource_flop.txt"
+        flop_budget_text = flop_budget_path.read_text(encoding="utf-8")
+        budget_env = inbox.rpc(
+            proc,
+            "begin_config",
+            {"config_text": flop_budget_text},
+            "c-budget-reject",
+            expect_ok=False,
+        )
+        require(
+            budget_env.get("error_code") == "budget_exceeded",
+            f"1 MiB flop expected budget_exceeded: {budget_env}",
+        )
+        after_status = body_dict(inbox.rpc(proc, "status", None, "c-budget-after"))
+        require(
+            after_status.get("solution_id") == prior_sid,
+            f"budget reject wiped solution: before={prior_sid} after={after_status}",
+        )
+        require(
+            int(after_status.get("policy_revision") or -1) == prior_rev_budget,
+            f"budget reject changed revision: {after_status}",
+        )
+        require(
+            "allocated_bytes" in after_status and "memory_budget_bytes" in after_status,
+            f"status missing memory accounting: {after_status}",
+        )
+        stages["memory_budget"] = {
+            "error_code": budget_env.get("error_code"),
+            "preserved_solution_id": after_status.get("solution_id"),
+            "allocated_bytes": after_status.get("allocated_bytes"),
+            "memory_budget_bytes": after_status.get("memory_budget_bytes"),
+            "peak_allocated_bytes": after_status.get("peak_allocated_bytes"),
         }
 
         wall_s = round(time.perf_counter() - t0, 4)

@@ -162,7 +162,7 @@ pub fn main() !void {
         try stdout.print("evaluation_mode: frozen_accuracy_stop\n", .{});
     }
 
-    var sess = poker_app.Session.init(allocator);
+    var sess = try poker_app.Session.init(allocator);
     defer sess.deinit();
 
     const t_begin0 = std.time.nanoTimestamp();
