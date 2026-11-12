@@ -91,6 +91,28 @@ export function reconnectedMessage(label?: string): string {
 }
 
 /**
+ * After a cold reconnect the new sidecar has no in-memory train state.
+ * Restart alone never restores unsaved progress (ZR-143) — only Open of a
+ * previously saved checkpoint can.
+ */
+export function coldReconnectMessage(opts?: {
+  label?: string;
+  solutionPath?: string;
+}): string {
+  const base = reconnectedMessage(opts?.label);
+  const path = opts?.solutionPath?.trim() ?? "";
+  if (path) {
+    return `${base} Unsaved train progress is gone. Open the last saved checkpoint (${path}) to restore it.`;
+  }
+  return `${base} Unsaved train progress is gone — Save before a crash to keep a checkpoint.`;
+}
+
+/** Last known on-disk checkpoint path Study can reopen after engine death. */
+export function lastValidCheckpointPath(solutionPath: string | null | undefined): string {
+  return (solutionPath ?? "").trim();
+}
+
+/**
  * Host status publishes `phase:"failed"`; desktop historically only looked at
  * `failed`/`error`. Normalize so phase mapping is honest.
  */
