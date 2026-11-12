@@ -218,6 +218,7 @@ Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via no
 
 - Progress: iteration counter every train step; EV / gap / Accuracy refresh about every 10 iters (or denser if Samples is raised) (#180). `time_limit: 0` stops after the first completed iteration.
 - Early-stop uses **Pio Accuracy** (`NashConv / 2`). Compare the threshold to **Accuracy chips**, not raw NashConv (off-by-2 early/late stop). Default CLI/UI **unit** is pot fraction (`--accuracy 0.05` or `5 chips`); Pio UPI’s chips-default unit is not our product default (#179). Keep `nash_gap` as NashConv for reporting.
+- **Acc-stop honesty (ZR-153):** `CompiledGame.pot` is **tenths**. Threshold chips = `accuracy_pot_fraction * tenthsToChips(pot)` — never multiply the fraction by raw tenths (10× threshold → false early “Accuracy reached”). After `train(1)`, publish cadence may leave a **stale** average; Study `trainGated` and gate-bench Acc checkpoints must `ensurePublishedExact()` so the evaluated average matches the reported iteration.
 
 ---
 

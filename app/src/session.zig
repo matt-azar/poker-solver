@@ -832,8 +832,55 @@ pub const Session = struct {
         self.clearControlFlags();
     }
 
-    /// Accuracy / time gated train loop shared with gate-bench (ZR-91).
+    /// Result of evaluating the exact average for the current trained iteration (ZR-153).
+    pub const ExactIterEval = struct {
+        trained: i32,
+        eval: poker_engine.solve.frozen_walk.FrozenEval,
+    };
+
+    /// Pio Accuracy stop threshold in chip EV units (ZR-153).
+    /// `pot_tenths` is `CompiledGame.pot` / StreetSpec pot (tenths-of-a-chip).
+    /// When `is_fraction`, threshold = target × pot_chips; otherwise absolute chips.
+    /// Returns -1 when Acc-stop is disarmed (non-positive pot for a fraction target).
+    pub fn accuracyThresholdChips(pot_tenths: i32, target: f64, is_fraction: bool) f64 {
+        if (!(target >= 0) or !std.math.isFinite(target)) return -1.0;
+        if (!is_fraction) return target;
+        const pot_chips = poker_engine.poker.chips.tenthsToChips(pot_tenths);
+        if (!(pot_chips > 0)) return -1.0;
+        return target * pot_chips;
+    }
+
+    /// True when measured Pio Accuracy chips meets the stop threshold.
+    pub fn accuracyReached(accuracy_chips: f64, threshold_chips: f64) bool {
+        return threshold_chips >= 0 and accuracy_chips <= threshold_chips;
+    }
+
+    /// Force-publish the exact average for `training.trained`, then evaluate it.
+    /// Guarantees the returned policy matches the iteration being reported (no
+    /// stale publish-cadence snapshot). Shared by Study `trainGated` and gate-bench.
+    pub fn evaluateExactIteration(self: *Session) SessionError!ExactIterEval {
+        try self.ensurePublishedExact();
+        const published = self.published orelse return error.NothingPublished;
+        const trained: i32 = if (self.training) |ts| ts.trained else published.trained;
+        if (published.trained != trained) return error.InvalidSession;
+        const eval = try self.evaluateFrozen(published.average);
+        return .{ .trained = trained, .eval = eval };
+    }
+
+    fn recordEvalMetrics(self: *Session, eval: poker_engine.solve.frozen_walk.FrozenEval) void {
+        self.setMetrics(.{
+            .value = eval.u0,
+            .br0 = eval.br0,
+            .br1 = eval.br1,
+            .nash_gap = eval.nash_gap,
+            .accuracy = eval.accuracy,
+        });
+    }
+
+    /// Accuracy / time gated train loop shared with gate-bench (ZR-91 / ZR-153).
     /// Each step is `train(1)` so pause/stop still land on iteration boundaries.
+    /// Uses `accuracyThresholdChips` + `evaluateExactIteration` so the stop signal
+    /// compares chip Accuracy to a chip threshold on the exact reported iter.
     pub fn trainGated(
         self: *Session,
         max_iterations: i32,
@@ -843,11 +890,8 @@ pub const Session = struct {
     ) SessionError!void {
         if (max_iterations < 1) return error.InvalidSession;
         const every: i32 = if (eval_every < 1) 1 else eval_every;
-        const pot: f64 = if (self.game) |g| @floatFromInt(g.pot) else 0;
-        const threshold_chips = if (accuracy_pot_fraction > 0 and pot > 0)
-            accuracy_pot_fraction * pot
-        else
-            -1.0;
+        const pot_tenths: i32 = if (self.game) |g| g.pot else 0;
+        const threshold_chips = accuracyThresholdChips(pot_tenths, accuracy_pot_fraction, true);
         const use_time = time_limit_seconds >= 0;
         const t0 = std.time.nanoTimestamp();
         var completed: i32 = 0;
@@ -877,13 +921,15 @@ pub const Session = struct {
             fresh_eval = false;
 
             if (@rem(completed, every) == 0 and threshold_chips >= 0) {
-                // Acc must see the exact average for this completed iteration.
-                try self.ensurePublishedExact();
-                const published = self.published orelse return error.NothingPublished;
-                const eval = try self.evaluateFrozen(published.average);
+                const exact = try self.evaluateExactIteration();
+                if (exact.trained != completed) return error.InvalidSession;
+                self.recordEvalMetrics(exact.eval);
                 fresh_eval = true;
-                if (eval.accuracy <= threshold_chips) {
+                if (accuracyReached(exact.eval.accuracy, threshold_chips)) {
                     self.last_terminal = .accuracy_reached;
+                    self.mu.lock();
+                    self.phase = .published;
+                    self.mu.unlock();
                     return;
                 }
             }
@@ -891,18 +937,22 @@ pub const Session = struct {
                 const elapsed = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e9;
                 if (elapsed >= time_limit_seconds) {
                     if (!fresh_eval and threshold_chips >= 0) {
-                        try self.ensurePublishedExact();
-                        if (self.published) |published| {
-                            _ = try self.evaluateFrozen(published.average);
-                        }
+                        const exact = try self.evaluateExactIteration();
+                        self.recordEvalMetrics(exact.eval);
                     }
                     self.last_terminal = .time_limit_reached;
+                    self.mu.lock();
+                    self.phase = if (self.published != null) .published else .paused;
+                    self.mu.unlock();
                     return;
                 }
             }
         }
         try self.ensurePublishedExact();
         self.last_terminal = .completed;
+        self.mu.lock();
+        self.phase = if (self.published != null) .published else .paused;
+        self.mu.unlock();
     }
 
     /// Frozen NashConv / Accuracy on the Session-owned engine (reuses ranks).
