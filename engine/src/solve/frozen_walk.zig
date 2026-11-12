@@ -1005,7 +1005,7 @@ pub const FrozenCtx = struct {
         return total;
     }
 
-    fn prepareResponseRoot(_: *FrozenCtx, w: *WorkerLocal) void {
+    pub fn prepareResponseRoot(_: *FrozenCtx, w: *WorkerLocal) void {
         @memset(w.scratch[0].pi0, 1.0);
         @memset(w.scratch[0].pi1, 1.0);
         w.resetSupport();

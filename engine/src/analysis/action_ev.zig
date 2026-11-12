@@ -5,6 +5,7 @@ const icm = @import("../poker/icm.zig");
 const range_mod = @import("../poker/range.zig");
 const traversal = @import("../solve/traversal.zig");
 const training_state = @import("../solve/training_state.zig");
+const frozen_walk = @import("../solve/frozen_walk.zig");
 
 pub const ActionEvError = error{ InvalidAnalysis, OutOfMemory };
 
@@ -77,8 +78,119 @@ fn resolveSigma(
     return owned.*.?;
 }
 
-/// Deal-by-deal conditional action EV for a river/turn decision under published average.
+/// Prefer frozen public-tree `response_walk` for root EV (flop-scale Study latency).
+/// Non-root / explicit turn·river pins keep the deal-by-deal oracle path.
 pub fn actionValues(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    published: training_state.PublishedPolicy,
+    node_index: u32,
+    turn: i32,
+    river: i32,
+) ActionEvError!ActionValues {
+    if (node_index == 0 and turn < 0 and river < 0) {
+        if (actionValuesFrozen(allocator, game, published, 0)) |page| {
+            return page;
+        } else |_| {
+            // Malformed frozen tables → deal-by-deal fallback (tiny oracles).
+            return actionValuesDealByDeal(allocator, game, published, node_index, turn, river);
+        }
+    }
+    return actionValuesDealByDeal(allocator, game, published, node_index, turn, river);
+}
+
+/// Frozen StreetBatch-style action EV at the **root** under published average.
+/// Reuses FrozenCtx rank cache / response_walk (same engine as flop train + #256 BR / #259 MT).
+pub fn actionValuesFrozen(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    published: training_state.PublishedPolicy,
+    node_index: u32,
+) ActionEvError!ActionValues {
+    if (node_index != 0) return error.InvalidAnalysis;
+    if (node_index >= game.nodes.len) return error.InvalidAnalysis;
+    const node = game.nodes[node_index];
+    if (node.kind != .decision) return error.InvalidAnalysis;
+
+    var owned_sigma: ?[]f32 = null;
+    defer if (owned_sigma) |buf| allocator.free(buf);
+    const sigma = try resolveSigma(allocator, game, published, &owned_sigma);
+
+    var ctx = frozen_walk.FrozenCtx.initEval(allocator, game) catch return error.InvalidAnalysis;
+    defer ctx.deinit();
+    const w = &ctx.workspace;
+    ctx.prepareResponseRoot(w);
+    // serial_chance=true: Study values share the process with optional train workers (D3).
+    ctx.responseWalk(w, 0, -1, -1, 0, -1, sigma, true) catch return error.InvalidAnalysis;
+
+    const actor: usize = @intCast(node.player);
+    const hands: usize = if (actor == 0) ctx.n0 else ctx.n1;
+    const ev = if (actor == 0) w.scratch[0].ev0 else w.scratch[0].ev1;
+    const aev = if (actor == 0) w.scratch[0].aev0 else w.scratch[0].aev1;
+    const n_act: usize = node.n_actions;
+
+    var page = ActionValues{
+        .allocator = allocator,
+        .node_index = node_index,
+        .player = node.player,
+        .policy_revision = published.revision,
+        .local_offset = -(try foldNowUtility(allocator, game, node, node.player)),
+    };
+    errdefer page.deinit();
+
+    page.actions = allocator.alloc([]const u8, n_act) catch return error.OutOfMemory;
+    @memset(page.actions, "");
+    var a: usize = 0;
+    while (a < n_act) : (a += 1) {
+        page.actions[a] = allocator.dupe(u8, node.action_labels[a]) catch return error.OutOfMemory;
+    }
+
+    page.combos = allocator.alloc([]const u8, hands) catch return error.OutOfMemory;
+    @memset(page.combos, "");
+    page.ev_defined = allocator.alloc(u8, hands) catch return error.OutOfMemory;
+    @memset(page.ev_defined, 0);
+    page.action_ev = allocator.alloc(f64, hands * n_act) catch return error.OutOfMemory;
+    @memset(page.action_ev, 0);
+    page.mixed_ev = allocator.alloc(f64, hands) catch return error.OutOfMemory;
+    @memset(page.mixed_ev, 0);
+
+    var hand: usize = 0;
+    while (hand < hands) : (hand += 1) {
+        const combo = game.hands.combos[actor][hand];
+        var buf: [4]u8 = undefined;
+        const text = range_mod.Range.comboText(combo, &buf) catch return error.InvalidAnalysis;
+        page.combos[hand] = allocator.dupe(u8, text) catch return error.OutOfMemory;
+    }
+
+    // Root CF values from response_walk already fold opponent reach + chance.
+    // node_ev matches evaluatePublishedFrozen util for the acting seat.
+    // Do not trust live masks after the walk (left on last runout); use range weights.
+    var node_ev: f64 = 0;
+    var any = false;
+    hand = 0;
+    while (hand < hands) : (hand += 1) {
+        if (!(game.hands.range_w[actor][hand] > 0)) continue;
+        any = true;
+        page.ev_defined[hand] = 1;
+        page.mixed_ev[hand] = ev[hand];
+        node_ev += ev[hand];
+        if (n_act <= 1) {
+            page.action_ev[hand * n_act] = ev[hand];
+            continue;
+        }
+        a = 0;
+        while (a < n_act) : (a += 1) {
+            page.action_ev[hand * n_act + a] = aev[a * hands + hand];
+        }
+    }
+    page.reach_defined = any;
+    page.node_ev_defined = any;
+    if (any) page.node_ev = node_ev;
+    return page;
+}
+
+/// Deal-by-deal conditional action EV (oracle / non-root). Do not use on flop-scale roots.
+pub fn actionValuesDealByDeal(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
     published: training_state.PublishedPolicy,

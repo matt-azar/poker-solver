@@ -145,14 +145,31 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "status")) {
-        var buf: [320]u8 = undefined;
-        const body = try std.fmt.bufPrint(&buf, "{{\"phase\":\"{s}\",\"solution_id\":{d},\"policy_revision\":{d},\"workers_training\":{d},\"workers_analysis\":{d}}}", .{
-            @tagName(state.session.phase),
-            state.session.solution_id,
-            state.session.policyRevision(),
-            state.budget.training,
-            state.budget.analysis,
-        });
+        // Study-compatible flags (decodeStatusPayload) + Zig session fields.
+        const running = state.session.phase == .training or state.session.phase == .compiling;
+        const paused = state.session.phase == .paused;
+        var buf: [512]u8 = undefined;
+        const body = if (state.session.solution_id == 0)
+            try std.fmt.bufPrint(&buf, "{{\"running\":{},\"paused\":{},\"cancelled\":false,\"status_generation\":{d},\"solution_id\":null,\"job_id\":null,\"root_node_id\":null,\"phase\":\"{s}\",\"policy_revision\":{d},\"workers_training\":{d},\"workers_analysis\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}", .{
+                running,
+                paused,
+                state.session.solution_id + state.session.policyRevision(),
+                @tagName(state.session.phase),
+                state.session.policyRevision(),
+                state.budget.training,
+                state.budget.analysis,
+            })
+        else
+            try std.fmt.bufPrint(&buf, "{{\"running\":{},\"paused\":{},\"cancelled\":false,\"status_generation\":{d},\"solution_id\":\"s{d}\",\"job_id\":null,\"root_node_id\":\"p0\",\"phase\":\"{s}\",\"policy_revision\":{d},\"workers_training\":{d},\"workers_analysis\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}", .{
+                running,
+                paused,
+                state.session.solution_id + state.session.policyRevision(),
+                state.session.solution_id,
+                @tagName(state.session.phase),
+                state.session.policyRevision(),
+                state.budget.training,
+                state.budget.analysis,
+            });
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
@@ -248,6 +265,39 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             page.n_actions,
             page.n_hands,
             page.policy_revision,
+        });
+        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+    }
+
+    if (std.mem.eql(u8, req.op, "values")) {
+        state.budget.prioritizeAnalysis(1);
+        defer state.budget.returnToTraining();
+        const game = state.session.game orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no game");
+        const published = state.session.published orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no published policy");
+        const node_index: u32 = @intCast(bodyIntField(req.body_json, "node_index") orelse 0);
+        const t0 = std.time.nanoTimestamp();
+        var page = poker_engine.analysis.action_ev.actionValues(state.allocator, game, published, node_index, -1, -1) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "values_failed", @errorName(err));
+        };
+        defer page.deinit();
+        const elapsed_ns = std.time.nanoTimestamp() - t0;
+        const elapsed_ms = @divTrunc(elapsed_ns, 1_000_000);
+        // Summary page for Study latency (full hand×action tables are a follow-on).
+        // Root uses frozen response_walk; see action_ev.actionValues.
+        var buf: [448]u8 = undefined;
+        const body = try std.fmt.bufPrint(&buf, "{{\"node_index\":{d},\"player\":{d},\"policy_revision\":{d},\"units\":\"chips\",\"utility_basis\":\"root_centered\",\"local_offset\":{d:.6},\"node_ev_defined\":{},\"node_ev\":{d:.6},\"n_hands\":{d},\"n_actions\":{d},\"elapsed_ms\":{d},\"solution_id\":\"s{d}\",\"engine\":\"frozen_response_walk\"}}", .{
+            page.node_index,
+            page.player,
+            page.policy_revision,
+            page.local_offset,
+            page.node_ev_defined,
+            page.node_ev,
+            page.combos.len,
+            page.actions.len,
+            elapsed_ms,
+            state.session.solution_id,
         });
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
