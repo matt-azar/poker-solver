@@ -19,7 +19,10 @@ export function isTauriRuntime(): boolean {
     return true;
   }
   const env = import.meta.env as Record<string, unknown>;
-  return Boolean(env.TAURI_ENV);
+  // Tauri 2 Vite injects TAURI_ENV_PLATFORM / TAURI_PLATFORM — not a bare TAURI_ENV.
+  return Boolean(
+    env.TAURI_ENV_PLATFORM || env.TAURI_PLATFORM || env.TAURI_ENV || env.__TAURI_ENV__,
+  );
 }
 
 /** Install the Tauri file adapter when detected; otherwise keep the browser default. */

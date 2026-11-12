@@ -274,12 +274,15 @@ fn kill_session(slot: &mut Option<PipeSession>) {
 fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String> {
     let path = resolve_sidecar(app)?;
     eprintln!("info: solver-engine on disk at {}", path.display());
+    // Pipe stderr and drain it. Inheriting the parent stderr can deadlock the
+    // ready handshake on Windows when the parent’s stderr is redirected (pipe
+    // buffer fills → child blocks on log write → IPC ready never arrives).
     let mut child = Command::new(&path)
         .arg("--launch-id")
         .arg(launch_id)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| format!("spawn `{}`: {err}", path.display()))?;
     let stdin = child
@@ -290,6 +293,24 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
         .stdout
         .take()
         .ok_or_else(|| "solver-engine stdout missing".to_string())?;
+    if let Some(mut stderr) = child.stderr.take() {
+        let _ = thread::Builder::new()
+            .name("solver-engine-stderr".into())
+            .spawn(move || {
+                let mut buf = [0u8; 4096];
+                loop {
+                    match stderr.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let text = String::from_utf8_lossy(&buf[..n]);
+                            eprint!("{text}");
+                        }
+                        Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(_) => break,
+                    }
+                }
+            });
+    }
     let io = Arc::new(SessionIo {
         stdin: Mutex::new(stdin),
         next_request: AtomicU64::new(1),
