@@ -84,6 +84,12 @@ jobs:
           set -euo pipefail
           python3 scripts/zig/study-contract-smoke.py ./zig-out/bin/solver-engine
 
+      # ZR-143: kill sidecar mid-session; cold restart ≠ restore unsaved; open ckpt.
+      - name: Engine crash recovery smoke
+        run: |
+          set -euo pipefail
+          python3 scripts/zig/engine-crash-recovery-smoke.py ./zig-out/bin/solver-engine
+
   zig-windows:
     runs-on: windows-latest
     timeout-minutes: 45

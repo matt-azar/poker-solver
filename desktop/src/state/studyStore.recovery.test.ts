@@ -100,6 +100,8 @@ describe("studyStore session recovery (ZR-123)", () => {
     engineMocks.ensureEngine.mockClear();
     engineMocks.engineClient.solve.mockClear();
     engineMocks.engineClient.status.mockClear();
+    engineMocks.engineClient.open.mockClear();
+    engineMocks.engineClient.clearLastStudyJobId.mockClear();
     engineMocks.setStatusImpl(async () => ({
       running: false,
       paused: false,
@@ -118,6 +120,7 @@ describe("studyStore session recovery (ZR-123)", () => {
         pot: 5.5,
         stack: 97.5,
         iterations: 10,
+        solutionPath: "",
       },
       solutionId: null,
       currentNode: null,
@@ -151,11 +154,13 @@ describe("studyStore session recovery (ZR-123)", () => {
     expect(state.phase).not.toBe("solving");
     expect(solveControlFlags(state.phase).canSolve).toBe(true);
     expect(state.message).toMatch(/reconnected/i);
+    expect(state.message).toMatch(/Unsaved train progress is gone/i);
+    expect(state.phase).toBe("idle");
     // Cold sidecar status has no solution_id — drop stale Study identity.
     expect(state.solutionId).toBeNull();
   });
 
-  it("markEngineSessionDead clears sticky busy without calling ensure", () => {
+  it("markEngineSessionDead clears sticky busy and failed job without calling ensure", () => {
     useStudyStore.setState({
       phase: "solving",
       solutionId: "s1",
@@ -164,10 +169,118 @@ describe("studyStore session recovery (ZR-123)", () => {
     useStudyStore.getState().markEngineSessionDead("Broken pipe");
     const state = useStudyStore.getState();
     expect(engineMocks.ensureEngine).not.toHaveBeenCalled();
+    expect(engineMocks.engineClient.clearLastStudyJobId).toHaveBeenCalled();
     expect(state.connection).toBe("disconnected");
     expect(state.phase).toBe("failed");
     expect(solveControlFlags(state.phase).canSolve).toBe(true);
     expect(state.message).toMatch(/Reconnect/i);
+  });
+
+  it("crash mid-solve → recover → reopen last saved checkpoint (ZR-143)", async () => {
+    const checkpoint = "/tmp/zr143-last.psol";
+    useStudyStore.setState({
+      phase: "solving",
+      connection: "connected",
+      solutionId: "s-live",
+      draft: {
+        ...useStudyStore.getState().draft,
+        solutionPath: checkpoint,
+      },
+    });
+
+    // Pipe death while solving: clear sticky job, stay disconnected until Reconnect.
+    useStudyStore.getState().markEngineSessionDead("solver-engine pipe closed");
+    expect(engineMocks.engineClient.clearLastStudyJobId).toHaveBeenCalled();
+    expect(useStudyStore.getState().connection).toBe("disconnected");
+    expect(useStudyStore.getState().phase).toBe("failed");
+
+    // Cold sidecar after re-ensure: no solution_id — unsaved live state is gone.
+    engineMocks.setStatusImpl(async () => ({
+      running: false,
+      paused: false,
+      cancelled: false,
+      failed: false,
+      solution_id: null,
+      status_generation: 2,
+      phase: "idle",
+    }));
+    const recovered = await useStudyStore.getState().recoverEngineSession();
+    expect(recovered.ok).toBe(true);
+    const afterRecover = useStudyStore.getState();
+    expect(afterRecover.solutionId).toBeNull();
+    expect(afterRecover.phase).toBe("idle");
+    expect(afterRecover.draft.solutionPath).toBe(checkpoint);
+    expect(afterRecover.message).toMatch(/Unsaved train progress is gone/i);
+    expect(afterRecover.message).toMatch(/zr143-last\.psol/);
+    expect(solveControlFlags(afterRecover.phase).canSolve).toBe(true);
+
+    // Open last valid checkpoint restores published identity from disk only.
+    engineMocks.engineClient.open.mockResolvedValueOnce(undefined);
+    engineMocks.setStatusImpl(async () => ({
+      running: false,
+      paused: false,
+      cancelled: false,
+      failed: false,
+      solution_id: "s-ckpt",
+      root_node_id: "p0.t-1.r-1",
+      status_generation: 3,
+      phase: "published",
+      has_training: true,
+      can_continue: true,
+      iterations: 10,
+    }));
+    const opened = await useStudyStore.getState().openSolution(checkpoint);
+    expect(opened).toEqual({ ok: true, path: checkpoint });
+    expect(engineMocks.engineClient.open).toHaveBeenCalledWith(checkpoint);
+    const afterOpen = useStudyStore.getState();
+    expect(afterOpen.solutionId).toBe("s-ckpt");
+    expect(afterOpen.draft.solutionPath).toBe(checkpoint);
+    expect(afterOpen.status?.iterations).toBe(10);
+  });
+
+  it("restart alone does not silently restore unsaved progress (ZR-143)", async () => {
+    // Live published study that was never Saved (empty solutionPath).
+    useStudyStore.setState({
+      phase: "solving",
+      connection: "connected",
+      solutionId: "s-unsaved",
+      draft: {
+        ...useStudyStore.getState().draft,
+        solutionPath: "",
+      },
+      status: {
+        running: true,
+        paused: false,
+        solution_id: "s-unsaved",
+        iterations: 40,
+        iterations_requested: 200,
+        phase: "training",
+      },
+    });
+    useStudyStore.getState().markEngineSessionDead("Broken pipe");
+
+    engineMocks.setStatusImpl(async () => ({
+      running: false,
+      paused: false,
+      cancelled: false,
+      failed: false,
+      solution_id: null,
+      status_generation: 7,
+      phase: "idle",
+    }));
+    const recovered = await useStudyStore.getState().recoverEngineSession();
+    expect(recovered.ok).toBe(true);
+    const state = useStudyStore.getState();
+    // Restart/re-ensure alone: no solution_id painted back from the dead session.
+    expect(state.solutionId).toBeNull();
+    expect(state.status?.solution_id ?? null).toBeNull();
+    expect(state.draft.solutionPath).toBe("");
+    expect(state.message).toMatch(/Unsaved train progress is gone/i);
+    expect(state.message).toMatch(/Save before a crash/i);
+
+    const missing = await useStudyStore.getState().openSolution();
+    expect(missing.ok).toBe(false);
+    expect(engineMocks.engineClient.open).not.toHaveBeenCalled();
   });
 
   it("Solve after failed phase is allowed and launches a new job", async () => {

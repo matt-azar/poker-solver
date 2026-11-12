@@ -84,8 +84,10 @@ import {
 } from "../domain/strategyEdits";
 import {
   classifyEngineSessionFault,
+  coldReconnectMessage,
   ensureFailedRecoveryMessage,
   isRecoveryOrUnreachableMessage,
+  lastValidCheckpointPath,
   normalizeStatusForPhase,
   phaseAfterSessionFault,
   reconnectedMessage,
@@ -1940,6 +1942,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     continuationPending = false;
     pendingReloadNodeId = undefined;
     invalidateLifecycleRequests();
+    // Failed/orphan job id must not outlive the dead pipe (ZR-143).
+    engineClient.clearLastStudyJobId();
     const patch = sessionDeadUiPatch({
       detail,
       phase: get().phase,
@@ -1961,6 +1965,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     engineClient.clearLastStudyJobId();
     const priorPhase = get().phase;
     const hadSolution = Boolean(get().solutionId);
+    const checkpointPath = lastValidCheckpointPath(get().draft.solutionPath);
     set({
       connection: "connecting",
       message: reconnectingMessage(),
@@ -1978,15 +1983,16 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       });
       return { ok: false, error: result.error };
     }
+    const label =
+      result.transport.kind === "ipc" ? result.transport.label : result.status;
     set({
       connection: "connected",
-      message: reconnectedMessage(
-        result.transport.kind === "ipc" ? result.transport.label : result.status,
-      ),
+      message: reconnectedMessage(label),
     });
     get().startPolling();
     await get().refresh();
     // Fresh engine has no published solution — drop stale Study identity.
+    // Restart alone never restores unsaved train progress (ZR-143).
     const status = get().status;
     if (!status?.solution_id) {
       set({
@@ -2006,6 +2012,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         strategyEditDraftBaseline: null,
         strategyEditDrawerOpen: false,
         compareNote: null,
+        // Cold host after crash: prior "failed" was the dead session, not a
+        // sticky train fault on this sidecar. Keep draft.solutionPath so Open
+        // can reload the last valid checkpoint.
+        phase: "idle",
+        message: coldReconnectMessage({
+          label,
+          solutionPath: checkpointPath || undefined,
+        }),
       });
     }
     return { ok: true };

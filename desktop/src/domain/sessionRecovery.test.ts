@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyEngineSessionFault,
+  coldReconnectMessage,
   disconnectedRecoveryMessage,
   isEngineSessionDead,
   isRecoveryOrUnreachableMessage,
   isStickyBusyPhase,
+  lastValidCheckpointPath,
   normalizeStatusForPhase,
   phaseAfterSessionFault,
   sessionDeadUiPatch,
@@ -105,5 +107,20 @@ describe("sessionRecovery", () => {
     expect(isRecoveryOrUnreachableMessage("Solving — 12/200 iterations")).toBe(
       false,
     );
+  });
+
+  it("cold reconnect copy keeps checkpoint reopen honest and rejects silent restore (ZR-143)", () => {
+    expect(lastValidCheckpointPath(" /tmp/last.psol ")).toBe("/tmp/last.psol");
+    expect(lastValidCheckpointPath("")).toBe("");
+    const withPath = coldReconnectMessage({
+      label: "solver-engine IPC (protocol 2)",
+      solutionPath: "/tmp/last.psol",
+    });
+    expect(withPath).toMatch(/reconnected/i);
+    expect(withPath).toMatch(/Unsaved train progress is gone/i);
+    expect(withPath).toMatch(/\/tmp\/last\.psol/);
+    const withoutPath = coldReconnectMessage({ label: "engine" });
+    expect(withoutPath).toMatch(/Unsaved train progress is gone/i);
+    expect(withoutPath).toMatch(/Save before a crash/i);
   });
 });
