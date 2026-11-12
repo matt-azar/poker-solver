@@ -154,3 +154,39 @@ test "parse force root check" {
     try std.testing.expectEqualStrings("c", edit.action);
     try std.testing.expectEqual(@as(usize, 0), edit.path.steps.len);
 }
+
+test "parse add-size pot fraction and chips" {
+    {
+        const edit = try parseOneEdit(std.testing.allocator, "add-size - 0.33");
+        defer freeEdit(std.testing.allocator, edit);
+        try std.testing.expect(edit.kind == .add_size);
+        try std.testing.expectEqual(@as(f64, 0.33), edit.size_pot_fraction);
+        try std.testing.expectEqual(@as(chips.Chip, 0), edit.size_chips);
+    }
+    {
+        const edit = try parseOneEdit(std.testing.allocator, "add-size - 20c");
+        defer freeEdit(std.testing.allocator, edit);
+        try std.testing.expect(edit.kind == .add_size);
+        try std.testing.expect(edit.usesChipSize());
+        try std.testing.expectEqual(chips.chipUnits(20), edit.size_chips);
+    }
+}
+
+test "parse remove compact deep path" {
+    const edit = try parseOneEdit(std.testing.allocator, "remove c/b50 b50");
+    defer freeEdit(std.testing.allocator, edit);
+    try std.testing.expect(edit.kind == .remove);
+    try std.testing.expectEqual(@as(usize, 2), edit.path.steps.len);
+    try std.testing.expectEqualStrings("c", edit.path.steps[0].label);
+    try std.testing.expectEqualStrings("b50", edit.path.steps[1].label);
+    try std.testing.expectEqualStrings("b50", edit.action);
+}
+
+test "parse remove after check compact" {
+    const edit = try parseOneEdit(std.testing.allocator, "remove c b50");
+    defer freeEdit(std.testing.allocator, edit);
+    try std.testing.expect(edit.kind == .remove);
+    try std.testing.expectEqual(@as(usize, 1), edit.path.steps.len);
+    try std.testing.expectEqualStrings("c", edit.path.steps[0].label);
+    try std.testing.expectEqualStrings("b50", edit.action);
+}

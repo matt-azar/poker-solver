@@ -4,6 +4,11 @@ const std = @import("std");
 const street_config = @import("street_config.zig");
 const compile = @import("compile.zig");
 
+// ZR-94 apply / unapplied-report pins (separate file; pulled in via this suite).
+comptime {
+    _ = @import("tree_edit_apply_test.zig");
+}
+
 fn decisionFingerprint(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,

@@ -142,25 +142,25 @@ fn expandAndConsider(
     }
 }
 
-fn considerAmount(
+/// Shared pot-cap / all-in-threshold / min-raise clamps for listed sizes and AddSize.
+/// Returns null when the amount is illegal after clamps. `force_all_in` is for size-list
+/// tokens only; AddSize always passes false (short all-in needs `allow_all_in`).
+fn resolveAggressiveAdd(
     config: street_spec.StreetSpec,
     state: BetState,
-    player: i32,
-    to_call: chips.Chip,
-    facing: bool,
-    max_add: chips.Chip,
     add_in: chips.Chip,
     force_all_in: bool,
-    amounts: *[8]chips.Chip,
-    n_amounts: *i32,
-    aggressive_limit: i32,
-) BettingError!void {
+) ?chips.Chip {
+    const player = state.acting;
+    const to_call = state.committed - state.contrib[@intCast(player)];
+    const facing = to_call > 0;
+    const max_add = config.stack - state.contrib[@intCast(player)];
     var add = add_in;
-    if (facing and config.max_raises <= state.num_raises) return;
-    if (add < 1) return;
-    if (facing and !config.allow_three_bet and state.num_raises >= 1) return;
+    if (facing and config.max_raises <= state.num_raises) return null;
+    if (add < 1) return null;
+    if (facing and !config.allow_three_bet and state.num_raises >= 1) return null;
     if (add > max_add) {
-        if (!config.allow_all_in and !force_all_in) return;
+        if (!config.allow_all_in and !force_all_in) return null;
         add = max_add;
     }
     if (config.all_in_threshold > 0.0 and config.allow_all_in) {
@@ -175,11 +175,32 @@ fn considerAmount(
         if (add - to_call > max_by) add = to_call + max_by;
     }
     const raise_by = add - to_call;
-    if (raise_by <= 0) return;
+    if (raise_by <= 0) return null;
     const min_increment: chips.Chip = if (state.last_raise == 0) 1 else state.last_raise;
     const full = raise_by >= min_increment;
     const shove = state.contrib[@intCast(player)] + add == config.stack;
-    if (!full and !(shove and (config.allow_all_in or force_all_in))) return;
+    if (!full and !(shove and (config.allow_all_in or force_all_in))) return null;
+    return add;
+}
+
+fn considerAmount(
+    config: street_spec.StreetSpec,
+    state: BetState,
+    player: i32,
+    to_call: chips.Chip,
+    facing: bool,
+    max_add: chips.Chip,
+    add_in: chips.Chip,
+    force_all_in: bool,
+    amounts: *[8]chips.Chip,
+    n_amounts: *i32,
+    aggressive_limit: i32,
+) BettingError!void {
+    _ = player;
+    _ = to_call;
+    _ = facing;
+    _ = max_add;
+    const add = resolveAggressiveAdd(config, state, add_in, force_all_in) orelse return;
 
     var i: i32 = 0;
     while (i < n_amounts.*) : (i += 1) {
@@ -392,13 +413,104 @@ pub fn applyAction(config: street_spec.StreetSpec, state_in: BetState, legal: Le
     return state;
 }
 
+/// Compact path token from a public display label (C++ compact_from_display_label).
+/// Fold/Check/Call → f/c/call; "Bet 50" → b50; "Raise to 100 all-in" → r100ai.
+pub fn compactFromDisplayLabel(label: []const u8, buf: []u8) ?[]const u8 {
+    if (std.mem.eql(u8, label, "Fold")) return "f";
+    if (std.mem.eql(u8, label, "Check")) return "c";
+    if (std.mem.eql(u8, label, "Call")) return "call";
+    var core = label;
+    var all_in = false;
+    if (std.mem.endsWith(u8, core, " all-in")) {
+        all_in = true;
+        core = core[0 .. core.len - " all-in".len];
+    }
+    var fbs = std.io.fixedBufferStream(buf);
+    const w = fbs.writer();
+    if (core.len > 4 and std.mem.eql(u8, core[0..4], "Bet ")) {
+        w.print("b{s}", .{core[4..]}) catch return null;
+        if (all_in) w.writeAll("ai") catch return null;
+        return fbs.getWritten();
+    }
+    if (core.len > 9 and std.mem.eql(u8, core[0..9], "Raise to ")) {
+        w.print("r{s}", .{core[9..]}) catch return null;
+        if (all_in) w.writeAll("ai") catch return null;
+        return fbs.getWritten();
+    }
+    return null;
+}
+
 fn pathTokenMatchesDisplay(token: []const u8, display: []const u8) bool {
     if (std.mem.eql(u8, token, display)) return true;
-    // Compact forms matching C++ compact_from_display_label.
-    if (std.mem.eql(u8, display, "Fold")) return std.mem.eql(u8, token, "f");
-    if (std.mem.eql(u8, display, "Check")) return std.mem.eql(u8, token, "c");
-    if (std.mem.eql(u8, display, "Call")) return std.mem.eql(u8, token, "call");
-    return false;
+    var compact_buf: [64]u8 = undefined;
+    const compact = compactFromDisplayLabel(display, &compact_buf) orelse return false;
+    return std.mem.eql(u8, token, compact);
+}
+
+/// Per-edit apply outcome across the public tree (compiled soft report).
+pub const EditApplyStatus = enum {
+    never_matched_path,
+    applied,
+    action_missing,
+    illegal_size,
+    duplicate,
+    remove_would_empty,
+};
+
+pub fn editApplyStatusName(status: EditApplyStatus) []const u8 {
+    return switch (status) {
+        .never_matched_path => "never_matched_path",
+        .applied => "applied",
+        .action_missing => "action_missing",
+        .illegal_size => "illegal_size",
+        .duplicate => "duplicate",
+        .remove_would_empty => "remove_would_empty",
+    };
+}
+
+fn noteEditStatus(statuses: ?[]EditApplyStatus, index: usize, next: EditApplyStatus) void {
+    if (statuses == null) return;
+    const cur = statuses.?[index];
+    if (cur == .applied) return;
+    statuses.?[index] = next;
+}
+
+/// Resolve AddSize chip add with the same clamps as listed sizes (`considerAmount`).
+fn resolveAddSizeAmount(
+    config: street_spec.StreetSpec,
+    state: BetState,
+    edit: tree_edit.LineEdit,
+) ?chips.Chip {
+    const player = state.acting;
+    const to_call = state.committed - state.contrib[@intCast(player)];
+    const facing = to_call > 0;
+    const basis = if (facing) state.pot + to_call else state.pot;
+    const sized: chips.Chip = if (edit.usesChipSize())
+        edit.size_chips
+    else
+        chips.roundChips(edit.size_pot_fraction, basis) catch return null;
+    const add_in: chips.Chip = if (facing) to_call + sized else sized;
+    return resolveAggressiveAdd(config, state, add_in, false);
+}
+
+fn insertAggressiveAmount(legal: *Legal, add: chips.Chip) BettingError!enum { inserted, duplicate } {
+    var i: i32 = 0;
+    while (i < legal.count) : (i += 1) {
+        if (legal.code[@intCast(i)] == 2 and legal.add[@intCast(i)] == add) {
+            return .duplicate;
+        }
+    }
+    if (legal.count >= 8) return error.InvalidBetting;
+    var slot = legal.count;
+    while (slot > 0 and legal.code[@intCast(slot - 1)] == 2 and legal.add[@intCast(slot - 1)] > add) {
+        legal.code[@intCast(slot)] = legal.code[@intCast(slot - 1)];
+        legal.add[@intCast(slot)] = legal.add[@intCast(slot - 1)];
+        slot -= 1;
+    }
+    legal.code[@intCast(slot)] = 2;
+    legal.add[@intCast(slot)] = add;
+    legal.count += 1;
+    return .inserted;
 }
 
 fn pathMatchesPublicLine(path: tree_edit.LinePath, public_path: []const u8) bool {
@@ -445,49 +557,22 @@ pub fn applyTreeEdits(
     config: street_spec.StreetSpec,
     state: BetState,
     public_path: []const u8,
+    statuses: ?[]EditApplyStatus,
 ) BettingError!void {
     if (config.tree_edits.len == 0) return;
+    if (statuses) |s| {
+        if (s.len != config.tree_edits.len) return error.InvalidBetting;
+    }
     const facing = state.committed > state.contrib[@intCast(state.acting)];
-    for (config.tree_edits) |edit| {
+    for (config.tree_edits, 0..) |edit, edit_i| {
         if (!pathMatchesPublicLine(edit.path, public_path)) continue;
         if (edit.kind == .add_size) {
-            // Phase 2: AddSize supported via resolve path (pot fraction / chips).
-            const player = state.acting;
-            const to_call = state.committed - state.contrib[@intCast(player)];
-            const max_add = config.stack - state.contrib[@intCast(player)];
-            if (facing and config.max_raises <= state.num_raises) continue;
-            if (facing and !config.allow_three_bet and state.num_raises >= 1) continue;
-            const basis = if (facing) state.pot + to_call else state.pot;
-            const sized: chips.Chip = if (edit.usesChipSize())
-                edit.size_chips
-            else
-                chips.roundChips(edit.size_pot_fraction, basis) catch continue;
-            var add: chips.Chip = if (facing) to_call + sized else sized;
-            if (add < 1) continue;
-            if (add > max_add) {
-                if (!config.allow_all_in) continue;
-                add = max_add;
-            }
-            // Insert aggressive amount.
-            var dup = false;
-            var i: i32 = 0;
-            while (i < legal.count) : (i += 1) {
-                if (legal.code[@intCast(i)] == 2 and legal.add[@intCast(i)] == add) {
-                    dup = true;
-                    break;
-                }
-            }
-            if (dup) continue;
-            if (legal.count >= 8) return error.InvalidBetting;
-            var slot = legal.count;
-            while (slot > 0 and legal.code[@intCast(slot - 1)] == 2 and legal.add[@intCast(slot - 1)] > add) {
-                legal.code[@intCast(slot)] = legal.code[@intCast(slot - 1)];
-                legal.add[@intCast(slot)] = legal.add[@intCast(slot - 1)];
-                slot -= 1;
-            }
-            legal.code[@intCast(slot)] = 2;
-            legal.add[@intCast(slot)] = add;
-            legal.count += 1;
+            const add = resolveAddSizeAmount(config, state, edit) orelse {
+                noteEditStatus(statuses, edit_i, .illegal_size);
+                continue;
+            };
+            const insert = try insertAggressiveAmount(legal, add);
+            noteEditStatus(statuses, edit_i, if (insert == .duplicate) .duplicate else .applied);
             continue;
         }
         if (edit.kind == .force) {
@@ -501,26 +586,40 @@ pub fn applyTreeEdits(
                     break;
                 }
             }
-            if (keep < 0) continue;
+            if (keep < 0) {
+                noteEditStatus(statuses, edit_i, .action_missing);
+                continue;
+            }
             legal.code[0] = legal.code[@intCast(keep)];
             legal.add[0] = legal.add[@intCast(keep)];
             legal.count = 1;
+            noteEditStatus(statuses, edit_i, .applied);
             continue;
         }
         if (edit.kind == .remove) {
             var filtered = Legal{};
+            var removed_any = false;
             var i: i32 = 0;
             while (i < legal.count) : (i += 1) {
                 const street_total = state.contrib[@intCast(state.acting)] + legal.add[@intCast(i)];
                 const all_in = legal.code[@intCast(i)] != 0 and street_total == config.stack and legal.add[@intCast(i)] > 0;
                 if (tokenMatchesAction(edit.action, legal.code[@intCast(i)], legal.add[@intCast(i)], street_total, all_in, facing)) {
+                    removed_any = true;
                     continue;
                 }
                 filtered.code[@intCast(filtered.count)] = legal.code[@intCast(i)];
                 filtered.add[@intCast(filtered.count)] = legal.add[@intCast(i)];
                 filtered.count += 1;
             }
-            if (filtered.count > 0) legal.* = filtered;
+            if (!removed_any) {
+                noteEditStatus(statuses, edit_i, .action_missing);
+            } else if (filtered.count == 0) {
+                // Keep at least one legal action; still report the soft skip.
+                noteEditStatus(statuses, edit_i, .remove_would_empty);
+            } else {
+                legal.* = filtered;
+                noteEditStatus(statuses, edit_i, .applied);
+            }
         }
     }
 }
