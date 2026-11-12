@@ -13,6 +13,8 @@
 //! Accuracy-stop mode (`--accuracy`): trains 1 frozen CFR+ iter at a time with
 //! frozen NashConv/Accuracy eval every `--eval-every`; stops at Acc ≤ threshold,
 //! soft `--time-limit`, or iteration cap. Honors `--threads` / config threads.
+//! Each Acc checkpoint force-publishes the exact average for that completed
+//! iteration before eval (ZR-153 — no stale publish-cadence snapshot).
 const std = @import("std");
 const poker_engine = @import("poker_engine");
 const poker_app = @import("poker_app");
@@ -188,11 +190,16 @@ pub fn main() !void {
     try stdout.print("threads: {d}\n", .{sess.threads});
 
     // StreetSpec / CompiledGame pot is tenths-of-a-chip (matches C++ Chip).
-    const pot_chips = @as(f64, @floatFromInt(game.pot)) / 10.0;
+    // Shared Session helper converts tenths → chip EV for Acc-stop (ZR-153).
+    const pot_chips = poker_engine.poker.chips.tenthsToChips(game.pot);
     try stdout.print("pot_chips: {d:.4}\n", .{pot_chips});
 
     if (mode == .accuracy_stop) {
-        const threshold_chips = if (opts.accuracy_is_fraction) opts.accuracy * pot_chips else opts.accuracy;
+        const threshold_chips = poker_app.Session.accuracyThresholdChips(
+            game.pot,
+            opts.accuracy,
+            opts.accuracy_is_fraction,
+        );
         try stdout.print("accuracy_threshold_chips: {d:.10}\n", .{threshold_chips});
         try runAccuracyStop(
             allocator,
@@ -309,18 +316,23 @@ fn applyFlag(arg: []const u8, args: *std.process.ArgIterator, opts: *Options) !v
     }
 }
 
-fn evaluateFrozen(
-    sess: *poker_app.Session,
-    average: []const f32,
-) !poker_engine.analysis.evaluation.EvaluationResult {
-    // Session-owned FrozenCtx reuses ranks across Acc-stop train(1)/eval cycles.
-    const frozen_eval = try sess.evaluateFrozen(average);
+fn evaluationFromFrozen(
+    frozen_eval: poker_engine.solve.frozen_walk.FrozenEval,
+) poker_engine.analysis.evaluation.EvaluationResult {
     return poker_engine.analysis.evaluation.makeEvaluation(
         frozen_eval.u0,
         frozen_eval.u1,
         frozen_eval.br0,
         frozen_eval.br1,
     );
+}
+
+fn evaluateFrozen(
+    sess: *poker_app.Session,
+    average: []const f32,
+) !poker_engine.analysis.evaluation.EvaluationResult {
+    // Session-owned FrozenCtx reuses ranks across Acc-stop train(1)/eval cycles.
+    return evaluationFromFrozen(try sess.evaluateFrozen(average));
 }
 
 fn runAccuracyStop(
@@ -356,6 +368,8 @@ fn runAccuracyStop(
 
     // Match C++ StreetBatchSolver::solve_frozen: train 1 iter, optional Acc
     // check every eval_every, wall check at each iteration boundary.
+    // ZR-153: Acc checkpoints use Session.evaluateExactIteration (shared with
+    // Study trainGated) so the average matches the reported completed iter.
     var fresh_eval = false;
     while (completed < max_iterations) {
         const t_train0 = std.time.nanoTimestamp();
@@ -367,10 +381,11 @@ fn runAccuracyStop(
 
         const do_eval = @rem(completed, eval_every) == 0;
         if (do_eval) {
-            const published = sess.published orelse return error.NothingPublished;
             const t_eval0 = std.time.nanoTimestamp();
-            const eval = try evaluateFrozen(sess, published.average);
+            const exact = try sess.evaluateExactIteration();
             const step_eval_ns = std.time.nanoTimestamp() - t_eval0;
+            if (exact.trained != completed) return error.InvalidSession;
+            const eval = evaluationFromFrozen(exact.eval);
             eval_ns_total += step_eval_ns;
             eval_count += 1;
             last_eval = eval;
@@ -400,7 +415,7 @@ fn runAccuracyStop(
                 },
             );
 
-            if (eval.accuracy <= threshold_chips) {
+            if (poker_app.Session.accuracyReached(eval.accuracy, threshold_chips)) {
                 accuracy_reached = true;
                 break;
             }
@@ -418,10 +433,11 @@ fn runAccuracyStop(
     // Final evaluate if the last iteration was not already a checkpoint
     // (mirrors C++ solve_frozen when !fresh).
     if (!fresh_eval or last_eval == null) {
-        const published = sess.published orelse return error.NothingPublished;
         const t_eval0 = std.time.nanoTimestamp();
-        const eval = try evaluateFrozen(sess, published.average);
+        const exact = try sess.evaluateExactIteration();
         const step_eval_ns = std.time.nanoTimestamp() - t_eval0;
+        if (exact.trained != completed) return error.InvalidSession;
+        const eval = evaluationFromFrozen(exact.eval);
         eval_ns_total += step_eval_ns;
         eval_count += 1;
         last_eval = eval;
@@ -446,7 +462,9 @@ fn runAccuracyStop(
                 eval.nash_gap,
             },
         );
-        if (eval.accuracy <= threshold_chips) accuracy_reached = true;
+        if (poker_app.Session.accuracyReached(eval.accuracy, threshold_chips)) {
+            accuracy_reached = true;
+        }
     }
 
     const eval = last_eval orelse return error.NothingPublished;

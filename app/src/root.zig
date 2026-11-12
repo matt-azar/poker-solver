@@ -641,6 +641,87 @@ test "strategy publish failure is distinct from mid-pass train failure" {
     try std.testing.expect(sess.policyRevision() > prior_rev);
 }
 
+test "accuracyThresholdChips converts tenths pot to chip EV" {
+    // pot 100 chips → 1000 tenths. Fraction 0.05 → 5 chip threshold, not 50.
+    try std.testing.expectApproxEqAbs(
+        Session.accuracyThresholdChips(1000, 0.05, true),
+        5.0,
+        1e-12,
+    );
+    try std.testing.expectApproxEqAbs(
+        Session.accuracyThresholdChips(1000, 5.0, false),
+        5.0,
+        1e-12,
+    );
+    try std.testing.expect(!Session.accuracyReached(5.0001, 5.0));
+    try std.testing.expect(Session.accuracyReached(5.0, 5.0));
+    try std.testing.expect(Session.accuracyReached(4.9, 5.0));
+}
+
+// ZR-153: Accuracy-reached must be true for the exact published average at the
+// claimed iteration (chip units, not tenths; no stale publish cadence snapshot).
+test "trainGated accuracy_reached meets threshold on exact published average" {
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    const target_frac: f64 = 0.05;
+    const pot_tenths: i32 = 1000;
+    const threshold_chips = Session.accuracyThresholdChips(pot_tenths, target_frac, true);
+    const pot_chips = poker_engine.poker.chips.tenthsToChips(pot_tenths);
+
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try std.testing.expectEqual(pot_tenths, sess.game.?.pot);
+    // Stress publish cadence: Acc-stop must force the exact iter average anyway.
+    sess.publish_every = 100;
+
+    try sess.trainGated(200, target_frac, 1, -1.0);
+    try std.testing.expect(sess.last_terminal == .accuracy_reached);
+    try std.testing.expect(sess.phase == .published);
+    try std.testing.expect(sess.has_metrics);
+
+    const published = sess.published orelse return error.TestUnexpectedResult;
+    const trained = sess.training.?.trained;
+    try std.testing.expectEqual(trained, published.trained);
+    try std.testing.expectEqual(trained, sess.last_published_trained);
+    try std.testing.expect(trained > 0);
+
+    // Independent re-eval of the claimed snapshot (not the stop-loop's cached metrics).
+    const independent = try sess.evaluateFrozen(published.average);
+    try std.testing.expect(Session.accuracyReached(independent.accuracy, threshold_chips));
+    try std.testing.expect(independent.accuracy / pot_chips <= target_frac + 1e-12);
+    // Stored stop metrics must match the independent eval (same average).
+    try std.testing.expectApproxEqAbs(sess.metrics.accuracy, independent.accuracy, 1e-9);
+    try std.testing.expectApproxEqAbs(sess.metrics.nash_gap, independent.nash_gap, 1e-9);
+
+    // Tenths regression: pot is 1000 tenths. Using raw tenths as "chips" would
+    // accept Acc up to 50 chips (0.5 pot) for a 0.05 target — prove we did not.
+    try std.testing.expect(independent.accuracy <= 0.15 * pot_chips);
+
+    // Shared exact-iter helper agrees with the claimed published average.
+    const exact = try sess.evaluateExactIteration();
+    try std.testing.expectEqual(trained, exact.trained);
+    try std.testing.expectApproxEqAbs(exact.eval.accuracy, independent.accuracy, 1e-9);
+}
 
 test {
     _ = session;
