@@ -18,6 +18,7 @@ import {
   ipcBeginConfig,
   ipcCancel,
   ipcCancelEquityJob,
+  ipcCategories,
   ipcDeleteLock,
   ipcEquity,
   ipcGetConfig,
@@ -593,6 +594,19 @@ export class EngineClient {
   }
 
   async getCategories(solutionId: string, nodeId?: string, signal?: AbortSignal): Promise<unknown> {
+    if (isIpcTransport()) {
+      if (signal?.aborted) {
+        throw new EngineError("aborted", 0, null);
+      }
+      const data = await ipcCategories({
+        nodeId: nodeId ?? "p0.t-1.r-1",
+      });
+      return {
+        ...(data as object),
+        solution_id: solutionId,
+        ...(nodeId ? { node_id: nodeId } : {}),
+      };
+    }
     const path = nodeId
       ? `/api/solutions/${solutionId}/nodes/${encodeURIComponent(nodeId)}/categories`
       : `/api/solutions/${solutionId}/categories`;
@@ -778,7 +792,16 @@ export class EngineClient {
 
   async compare(baseline: string, scenario: string, nodeId: string): Promise<unknown> {
     if (isIpcTransport()) {
-      throw new EngineError("compare is not available over solver-engine IPC yet", 501, null);
+      void baseline;
+      void scenario;
+      void nodeId;
+      // Dual-session immutable baseline is deferred (audit §6). Soft-gate UI
+      // should avoid calling this; keep a clear 501 if something still does.
+      throw new EngineError(
+        "Compare needs an immutable dual-session baseline; not available over Zig IPC yet",
+        501,
+        { code: "compare_dual_session_deferred" },
+      );
     }
     const query = new URLSearchParams({ baseline, scenario, node_id: nodeId });
     const { response, data } = await this.request("GET", `/api/compare?${query}`);

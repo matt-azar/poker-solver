@@ -15,9 +15,11 @@ import { isTauriRuntime } from "../platform";
 import { isIpcTransport } from "./transport";
 
 export const STUDY_IPC_FEATURE_FLAGS = {
+  // #301 wired host resolve_locked; flag flip may follow separately — leave false here.
   resolveLocked: false,
   compare: false,
-  categories: false,
+  // ZR-103: host `categories` + EngineClient IPC branch (made-hand on 5-card boards).
+  categories: true,
   strategyEdits: false,
   runouts: false,
 } as const;
@@ -27,7 +29,8 @@ export type StudyIpcFeature = keyof typeof STUDY_IPC_FEATURE_FLAGS;
 const UNAVAILABLE_COPY: Record<StudyIpcFeature, string> = {
   resolveLocked:
     "Resolve locked is not available over solver-engine IPC yet",
-  compare: "Compare is not available over solver-engine IPC yet",
+  compare:
+    "Compare needs an immutable dual-session baseline; not available over Zig IPC yet",
   categories: "Categories are not available over solver-engine IPC yet",
   strategyEdits:
     "Strategy edits are not available over solver-engine IPC yet",

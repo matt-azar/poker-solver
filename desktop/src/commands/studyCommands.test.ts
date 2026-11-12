@@ -128,7 +128,7 @@ describe("IPC soft-disable gates (ZR-102)", () => {
     setHttpFallbackTransport();
   });
 
-  it("blocks resolve / compare / strategy / categories while IPC is unwired", () => {
+  it("blocks resolve / compare / strategy while IPC is unwired; categories wired (ZR-103)", () => {
     setIpcTransport({
       protocol: 2,
       launchId: "test",
@@ -145,7 +145,7 @@ describe("IPC soft-disable gates (ZR-102)", () => {
     expect(canExecuteResolveLocked(study).reason).toMatch(/not available/i);
     expect(canExecuteCompareToBaseline(study).ok).toBe(false);
     expect(canExecuteOpenStrategyEditor(study).ok).toBe(false);
-    expect(canExecuteLoadCategories(study).ok).toBe(false);
+    expect(canExecuteLoadCategories(study).ok).toBe(true);
   });
 });
 
