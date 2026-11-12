@@ -19,6 +19,31 @@ const HandSupport = struct {
     contain: [52]i32 = .{0} ** 52,
 };
 
+/// Packed showdown strength (C++ pack_rank): higher wins.
+fn packRank(value: hand_eval.HandValue) u32 {
+    var rank: u32 = @intFromEnum(value.category);
+    var i: usize = 0;
+    while (i < 5) : (i += 1) {
+        rank = rank * 16 + @as(u32, @intCast(value.tiebreak[i]));
+    }
+    return rank;
+}
+
+fn runoutKey(turn: i32, river: i32) i32 {
+    return (turn + 1) * 64 + (river + 1);
+}
+
+const RunoutRanks = struct {
+    rank0: []u32,
+    rank1: []u32,
+
+    fn deinit(self: *RunoutRanks, allocator: std.mem.Allocator) void {
+        allocator.free(self.rank0);
+        allocator.free(self.rank1);
+        self.* = undefined;
+    }
+};
+
 const Scratch = struct {
     pi0: []f64,
     pi1: []f64,
@@ -51,12 +76,16 @@ pub const FrozenCtx = struct {
     support1: []HandSupport,
     live0: []bool,
     live1: []bool,
+    /// Opponent hand with the same combo, or -1 (C++ twin_hand).
+    twin0: []i32,
+    twin1: []i32,
     amount0: []f64,
     amount1: []f64,
     by_card0: [52]f64 = .{0} ** 52,
     by_card1: [52]f64 = .{0} ** 52,
     support_turn: i32 = -2,
     support_river: i32 = -2,
+    ranks: std.AutoHashMap(i32, RunoutRanks),
     scratch: [max_depth]Scratch = undefined,
     scratch_len: usize = 0,
 
@@ -76,13 +105,17 @@ pub const FrozenCtx = struct {
             .support1 = try allocator.alloc(HandSupport, n1),
             .live0 = try allocator.alloc(bool, n0),
             .live1 = try allocator.alloc(bool, n1),
+            .twin0 = try allocator.alloc(i32, n0),
+            .twin1 = try allocator.alloc(i32, n1),
             .amount0 = try allocator.alloc(f64, n0),
             .amount1 = try allocator.alloc(f64, n1),
+            .ranks = std.AutoHashMap(i32, RunoutRanks).init(allocator),
         };
         errdefer ctx.deinit();
         @memset(ctx.support0, .{});
         @memset(ctx.support1, .{});
         try ctx.buildSupport();
+        try ctx.buildTwins();
         @memset(ctx.live0, true);
         @memset(ctx.live1, true);
         var d: usize = 0;
@@ -106,15 +139,38 @@ pub const FrozenCtx = struct {
         while (d < self.scratch_len) : (d += 1) {
             self.scratch[d].deinit(self.allocator);
         }
+        var it = self.ranks.iterator();
+        while (it.next()) |entry| {
+            entry.value_ptr.deinit(self.allocator);
+        }
+        self.ranks.deinit();
         self.allocator.free(self.support0);
         self.allocator.free(self.support1);
         self.allocator.free(self.live0);
         self.allocator.free(self.live1);
+        self.allocator.free(self.twin0);
+        self.allocator.free(self.twin1);
         self.allocator.free(self.amount0);
         self.allocator.free(self.amount1);
         self.* = undefined;
     }
 
+    fn buildTwins(self: *FrozenCtx) FrozenError!void {
+        @memset(self.twin0, -1);
+        @memset(self.twin1, -1);
+        var h0: usize = 0;
+        while (h0 < self.n0) : (h0 += 1) {
+            const combo = self.game.hands.combos[0][h0];
+            const opp = self.game.hands.combo_to_hand[1][@intCast(combo)];
+            self.twin0[h0] = opp;
+        }
+        var h1: usize = 0;
+        while (h1 < self.n1) : (h1 += 1) {
+            const combo = self.game.hands.combos[1][h1];
+            const opp = self.game.hands.combo_to_hand[0][@intCast(combo)];
+            self.twin1[h1] = opp;
+        }
+    }
     fn buildSupport(self: *FrozenCtx) FrozenError!void {
         inline for (0..2) |player| {
             const rows = if (player == 0) self.support0 else self.support1;
@@ -265,19 +321,9 @@ pub const FrozenCtx = struct {
         return a0 == b0 or a0 == b1 or a1 == b0 or a1 == b1;
     }
 
-    fn applyTerminal(
-        self: *FrozenCtx,
-        node: compile.Node,
-        turn: i32,
-        river: i32,
-        pi0: []const f64,
-        pi1: []const f64,
-        ev0: []f64,
-        ev1: []f64,
-    ) FrozenError!void {
-        self.ensureBoardSupport(turn, river);
-        @memset(ev0, 0);
-        @memset(ev1, 0);
+    fn ensureRanks(self: *FrozenCtx, turn: i32, river: i32) FrozenError!*const RunoutRanks {
+        const key = runoutKey(turn, river);
+        if (self.ranks.getPtr(key)) |existing| return existing;
 
         var board_buf: [5]card.Card = undefined;
         var board_len: usize = 0;
@@ -293,7 +339,53 @@ pub const FrozenCtx = struct {
             board_buf[board_len] = river;
             board_len += 1;
         }
+        if (board_len != 5) return error.InvalidFrozen;
         const board = board_buf[0..board_len];
+
+        var table = RunoutRanks{
+            .rank0 = try self.allocator.alloc(u32, self.n0),
+            .rank1 = try self.allocator.alloc(u32, self.n1),
+        };
+        errdefer table.deinit(self.allocator);
+        @memset(table.rank0, 0);
+        @memset(table.rank1, 0);
+
+        var cards: [7]card.Card = undefined;
+        @memcpy(cards[2..7], board);
+        var h0: usize = 0;
+        while (h0 < self.n0) : (h0 += 1) {
+            if (self.handBlocksBoard(0, h0, turn, river)) continue;
+            cards[0] = self.game.hands.hole_low[0][h0];
+            cards[1] = self.game.hands.hole_high[0][h0];
+            const value = hand_eval.evaluate(cards[0..7]) catch continue;
+            table.rank0[h0] = packRank(value);
+        }
+        var h1: usize = 0;
+        while (h1 < self.n1) : (h1 += 1) {
+            if (self.handBlocksBoard(1, h1, turn, river)) continue;
+            cards[0] = self.game.hands.hole_low[1][h1];
+            cards[1] = self.game.hands.hole_high[1][h1];
+            const value = hand_eval.evaluate(cards[0..7]) catch continue;
+            table.rank1[h1] = packRank(value);
+        }
+
+        try self.ranks.put(key, table);
+        return self.ranks.getPtr(key).?;
+    }
+
+    fn applyTerminal(
+        self: *FrozenCtx,
+        node: compile.Node,
+        turn: i32,
+        river: i32,
+        pi0: []const f64,
+        pi1: []const f64,
+        ev0: []f64,
+        ev1: []f64,
+    ) FrozenError!void {
+        self.ensureBoardSupport(turn, river);
+        @memset(ev0, 0);
+        @memset(ev1, 0);
 
         if (node.folded >= 0) {
             const total0 = self.collectReach(0, pi0, self.amount0, &self.by_card0);
@@ -323,7 +415,9 @@ pub const FrozenCtx = struct {
             return;
         }
 
-        if (board_len != 5) return error.InvalidFrozen;
+        // Five-card showdown: evaluate each hand once per runout, then O(n0·n1)
+        // packed-rank compares (avoids re-running evaluate in the inner loop).
+        const ranks = try self.ensureRanks(turn, river);
         _ = self.collectReach(0, pi0, self.amount0, null);
         _ = self.collectReach(1, pi1, self.amount1, null);
 
@@ -343,24 +437,20 @@ pub const FrozenCtx = struct {
         var h0: usize = 0;
         while (h0 < self.n0) : (h0 += 1) {
             if (!self.live0[h0]) continue;
-            const c0 = self.game.hands.hole_low[0][h0];
-            const c1 = self.game.hands.hole_high[0][h0];
+            const r0 = ranks.rank0[h0];
             const rw0 = self.game.hands.range_w[0][h0];
             var h1: usize = 0;
             while (h1 < self.n1) : (h1 += 1) {
                 if (!self.live1[h1]) continue;
                 if (self.handsBlock(h0, h1)) continue;
-                const d0 = self.game.hands.hole_low[1][h1];
-                const d1 = self.game.hands.hole_high[1][h1];
-                const outcome = hand_eval.compareShowdown(c0, c1, d0, d1, board) catch continue;
-                const u = if (outcome > 0) win_u else if (outcome < 0) lose_u else tie_u;
+                const r1 = ranks.rank1[h1];
+                const u = if (r0 > r1) win_u else if (r0 < r1) lose_u else tie_u;
                 const rw1 = self.game.hands.range_w[1][h1];
                 ev0[h0] += u[0] * rw0 * self.joint_scale * self.amount1[h1];
                 ev1[h1] += u[1] * rw1 * self.joint_scale * self.amount0[h0];
             }
         }
     }
-
     pub fn walk(
         self: *FrozenCtx,
         node_index: u32,
