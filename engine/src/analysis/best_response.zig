@@ -306,11 +306,19 @@ pub fn onProfilePayoff(
 }
 
 /// Evaluate published average: on-path + unilateral BRs → NashConv / Accuracy.
+/// Prefers StreetBatch-style frozen `response_walk` (C++ evaluate_profile).
+/// Falls back to deal-by-deal deepest-first BR only if frozen refuses the game.
 pub fn evaluatePublished(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
     average: []const f32,
 ) BrError!evaluation.EvaluationResult {
+    const frozen = @import("../solve/frozen_walk.zig");
+    if (frozen.evaluatePublishedFrozen(allocator, game, average)) |result| {
+        return evaluation.makeEvaluation(result.u0, result.u1, result.br0, result.br1);
+    } else |_| {
+        // Malformed tables: keep deal-by-deal oracle path.
+    }
     const on_path = try onProfilePayoff(allocator, game, average);
     const when0 = try payoffOfBestResponse(allocator, game, average, 0);
     const when1 = try payoffOfBestResponse(allocator, game, average, 1);

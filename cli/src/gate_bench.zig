@@ -1,9 +1,13 @@
 //! Phase 7 interim gate bench (Linux ReleaseFast approximation).
 //! Windows Release remains authoritative for cutover (D10/D12).
 //! Usage: gate-bench <street-config.txt> [--iterations N] [--label NAME]
+//!          [--skip-eval | --eval-root]
 //!
 //! Always wrap flop-scale runs with `scripts/zig/run-gate-bounded.sh` (or GNU
 //! `timeout`). Do not leave unbounded trains running in agent digs.
+//! Prefer `--skip-eval` for flop-scale trains until BR/NashConv is bounded.
+//! `--eval-root` reports deal-by-deal root EV only (no NashConv) — fine for
+//! tiny/river parity; still avoid on full one_size until a frozen EV path lands.
 const std = @import("std");
 const poker_engine = @import("poker_engine");
 const poker_app = @import("poker_app");
@@ -18,12 +22,14 @@ pub fn main() !void {
     _ = args.next();
 
     const path = args.next() orelse {
-        std.debug.print("usage: gate-bench <street-config.txt> [--iterations N] [--label NAME]\n", .{});
+        std.debug.print("usage: gate-bench <street-config.txt> [--iterations N] [--label NAME] [--skip-eval|--eval-root]\n", .{});
         std.process.exit(2);
     };
 
     var iterations: i32 = 2;
     var label: []const u8 = "unnamed";
+    var skip_eval = false;
+    var eval_root = false;
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--iterations")) {
             const v = args.next() orelse {
@@ -36,10 +42,18 @@ pub fn main() !void {
                 std.debug.print("--label needs a value\n", .{});
                 std.process.exit(2);
             };
+        } else if (std.mem.eql(u8, arg, "--skip-eval")) {
+            skip_eval = true;
+        } else if (std.mem.eql(u8, arg, "--eval-root")) {
+            eval_root = true;
         } else {
             std.debug.print("unknown arg: {s}\n", .{arg});
             std.process.exit(2);
         }
+    }
+    if (skip_eval and eval_root) {
+        std.debug.print("use only one of --skip-eval / --eval-root\n", .{});
+        std.process.exit(2);
     }
     if (iterations < 1) {
         std.debug.print("iterations must be >= 1\n", .{});
@@ -78,6 +92,29 @@ pub fn main() !void {
     try stdout.print("train_seconds: {d:.6}\n", .{@as(f64, @floatFromInt(train_ns)) / 1e9});
     try stdout.print("trained: {d}\n", .{published.trained});
     try stdout.print("policy_revision: {d}\n", .{published.revision});
+
+    if (skip_eval) {
+        try stdout.print("phase: final\n", .{});
+        try stdout.print("evaluation_skipped: 1\n", .{});
+        try stdout.print("total_seconds: {d:.6}\n", .{
+            @as(f64, @floatFromInt(begin_ns + train_ns)) / 1e9,
+        });
+        return;
+    }
+
+    if (eval_root) {
+        const t_eval0 = std.time.nanoTimestamp();
+        const root_ev = try poker_engine.solve.cfr_plus.evaluatePublished(allocator, game, published);
+        const eval_ns = std.time.nanoTimestamp() - t_eval0;
+        try stdout.print("phase: final\n", .{});
+        try stdout.print("evaluation_mode: root_ev\n", .{});
+        try stdout.print("evaluation_seconds: {d:.6}\n", .{@as(f64, @floatFromInt(eval_ns)) / 1e9});
+        try stdout.print("player0_expected_utility: {d:.10}\n", .{root_ev});
+        try stdout.print("total_seconds: {d:.6}\n", .{
+            @as(f64, @floatFromInt(begin_ns + train_ns + eval_ns)) / 1e9,
+        });
+        return;
+    }
 
     const t_eval0 = std.time.nanoTimestamp();
     const eval = try poker_engine.analysis.best_response.evaluatePublished(
