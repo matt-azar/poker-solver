@@ -96,7 +96,7 @@ describe("EngineClient Slice A IPC branches", () => {
     await expect(client.save("s2", "/tmp/demo.psol")).resolves.toEqual({ saved: true });
   });
 
-  it("keeps HTTP paths when transport is fallback", async () => {
+  it("refuses HTTP in the Tauri shell when transport is fallback", async () => {
     setHttpFallbackTransport();
     const fetchImpl = vi.fn(async () => {
       return new Response(JSON.stringify({ phase: "paused" }), {
@@ -105,8 +105,11 @@ describe("EngineClient Slice A IPC branches", () => {
       });
     });
     client = new EngineClient({ baseUrl: "http://127.0.0.1:8765", fetchImpl });
-    await client.pause("j1");
-    expect(fetchImpl).toHaveBeenCalled();
+    await expect(client.pause("j1")).rejects.toMatchObject({
+      name: "EngineError",
+      status: 501,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
   });
 });
@@ -165,7 +168,7 @@ describe("EngineClient Slice C locks IPC branches", () => {
     });
   });
 
-  it("keeps locks HTTP when transport is fallback", async () => {
+  it("refuses locks HTTP in the Tauri shell when transport is fallback", async () => {
     setHttpFallbackTransport();
     const fetchImpl = vi.fn(async () => {
       return new Response(JSON.stringify({ locks: [] }), {
@@ -174,8 +177,27 @@ describe("EngineClient Slice C locks IPC branches", () => {
       });
     });
     client = new EngineClient({ baseUrl: "http://127.0.0.1:8765", fetchImpl });
-    await client.listLocks("s9");
-    expect(fetchImpl).toHaveBeenCalled();
+    await expect(client.listLocks("s9")).rejects.toMatchObject({
+      name: "EngineError",
+      status: 501,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("EngineClient empty-base refuse", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    setHttpFallbackTransport();
+  });
+
+  it("does not fetch when base URL is empty (Failed-to-fetch class)", async () => {
+    const fetchImpl = vi.fn();
+    const client = new EngineClient({ baseUrl: "", fetchImpl: fetchImpl as unknown as typeof fetch });
+    await expect(client.status()).rejects.toMatchObject({
+      name: "EngineError",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

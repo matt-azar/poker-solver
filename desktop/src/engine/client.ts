@@ -8,6 +8,7 @@ import type {
   TreePreviewPayload,
 } from "../domain/types";
 import { presentUserText } from "../domain/userText";
+import { isTauriRuntime } from "../platform";
 import { decodeErrorPayload } from "./contracts/error";
 import { decodeReadyPayload, type ReadyPayload } from "./contracts/ready";
 import { decodeStatusPayload } from "./contracts/status";
@@ -113,10 +114,6 @@ export class EngineClient {
     return defaultEngineBaseUrl().replace(/\/$/, "");
   }
 
-  private url(path: string): string {
-    return `${this.baseUrl()}${path}`;
-  }
-
   private async request(
     method: string,
     path: string,
@@ -131,11 +128,28 @@ export class EngineClient {
         null,
       );
     }
+    // Empty base URL + fetch("") paints "Engine unreachable: Failed to fetch"
+    // (same class as #288). Refuse before dialing — HTTP is test/fixture only.
+    const base = this.baseUrl();
+    if (!base) {
+      throw new EngineError(
+        "No engine URL — Study requires the Tauri shell + solver-engine IPC",
+        0,
+        null,
+      );
+    }
+    if (isTauriRuntime()) {
+      throw new EngineError(
+        `HTTP ${method} ${path} is unavailable in the packaged Study shell`,
+        501,
+        null,
+      );
+    }
     const headers = new Headers(init.headers);
     if (body !== undefined) {
       headers.set("Content-Type", "application/json");
     }
-    const response = await this.fetchImpl(this.url(path), {
+    const response = await this.fetchImpl(`${base}${path}`, {
       ...init,
       method,
       headers,
@@ -520,7 +534,8 @@ export class EngineClient {
   }
 
   async recentSolutions(): Promise<unknown> {
-    if (isIpcTransport()) {
+    // Library FS reads are Tauri-owned — do not require a live IPC session.
+    if (isTauriRuntime() || isIpcTransport()) {
       return libraryInvoke("library_list_recent");
     }
     const { response, data } = await this.request("GET", "/api/recent-solutions");
@@ -529,7 +544,7 @@ export class EngineClient {
   }
 
   async templates(): Promise<unknown> {
-    if (isIpcTransport()) {
+    if (isTauriRuntime() || isIpcTransport()) {
       return libraryInvoke("library_list_templates");
     }
     const { response, data } = await this.request("GET", "/api/templates");
@@ -538,7 +553,7 @@ export class EngineClient {
   }
 
   async template(id: string): Promise<{ id: string; text: string }> {
-    if (isIpcTransport()) {
+    if (isTauriRuntime() || isIpcTransport()) {
       return libraryInvoke("library_read_template", { id });
     }
     const { response, data } = await this.request("GET", `/api/templates/${encodeURIComponent(id)}`);
@@ -547,7 +562,7 @@ export class EngineClient {
   }
 
   async ranges(): Promise<unknown> {
-    if (isIpcTransport()) {
+    if (isTauriRuntime() || isIpcTransport()) {
       return libraryInvoke("library_list_ranges");
     }
     const { response, data } = await this.request("GET", "/api/ranges");
@@ -556,7 +571,7 @@ export class EngineClient {
   }
 
   async rangePreset(id: string): Promise<{ id: string; text: string }> {
-    if (isIpcTransport()) {
+    if (isTauriRuntime() || isIpcTransport()) {
       return libraryInvoke("library_read_range", { id });
     }
     const { response, data } = await this.request("GET", `/api/ranges/${encodeURIComponent(id)}`);

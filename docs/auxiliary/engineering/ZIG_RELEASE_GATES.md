@@ -42,21 +42,20 @@ C++ `--plan-memory` / tip-C++ rematch notes live in store digs only.
 
 | Workflow | Role |
 | --- | --- |
-| `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke |
-| `.github/workflows/windows-installer-zig-preview.yml` | Labeled NSIS artifact `holdem-study-zig-tech-preview-windows-installer` (`productName`: Holdem Study Zig Tech Preview) |
-| `.github/workflows/windows-installer.yml` | Shipping-labeled installer; still bundles dormant `solver-engine.exe` because `externalBin` lists both |
+| `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke; Windows pins `-Dcpu=x86_64_v2` |
+| `.github/workflows/windows-installer.yml` | Shipping NSIS; `externalBin` is Zig `solver-engine` only (no `holdem-explorer`) |
+| `.github/workflows/windows-installer-release.yml` | Tag-triggered release wrapper that reuses `windows-installer.yml` |
 
-Preview installers must stay clearly labeled. Shipping cutover flips the
-default Study transport only after cutover criteria are green and the owner
-records an explicit GO.
+The labeled Zig tech-preview installer workflow was removed with the C++ strip
+(#287). Stable Study ships Zig typed IPC only after owner GO (2026-11-12).
 
 ## Local toolchain
 
 ```bash
 ./scripts/zig/install-toolchain.sh   # Linux x86_64 — verifies official sha256
 zig version                          # expect 0.14.1
-zig build -Doptimize=ReleaseFast
-zig build test
+./scripts/build.sh                   # pins -Dcpu=x86_64_v2 (override via ZIG_CPU)
+# or: zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2 && zig build test -Dcpu=x86_64_v2
 ```
 
 Pin fields (version, URLs, hashes) must match `.github/workflows/zig.yml` and
