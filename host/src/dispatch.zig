@@ -1599,6 +1599,69 @@ test "ready dispatch" {
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "solver-engine") != null);
 }
 
+test "node flop root reach uses range-weight scale not 1/n deal mass" {
+    // ZR-121: flop12 unit-weight fixture — deal-joint max was ~1/12; must be >0.9.
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range 2s2h:1,3s3h:1,4s4h:1,5s5h:1,6s6h:1,8s8h:1,9s9h:1,TsTh:1,JsJh:1,QsQh:1,KsKh:1,AsAc:1
+        \\ip-range 2s2h:1,3s3h:1,4s4h:1,5s5h:1,6s6h:1,8s8h:1,9s9h:1,TsTh:1,JsJh:1,QsQh:1,KsKh:1,AsAc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "node-flop-reach");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "flop-reach"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"reach_defined\":true") != null);
+    const reach_key = "\"reach\":[";
+    const reach_at = std.mem.indexOf(u8, reply.body_json, reach_key) orelse unreachable;
+    const after = reply.body_json[reach_at + reach_key.len ..];
+    const end = std.mem.indexOfScalar(u8, after, ']') orelse unreachable;
+    const slice = after[0..end];
+    var max_r: f64 = 0;
+    var sum_r: f64 = 0;
+    var live: usize = 0;
+    var it = std.mem.tokenizeScalar(u8, slice, ',');
+    while (it.next()) |tok| {
+        const v = std.fmt.parseFloat(f64, tok) catch continue;
+        if (v > max_r) max_r = v;
+        if (v > 0) {
+            live += 1;
+            sum_r += v;
+        }
+    }
+    try std.testing.expect(live >= 12);
+    try std.testing.expect(max_r > 0.9);
+    const mean_live = sum_r / @as(f64, @floatFromInt(live));
+    try std.testing.expect(mean_live > 0.9);
+}
+
 test "node accepts Study node_id and returns strategy tables" {
     const config =
         \\street-config 1

@@ -404,7 +404,9 @@ fn zeroUnsupported(game: compile.CompiledGame, reach: []f64, player: usize, turn
 }
 
 /// C++ `StreetBatchSolver::Engine::replay_weights`: independent per-player reach
-/// along the betting/chance line (own actions × card removal). Caller frees q0/q1.
+/// along the betting/chance line (own actions × card removal). Same scale for
+/// flop, turn, and river Study inspect / equity / categories — unit-weight live
+/// hands stay ≈ 1 (not deal-joint mass). Caller frees q0/q1.
 pub fn replayReachWeights(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
