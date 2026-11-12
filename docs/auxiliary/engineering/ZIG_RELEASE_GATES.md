@@ -42,7 +42,7 @@ C++ `--plan-memory` / tip-C++ rematch notes live in store digs only.
 
 | Workflow | Role |
 | --- | --- |
-| `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke; Windows pins `-Dcpu=x86_64_v2` |
+| `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke + Study contract smoke (`scripts/zig/study-contract-smoke.py`, river fixture, ≤60s); Windows pins `-Dcpu=x86_64_v2` |
 | `.github/workflows/windows-installer.yml` | Shipping NSIS; `externalBin` is Zig `solver-engine` only (no `holdem-explorer`) |
 | `.github/workflows/windows-installer-release.yml` | Tag-triggered release wrapper that reuses `windows-installer.yml` |
 
