@@ -143,6 +143,63 @@ test "inspect copies published strategy rows" {
     }
 }
 
+test "inspect root reach uses range-weight scale not deal probability" {
+    // ZR-105: Weight fill / Range inclusion expect unit-weight live hands ≈ 1.0,
+    // not absolute deal-joint mass ≪ 1 (which paints flat bottom bars).
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7s 4s 2h
+        \\pot 100
+        \\stack 200
+        \\oop-range AsAd:1,QsQd:1
+        \\ip-range JcJd:1,TcTd:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var spec = try street_config.parseStreetConfig(std.testing.allocator, text);
+    defer spec.deinit();
+    var game = try compile.compile(std.testing.allocator, spec);
+    defer game.deinit();
+    var state = try training_state.TrainingState.init(std.testing.allocator, game);
+    defer state.deinit();
+    var published = try cfr_plus.trainDealByDeal(std.testing.allocator, game, &state, .{ .iterations = 1 });
+    defer published.deinit();
+
+    var page = try inspect.inspectNode(std.testing.allocator, game, published, 0, -1, -1);
+    defer page.deinit();
+    try std.testing.expect(page.reach_defined);
+    try std.testing.expect(page.reach.len >= 2);
+    var max_reach: f32 = 0;
+    var live: usize = 0;
+    for (page.reach) |r| {
+        if (r > max_reach) max_reach = r;
+        if (r > 0) {
+            live += 1;
+            // Unit starting weight + root (no path σ) → ≈ range_w (=1).
+            try std.testing.expectApproxEqAbs(@as(f64, 1.0), @as(f64, r), 1e-5);
+        }
+    }
+    try std.testing.expect(live >= 2);
+    try std.testing.expect(max_reach > 0.5);
+    // Deal-joint scale would be O(1/n_hands) ≪ 1; guard against regression.
+    try std.testing.expect(max_reach > 0.9);
+
+    var marg_sum: f64 = 0;
+    for (page.marginal) |m| marg_sum += m;
+    try std.testing.expectApproxEqAbs(@as(f64, 1.0), marg_sum, 1e-5);
+}
+
 test "action ev local_offset makes fold local zero when facing bet" {
     const text =
         \\street-config 1

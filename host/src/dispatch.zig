@@ -1334,6 +1334,21 @@ test "node accepts Study node_id and returns strategy tables" {
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"children\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"reach\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"marginal\":[") != null);
+    // ZR-105: root unit-weight hands must report range-weight reach ≈ 1, not deal mass ≪ 1.
+    {
+        const reach_key = "\"reach\":[";
+        const reach_at = std.mem.indexOf(u8, reply.body_json, reach_key) orelse unreachable;
+        const after = reply.body_json[reach_at + reach_key.len ..];
+        const end = std.mem.indexOfScalar(u8, after, ']') orelse unreachable;
+        const slice = after[0..end];
+        var max_r: f64 = 0;
+        var it = std.mem.tokenizeScalar(u8, slice, ',');
+        while (it.next()) |tok| {
+            const v = std.fmt.parseFloat(f64, tok) catch continue;
+            if (v > max_r) max_r = v;
+        }
+        try std.testing.expect(max_r > 0.9);
+    }
     // Root river with bets usually has strategy rows; either 2D array or null (check-only).
     try std.testing.expect(
         std.mem.indexOf(u8, reply.body_json, "\"strategy\":[") != null or
