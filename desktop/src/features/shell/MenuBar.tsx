@@ -6,18 +6,22 @@ import {
 import { matchShortcut, SHORTCUTS } from "../../commands/shortcuts";
 import {
   canExecuteCalculateEv,
+  canExecuteCompareToBaseline,
   canExecuteContinue,
   canExecuteOpenLockEditor,
   canExecuteOpenStrategyEditor,
   canExecutePause,
+  canExecuteResolveLocked,
   canExecuteSave,
   canExecuteSolve,
   canExecuteStop,
   executeCalculateEv,
+  executeCompareToBaseline,
   executeContinue,
   executeOpenLockEditor,
   executeOpenStrategyEditor,
   executePause,
+  executeResolveLocked,
   executeSave,
   executeSolve,
   executeStop,
@@ -174,6 +178,14 @@ export function MenuBar({
   const evGate = canExecuteCalculateEv(commandCtx);
   const lockGate = canExecuteOpenLockEditor(commandCtx);
   const strategyGate = canExecuteOpenStrategyEditor(commandCtx);
+  const resolveGate = canExecuteResolveLocked(commandCtx);
+  const compareGate = canExecuteCompareToBaseline(commandCtx);
+  const compareDisabled = !compareGate.ok || !baselineSolutionId;
+  const compareTitle = !compareGate.ok
+    ? compareGate.reason
+    : !baselineSolutionId
+      ? "Resolve locked first to create a baseline"
+      : compareGate.reason;
 
   return (
     <header className="menu-bar" ref={rootRef}>
@@ -198,6 +210,7 @@ export function MenuBar({
             {
               label: "Save solution…",
               disabled: !saveGate.ok,
+              title: saveGate.reason,
               onClick: () => {
                 void executeSave({
                   ...commandDeps(),
@@ -232,6 +245,7 @@ export function MenuBar({
               shortcut: "S",
               onClick: () => void executeSolve({ ...commandDeps(), solve }),
               disabled: !solveGate.ok,
+              title: solveGate.reason,
             },
             {
               label: "Continue",
@@ -239,17 +253,20 @@ export function MenuBar({
               onClick: () =>
                 void executeContinue({ ...commandDeps(), continueSolve }),
               disabled: !continueGate.ok,
+              title: continueGate.reason,
             },
             {
               label: "Pause",
               onClick: () => void executePause({ ...commandDeps(), pause }),
               disabled: !pauseGate.ok,
+              title: pauseGate.reason,
             },
             {
               label: "Stop",
               shortcut: "X",
               onClick: () => void executeStop({ ...commandDeps(), stop }),
               disabled: !stopGate.ok,
+              title: stopGate.reason,
             },
             { sep: true },
             {
@@ -257,16 +274,28 @@ export function MenuBar({
               onClick: () =>
                 void executeCalculateEv({ ...commandDeps(), calculateEv }),
               disabled: !evGate.ok,
+              title: evGate.reason,
             },
             { sep: true },
             {
               label: "Resolve locked",
-              onClick: () => void resolveLocked(),
+              onClick: () =>
+                void executeResolveLocked({
+                  ...commandDeps(),
+                  resolveLocked,
+                }),
+              disabled: !resolveGate.ok,
+              title: resolveGate.reason,
             },
             {
               label: "Compare to baseline",
-              onClick: () => void loadCompare(),
-              disabled: !baselineSolutionId,
+              onClick: () =>
+                void executeCompareToBaseline({
+                  ...commandDeps(),
+                  loadCompare,
+                }),
+              disabled: compareDisabled,
+              title: compareTitle,
             },
           ]}
         />
@@ -281,6 +310,7 @@ export function MenuBar({
               onClick: () =>
                 executeOpenLockEditor({ ...commandDeps(), setLockDrawerOpen }),
               disabled: !lockGate.ok,
+              title: lockGate.reason,
             },
             {
               label: "Open strategy editor",
@@ -290,15 +320,27 @@ export function MenuBar({
                   setStrategyEditDrawerOpen,
                 }),
               disabled: !strategyGate.ok,
+              title: strategyGate.reason,
             },
             {
               label: "Resolve locked",
-              onClick: () => void resolveLocked(),
+              onClick: () =>
+                void executeResolveLocked({
+                  ...commandDeps(),
+                  resolveLocked,
+                }),
+              disabled: !resolveGate.ok,
+              title: resolveGate.reason,
             },
             {
               label: "Compare to baseline",
-              onClick: () => void loadCompare(),
-              disabled: !baselineSolutionId,
+              onClick: () =>
+                void executeCompareToBaseline({
+                  ...commandDeps(),
+                  loadCompare,
+                }),
+              disabled: compareDisabled,
+              title: compareTitle,
             },
           ]}
         />
@@ -368,6 +410,8 @@ interface MenuItem {
   shortcut?: string;
   onClick?: () => void;
   disabled?: boolean;
+  /** Tooltip / native title — especially useful when disabled. */
+  title?: string;
   sep?: boolean;
 }
 
@@ -411,6 +455,7 @@ function Menu({
                 type="button"
                 role="menuitem"
                 disabled={item.disabled}
+                title={item.title}
                 onClick={() => {
                   setOpen(null);
                   item.onClick?.();

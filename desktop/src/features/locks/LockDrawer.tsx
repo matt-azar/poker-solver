@@ -1,4 +1,8 @@
 import { useMemo, useState } from "react";
+import {
+  studyIpcFeatureAvailable,
+  studyIpcUnavailableReason,
+} from "../../engine/ipcCapabilities";
 import { mapActionColors } from "../../domain/actionColors";
 import {
   formatProbPct,
@@ -507,10 +511,16 @@ export function LockDrawer() {
 
             <section className="lock-drawer__section" aria-label="Resolve locked">
               <div className="lock-drawer__section-title">Resolve</div>
+              {!studyIpcFeatureAvailable("resolveLocked") ? (
+                <p className="empty-hint" role="status">
+                  {studyIpcUnavailableReason("resolveLocked")}
+                </p>
+              ) : null}
               <label className="lock-warm-start">
                 <input
                   type="checkbox"
                   checked={warmStart}
+                  disabled={!studyIpcFeatureAvailable("resolveLocked")}
                   onChange={(event) => setWarmStart(event.target.checked)}
                 />
                 <span>Warm-start from current strategy</span>
@@ -519,7 +529,16 @@ export function LockDrawer() {
                 <button
                   type="button"
                   className="toolbar-btn primary"
-                  disabled={busy || !currentNode}
+                  disabled={
+                    busy ||
+                    !currentNode ||
+                    !studyIpcFeatureAvailable("resolveLocked")
+                  }
+                  title={
+                    !studyIpcFeatureAvailable("resolveLocked")
+                      ? studyIpcUnavailableReason("resolveLocked")
+                      : undefined
+                  }
                   onClick={() => void resolveLocked()}
                 >
                   Resolve locked
@@ -527,12 +546,16 @@ export function LockDrawer() {
                 <button
                   type="button"
                   className="toolbar-btn"
-                  disabled={!baselineSolutionId}
+                  disabled={
+                    !studyIpcFeatureAvailable("compare") || !baselineSolutionId
+                  }
                   onClick={() => void loadCompare()}
                   title={
-                    baselineSolutionId
-                      ? `Baseline ${baselineSolutionId}`
-                      : "Resolve locked first to create a baseline"
+                    !studyIpcFeatureAvailable("compare")
+                      ? studyIpcUnavailableReason("compare")
+                      : baselineSolutionId
+                        ? `Baseline ${baselineSolutionId}`
+                        : "Resolve locked first to create a baseline"
                   }
                 >
                   Compare to baseline
