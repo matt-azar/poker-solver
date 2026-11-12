@@ -7,8 +7,12 @@ Spawns `solver-engine` over length-prefixed protocol-2 IPC and exercises:
 
 Train uses ZR-106 short-admit (`{accepted,running}`); completion is polled
 via `status` (`running` / `terminal_reason` / `policy_revision` / `last_error`).
-Async train faults stay sticky on `last_error` (no second solve reply). Fresh
-trains publish one revision per iteration, so revision == cumulative trained.
+Async train faults stay sticky on `last_error` (no second solve reply).
+
+ZR-133 Change C: iteration progress (`iterations`) advances every train step;
+`policy_revision` advances only on strategy publish events (bounded cadence,
+default every 10 iters, plus first iter / pause / stop / completion flushes).
+Do not require revision == trained.
 
 Uses the tiny river_gate_smoke fixture. No Accuracy walls.
 Overall wall bound defaults to 60s.
@@ -392,11 +396,15 @@ def main() -> int:
             status1.get("terminal_reason") == "completed",
             f"solve-10 terminal: {status1}",
         )
-        # Fresh begin: one publish per iter ⇒ policy_revision == trained.
         require(
-            int(status1.get("policy_revision") or 0) == 10,
-            f"solve-10 revision!=10: {status1}",
+            status1.get("phase") == "published",
+            f"solve-10 phase: {status1}",
         )
+        # ZR-133: revision tracks publish events (first + completion flush for
+        # a 10-iter batch at default cadence), not every trained iteration.
+        rev10 = int(status1.get("policy_revision") or 0)
+        require(rev10 >= 2, f"solve-10 revision<{2}: {status1}")
+        require(rev10 < 10, f"solve-10 revision still every-iter: {status1}")
         # ZR-120: status must carry iteration progress for Study UI.
         require(
             int(status1.get("iterations") or -1) == 10,
@@ -664,13 +672,21 @@ def main() -> int:
         }
 
         # --- checkpoint save / open / continue (10 + 5) ---
-        # Open resets policy_revision to 1; +5 iters → revision 6. Cumulative
-        # trained is 15 inside the trainer; status exposes revision not trained.
+        # Open resets policy_revision to 1 while preserving trainer.trained.
+        # ZR-133: continue +5 at default cadence publishes on completion flush
+        # (rev 1 → 2), not once per iter. Cumulative trained is still 15.
         inbox.rpc(proc, "begin_config", {"config_text": config_text}, "c-begin-ckpt")
         admit_solve(inbox, proc, 10, "c-ckpt-10", "j-ckpt-10")
         ckpt10 = wait_until_idle(inbox, proc, "ckpt-10")
-        require(int(ckpt10.get("policy_revision") or 0) == 10, f"ckpt10: {ckpt10}")
+        ckpt10_rev = int(ckpt10.get("policy_revision") or 0)
+        require(ckpt10_rev >= 2, f"ckpt10 revision<{2}: {ckpt10}")
+        require(ckpt10_rev < 10, f"ckpt10 revision still every-iter: {ckpt10}")
+        require(
+            int(ckpt10.get("iterations") or -1) == 10,
+            f"ckpt10 iterations!=10: {ckpt10}",
+        )
         require(ckpt10.get("terminal_reason") == "completed", f"ckpt10 terminal: {ckpt10}")
+        require(ckpt10.get("phase") == "published", f"ckpt10 phase: {ckpt10}")
 
         fd, tmp_path = tempfile.mkstemp(prefix="zr104-", suffix=".psol")
         os.close(fd)
@@ -700,9 +716,10 @@ def main() -> int:
         )
         ckpt15 = wait_until_idle(inbox, proc, "ckpt-5")
         require(ckpt15.get("terminal_reason") == "completed", f"ckpt continue: {ckpt15}")
+        # Open@1 + multi-iter completion flush (cadence bound not hit in 5 steps).
         require(
-            int(ckpt15.get("policy_revision") or 0) == 6,
-            f"continue revision!=6 (open@1 +5): {ckpt15}",
+            int(ckpt15.get("policy_revision") or 0) == 2,
+            f"continue revision!=2 (open@1 + completion flush): {ckpt15}",
         )
         require(
             int(ckpt15.get("iterations") or -1) == 15,
@@ -716,7 +733,10 @@ def main() -> int:
             "continue_admit": admit5,
             "continue_iterations_requested": mid_continue.get("iterations_requested"),
             "continue_iterations": ckpt15.get("iterations"),
-            "note": "trainer.trained is 15; status reports policy_revision (open resets to 1)",
+            "note": (
+                "trainer.trained is 15; policy_revision advances on publish "
+                "events (ZR-133 cadence), open resets revision to 1"
+            ),
         }
 
         wall_s = round(time.perf_counter() - t0, 4)
