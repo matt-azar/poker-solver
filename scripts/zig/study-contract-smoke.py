@@ -5,6 +5,10 @@ Spawns `solver-engine` over length-prefixed protocol-2 IPC and exercises:
   ready → begin_config → solve → status → node (links + weighted strategy)
   → equity → pause/stop mid-train → checkpoint save/open/continue
 
+Train uses ZR-106 short-admit (`{accepted,running}`); completion is polled
+via `status` (`running` / `terminal_reason` / `policy_revision`). Fresh trains
+publish one revision per iteration, so revision == cumulative trained.
+
 Uses the tiny river_gate_smoke fixture. No Accuracy walls.
 Overall wall bound defaults to 60s.
 """
@@ -159,6 +163,83 @@ class ReplyInbox:
         return env
 
 
+def admit_solve(
+    inbox: ReplyInbox,
+    proc: subprocess.Popen,
+    iterations: int,
+    request_id: str,
+    job_id: str,
+) -> dict:
+    """ZR-106: solve returns immediately with accepted/running; no completion reply."""
+    write_req(proc, "solve", {"iterations": iterations}, request_id, job_id=job_id)
+    env = inbox.take("solve", timeout_s=15.0)
+    require(env.get("ok"), f"solve admit failed: {env}")
+    body = body_dict(env)
+    require(
+        body.get("accepted") is True or body.get("running") is True,
+        f"expected short-admit body: {body}",
+    )
+    return body
+
+
+def wait_until_idle(
+    inbox: ReplyInbox,
+    proc: subprocess.Popen,
+    label: str,
+    *,
+    timeout_s: float = 45.0,
+) -> dict:
+    """Poll status until train overlay leaves running (Study waitUntilIdle)."""
+    deadline = time.perf_counter() + timeout_s
+    n = 0
+    last: dict = {}
+    while time.perf_counter() < deadline:
+        last = body_dict(
+            inbox.rpc(
+                proc,
+                "status",
+                None,
+                f"c-wait-idle-{label}-{n}",
+                timeout_s=5.0,
+            )
+        )
+        n += 1
+        if last.get("running") is False:
+            return last
+        time.sleep(0.002)
+    raise ContractError(f"{label}: timed out waiting for idle; last={last}")
+
+
+def wait_until_training(
+    inbox: ReplyInbox,
+    proc: subprocess.Popen,
+    label: str,
+    *,
+    timeout_s: float = 5.0,
+) -> dict:
+    """Wait until session phase is training (pause needs phase!=paused from begin)."""
+    deadline = time.perf_counter() + timeout_s
+    n = 0
+    while time.perf_counter() < deadline:
+        st = body_dict(
+            inbox.rpc(
+                proc,
+                "status",
+                None,
+                f"c-wait-train-{label}-{n}",
+                timeout_s=5.0,
+            )
+        )
+        n += 1
+        if st.get("phase") == "training":
+            return st
+        if st.get("running") is False and st.get("phase") != "paused":
+            # Finished before we observed training (should not with long_iters).
+            raise ContractError(f"{label}: left running before phase=training: {st}")
+        time.sleep(0.001)
+    raise ContractError(f"{label}: phase never became training")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -252,25 +333,26 @@ def main() -> int:
         require("solution_id" in begin, f"begin missing solution_id: {begin}")
 
         t_solve = time.perf_counter()
-        write_req(
-            proc, "solve", {"iterations": 10}, "c-solve-10", job_id="j-contract-10"
-        )
-        solve10 = inbox.take("solve", timeout_s=30.0)
-        require(solve10.get("ok"), f"solve failed: {solve10}")
-        solve10_body = body_dict(solve10)
-        require(int(solve10_body.get("trained") or 0) == 10, f"trained!=10: {solve10_body}")
-        stages["solve_10"] = {
-            "trained": solve10_body.get("trained"),
-            "terminal_reason": solve10_body.get("terminal_reason"),
-            "wall_s": round(time.perf_counter() - t_solve, 4),
-            "policy_revision": solve10_body.get("policy_revision"),
-        }
-
-        status1 = body_dict(inbox.rpc(proc, "status", None, "c-status1"))
+        admit10 = admit_solve(inbox, proc, 10, "c-solve-10", "j-contract-10")
+        status1 = wait_until_idle(inbox, proc, "solve-10")
         require(status1.get("has_training") is True, f"has_training: {status1}")
         require(status1.get("can_continue") is True, f"can_continue: {status1}")
-        require(status1.get("running") is False, f"running after solve: {status1}")
         require(status1.get("solution_id"), f"no solution_id: {status1}")
+        require(
+            status1.get("terminal_reason") == "completed",
+            f"solve-10 terminal: {status1}",
+        )
+        # Fresh begin: one publish per iter ⇒ policy_revision == trained.
+        require(
+            int(status1.get("policy_revision") or 0) == 10,
+            f"solve-10 revision!=10: {status1}",
+        )
+        stages["solve_10"] = {
+            "admit": admit10,
+            "terminal_reason": status1.get("terminal_reason"),
+            "wall_s": round(time.perf_counter() - t_solve, 4),
+            "policy_revision": status1.get("policy_revision"),
+        }
         stages["status_after_solve"] = {
             "has_training": status1.get("has_training"),
             "can_continue": status1.get("can_continue"),
@@ -347,73 +429,26 @@ def main() -> int:
             "child_node_id": child_id,
         }
 
-        def wait_until_training(label: str, *, timeout_s: float = 5.0) -> None:
-            """Wait until session phase is training.
-
-            `running` flips when the host sets train_running, which can precede
-            Session.phase=.training; pause() still rejects phase=.paused (begin).
-            """
-            deadline = time.perf_counter() + timeout_s
-            n = 0
-            while time.perf_counter() < deadline:
-                st = body_dict(
-                    inbox.rpc(
-                        proc,
-                        "status",
-                        None,
-                        f"c-wait-train-{label}-{n}",
-                        timeout_s=5.0,
-                    )
-                )
-                n += 1
-                if st.get("phase") == "training":
-                    return
-                if inbox.pending:
-                    for env in inbox.pending:
-                        if env.get("op") == "solve":
-                            raise ContractError(
-                                f"{label}: solve finished before phase=training: {env}"
-                            )
-                time.sleep(0.001)
-            raise ContractError(f"{label}: phase never became training")
-
         # --- pause mid-train, then stop (cancel) mid-train ---
         inbox.rpc(proc, "begin_config", {"config_text": config_text}, "c-begin-pause")
-        write_req(
-            proc,
-            "solve",
-            {"iterations": long_iters},
-            "c-solve-pause",
-            job_id="j-contract-pause",
-        )
-        wait_until_training("pause")
+        admit_solve(inbox, proc, long_iters, "c-solve-pause", "j-contract-pause")
+        wait_until_training(inbox, proc, "pause")
         write_req(proc, "pause", None, "c-pause")
         pause_env = inbox.take("pause", timeout_s=10.0)
         require(pause_env.get("ok"), f"pause failed: {pause_env}")
-        solve_pause = inbox.take("solve", timeout_s=45.0)
-        require(solve_pause.get("ok"), f"paused solve failed: {solve_pause}")
-        pause_body = body_dict(solve_pause)
+        status_paused = wait_until_idle(inbox, proc, "pause")
         require(
-            pause_body.get("terminal_reason") == "paused",
-            f"expected paused terminal: {pause_body}",
+            status_paused.get("terminal_reason") == "paused",
+            f"expected paused terminal: {status_paused}",
         )
-        trained_paused = int(pause_body.get("trained") or 0)
+        rev_paused = int(status_paused.get("policy_revision") or 0)
         require(
-            0 < trained_paused < long_iters,
-            f"pause did not stop early: {pause_body}",
+            0 < rev_paused < long_iters,
+            f"pause did not stop early: {status_paused}",
         )
 
-        status_paused = body_dict(inbox.rpc(proc, "status", None, "c-status-paused"))
-        require(status_paused.get("running") is False, f"still running: {status_paused}")
-
-        write_req(
-            proc,
-            "solve",
-            {"iterations": long_iters},
-            "c-solve-stop",
-            job_id="j-contract-stop",
-        )
-        wait_until_training("stop")
+        admit_solve(inbox, proc, long_iters, "c-solve-stop", "j-contract-stop")
+        wait_until_training(inbox, proc, "stop")
         write_req(proc, "cancel", None, "c-cancel", job_id="j-contract-stop")
         cancel_env = inbox.take("cancel", timeout_s=10.0)
         require(cancel_env.get("ok"), f"cancel failed: {cancel_env}")
@@ -421,43 +456,43 @@ def main() -> int:
             body_dict(cancel_env).get("cancelled") is True,
             f"cancel body: {cancel_env}",
         )
-        solve_stop = inbox.take("solve", timeout_s=45.0)
-        require(solve_stop.get("ok"), f"stopped solve failed: {solve_stop}")
-        stop_body = body_dict(solve_stop)
+        status_stopped = wait_until_idle(inbox, proc, "stop")
         require(
-            stop_body.get("terminal_reason") == "cancelled",
-            f"expected cancelled terminal: {stop_body}",
+            status_stopped.get("terminal_reason") == "cancelled",
+            f"expected cancelled terminal: {status_stopped}",
         )
-        trained_stopped = int(stop_body.get("trained") or 0)
+        rev_stopped = int(status_stopped.get("policy_revision") or 0)
         require(
-            trained_stopped < trained_paused + long_iters,
-            f"stop did not stop early: {stop_body}",
+            rev_stopped < rev_paused + long_iters,
+            f"stop did not stop early: {status_stopped}",
         )
         stages["pause_stop"] = {
-            "pause_trained": trained_paused,
-            "stop_trained": trained_stopped,
-            "pause_terminal": pause_body.get("terminal_reason"),
-            "stop_terminal": stop_body.get("terminal_reason"),
+            "pause_revision": rev_paused,
+            "stop_revision": rev_stopped,
+            "pause_terminal": status_paused.get("terminal_reason"),
+            "stop_terminal": status_stopped.get("terminal_reason"),
         }
 
-        # Fresh job after stop must admit.
-        write_req(
-            proc,
-            "solve",
-            {"iterations": 1},
-            "c-solve-fresh",
-            job_id="j-contract-fresh",
+        # Fresh job after stop must admit + complete.
+        admit_solve(inbox, proc, 1, "c-solve-fresh", "j-contract-fresh")
+        status_fresh = wait_until_idle(inbox, proc, "fresh")
+        require(
+            status_fresh.get("terminal_reason") == "completed",
+            f"fresh after stop: {status_fresh}",
         )
-        fresh_env = inbox.take("solve", timeout_s=15.0)
-        require(fresh_env.get("ok"), f"fresh after stop failed: {fresh_env}")
-        stages["fresh_after_stop"] = body_dict(fresh_env)
+        stages["fresh_after_stop"] = {
+            "terminal_reason": status_fresh.get("terminal_reason"),
+            "policy_revision": status_fresh.get("policy_revision"),
+        }
 
-        # --- checkpoint save / open / continue (10 + 5 → trained 15) ---
+        # --- checkpoint save / open / continue (10 + 5) ---
+        # Open resets policy_revision to 1; +5 iters → revision 6. Cumulative
+        # trained is 15 inside the trainer; status exposes revision not trained.
         inbox.rpc(proc, "begin_config", {"config_text": config_text}, "c-begin-ckpt")
-        write_req(proc, "solve", {"iterations": 10}, "c-ckpt-10", job_id="j-ckpt-10")
-        ckpt10 = inbox.take("solve", timeout_s=30.0)
-        require(ckpt10.get("ok"), f"ckpt solve10: {ckpt10}")
-        require(int(body_dict(ckpt10).get("trained") or 0) == 10, "ckpt trained!=10")
+        admit_solve(inbox, proc, 10, "c-ckpt-10", "j-ckpt-10")
+        ckpt10 = wait_until_idle(inbox, proc, "ckpt-10")
+        require(int(ckpt10.get("policy_revision") or 0) == 10, f"ckpt10: {ckpt10}")
+        require(ckpt10.get("terminal_reason") == "completed", f"ckpt10 terminal: {ckpt10}")
 
         fd, tmp_path = tempfile.mkstemp(prefix="zr104-", suffix=".psol")
         os.close(fd)
@@ -469,18 +504,25 @@ def main() -> int:
         require(open_body.get("can_continue") is True, f"open can_continue: {open_body}")
         require(open_body.get("has_training") is True, f"open has_training: {open_body}")
         require("status_generation" in open_body, "open missing status_generation")
-
-        write_req(proc, "solve", {"iterations": 5}, "c-ckpt-5", job_id="j-ckpt-5")
-        ckpt15 = inbox.take("solve", timeout_s=30.0)
-        require(ckpt15.get("ok"), f"ckpt continue: {ckpt15}")
-        ckpt15_body = body_dict(ckpt15)
+        # Open reinstalls published revision = 1 while preserving trainer.trained.
         require(
-            int(ckpt15_body.get("trained") or 0) == 15,
-            f"continue trained!=15: {ckpt15_body}",
+            int(open_body.get("policy_revision") or 0) == 1,
+            f"open revision reset: {open_body}",
+        )
+
+        admit_solve(inbox, proc, 5, "c-ckpt-5", "j-ckpt-5")
+        ckpt15 = wait_until_idle(inbox, proc, "ckpt-5")
+        require(ckpt15.get("terminal_reason") == "completed", f"ckpt continue: {ckpt15}")
+        require(
+            int(ckpt15.get("policy_revision") or 0) == 6,
+            f"continue revision!=6 (open@1 +5): {ckpt15}",
         )
         stages["checkpoint"] = {
-            "trained_after_open_continue": ckpt15_body.get("trained"),
+            "revision_after_10": ckpt10.get("policy_revision"),
+            "revision_on_open": open_body.get("policy_revision"),
+            "revision_after_open_continue_5": ckpt15.get("policy_revision"),
             "can_continue_on_open": open_body.get("can_continue"),
+            "note": "trainer.trained is 15; status reports policy_revision (open resets to 1)",
         }
 
         wall_s = round(time.perf_counter() - t0, 4)
