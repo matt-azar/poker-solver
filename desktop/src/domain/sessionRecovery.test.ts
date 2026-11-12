@@ -82,6 +82,22 @@ describe("sessionRecovery", () => {
     ).toBe(true);
   });
 
+  it("rejects negative consecutiveFailures / zero threshold (ZR-149)", () => {
+    expect(() =>
+      shouldMarkStatusPollDead({
+        consecutiveFailures: -1,
+        detail: "status request timed out",
+      }),
+    ).toThrow(/consecutiveFailures/);
+    expect(() =>
+      shouldMarkStatusPollDead({
+        consecutiveFailures: 1,
+        detail: "status request timed out",
+        threshold: 0,
+      }),
+    ).toThrow(/threshold/);
+  });
+
   it("reads sticky last_error and recovery unreachable copy", () => {
     expect(
       statusStickyError({

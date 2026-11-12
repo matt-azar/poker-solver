@@ -94,6 +94,32 @@ describe("decodeStatusPayload", () => {
     ).toThrow(/phase/);
   });
 
+  it("rejects can_continue without has_training (ZR-149)", () => {
+    expect(() =>
+      decodeStatusPayload({
+        running: false,
+        paused: true,
+        cancelled: false,
+        status_generation: 1,
+        has_training: false,
+        can_continue: true,
+      }),
+    ).toThrow(/can_continue requires has_training/);
+  });
+
+  it("rejects peak_allocated_bytes below allocated_bytes (ZR-149)", () => {
+    expect(() =>
+      decodeStatusPayload({
+        running: false,
+        paused: false,
+        cancelled: false,
+        status_generation: 1,
+        allocated_bytes: 100,
+        peak_allocated_bytes: 50,
+      }),
+    ).toThrow(/peak_allocated_bytes/);
+  });
+
   it("rejects missing required flags", () => {
     expect(() =>
       decodeStatusPayload({

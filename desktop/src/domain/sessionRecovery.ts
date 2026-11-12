@@ -146,10 +146,19 @@ export function shouldMarkStatusPollDead(args: {
   detail: string;
   threshold?: number;
 }): boolean {
+  // Preconditions: failure counts are non-negative; threshold is at least 1.
+  if (args.consecutiveFailures < 0) {
+    throw new Error("contract: consecutiveFailures must be >= 0");
+  }
+  const threshold = args.threshold ?? STATUS_POLL_DEAD_AFTER_FAILURES;
+  if (threshold < 1) {
+    throw new Error("contract: status-poll dead threshold must be >= 1");
+  }
+  // Positive: hard session-dead faults paint immediately (even at 0 soft blips).
   if (isEngineSessionDead(args.detail)) {
     return true;
   }
-  const threshold = args.threshold ?? STATUS_POLL_DEAD_AFTER_FAILURES;
+  // Negative: soft blips stay alive until the threshold.
   return args.consecutiveFailures >= threshold;
 }
 

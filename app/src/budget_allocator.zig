@@ -62,22 +62,36 @@ pub const BudgetAllocator = struct {
     fn noteLiveLocked(self: *BudgetAllocator, new_live: u64) void {
         self.live_bytes = new_live;
         if (new_live > self.peak_bytes) self.peak_bytes = new_live;
+        // Peak is monotonic and always covers live.
+        std.debug.assert(self.peak_bytes >= self.live_bytes);
+        if (self.limit_bytes > 0) std.debug.assert(self.live_bytes <= self.limit_bytes);
     }
 
     fn chargeGrowLocked(self: *BudgetAllocator, add: u64) bool {
+        std.debug.assert(add > 0);
         const new_live = self.live_bytes +% add;
-        if (new_live < self.live_bytes) return false; // overflow
-        if (!self.fitsLocked(new_live)) return false;
+        // Negative space: wrap or over-limit refuses without mutating live/peak.
+        if (new_live < self.live_bytes) {
+            std.debug.assert(new_live < self.live_bytes);
+            return false; // overflow
+        }
+        if (!self.fitsLocked(new_live)) {
+            if (self.limit_bytes > 0) std.debug.assert(new_live > self.limit_bytes);
+            return false;
+        }
         self.noteLiveLocked(new_live);
         return true;
     }
 
     fn releaseLocked(self: *BudgetAllocator, sub: u64) void {
+        std.debug.assert(sub > 0);
         if (sub >= self.live_bytes) {
             self.live_bytes = 0;
         } else {
             self.live_bytes -= sub;
         }
+        // Free never lowers peak; live stays within peak.
+        std.debug.assert(self.peak_bytes >= self.live_bytes);
     }
 
     fn alloc(ctx: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
@@ -85,13 +99,22 @@ pub const BudgetAllocator = struct {
         if (len == 0) return self.parent.rawAlloc(0, alignment, ret_addr);
 
         self.mu.lock();
+        const live_before = self.live_bytes;
         const ok = self.chargeGrowLocked(len);
+        const live_after_charge = self.live_bytes;
         self.mu.unlock();
-        if (!ok) return null;
+        if (!ok) {
+            // Refuse path: live unchanged (pair with successful charge below).
+            std.debug.assert(live_after_charge == live_before);
+            return null;
+        }
+        std.debug.assert(live_after_charge == live_before + len);
 
         const ptr = self.parent.rawAlloc(len, alignment, ret_addr) orelse {
             self.mu.lock();
             self.releaseLocked(len);
+            // Parent OOM rolls the charge back.
+            std.debug.assert(self.live_bytes == live_before);
             self.mu.unlock();
             return null;
         };
@@ -107,12 +130,17 @@ pub const BudgetAllocator = struct {
             const add = new_len - old_len;
             // Peak while both conceptual sizes exist: charge growth first.
             self.mu.lock();
+            const live_before = self.live_bytes;
             const ok = self.chargeGrowLocked(add);
             self.mu.unlock();
-            if (!ok) return false;
+            if (!ok) {
+                std.debug.assert(self.live() == live_before);
+                return false;
+            }
             if (!self.parent.rawResize(memory, alignment, new_len, ret_addr)) {
                 self.mu.lock();
                 self.releaseLocked(add);
+                std.debug.assert(self.live_bytes == live_before);
                 self.mu.unlock();
                 return false;
             }
@@ -138,12 +166,17 @@ pub const BudgetAllocator = struct {
             // Charge old+new overlap (full new size while old still held conceptually
             // only for the delta; parent remap may keep the same block).
             self.mu.lock();
+            const live_before = self.live_bytes;
             const ok = self.chargeGrowLocked(add);
             self.mu.unlock();
-            if (!ok) return null;
+            if (!ok) {
+                std.debug.assert(self.live() == live_before);
+                return null;
+            }
             const ptr = self.parent.rawRemap(memory, alignment, new_len, ret_addr) orelse {
                 self.mu.lock();
                 self.releaseLocked(add);
+                std.debug.assert(self.live_bytes == live_before);
                 self.mu.unlock();
                 return null;
             };
@@ -163,7 +196,10 @@ pub const BudgetAllocator = struct {
         self.parent.rawFree(memory, alignment, ret_addr);
         if (len == 0) return;
         self.mu.lock();
+        const live_before = self.live_bytes;
         self.releaseLocked(len);
+        std.debug.assert(self.live_bytes <= live_before);
+        std.debug.assert(self.peak_bytes >= self.live_bytes);
         self.mu.unlock();
     }
 };
