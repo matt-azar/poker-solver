@@ -1,6 +1,7 @@
 const std = @import("std");
 const compile = @import("../game/compile.zig");
 const regret_matching = @import("regret_matching.zig");
+const node_lock = @import("node_lock.zig");
 
 pub const TrainError = error{
     InvalidTrain,
@@ -9,6 +10,7 @@ pub const TrainError = error{
     LockedMemoryLimitExceeded,
     SystemResources,
     Unexpected,
+    LockActionCountMismatch,
 };
 
 /// Mutable CFR tables. `sigma` is trainer-exclusive (D2).
@@ -32,7 +34,7 @@ pub const TrainingState = struct {
         @memset(state.regret, 0);
         @memset(state.strategy_sum, 0);
         @memset(state.sigma, 0);
-        freezeSigma(game, &state);
+        try freezeSigma(game, &state, null);
         return state;
     }
 
@@ -64,6 +66,22 @@ const SlotPass = enum {
     publish,
 };
 
+fn applyLockAfterMatch(
+    state: *TrainingState,
+    locks: ?*const node_lock.LockSet,
+    slot: compile.Slot,
+    n: usize,
+    base: usize,
+) TrainError!void {
+    const set = locks orelse return;
+    const lock = set.findForRunout(@intCast(slot.node), slot.turn, slot.river);
+    _ = node_lock.applyLockToStrategyF32(state.sigma[base .. base + n], lock, slot.hand) catch |err| {
+        return switch (err) {
+            error.LockActionCountMismatch => error.LockActionCountMismatch,
+        };
+    };
+}
+
 fn applySlotRange(
     game: compile.CompiledGame,
     state: *TrainingState,
@@ -72,7 +90,8 @@ fn applySlotRange(
     begin: usize,
     end: usize,
     average: ?[]f32,
-) void {
+    locks: ?*const node_lock.LockSet,
+) TrainError!void {
     var index = begin;
     while (index < end) : (index += 1) {
         const slot = game.slots[index];
@@ -82,6 +101,7 @@ fn applySlotRange(
         switch (pass) {
             .freeze => {
                 regret_matching.regretMatching(state.regret[base .. base + n], state.sigma[base .. base + n]);
+                try applyLockAfterMatch(state, locks, slot, n, base);
             },
             .floor => {
                 if (player >= 0 and node.player != player) continue;
@@ -93,6 +113,7 @@ fn applySlotRange(
                     regret_matching.floorRegrets(state.regret[base .. base + n]);
                 }
                 regret_matching.regretMatching(state.regret[base .. base + n], state.sigma[base .. base + n]);
+                try applyLockAfterMatch(state, locks, slot, n, base);
             },
             .publish => {
                 const out = average orelse return;
@@ -111,12 +132,25 @@ const SlotJob = struct {
     pass: SlotPass,
     player: i32,
     average: ?[]f32,
+    locks: ?*const node_lock.LockSet,
     begins: []const usize,
     ends: []const usize,
+    err: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
 };
 
-fn runSlotWorker(worker: usize, job: *const SlotJob) void {
-    applySlotRange(job.game, job.state, job.pass, job.player, job.begins[worker], job.ends[worker], job.average);
+fn runSlotWorker(worker: usize, job: *SlotJob) void {
+    applySlotRange(
+        job.game,
+        job.state,
+        job.pass,
+        job.player,
+        job.begins[worker],
+        job.ends[worker],
+        job.average,
+        job.locks,
+    ) catch {
+        _ = job.err.store(1, .release);
+    };
 }
 
 fn partitionSlots(total: usize, workers: u32, begins: []usize, ends: []usize) void {
@@ -134,7 +168,7 @@ fn partitionSlots(total: usize, workers: u32, begins: []usize, ends: []usize) vo
 }
 
 /// C++ `PoolJob::Slots`: static partition of `game.slots` across `threads`.
-/// Slots write disjoint regret/sigma/average spans — no atomics.
+/// Slots write disjoint regret/sigma/average spans — no atomics on table cells.
 fn runSlotPassThreaded(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
@@ -143,24 +177,26 @@ fn runSlotPassThreaded(
     player: i32,
     threads_in: u32,
     average: ?[]f32,
+    locks: ?*const node_lock.LockSet,
 ) TrainError!void {
     const total = game.slots.len;
     if (total == 0) return;
     const threads: u32 = if (threads_in < 1) 1 else @min(threads_in, 64);
     if (threads <= 1) {
-        applySlotRange(game, state, pass, player, 0, total, average);
+        try applySlotRange(game, state, pass, player, 0, total, average, locks);
         return;
     }
 
     var begins: [64]usize = undefined;
     var ends: [64]usize = undefined;
     partitionSlots(total, threads, begins[0..threads], ends[0..threads]);
-    const job = SlotJob{
+    var job = SlotJob{
         .game = game,
         .state = state,
         .pass = pass,
         .player = player,
         .average = average,
+        .locks = locks,
         .begins = begins[0..threads],
         .ends = ends[0..threads],
     };
@@ -178,10 +214,11 @@ fn runSlotPassThreaded(
     }
     runSlotWorker(0, &job);
     for (thread_buf) |t| t.join();
+    if (job.err.load(.acquire) != 0) return error.LockActionCountMismatch;
 }
 
-pub fn freezeSigma(game: compile.CompiledGame, state: *TrainingState) void {
-    applySlotRange(game, state, .freeze, -1, 0, game.slots.len, null);
+pub fn freezeSigma(game: compile.CompiledGame, state: *TrainingState, locks: ?*const node_lock.LockSet) TrainError!void {
+    try applySlotRange(game, state, .freeze, -1, 0, game.slots.len, null, locks);
 }
 
 pub fn freezeSigmaThreaded(
@@ -189,12 +226,13 @@ pub fn freezeSigmaThreaded(
     game: compile.CompiledGame,
     state: *TrainingState,
     threads: u32,
+    locks: ?*const node_lock.LockSet,
 ) TrainError!void {
-    try runSlotPassThreaded(allocator, game, state, .freeze, -1, threads, null);
+    try runSlotPassThreaded(allocator, game, state, .freeze, -1, threads, null, locks);
 }
 
-pub fn floorPlayer(game: compile.CompiledGame, state: *TrainingState, player: i32) void {
-    applySlotRange(game, state, .floor, player, 0, game.slots.len, null);
+pub fn floorPlayer(game: compile.CompiledGame, state: *TrainingState, player: i32) TrainError!void {
+    try applySlotRange(game, state, .floor, player, 0, game.slots.len, null, null);
 }
 
 pub fn floorPlayerThreaded(
@@ -204,11 +242,16 @@ pub fn floorPlayerThreaded(
     player: i32,
     threads: u32,
 ) TrainError!void {
-    try runSlotPassThreaded(allocator, game, state, .floor, player, threads, null);
+    try runSlotPassThreaded(allocator, game, state, .floor, player, threads, null, null);
 }
 
-pub fn floorAndFreeze(game: compile.CompiledGame, state: *TrainingState, player: i32) void {
-    applySlotRange(game, state, .floor_and_freeze, player, 0, game.slots.len, null);
+pub fn floorAndFreeze(
+    game: compile.CompiledGame,
+    state: *TrainingState,
+    player: i32,
+    locks: ?*const node_lock.LockSet,
+) TrainError!void {
+    try applySlotRange(game, state, .floor_and_freeze, player, 0, game.slots.len, null, locks);
 }
 
 pub fn floorAndFreezeThreaded(
@@ -217,8 +260,9 @@ pub fn floorAndFreezeThreaded(
     state: *TrainingState,
     player: i32,
     threads: u32,
+    locks: ?*const node_lock.LockSet,
 ) TrainError!void {
-    try runSlotPassThreaded(allocator, game, state, .floor_and_freeze, player, threads, null);
+    try runSlotPassThreaded(allocator, game, state, .floor_and_freeze, player, threads, null, locks);
 }
 
 /// After a completed iteration: materialize stable average-policy revision (D2).
@@ -244,7 +288,7 @@ pub fn publishAverageThreaded(
     }
     published.average = allocator.alloc(f32, state.strategy_sum.len) catch return error.OutOfMemory;
     @memset(published.average, 0);
-    try runSlotPassThreaded(allocator, game, state, .publish, -1, threads, published.average);
+    try runSlotPassThreaded(allocator, game, state, .publish, -1, threads, published.average, null);
     return published;
 }
 
@@ -288,14 +332,14 @@ test "slot passes: 4-thread matches serial" {
         threaded.regret[i] = v;
     }
 
-    freezeSigma(game, &serial);
-    try freezeSigmaThreaded(std.testing.allocator, game, &threaded, 4);
+    try freezeSigma(game, &serial, null);
+    try freezeSigmaThreaded(std.testing.allocator, game, &threaded, 4, null);
     for (serial.sigma, threaded.sigma) |a, b| {
         try std.testing.expectApproxEqAbs(@as(f64, a), @as(f64, b), 1e-7);
     }
 
-    floorAndFreeze(game, &serial, 0);
-    try floorAndFreezeThreaded(std.testing.allocator, game, &threaded, 0, 4);
+    try floorAndFreeze(game, &serial, 0, null);
+    try floorAndFreezeThreaded(std.testing.allocator, game, &threaded, 0, 4, null);
     for (serial.regret, threaded.regret) |a, b| {
         try std.testing.expectApproxEqAbs(@as(f64, a), @as(f64, b), 1e-7);
     }
@@ -303,7 +347,7 @@ test "slot passes: 4-thread matches serial" {
         try std.testing.expectApproxEqAbs(@as(f64, a), @as(f64, b), 1e-7);
     }
 
-    floorPlayer(game, &serial, 1);
+    try floorPlayer(game, &serial, 1);
     try floorPlayerThreaded(std.testing.allocator, game, &threaded, 1, 4);
     for (serial.regret, threaded.regret) |a, b| {
         try std.testing.expectApproxEqAbs(@as(f64, a), @as(f64, b), 1e-7);

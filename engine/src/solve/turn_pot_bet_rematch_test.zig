@@ -21,7 +21,7 @@ fn compileConfig(allocator: std.mem.Allocator, text: []const u8) !compile_mod.Co
 fn trainEval(allocator: std.mem.Allocator, game: compile_mod.CompiledGame, iterations: i32) !frozen_walk.FrozenEval {
     var state = try training_state.TrainingState.init(allocator, game);
     defer state.deinit();
-    var published = try frozen_walk.trainFrozenCfrPlus(allocator, game, &state, iterations);
+    var published = try frozen_walk.trainFrozenCfrPlus(allocator, game, &state, iterations, null);
     defer published.deinit();
     return frozen_walk.evaluatePublishedFrozen(allocator, game, published.average);
 }
@@ -78,7 +78,7 @@ test "turn pot-bet frozen 400-iter value/gap/strategy pins vs tip C++ StreetBatc
 
     var state = try training_state.TrainingState.init(std.testing.allocator, game);
     defer state.deinit();
-    var published = try frozen_walk.trainFrozenCfrPlus(std.testing.allocator, game, &state, 400);
+    var published = try frozen_walk.trainFrozenCfrPlus(std.testing.allocator, game, &state, 400, null);
     defer published.deinit();
     const eval = try frozen_walk.evaluatePublishedFrozen(std.testing.allocator, game, published.average);
 

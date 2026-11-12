@@ -34,7 +34,7 @@ pub fn trainDealByDeal(
         else
             1.0;
 
-        training_state.freezeSigma(game, state);
+        try training_state.freezeSigma(game, state, null);
         for (game.deals) |deal| {
             _ = try traversal.cfrDeal(
                 allocator,
@@ -51,7 +51,7 @@ pub fn trainDealByDeal(
                 weight,
             );
         }
-        training_state.floorAndFreeze(game, state, 0);
+        try training_state.floorAndFreeze(game, state, 0, null);
 
         for (game.deals) |deal| {
             _ = try traversal.cfrDeal(
@@ -69,7 +69,7 @@ pub fn trainDealByDeal(
                 weight,
             );
         }
-        training_state.floorAndFreeze(game, state, 1);
+        try training_state.floorAndFreeze(game, state, 1, null);
 
         state.trained += 1;
         if (published.average.len != 0) published.deinit();

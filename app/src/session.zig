@@ -235,16 +235,35 @@ pub const Session = struct {
             self.mu.unlock();
             return error.InvalidSession;
         });
+        // Snapshot lock overlay text under the session mutex (C++ SolveConfig::locks).
+        const locks_snapshot: []u8 = if (self.locks_text.len != 0)
+            (self.allocator.dupe(u8, self.locks_text) catch {
+                self.mu.unlock();
+                return error.OutOfMemory;
+            })
+        else
+            &.{};
         self.phase = .training;
         self.mu.unlock();
+        defer if (locks_snapshot.len != 0) self.allocator.free(locks_snapshot);
         errdefer {
             self.mu.lock();
             self.phase = if (self.published != null) .published else .failed;
             self.mu.unlock();
         }
 
+        var locks_owned: ?poker_engine.solve.node_lock.LockSet = null;
+        defer if (locks_owned) |*owned| owned.deinit();
+        if (locks_snapshot.len != 0) {
+            locks_owned = poker_engine.solve.node_lock.parseLockSet(self.allocator, locks_snapshot) catch {
+                return error.InvalidSession;
+            };
+        }
+
         // Persistent FrozenCtx: ranks / scratch survive Acc-stop train(1) cycles.
         const ctx = try self.ensureFrozenCtx();
+        ctx.locks = if (locks_owned) |*owned| owned else null;
+        defer ctx.locks = null;
         var stub = try poker_engine.solve.frozen_walk.trainFrozenCfrPlusOnCtx(
             ctx,
             state,
@@ -413,7 +432,18 @@ pub const Session = struct {
             @memcpy(training.regret, doc.regret);
             @memcpy(training.strategy_sum, doc.strategy_sum);
             training.trained = doc.trained;
-            poker_engine.solve.training_state.freezeSigma(game, &training);
+            var open_locks: ?poker_engine.solve.node_lock.LockSet = null;
+            defer if (open_locks) |*owned| owned.deinit();
+            if (doc.locks_text.len != 0) {
+                open_locks = poker_engine.solve.node_lock.parseLockSet(self.allocator, doc.locks_text) catch {
+                    return error.InvalidPsol;
+                };
+            }
+            try poker_engine.solve.training_state.freezeSigma(
+                game,
+                &training,
+                if (open_locks) |*owned| owned else null,
+            );
         }
 
         var published = poker_engine.solve.training_state.PublishedPolicy{

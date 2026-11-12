@@ -1,7 +1,7 @@
 //! Node / line lock model + text codec (C++ include/solver/node_lock.hpp).
-//! Study overlay persistence uses this text in `.psol` v4. CFR walk apply is
-//! separate (`applyLockToStrategy` is the row helper; wiring into frozen CFR
-//! remains a residual UX).
+//! Study overlay persistence uses this text in `.psol` v4. Row helpers
+//! (`applyLockToStrategy` / `applyLockToStrategyF32`) overwrite regret-matched
+//! σ; frozen CFR freeze/floorAndFreeze call the f32 helper (C++ `apply_freeze_range`).
 const std = @import("std");
 
 pub const lock_prob_sum_tolerance: f64 = 1e-12;
@@ -112,6 +112,18 @@ pub fn applyLockToStrategy(probs: []f64, lock: ?*const NodeLock, combo_index: us
     if (L.kind == .selected_combos and !comboIsSelected(L.*, combo_index)) return false;
     if (probs.len != L.actions.probs.len) return error.LockActionCountMismatch;
     @memcpy(probs, L.actions.probs);
+    return true;
+}
+
+/// f32 σ tables (TrainingState / StreetBatch). Same contract as C++ float overload.
+pub fn applyLockToStrategyF32(probs: []f32, lock: ?*const NodeLock, combo_index: usize) !bool {
+    const L = lock orelse return false;
+    if (L.actions.unlocked()) return false;
+    if (L.kind == .selected_combos and !comboIsSelected(L.*, combo_index)) return false;
+    if (probs.len != L.actions.probs.len) return error.LockActionCountMismatch;
+    for (probs, L.actions.probs) |*dst, src| {
+        dst.* = @floatCast(src);
+    }
     return true;
 }
 
