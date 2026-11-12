@@ -207,6 +207,9 @@ pub const FrozenCtx = struct {
     extras: []WorkerLocal = &.{},
     result0: []f64 = &.{},
     result1: []f64 = &.{},
+    /// Set after a successful `ensureAllRanksReady` so Acc-stop `train(1)` / eval
+    /// can reuse Session-owned ctx without rebuilding runout tables.
+    ranks_ready: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, game: compile.CompiledGame, state: *training_state.TrainingState) FrozenError!FrozenCtx {
         return initCommon(allocator, game, state, 1);
@@ -614,11 +617,14 @@ pub const FrozenCtx = struct {
 
     /// Fill every five-card runout rank/showdown table on the calling thread
     /// before a multithreaded pass (C++ `ensure_ranks`). Workers then only read.
-    fn ensureAllRanks(self: *FrozenCtx) FrozenError!void {
+    /// Idempotent once `ranks_ready` — Acc-stop reuses a Session-owned ctx.
+    pub fn ensureAllRanksReady(self: *FrozenCtx) FrozenError!void {
+        if (self.ranks_ready) return;
         var dead: [52]bool = .{false} ** 52;
         for (self.game.board) |c| dead[@intCast(c)] = true;
         if (self.game.board.len == 5) {
             _ = try self.ensureRanks(-1, -1);
+            self.ranks_ready = true;
             return;
         }
         if (self.game.board.len == 4) {
@@ -627,6 +633,7 @@ pub const FrozenCtx = struct {
                 if (dead[@intCast(river)]) continue;
                 _ = try self.ensureRanks(-1, river);
             }
+            self.ranks_ready = true;
             return;
         }
         if (self.game.board.len != 3) return error.InvalidFrozen;
@@ -639,6 +646,7 @@ pub const FrozenCtx = struct {
                 _ = try self.ensureRanks(turn, river);
             }
         }
+        self.ranks_ready = true;
     }
 
     fn ensureRanks(self: *FrozenCtx, turn: i32, river: i32) FrozenError!*const RunoutRanks {
@@ -1737,20 +1745,20 @@ pub fn trainFrozenCfrPlus(
     return trainFrozenCfrPlusThreaded(allocator, game, state, iterations, 1, null, null);
 }
 
-pub fn trainFrozenCfrPlusThreaded(
-    allocator: std.mem.Allocator,
-    game: compile.CompiledGame,
+/// Train on a caller-owned ctx (Session-persistent ranks / scratch).
+/// Ensures ranks once; does not create or destroy the ctx.
+pub fn trainFrozenCfrPlusOnCtx(
+    ctx: *FrozenCtx,
     state: *training_state.TrainingState,
     iterations: i32,
-    threads: u32,
     publish_hook: ?PublishHook,
     publish_ctx: ?*anyopaque,
 ) FrozenError!training_state.PublishedPolicy {
     if (iterations < 1) return error.InvalidFrozen;
-    var ctx = try FrozenCtx.initThreaded(allocator, game, state, threads);
-    defer ctx.deinit();
-    // Match C++ train_frozen: materialize all runout showdown tables before walks.
-    try ctx.ensureAllRanks();
+    ctx.state = state;
+    try ctx.ensureAllRanksReady();
+    const game = ctx.game;
+    const allocator = ctx.allocator;
     const w = &ctx.workspace;
     var published = training_state.PublishedPolicy{ .allocator = allocator };
     var step: i32 = 0;
@@ -1791,22 +1799,28 @@ pub fn trainFrozenCfrPlusThreaded(
     return published;
 }
 
-/// Frozen evaluate_profile: on-path + unilateral BR → NashConv / Accuracy.
-/// Matches C++ `StreetBatchSolver::Engine::evaluate_profile`.
-pub fn evaluatePublishedFrozen(
+pub fn trainFrozenCfrPlusThreaded(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
-    average: []const f32,
-) FrozenError!FrozenEval {
-    return evaluatePublishedFrozenThreaded(allocator, game, average, 1);
+    state: *training_state.TrainingState,
+    iterations: i32,
+    threads: u32,
+    publish_hook: ?PublishHook,
+    publish_ctx: ?*anyopaque,
+) FrozenError!training_state.PublishedPolicy {
+    if (iterations < 1) return error.InvalidFrozen;
+    var ctx = try FrozenCtx.initThreaded(allocator, game, state, threads);
+    defer ctx.deinit();
+    return trainFrozenCfrPlusOnCtx(&ctx, state, iterations, publish_hook, publish_ctx);
 }
 
-pub fn evaluatePublishedFrozenThreaded(
-    allocator: std.mem.Allocator,
-    game: compile.CompiledGame,
+/// Evaluate on a caller-owned ctx (reuses Session ranks). Match C++ evaluate_profile.
+pub fn evaluatePublishedFrozenOnCtx(
+    ctx: *FrozenCtx,
     average: []const f32,
-    threads: u32,
 ) FrozenError!FrozenEval {
+    const game = ctx.game;
+    const allocator = ctx.allocator;
     var owned: ?[]f32 = null;
     defer if (owned) |buf| allocator.free(buf);
     var sigma = average;
@@ -1819,9 +1833,7 @@ pub fn evaluatePublishedFrozenThreaded(
         return error.InvalidFrozen;
     }
 
-    var ctx = try FrozenCtx.initEvalThreaded(allocator, game, threads);
-    defer ctx.deinit();
-    try ctx.ensureAllRanks();
+    try ctx.ensureAllRanksReady();
     const w = &ctx.workspace;
 
     ctx.prepareResponseRoot(w);
@@ -1846,6 +1858,27 @@ pub fn evaluatePublishedFrozenThreaded(
         .nash_gap = nash_gap,
         .accuracy = 0.5 * nash_gap,
     };
+}
+
+/// Frozen evaluate_profile: on-path + unilateral BR → NashConv / Accuracy.
+/// Matches C++ `StreetBatchSolver::Engine::evaluate_profile`.
+pub fn evaluatePublishedFrozen(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    average: []const f32,
+) FrozenError!FrozenEval {
+    return evaluatePublishedFrozenThreaded(allocator, game, average, 1);
+}
+
+pub fn evaluatePublishedFrozenThreaded(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    average: []const f32,
+    threads: u32,
+) FrozenError!FrozenEval {
+    var ctx = try FrozenCtx.initEvalThreaded(allocator, game, threads);
+    defer ctx.deinit();
+    return evaluatePublishedFrozenOnCtx(&ctx, average);
 }
 
 test "frozen river smoke trains" {

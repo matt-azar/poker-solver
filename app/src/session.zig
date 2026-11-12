@@ -60,6 +60,9 @@ pub const Session = struct {
     frozen: bool = false,
     /// Shared worker budget for frozen chance steal (D3). From config `threads` or host override.
     threads: u32 = 1,
+    /// Persistent StreetBatch-style engine: ranks + worker scratch survive Acc-stop
+    /// `train(1)` / eval cycles (C++ Engine lifetime). Cleared on `begin` / deinit.
+    frozen_ctx: ?poker_engine.solve.frozen_walk.FrozenCtx = null,
     /// Protects phase / published swap / reader count (mid-train Study browse).
     mu: std.Thread.Mutex = .{},
     readers: u32 = 0,
@@ -82,6 +85,11 @@ pub const Session = struct {
     }
 
     fn clearSolution(self: *Session) void {
+        // Drop frozen engine before game tables it references.
+        if (self.frozen_ctx) |*ctx| {
+            ctx.deinit();
+            self.frozen_ctx = null;
+        }
         if (self.config_text.len != 0) {
             self.allocator.free(self.config_text);
             self.config_text = &.{};
@@ -119,8 +127,41 @@ pub const Session = struct {
     }
 
     /// Override worker count (host D3 budget). Clamped to 1..64.
+    /// Recreates persistent frozen ctx on next train/eval if the count changes.
     pub fn setThreads(self: *Session, threads: u32) void {
-        self.threads = if (threads < 1) 1 else @min(threads, 64);
+        const next: u32 = if (threads < 1) 1 else @min(threads, 64);
+        if (next != self.threads) {
+            if (self.frozen_ctx) |*ctx| {
+                ctx.deinit();
+                self.frozen_ctx = null;
+            }
+        }
+        self.threads = next;
+    }
+
+    /// Create or reuse Session-owned FrozenCtx (ranks filled once).
+    fn ensureFrozenCtx(self: *Session) SessionError!*poker_engine.solve.frozen_walk.FrozenCtx {
+        const game = self.game orelse return error.InvalidSession;
+        const state = &(self.training orelse return error.InvalidSession);
+        if (self.frozen_ctx) |*ctx| {
+            if (ctx.threads == self.threads) {
+                ctx.state = state;
+                ctx.game = game;
+                return ctx;
+            }
+            ctx.deinit();
+            self.frozen_ctx = null;
+        }
+        var ctx = try poker_engine.solve.frozen_walk.FrozenCtx.initThreaded(
+            self.allocator,
+            game,
+            state,
+            self.threads,
+        );
+        errdefer ctx.deinit();
+        try ctx.ensureAllRanksReady();
+        self.frozen_ctx = ctx;
+        return &(self.frozen_ctx.?);
     }
 
     /// Begin a new solve from street-config text. On failure, prior solution is kept.
@@ -184,16 +225,15 @@ pub const Session = struct {
             self.mu.unlock();
             return error.InvalidSession;
         }
-        const game = self.game orelse {
+        if (self.game == null) {
             self.mu.unlock();
             return error.InvalidSession;
-        };
+        }
         const state = &(self.training orelse {
             self.mu.unlock();
             return error.InvalidSession;
         });
         self.phase = .training;
-        const threads = self.threads;
         self.mu.unlock();
         errdefer {
             self.mu.lock();
@@ -201,13 +241,12 @@ pub const Session = struct {
             self.mu.unlock();
         }
 
-        // StreetBatch-style frozen CFR+; mid-iter publish via reader-lease swap (R10).
-        var stub = try poker_engine.solve.frozen_walk.trainFrozenCfrPlusThreaded(
-            self.allocator,
-            game,
+        // Persistent FrozenCtx: ranks / scratch survive Acc-stop train(1) cycles.
+        const ctx = try self.ensureFrozenCtx();
+        var stub = try poker_engine.solve.frozen_walk.trainFrozenCfrPlusOnCtx(
+            ctx,
             state,
             iterations,
-            threads,
             onTrainPublished,
             self,
         );
@@ -217,6 +256,15 @@ pub const Session = struct {
         self.mu.lock();
         self.phase = .published;
         self.mu.unlock();
+    }
+
+    /// Frozen NashConv / Accuracy on the Session-owned engine (reuses ranks).
+    pub fn evaluateFrozen(
+        self: *Session,
+        average: []const f32,
+    ) SessionError!poker_engine.solve.frozen_walk.FrozenEval {
+        const ctx = try self.ensureFrozenCtx();
+        return poker_engine.solve.frozen_walk.evaluatePublishedFrozenOnCtx(ctx, average);
     }
 
     /// Borrow published policy for analysis. Safe while train continues (D2/D3).
