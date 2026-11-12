@@ -196,13 +196,28 @@ export async function ipcPause(jobId?: string | null): Promise<unknown> {
 }
 
 /**
- * Host cancel (Study stop). Requires a job_id — defaults to the Study train id
- * used by `ipcSolve` (`j-study`). This is cancel-of-job, not stop-and-keep;
- * Session continue-on-same-id remains a follow-on.
+ * Host cancel (Study stop). Requires a job_id minted by the client for the
+ * active train (ZR-90). This is cancel-of-job; continue uses a fresh solve.
  */
 export async function ipcCancel(jobId?: string | null): Promise<unknown> {
-  const env = await solverEngineRequest("cancel", null, jobId ?? "j-study");
+  if (!jobId) {
+    throw new Error("cancel requires a job_id");
+  }
+  const env = await solverEngineRequest("cancel", null, jobId);
   return env.body;
+}
+
+let studyJobSeq = 0;
+
+/** Mint a per-solve job id for Study IPC (ZR-90). */
+export function mintStudyJobId(): string {
+  studyJobSeq += 1;
+  return `j${studyJobSeq}`;
+}
+
+/** Test helper — reset the Study job id counter. */
+export function resetStudyJobIdCounterForTests(): void {
+  studyJobSeq = 0;
 }
 
 export async function ipcOpen(path: string): Promise<unknown> {
@@ -253,7 +268,39 @@ export async function ipcBeginConfig(configText: string): Promise<unknown> {
   return env.body;
 }
 
-export async function ipcSolve(iterations: number, jobId?: string): Promise<unknown> {
-  const env = await solverEngineRequest("solve", { iterations }, jobId ?? null);
+export async function ipcGetConfig(): Promise<unknown> {
+  const env = await solverEngineRequest("get_config");
+  return env.body;
+}
+
+export type IpcSolveOptions = {
+  iterations: number;
+  accuracy?: number;
+  time_limit?: number;
+  eval_every?: number;
+  jobId?: string | null;
+};
+
+export async function ipcSolve(
+  iterationsOrOpts: number | IpcSolveOptions,
+  jobId?: string,
+): Promise<unknown> {
+  const opts: IpcSolveOptions =
+    typeof iterationsOrOpts === "number"
+      ? { iterations: iterationsOrOpts, jobId: jobId ?? null }
+      : iterationsOrOpts;
+  const body: Record<string, unknown> = {
+    iterations: Math.max(1, Math.trunc(opts.iterations || 1)),
+  };
+  if (opts.accuracy != null && Number.isFinite(opts.accuracy) && opts.accuracy > 0) {
+    body.accuracy = opts.accuracy;
+  }
+  if (opts.time_limit != null && Number.isFinite(opts.time_limit) && opts.time_limit >= 0) {
+    body.time_limit = opts.time_limit;
+  }
+  if (opts.eval_every != null && Number.isFinite(opts.eval_every) && opts.eval_every > 0) {
+    body.eval_every = Math.trunc(opts.eval_every);
+  }
+  const env = await solverEngineRequest("solve", body, opts.jobId ?? null);
   return env.body;
 }

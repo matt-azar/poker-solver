@@ -13,12 +13,13 @@ import { decodeErrorPayload } from "./contracts/error";
 import { decodeReadyPayload, type ReadyPayload } from "./contracts/ready";
 import { decodeStatusPayload } from "./contracts/status";
 import { normalizeRunoutsPayload, type RunoutsModel } from "./runouts";
-import { formatSolveJobStreetConfig } from "./streetConfigText";
+import { formatSolveJobStreetConfig, parseStreetConfigTextToSolutionConfig } from "./streetConfigText";
 import {
   ipcBeginConfig,
   ipcCancel,
   ipcDeleteLock,
   ipcEquity,
+  ipcGetConfig,
   ipcListLocks,
   ipcNode,
   ipcOpen,
@@ -28,6 +29,7 @@ import {
   ipcSolve,
   ipcStatus,
   ipcValues,
+  mintStudyJobId,
   isIpcTransport,
 } from "./transport";
 
@@ -79,15 +81,26 @@ async function readBody(response: Response): Promise<unknown> {
   }
 }
 
+function isRootStudyNodeId(nodeId: string | undefined): boolean {
+  if (!nodeId) return true;
+  return /^p0\.t-1\.r-1$/i.test(nodeId.trim());
+}
+
 export class EngineClient {
   private readonly constructorBaseUrl: string | undefined;
   private runtimeBaseUrl: string | undefined;
   private readonly fetchImpl: typeof fetch;
+  /** Last minted Study train job id (ZR-90 stop/cancel). */
+  private lastJobId: string | null = null;
 
   constructor(options: EngineClientOptions = {}) {
     this.constructorBaseUrl =
       options.baseUrl !== undefined ? options.baseUrl.replace(/\/$/, "") : undefined;
     this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
+  }
+
+  lastStudyJobId(): string | null {
+    return this.lastJobId;
   }
 
   /** Packaged Study sets this after `ensureEngine()` resolves the owned sidecar. */
@@ -214,26 +227,43 @@ export class EngineClient {
       }
       const configText = formatSolveJobStreetConfig(job);
       const iterations = Math.max(1, Math.trunc(job.iterations || 1));
-      // Host train replies when finished (async worker; Tauri RPC wall 240s).
-      // Prefer job.time_limit as a soft note only — host cancel/time_limit TBD.
+      const jobId = mintStudyJobId();
+      this.lastJobId = jobId;
       await ipcBeginConfig(configText);
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      const body = (await ipcSolve(iterations, "j-study")) as {
+      const accuracy =
+        typeof job.accuracy === "number" && Number.isFinite(job.accuracy)
+          ? job.accuracy
+          : undefined;
+      const time_limit =
+        typeof job.time_limit === "number" && Number.isFinite(job.time_limit)
+          ? job.time_limit
+          : undefined;
+      const body = (await ipcSolve({
+        iterations,
+        accuracy,
+        time_limit,
+        jobId,
+      })) as {
         solution_id?: number;
         policy_revision?: number;
         trained?: number;
+        terminal_reason?: string;
+        threads?: number;
       };
       return {
         running: false,
-        job_id: "j-study",
+        job_id: jobId,
         solution_id:
           body.solution_id != null && body.solution_id > 0
             ? `s${body.solution_id}`
             : null,
         policy_revision: body.policy_revision ?? 0,
         trained: body.trained ?? iterations,
+        terminal_reason: body.terminal_reason ?? "completed",
+        threads: body.threads,
         transport: "ipc",
       };
     }
@@ -244,7 +274,7 @@ export class EngineClient {
 
   async pause(jobId?: string): Promise<unknown> {
     if (isIpcTransport()) {
-      return ipcPause(jobId ?? null);
+      return ipcPause(jobId ?? this.lastJobId);
     }
     const { response, data } = await this.request(
       "POST",
@@ -257,12 +287,16 @@ export class EngineClient {
 
   /**
    * Stop a train/analysis job.
-   * On IPC this maps to host `cancel` (job cancel), not HTTP stop-and-keep.
-   * Missing jobId defaults to the Study train id (`j-study`).
+   * On IPC this maps to host `cancel` (cooperative stop at iteration boundary).
+   * Missing jobId uses the last minted Study train id (ZR-90).
    */
   async stop(jobId?: string): Promise<unknown> {
     if (isIpcTransport()) {
-      return ipcCancel(jobId ?? null);
+      const id = jobId ?? this.lastJobId;
+      if (!id) {
+        throw new EngineError("no active study job to cancel", 400, null);
+      }
+      return ipcCancel(id);
     }
     const { response, data } = await this.request(
       "POST",
@@ -277,6 +311,8 @@ export class EngineClient {
     solutionId: string,
     body: { iterations: number; time_limit?: number },
   ): Promise<unknown> {
+    // Continue IPC wiring owned by parallel UI audit worker (ZR-98). Host already
+    // exposes has_training / can_continue on status for that work.
     const { response, data } = await this.request(
       "POST",
       `/api/solutions/${solutionId}/continue`,
@@ -373,16 +409,23 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      // Host equity resolves Study node_id for identity; math is still
-      // starting-range/board check-down (strategy-reach residual).
+      // Gate incorrect node equity: only root/starting-board until reach-aware path.
+      if (nodeId && !isRootStudyNodeId(nodeId)) {
+        throw new EngineError(
+          "node-conditioned equity is not available yet; equity is root/starting-board only",
+          501,
+          { code: "node_equity_unsupported", node_id: nodeId },
+        );
+      }
       const data = await ipcEquity(
         nodeId ? { nodeId } : { nodeIndex: 0, nodeId: "p0.t-1.r-1" },
       );
       return {
         ...(data as object),
         solution_id: solutionId,
-        ...(nodeId ? { node_id: nodeId } : {}),
+        ...(nodeId ? { node_id: nodeId } : { node_id: "p0.t-1.r-1" }),
         pending: false,
+        equity_scope: "starting_board",
       };
     }
     const path = nodeId
@@ -405,9 +448,12 @@ export class EngineClient {
         throw new EngineError("aborted", 0, null);
       }
       // Thin sync warm: Study still polls getValues/getEquity. No 202 job handle yet.
-      // Skip runouts on IPC until a host op exists.
-      const wanted = metrics.filter((m) => m === "values" || m === "equity");
-      void nodeId;
+      // Skip runouts on IPC until a host op exists. Skip non-root equity (gate).
+      const wanted = metrics.filter((m) => {
+        if (m === "values") return true;
+        if (m === "equity") return isRootStudyNodeId(nodeId);
+        return false;
+      });
       return {
         pending: false,
         ok: true,
@@ -525,6 +571,15 @@ export class EngineClient {
 
   /** Spot config for a loaded solution (ranges, bets, tree edits, optional settings). */
   async getSolutionConfig(solutionId: string): Promise<Record<string, unknown>> {
+    if (isIpcTransport()) {
+      void solutionId;
+      const body = (await ipcGetConfig()) as { street_config_text?: string };
+      const text = typeof body.street_config_text === "string" ? body.street_config_text : "";
+      if (!text.trim()) {
+        throw new EngineError("solution config unavailable", 404, body);
+      }
+      return parseStreetConfigTextToSolutionConfig(text);
+    }
     const { response, data } = await this.request(
       "GET",
       `/api/solutions/${solutionId}/config`,

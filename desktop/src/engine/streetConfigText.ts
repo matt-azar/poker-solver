@@ -157,3 +157,101 @@ export function formatSolveJobStreetConfig(job: SolveJobRequest): string {
   }
   return `${lines.join("\n")}\n`;
 }
+
+/**
+ * Parse `street-config 1` text back into the loose solution-config object
+ * `draftPartialFromSolutionConfig` understands (ZR-92 open → Build draft).
+ */
+export function parseStreetConfigTextToSolutionConfig(
+  text: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { street_config_text: text };
+  const treeEdits: string[] = [];
+  const sizeKeys: Record<string, string> = {
+    "oop-bets": "oop_bets",
+    "ip-bets": "ip_bets",
+    "oop-raises": "oop_raises",
+    "ip-raises": "ip_raises",
+    "oop-flop-bets": "oop_flop_bets",
+    "oop-turn-bets": "oop_turn_bets",
+    "oop-river-bets": "oop_river_bets",
+    "ip-flop-bets": "ip_flop_bets",
+    "ip-turn-bets": "ip_turn_bets",
+    "ip-river-bets": "ip_river_bets",
+    "oop-flop-raises": "oop_flop_raises",
+    "oop-turn-raises": "oop_turn_raises",
+    "oop-river-raises": "oop_river_raises",
+    "ip-flop-raises": "ip_flop_raises",
+    "ip-turn-raises": "ip_turn_raises",
+    "ip-river-raises": "ip_river_raises",
+    "oop-donk": "oop_donk",
+    "oop-flop-donk": "oop_flop_donk",
+    "oop-turn-donk": "oop_turn_donk",
+    "oop-river-donk": "oop_river_donk",
+  };
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#") || line.startsWith("street-config")) continue;
+    const sp = line.indexOf(" ");
+    const key = sp < 0 ? line : line.slice(0, sp);
+    const value = sp < 0 ? "" : line.slice(sp + 1).trim();
+    switch (key) {
+      case "board":
+        out.board = value.split(/\s+/).filter(Boolean);
+        break;
+      case "pot":
+      case "stack":
+      case "max-raises":
+      case "allow-all-in":
+      case "allow-three-bet":
+      case "all-in-threshold":
+      case "pot-cap":
+      case "merge-threshold":
+      case "rake-rate":
+      case "rake-cap":
+      case "memory-mib":
+      case "threads":
+      case "first-to-act":
+        out[key.replace(/-/g, "_")] = Number(value);
+        break;
+      case "oop-range":
+        out.oop_range = value;
+        break;
+      case "ip-range":
+        out.ip_range = value;
+        break;
+      case "icm-stacks":
+        out.icm_stacks = value
+          .split(/[\s,]+/)
+          .filter(Boolean)
+          .map(Number);
+        break;
+      case "icm-payouts":
+        out.icm_payouts = value
+          .split(/[\s,]+/)
+          .filter(Boolean)
+          .map(Number);
+        break;
+      case "oop-raise-multiples":
+      case "ip-raise-multiples":
+        out[key.replace(/-/g, "_")] = value
+          .split(/[\s,]+/)
+          .filter(Boolean)
+          .map(Number);
+        break;
+      case "tree-edit":
+        if (value) treeEdits.push(value);
+        break;
+      default: {
+        const mapped = sizeKeys[key];
+        if (mapped) {
+          // Present even when blank so Build can rebuild check-only streets.
+          out[mapped] = value.length === 0 ? [] : value.split(/\s+/).filter(Boolean);
+        }
+        break;
+      }
+    }
+  }
+  if (treeEdits.length > 0) out.tree_edits = treeEdits;
+  return out;
+}

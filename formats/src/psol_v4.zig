@@ -48,6 +48,9 @@ pub const Document = struct {
     strategy_edits_text: []u8 = &.{},
     metrics: Metrics = .{},
     has_metrics: bool = false,
+    /// True when the v4 `flag_training` bit is set (may have empty tables on
+    /// degenerate check-only trees). Distinct from browse-only documents.
+    has_training_flag: bool = false,
 
     pub fn deinit(self: *Document) void {
         freeSlice(self.allocator, self.config_text);
@@ -63,7 +66,7 @@ pub const Document = struct {
     }
 
     pub fn hasTraining(self: Document) bool {
-        return self.regret.len != 0 or self.strategy_sum.len != 0;
+        return self.has_training_flag or self.regret.len != 0 or self.strategy_sum.len != 0;
     }
 
     pub fn hasOverlays(self: Document) bool {
@@ -340,6 +343,7 @@ pub fn decode(allocator: std.mem.Allocator, file: []const u8) OpenError!Document
     document.average = try reader.f32s(allocator);
 
     if ((flags & flag_training) != 0) {
+        document.has_training_flag = true;
         document.trained = try reader.i32r();
         document.regret = try reader.f32s(allocator);
         document.strategy_sum = try reader.f32s(allocator);
@@ -363,18 +367,44 @@ pub fn decode(allocator: std.mem.Allocator, file: []const u8) OpenError!Document
     return document;
 }
 
+pub const max_psol_bytes: usize = 512 * 1024 * 1024;
+
+/// Atomic save: write a sibling temp file, then rename over the destination (ZR-92).
+/// On Windows, rename-over-existing may fail — delete the destination then retry.
 pub fn writeFile(allocator: std.mem.Allocator, path: []const u8, document: Document) OpenError!void {
     const bytes = try encode(allocator, document);
     defer allocator.free(bytes);
-    const file = std.fs.cwd().createFile(path, .{}) catch return error.InvalidPsol;
-    defer file.close();
-    file.writeAll(bytes) catch return error.InvalidPsol;
+    if (bytes.len > max_psol_bytes) return error.InvalidPsol;
+
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    // Prefer a same-directory sibling. Avoid embedding path separators that JSON
+    // might mis-handle; callers must pass an already-unescaped filesystem path.
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp-{d}", .{ path, std.time.milliTimestamp() }) catch {
+        return error.InvalidPsol;
+    };
+    {
+        const file = std.fs.cwd().createFile(tmp_path, .{}) catch return error.InvalidPsol;
+        defer file.close();
+        file.writeAll(bytes) catch {
+            std.fs.cwd().deleteFile(tmp_path) catch {};
+            return error.InvalidPsol;
+        };
+        file.sync() catch {};
+    }
+    std.fs.cwd().rename(tmp_path, path) catch {
+        // Windows: replace existing destination.
+        std.fs.cwd().deleteFile(path) catch {};
+        std.fs.cwd().rename(tmp_path, path) catch {
+            std.fs.cwd().deleteFile(tmp_path) catch {};
+            return error.InvalidPsol;
+        };
+    };
 }
 
 pub fn readFile(allocator: std.mem.Allocator, path: []const u8) OpenError!Document {
     const file = std.fs.cwd().openFile(path, .{}) catch return error.UnsupportedFormat;
     defer file.close();
-    const bytes = file.readToEndAlloc(allocator, 512 * 1024 * 1024) catch return error.OutOfMemory;
+    const bytes = file.readToEndAlloc(allocator, max_psol_bytes) catch return error.OutOfMemory;
     defer allocator.free(bytes);
     return decode(allocator, bytes);
 }
