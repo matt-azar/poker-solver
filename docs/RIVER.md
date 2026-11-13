@@ -2,7 +2,7 @@
 
 One no-limit betting street on a fixed five-card board. Equilibrium of the configured bet-size tree.
 
-**Shipping on `zig-rewrite`:** five-card Study solves go through Zig `solver-engine` IPC (same Session path as flop/turn). C++ `RiverGame` / `river_solver` / Explorer names below are **historical** algorithm vocabulary — not a live product binary. See [STREETS.md](STREETS.md), [DESKTOP_UI.md](DESKTOP_UI.md).
+**Shipping on `main`:** five-card Study solves go through Zig `solver-engine` IPC (same Session path as flop/turn). C++ `RiverGame` / `river_solver` / Explorer names below are **historical** algorithm vocabulary — not a live product binary. See [STREETS.md](STREETS.md), [DESKTOP_UI.md](DESKTOP_UI.md).
 
 Historically, `RiverGame` + `CfrTrainer` was the five-card oracle and `RiverBatchSolver` was for internal oracle/legacy fixtures. Chance is the ordered hand distribution from [HOLDEM.md](HOLDEM.md): player 0 OOP, player 1 IP; a hand pair is legal only when the four private cards and the board are disjoint. No RNG.
 

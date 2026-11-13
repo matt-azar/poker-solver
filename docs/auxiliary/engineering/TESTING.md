@@ -1,6 +1,6 @@
 # Testing
 
-Product validation on `zig-rewrite` is **Zig engine tests**, **desktop Vitest**, and **real-sidecar IPC contract smokes**. The C++ `ctest` / `poker_http_tests` / spawned-`explorer` matrix is removed (#286–#287).
+Product validation on `main` is **Zig engine tests**, **desktop Vitest**, and **real-sidecar IPC contract smokes**. The C++ `ctest` / `poker_http_tests` / spawned-`explorer` matrix is removed (#286–#287).
 
 ## Quick commands
 

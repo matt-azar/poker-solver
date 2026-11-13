@@ -1,5 +1,6 @@
 # Zig engine gate (build/test + ready/contract smokes).
-# Runs on zig-rewrite and on PRs that touch the Zig tree / this workflow.
+# Runs on main (and zig-rewrite while that alias remains) and on PRs that touch
+# the Zig tree / this workflow.
 # Desktop Vitest/tsc lives in ci.yml; NSIS packaging in windows-installer.yml.
 # C++ explorer matrices were removed with the strip (#286–#287).
 
@@ -7,7 +8,7 @@ name: Zig
 
 on:
   push:
-    branches: [zig-rewrite]
+    branches: [main, zig-rewrite]
     paths:
       - "build.zig"
       - "build.zig.zon"

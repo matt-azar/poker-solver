@@ -8,7 +8,7 @@ Keep the lessons doc current with durable traps agents rediscover. Prefer short 
 
 ## Cadence
 
-- **Cursor Automation (preferred):** [Update docs](https://cursor.com/automations/138d322b-ddfd-11f1-ba91-f63b1661ac50) (or recreate from the prompt below at [cursor.com/automations](https://cursor.com/automations)). Repository must be attached — cron defaults otherwise run with no repo. Prefer the **product tip** branch (`zig-rewrite` until cutover merges to `main`).
+- **Cursor Automation (preferred):** [Update docs](https://cursor.com/automations/138d322b-ddfd-11f1-ba91-f63b1661ac50) (or recreate from the prompt below at [cursor.com/automations](https://cursor.com/automations)). Repository must be attached — cron defaults otherwise run with no repo. Prefer the **product tip** branch (`main`).
 - **Also useful:** GitHub **Pull request merged** trigger on this repo with the same prompt narrowed to “only if this merge taught a new trap.”
 - Manual: any agent may follow this playbook when asked.
 

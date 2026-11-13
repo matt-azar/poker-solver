@@ -1,7 +1,7 @@
 name: CI
 
 # Desktop Study UI gate. Zig build/test lives in zig.yml; Windows NSIS in
-# windows-installer.yml. C++ / holdem-explorer matrices were removed on zig-rewrite
+# windows-installer.yml. C++ / holdem-explorer matrices were removed on main
 # (owner GO 2026-11-12 — full Zig, no C++ shipping path).
 on:
   push:

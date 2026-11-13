@@ -4,7 +4,7 @@ Comparison target: documented PioSolver 3.11. A hands-on menu audit of a pinned 
 
 States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 
-**Shipping surface on `zig-rewrite`:** Zig `solver-engine` typed IPC + React Study (`desktop/`). Evidence below is Zig / desktop unless marked **historical (C++)**. Do not treat retired explorer HTTP / CMake CI as living ship proof.
+**Shipping surface on `main`:** Zig `solver-engine` typed IPC + React Study (`desktop/`). Evidence below is Zig / desktop unless marked **historical (C++)**. Do not treat retired explorer HTTP / CMake CI as living ship proof.
 
 | Family | Status | Milestone | Evidence in this repository | Limitation |
 | --- | --- | --- | --- | --- |

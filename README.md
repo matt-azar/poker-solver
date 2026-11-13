@@ -6,7 +6,7 @@ Heads-up no-limit Texas Hold'em GTO solver (**Zig**) with a local Study workstat
 
 Flop, turn, and river share one public betting tree. Convergence is an equilibrium of the configured bet-size tree.
 
-The legacy C++ `holdem-explorer` / CMake shipping path is **removed** on `zig-rewrite` (owner GO 2026-11-12). Study is Zig typed-IPC only.
+The legacy C++ `holdem-explorer` / CMake shipping path is **removed** on `main` (owner GO 2026-11-12; Zig cutover). Study is Zig typed-IPC only.
 
 ## Windows installer
 

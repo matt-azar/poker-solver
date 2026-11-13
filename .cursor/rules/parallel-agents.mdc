@@ -12,13 +12,13 @@ alwaysApply: true
 - Assume siblings may write into `/workspace` even when asked to use a worktree. Do not checkout/commit there while they run unless ownership is proven disjoint.
 - Give each agent a disjoint path list. Serialize `build.zig`, `tauri.conf.json`, `solver_engine.rs`, `host/src/dispatch.zig`, and `desktop/src/engine/{client,transport}.ts`, or have only the parent touch them.
 - Subagents often cannot `ManagePullRequest`; the parent opens PRs after push and subscribes CI.
-- If the tree is interleaved: WIP snapshot branch, then path-checkout onto clean `cursor/<feature>-<run-suffix>` branches from the product tip (`zig-rewrite` until cutover merges to `main`).
+- If the tree is interleaved: WIP snapshot branch, then path-checkout onto clean `cursor/<feature>-<run-suffix>` branches from the product tip (`main`).
 - Re-run `git status` immediately before every commit; restore unexpected paths.
 - Follow-ups committed on an already-merged PR head never reach the base — rebase onto the correct tip as a new PR.
 
 **Architecture / Study correctness (short)**
 
-- On `zig-rewrite`, Study ships Zig `solver-engine` typed IPC only. Do not reintroduce `holdem-explorer`, CMake product builds, HTTP `:8765`, or HTTP fallthrough while IPC is active.
+- On `main`, Study ships Zig `solver-engine` typed IPC only. Do not reintroduce `holdem-explorer`, CMake product builds, HTTP `:8765`, or HTTP fallthrough while IPC is active.
 - Windows: GUI subsystem + `CREATE_NO_WINDOW` for `solver-engine`; pin `-Dcpu=x86_64_v2`; drain stderr on spawn.
 - Tauri IPC: demux by `request_id`; don't hold the lifecycle mutex for the whole RPC; don't kill train on one timeout.
 - Nash gap is NashConv (sum of BR gains). Accuracy / stop criterion is Pio’s average (NashConv/2); default unit is pot fraction. Compare stop thresholds to Accuracy chips, not raw NashConv.

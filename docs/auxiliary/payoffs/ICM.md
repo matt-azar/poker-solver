@@ -61,7 +61,7 @@ finished Study ICM shipping claim from the math pins alone.
 
 Historical C++ Explorer Job JSON used flat keys `icm_stacks` / `icm_payouts`
 and returned HTTP 400 on invalid values; that HTTP surface is removed on
-`zig-rewrite`.
+`main`.
 
 ## Solve path
 

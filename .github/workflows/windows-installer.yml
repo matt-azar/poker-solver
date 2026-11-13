@@ -12,7 +12,8 @@
 #   builds and attaches the installer to a GitHub Release.
 # - Stable download name: Holdem-Study-windows-x64-setup.exe
 #   (README /releases/latest/download/… stays current across cuts)
-# - Path-filtered main / zig-rewrite / PR pushes below only upload the Actions artifact.
+# - Path-filtered main (and zig-rewrite while alias remains) / PR pushes below
+#   only upload the Actions artifact.
 
 name: Windows Installer
 

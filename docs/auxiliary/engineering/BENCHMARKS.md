@@ -2,7 +2,7 @@
 
 **Historical C++ measurement corpus.** Tables below record C++ `street_solver` /
 `river_solver` / `build\Release\*.exe` runs from before the Zig cutover. They
-are not the `zig-rewrite` shipping path. For current product validation see
+are not the `main` shipping path. For current product validation see
 [TESTING.md](TESTING.md) and optional Zig digs in [ZIG_RELEASE_GATES.md](ZIG_RELEASE_GATES.md).
 Study fixtures still live under [benchmarks/study/](../../../benchmarks/study/).
 

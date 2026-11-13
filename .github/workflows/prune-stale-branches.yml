@@ -24,7 +24,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Long-lived integration heads (C++ ships on main; Zig rewrite lands here).
+          # Long-lived heads. Keep zig-rewrite protected until the cutover alias is deleted.
           protected='^(main|master|zig-rewrite)$'
 
           mapfile -t open_heads < <(
