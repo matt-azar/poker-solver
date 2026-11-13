@@ -10,7 +10,7 @@ The legacy C++ `holdem-explorer` / CMake shipping path is **removed** on `zig-re
 
 ## Windows installer
 
-Download the unsigned NSIS setup from the [latest GitHub Release](https://github.com/matt-azar/poker-solver/releases/latest) (current cut: `v0.1.4-windows`):
+Download the unsigned NSIS setup from the [latest GitHub Release](https://github.com/matt-azar/poker-solver/releases/latest) (current cut: `v0.1.5-windows`):
 
 **[Holdem Study (Windows)](https://github.com/matt-azar/poker-solver/releases/latest/download/Holdem-Study-windows-x64-setup.exe)** → `Holdem-Study-windows-x64-setup.exe`
 
