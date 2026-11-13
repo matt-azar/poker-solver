@@ -114,6 +114,45 @@ fn persist_pre_solve_diagnostics(summary: serde_json::Value) -> Result<(), Strin
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UiHangEventReport {
+    kind: String,
+    #[serde(default)]
+    timestamp: Option<String>,
+    #[serde(default)]
+    duration_ms: Option<u64>,
+    #[serde(default)]
+    detail: Option<String>,
+    #[serde(default)]
+    last_op: Option<String>,
+    #[serde(default)]
+    consecutive_status_failures: Option<u32>,
+    #[serde(default)]
+    phase: Option<String>,
+}
+
+/// Append a temporary UI-unresponsiveness signal (ZR-173). Soft timeouts that
+/// recover still leave evidence without overwriting last-fault.json.
+#[tauri::command]
+fn report_ui_hang_event(report: UiHangEventReport) -> Result<(), String> {
+    let kind = report.kind.trim();
+    if kind.is_empty() {
+        return Err("ui hang event kind required".into());
+    }
+    diagnostics::record_ui_hang_event(diagnostics::UiHangEvent {
+        timestamp: report.timestamp.unwrap_or_default(),
+        kind: kind.to_string(),
+        duration_ms: report.duration_ms,
+        detail: report.detail,
+        last_op: report.last_op,
+        consecutive_status_failures: report.consecutive_status_failures,
+        phase: report.phase,
+        ui_version: String::new(),
+    });
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg_attr(not(windows), allow(unused_mut))]
@@ -156,6 +195,7 @@ pub fn run() {
             diagnostics_dir_path,
             report_engine_fault,
             persist_pre_solve_diagnostics,
+            report_ui_hang_event,
             library::library_list_templates,
             library::library_list_ranges,
             library::library_list_recent,

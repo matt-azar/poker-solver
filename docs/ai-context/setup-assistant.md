@@ -68,7 +68,7 @@ Street sizes stay on `treeEdits` / `intent.treePreset`: `oopFlop`, `ipFlop`, `oo
 - Local postflop solver: React Study UI + `explorer` engine. OpenAI is optional; **Solve** is local.
 - Workspaces (menu bar tabs): **Study**, **Build**, **Equity**, **Compare**, **Library**.
 - Primary AI surface: floating **Study assistant** — menu bar **Assistant** toggle. Hideable, movable, resizable. Available on every workspace. Keyboard shortcuts stay on `?` (Help overlay).
-- Help overlay (`?`) shows the diagnostics folder path and offers **Open diagnostics folder** / **Copy diagnostics zip** (desktop only). Before Solve/Continue, Study writes cheap `last-solve.json` + `host-resources.json` (`snapshotKind=pre-solve`). Every Solve failed / session-dead writes `last-fault.json` and refreshes host resources (`snapshotKind=fault`) under `%LOCALAPPDATA%\Holdem Study\diagnostics` (plus `engine.log` / `session-meta.json`).
+- Help overlay (`?`) shows the diagnostics folder path and offers **Open diagnostics folder** / **Copy diagnostics zip** (desktop only). Before Solve/Continue, Study writes cheap `last-solve.json` + `host-resources.json` (`snapshotKind=pre-solve`). Every Solve failed / session-dead writes `last-fault.json` and refreshes host resources (`snapshotKind=fault`). Temporary UI unresponsiveness (status-poll timeout/slow/hung, main-thread stall) appends `ui-hang-events.json` even when the soft blip recovers. Folder: `%LOCALAPPDATA%\Holdem Study\diagnostics` (plus `engine.log` / `session-meta.json`).
 - There is **no** separate Build-page Setup assistant and **no** Help-menu “Study assistant…” entry.
 
 ### Apply / write behavior

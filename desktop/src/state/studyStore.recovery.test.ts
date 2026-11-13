@@ -94,8 +94,10 @@ vi.mock("../platform/engine", () => ({
 
 const diagMocks = vi.hoisted(() => ({
   reportSolveFailedFault: vi.fn(async () => undefined),
+  reportUiHangEvent: vi.fn(async () => undefined),
   clearSolveFaultDedupe: vi.fn(),
   persistPreSolveDiagnostics: vi.fn(async () => undefined),
+  STATUS_POLL_SLOW_MS: 1_500,
   summarizeLastSolve: vi.fn(() => ({
     snapshotKind: "pre-solve" as const,
     trigger: "solve" as const,
@@ -147,8 +149,10 @@ const diagMocks = vi.hoisted(() => ({
 
 vi.mock("../platform/diagnostics", () => ({
   reportSolveFailedFault: diagMocks.reportSolveFailedFault,
+  reportUiHangEvent: diagMocks.reportUiHangEvent,
   clearSolveFaultDedupe: diagMocks.clearSolveFaultDedupe,
   persistPreSolveDiagnostics: diagMocks.persistPreSolveDiagnostics,
+  STATUS_POLL_SLOW_MS: diagMocks.STATUS_POLL_SLOW_MS,
   summarizeLastSolve: diagMocks.summarizeLastSolve,
   summarizeContinueSolve: diagMocks.summarizeContinueSolve,
   boardLenFromStatusBoard: diagMocks.boardLenFromStatusBoard,
@@ -165,6 +169,7 @@ describe("studyStore session recovery (ZR-123)", () => {
     engineMocks.engineClient.open.mockClear();
     engineMocks.engineClient.clearLastStudyJobId.mockClear();
     diagMocks.reportSolveFailedFault.mockClear();
+    diagMocks.reportUiHangEvent.mockClear();
     diagMocks.clearSolveFaultDedupe.mockClear();
     diagMocks.persistPreSolveDiagnostics.mockClear();
     diagMocks.summarizeLastSolve.mockClear();
