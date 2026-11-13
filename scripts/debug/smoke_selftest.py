@@ -93,6 +93,53 @@ def main() -> int:
     if len(CHECKLIST) < 3:
         failures.append("windows checklist too short")
 
+    # send_report dry-run (no credentials / no network create required).
+    send_script = _HERE / "send_report.py"
+    if not send_script.is_file():
+        failures.append("missing send_report.py")
+    else:
+        with tempfile.TemporaryDirectory(prefix="study-debug-send-smoke-") as tmp_send:
+            diag_send = Path(tmp_send) / "diagnostics"
+            _synthetic_diag(diag_send)
+            import zipfile
+
+            zpath = Path(tmp_send) / "diag.zip"
+            with zipfile.ZipFile(zpath, "w") as zf:
+                for p in diag_send.iterdir():
+                    if p.is_file():
+                        zf.write(p, arcname=p.name)
+            body_out = Path(tmp_send) / "body.md"
+            json_out = Path(tmp_send) / "send.json"
+            send_rc = subprocess.call(
+                [
+                    sys.executable,
+                    str(send_script),
+                    "--zip",
+                    str(zpath),
+                    "--dry-run",
+                    "--out-body",
+                    str(body_out),
+                    "--json-out",
+                    str(json_out),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if send_rc != 0 or not body_out.is_file() or not json_out.is_file():
+                failures.append("send_report --dry-run")
+            else:
+                body_txt = body_out.read_text(encoding="utf-8")
+                if "study-debug-report" not in body_txt:
+                    failures.append("send_report body missing marker")
+            auth_rc = subprocess.call(
+                [sys.executable, str(send_script), "--auth-check"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            # auth-check may return 1 when unauthenticated — that is still a valid run.
+            if auth_rc not in (0, 1):
+                failures.append(f"send_report --auth-check rc={auth_rc}")
+
     # Front-door CLI routes to the same scripts (no rewrite).
     front = _HERE / "study_debug.py"
     if not front.is_file():
@@ -125,6 +172,13 @@ def main() -> int:
             )
             if cli_rc != 0 or not out_json.is_file():
                 failures.append("study_debug analyze subcommand")
+            send_help = subprocess.call(
+                [sys.executable, str(front), "send", "--help"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if send_help != 0:
+                failures.append("study_debug send --help")
         # Mini-app file must exist; skip import if tkinter missing (headless CI).
         if not (_HERE / "study_debug_app.py").is_file():
             failures.append("missing study_debug_app.py")

@@ -7,6 +7,7 @@ defaults. Does not replace the individual tools — it just routes to them.
 
   python scripts/debug/study_debug.py collect
   python scripts/debug/study_debug.py analyze --zip path\\to\\zip
+  python scripts/debug/study_debug.py send --zip path\\to\\zip
   python scripts/debug/study_debug.py gui
 
 Windows: double-click or run ``study-debug.cmd`` (no args opens the mini-app).
@@ -36,6 +37,7 @@ _COMMANDS: dict[str, str] = {
     "snapshot": "capture_snapshot.py",
     "stacks": "stack_sample.py",
     "smoke": "smoke_selftest.py",
+    "send": "send_report.py",
 }
 
 _ALIASES: dict[str, str] = {
@@ -50,6 +52,9 @@ _ALIASES: dict[str, str] = {
     "stack": "stacks",
     "app": "gui",
     "ui": "gui",
+    "report": "send",
+    "upload": "send",
+    "gh-send": "send",
 }
 
 
@@ -112,6 +117,7 @@ Windows (from a clone of this repo):
   scripts\\debug\\study-debug.cmd              # opens mini-app
   scripts\\debug\\study-debug.cmd collect      # evidence zip while frozen
   scripts\\debug\\study-debug.cmd analyze --zip path\\to\\diagnostics.zip
+  scripts\\debug\\study-debug.cmd send --zip path\\to\\diagnostics.zip
   scripts\\debug\\study-debug.cmd dumps
   scripts\\debug\\study-debug.cmd sidecar --exe "C:\\Path\\To\\Install\\solver-engine.exe"
 
@@ -121,7 +127,7 @@ Or:
 
 Diagnostics folder: {diag}
 
-Subcommands: collect, analyze, dumps, sidecar, probe, freeze, watch,
+Subcommands: collect, analyze, send, dumps, sidecar, probe, freeze, watch,
              snapshot, stacks, smoke, gui, windows-collect
 """.format(
             diag=diag
@@ -135,6 +141,7 @@ examples (Windows installed Study):
   study_debug.py gui
   study_debug.py collect --zip --stacks
   study_debug.py analyze --zip %%USERPROFILE%%\\Desktop\\holdem-study-diagnostics.zip
+  study_debug.py send --zip %%USERPROFILE%%\\Desktop\\holdem-study-diagnostics.zip
   study_debug.py dumps --since-hours 48
   study_debug.py sidecar --exe "C:\\Program Files\\Holdem Study\\solver-engine.exe"
   study_debug.py watch --duration 120
@@ -149,7 +156,7 @@ examples (Windows installed Study):
     ap.add_argument(
         "command",
         nargs="?",
-        help="collect | analyze | dumps | sidecar | probe | freeze | watch | "
+        help="collect | analyze | send | dumps | sidecar | probe | freeze | watch | "
         "snapshot | stacks | smoke | gui | windows-collect",
     )
     ap.add_argument(
