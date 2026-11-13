@@ -2159,6 +2159,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               boardLen:
                 boardLenFromStatusBoard(normalized.board) ??
                 boardLenFromStatusBoard(prior.draft.boardText),
+              engineAllocated:
+                normalized.engine_allocated ?? normalized.engine_heap_bytes,
+              enginePeak: normalized.engine_peak,
               lastOp: "status",
             });
           } else if (reload && normalized.solution_id) {

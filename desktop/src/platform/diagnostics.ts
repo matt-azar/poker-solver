@@ -22,6 +22,9 @@ export type SolveFaultContext = {
   iterations?: number | null;
   /** Board card count only (3/4/5) — no card text in diagnostics. */
   boardLen?: number | null;
+  /** Optional engine heap/peak bytes from status (budget dig). */
+  engineAllocated?: number | null;
+  enginePeak?: number | null;
   lastOp?: string;
   consecutiveStatusFailures?: number;
 };
@@ -45,11 +48,20 @@ export function boardLenFromStatusBoard(
   return null;
 }
 
-/** Build reason string with safe dig context (iter + board_len only). */
+function formatMiB(bytes: number | null | undefined): string | null {
+  if (bytes == null || !Number.isFinite(Number(bytes)) || Number(bytes) <= 0) {
+    return null;
+  }
+  return `${(Number(bytes) / (1024 * 1024)).toFixed(1)}MiB`;
+}
+
+/** Build reason string with safe dig context (no board cards / ranges). */
 export function formatSolveFaultReason(ctx: {
   reason: string;
   iterations?: number | null;
   boardLen?: number | null;
+  engineAllocated?: number | null;
+  enginePeak?: number | null;
 }): string {
   const base = ctx.reason.trim() || "Solve failed";
   const bits: string[] = [];
@@ -58,6 +70,14 @@ export function formatSolveFaultReason(ctx: {
   }
   if (ctx.boardLen != null && Number.isFinite(Number(ctx.boardLen))) {
     bits.push(`board_len=${Number(ctx.boardLen)}`);
+  }
+  const peak = formatMiB(ctx.enginePeak ?? null);
+  if (peak) {
+    bits.push(`peak=${peak}`);
+  }
+  const allocated = formatMiB(ctx.engineAllocated ?? null);
+  if (allocated) {
+    bits.push(`alloc=${allocated}`);
   }
   return bits.length > 0 ? `${base} (${bits.join(", ")})` : base;
 }
