@@ -147,17 +147,26 @@ pub const Manager = struct {
         if (self.queue.items.len >= max_queued_jobs) return error.QueueFull;
         try self.ensureStartedLocked();
 
-        const id = try std.fmt.allocPrint(self.allocator, "eq{d}", .{self.next_id});
-        self.next_id += 1;
-        errdefer self.allocator.free(id);
+        // Reserve map + queue capacity before transferring ownership of `request`
+        // (ZR-155). Callers free `request` on enqueue error; a mid-insert failure
+        // must not leave the map holding the same heap the caller then frees.
+        try self.jobs.ensureUnusedCapacity(1);
+        try self.queue.ensureUnusedCapacity(1);
 
+        const id = try std.fmt.allocPrint(self.allocator, "eq{d}", .{self.next_id});
+        errdefer self.allocator.free(id);
+        const id_copy = try self.allocator.dupe(u8, id);
+        errdefer self.allocator.free(id_copy);
+
+        // Fallible work is done; transfer ownership and commit both structures.
         const snap = Snapshot{
-            .id = try self.allocator.dupe(u8, id),
+            .id = id_copy,
             .state = .queued,
             .request = request,
         };
-        try self.jobs.put(id, snap);
-        try self.queue.append(id);
+        self.jobs.putAssumeCapacity(id, snap);
+        self.queue.appendAssumeCapacity(id);
+        self.next_id += 1;
         self.cv.signal();
         return id;
     }
@@ -613,6 +622,102 @@ pub fn parseJobRequest(allocator: std.mem.Allocator, body_json: []const u8) !Job
         };
     }
     return request;
+}
+
+fn testMkRequest(allocator: std.mem.Allocator) !JobRequest {
+    var request = JobRequest{
+        .client_revision = try allocator.dupe(u8, "zr155"),
+        .options = .{
+            .method = .exact,
+            .seed = 1,
+        },
+    };
+    errdefer request.deinit(allocator);
+    request.players = try allocator.alloc(PlayerSpec, 2);
+    request.players[0] = .{
+        .id = try allocator.dupe(u8, "p1"),
+        .range_text = try allocator.dupe(u8, "AsAd"),
+    };
+    request.players[1] = .{
+        .id = try allocator.dupe(u8, "p2"),
+        .range_text = try allocator.dupe(u8, "KcKd"),
+    };
+    request.board = try allocator.dupe(card.Card, &.{});
+    request.dead_cards = try allocator.dupe(card.Card, &.{});
+    return request;
+}
+
+test "enqueue OOM before ownership leaves request with caller" {
+    // ZR-155: fail map/queue/id allocations; caller must still free request once.
+    // Manager allocator is failing; request heap stays on testing.allocator.
+    var fail_idx: usize = 0;
+    while (fail_idx < 8) : (fail_idx += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{
+            .fail_index = fail_idx,
+        });
+        var mgr = Manager.init(failing.allocator());
+        defer mgr.deinit();
+
+        var request = try testMkRequest(std.testing.allocator);
+        const result = mgr.enqueue(request);
+        if (result) |id| {
+            // Unexpected success at this fail_index — still owns via manager.
+            _ = id;
+            try std.testing.expect(mgr.jobs.count() >= 1);
+            break;
+        } else |err| {
+            try std.testing.expect(err == error.OutOfMemory or err == error.QueueFull);
+            // Caller still owns request; safe single free; map must not hold it.
+            request.deinit(std.testing.allocator);
+            try std.testing.expectEqual(@as(u32, 0), mgr.jobs.count());
+            try std.testing.expectEqual(@as(usize, 0), mgr.queue.items.len);
+            if (!failing.has_induced_failure) break;
+        }
+    }
+}
+
+test "enqueue reserves then commits without partial ownership" {
+    var mgr = Manager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    const request = try testMkRequest(std.testing.allocator);
+    const id = try mgr.enqueue(request);
+    try std.testing.expect(std.mem.eql(u8, id, "eq1"));
+    try std.testing.expectEqual(@as(u32, 1), mgr.jobs.count());
+    try std.testing.expectEqual(@as(usize, 1), mgr.queue.items.len);
+    const snap = mgr.jobs.getPtr(id).?;
+    try std.testing.expect(snap.state == .queued);
+    try std.testing.expect(std.mem.eql(u8, snap.request.client_revision, "zr155"));
+}
+
+test "enqueue OOM after prior jobs still frees caller request" {
+    // Warm capacity with a healthy manager allocator, then swap in a failing one
+    // so the next enqueue fails on id allocation after ensureUnusedCapacity may
+    // succeed from retained growth — request must remain caller-owned.
+    var mgr = Manager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    const warm = try testMkRequest(std.testing.allocator);
+    _ = try mgr.enqueue(warm);
+    // Cancel/remove so queue has room but capacity is retained.
+    _ = mgr.cancel("eq1");
+    if (mgr.jobs.fetchRemove("eq1")) |kv| {
+        var snap = kv.value;
+        snap.deinit(std.testing.allocator);
+        std.testing.allocator.free(kv.key);
+    }
+    mgr.queue.clearRetainingCapacity();
+
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{
+        .fail_index = 0,
+    });
+    mgr.allocator = failing.allocator();
+
+    var request = try testMkRequest(std.testing.allocator);
+    const result = mgr.enqueue(request);
+    try std.testing.expectError(error.OutOfMemory, result);
+    request.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u32, 0), mgr.jobs.count());
 }
 
 test "shutdown cancels queued jobs and does not drain heavy work" {

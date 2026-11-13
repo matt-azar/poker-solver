@@ -847,7 +847,7 @@ fn resolveLocatedNode(
 }
 
 fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
-    // Snapshot under session + job locks (ZR-90).
+    // Snapshot under session + job locks (ZR-90 / ZR-155).
     state.session.mu.lock();
     const phase = state.session.phase;
     const solution_id = state.session.solution_id;
@@ -860,12 +860,13 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     const memory_budget_bytes = state.session.memory_budget_bytes;
     const allocated_bytes = state.session.allocatedBytes();
     const peak_allocated_bytes = state.session.peakAllocatedBytes();
-    // Study progress (ZR-120): expose trained count so UI is not stuck at "0 iters".
-    var iterations: i32 = 0;
-    if (state.session.training) |*training| {
-        iterations = training.trained;
-    } else if (state.session.published) |published| {
-        iterations = published.trained;
+    // Progress: committed CFR+ iterations only (ZR-145 / ZR-155). Browse-only
+    // sessions without a trainer stamp fall back to published.trained.
+    var iterations: i32 = state.session.last_committed_trained;
+    if (state.session.training == null) {
+        if (state.session.published) |published| {
+            iterations = published.trained;
+        }
     }
     state.session.mu.unlock();
 
@@ -878,19 +879,35 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     const phase_name: []const u8 = if (begin_running) "compiling" else @tagName(phase);
     const iterations_requested = state.train_iterations_requested;
 
+    // Copy owned strings under job_mu — train worker may free/replace them after unlock.
+    var sticky_error_copy: ?[]u8 = null;
+    defer if (sticky_error_copy) |c| allocator.free(c);
+    var active_copy: ?[]u8 = null;
+    defer if (active_copy) |c| allocator.free(c);
+
     state.job_mu.lock();
-    const active = state.active_job_id;
-    const sticky_error = state.last_error;
     const gen = state.status_generation + solution_id + policy_revision;
+    if (state.last_error) |err| {
+        sticky_error_copy = allocator.dupe(u8, err) catch {
+            state.job_mu.unlock();
+            return error.OutOfMemory;
+        };
+    }
+    if (state.active_job_id) |jid| {
+        active_copy = allocator.dupe(u8, jid) catch {
+            state.job_mu.unlock();
+            return error.OutOfMemory;
+        };
+    }
     state.job_mu.unlock();
 
     var cancelled = state.last_cancelled and !running;
-    if (active) |jid| {
+    if (active_copy) |jid| {
         if (state.isCancelled(jid)) cancelled = true;
     }
     // ZR-130: sticky last_error marks failed even when Session errdefer kept
     // phase at `.published` (prior average still installed).
-    const failed = (phase == .failed or sticky_error != null) and !running;
+    const failed = (phase == .failed or sticky_error_copy != null) and !running;
 
     // Status honesty pairs (ZR-149): Continue implies resume-safe trainer;
     // peak covers live; failed idle snapshots are not "running".
@@ -921,7 +938,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     } else {
         try w.print(",\"baseline_solution_id\":\"s{d}\"", .{baseline_id});
     }
-    if (active) |jid| {
+    if (active_copy) |jid| {
         try w.print(",\"job_id\":\"{s}\"", .{jid});
     } else {
         try w.writeAll(",\"job_id\":null");
@@ -931,7 +948,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     try w.writeAll(",\"can_continue\":");
     try w.writeAll(if (can_continue) "true" else "false");
     // Sticky async-train code (null when clear). Desktop also reads legacy `error`.
-    if (sticky_error) |code| {
+    if (sticky_error_copy) |code| {
         try w.print(",\"last_error\":\"{s}\",\"error\":\"{s}\"", .{ code, code });
     } else {
         try w.writeAll(",\"last_error\":null,\"error\":\"\"");
@@ -2509,6 +2526,76 @@ test "status body exposes iterations and requested target" {
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"iterations\":3") != null);
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"iterations_requested\":7") != null);
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"phase\":\"published\"") != null);
+    try std.testing.expectEqual(@as(i32, 3), state.session.last_committed_trained);
+}
+
+test "status copies last_error; iterations use committed count" {
+    // ZR-155: formatStatusBody must not borrow last_error across job_mu unlock.
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "status-race");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(2);
+    try std.testing.expectEqual(@as(i32, 2), state.session.last_committed_trained);
+
+    // Concurrent mutator: free/replace sticky strings while status is formatted.
+    const RaceCtx = struct {
+        state: *HostState,
+        stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
+        fn run(self: *@This()) void {
+            var i: usize = 0;
+            while (!self.stop.load(.acquire)) : (i += 1) {
+                if (i % 2 == 0) {
+                    self.state.setLastError("RaceA");
+                } else {
+                    self.state.clearLastError();
+                    self.state.setLastError("RaceB");
+                }
+                self.state.job_mu.lock();
+                if (self.state.active_job_id) |old| self.state.allocator.free(old);
+                self.state.active_job_id = self.state.allocator.dupe(u8, if (i % 2 == 0) "job-a" else "job-b") catch null;
+                self.state.job_mu.unlock();
+                std.Thread.yield() catch {};
+            }
+        }
+    };
+    var race = RaceCtx{ .state = &state };
+    const thr = try std.Thread.spawn(.{}, RaceCtx.run, .{&race});
+    defer {
+        race.stop.store(true, .release);
+        thr.join();
+    }
+
+    var n: usize = 0;
+    while (n < 64) : (n += 1) {
+        const body = try formatStatusBody(std.testing.allocator, &state);
+        defer std.testing.allocator.free(body);
+        try std.testing.expect(std.mem.indexOf(u8, body, "\"iterations\":2") != null);
+        // Body must be well-formed JSON-ish regardless of concurrent clears.
+        try std.testing.expect(std.mem.indexOf(u8, body, "\"last_error\":") != null);
+        try std.testing.expect(std.mem.indexOf(u8, body, "\"job_id\":") != null);
+    }
 }
 
 test "status reports compiling while begin_running" {
