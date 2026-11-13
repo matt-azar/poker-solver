@@ -87,6 +87,7 @@ class StudyDebugApp(tk.Tk):
         buttons = [
             ("Collect bundle (while frozen)", self._on_collect),
             ("Analyze diagnostics", self._on_analyze),
+            ("Send report to GitHub", self._on_send),
             ("Find crash dumps", self._on_dumps),
             ("Sidecar PE check", self._on_sidecar),
             ("IPC probe", self._on_probe),
@@ -241,6 +242,32 @@ class StudyDebugApp(tk.Tk):
         elif diag and not diag.startswith("%"):
             args.extend(["--dir", diag])
         self._run("Analyze diagnostics", args)
+
+    def _on_send(self) -> None:
+        zip_path = self.zip_var.get().strip()
+        diag = self.diag_var.get().strip()
+        if not zip_path and (not diag or diag.startswith("%")):
+            messagebox.showinfo(
+                "Send report",
+                "Pick a diagnostics zip (Help → Copy diagnostics zip) or a "
+                "diagnostics folder, then click Send again.\n\n"
+                "Requires gh auth login (repo + gist) or HOLDEM_STUDY_GITHUB_TOKEN.",
+            )
+            return
+        if not messagebox.askyesno(
+            "Send report",
+            "Create a GitHub Issue on poker-solver and upload the zip as a "
+            "secret gist?\n\n"
+            "Logs may contain paths/usernames — review if the repo is public.\n"
+            "Nothing is committed into git history.",
+        ):
+            return
+        args = ["send", "--yes"]
+        if zip_path:
+            args.extend(["--zip", zip_path])
+        elif diag and not diag.startswith("%"):
+            args.extend(["--dir", diag])
+        self._run("Send report to GitHub", args)
 
     def _on_dumps(self) -> None:
         self._run("Find crash dumps", ["dumps", "--since-hours", "48"])

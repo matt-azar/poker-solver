@@ -54,6 +54,64 @@ Optional: `pip install psutil` for better CPU% on snapshot / watch.
 
 ---
 
+## Send report (Windows → GitHub)
+
+Uploads a diagnostics zip + analyze summary into the **poker-solver** repo as a
+**GitHub Issue** (structured body). The zip is attached via a **secret gist**
+by default (or a prerelease asset). Dumps are **not** committed to `main`.
+
+### Authenticate once
+
+Preferred (GitHub CLI on your machine):
+
+```powershell
+winget install GitHub.cli   # if needed
+gh auth login -s repo,gist
+gh auth status
+```
+
+Or set a PAT in the environment (**never commit the token**):
+
+```powershell
+# classic PAT: repo + gist scopes
+# fine-grained: Issues (read/write) + Gists (read/write) on matt-azar/poker-solver
+$env:HOLDEM_STUDY_GITHUB_TOKEN = "ghp_…"   # or GH_TOKEN
+```
+
+Optional override: `$env:HOLDEM_STUDY_GITHUB_REPO = "matt-azar/poker-solver"`.
+
+### One-click / one-command
+
+```powershell
+cd path\to\poker-solver
+
+# A) Mini-app → set Diagnostics zip → "Send report to GitHub"
+.\scripts\debug\study-debug.cmd
+
+# B) CLI after Help → Copy diagnostics zip
+.\scripts\debug\study-debug.cmd send --zip $env:USERPROFILE\Desktop\holdem-study-diagnostics.zip
+
+# C) Collect while frozen, then send that bundle
+.\scripts\debug\study-debug.cmd send --collect --yes
+
+# Dry-run (no GitHub calls) — good smoke check
+.\scripts\debug\study-debug.cmd send --zip path\to\zip --dry-run
+.\scripts\debug\study-debug.cmd send --auth-check
+```
+
+Privacy: bodies redact home / `%LOCALAPPDATA%` / username path segments where
+possible, but **warn** before send — logs can still leak machine-local paths.
+
+Attach modes: `--attach gist` (default), `--attach release` (rolling prerelease
+`study-debug-reports`), or `--attach none` (issue text only; attach zip in the UI).
+
+Optional Actions archive: add `--dispatch` to fire `repository_dispatch` type
+`study-debug-report` (workflow `.github/workflows/study-debug-report.yml`
+downloads the gist/release URL and stores a 90-day Actions artifact). Requires
+`repo` scope that can dispatch workflows.
+
+---
+
 ## Windows installed Study (details)
 
 Evidence the packaged app already writes:
@@ -116,6 +174,7 @@ Override diagnostics path: `$env:HOLDEM_STUDY_DIAGNOSTICS_DIR = "D:\copy\diagnos
 | --- | --- | --- |
 | `collect` | `collect_bundle.py` | Evidence dir/zip (default `--zip --stacks`) |
 | `analyze` | `analyze_diagnostics.py` | Crash vs hang triage on dir or Help zip |
+| `send` | `send_report.py` | Open GitHub Issue + attach zip (gist/release) |
 | `dumps` | `find_crash_dumps.py` | LocalDumps / cores |
 | `sidecar` | `windows_sidecar_check.py` | GUI PE / CREATE_NO_WINDOW checklist |
 | `probe` | `ipc_probe.py` | Ready + demux + status budget |
@@ -172,6 +231,7 @@ On Windows you can point probes at the **installed** sidecar:
 | `windows_sidecar_check.py` | Windows GUI quirks | PE subsystem=GUI checklist + CREATE_NO_WINDOW / stderr drain |
 | `windows_collect.ps1` | Windows install | One-shot snapshot + diagnostics analysis + dump search + zip |
 | `collect_bundle.py` | any | Cross-platform evidence directory/zip |
+| `send_report.py` | any | Issue + secret gist / release attach (no git commit) |
 | `smoke_selftest.py` | suite health | Synthetic diagnostics + import smoke |
 
 Shared helpers: `_common.py` (not a CLI).

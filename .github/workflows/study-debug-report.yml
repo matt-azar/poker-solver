@@ -1,0 +1,147 @@
+# Optional archive path for Study crash/hang reports sent by
+# scripts/debug/send_report.py (--dispatch).
+#
+# Does NOT commit dumps into git. Downloads a client-provided HTTPS URL
+# (secret gist raw / release asset) and stores it as a workflow artifact
+# linked to the Actions run — durable and repo-scoped without polluting main.
+#
+# Triggered by:
+#   - repository_dispatch type: study-debug-report
+#   - workflow_dispatch (manual retry with an artifact URL)
+#
+# Client payload / inputs:
+#   issue_number, issue_url, artifact_url, primary, sent_at
+
+name: study-debug-report
+
+on:
+  repository_dispatch:
+    types: [study-debug-report]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Related GitHub issue number (optional)
+        required: false
+        type: string
+      artifact_url:
+        description: HTTPS URL to diagnostics zip (gist raw or release asset)
+        required: true
+        type: string
+      primary:
+        description: Classification primary (crash/hang/…)
+        required: false
+        type: string
+        default: unknown
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve payload
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CLIENT_JSON: ${{ toJson(github.event.client_payload) }}
+          INPUT_ISSUE: ${{ inputs.issue_number }}
+          INPUT_URL: ${{ inputs.artifact_url }}
+          INPUT_PRIMARY: ${{ inputs.primary }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json, os, pathlib, re, sys
+          from urllib.parse import urlparse
+
+          out = pathlib.Path(os.environ["GITHUB_OUTPUT"])
+          event = os.environ.get("EVENT_NAME", "")
+          if event == "repository_dispatch":
+              payload = json.loads(os.environ.get("CLIENT_JSON") or "{}")
+          else:
+              payload = {
+                  "issue_number": os.environ.get("INPUT_ISSUE") or None,
+                  "artifact_url": os.environ.get("INPUT_URL") or "",
+                  "primary": os.environ.get("INPUT_PRIMARY") or "unknown",
+              }
+
+          url = (payload.get("artifact_url") or "").strip()
+          if not url:
+              print("error: artifact_url missing", file=sys.stderr)
+              sys.exit(1)
+          parsed = urlparse(url)
+          if parsed.scheme != "https":
+              print("error: artifact_url must be https", file=sys.stderr)
+              sys.exit(1)
+          # Allow GitHub-hosted downloads only (gist / github releases / objects).
+          host = (parsed.hostname or "").lower()
+          allowed = (
+              host == "github.com"
+              or host.endswith(".github.com")
+              or host == "githubusercontent.com"
+              or host.endswith(".githubusercontent.com")
+          )
+          if not allowed:
+              print(f"error: refusing non-GitHub host {host!r}", file=sys.stderr)
+              sys.exit(1)
+
+          issue = payload.get("issue_number")
+          issue_s = str(issue) if issue not in (None, "") else "none"
+          primary = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(payload.get("primary") or "unknown"))[:40]
+          with out.open("a", encoding="utf-8") as f:
+              f.write(f"artifact_url={url}\n")
+              f.write(f"issue_number={issue_s}\n")
+              f.write(f"primary={primary}\n")
+          print(f"artifact_url host={host} issue={issue_s} primary={primary}")
+          PY
+
+      - name: Download diagnostics zip
+        env:
+          ARTIFACT_URL: ${{ steps.meta.outputs.artifact_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          # Prefer gh/curl with bearer for private release assets; public gists work without.
+          if command -v gh >/dev/null 2>&1; then
+            curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/octet-stream" \
+              -L --output artifact/diagnostics.zip \
+              "$ARTIFACT_URL" \
+            || curl -fsSL -L --output artifact/diagnostics.zip "$ARTIFACT_URL"
+          else
+            curl -fsSL -L --output artifact/diagnostics.zip "$ARTIFACT_URL"
+          fi
+          file artifact/diagnostics.zip
+          ls -la artifact/diagnostics.zip
+          # Basic zip magic check (PK\x03\x04) — do not fail hard on non-zip evidence.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("artifact/diagnostics.zip")
+          head = p.read_bytes()[:4]
+          if head[:2] != b"PK":
+              print("warning: download does not look like a zip (continuing)")
+          else:
+              print(f"ok zip magic, bytes={p.stat().st_size}")
+          PY
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: study-debug-${{ steps.meta.outputs.primary }}-issue-${{ steps.meta.outputs.issue_number }}
+          path: artifact/diagnostics.zip
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Comment on issue (optional)
+        if: steps.meta.outputs.issue_number != 'none'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.meta.outputs.issue_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh issue comment "$ISSUE" --repo "${{ github.repository }}" \
+            --body "Actions archived this report as a workflow artifact (90-day retention): ${RUN_URL}"
