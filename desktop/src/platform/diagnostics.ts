@@ -30,6 +30,34 @@ export type SolveFaultContext = {
   consecutiveStatusFailures?: number;
 };
 
+/**
+ * Temporary UI-unresponsiveness signal kinds (ZR-173).
+ * Soft status-poll timeouts that recover still leave evidence in
+ * `ui-hang-events.json` without overwriting `last-fault.json`.
+ */
+export type UiHangEventKind =
+  | "status-poll-timeout"
+  | "status-poll-slow"
+  | "status-poll-hung"
+  | "main-thread-stall";
+
+export type UiHangEventReport = {
+  kind: UiHangEventKind;
+  /** Wall duration of the stall / poll when known. */
+  durationMs?: number;
+  detail?: string;
+  lastOp?: string;
+  consecutiveStatusFailures?: number;
+  /** Study phase at capture time (solving / building / …). */
+  phase?: string;
+};
+
+/** Status poll duration above this is recorded as `status-poll-slow`. */
+export const STATUS_POLL_SLOW_MS = 1_500;
+/** Main-thread heartbeat gap above this is a stall (Not Responding class). */
+export const MAIN_THREAD_STALL_MS = 2_000;
+const MAIN_THREAD_HEARTBEAT_MS = 250;
+
 /** Compact last-solve summary persisted before train start (ZR-169). */
 export type LastSolveSummary = {
   snapshotKind: "pre-solve";
@@ -371,4 +399,100 @@ export async function copyTextToClipboard(text: string): Promise<void> {
     return;
   }
   throw new Error("Clipboard unavailable");
+}
+
+/**
+ * Append one hang/unresponsiveness signal to ui-hang-events.json (ZR-173).
+ * Best-effort; never throws into status poll / paint paths.
+ */
+export async function reportUiHangEvent(report: UiHangEventReport): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  const kind = report.kind?.trim();
+  if (!kind) {
+    return;
+  }
+  try {
+    await invoke("report_ui_hang_event", {
+      report: {
+        kind,
+        durationMs:
+          report.durationMs != null && Number.isFinite(report.durationMs)
+            ? Math.max(0, Math.round(Number(report.durationMs)))
+            : undefined,
+        detail: report.detail,
+        lastOp: report.lastOp,
+        consecutiveStatusFailures: report.consecutiveStatusFailures,
+        phase: report.phase,
+      },
+    });
+  } catch {
+    // Must not block status paint / Reconnect.
+  }
+}
+
+type HangMonitorHandle = {
+  stop: () => void;
+};
+
+let hangMonitor: HangMonitorHandle | null = null;
+
+/**
+ * Cheap main-thread stall detector for packaged Study (ZR-173).
+ * Interval heartbeat: a gap >> interval means the UI thread was blocked
+ * (sync IPC, heavy JS, or OS "Not Responding"). Records once per stall when
+ * the thread resumes. No-op outside Tauri / when already running.
+ */
+export function startUiHangMonitor(opts?: {
+  stallMs?: number;
+  heartbeatMs?: number;
+}): void {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  if (hangMonitor) {
+    return;
+  }
+  if (typeof window === "undefined" || typeof window.setInterval !== "function") {
+    return;
+  }
+  const stallMs = Math.max(500, opts?.stallMs ?? MAIN_THREAD_STALL_MS);
+  const heartbeatMs = Math.max(100, opts?.heartbeatMs ?? MAIN_THREAD_HEARTBEAT_MS);
+  let lastBeat = Date.now();
+  let stallOpen = false;
+  const timer = window.setInterval(() => {
+    const now = Date.now();
+    const gap = now - lastBeat;
+    lastBeat = now;
+    if (gap >= stallMs) {
+      if (!stallOpen) {
+        stallOpen = true;
+        void reportUiHangEvent({
+          kind: "main-thread-stall",
+          durationMs: gap,
+          detail: `main-thread gap ${gap}ms (heartbeat ${heartbeatMs}ms)`,
+          lastOp: "ui-heartbeat",
+        });
+      }
+    } else {
+      stallOpen = false;
+    }
+  }, heartbeatMs);
+  hangMonitor = {
+    stop: () => {
+      window.clearInterval(timer);
+    },
+  };
+}
+
+/** Stop the main-thread hang monitor (tests / shutdown). */
+export function stopUiHangMonitor(): void {
+  hangMonitor?.stop();
+  hangMonitor = null;
+}
+
+/** Test helper: is the hang monitor currently scheduled? */
+export function uiHangMonitorActiveForTests(): boolean {
+  return hangMonitor != null;
 }

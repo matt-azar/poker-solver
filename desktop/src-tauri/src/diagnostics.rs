@@ -19,11 +19,14 @@ const ENGINE_LOG: &str = "engine.log";
 const LAST_FAULT: &str = "last-fault.json";
 const LAST_SOLVE: &str = "last-solve.json";
 const HOST_RESOURCES: &str = "host-resources.json";
+const UI_HANG_EVENTS: &str = "ui-hang-events.json";
 const SESSION_META: &str = "session-meta.json";
 const README_NAME: &str = "README.txt";
 const OVERRIDE_ENV: &str = "HOLDEM_STUDY_DIAGNOSTICS_DIR";
 /// Soft cap for rolling sidecar stderr (bytes). Spec: ~1–2 MB.
 const ENGINE_LOG_MAX_BYTES: u64 = 2 * 1024 * 1024;
+/// Cap for temporary UI-unresponsiveness evidence (ZR-173).
+const UI_HANG_EVENTS_MAX: usize = 32;
 const UI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const README_BODY: &str = "\
@@ -41,6 +44,7 @@ Contents:
   last-fault.json      — last Solve failed / session-dead / kill / ensure-fail
   last-solve.json      — compact parameters of the last Solve (no range blobs)
   host-resources.json  — best-effort UI/sidecar RSS + system RAM/CPU
+  ui-hang-events.json  — ring of temporary UI unresponsiveness signals
   session-meta.json    — app version, protocol, launch_id, OS
 
 Timing:
@@ -61,12 +65,24 @@ host-resources.json fields (best-effort; omitted when sampling fails):
   sidecarRssBytes, systemTotalRamBytes, systemAvailableRamBytes,
   cpuLoad1 (Linux), cpuPercentApprox (when a prior sample exists), os, note
 
+ui-hang-events.json (ZR-173) — temporary unresponsiveness, not only hard faults:
+  Ring of up to 32 events. Soft status-poll timeouts / slow polls that recover
+  still leave evidence here even when last-fault.json is unchanged.
+  Typical kinds: status-poll-timeout, status-poll-slow, status-poll-hung,
+  main-thread-stall. Fields: timestamp, kind, durationMs, detail, lastOp,
+  consecutiveStatusFailures, phase. False positives: laptop sleep/resume,
+  debugger pauses, brief GC/hitch. Prefer a cluster of events over a single
+  soft blip. Hard session-dead still also writes last-fault.json.
+
 Hard crash minidumps (if Windows LocalDumps is registered) land under:
   %LOCALAPPDATA%\\CrashDumps\\
   Look for Holdem Study.exe.*.dmp and solver-engine.exe.*.dmp
 
 Do not include assistant API keys or full range text unless asked.
 ";
+
+/// Serialize hang-event ring writes (status poll + main-thread monitor).
+static UI_HANG_LOCK: Mutex<()> = Mutex::new(());
 
 /// Last known solver-engine PID (for host-resources after UI-side faults).
 static LAST_SIDECAR_PID: Mutex<Option<u32>> = Mutex::new(None);
@@ -222,6 +238,126 @@ pub fn write_last_fault_with_sidecar(snapshot: &FaultSnapshot, sidecar_pid: Opti
     }
     // Never let host sampling block or undo the fault write.
     write_host_resources_labeled(sidecar_pid, "fault", /*cheap*/ false);
+}
+
+/// One temporary UI-unresponsiveness signal (ZR-173).
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiHangEvent {
+    pub timestamp: String,
+    /// `status-poll-timeout` | `status-poll-slow` | `status-poll-hung` |
+    /// `main-thread-stall` | future kinds.
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_op: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consecutive_status_failures: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    pub ui_version: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UiHangEventsFile {
+    schema_version: u32,
+    updated_at: String,
+    events: Vec<UiHangEvent>,
+}
+
+/// Append a hang/unresponsiveness signal to the rolling `ui-hang-events.json`.
+///
+/// Best-effort; never panics into the UI path. Soft timeouts that recover still
+/// leave evidence here without overwriting `last-fault.json`.
+pub fn record_ui_hang_event(mut event: UiHangEvent) {
+    if event.timestamp.trim().is_empty() {
+        event.timestamp = iso_timestamp();
+    }
+    if event.ui_version.trim().is_empty() {
+        event.ui_version = UI_VERSION.to_string();
+    }
+    let Ok(_guard) = UI_HANG_LOCK.lock() else {
+        return;
+    };
+    let Ok(dir) = ensure_diagnostics_dir() else {
+        return;
+    };
+    let path = dir.join(UI_HANG_EVENTS);
+    let mut events: Vec<UiHangEvent> = read_ui_hang_events(&path);
+    events.push(event);
+    if events.len() > UI_HANG_EVENTS_MAX {
+        let drop_n = events.len() - UI_HANG_EVENTS_MAX;
+        events.drain(0..drop_n);
+    }
+    let body = UiHangEventsFile {
+        schema_version: 1,
+        updated_at: iso_timestamp(),
+        events,
+    };
+    match serde_json::to_string_pretty(&body) {
+        Ok(text) => {
+            if let Err(err) = fs::write(&path, text) {
+                eprintln!("warn: diagnostics ui-hang-events write failed: {err}");
+            }
+        }
+        Err(err) => eprintln!("warn: diagnostics ui-hang-events encode failed: {err}"),
+    }
+}
+
+fn read_ui_hang_events(path: &Path) -> Vec<UiHangEvent> {
+    let Ok(text) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    let Some(arr) = value.get("events").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in arr {
+        let Some(kind) = item.get("kind").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if kind.trim().is_empty() {
+            continue;
+        }
+        out.push(UiHangEvent {
+            timestamp: item
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            kind: kind.to_string(),
+            duration_ms: item.get("durationMs").and_then(|v| v.as_u64()),
+            detail: item
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            last_op: item
+                .get("lastOp")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            consecutive_status_failures: item
+                .get("consecutiveStatusFailures")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32),
+            phase: item
+                .get("phase")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            ui_version: item
+                .get("uiVersion")
+                .and_then(|v| v.as_str())
+                .unwrap_or(UI_VERSION)
+                .to_string(),
+        });
+    }
+    out
 }
 
 /// Persist compact last-solve parameters from the Study UI (ZR-169).
@@ -1113,6 +1249,47 @@ mod tests {
         let bytes = fs::read(&zip).expect("read zip");
         assert_eq!(&bytes[0..4], &[0x50, 0x4b, 0x03, 0x04]);
         assert!(bytes.windows(4).any(|w| w == [0x50, 0x4b, 0x01, 0x02]));
+    }
+
+    #[test]
+    fn ui_hang_events_ring_caps_and_survives_soft_timeouts() {
+        let (dir, _guard) = isolated_dir("hang");
+        let _ = ensure_diagnostics_dir();
+        assert!(
+            fs::read_to_string(dir.join(README_NAME))
+                .unwrap()
+                .contains("ui-hang-events.json")
+        );
+        for i in 0..(UI_HANG_EVENTS_MAX + 4) {
+            record_ui_hang_event(UiHangEvent {
+                timestamp: format!("{i}"),
+                kind: if i % 2 == 0 {
+                    "status-poll-timeout".into()
+                } else {
+                    "main-thread-stall".into()
+                },
+                duration_ms: Some(4_000 + i as u64),
+                detail: Some(format!("blip-{i}")),
+                last_op: Some("status".into()),
+                consecutive_status_failures: Some((i % 3) as u32),
+                phase: Some("solving".into()),
+                ui_version: String::new(),
+            });
+        }
+        let body: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(UI_HANG_EVENTS)).unwrap()).unwrap();
+        assert_eq!(body["schemaVersion"], 1);
+        let events = body["events"].as_array().expect("events");
+        assert_eq!(events.len(), UI_HANG_EVENTS_MAX);
+        // Oldest 4 dropped; first retained is index 4.
+        assert_eq!(events[0]["timestamp"], "4");
+        assert_eq!(events[0]["uiVersion"], UI_VERSION);
+        assert_eq!(
+            events[events.len() - 1]["timestamp"],
+            format!("{}", UI_HANG_EVENTS_MAX + 3)
+        );
+        // Soft hang evidence must not invent a last-fault overwrite.
+        assert!(!dir.join(LAST_FAULT).exists());
     }
 
     #[test]

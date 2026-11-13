@@ -143,6 +143,8 @@ import {
   clearSolveFaultDedupe,
   persistPreSolveDiagnostics,
   reportSolveFailedFault,
+  reportUiHangEvent,
+  STATUS_POLL_SLOW_MS,
   summarizeContinueSolve,
   summarizeLastSolve,
 } from "../platform/diagnostics";
@@ -2104,8 +2106,28 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         const abort = new AbortController();
         setStatusAbortController(abort);
         const timed = createTimeoutSignal(STATUS_POLL_TIMEOUT_MS, abort.signal);
+        const pollStartedAt =
+          typeof performance !== "undefined" && typeof performance.now === "function"
+            ? performance.now()
+            : Date.now();
         try {
           const status = await engineClient.status(timed.signal);
+          const pollMs = Math.round(
+            (typeof performance !== "undefined" && typeof performance.now === "function"
+              ? performance.now()
+              : Date.now()) - pollStartedAt,
+          );
+          // ZR-173: slow-but-successful status polls leave hang evidence without
+          // touching last-fault (stdin starve / busy host that recovered).
+          if (pollMs >= STATUS_POLL_SLOW_MS) {
+            void reportUiHangEvent({
+              kind: "status-poll-slow",
+              durationMs: pollMs,
+              detail: `status poll ${pollMs}ms`,
+              lastOp: "status",
+              phase: get().phase,
+            });
+          }
           // Drop superseded responses (invalidateLifecycleRequests bumped token).
           if (!shouldApplyStatus(token, getStatusToken())) {
             continue;
@@ -2238,9 +2260,26 @@ export const useStudyStore = create<StudyState>((set, get) => ({
             continue;
           }
           setStatusConsecutiveFailures(getStatusConsecutiveFailures() + 1);
+          const consecutiveFailures = getStatusConsecutiveFailures();
+          const pollMs = Math.round(
+            (typeof performance !== "undefined" && typeof performance.now === "function"
+              ? performance.now()
+              : Date.now()) - pollStartedAt,
+          );
           const detail = statusPollFailureDetail(error, {
             timedOut: timed.timedOut(),
           });
+          // ZR-173: soft timeouts that later recover still leave zip evidence.
+          if (timed.timedOut()) {
+            void reportUiHangEvent({
+              kind: "status-poll-timeout",
+              durationMs: pollMs,
+              detail,
+              lastOp: "status",
+              consecutiveStatusFailures: consecutiveFailures,
+              phase: get().phase,
+            });
+          }
           let shellHint = "";
           if (isTauriRuntime()) {
             const shellStatus = await readEngineStatus();
@@ -2257,13 +2296,21 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           // ZR-151: when hung, terminate the sidecar so Reconnect can spawn fresh.
           if (
             shouldMarkStatusPollDead({
-              consecutiveFailures: getStatusConsecutiveFailures(),
+              consecutiveFailures,
               detail: fullDetail,
             })
           ) {
+            void reportUiHangEvent({
+              kind: "status-poll-hung",
+              durationMs: pollMs,
+              detail: fullDetail,
+              lastOp: "status",
+              consecutiveStatusFailures: consecutiveFailures,
+              phase: get().phase,
+            });
             if (
               shouldTerminateHungSidecar({
-                consecutiveFailures: getStatusConsecutiveFailures(),
+                consecutiveFailures,
                 detail: fullDetail,
               })
             ) {

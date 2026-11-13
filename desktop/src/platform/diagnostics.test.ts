@@ -170,4 +170,84 @@ describe("diagnostics platform", () => {
       persistPreSolveDiagnostics(summarizeLastSolve(sampleJob())),
     ).resolves.toBeUndefined();
   });
+
+  it("reportUiHangEvent invokes Tauri and swallows errors (ZR-173)", async () => {
+    invoke.mockResolvedValueOnce(undefined);
+    const { reportUiHangEvent, STATUS_POLL_SLOW_MS, MAIN_THREAD_STALL_MS } =
+      await import("./diagnostics");
+    expect(STATUS_POLL_SLOW_MS).toBeGreaterThan(0);
+    expect(MAIN_THREAD_STALL_MS).toBeGreaterThan(STATUS_POLL_SLOW_MS);
+    await reportUiHangEvent({
+      kind: "status-poll-timeout",
+      durationMs: 4001.7,
+      detail: "status timed out",
+      lastOp: "status",
+      consecutiveStatusFailures: 2,
+      phase: "solving",
+    });
+    expect(invoke).toHaveBeenCalledWith("report_ui_hang_event", {
+      report: {
+        kind: "status-poll-timeout",
+        durationMs: 4002,
+        detail: "status timed out",
+        lastOp: "status",
+        consecutiveStatusFailures: 2,
+        phase: "solving",
+      },
+    });
+
+    invoke.mockRejectedValueOnce(new Error("offline"));
+    await expect(
+      reportUiHangEvent({ kind: "main-thread-stall", durationMs: 2500 }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("startUiHangMonitor is idempotent and stoppable (ZR-173)", async () => {
+    vi.useFakeTimers();
+    invoke.mockResolvedValue(undefined);
+    const {
+      startUiHangMonitor,
+      stopUiHangMonitor,
+      uiHangMonitorActiveForTests,
+      MAIN_THREAD_STALL_MS,
+    } = await import("./diagnostics");
+    stopUiHangMonitor();
+    startUiHangMonitor({ stallMs: MAIN_THREAD_STALL_MS, heartbeatMs: 250 });
+    startUiHangMonitor({ stallMs: MAIN_THREAD_STALL_MS, heartbeatMs: 250 });
+    expect(uiHangMonitorActiveForTests()).toBe(true);
+
+    // Advance one heartbeat without a stall — no hang report yet.
+    await vi.advanceTimersByTimeAsync(250);
+    const hangCalls = invoke.mock.calls.filter(
+      (c) => c[0] === "report_ui_hang_event",
+    );
+    expect(hangCalls.length).toBe(0);
+
+    // Simulate a blocked UI thread by jumping wall time past the stall threshold.
+    const realNow = Date.now;
+    const base = realNow();
+    let warped = base;
+    vi.spyOn(Date, "now").mockImplementation(() => warped);
+    warped = base + MAIN_THREAD_STALL_MS + 500;
+    await vi.advanceTimersByTimeAsync(250);
+    const afterStall = invoke.mock.calls.filter(
+      (c) => c[0] === "report_ui_hang_event",
+    );
+    expect(afterStall.length).toBe(1);
+    expect(afterStall[0]?.[1]).toMatchObject({
+      report: { kind: "main-thread-stall" },
+    });
+
+    // Same open stall must not spam another event on the next beat.
+    warped = base + MAIN_THREAD_STALL_MS + 800;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(
+      invoke.mock.calls.filter((c) => c[0] === "report_ui_hang_event").length,
+    ).toBe(1);
+
+    stopUiHangMonitor();
+    expect(uiHangMonitorActiveForTests()).toBe(false);
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
 });

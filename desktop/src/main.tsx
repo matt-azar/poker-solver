@@ -5,11 +5,14 @@ import "./styles/tokens.css";
 import "./styles/layout.css";
 import { applyDocumentTheme, resolveTheme, useThemeStore } from "./state/themeStore";
 import { detectAndInstallPlatform } from "./platform";
+import { startUiHangMonitor } from "./platform/diagnostics";
 import { ensureEngine } from "./platform/engine";
 import { useStudyStore } from "./state/studyStore";
 
 applyDocumentTheme(resolveTheme(useThemeStore.getState().preference));
 detectAndInstallPlatform();
+// ZR-173: cheap main-thread stall → ui-hang-events.json (Tauri only).
+startUiHangMonitor();
 
 async function bootEngineThenRender(): Promise<void> {
   // Packaged Tauri: solver-engine IPC only.
