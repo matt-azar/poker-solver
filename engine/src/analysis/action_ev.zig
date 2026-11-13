@@ -436,12 +436,16 @@ pub fn actionValuesDealByDeal(
     }
     page.reach_defined = reach_mass > 0;
 
+    // Aggregate node EV over hands with positive posterior mass at this runout.
+    // Hands removed by the query turn/river (mass==0) stay ev_defined=0 and must
+    // not clear node_ev_defined — that blanked Compare-runouts EV for every river
+    // that collides with any hero combo while Equity (reach-weighted) stayed filled
+    // (ZR-162). Fail the aggregate only when a positive-mass hand cannot be mixed.
     var node_ev: f64 = 0;
     var node_ok = page.reach_defined;
     hand = 0;
     while (hand < hands) : (hand += 1) {
         if (!(mass[hand] > 0)) {
-            if (page.reach_defined) node_ok = false;
             continue;
         }
         page.ev_defined[hand] = 1;
@@ -452,15 +456,18 @@ pub fn actionValuesDealByDeal(
         } else {
             const key = game.cardKey(node, @intCast(hand), turn, river) catch {
                 page.ev_defined[hand] = 0;
+                node_ok = false;
                 continue;
             };
             if (key < 0 or @as(usize, @intCast(key)) >= node.slot_of.len) {
                 page.ev_defined[hand] = 0;
+                node_ok = false;
                 continue;
             }
             const slot_i = node.slot_of[@intCast(key)];
             if (slot_i < 0) {
                 page.ev_defined[hand] = 0;
+                node_ok = false;
                 continue;
             }
             const base: usize = @intCast(game.slots[@intCast(slot_i)].base);

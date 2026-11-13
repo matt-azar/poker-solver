@@ -73,6 +73,23 @@ describe("line card grid", () => {
       null,
     );
   });
+
+  // ZR-162: Compare-runouts cells read node_ev only when the engine marks it
+  // defined. Rivers that collide with a hero combo used to clear that flag.
+  it("treats node_ev_defined false as missing EV (blank Compare cell)", () => {
+    expect(
+      lineCardEvFromValues(
+        {
+          node_ev: null,
+          node_ev_defined: false,
+          utility_basis: "local",
+          local_offset: 0,
+        },
+        "local",
+        ["Check", "Bet 50"],
+      ),
+    ).toBeNull();
+  });
 });
 
 describe("lineCardReportStreet", () => {
