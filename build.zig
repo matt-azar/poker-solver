@@ -1,8 +1,18 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 // Zig workspace: engine / app / formats / host(`solver-engine`) / cli.
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    // Portable floor when `-Dcpu` is omitted (ZR-175). Bare `zig build
+    // -Doptimize=ReleaseFast` on an AVX-512 host otherwise emits EVEX/zmm
+    // (e.g. vmovdqu64) and SIGILLs on AVX2-only laptops (i7-10510U /
+    // 0xC000001D). Override explicitly with `-Dcpu=native` for host-only digs.
+    const default_target: std.Target.Query = if (builtin.cpu.arch == .x86_64) .{
+        .cpu_model = .{ .explicit = &std.Target.x86.cpu.x86_64_v2 },
+    } else .{};
+    const target = b.standardTargetOptions(.{
+        .default_target = default_target,
+    });
     const optimize = b.standardOptimizeOption(.{});
 
     const engine_mod = b.addModule("poker_engine", .{
