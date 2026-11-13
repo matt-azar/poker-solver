@@ -31,7 +31,7 @@ const BeginTask = struct {
     config: []u8,
 };
 
-const AnalysisKind = enum { values, equity, node };
+const AnalysisKind = enum { values, equity, node, categories };
 
 const AnalysisTask = struct {
     state: *HostState,
@@ -70,7 +70,7 @@ pub const HostState = struct {
     /// Flop/turn compile off the stdin loop so Study can poll `status` (ZR-120).
     begin_thread: ?std.Thread = null,
     begin_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    /// ZR-151: values/equity/node off the stdin loop so Stop/status stay live.
+    /// ZR-151 / ZR-171: values/equity/node/categories off the stdin loop so Stop/status stay live.
     analysis_thread: ?std.Thread = null,
     analysis_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     /// Bumped on each new analysis request; older workers reply `superseded`.
@@ -906,7 +906,7 @@ fn resolveLocatedNode(
 }
 
 fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
-    // Snapshot under session + job locks (ZR-90 / ZR-155).
+    // Snapshot under session + job locks (ZR-90 / ZR-155 / ZR-171).
     state.session.mu.lock();
     const phase = state.session.phase;
     const solution_id = state.session.solution_id;
@@ -919,6 +919,22 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     const memory_budget_bytes = state.session.memory_budget_bytes;
     const allocated_bytes = state.session.allocatedBytes();
     const peak_allocated_bytes = state.session.peakAllocatedBytes();
+    const has_metrics = state.session.has_metrics;
+    const metrics = state.session.metrics;
+    const accuracy_target = state.session.accuracy_target;
+    const time_limit_seconds = state.session.time_limit_seconds;
+    const gap_len = state.session.gap_series_len;
+    var gap_buf: [poker_app.session.gap_series_capacity]poker_app.session.GapSeriesPoint = undefined;
+    if (gap_len > 0) {
+        @memcpy(gap_buf[0..gap_len], state.session.gap_series[0..gap_len]);
+    }
+    const runtime_opt = state.session.runtimeSeconds();
+    var pot_chips: f64 = 0;
+    var stack_chips: f64 = 0;
+    if (state.session.game) |g| {
+        pot_chips = poker_engine.poker.chips.tenthsToChips(g.pot);
+        stack_chips = poker_engine.poker.chips.tenthsToChips(g.stack);
+    }
     // Progress: committed CFR+ iterations only (ZR-145 / ZR-155). Browse-only
     // sessions without a trainer stamp fall back to published.trained.
     var iterations: i32 = state.session.last_committed_trained;
@@ -937,6 +953,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     // holds the prior solution until fail-closed install (ZR-120).
     const phase_name: []const u8 = if (begin_running) "compiling" else @tagName(phase);
     const iterations_requested = state.train_iterations_requested;
+    const time_limit_reached = terminal == .time_limit_reached;
 
     // Copy owned strings under job_mu — train worker may free/replace them after unlock.
     var sticky_error_copy: ?[]u8 = null;
@@ -1013,7 +1030,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
         try w.writeAll(",\"last_error\":null,\"error\":\"\"");
     }
     try w.print(
-        ",\"phase\":\"{s}\",\"iterations\":{d},\"iterations_requested\":{d},\"policy_revision\":{d},\"terminal_reason\":\"{s}\",\"workers_training\":{d},\"workers_analysis\":{d},\"threads\":{d},\"memory_budget_bytes\":{d},\"allocated_bytes\":{d},\"peak_allocated_bytes\":{d},\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}}",
+        ",\"phase\":\"{s}\",\"iterations\":{d},\"iterations_requested\":{d},\"policy_revision\":{d},\"terminal_reason\":\"{s}\",\"workers_training\":{d},\"workers_analysis\":{d},\"threads\":{d},\"memory_budget_bytes\":{d},\"allocated_bytes\":{d},\"peak_allocated_bytes\":{d},\"engine_allocated\":{d},\"engine_peak\":{d},\"engine_heap_bytes\":{d}",
         .{
             phase_name,
             iterations,
@@ -1026,8 +1043,57 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
             memory_budget_bytes,
             allocated_bytes,
             peak_allocated_bytes,
+            allocated_bytes,
+            peak_allocated_bytes,
+            allocated_bytes,
         },
     );
+    try w.writeAll(",\"time_limit_reached\":");
+    try w.writeAll(if (time_limit_reached) "true" else "false");
+    if (time_limit_seconds >= 0) {
+        try w.print(",\"time_limit\":{d}", .{time_limit_seconds});
+    } else {
+        try w.writeAll(",\"time_limit\":null");
+    }
+    if (runtime_opt) |runtime| {
+        try w.print(",\"runtime_seconds\":{d},\"runtime\":{d}", .{ runtime, runtime });
+    } else {
+        try w.writeAll(",\"runtime_seconds\":null,\"runtime\":null");
+    }
+    if (pot_chips > 0) {
+        try w.print(",\"pot\":{d}", .{pot_chips});
+    } else {
+        try w.writeAll(",\"pot\":null");
+    }
+    if (stack_chips > 0) {
+        try w.print(",\"stack\":{d}", .{stack_chips});
+    } else {
+        try w.writeAll(",\"stack\":null");
+    }
+    if (accuracy_target >= 0) {
+        try w.print(",\"accuracy\":{d},\"accuracy_threshold\":{d}", .{ accuracy_target, accuracy_target });
+    } else {
+        try w.writeAll(",\"accuracy\":null,\"accuracy_threshold\":null");
+    }
+    if (has_metrics) {
+        try w.print(
+            ",\"value\":{d},\"player0_expected_utility\":{d},\"nash_gap\":{d},\"accuracy_chips\":{d},\"p1_best_response\":{d},\"p2_best_response\":{d}",
+            .{ metrics.value, metrics.value, metrics.nash_gap, metrics.accuracy, metrics.br0, metrics.br1 },
+        );
+    } else {
+        try w.writeAll(",\"value\":null,\"player0_expected_utility\":null,\"nash_gap\":null,\"accuracy_chips\":null,\"p1_best_response\":null,\"p2_best_response\":null");
+    }
+    try w.writeAll(",\"gap_series\":[");
+    var gi: usize = 0;
+    while (gi < gap_len) : (gi += 1) {
+        if (gi > 0) try w.writeAll(",");
+        const pt = gap_buf[gi];
+        try w.print(
+            "{{\"iterations\":{d},\"iteration\":{d},\"value\":{d},\"nash_gap\":{d},\"accuracy_chips\":{d}}}",
+            .{ pt.iterations, pt.iterations, pt.value, pt.nash_gap, pt.accuracy_chips },
+        );
+    }
+    try w.writeAll("],\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}");
     return try list.toOwnedSlice();
 }
 
@@ -1304,7 +1370,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return handleEquity(state, req);
     }
 
-    // Study Categories (made-hand on five-card boards; short boards → available=false).
+    // Study Categories — sync path for unit tests. Product stdin uses startCategories (ZR-171).
     if (std.mem.eql(u8, req.op, "categories")) {
         return handleCategories(state, req);
     }
@@ -1411,22 +1477,13 @@ fn trainWorker(task: *TrainTask) void {
         state.allocator.destroy(task);
     }
 
-    const use_gated = task.accuracy > 0 or task.time_limit >= 0;
-    // ZR-106 / ZR-90 / ZR-130: admission already replied. Completion and faults
-    // are visible via `status` (`running` / phase / terminal_reason / last_error)
-    // — do not write a second solve reply on the same request_id (would be
-    // orphaned after short admit). Catch records sticky last_error instead.
-    if (use_gated) {
-        state.session.trainGated(task.iterations, task.accuracy, task.eval_every, task.time_limit) catch |err| {
-            state.setLastError(@errorName(err));
-            return;
-        };
-    } else {
-        state.session.train(task.iterations) catch |err| {
-            state.setLastError(@errorName(err));
-            return;
-        };
-    }
+    // ZR-171: always use trainGated so Study footer gets Acc/EV/ETA samples even
+    // for iteration-only jobs (accuracy ≤ 0). Accuracy/time early-stop still honor
+    // positive targets. Admission already replied (ZR-106); faults → sticky last_error.
+    state.session.trainGated(task.iterations, task.accuracy, task.eval_every, task.time_limit) catch |err| {
+        state.setLastError(@errorName(err));
+        return;
+    };
     state.clearLastError();
 }
 
@@ -1493,9 +1550,16 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
     const iterations = bodyIntField(req.body_json, "iterations") orelse 1;
     const accuracy = bodyFloatField(req.body_json, "accuracy") orelse 0;
     const time_limit = bodyFloatField(req.body_json, "time_limit") orelse -1;
-    // C++ resolve-locked `samples` mapped to eval chunking; honor as eval_every when set.
+    // Study Settings "Samples" = desired EV/gap refresh count. Cap cadence at 10
+    // iters so the footer never waits longer (DESKTOP_UI / ZR-171). Explicit
+    // `eval_every` still wins when callers set it (gate-bench / resolve_locked).
     const samples = bodyIntField(req.body_json, "samples");
-    const eval_every = bodyIntField(req.body_json, "eval_every") orelse (samples orelse 20);
+    const job_iters: i32 = if (iterations < 1) 1 else iterations;
+    const eval_every = bodyIntField(req.body_json, "eval_every") orelse blk: {
+        const refresh_count: i32 = if (samples) |s| (if (s < 1) 1 else s) else 5;
+        const period = @divTrunc(job_iters + refresh_count - 1, refresh_count);
+        break :blk @max(@as(i32, 1), @min(@as(i32, 10), period));
+    };
     state.budget.returnToTraining();
     // Honor config threads; never raise above Session/config (ZR-91). Cap by host budget.
     if (state.budget.training > 0 and state.session.threads > state.budget.training) {
@@ -1511,7 +1575,6 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
     state.session.mu.lock();
     const start_trained: i32 = if (state.session.training) |*training| training.trained else 0;
     state.session.mu.unlock();
-    const job_iters: i32 = if (iterations < 1) 1 else iterations;
     state.train_iterations_requested = start_trained + job_iters;
 
     const task = try state.allocator.create(TrainTask);
@@ -1805,6 +1868,17 @@ fn analysisWorker(task: *AnalysisTask) void {
         .node => buildNodeReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
             break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "inspect_failed", @errorName(err)) catch return;
         },
+        .categories => buildCategoriesReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
+            const code: []const u8 = if (err == error.OutOfMemory and state.session.budget.limit() > 0)
+                "budget_exceeded"
+            else if (err == error.WorkLimit)
+                "work_limit"
+            else if (err == error.InvalidWeight)
+                "invalid_weight"
+            else
+                "categories_failed";
+            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+        },
     };
     defer reply.deinit();
 
@@ -1906,6 +1980,43 @@ fn buildEquityReply(
     return ipc.makeReply(state.allocator, request_id, job_id, "equity", body);
 }
 
+fn buildCategoriesReply(
+    state: *HostState,
+    request_id: []const u8,
+    job_id: ?[]const u8,
+    body_json: []const u8,
+    lease: *poker_app.PublishedLease,
+) !ipc.Envelope {
+    const located = try resolveLocatedNode(lease.game, body_json);
+    const node_id_text = try poker_engine.analysis.node_id.formatNodeId(
+        state.allocator,
+        located.node_index,
+        located.turn,
+        located.river,
+    );
+    defer state.allocator.free(node_id_text);
+    const t0 = std.time.nanoTimestamp();
+    const report = try poker_engine.analysis.categories.categoriesAtNode(
+        state.session.allocator,
+        lease.game,
+        lease.published,
+        located.node_index,
+        located.turn,
+        located.river,
+    );
+    const elapsed_ns = std.time.nanoTimestamp() - t0;
+    const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
+    const body = try categories_json.packStudyCategoriesBody(state.allocator, .{
+        .solution_id = lease.solution_id,
+        .node_id = node_id_text,
+        .policy_revision = state.session.policyRevision(),
+        .query_seconds = query_seconds,
+        .report = &report,
+    });
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, request_id, job_id, "categories", body);
+}
+
 fn buildNodeReply(
     state: *HostState,
     request_id: []const u8,
@@ -1988,6 +2099,10 @@ pub fn startEquity(state: *HostState, req: ipc.Envelope) !void {
 
 pub fn startNode(state: *HostState, req: ipc.Envelope) !void {
     try startAnalysis(state, req, .node);
+}
+
+pub fn startCategories(state: *HostState, req: ipc.Envelope) !void {
+    try startAnalysis(state, req, .categories);
 }
 
 fn ioWorker(task: *IoTask) void {
@@ -3085,6 +3200,48 @@ test "status body exposes iterations and requested target" {
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"iterations_requested\":7") != null);
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"phase\":\"published\"") != null);
     try std.testing.expectEqual(@as(i32, 3), state.session.last_committed_trained);
+}
+
+test "status body publishes progress metrics after trainGated (ZR-171)" {
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "status-progress");
+    defer state.deinit();
+    try state.session.begin(config);
+    state.train_iterations_requested = 4;
+    // Iteration-only job (accuracy ≤ 0) must still record EV/gap for the footer.
+    try state.session.trainGated(4, -1.0, 2, -1.0);
+
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"iterations\":4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"nash_gap\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"accuracy_chips\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"runtime_seconds\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"engine_allocated\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"gap_series\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"pot\":100") != null);
+    try std.testing.expect(state.session.has_metrics);
+    try std.testing.expect(state.session.gap_series_len >= 1);
 }
 
 test "status copies last_error; iterations use committed count" {

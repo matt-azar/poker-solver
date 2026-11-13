@@ -166,7 +166,9 @@ export function StatusBar({
         </span>
         <span title="Iterations per second">Rate {metrics.rate}</span>
         <span title="Root OOP EV (chips)">EV {metrics.ev}</span>
-        <span title="NashConv (absolute and % of pot)">Nash {metrics.nash}</span>
+        <span title="Pio Accuracy (NashConv/2) in chips and % of pot">
+          Acc {metrics.nash}
+        </span>
         <span title="Engine-allocated heap">Mem {metrics.memory}</span>
       </span>
     </footer>

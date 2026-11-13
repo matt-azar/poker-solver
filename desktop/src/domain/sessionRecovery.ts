@@ -137,13 +137,50 @@ export function canOfferReopenLastCheckpoint(
 /**
  * Host status publishes `phase:"failed"`; desktop historically only looked at
  * `failed`/`error`. Normalize so phase mapping is honest.
+ *
+ * ZR-171: also alias Zig heap fields onto the Study footer metrics keys so
+ * Acc/ETA/Mem light up without every call site knowing both names.
  */
 export function normalizeStatusForPhase(status: StatusPayload): StatusPayload {
   const hostPhase = typeof status.phase === "string" ? status.phase : null;
+  let next: StatusPayload = status;
   if (hostPhase === "failed" && !status.failed) {
-    return { ...status, failed: true };
+    next = { ...next, failed: true };
   }
-  return status;
+  const allocated =
+    status.engine_allocated ??
+    status.engine_heap_bytes ??
+    (typeof status.allocated_bytes === "number" ? status.allocated_bytes : null);
+  const peak =
+    status.engine_peak ??
+    (typeof status.peak_allocated_bytes === "number"
+      ? status.peak_allocated_bytes
+      : null);
+  if (allocated != null && status.engine_allocated == null) {
+    next = { ...next, engine_allocated: Number(allocated) };
+  }
+  if (allocated != null && status.engine_heap_bytes == null) {
+    next = { ...next, engine_heap_bytes: Number(allocated) };
+  }
+  if (peak != null && status.engine_peak == null) {
+    next = { ...next, engine_peak: Number(peak) };
+  }
+  if (
+    status.accuracy_chips == null &&
+    typeof status.nash_gap === "number" &&
+    Number.isFinite(status.nash_gap)
+  ) {
+    next = { ...next, accuracy_chips: 0.5 * status.nash_gap };
+  }
+  if (
+    (status.player0_expected_utility == null ||
+      Number.isNaN(Number(status.player0_expected_utility))) &&
+    typeof status.value === "number" &&
+    Number.isFinite(status.value)
+  ) {
+    next = { ...next, player0_expected_utility: status.value };
+  }
+  return next;
 }
 
 /** Sticky train/session fault code from status (`last_error` preferred, then `error`). */
