@@ -2,9 +2,11 @@
 //! Hold'em Study Tauri shell: loads the Vite UI and owns the Zig solver-engine IPC session.
 
 mod assistant_secrets;
+mod diagnostics;
 mod library;
 mod solver_engine;
 
+use serde::Deserialize;
 use tauri::{AppHandle, Manager, RunEvent};
 
 use assistant_secrets::AssistantSecretStore;
@@ -40,8 +42,74 @@ fn assistant_secret_has(app: AppHandle, service: String) -> Result<bool, String>
     assistant_secret_store(&app)?.has(&service)
 }
 
+#[tauri::command]
+fn open_diagnostics_folder() -> Result<String, String> {
+    diagnostics::open_diagnostics_folder()
+}
+
+#[tauri::command]
+fn copy_diagnostics_bundle() -> Result<String, String> {
+    // Prefer a zip path the user can paste into chat/email.
+    match diagnostics::bundle_diagnostics_zip() {
+        Ok(path) => Ok(path),
+        Err(zip_err) => {
+            // Fallback: folder path is still shareable.
+            let dir = diagnostics::diagnostics_dir_path_string()?;
+            Err(format!(
+                "zip failed ({zip_err}); diagnostics folder: {dir}"
+            ))
+        }
+    }
+}
+
+#[tauri::command]
+fn diagnostics_dir_path() -> Result<String, String> {
+    diagnostics::diagnostics_dir_path_string()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FaultReport {
+    reason: String,
+    #[serde(default)]
+    launch_id: Option<String>,
+    #[serde(default)]
+    last_op: Option<String>,
+    #[serde(default)]
+    exit_reason: Option<String>,
+    #[serde(default)]
+    consecutive_status_failures: Option<u32>,
+    #[serde(default)]
+    protocol: Option<u32>,
+}
+
+/// Study UI reports session-dead / reconnect faults so last-fault.json is current
+/// even when Rust did not tear down the pipes yet.
+#[tauri::command]
+fn report_engine_fault(
+    state: tauri::State<'_, solver_engine::SolverEngineState>,
+    report: FaultReport,
+) -> Result<(), String> {
+    let launch_id = report
+        .launch_id
+        .or_else(|| state.launch_id_snapshot())
+        .unwrap_or_else(|| "unknown".into());
+    let last_op = report.last_op.or_else(|| state.last_op_snapshot());
+    let snapshot = diagnostics::fault_from_ui_report(
+        Some(launch_id),
+        last_op,
+        report.reason,
+        report.exit_reason,
+        report.consecutive_status_failures,
+        report.protocol.unwrap_or(2),
+    );
+    diagnostics::write_last_fault(&snapshot);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut builder = tauri::Builder::default().plugin(tauri_plugin_shell::init());
     #[cfg(windows)]
     {
@@ -50,6 +118,11 @@ pub fn run() {
     builder
         .manage(solver_engine::SolverEngineState::new())
         .setup(|app| {
+            // Seed diagnostics folder + optional LocalDumps (ZR-160). Best-effort.
+            let _ = diagnostics::ensure_diagnostics_dir();
+            if let Err(err) = diagnostics::register_local_dumps() {
+                eprintln!("warn: LocalDumps registration skipped: {err}");
+            }
             // Shipping Study uses Zig solver-engine IPC only (no holdem-explorer).
             let handle = app.handle().clone();
             let zig_state = app.state::<solver_engine::SolverEngineState>();
@@ -71,6 +144,10 @@ pub fn run() {
             solver_engine::solver_engine_info,
             solver_engine::solver_engine_request,
             solver_engine::kill_solver_engine_cmd,
+            open_diagnostics_folder,
+            copy_diagnostics_bundle,
+            diagnostics_dir_path,
+            report_engine_fault,
             library::library_list_templates,
             library::library_list_ranges,
             library::library_list_recent,

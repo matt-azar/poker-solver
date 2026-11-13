@@ -103,6 +103,7 @@ export async function killSolverEngineIpc(): Promise<void> {
     return;
   }
   try {
+    // Rust kill path also writes last-fault.json (ZR-160).
     await invoke("kill_solver_engine_cmd");
   } catch {
     // Already dead / no session — Reconnect/ensure will recover.

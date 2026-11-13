@@ -111,12 +111,32 @@
   nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=''SilentlyContinue''; Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${APP_EXE}''); Unblock-File -LiteralPath (Join-Path ''$INSTDIR'' ''${SIDECAR_EXE}''); Get-ChildItem -LiteralPath ''$INSTDIR'' -Filter ''*.exe'' -File | Unblock-File"'
   Pop $0
 
+  ; LocalDumps (HKCU) so hard crashes leave minidumps under %LOCALAPPDATA%\CrashDumps.
+  ; App first-launch also registers; installer covers upgrades before first run.
+  DetailPrint "Registering Windows LocalDumps for ${APP_EXE} and ${SIDECAR_EXE}..."
+  nsExec::ExecToLog 'reg add "HKCU\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\${APP_EXE}" /v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f'
+  Pop $0
+  nsExec::ExecToLog 'reg add "HKCU\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\${APP_EXE}" /v DumpCount /t REG_DWORD /d 5 /f'
+  Pop $0
+  nsExec::ExecToLog 'reg add "HKCU\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\${APP_EXE}" /v DumpType /t REG_DWORD /d 1 /f'
+  Pop $0
+  nsExec::ExecToLog 'reg add "HKCU\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\${SIDECAR_EXE}" /v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f'
+  Pop $0
+  nsExec::ExecToLog 'reg add "HKCU\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\${SIDECAR_EXE}" /v DumpCount /t REG_DWORD /d 5 /f'
+  Pop $0
+  nsExec::ExecToLog 'reg add "HKCU\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\${SIDECAR_EXE}" /v DumpType /t REG_DWORD /d 1 /f'
+  Pop $0
+  ; Ensure diagnostics folder exists for first-run logs (ZR-160).
+  CreateDirectory "$LOCALAPPDATA\Holdem Study\diagnostics"
+
   ; Tiny marker so support can confirm engine install ran.
   FileOpen $1 "$INSTDIR\engine-setup.txt" w
   FileWrite $1 "Hold'em Study engine sidecar: ${SIDECAR_EXE}$\r$\n"
   FileWrite $1 "Transport: Zig typed IPC (protocol 2, inherited pipes)$\r$\n"
   FileWrite $1 "Installed beside the UI in:$\r$\n$INSTDIR$\r$\n"
   FileWrite $1 "Study launches ${SIDECAR_EXE}; HTTP holdem-explorer is not shipped.$\r$\n"
+  FileWrite $1 "Diagnostics: %LOCALAPPDATA%\Holdem Study\diagnostics\$\r$\n"
+  FileWrite $1 "Crash dumps (LocalDumps): %LOCALAPPDATA%\CrashDumps\$\r$\n"
   FileClose $1
   DetailPrint "Engine sidecar ready: $INSTDIR\${SIDECAR_EXE}"
 !macroend

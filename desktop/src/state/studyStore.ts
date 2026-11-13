@@ -138,6 +138,7 @@ import {
   type StudyIpcFeature,
 } from "../engine/ipcCapabilities";
 import { isTauriRuntime } from "../platform";
+import { reportEngineFault } from "../platform/diagnostics";
 import { ensureEngine, readEngineStatus } from "../platform/engine";
 
 function rejectUnavailableIpcFeature(feature: StudyIpcFeature): string | null {
@@ -1968,6 +1969,12 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       patch.message = opts.message.trim();
     }
     set(patch);
+    // ZR-160: persist last-fault for the diagnostics zip (best-effort).
+    void reportEngineFault({
+      reason: detail,
+      exitReason: "session-dead",
+      protocol: 2,
+    });
   },
 
   async recoverEngineSession() {
@@ -1998,6 +2005,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         phase: phaseAfterSessionFault(get().phase, {
           hadSolution: Boolean(get().solutionId),
         }),
+      });
+      void reportEngineFault({
+        reason: result.error,
+        exitReason: "reconnect-ensure-fail",
+        protocol: 2,
       });
       return { ok: false, error: result.error };
     }
