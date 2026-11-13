@@ -74,6 +74,8 @@ struct SessionIo {
     next_request: AtomicU64,
     pending: Mutex<HashMap<String, SyncSender<Result<Value, String>>>>,
     shut_down: AtomicBool,
+    /// Copied at spawn so the reader thread can fault with a real launch id.
+    launch_id: String,
 }
 
 struct PipeSession {
@@ -91,6 +93,9 @@ pub struct SolverEngineState {
     reconnect: Mutex<()>,
     /// Last IPC op attempted (for last-fault.json).
     last_op: Mutex<Option<String>>,
+    /// Survives kill/clear so UI `report_engine_fault` can still stamp launchId
+    /// after Rust tears down the session (ZR-168: zip had launchId "unknown").
+    last_launch_id: Mutex<Option<String>>,
 }
 
 impl SolverEngineState {
@@ -99,12 +104,19 @@ impl SolverEngineState {
             session: Mutex::new(None),
             reconnect: Mutex::new(()),
             last_op: Mutex::new(None),
+            last_launch_id: Mutex::new(None),
         }
     }
 
     fn remember_op(&self, op: &str) {
         if let Ok(mut slot) = self.last_op.lock() {
             *slot = Some(op.to_string());
+        }
+    }
+
+    fn remember_launch_id(&self, launch_id: &str) {
+        if let Ok(mut slot) = self.last_launch_id.lock() {
+            *slot = Some(launch_id.to_string());
         }
     }
 
@@ -115,11 +127,17 @@ impl SolverEngineState {
             .and_then(|g| g.clone())
     }
 
+    /// Live session launch id, or the last one before kill/clear.
     pub fn launch_id_snapshot(&self) -> Option<String> {
-        self.session
+        if let Ok(guard) = self.session.lock() {
+            if let Some(session) = guard.as_ref() {
+                return Some(session.launch_id.clone());
+            }
+        }
+        self.last_launch_id
             .lock()
             .ok()
-            .and_then(|g| g.as_ref().map(|s| s.launch_id.clone()))
+            .and_then(|g| g.clone())
     }
 }
 
@@ -263,6 +281,7 @@ fn reply_to_result(reply: Value) -> Result<Value, String> {
 
 fn reader_loop(mut stdout: ChildStdout, io: Arc<SessionIo>) {
     let mut stash = Vec::new();
+    let mut unexpected_eof: Option<String> = None;
     loop {
         if io.shut_down.load(Ordering::SeqCst) {
             break;
@@ -293,10 +312,28 @@ fn reader_loop(mut stdout: ChildStdout, io: Arc<SessionIo>) {
                 // Orphan / late reply after waiter timed out: drop.
             }
             Err(err) => {
+                // Sidecar died or closed stdout before host kill — record now so
+                // last-fault keeps this launch_id (status-write 232 comes later).
+                if !io.shut_down.load(Ordering::SeqCst) {
+                    unexpected_eof = Some(err.clone());
+                }
                 fail_all_pending(&io, &err);
                 break;
             }
         }
+    }
+    if let Some(err) = unexpected_eof {
+        let reason = format!(
+            "solver-engine stdout EOF ({err}); sidecar exited before host kill"
+        );
+        diagnostics::append_engine_log(format!("{reason}\n").as_bytes());
+        diagnostics::record_fault(
+            &io.launch_id,
+            Some("stdout-eof"),
+            &reason,
+            "sidecar-exit",
+            PROTOCOL,
+        );
     }
     fail_all_pending(&io, "solver-engine pipe closed");
 }
@@ -411,6 +448,7 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
         next_request: AtomicU64::new(1),
         pending: Mutex::new(HashMap::new()),
         shut_down: AtomicBool::new(false),
+        launch_id: launch_id.to_string(),
     });
     let reader_io = Arc::clone(&io);
     let reader = thread::Builder::new()
@@ -606,6 +644,7 @@ pub fn ensure_solver_engine_session(
     }
 
     let launch_id = new_launch_id();
+    state.remember_launch_id(&launch_id);
     let mut session = spawn_session(app, &launch_id)?;
     let io = Arc::clone(&session.io);
     // Handshake waits on the demux oneshot; lifecycle lock stays held only for
@@ -619,6 +658,7 @@ pub fn ensure_solver_engine_session(
                 info.workers,
                 &info.sidecar,
             );
+            state.remember_launch_id(&info.launch_id);
             session.info = info.clone();
             *guard = Some(session);
             Ok(info)
@@ -820,6 +860,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn launch_id_snapshot_survives_session_clear() {
+        let state = SolverEngineState::new();
+        assert!(state.launch_id_snapshot().is_none());
+        state.remember_launch_id("zig-deadbeef-1");
+        assert_eq!(
+            state.launch_id_snapshot().as_deref(),
+            Some("zig-deadbeef-1"),
+            "last launch id must remain after slot is empty (UI fault path)"
+        );
+        state.remember_launch_id("zig-cafef00d-2");
+        assert_eq!(state.launch_id_snapshot().as_deref(), Some("zig-cafef00d-2"));
+    }
+
     /// Connection-scoped kill needs a real OS child (`sleep`). Unix-only.
     #[cfg(unix)]
     mod connection_scoped {
@@ -862,6 +916,7 @@ mod tests {
                 next_request: AtomicU64::new(1),
                 pending: Mutex::new(HashMap::new()),
                 shut_down: AtomicBool::new(false),
+                launch_id: launch_id.to_string(),
             });
             let session = PipeSession {
                 child,
@@ -875,6 +930,7 @@ mod tests {
                 kill_session(&mut guard, None, "test-reinstall", false);
                 *guard = Some(session);
             }
+            state.remember_launch_id(launch_id);
             (io, pid)
         }
 
@@ -898,6 +954,7 @@ mod tests {
                     next_request: AtomicU64::new(1),
                     pending: Mutex::new(HashMap::new()),
                     shut_down: AtomicBool::new(false),
+                    launch_id: "engine-a".into(),
                 });
                 (child, io)
             };
@@ -915,6 +972,7 @@ mod tests {
                     next_request: AtomicU64::new(1),
                     pending: Mutex::new(HashMap::new()),
                     shut_down: AtomicBool::new(false),
+                    launch_id: "engine-b".into(),
                 });
                 (child, io)
             };
