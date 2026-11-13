@@ -14,6 +14,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -91,6 +92,52 @@ def main() -> int:
 
     if len(CHECKLIST) < 3:
         failures.append("windows checklist too short")
+
+    # Front-door CLI routes to the same scripts (no rewrite).
+    front = _HERE / "study_debug.py"
+    if not front.is_file():
+        failures.append("missing study_debug.py front door")
+    else:
+        help_rc = subprocess.call(
+            [sys.executable, str(front), "--help"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if help_rc != 0:
+            failures.append("study_debug --help")
+        with tempfile.TemporaryDirectory(prefix="study-debug-cli-") as tmp2:
+            diag2 = Path(tmp2) / "diagnostics"
+            _synthetic_diag(diag2)
+            out_json = Path(tmp2) / "analysis.json"
+            cli_rc = subprocess.call(
+                [
+                    sys.executable,
+                    str(front),
+                    "analyze",
+                    "--dir",
+                    str(diag2),
+                    "--out",
+                    str(out_json),
+                    "--json-only",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if cli_rc != 0 or not out_json.is_file():
+                failures.append("study_debug analyze subcommand")
+        # Mini-app file must exist; skip import if tkinter missing (headless CI).
+        if not (_HERE / "study_debug_app.py").is_file():
+            failures.append("missing study_debug_app.py")
+        else:
+            try:
+                import tkinter  # noqa: F401
+            except ImportError:
+                eprint("note: tkinter unavailable — skipping study_debug_app import")
+            else:
+                try:
+                    import study_debug_app  # noqa: F401
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(f"study_debug_app import: {exc}")
 
     if args.with_engine:
         binary = default_solver_engine()

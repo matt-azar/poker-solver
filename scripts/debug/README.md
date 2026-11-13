@@ -8,7 +8,53 @@ no HTTP `:8765`, no `holdem-explorer`, no product-code hooks required.
 crashes/hangs have been hard to root-cause there. Linux cloud probes still work
 against a built `zig-out/bin/solver-engine` for engine-only digs.
 
-## Windows installed Study (start here)
+---
+
+## How Matt runs this on Windows
+
+You need a **clone of this repo** (tooling only) and **Python 3.10+** on PATH.
+The installed Study app stays in Program Files / the NSIS install dir — do **not**
+copy the installed exe into the repo.
+
+Diagnostics the app already writes live under
+`%LOCALAPPDATA%\Holdem Study\diagnostics\`.
+
+### One of these (pick a front door)
+
+```powershell
+# A) Mini-app (buttons for collect / analyze / dumps / sidecar / watch)
+.\scripts\debug\study-debug.cmd
+
+# B) Same thing via PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\debug\study-debug.ps1
+```
+
+### Or 4 CLI commands (while Study is frozen, leave it open)
+
+```powershell
+cd path\to\poker-solver
+
+.\scripts\debug\study-debug.cmd collect
+.\scripts\debug\study-debug.cmd analyze --zip $env:USERPROFILE\Desktop\holdem-study-diagnostics.zip
+.\scripts\debug\study-debug.cmd dumps
+.\scripts\debug\study-debug.cmd sidecar --exe "C:\Path\To\Install\solver-engine.exe"
+```
+
+`collect` with no extra flags means `--zip --stacks` (evidence bundle under `%TEMP%`).
+
+Equivalent without the `.cmd` launcher:
+
+```powershell
+python scripts\debug\study_debug.py collect
+python scripts\debug\study_debug.py gui
+# or: set PYTHONPATH=scripts && python -m debug collect
+```
+
+Optional: `pip install psutil` for better CPU% on snapshot / watch.
+
+---
+
+## Windows installed Study (details)
 
 Evidence the packaged app already writes:
 
@@ -28,77 +74,94 @@ Installed binaries (typical):
 Leave Study open if possible — killing it loses stacks.
 
 ```powershell
-# From a clone of this repo (Python 3.10+ on PATH)
-cd path\to\poker-solver
-python scripts\debug\capture_snapshot.py --out $env:TEMP\study-snap.json
-python scripts\debug\stack_sample.py --out $env:TEMP\study-stacks.txt
-python scripts\debug\collect_bundle.py --zip --stacks --out $env:TEMP\study-bundle
-```
-
-Or one shot:
-
-```powershell
+.\scripts\debug\study-debug.cmd collect
+# or one-shot PowerShell helper:
 powershell -File scripts\debug\windows_collect.ps1
 ```
 
 Then in Study: Help → **Copy diagnostics zip**, and:
 
 ```powershell
-python scripts\debug\analyze_diagnostics.py --zip path\to\holdem-study-diagnostics.zip
-python scripts\debug\find_crash_dumps.py --since-hours 48
-python scripts\debug\windows_sidecar_check.py --exe "C:\Path\To\Install\solver-engine.exe"
+.\scripts\debug\study-debug.cmd analyze --zip path\to\holdem-study-diagnostics.zip
+.\scripts\debug\study-debug.cmd dumps --since-hours 48
+.\scripts\debug\study-debug.cmd sidecar --exe "C:\Path\To\Install\solver-engine.exe"
 ```
 
 ### After a hard crash (app already gone)
 
 1. Help is unavailable — open `%LOCALAPPDATA%\Holdem Study\diagnostics\` manually  
    or use the last diagnostics zip if you copied one earlier.
-2. `analyze_diagnostics.py --dir "%LOCALAPPDATA%\Holdem Study\diagnostics"`
-3. `find_crash_dumps.py` — if empty, enable LocalDumps (script prints the registry recipe) and repro once.
+2. `study-debug.cmd analyze` (defaults to the LocalAppData diagnostics dir)  
+   or `analyze --dir "%LOCALAPPDATA%\Holdem Study\diagnostics"`
+3. `study-debug.cmd dumps` — if empty, enable LocalDumps (script prints the registry recipe) and repro once.
 4. Check `last-solve.json` (`snapshotKind=pre-solve`) vs missing `last-fault.json` → died before fault write (classic hard crash).
 
 ### Windows-only failure modes this suite targets
 
 | Symptom | Likely cause | Script / check |
 | --- | --- | --- |
-| Blank console; closing it kills Study | Console-subsystem sidecar | `windows_sidecar_check.py` (expect PE subsystem **GUI=2**) |
+| Blank console; closing it kills Study | Console-subsystem sidecar | `sidecar` (expect PE subsystem **GUI=2**) |
 | Ready hang on spawn | stderr not drained | Checklist in `windows_sidecar_check.py` |
 | `0xc000001d` | AVX-512 binary on older CPU | Rebuild/install with `-Dcpu=x86_64_v2` |
-| Solve “stuck”, then Reconnect | Soft status timeouts → hung threshold (3) | `analyze_diagnostics` + `ui-hang-events.json` |
-| UI frozen, sidecar still in Task Manager | IPC deadlock / main-thread stall | `capture_snapshot` + `stack_sample` + hang events |
+| Solve “stuck”, then Reconnect | Soft status timeouts → hung threshold (3) | `analyze` + `ui-hang-events.json` |
+| UI frozen, sidecar still in Task Manager | IPC deadlock / main-thread stall | `snapshot` + `stacks` + hang events |
 
 Override diagnostics path: `$env:HOLDEM_STUDY_DIAGNOSTICS_DIR = "D:\copy\diagnostics"`.
 
-Optional: `pip install psutil` for better CPU% on `capture_snapshot` / `watch_hang`.
+---
+
+## Front-door CLI reference
+
+| Command | Wraps | Purpose |
+| --- | --- | --- |
+| `collect` | `collect_bundle.py` | Evidence dir/zip (default `--zip --stacks`) |
+| `analyze` | `analyze_diagnostics.py` | Crash vs hang triage on dir or Help zip |
+| `dumps` | `find_crash_dumps.py` | LocalDumps / cores |
+| `sidecar` | `windows_sidecar_check.py` | GUI PE / CREATE_NO_WINDOW checklist |
+| `probe` | `ipc_probe.py` | Ready + demux + status budget |
+| `freeze` | `train_freeze_probe.py` | Status live during solve |
+| `watch` | `watch_hang.py` | Idle-sidecar / exit alerts |
+| `snapshot` / `stacks` | matching scripts | Live process / backtraces |
+| `gui` / `app` | `study_debug_app.py` | Mini-app window |
+| `windows-collect` | `windows_collect.ps1` | One-shot Windows collect |
+| `smoke` | `smoke_selftest.py` | Suite self-test |
+
+Extra args after the subcommand are forwarded unchanged
+(e.g. `study_debug.py analyze --json-only`).
+
+---
 
 ## Quick start (any OS / engine-only)
 
 ```bash
+python3 scripts/debug/study_debug.py smoke
+# or legacy:
 python3 scripts/debug/smoke_selftest.py
 
-# Live or offline triage
-python3 scripts/debug/capture_snapshot.py
-python3 scripts/debug/analyze_diagnostics.py
-python3 scripts/debug/collect_bundle.py --zip --stacks
+python3 scripts/debug/study_debug.py snapshot
+python3 scripts/debug/study_debug.py analyze
+python3 scripts/debug/study_debug.py collect --zip --stacks
 
-# Built sidecar (Linux cloud / local zig)
 zig build -Dcpu=x86_64_v2
-python3 scripts/debug/ipc_probe.py
-python3 scripts/debug/train_freeze_probe.py
-python3 scripts/debug/smoke_selftest.py --with-engine
+python3 scripts/debug/study_debug.py probe
+python3 scripts/debug/study_debug.py freeze
+python3 scripts/debug/study_debug.py smoke --with-engine
 ```
 
 On Windows you can point probes at the **installed** sidecar:
 
 ```powershell
-python scripts\debug\ipc_probe.py --binary "C:\Path\To\Install\solver-engine.exe"
-python scripts\debug\train_freeze_probe.py --binary "C:\Path\To\Install\solver-engine.exe"
+.\scripts\debug\study-debug.cmd probe --binary "C:\Path\To\Install\solver-engine.exe"
+.\scripts\debug\study-debug.cmd freeze --binary "C:\Path\To\Install\solver-engine.exe"
 ```
 
 ## Scripts
 
 | Script | Failure mode | What it does |
 | --- | --- | --- |
+| `study_debug.py` | — | **Front door** CLI (subcommands above) |
+| `study_debug_app.py` | — | Stdlib tkinter mini-app |
+| `study-debug.cmd` / `.ps1` | — | Find Python + launch CLI/GUI |
 | `capture_snapshot.py` | crash **or** hang | Process tree, RSS/CPU, orphan sidecar detection |
 | `analyze_diagnostics.py` | crash **or** hang | Classifies app diagnostics / zip → crash vs hang |
 | `watch_hang.py` | hang | Time-series CPU/RSS; alerts on idle sidecar / exit |
@@ -152,12 +215,12 @@ From `desktop/src-tauri/src/solver_engine.rs` and Study JS:
 ### Cloud / Linux engine dig (no UI)
 
 1. `zig build -Dcpu=x86_64_v2`
-2. `ipc_probe.py` then `train_freeze_probe.py`
+2. `study_debug.py probe` then `freeze`
 3. Compare with `scripts/zig/stop-close-responsive-smoke.py` / `engine-crash-recovery-smoke.py`
 
 ### Blank console / closing console kills Study
 
-1. `windows_sidecar_check.py --exe path\to\solver-engine.exe` (expect subsystem GUI=2)
+1. `study_debug.py sidecar --exe path\to\solver-engine.exe` (expect subsystem GUI=2)
 2. Do **not** “fix” by shipping a Console PE — that is the bug class (#290)
 
 ## Related in-repo tooling
@@ -172,4 +235,5 @@ From `desktop/src-tauri/src/solver_engine.rs` and Study JS:
 - Prefer **external observation** first; avoid editing `solver_engine.rs`,
   `transport.ts`, or host dispatch unless a dig proves a product bug.
 - Do not reintroduce HTTP fallthrough or `holdem-explorer`.
-- Scripts are stdlib-first (Python 3.10+); `psutil` optional.
+- Scripts are stdlib-first (Python 3.10+); `psutil` optional; mini-app needs tkinter
+  (usually bundled with Python on Windows).
