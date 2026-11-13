@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const poker_engine = @import("poker_engine");
 
 pub const version: u32 = 4;
@@ -698,9 +699,77 @@ pub fn writeFileInjected(
 
     // Positive space: only the no-fault path performs the single replace.
     std.debug.assert(fault == .none);
-    // Single replace. Zig's renameat uses MOVEFILE_REPLACE_EXISTING on Windows —
-    // do not delete-then-retry (that race deletes the only good checkpoint).
+    // Single replace. Do not delete-then-retry (that race deletes the only good
+    // checkpoint). Windows file-in-use → SHARING_VIOLATION must map cleanly.
+    try renameReplace(dir, tmp_name, basename);
+}
+
+/// Atomic same-directory replace. On Windows, Zig 0.14 `Dir.rename` → `renameatW`
+/// leaves `STATUS_SHARING_VIOLATION` (0xC0000043) as `error.Unexpected` and prints
+/// via `unexpectedStatus`. Map that (and AccessDenied) to InvalidPsol without the
+/// stderr noise so file-in-use Save failures stay a clean codec error (ZR-178).
+fn renameReplace(dir: std.fs.Dir, tmp_name: []const u8, basename: []const u8) error{InvalidPsol}!void {
+    if (builtin.os.tag == .windows) {
+        renameReplaceWindows(dir, tmp_name, basename) catch return error.InvalidPsol;
+        return;
+    }
     dir.rename(tmp_name, basename) catch return error.InvalidPsol;
+}
+
+fn renameReplaceWindows(dir: std.fs.Dir, tmp_name: []const u8, basename: []const u8) !void {
+    const w = std.os.windows;
+    const tmp_w = try w.sliceToPrefixedFileW(dir.fd, tmp_name);
+    const dest_w = try w.sliceToPrefixedFileW(dir.fd, basename);
+
+    const src_fd = w.OpenFile(tmp_w.span(), .{
+        .dir = dir.fd,
+        .access_mask = w.SYNCHRONIZE | w.GENERIC_WRITE | w.DELETE,
+        .creation = w.FILE_OPEN,
+        .filter = .any,
+        .follow_symlinks = false,
+    }) catch |err| switch (err) {
+        error.WouldBlock => unreachable,
+        else => |e| return e,
+    };
+    defer w.CloseHandle(src_fd);
+
+    const new_path_w = dest_w.span();
+    const struct_buf_len = @sizeOf(w.FILE_RENAME_INFORMATION) + (std.fs.max_path_bytes - 1);
+    var rename_info_buf: [struct_buf_len]u8 align(@alignOf(w.FILE_RENAME_INFORMATION)) = undefined;
+    const struct_len = @sizeOf(w.FILE_RENAME_INFORMATION) - 1 + new_path_w.len * 2;
+    if (struct_len > struct_buf_len) return error.NameTooLong;
+
+    const rename_info: *w.FILE_RENAME_INFORMATION = @ptrCast(&rename_info_buf);
+    var io_status_block: w.IO_STATUS_BLOCK = undefined;
+    rename_info.* = .{
+        .Flags = w.TRUE, // ReplaceIfExists
+        .RootDirectory = if (std.fs.path.isAbsoluteWindowsWTF16(new_path_w)) null else dir.fd,
+        .FileNameLength = @intCast(new_path_w.len * 2),
+        .FileName = undefined,
+    };
+    @memcpy((&rename_info.FileName).ptr, new_path_w);
+
+    const rc = w.ntdll.NtSetInformationFile(
+        src_fd,
+        &io_status_block,
+        rename_info,
+        @intCast(struct_len),
+        .FileRenameInformation,
+    );
+    switch (rc) {
+        .SUCCESS => {},
+        // Dest held open without FILE_SHARE_DELETE/WRITE (Explorer/AV file-in-use).
+        .SHARING_VIOLATION => return error.AccessDenied,
+        .ACCESS_DENIED => return error.AccessDenied,
+        .OBJECT_NAME_NOT_FOUND => return error.FileNotFound,
+        .OBJECT_PATH_NOT_FOUND => return error.FileNotFound,
+        .NOT_SAME_DEVICE => return error.RenameAcrossMountPoints,
+        .OBJECT_NAME_COLLISION => return error.PathAlreadyExists,
+        .DIRECTORY_NOT_EMPTY => return error.PathAlreadyExists,
+        .FILE_IS_A_DIRECTORY => return error.IsDir,
+        .NOT_A_DIRECTORY => return error.NotDir,
+        else => return w.unexpectedStatus(rc),
+    }
 }
 
 /// Streaming payload reader with a bounded readahead buffer (ZR-156).

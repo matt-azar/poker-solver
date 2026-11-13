@@ -660,6 +660,10 @@ def main() -> int:
         }
 
         # --- pause mid-train, then stop (cancel) mid-train ---
+        # ZR-178: tiny river ReleaseFast can burn millions of iters/sec on Windows.
+        # Pause must latch cooperatively even between trainGated train(1) steps
+        # (Session.pause always sets pause_requested). Still send pause ASAP once
+        # training progress is visible — do not leave a wide poll gap.
         inbox.rpc(proc, "begin_config", {"config_text": config_text}, "c-begin-pause")
         admit_solve(inbox, proc, long_iters, "c-solve-pause", "j-contract-pause")
         wait_until_training(inbox, proc, "pause")
@@ -672,8 +676,9 @@ def main() -> int:
             f"expected paused terminal: {status_paused}",
         )
         rev_paused = int(status_paused.get("policy_revision") or 0)
+        iters_paused = int(status_paused.get("iterations") or 0)
         require(
-            0 < rev_paused < long_iters,
+            0 < rev_paused and iters_paused < long_iters,
             f"pause did not stop early: {status_paused}",
         )
 
@@ -692,9 +697,14 @@ def main() -> int:
             f"expected cancelled terminal: {status_stopped}",
         )
         rev_stopped = int(status_stopped.get("policy_revision") or 0)
+        iters_stopped = int(status_stopped.get("iterations") or 0)
+        require(
+            iters_stopped < iters_paused + long_iters,
+            f"stop did not stop early: {status_stopped}",
+        )
         require(
             rev_stopped < rev_paused + long_iters,
-            f"stop did not stop early: {status_stopped}",
+            f"stop revision unbounded: {status_stopped}",
         )
         stages["pause_stop"] = {
             "pause_revision": rev_paused,

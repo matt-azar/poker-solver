@@ -1178,6 +1178,9 @@ pub const Session = struct {
             if (self.last_terminal == .paused) return;
             completed += 1;
             fresh_eval = false;
+            // Note: train(1) leaves phase=.published between gated steps. pause()
+            // must latch pause_requested even in that gap (ZR-178); do not flip
+            // phase back to .training here — train(1) only admits paused/published.
 
             if (@rem(completed, every) == 0) {
                 if (want_accuracy) {
@@ -1219,6 +1222,24 @@ pub const Session = struct {
                     return;
                 }
             }
+        }
+        // Pause/stop may arrive after the last train(1) but before completion flush.
+        if (self.stop_requested.load(.acquire)) {
+            self.last_terminal = .cancelled;
+            self.mu.lock();
+            self.phase = .paused;
+            self.mu.unlock();
+            self.clearControlFlags();
+            self.freezeRuntime();
+            return;
+        }
+        if (self.pause_requested.load(.acquire)) {
+            self.last_terminal = .paused;
+            self.mu.lock();
+            self.phase = .paused;
+            self.mu.unlock();
+            self.clearControlFlags();
+            return;
         }
         self.ensurePublishedExact() catch |err| {
             // ZR-164: gated completion under publish pressure keeps prior average.
@@ -1306,14 +1327,24 @@ pub const Session = struct {
     pub fn pause(self: *Session) SessionError!void {
         self.mu.lock();
         defer self.mu.unlock();
+        // Always latch cooperative pause first. trainGated's train(1) steps finish
+        // with phase=.published between iterations; treating that as an idle pause
+        // (phase flip only, no flag) lets the gated loop keep burning the remaining
+        // budget — zig-windows study-contract-smoke saw completed@2e6 instead of
+        // paused (ZR-178).
+        self.pause_requested.store(true, .release);
         if (self.phase == .training) {
-            // Cooperative: train loop stops at the next iteration boundary.
-            self.pause_requested.store(true, .release);
+            // Train loop observes the flag at the next iteration boundary.
+            return;
+        }
+        if (self.phase == .paused) {
+            // Idempotent: already paused (idle or mid-gate latch applied).
             return;
         }
         if (self.phase != .published) return error.InvalidSession;
         if (self.published == null) return error.NothingPublished;
         self.phase = .paused;
+        self.last_terminal = .paused;
     }
 
     pub fn setLocksText(self: *Session, text: []const u8) SessionError!void {
