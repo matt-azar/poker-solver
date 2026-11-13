@@ -18,7 +18,7 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 Foundation in place: shared street/river public tree, pass-frozen CFR variants, active-player CFR+ flooring, blocker-aware showdowns, first-public-card parallelism, engine allocation budgets (default 1024 MiB), node-scoped browsing, Hold’em reference enumerators on `CfrTrainer`. Threads default to one.
 
-Flop, turn, and river are one betting tree (two, one, or zero cards left) in the Zig engine Session. Historical C++ names `StreetGame` / `StreetBatchSolver` / `RiverGame` describe the same public-tree idea in older math docs; they are not a shipping binary path on `zig-rewrite`.
+Flop, turn, and river are one betting tree (two, one, or zero cards left) in the Zig engine Session. Historical C++ names `StreetGame` / `StreetBatchSolver` / `RiverGame` describe the same public-tree idea in older math docs; they are not a shipping binary path on `main`.
 
 Also landed on the Zig Study path: conditional action EV; stop-and-keep / pause / continue; versioned PSOL; check-down equity (+ buckets); made-hand categories; node locks + strategy edits; pot rake wiring; Windows NSIS Study installer (Zig sidecar only); flop/turn draw and backdoor tags in Study. Compact saves, a durable batch queue, trainer packs, preflop, dual-session Compare, and **complete ICM Study solves (ZR-93 — reject until done; low priority)** are still open. No head-to-head Pio performance or solution-quality equivalence. Acc / time-to-Accuracy walls are not cutover blockers.
 

@@ -1,6 +1,6 @@
 # Explorer HTTP API (retired)
 
-**Status on `zig-rewrite`:** the C++ `holdem-explorer` HTTP server (`:8765`) is **removed**. Packaged and Tauri Study use the Zig `solver-engine` sidecar over typed IPC (protocol 2, inherited pipes). There is no dual-sidecar / HTTP fallback shipping path.
+**Status on `main`:** the C++ `holdem-explorer` HTTP server (`:8765`) is **removed**. Packaged and Tauri Study use the Zig `solver-engine` sidecar over typed IPC (protocol 2, inherited pipes). There is no dual-sidecar / HTTP fallback shipping path.
 
 For the live Study workstation and Windows packaging, see [DESKTOP_UI.md](DESKTOP_UI.md).
 

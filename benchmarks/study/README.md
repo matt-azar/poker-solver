@@ -97,7 +97,7 @@ These do not replace the three reference cases.
 ## How to run
 
 **Historical (pre-#287):** this harness drove C++ `street_solver` / `river_solver`
-via CMake `build/Release`. That tree is removed on `zig-rewrite`. Do not treat
+via CMake `build/Release`. That tree is removed on `main`. Do not treat
 the cmake commands as a live product how-to.
 
 **Current Zig Study contract smoke** (real sidecar, no Acc wall):

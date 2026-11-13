@@ -1,6 +1,6 @@
 # Architecture
 
-**Shipping on `zig-rewrite`:** the production Study engine is Zig (`engine/`, `app/`, `host/`, `cli/` → `solver-engine` typed IPC). The C++ `holdem-explorer` / CMake library tree described in older revisions of this doc is **removed**. Algorithmic concepts below (one postflop tree, NashConv, CFR+ schedules) still apply; treat C++ path / `include/` / `src/` names as historical vocabulary unless a Zig module is named explicitly.
+**Shipping on `main`:** the production Study engine is Zig (`engine/`, `app/`, `host/`, `cli/` → `solver-engine` typed IPC). The C++ `holdem-explorer` / CMake library tree described in older revisions of this doc is **removed**. Algorithmic concepts below (one postflop tree, NashConv, CFR+ schedules) still apply; treat C++ path / `include/` / `src/` names as historical vocabulary unless a Zig module is named explicitly.
 
 Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [DESKTOP_UI.md](DESKTOP_UI.md), [HOLDEM.md](HOLDEM.md). Retired HTTP explorer notes: [EXPLORER.md](EXPLORER.md).
 

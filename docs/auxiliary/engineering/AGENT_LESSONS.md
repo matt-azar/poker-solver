@@ -4,7 +4,7 @@ Mistakes, friction, and correctness traps observed in this repository’s histor
 
 Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor/rules/licensing.mdc`. Refresh playbook: [`AGENT_LESSONS_REFRESH.md`](AGENT_LESSONS_REFRESH.md).
 
-**`zig-rewrite` product path (owner GO 2026-11-12):** Study ships Zig `solver-engine` typed IPC only. The C++ `holdem-explorer` / CMake tree, HTTP `:8765` fallbacks, and dual-sidecar packaging are removed. Sections below that mention CMake / `explorer` / `poker_http_tests` are **historical traps** from the C++ era — do not treat them as a mandate to restore those paths.
+**`main` product path (owner GO 2026-11-12; Zig cutover):** Study ships Zig `solver-engine` typed IPC only. The C++ `holdem-explorer` / CMake tree, HTTP `:8765` fallbacks, and dual-sidecar packaging are removed. Sections below that mention CMake / `explorer` / `poker_http_tests` are **historical traps** from the C++ era — do not treat them as a mandate to restore those paths.
 
 ---
 
@@ -15,7 +15,7 @@ Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor
 1. **One writer per tree.** Delegated Task / best-of-n runners may still write into shared `/workspace` even when told to use an isolated worktree. Do not `git checkout`, reset, or commit on `/workspace` while siblings run unless you have confirmed they never touch that path.
 2. **Disjoint file ownership.** Assign path prefixes per agent. Serialize shared manifests (`build.zig`, `desktop/src-tauri/tauri.conf.json`, Tauri `solver_engine.rs` spawn/IPC, `host/src/dispatch.zig`, `desktop/src/engine/client.ts` / `transport.ts`) or let only the parent edit them. Historical CMake / `explorer_main.cpp` ownership rules apply only on pre-cutover trees.
 3. **Parent owns forge writes.** Subagents often lack `ManagePullRequest` and must not use `gh` to create/update PRs. After a sibling pushes, the parent opens/updates the PR and subscribes CI.
-4. **Snapshot before splitting.** If the tree is interleaved, commit everything onto `cursor/wip-…-<run-suffix>`, then path-checkout onto clean feature branches from the correct base (`zig-rewrite` while that is the product tip).
+4. **Snapshot before splitting.** If the tree is interleaved, commit everything onto `cursor/wip-…-<run-suffix>`, then path-checkout onto clean feature branches from the correct base (`main`).
 5. **Re-check `git status` before every commit.** Restore unexpected paths with `git checkout HEAD -- <path>`.
 6. **Scope shared harness edits.** A WIP snapshot’s `build.zig` / host dispatch / desktop EngineClient will list every agent’s ops. Trim to this branch only.
 
@@ -40,7 +40,7 @@ Do not edit build.zig, tauri.conf.json, solver_engine.rs, host/src/dispatch.zig,
   or desktop/src/engine/{client,transport}.ts unless listed; if you must, add only your ops.
 Branch: cursor/<name>-<run-suffix> from <exact base ref>
   (use the suffix required by this cloud run, e.g. -ce85 / -c006).
-  Product tip base is often origin/zig-rewrite until cutover merges to main.
+  Product tip base is origin/main.
 Push with git push -u origin <branch>.
 Do not open a PR (parent will ManagePullRequest).
 Do not change LICENSE.
@@ -51,7 +51,7 @@ Report: tip SHA, files touched, test command + counts, compare URL.
 
 1. Inventory with `git status` / `git diff --stat`.
 2. Commit all dirty + untracked onto `cursor/wip-<topic>-<run-suffix>`.
-3. For each feature: branch from the product tip (`origin/zig-rewrite` or `origin/main`).
+3. For each feature: branch from the product tip (`origin/main`).
 4. `git checkout wip -- <only that feature’s files>`.
 5. Trim shared manifests, dispatch, EngineClient, and docs.
 6. `zig build` + `zig build test`; desktop `npx tsc -b` / focused vitest; fix.
@@ -69,7 +69,7 @@ Report: tip SHA, files touched, test command + counts, compare URL.
 
 ### Zig `solver-engine` IPC (current product)
 
-Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdout pipes via Tauri). There is no shipping HTTP `:8765` / `holdem-explorer` path on `zig-rewrite` (#286–#287).
+Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdout pipes via Tauri). There is no shipping HTTP `:8765` / `holdem-explorer` path on `main` (#286–#287).
 
 | Trap | Symptom | Do / Don't |
 | --- | --- | --- |
@@ -105,7 +105,7 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 
 ### One production postflop engine (M6)
 
-A flop, turn, and river are **one** betting tree with two, one, or zero cards left. On `zig-rewrite`, production Study uses the Zig Session frozen public-tree path for all three board lengths.
+A flop, turn, and river are **one** betting tree with two, one, or zero cards left. On `main`, production Study uses the Zig Session frozen public-tree path for all three board lengths.
 
 | Board | Current product path | Historical C++ reference |
 | --- | --- | --- |
@@ -284,7 +284,7 @@ Historical C++ targets (`street_solver`, `river_solver`, `explorer`, `poker_*_te
 - **Tauri sidecar spawn (Zig):** `externalBin` → `binaries/solver-engine`; installed file is `<exe_dir>/solver-engine.exe`. Spawn the absolute path beside the app. Packaged UI must **statically import** `@tauri-apps/api/core`. Own the child via IPC ready + launch id — not “any TCP on 8765.”
 - **NSIS upgrade + sidecar lock:** PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning`), then `taskkill` / delete **both** `solver-engine.exe` and legacy `holdem-explorer.exe`. Never `taskkill` `explorer.exe` (Windows shell).
 - **Packaged security:** production CSP (#242); assistant secrets in OS **keyring** (#243).
-- **Historical C++ HTTP gaps** (pre-cutover trees only): Linux/Windows `poker_http_tests`, MSVC stack, `holdem-explorer` path quirks — do not restore those shipping paths on `zig-rewrite`.
+- **Historical C++ HTTP gaps** (pre-cutover trees only): Linux/Windows `poker_http_tests`, MSVC stack, `holdem-explorer` path quirks — do not restore those shipping paths on `main`.
 
 ### Licensing
 
@@ -293,7 +293,7 @@ Do not change `LICENSE`, SPDX, or license metadata. `UNLICENSED` ≠ Unlicense. 
 ### Branch / PR hygiene (cloud)
 
 - Branches: `cursor/<descriptive-name>-<run-suffix>`, lowercase (suffix comes from the cloud-run instructions).
-- Prefer the **product tip** as `base_branch` (`zig-rewrite` until cutover merges to `main`); say so in the PR body when not targeting `main`.
+- Prefer the **product tip** as `base_branch` (`main`).
 - Update `docs/auxiliary/planning/FEATURE_PARITY.md` **only** in the commit that demonstrates the row change.
 - When UI chrome moves, update `docs/ai-context/source/` + `sync:ai-context` and player docs in the **same** change when packs claim those labels.
 
@@ -413,7 +413,7 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 
 ## 7. Keeping this doc fresh
 
-- Durable scheduled refresh: Cursor Automation [Update docs](https://cursor.com/automations/138d322b-ddfd-11f1-ba91-f63b1661ac50) plus the paste-ready prompt in [`AGENT_LESSONS_REFRESH.md`](AGENT_LESSONS_REFRESH.md). Prefer the **product tip** base (`zig-rewrite` until cutover lands on `main`).
+- Durable scheduled refresh: Cursor Automation [Update docs](https://cursor.com/automations/138d322b-ddfd-11f1-ba91-f63b1661ac50) plus the paste-ready prompt in [`AGENT_LESSONS_REFRESH.md`](AGENT_LESSONS_REFRESH.md). Prefer the **product tip** base (`main`).
 - When a PR fixes an agent-rediscovered trap, add a short **Do/Don't** here in the same PR when practical.
 - Update the short digest in `.cursor/rules/parallel-agents.mdc` and root `AGENTS.md` whenever a new trap belongs in every agent’s always-on context.
 

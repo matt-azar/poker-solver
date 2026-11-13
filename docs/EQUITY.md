@@ -2,7 +2,7 @@
 
 Exact check-down showdown equity for a flop, turn, or river.
 
-**Shipping on `zig-rewrite`:** Study node equity and the Equity Calculator use Zig host IPC (`equity`, `start_equity_job` / `get_equity_job` / `cancel_equity_job`). C++ `equity_calculator` / `equity_tests` / Explorer `/equity` names below are **historical** — algorithm notes still apply. Not a Pio equity-parity claim.
+**Shipping on `main`:** Study node equity and the Equity Calculator use Zig host IPC (`equity`, `start_equity_job` / `get_equity_job` / `cancel_equity_job`). C++ `equity_calculator` / `equity_tests` / Explorer `/equity` names below are **historical** — algorithm notes still apply. Not a Pio equity-parity claim.
 
 Does not edit ranges, build a betting tree, or read solver state beyond the requested weights/board. Default work limit admits a full-range river and rejects a full-range turn.
 
@@ -125,7 +125,7 @@ Study node equity uses host IPC `equity` with **reach-weighted** strategy-condit
 
 ## Standalone Equity calculator
 
-The desktop **Equity** workspace is independent of any solution. On `zig-rewrite`, packaged Study uses solver-engine IPC ops `start_equity_job` / `get_equity_job` / `cancel_equity_job` (result embedded on completed/stopped status). Legacy HTTP paths (removed on this branch) were:
+The desktop **Equity** workspace is independent of any solution. On `main`, packaged Study uses solver-engine IPC ops `start_equity_job` / `get_equity_job` / `cancel_equity_job` (result embedded on completed/stopped status). Legacy HTTP paths (removed on this tree) were:
 
 | Method | Path |
 | --- | --- |

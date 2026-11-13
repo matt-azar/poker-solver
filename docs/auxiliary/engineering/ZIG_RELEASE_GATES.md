@@ -16,7 +16,7 @@ what to run and what must stay blocked.
 
 Owner GO 2026-11-12: stable Windows NSIS ships Zig `solver-engine` only
 (typed IPC). HTTP `holdem-explorer` is not a packaged Study path on
-`zig-rewrite`. Scoreboard/evidence remain in the store docs above.
+`main`. Scoreboard/evidence remain in the store docs above.
 
 **Acc / perf are not cutover blockers** (owner preference 2026-11-12): do not
 block merge or ship on Accuracy/NashConv / time-to-Accuracy walls. Keep real
@@ -30,7 +30,7 @@ stay bounded and store-recorded — they are not a green-check gate in this file
   **⅓ pot** and **¾ pot** only
 
 Fixture assets live under `benchmarks/study/` (and parity harnesses that
-consume them). The in-repo C++ tree is removed on `zig-rewrite`; historical
+consume them). The in-repo C++ tree is removed on `main`; historical
 C++ `--plan-memory` / tip-C++ rematch notes live in store digs only.
 
 ## Optional measurement procedure (digs only — not a cutover gate)
@@ -45,7 +45,7 @@ When recording store scoreboard rows (optional; not required for cutover):
 4. Record rows in the store scoreboard — not as a green check here. Do not
    schedule new hour-long Acc walls by default (prefer ≤30–45 min soft+hard kill).
 
-## CI scaffolding on `zig-rewrite`
+## CI scaffolding on `main`
 
 | Workflow | Role |
 | --- | --- |

@@ -1,6 +1,6 @@
 # Study baseline
 
-Everyday postflop study surface on `zig-rewrite`.
+Everyday postflop study surface on `main`.
 
 Product entry points: Zig `solver-engine` + Study UI (`desktop/`). Living status: [FEATURE_PARITY.md](FEATURE_PARITY.md). Ordered work: [ROADMAP.md](ROADMAP.md). The C++ `explorer` / `street_solver` / CMake validation path is removed.
 

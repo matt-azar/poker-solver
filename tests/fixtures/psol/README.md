@@ -11,7 +11,7 @@ Tiny checkpoints used as product compatibility pins for Open / Continue (Zig `fo
 
 Generated historically with the retired C++ `generate_psol_fixtures` tool from this repository’s PSOL writer (codec-compatible with the `v0.1.2` wire layout: streaming write, versions 1–3, kinds 1–2). Source tip at generation time is recorded in git history for these blobs.
 
-Do not expect a CMake regenerator on `zig-rewrite`; treat the committed blobs as the pin. Update fixtures only with an explicit Zig-side writer + matching rematch tests.
+Do not expect a CMake regenerator on `main`; treat the committed blobs as the pin. Update fixtures only with an explicit Zig-side writer + matching rematch tests.
 
 ## Contract covered by tests
 
