@@ -26,11 +26,15 @@ const README_BODY: &str = "\
 Holdem Study diagnostics
 ========================
 
-Zip this folder and send it when reporting a hang, crash, or engine failure.
+Zip this folder and send it when reporting a hang, crash, Solve failed, or
+engine failure.
+
+Folder (Windows packaged):
+  %LOCALAPPDATA%\\Holdem Study\\diagnostics\\
 
 Contents:
-  engine.log       — recent solver-engine stderr (rolling)
-  last-fault.json  — last session-dead / kill / ensure-fail snapshot
+  engine.log        — recent solver-engine stderr (rolling)
+  last-fault.json   — last Solve failed / session-dead / kill / ensure-fail
   session-meta.json — app version, protocol, launch_id, OS
 
 Hard crash minidumps (if Windows LocalDumps is registered) land under:
@@ -81,9 +85,8 @@ pub fn ensure_diagnostics_dir() -> Result<PathBuf, String> {
     let dir = diagnostics_dir();
     fs::create_dir_all(&dir).map_err(|err| format!("create diagnostics dir: {err}"))?;
     let readme = dir.join(README_NAME);
-    if !readme.is_file() {
-        fs::write(&readme, README_BODY).map_err(|err| format!("write diagnostics README: {err}"))?;
-    }
+    // Refresh README so folder-path / Solve-failed guidance stays current (ZR-163).
+    fs::write(&readme, README_BODY).map_err(|err| format!("write diagnostics README: {err}"))?;
     Ok(dir)
 }
 

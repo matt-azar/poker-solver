@@ -31,6 +31,7 @@ import { canOfferReopenLastCheckpoint } from "../../domain/sessionRecovery";
 import {
   copyDiagnosticsBundle,
   copyTextToClipboard,
+  diagnosticsDirPath,
   openDiagnosticsFolder,
 } from "../../platform/diagnostics";
 import { isTauriRuntime } from "../../platform";
@@ -498,12 +499,40 @@ function Menu({
 export function HelpOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [diagMessage, setDiagMessage] = useState<string | null>(null);
   const [diagBusy, setDiagBusy] = useState(false);
+  const [diagFolderPath, setDiagFolderPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    // Always surface the folder path so Solve failed reports are findable (ZR-163).
+    if (!isTauriRuntime()) {
+      setDiagFolderPath("%LOCALAPPDATA%\\Holdem Study\\diagnostics");
+      return;
+    }
+    let cancelled = false;
+    void diagnosticsDirPath()
+      .then((path) => {
+        if (!cancelled) {
+          setDiagFolderPath(path);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDiagFolderPath("%LOCALAPPDATA%\\Holdem Study\\diagnostics");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   async function onOpenDiagnostics() {
     setDiagBusy(true);
     setDiagMessage(null);
     try {
       const path = await openDiagnosticsFolder();
+      setDiagFolderPath(path);
       setDiagMessage(`Opened: ${path}`);
     } catch (err) {
       setDiagMessage(err instanceof Error ? err.message : String(err));
@@ -550,9 +579,18 @@ export function HelpOverlay({ open, onClose }: { open: boolean; onClose: () => v
         </p>
         <h2 style={{ marginTop: 20 }}>Diagnostics</h2>
         <p className="muted">
-          After a hang or engine crash, zip the diagnostics folder (or copy the zip path)
-          and send it with a short repro. Hard-crash dumps may also appear under CrashDumps.
+          After Solve failed, a hang, or an engine crash, open or zip this folder and
+          send it with a short repro. Hard-crash dumps may also appear under CrashDumps.
         </p>
+        {diagFolderPath ? (
+          <p
+            className="muted"
+            style={{ marginTop: 8, wordBreak: "break-all" }}
+            data-testid="diagnostics-folder-path"
+          >
+            Folder: {diagFolderPath}
+          </p>
+        ) : null}
         <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             type="button"
