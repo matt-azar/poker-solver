@@ -27,10 +27,7 @@ import {
   executeStop,
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
-import {
-  canOfferReopenLastCheckpoint,
-  lastValidCheckpointPath,
-} from "../../domain/sessionRecovery";
+import { canOfferReopenLastCheckpoint } from "../../domain/sessionRecovery";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -183,10 +180,7 @@ export function MenuBar({
   const pauseGate = canExecutePause(commandCtx);
   const stopGate = canExecuteStop(commandCtx);
   const saveGate = canExecuteSave(commandCtx);
-  const checkpointPath = lastValidCheckpointPath(
-    draft.solutionPath,
-    lastCheckpointPath,
-  );
+  const checkpointPath = lastCheckpointPath.trim();
   const canReopenCheckpoint = canOfferReopenLastCheckpoint(checkpointPath);
   const evGate = canExecuteCalculateEv(commandCtx);
   const lockGate = canExecuteOpenLockEditor(commandCtx);

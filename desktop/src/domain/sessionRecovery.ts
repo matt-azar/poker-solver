@@ -111,7 +111,7 @@ export function coldReconnectMessage(opts?: {
 /**
  * Last known on-disk checkpoint Study can reopen after engine death.
  * Prefer the dedicated last-successful Save/Open path; fall back to the
- * draft field when callers have not yet recorded a successful file op.
+ * draft field only for recovery copy when older sessions never recorded one.
  */
 export function lastValidCheckpointPath(
   solutionPath: string | null | undefined,
@@ -124,11 +124,14 @@ export function lastValidCheckpointPath(
   return (solutionPath ?? "").trim();
 }
 
-/** True when Study can offer Reopen last checkpoint (path known). */
+/**
+ * True when Study can offer Reopen last checkpoint.
+ * Only a successful Save/Open path qualifies — typed draft paths do not.
+ */
 export function canOfferReopenLastCheckpoint(
   lastCheckpointPath: string | null | undefined,
 ): boolean {
-  return lastValidCheckpointPath(null, lastCheckpointPath).length > 0;
+  return (lastCheckpointPath ?? "").trim().length > 0;
 }
 
 /**

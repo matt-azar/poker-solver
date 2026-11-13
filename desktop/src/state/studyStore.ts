@@ -2044,10 +2044,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   async reopenLastCheckpoint() {
-    const checkpointPath = lastValidCheckpointPath(
-      get().draft.solutionPath,
-      get().lastCheckpointPath,
-    );
+    const checkpointPath = get().lastCheckpointPath.trim();
     if (!canOfferReopenLastCheckpoint(checkpointPath)) {
       const error =
         "No last checkpoint — Save or Open a .psol before Reopen last checkpoint.";

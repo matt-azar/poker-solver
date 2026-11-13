@@ -9,10 +9,7 @@ import {
   executeStop,
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
-import {
-  canOfferReopenLastCheckpoint,
-  lastValidCheckpointPath,
-} from "../../domain/sessionRecovery";
+import { canOfferReopenLastCheckpoint } from "../../domain/sessionRecovery";
 import {
   engineActivityMessage,
   phaseLabel,
@@ -52,10 +49,7 @@ export function StatusBar({
   const workspace = useStudyStore((s) => s.workspace);
   const currentNode = useStudyStore((s) => s.currentNode);
   const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
-  const checkpointPath = lastValidCheckpointPath(
-    draft.solutionPath,
-    lastCheckpointPath,
-  );
+  const checkpointPath = lastCheckpointPath.trim();
   const showReopen =
     Boolean(onReopenLastCheckpoint) &&
     canOfferReopenLastCheckpoint(checkpointPath) &&
