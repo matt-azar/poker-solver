@@ -371,17 +371,19 @@ pub const Session = struct {
         if (spec.memory_mib <= 0) return error.BudgetExceeded;
         const budget_bytes: u64 = @as(u64, @intCast(spec.memory_mib)) * 1024 * 1024;
 
-        // Hold the prior solution until install. Raise the ceiling so a full new
-        // solution may allocate up to `budget_bytes` while old live is still charged
-        // (peak overlap counts). Roll the limit back on any failure.
+        // Shared memory-mib ceiling (ZR-156): do not raise to old+new. Hold the
+        // prior solution until install; if old and new cannot coexist under
+        // `budget_bytes`, refuse and keep the prior open.
         const prior_limit = self.budget.limit();
         const prior_budget_field = self.memory_budget_bytes;
         const old_live = self.budget.live();
-        self.budget.setLimit(old_live + budget_bytes);
+        self.budget.setLimit(budget_bytes);
         errdefer {
             self.budget.setLimit(prior_limit);
             self.memory_budget_bytes = prior_budget_field;
         }
+        // Prior alone already above the new ceiling → cannot stage a replacement.
+        if (old_live > budget_bytes) return error.BudgetExceeded;
 
         // Under a declared budget, construction OOM is a budget failure (charge-
         // before-allocate during compile growth + tables).
@@ -392,6 +394,8 @@ pub const Session = struct {
         errdefer game.deinit();
         const estimated = estimateSolutionBytes(game);
         if (estimated > budget_bytes) return error.BudgetExceeded;
+        // Coexistence preflight: old live + new estimate must fit the shared ceiling.
+        if (old_live > 0 and estimated > budget_bytes - old_live) return error.BudgetExceeded;
 
         var training = poker_engine.solve.training_state.TrainingState.init(self.allocator, game) catch |err| {
             if (err == error.OutOfMemory) return error.BudgetExceeded;
@@ -431,6 +435,7 @@ pub const Session = struct {
         std.debug.assert(self.phase == .paused);
         std.debug.assert(self.memory_budget_bytes == budget_bytes);
         std.debug.assert(self.budget.limit() == budget_bytes);
+        std.debug.assert(self.budget.live() <= budget_bytes);
         std.debug.assert(!self.cfr_pass_mutated);
         std.debug.assert(self.last_committed_trained == 0);
     }
@@ -1098,6 +1103,35 @@ pub const Session = struct {
         self.has_metrics = true;
     }
 
+    /// Free bulky PSOL table slices after they have been copied into Session-owned
+    /// buffers so Open peak stays under the shared memory-mib ceiling (ZR-156).
+    fn releaseDocTableStaging(doc: *poker_formats.Document) void {
+        if (doc.average.len != 0) {
+            doc.allocator.free(doc.average);
+            doc.average = &.{};
+        }
+        if (doc.regret.len != 0) {
+            doc.allocator.free(doc.regret);
+            doc.regret = &.{};
+        }
+        if (doc.strategy_sum.len != 0) {
+            doc.allocator.free(doc.strategy_sum);
+            doc.strategy_sum = &.{};
+        }
+        if (doc.oop_combos.len != 0) {
+            doc.allocator.free(doc.oop_combos);
+            doc.oop_combos = &.{};
+        }
+        if (doc.ip_combos.len != 0) {
+            doc.allocator.free(doc.ip_combos);
+            doc.ip_combos = &.{};
+        }
+        if (doc.slot_actions.len != 0) {
+            doc.allocator.free(doc.slot_actions);
+            doc.slot_actions = &.{};
+        }
+    }
+
     fn buildDocument(self: *Session) SessionError!poker_formats.Document {
         const game = self.game orelse return error.InvalidSession;
         const published = self.published orelse return error.NothingPublished;
@@ -1182,8 +1216,37 @@ pub const Session = struct {
     pub fn open(self: *Session, path: []const u8) SessionError!void {
         if (self.busyForReplace()) return error.Busy;
 
-        // Read staging against parent first; enforce solution budget after we know memory-mib.
-        var doc = poker_formats.readFile(self.parent, path) catch |err| {
+        // Peek config on parent (street-config text only) to learn memory-mib
+        // before charging the full streamed document against the shared ceiling.
+        const peeked_config = poker_formats.peekConfigText(self.parent, path) catch |err| {
+            return err;
+        };
+        defer self.parent.free(peeked_config);
+        // If the peeked text is not street-config, re-stream on parent so callers
+        // still see codec errors (InvalidPsol / Legacy) instead of a parse miss.
+        var peeked_spec = poker_engine.game.parseStreetConfig(self.parent, peeked_config) catch {
+            var probe = poker_formats.readFile(self.parent, path) catch |err| return err;
+            probe.deinit();
+            return error.InvalidPsol;
+        };
+        defer peeked_spec.deinit();
+        if (peeked_spec.memory_mib <= 0) return error.BudgetExceeded;
+        const budget_bytes: u64 = @as(u64, @intCast(peeked_spec.memory_mib)) * 1024 * 1024;
+
+        // Shared memory-mib ceiling (ZR-156): charge Open staging + compile under
+        // the declared budget. Do not raise to old+new; do not stage on parent.
+        const prior_limit = self.budget.limit();
+        const prior_budget_field = self.memory_budget_bytes;
+        const old_live = self.budget.live();
+        self.budget.setLimit(budget_bytes);
+        errdefer {
+            self.budget.setLimit(prior_limit);
+            self.memory_budget_bytes = prior_budget_field;
+        }
+        if (old_live > budget_bytes) return error.BudgetExceeded;
+
+        var doc = poker_formats.readFile(self.allocator, path) catch |err| {
+            if (err == error.OutOfMemory) return error.BudgetExceeded;
             return err;
         };
         defer doc.deinit();
@@ -1191,16 +1254,7 @@ pub const Session = struct {
         var spec = try poker_engine.game.parseStreetConfig(self.parent, doc.config_text);
         defer spec.deinit();
         if (spec.memory_mib <= 0) return error.BudgetExceeded;
-        const budget_bytes: u64 = @as(u64, @intCast(spec.memory_mib)) * 1024 * 1024;
-
-        const prior_limit = self.budget.limit();
-        const prior_budget_field = self.memory_budget_bytes;
-        const old_live = self.budget.live();
-        self.budget.setLimit(old_live + budget_bytes);
-        errdefer {
-            self.budget.setLimit(prior_limit);
-            self.memory_budget_bytes = prior_budget_field;
-        }
+        if (@as(u64, @intCast(spec.memory_mib)) * 1024 * 1024 != budget_bytes) return error.InvalidPsol;
 
         var game = poker_engine.game.compile.compile(self.allocator, spec) catch |err| {
             if (err == error.OutOfMemory) return error.BudgetExceeded;
@@ -1224,6 +1278,13 @@ pub const Session = struct {
 
         const estimated = estimateSolutionBytes(game);
         if (estimated > budget_bytes) return error.BudgetExceeded;
+        // Coexistence: prior solution + new estimate must fit while both are live.
+        if (old_live > 0 and estimated > budget_bytes - old_live) return error.BudgetExceeded;
+
+        const doc_trained = doc.trained;
+        const doc_frozen = doc.frozen;
+        const doc_metrics = doc.metrics;
+        const doc_has_metrics = doc.has_metrics;
 
         const average_mem = self.allocator.alloc(f32, @intCast(game.table_entries)) catch return error.BudgetExceeded;
         var average_owned = true;
@@ -1251,7 +1312,7 @@ pub const Session = struct {
             poker_engine.game.compile.copyTablePsolToMemory(game, layout, doc.strategy_sum, tables.strategy_sum) catch {
                 return error.InvalidPsol;
             };
-            tables.trained = doc.trained;
+            tables.trained = doc_trained;
             var open_locks: ?poker_engine.solve.node_lock.LockSet = null;
             defer if (open_locks) |*owned| owned.deinit();
             if (doc.locks_text.len != 0) {
@@ -1268,11 +1329,15 @@ pub const Session = struct {
             training = tables;
         }
 
+        // Drop bulky checkpoint staging before the fail-closed swap so peak is
+        // old+new (shared ceiling), not old+doc+new.
+        releaseDocTableStaging(&doc);
+
         var published = poker_engine.solve.training_state.PublishedPolicy{
             .allocator = self.allocator,
             .average = average_mem,
             .revision = 1,
-            .trained = doc.trained,
+            .trained = doc_trained,
         };
         average_owned = false; // ownership moved into published
         errdefer published.deinit();
@@ -1292,15 +1357,15 @@ pub const Session = struct {
         self.training = training;
         self.published = published;
         self.last_published_trained = published.trained;
-        self.last_committed_trained = if (want_training) doc.trained else 0;
+        self.last_committed_trained = if (want_training) doc_trained else 0;
         self.cfr_pass_mutated = false;
         self.iters_since_publish = 0;
         self.force_next_publish = false;
         self.locks_text = owned_locks;
         self.strategy_edits_text = owned_edits;
-        self.frozen = doc.frozen;
-        self.metrics = doc.metrics;
-        self.has_metrics = doc.has_metrics;
+        self.frozen = doc_frozen;
+        self.metrics = doc_metrics;
+        self.has_metrics = doc_has_metrics;
         self.threads = clampThreads(spec.threads);
         self.has_training = want_training;
         self.memory_budget_bytes = budget_bytes;
@@ -1314,11 +1379,12 @@ pub const Session = struct {
         std.debug.assert(self.published != null);
         std.debug.assert(self.phase == .published);
         std.debug.assert(self.budget.limit() == budget_bytes);
+        std.debug.assert(self.budget.live() <= budget_bytes);
         std.debug.assert(!self.cfr_pass_mutated);
         if (want_training) {
             std.debug.assert(self.has_training);
             std.debug.assert(self.training != null);
-            std.debug.assert(self.last_committed_trained == doc.trained);
+            std.debug.assert(self.last_committed_trained == doc_trained);
             std.debug.assert(self.canContinue());
         } else {
             std.debug.assert(!self.has_training);

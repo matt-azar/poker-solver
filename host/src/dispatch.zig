@@ -1039,13 +1039,23 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
-    // ZR-83: side-effect-free preview/plan — never begin_config / clearSolution.
+    // ZR-83 / ZR-156: side-effect-free preview/plan — never begin_config /
+    // clearSolution. Compile through the Session budget allocator (shared
+    // memory-mib ceiling); JSON reply body stays on the host IPC allocator.
     if (std.mem.eql(u8, req.op, "tree_preview")) {
         const escaped = bodyStringField(req.body_json, "config_text") orelse
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
         const config = try unescapeConfig(state.allocator, escaped);
         defer state.allocator.free(config);
-        const body = poker_app.plan_preview.treePreviewJson(state.allocator, config) catch |err| {
+        var bundle = poker_app.plan_preview.compilePreview(state.session.allocator, config) catch |err| {
+            const code: []const u8 = if (err == error.OutOfMemory)
+                (if (state.session.budget.limit() > 0) "budget_exceeded" else "out_of_memory")
+            else
+                "invalid_config";
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        defer bundle.deinit();
+        const body = poker_app.plan_preview.formatTreePreviewJson(state.allocator, &bundle) catch |err| {
             const code: []const u8 = if (err == error.OutOfMemory) "out_of_memory" else "invalid_config";
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };
@@ -1058,7 +1068,21 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
         const config = try unescapeConfig(state.allocator, escaped);
         defer state.allocator.free(config);
-        const body = poker_app.plan_preview.planMemoryJson(state.allocator, config) catch |err| {
+        var bundle = poker_app.plan_preview.compilePreview(state.session.allocator, config) catch |err| {
+            const code: []const u8 = if (err == error.OutOfMemory)
+                (if (state.session.budget.limit() > 0) "budget_exceeded" else "out_of_memory")
+            else
+                "invalid_config";
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        defer bundle.deinit();
+        var list = std.ArrayList(u8).init(state.allocator);
+        errdefer list.deinit();
+        poker_app.plan_preview.formatMemoryPlanJson(&list, bundle.plan) catch |err| {
+            const code: []const u8 = if (err == error.OutOfMemory) "out_of_memory" else "invalid_config";
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+        };
+        const body = list.toOwnedSlice() catch |err| {
             const code: []const u8 = if (err == error.OutOfMemory) "out_of_memory" else "invalid_config";
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };

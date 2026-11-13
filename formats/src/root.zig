@@ -15,6 +15,10 @@ pub const SaveFault = psol_v4.SaveFault;
 pub const writeFile = psol_v4.writeFile;
 pub const writeFileInjected = psol_v4.writeFileInjected;
 pub const readFile = psol_v4.readFile;
+pub const peekConfigText = psol_v4.peekConfigText;
+pub const encodedFileBytes = psol_v4.encodedFileBytes;
+pub const max_psol_bytes = psol_v4.max_psol_bytes;
+pub const stream_chunk_bytes = psol_v4.stream_chunk_bytes;
 
 test {
     _ = psol_v4;

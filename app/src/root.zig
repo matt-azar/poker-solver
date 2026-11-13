@@ -723,6 +723,112 @@ test "trainGated accuracy_reached meets threshold on exact published average" {
     try std.testing.expectApproxEqAbs(exact.eval.accuracy, independent.accuracy, 1e-9);
 }
 
+test "shared ceiling refuses begin when old and new cannot coexist" {
+    // ZR-156: do not raise limit to old+new; keep prior when headroom is gone.
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(1);
+    const prior_id = sess.solution_id;
+    const prior_rev = sess.policyRevision();
+    const prior_live = sess.allocatedBytes();
+    const budget = sess.memory_budget_bytes;
+    try std.testing.expect(prior_live > 0);
+    try std.testing.expect(prior_live <= budget);
+    try std.testing.expect(sess.peakAllocatedBytes() <= budget);
+
+    // Fill almost all remaining headroom so a second solution cannot allocate.
+    const headroom = budget - prior_live;
+    try std.testing.expect(headroom > 64);
+    const filler = try sess.allocator.alloc(u8, @intCast(headroom - 32));
+    defer sess.allocator.free(filler);
+    try std.testing.expectEqual(budget - 32, sess.allocatedBytes());
+
+    try std.testing.expectError(error.BudgetExceeded, sess.begin(text));
+    try std.testing.expectEqual(prior_id, sess.solution_id);
+    try std.testing.expectEqual(prior_rev, sess.policyRevision());
+    try std.testing.expect(sess.phase == .published);
+    try std.testing.expect(sess.peakAllocatedBytes() <= budget);
+}
+
+test "two-size flop streamed save open continue roundtrip" {
+    // Compact two-size flop (⅓ + ¾) — same shape as flop_srp_two_sizes, CI-scale.
+    const text =
+        \\street-config 1
+        \\board Js 8h 3h
+        \\pot 100
+        \\stack 200
+        \\oop-range AcAd:1,KsKh:1
+        \\ip-range QcQd:1,JcJh:1
+        \\first-to-act 0
+        \\max-raises 2
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 512
+        \\threads 1
+        \\oop-flop-bets 0.333333 0.75
+        \\ip-flop-bets 0.333333 0.75
+        \\oop-raises 0.75
+        \\ip-raises 0.75
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(2);
+    try std.testing.expect(sess.canContinue());
+    const trained_before = sess.training.?.trained;
+    try std.testing.expectEqual(@as(i32, 2), trained_before);
+    try std.testing.expect(sess.allocatedBytes() <= sess.memory_budget_bytes);
+    try std.testing.expect(sess.peakAllocatedBytes() <= sess.memory_budget_bytes);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "two_size_flop.psol" });
+    defer std.testing.allocator.free(path);
+
+    try sess.save(path);
+    try std.testing.expect(sess.peakAllocatedBytes() <= sess.memory_budget_bytes);
+
+    var other = try Session.init(std.testing.allocator);
+    defer other.deinit();
+    try other.open(path);
+    try std.testing.expect(other.canContinue());
+    try std.testing.expectEqual(trained_before, other.training.?.trained);
+    try std.testing.expect(other.allocatedBytes() <= other.memory_budget_bytes);
+    try std.testing.expect(other.peakAllocatedBytes() <= other.memory_budget_bytes);
+
+    try other.train(3);
+    try std.testing.expectEqual(trained_before + 3, other.training.?.trained);
+    try std.testing.expect(other.canContinue());
+    try std.testing.expect(other.peakAllocatedBytes() <= other.memory_budget_bytes);
+}
+
 test {
     _ = session;
     _ = plan_preview;
