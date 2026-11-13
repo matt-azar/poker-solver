@@ -10,8 +10,10 @@ vi.mock("./index", () => ({
 }));
 
 describe("diagnostics platform", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     invoke.mockReset();
+    const { resetSolveFaultDedupeForTests } = await import("./diagnostics");
+    resetSolveFaultDedupeForTests();
   });
 
   it("openDiagnosticsFolder invokes Tauri command", async () => {
@@ -39,5 +41,63 @@ describe("diagnostics platform", () => {
     expect(invoke).toHaveBeenCalledWith("report_engine_fault", {
       report: { reason: "pipe closed", lastOp: "status" },
     });
+  });
+
+  it("formatSolveFaultReason includes iter, board_len, and peak", async () => {
+    const { formatSolveFaultReason, boardLenFromStatusBoard } = await import(
+      "./diagnostics"
+    );
+    expect(
+      formatSolveFaultReason({
+        reason: "StrategyPublishFailed",
+        iterations: 11,
+        boardLen: 3,
+        enginePeak: 400 * 1024 * 1024,
+        engineAllocated: 350 * 1024 * 1024,
+      }),
+    ).toBe(
+      "StrategyPublishFailed (iter=11, board_len=3, peak=400.0MiB, alloc=350.0MiB)",
+    );
+    expect(boardLenFromStatusBoard(["Ah", "Kd", "7c"])).toBe(3);
+    expect(boardLenFromStatusBoard("Ah Kd 7c 2s")).toBe(4);
+    expect(boardLenFromStatusBoard(null)).toBeNull();
+  });
+
+  it("reportSolveFailedFault writes once per sticky key (ZR-163)", async () => {
+    invoke.mockResolvedValue(undefined);
+    const { reportSolveFailedFault } = await import("./diagnostics");
+    await reportSolveFailedFault({
+      reason: "OutOfMemory",
+      exitReason: "solve-failed",
+      iterations: 11,
+      boardLen: 3,
+      lastOp: "status",
+    });
+    await reportSolveFailedFault({
+      reason: "OutOfMemory",
+      exitReason: "solve-failed",
+      iterations: 11,
+      boardLen: 3,
+      lastOp: "status",
+    });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("report_engine_fault", {
+      report: {
+        reason: "OutOfMemory (iter=11, board_len=3)",
+        exitReason: "solve-failed",
+        lastOp: "status",
+        consecutiveStatusFailures: undefined,
+        protocol: 2,
+      },
+    });
+
+    await reportSolveFailedFault({
+      reason: "OutOfMemory",
+      exitReason: "solve-failed",
+      iterations: 12,
+      boardLen: 3,
+      lastOp: "status",
+    });
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 });

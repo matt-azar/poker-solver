@@ -138,7 +138,11 @@ import {
   type StudyIpcFeature,
 } from "../engine/ipcCapabilities";
 import { isTauriRuntime } from "../platform";
-import { reportEngineFault } from "../platform/diagnostics";
+import {
+  boardLenFromStatusBoard,
+  clearSolveFaultDedupe,
+  reportSolveFailedFault,
+} from "../platform/diagnostics";
 import { ensureEngine, readEngineStatus } from "../platform/engine";
 
 function rejectUnavailableIpcFeature(feature: StudyIpcFeature): string | null {
@@ -1969,11 +1973,12 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       patch.message = opts.message.trim();
     }
     set(patch);
-    // ZR-160: persist last-fault for the diagnostics zip (best-effort).
-    void reportEngineFault({
+    // ZR-160 / ZR-163: persist last-fault for the diagnostics zip (best-effort).
+    clearSolveFaultDedupe();
+    void reportSolveFailedFault({
       reason: detail,
       exitReason: "session-dead",
-      protocol: 2,
+      lastOp: "status",
     });
   },
 
@@ -2006,10 +2011,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           hadSolution: Boolean(get().solutionId),
         }),
       });
-      void reportEngineFault({
+      clearSolveFaultDedupe();
+      void reportSolveFailedFault({
         reason: result.error,
         exitReason: "reconnect-ensure-fail",
-        protocol: 2,
+        lastOp: "ensure",
       });
       return { ok: false, error: result.error };
     }
@@ -2144,6 +2150,20 @@ export const useStudyStore = create<StudyState>((set, get) => ({
             liveMessage = sticky
               ? presentUserText(sticky)
               : "Solve failed.";
+            // ZR-163: host sticky last_error / phase=failed must write last-fault
+            // even when pipes stay alive (no session-dead). Deduped per sticky key.
+            void reportSolveFailedFault({
+              reason: sticky ?? "Solve failed.",
+              exitReason: "solve-failed",
+              iterations: normalized.iterations,
+              boardLen:
+                boardLenFromStatusBoard(normalized.board) ??
+                boardLenFromStatusBoard(prior.draft.boardText),
+              engineAllocated:
+                normalized.engine_allocated ?? normalized.engine_heap_bytes,
+              enginePeak: normalized.engine_peak,
+              lastOp: "status",
+            });
           } else if (reload && normalized.solution_id) {
             liveMessage = normalized.paused
               ? "Paused — browsing available. Continue to resume."
@@ -2315,6 +2335,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     // the host compiles off-stdin and short-admits train (ZR-106 / ZR-120).
     // Await admit only — completion is owned by status polling, not this RPC.
     continuationPending = true;
+    clearSolveFaultDedupe();
     get().startPolling();
     try {
       await stopOrphanTrainIfRunning();
@@ -2330,12 +2351,19 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         get().markEngineSessionDead(fault.detail);
         return;
       }
+      const message =
+        error instanceof Error ? presentUserText(error.message) : "Solve failed";
       set({
         ...prior,
         phase: "failed",
-        message:
-          error instanceof Error ? presentUserText(error.message) : "Solve failed",
+        message,
         solveValidationErrors: [],
+      });
+      void reportSolveFailedFault({
+        reason: message,
+        exitReason: "solve-rpc-failed",
+        boardLen: boardLenFromStatusBoard(get().draft.boardText),
+        lastOp: "solve",
       });
     }
   },
@@ -2381,10 +2409,18 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         get().markEngineSessionDead(fault.detail);
         return;
       }
+      const message =
+        error instanceof EngineError ? error.message : "Continue failed";
       set({
         ...prior,
         phase: "failed",
-        message: error instanceof EngineError ? error.message : "Continue failed",
+        message,
+      });
+      void reportSolveFailedFault({
+        reason: message,
+        exitReason: "solve-rpc-failed",
+        boardLen: boardLenFromStatusBoard(get().draft.boardText),
+        lastOp: "continue",
       });
     }
   },
@@ -2442,10 +2478,18 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         get().markEngineSessionDead(fault.detail);
         return;
       }
+      const message =
+        error instanceof EngineError ? error.message : "Resolve locked failed";
       set({
         ...prior,
         phase: "failed",
-        message: error instanceof EngineError ? error.message : "Resolve locked failed",
+        message,
+      });
+      void reportSolveFailedFault({
+        reason: message,
+        exitReason: "solve-rpc-failed",
+        boardLen: boardLenFromStatusBoard(get().draft.boardText),
+        lastOp: "resolve_locked",
       });
     }
   },
@@ -3456,6 +3500,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       set({
         phase: "failed",
         message,
+      });
+      void reportSolveFailedFault({
+        reason: message,
+        exitReason: "open-failed",
+        lastOp: "open",
       });
       return { ok: false, error: message };
     }

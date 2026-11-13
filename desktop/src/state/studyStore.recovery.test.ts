@@ -92,6 +92,26 @@ vi.mock("../platform/engine", () => ({
   readEngineStatus: engineMocks.readEngineStatus,
 }));
 
+const diagMocks = vi.hoisted(() => ({
+  reportSolveFailedFault: vi.fn(async () => undefined),
+  clearSolveFaultDedupe: vi.fn(),
+  boardLenFromStatusBoard: (board: unknown) => {
+    if (Array.isArray(board)) {
+      return board.length;
+    }
+    if (typeof board === "string" && board.trim()) {
+      return board.trim().split(/\s+/).filter(Boolean).length;
+    }
+    return null;
+  },
+}));
+
+vi.mock("../platform/diagnostics", () => ({
+  reportSolveFailedFault: diagMocks.reportSolveFailedFault,
+  clearSolveFaultDedupe: diagMocks.clearSolveFaultDedupe,
+  boardLenFromStatusBoard: diagMocks.boardLenFromStatusBoard,
+}));
+
 const { resetStatusPollingForTests, useStudyStore } = await import("./studyStore");
 
 describe("studyStore session recovery (ZR-123)", () => {
@@ -102,6 +122,8 @@ describe("studyStore session recovery (ZR-123)", () => {
     engineMocks.engineClient.status.mockClear();
     engineMocks.engineClient.open.mockClear();
     engineMocks.engineClient.clearLastStudyJobId.mockClear();
+    diagMocks.reportSolveFailedFault.mockClear();
+    diagMocks.clearSolveFaultDedupe.mockClear();
     engineMocks.setStatusImpl(async () => ({
       running: false,
       paused: false,
@@ -174,6 +196,48 @@ describe("studyStore session recovery (ZR-123)", () => {
     expect(state.phase).toBe("failed");
     expect(solveControlFlags(state.phase).canSolve).toBe(true);
     expect(state.message).toMatch(/Reconnect/i);
+    expect(diagMocks.reportSolveFailedFault).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "Broken pipe",
+        exitReason: "session-dead",
+      }),
+    );
+  });
+
+  it("status sticky last_error writes solve-failed diagnostics (ZR-163)", async () => {
+    useStudyStore.setState({
+      phase: "solving",
+      connection: "connected",
+      solutionId: "s1",
+      draft: {
+        ...useStudyStore.getState().draft,
+        boardText: "Ah Kd 7c",
+      },
+    });
+    engineMocks.setStatusImpl(async () => ({
+      running: false,
+      paused: false,
+      cancelled: false,
+      failed: true,
+      last_error: "OutOfMemory",
+      solution_id: "s1",
+      status_generation: 9,
+      phase: "failed",
+      iterations: 11,
+      board: ["Ah", "Kd", "7c"],
+    }));
+    await useStudyStore.getState().refresh();
+    expect(useStudyStore.getState().phase).toBe("failed");
+    expect(useStudyStore.getState().message).toMatch(/OutOfMemory/);
+    expect(diagMocks.reportSolveFailedFault).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "OutOfMemory",
+        exitReason: "solve-failed",
+        iterations: 11,
+        boardLen: 3,
+        lastOp: "status",
+      }),
+    );
   });
 
   it("crash mid-solve → recover → reopen last saved checkpoint (ZR-143/ZR-157)", async () => {
