@@ -95,6 +95,45 @@ vi.mock("../platform/engine", () => ({
 const diagMocks = vi.hoisted(() => ({
   reportSolveFailedFault: vi.fn(async () => undefined),
   clearSolveFaultDedupe: vi.fn(),
+  persistPreSolveDiagnostics: vi.fn(async () => undefined),
+  summarizeLastSolve: vi.fn(() => ({
+    snapshotKind: "pre-solve" as const,
+    trigger: "solve" as const,
+    street: "flop" as const,
+    boardLen: 3,
+    board: ["Ah", "Kd", "7c"],
+    pot: 100,
+    stack: 1000,
+    iterations: 10,
+    accuracy: null,
+    timeLimit: null,
+    memoryMib: 64,
+    threads: 1,
+    algorithm: null,
+    frozen: 1,
+    samples: null,
+    rakeRate: 0,
+    rakeCap: 0,
+    useIcm: false,
+    icmStacks: [] as number[],
+    icmPayouts: [] as number[],
+    potCap: 0,
+    allowThreeBet: 1,
+    allInThreshold: 0,
+    allowAllIn: 0,
+    maxRaises: 2,
+    mergeThreshold: 0,
+    publishEveryHint: 10,
+    betSizes: {},
+    ranges: {
+      oop: { seat: "oop" as const, chars: 2, hash: "deadbeef" },
+      ip: { seat: "ip" as const, chars: 2, hash: "cafebabe" },
+    },
+    treeEditCount: 0,
+    incentiveCount: 0,
+    edgeTagCount: 0,
+  })),
+  summarizeContinueSolve: vi.fn(() => null),
   boardLenFromStatusBoard: (board: unknown) => {
     if (Array.isArray(board)) {
       return board.length;
@@ -109,6 +148,9 @@ const diagMocks = vi.hoisted(() => ({
 vi.mock("../platform/diagnostics", () => ({
   reportSolveFailedFault: diagMocks.reportSolveFailedFault,
   clearSolveFaultDedupe: diagMocks.clearSolveFaultDedupe,
+  persistPreSolveDiagnostics: diagMocks.persistPreSolveDiagnostics,
+  summarizeLastSolve: diagMocks.summarizeLastSolve,
+  summarizeContinueSolve: diagMocks.summarizeContinueSolve,
   boardLenFromStatusBoard: diagMocks.boardLenFromStatusBoard,
 }));
 
@@ -124,6 +166,9 @@ describe("studyStore session recovery (ZR-123)", () => {
     engineMocks.engineClient.clearLastStudyJobId.mockClear();
     diagMocks.reportSolveFailedFault.mockClear();
     diagMocks.clearSolveFaultDedupe.mockClear();
+    diagMocks.persistPreSolveDiagnostics.mockClear();
+    diagMocks.summarizeLastSolve.mockClear();
+    diagMocks.summarizeContinueSolve.mockClear();
     engineMocks.setStatusImpl(async () => ({
       running: false,
       paused: false,

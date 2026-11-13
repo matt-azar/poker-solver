@@ -345,13 +345,16 @@ fn kill_session(
     record_fault: bool,
 ) {
     if let Some(mut session) = slot.take() {
+        let sidecar_pid = Some(session.child.id());
         if record_fault {
-            diagnostics::record_fault(
+            // Sample RSS before kill so host-resources can still see the child.
+            diagnostics::record_fault_with_sidecar(
                 &session.launch_id,
                 last_op,
                 reason,
                 "session-killed",
                 PROTOCOL,
+                sidecar_pid,
             );
         }
         session.io.shut_down.store(true, Ordering::SeqCst);
@@ -360,6 +363,7 @@ fn kill_session(
         if let Some(handle) = session.reader.take() {
             let _ = handle.join();
         }
+        diagnostics::remember_sidecar_pid(None);
         fail_all_pending(&session.io, "solver-engine session killed");
     }
 }
@@ -455,6 +459,7 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
         .name("solver-engine-stdout".into())
         .spawn(move || reader_loop(stdout, reader_io))
         .map_err(|err| format!("spawn solver-engine reader: {err}"))?;
+    diagnostics::remember_sidecar_pid(Some(child.id()));
     Ok(PipeSession {
         child,
         io,
@@ -664,12 +669,14 @@ pub fn ensure_solver_engine_session(
             Ok(info)
         }
         Err(err) => {
-            diagnostics::record_fault(
+            let sidecar_pid = Some(session.child.id());
+            diagnostics::record_fault_with_sidecar(
                 &launch_id,
                 Some("ready"),
                 &err,
                 "ensure-fail",
                 PROTOCOL,
+                sidecar_pid,
             );
             session.io.shut_down.store(true, Ordering::SeqCst);
             let _ = session.child.kill();
@@ -677,6 +684,7 @@ pub fn ensure_solver_engine_session(
             if let Some(handle) = session.reader.take() {
                 let _ = handle.join();
             }
+            diagnostics::remember_sidecar_pid(None);
             Err(err)
         }
     }

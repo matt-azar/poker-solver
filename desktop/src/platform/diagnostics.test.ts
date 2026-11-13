@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SolveJobRequest } from "../domain/types";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -8,6 +9,29 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("./index", () => ({
   isTauriRuntime: () => true,
 }));
+
+function sampleJob(overrides: Partial<SolveJobRequest> = {}): SolveJobRequest {
+  return {
+    board: ["Ah", "Kd", "7c"],
+    oop_range: "AA,KK",
+    ip_range: "QQ",
+    pot: 100,
+    stack: 1000,
+    oop_bets: [0.5],
+    ip_bets: [0.75],
+    oop_flop_bets: [0.33],
+    iterations: 50,
+    accuracy: 0.005,
+    memory_mib: 2048,
+    threads: 4,
+    algorithm: "cfr_plus",
+    frozen: 1,
+    samples: 5,
+    rake_rate: 0,
+    rake_cap: 0,
+    ...overrides,
+  };
+}
 
 describe("diagnostics platform", () => {
   beforeEach(async () => {
@@ -99,5 +123,51 @@ describe("diagnostics platform", () => {
       lastOp: "status",
     });
     expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("summarizeLastSolve omits range blobs and labels pre-solve (ZR-169)", async () => {
+    const {
+      summarizeLastSolve,
+      compactTextHash,
+      persistPreSolveDiagnostics,
+      summarizeContinueSolve,
+    } = await import("./diagnostics");
+    const summary = summarizeLastSolve(sampleJob(), "solve");
+    expect(summary.snapshotKind).toBe("pre-solve");
+    expect(summary.trigger).toBe("solve");
+    expect(summary.street).toBe("flop");
+    expect(summary.board).toEqual(["Ah", "Kd", "7c"]);
+    expect(summary.memoryMib).toBe(2048);
+    expect(summary.threads).toBe(4);
+    expect(summary.publishEveryHint).toBe(10);
+    expect(summary.betSizes.oop_flop_bets).toEqual([0.33]);
+    expect(summary.ranges.oop.hash).toBe(compactTextHash("AA,KK"));
+    expect(summary.ranges.oop.chars).toBe(5);
+    expect(JSON.stringify(summary)).not.toMatch(/AA,KK/);
+
+    invoke.mockResolvedValue(undefined);
+    await persistPreSolveDiagnostics(summary);
+    expect(invoke).toHaveBeenCalledWith("persist_pre_solve_diagnostics", {
+      summary,
+    });
+
+    const continued = summarizeContinueSolve(null, {
+      iterations: 25,
+      timeLimit: 60,
+    });
+    expect(continued?.trigger).toBe("continue");
+    expect(continued?.iterations).toBe(25);
+    expect(continued?.timeLimit).toBe(60);
+    expect(continued?.board).toEqual(["Ah", "Kd", "7c"]);
+  });
+
+  it("persistPreSolveDiagnostics swallows invoke errors", async () => {
+    invoke.mockRejectedValueOnce(new Error("no tauri"));
+    const { persistPreSolveDiagnostics, summarizeLastSolve } = await import(
+      "./diagnostics"
+    );
+    await expect(
+      persistPreSolveDiagnostics(summarizeLastSolve(sampleJob())),
+    ).resolves.toBeUndefined();
   });
 });
