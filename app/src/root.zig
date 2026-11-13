@@ -824,6 +824,63 @@ test "accuracyThresholdChips converts tenths pot to chip EV" {
     try std.testing.expect(Session.accuracyReached(4.9, 5.0));
 }
 
+// ZR-178: pause() must latch pause_requested even when trainGated is between
+// train(1) steps (phase=.published). Otherwise a huge iter budget races to
+// completed before the cooperative flag is ever set (zig-windows smoke).
+test "pause during trainGated published gap stops early (ZR-178)" {
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(1);
+    try std.testing.expect(sess.phase == .published);
+    // Idle-shaped phase (as between gated train(1) steps) must still latch.
+    try sess.pause();
+    try std.testing.expect(sess.pause_requested.load(.acquire));
+    try std.testing.expect(sess.phase == .paused);
+    try std.testing.expect(sess.last_terminal == .paused);
+
+    // Fresh gated job after clear — pause mid-budget via published-gap race.
+    sess.clearControlFlags();
+    const Context = struct {
+        sess: *Session,
+        fn run(ctx: *@This()) void {
+            // Let trainGated enter and publish at least one step.
+            std.Thread.sleep(2 * std.time.ns_per_ms);
+            ctx.sess.pause() catch {};
+        }
+    };
+    var ctx: Context = .{ .sess = &sess };
+    const thread = try std.Thread.spawn(.{}, Context.run, .{&ctx});
+    try sess.trainGated(2_000_000, -1.0, 10, -1.0);
+    thread.join();
+    try std.testing.expect(sess.last_terminal == .paused);
+    try std.testing.expect(sess.phase == .paused);
+    const trained = sess.training.?.trained;
+    try std.testing.expect(trained >= 1);
+    try std.testing.expect(trained < 2_000_000);
+}
+
 // ZR-171: iteration-only progress samples must not force-publish every eval_every
 // (ZR-133 cadence). Continue-shaped +5 with eval_every=1 stays open@1 + flush.
 test "trainGated progress samples do not force-publish every eval (ZR-171)" {
