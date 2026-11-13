@@ -57,26 +57,42 @@ Optional: `pip install psutil` for better CPU% on snapshot / watch.
 ## Send report (Windows → GitHub)
 
 Uploads a diagnostics zip + analyze summary into the **poker-solver** repo as a
-**GitHub Issue** (structured body). The zip is attached via a **secret gist**
-by default (or a prerelease asset). Dumps are **not** committed to `main`.
+**GitHub Issue** (structured body). The zip is attached via a release asset
+(webhook path) or **secret gist** (local `gh` path). Dumps are **not**
+committed to `main`.
 
-### Authenticate once
+### Authenticate once (preferred: webhook — no `gh` on the PC)
 
-Preferred (GitHub CLI on your machine):
+Deploy the small receiver once (Cloudflare Worker or stdlib Python server), then
+set two env vars on Windows. GitHub PAT stays on the server only.
+
+Full steps: [`report-receiver/README.md`](report-receiver/README.md).
+
+```powershell
+# After deploying the Worker / server (Matt does this once):
+[System.Environment]::SetEnvironmentVariable(
+  "HOLDEM_STUDY_REPORT_WEBHOOK_URL",
+  "https://holdem-study-report-receiver.<you>.workers.dev/report",
+  "User")
+[System.Environment]::SetEnvironmentVariable(
+  "HOLDEM_STUDY_REPORT_WEBHOOK_SECRET",
+  "<same REPORT_SHARED_SECRET as the server>",
+  "User")
+```
+
+Optional URL-only config file: `%USERPROFILE%\.holdem-study\report-webhook.json`
+(`{ "webhook_url": "https://…" }`) — keep the secret in env, never commit it.
+
+### Fallback: local GitHub CLI / PAT
 
 ```powershell
 winget install GitHub.cli   # if needed
 gh auth login -s repo,gist
 gh auth status
+# or: $env:HOLDEM_STUDY_GITHUB_TOKEN = "ghp_…"   # never commit
 ```
 
-Or set a PAT in the environment (**never commit the token**):
-
-```powershell
-# classic PAT: repo + gist scopes
-# fine-grained: Issues (read/write) + Gists (read/write) on matt-azar/poker-solver
-$env:HOLDEM_STUDY_GITHUB_TOKEN = "ghp_…"   # or GH_TOKEN
-```
+Force local path even when a webhook URL is set: `send --local-gh`.
 
 Optional override: `$env:HOLDEM_STUDY_GITHUB_REPO = "matt-azar/poker-solver"`.
 
@@ -94,7 +110,7 @@ cd path\to\poker-solver
 # C) Collect while frozen, then send that bundle
 .\scripts\debug\study-debug.cmd send --collect --yes
 
-# Dry-run (no GitHub calls) — good smoke check
+# Dry-run (no GitHub / webhook calls) — good smoke check
 .\scripts\debug\study-debug.cmd send --zip path\to\zip --dry-run
 .\scripts\debug\study-debug.cmd send --auth-check
 ```
@@ -102,13 +118,13 @@ cd path\to\poker-solver
 Privacy: bodies redact home / `%LOCALAPPDATA%` / username path segments where
 possible, but **warn** before send — logs can still leak machine-local paths.
 
-Attach modes: `--attach gist` (default), `--attach release` (rolling prerelease
-`study-debug-reports`), or `--attach none` (issue text only; attach zip in the UI).
+Attach modes (local-gh): `--attach gist` (default), `--attach release` (rolling
+prerelease `study-debug-reports`), or `--attach none`. Webhook path uses release
+assets on the server (binary-safe).
 
-Optional Actions archive: add `--dispatch` to fire `repository_dispatch` type
-`study-debug-report` (workflow `.github/workflows/study-debug-report.yml`
-downloads the gist/release URL and stores a 90-day Actions artifact). Requires
-`repo` scope that can dispatch workflows.
+Optional Actions archive (local-gh only): add `--dispatch` to fire
+`repository_dispatch` type `study-debug-report` (workflow
+`.github/workflows/study-debug-report.yml`).
 
 ---
 
@@ -174,7 +190,7 @@ Override diagnostics path: `$env:HOLDEM_STUDY_DIAGNOSTICS_DIR = "D:\copy\diagnos
 | --- | --- | --- |
 | `collect` | `collect_bundle.py` | Evidence dir/zip (default `--zip --stacks`) |
 | `analyze` | `analyze_diagnostics.py` | Crash vs hang triage on dir or Help zip |
-| `send` | `send_report.py` | Open GitHub Issue + attach zip (gist/release) |
+| `send` | `send_report.py` | Webhook or local gh → GitHub Issue + zip attach |
 | `dumps` | `find_crash_dumps.py` | LocalDumps / cores |
 | `sidecar` | `windows_sidecar_check.py` | GUI PE / CREATE_NO_WINDOW checklist |
 | `probe` | `ipc_probe.py` | Ready + demux + status budget |
@@ -231,7 +247,8 @@ On Windows you can point probes at the **installed** sidecar:
 | `windows_sidecar_check.py` | Windows GUI quirks | PE subsystem=GUI checklist + CREATE_NO_WINDOW / stderr drain |
 | `windows_collect.ps1` | Windows install | One-shot snapshot + diagnostics analysis + dump search + zip |
 | `collect_bundle.py` | any | Cross-platform evidence directory/zip |
-| `send_report.py` | any | Issue + secret gist / release attach (no git commit) |
+| `send_report.py` | any | Webhook POST or local Issue + gist/release (no git commit) |
+| `report-receiver/` | any | Deployable intake (CF Worker / Python); holds GitHub PAT |
 | `smoke_selftest.py` | suite health | Synthetic diagnostics + import smoke |
 
 Shared helpers: `_common.py` (not a CLI).

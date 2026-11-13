@@ -1,0 +1,16 @@
+# Cloudflare Worker for Study crash/hang report intake.
+# Deploy: see README.md in this folder. Never commit secrets.
+#
+# Secrets (wrangler secret put …):
+#   REPORT_SHARED_SECRET  — shared with Windows client
+#   GITHUB_TOKEN          — classic PAT: repo + gist (or fine-grained Issues + Gists)
+#
+# Vars (non-secret):
+name = "holdem-study-report-receiver"
+main = "src/worker.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+GITHUB_REPO = "matt-azar/poker-solver"
+# Optional: override API host (default https://api.github.com)
+# GITHUB_API = "https://api.github.com"

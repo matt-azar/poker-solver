@@ -1,0 +1,14 @@
+{
+  "name": "holdem-study-report-receiver",
+  "private": true,
+  "description": "Cloudflare Worker intake for Study crash/hang debug reports (UNLICENSED)",
+  "license": "UNLICENSED",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.99.0"
+  }
+}
