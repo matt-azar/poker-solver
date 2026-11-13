@@ -14,6 +14,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -139,6 +140,118 @@ def main() -> int:
             # auth-check may return 1 when unauthenticated — that is still a valid run.
             if auth_rc not in (0, 1):
                 failures.append(f"send_report --auth-check rc={auth_rc}")
+
+            # Webhook path against local dry-run receiver (no live GitHub).
+            receiver = _HERE / "report-receiver" / "server.py"
+            if not receiver.is_file():
+                failures.append("missing report-receiver/server.py")
+            else:
+                import socket
+                import time
+
+                sock = socket.socket()
+                sock.bind(("127.0.0.1", 0))
+                port = int(sock.getsockname()[1])
+                sock.close()
+                secret = "smoke-webhook-secret"
+                env = os.environ.copy()
+                env["REPORT_SHARED_SECRET"] = secret
+                env["DRY_RUN"] = "1"
+                # Clear client GitHub tokens so auth is via webhook only.
+                for k in (
+                    "HOLDEM_STUDY_GITHUB_TOKEN",
+                    "GH_TOKEN",
+                    "GITHUB_TOKEN",
+                    "HOLDEM_STUDY_REPORT_WEBHOOK_URL",
+                    "HOLDEM_STUDY_REPORT_WEBHOOK_SECRET",
+                ):
+                    env.pop(k, None)
+                proc = subprocess.Popen(
+                    [
+                        sys.executable,
+                        str(receiver),
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        str(port),
+                        "--dry-run",
+                    ],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                try:
+                    ready = False
+                    for _ in range(50):
+                        if proc.poll() is not None:
+                            break
+                        try:
+                            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                                ready = True
+                                break
+                        except OSError:
+                            time.sleep(0.05)
+                    if not ready:
+                        err = ""
+                        if proc.stderr:
+                            try:
+                                err = proc.stderr.read(500)
+                            except OSError:
+                                pass
+                        failures.append(f"report-receiver failed to start: {err}")
+                    else:
+                        wh_json = Path(tmp_send) / "webhook-send.json"
+                        wh_env = env.copy()
+                        wh_env["HOLDEM_STUDY_REPORT_WEBHOOK_URL"] = (
+                            f"http://127.0.0.1:{port}/report"
+                        )
+                        wh_env["HOLDEM_STUDY_REPORT_WEBHOOK_SECRET"] = secret
+                        wh_rc = subprocess.call(
+                            [
+                                sys.executable,
+                                str(send_script),
+                                "--zip",
+                                str(zpath),
+                                "--yes",
+                                "--webhook-dry-run",
+                                "--json-out",
+                                str(wh_json),
+                            ],
+                            env=wh_env,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        if wh_rc != 0 or not wh_json.is_file():
+                            failures.append("send_report webhook dry-run")
+                        else:
+                            import json as _json
+
+                            try:
+                                payload = _json.loads(
+                                    wh_json.read_text(encoding="utf-8")
+                                )
+                            except _json.JSONDecodeError:
+                                failures.append("webhook dry-run bad json")
+                            else:
+                                if not payload.get("ok") or not payload.get(
+                                    "webhook_dry_run"
+                                ):
+                                    failures.append("webhook dry-run payload")
+                        auth2 = subprocess.call(
+                            [sys.executable, str(send_script), "--auth-check"],
+                            env=wh_env,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        if auth2 != 0:
+                            failures.append("webhook --auth-check expected ok")
+                finally:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
 
     # Front-door CLI routes to the same scripts (no rewrite).
     front = _HERE / "study_debug.py"

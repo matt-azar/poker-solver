@@ -251,16 +251,31 @@ class StudyDebugApp(tk.Tk):
                 "Send report",
                 "Pick a diagnostics zip (Help → Copy diagnostics zip) or a "
                 "diagnostics folder, then click Send again.\n\n"
-                "Requires gh auth login (repo + gist) or HOLDEM_STUDY_GITHUB_TOKEN.",
+                "Preferred: HOLDEM_STUDY_REPORT_WEBHOOK_URL + "
+                "HOLDEM_STUDY_REPORT_WEBHOOK_SECRET "
+                "(no gh on this PC).\n"
+                "Fallback: gh auth login (repo + gist) or "
+                "HOLDEM_STUDY_GITHUB_TOKEN.",
             )
             return
-        if not messagebox.askyesno(
-            "Send report",
-            "Create a GitHub Issue on poker-solver and upload the zip as a "
-            "secret gist?\n\n"
-            "Logs may contain paths/usernames — review if the repo is public.\n"
-            "Nothing is committed into git history.",
-        ):
+        webhook = bool(os.environ.get("HOLDEM_STUDY_REPORT_WEBHOOK_URL", "").strip())
+        if webhook:
+            prompt = (
+                "POST this zip to your report webhook?\n"
+                "The server opens the GitHub Issue (no local gh / PAT).\n\n"
+                "Logs may contain paths/usernames — review if the repo is public.\n"
+                "Nothing is committed into git history."
+            )
+        else:
+            prompt = (
+                "Create a GitHub Issue on poker-solver and upload the zip as a "
+                "secret gist?\n\n"
+                "Tip: set HOLDEM_STUDY_REPORT_WEBHOOK_URL to skip local gh auth "
+                "(see scripts/debug/report-receiver/README.md).\n\n"
+                "Logs may contain paths/usernames — review if the repo is public.\n"
+                "Nothing is committed into git history."
+            )
+        if not messagebox.askyesno("Send report", prompt):
             return
         args = ["send", "--yes"]
         if zip_path:
