@@ -198,7 +198,8 @@ export class EngineClient {
   async status(signal?: AbortSignal): Promise<StatusPayload> {
     if (isIpcTransport()) {
       // Honor poll timeout / shutdown abort (ZR-148). Tauri invoke keeps
-      // running; Study unblocks and drops the late frame via status token.
+      // running until the Rust status budget (ZR-175: 8s, not 240s); Study
+      // unblocks earlier via raceWithAbort and drops the late frame via token.
       if (signal?.aborted) {
         throw new DOMException("Aborted", "AbortError");
       }
@@ -220,6 +221,15 @@ export class EngineClient {
       } catch (err) {
         throw new EngineError(err instanceof Error ? err.message : String(err), 0, data);
       }
+    }
+    // Packaged Study after session-dead clears IPC (ZR-175). Do not fall through
+    // to HTTP "No engine URL" — that overwrote useful last-fault detail.
+    if (isTauriRuntime()) {
+      throw new EngineError(
+        "solver-engine IPC not connected — use Reconnect",
+        0,
+        null,
+      );
     }
     const { response, data } = await this.request("GET", "/api/status", undefined, { signal });
     this.ensureOk(response, data);

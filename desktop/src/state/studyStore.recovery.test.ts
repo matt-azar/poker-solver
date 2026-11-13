@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { engineActivityMessage } from "../domain/solveActivity";
 import { DEFAULT_SPOT } from "../domain/types";
 import { solveControlFlags } from "../domain/solveControls";
+import { isStatusPollActive } from "./studySessionController";
 
 Object.defineProperty(window, "matchMedia", {
   writable: true,
@@ -238,6 +239,7 @@ describe("studyStore session recovery (ZR-123)", () => {
       solutionId: "s1",
       connection: "connected",
     });
+    useStudyStore.getState().startPolling();
     useStudyStore.getState().markEngineSessionDead("Broken pipe");
     const state = useStudyStore.getState();
     expect(engineMocks.ensureEngine).not.toHaveBeenCalled();
@@ -246,6 +248,8 @@ describe("studyStore session recovery (ZR-123)", () => {
     expect(state.phase).toBe("failed");
     expect(solveControlFlags(state.phase).canSolve).toBe(true);
     expect(state.message).toMatch(/Reconnect/i);
+    // ZR-175: session-dead must stop the status-poll loop (no hung/kill storm).
+    expect(isStatusPollActive()).toBe(false);
     expect(diagMocks.reportSolveFailedFault).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: "Broken pipe",
