@@ -133,6 +133,19 @@ describe("solveActivity", () => {
     expect(metrics.eta).toBe("—");
   });
 
+  it("estimates ETA from iteration target when solving", () => {
+    const metrics = statusMetrics({
+      running: true,
+      iterations: 40,
+      iterations_requested: 200,
+      runtime_seconds: 4,
+      nash_gap: 2,
+      pot: 100,
+    });
+    expect(metrics.eta).toBe("~16s");
+    expect(metrics.nash).toContain("1.00% pot");
+  });
+
   it("sentence-cases an all-lowercase engine failure", () => {
     const message = engineActivityMessage(
       "failed",

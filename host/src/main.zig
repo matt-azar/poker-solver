@@ -156,6 +156,15 @@ pub fn main() !void {
             };
             continue;
         }
+        // ZR-171: categories off stdin (same analysis worker as values/equity/node).
+        if (std.mem.eql(u8, req.op, "categories")) {
+            dispatch.startCategories(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
         if (std.mem.eql(u8, req.op, "save")) {
             dispatch.startSave(&state, req) catch |err| {
                 var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));

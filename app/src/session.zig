@@ -40,6 +40,16 @@ pub const TrainTerminal = enum {
 
 pub const Metrics = poker_formats.Metrics;
 
+/// One EV/gap sample for Study status `gap_series` (ZR-171).
+pub const GapSeriesPoint = struct {
+    iterations: i32 = 0,
+    value: f64 = 0,
+    nash_gap: f64 = 0,
+    accuracy_chips: f64 = 0,
+};
+
+pub const gap_series_capacity: usize = 32;
+
 /// Reader lease over the current published average (Study values under train).
 /// Holds `readers` until `release` / `deinit`; train publish waits for quiet.
 pub const PublishedLease = struct {
@@ -84,6 +94,17 @@ pub const Session = struct {
     strategy_edit_baseline: ?[]f32 = null,
     metrics: Metrics = .{},
     has_metrics: bool = false,
+    /// Wall clock when the active train job started (0 = none / frozen into cache).
+    train_started_ns: i128 = 0,
+    /// Frozen elapsed seconds after the job ends (<0 = unset).
+    runtime_seconds_cached: f64 = -1,
+    /// Bounded EV/gap history for Study footer ETA (ZR-171).
+    gap_series_len: usize = 0,
+    gap_series: [gap_series_capacity]GapSeriesPoint = [_]GapSeriesPoint{GapSeriesPoint{}} ** gap_series_capacity,
+    /// Job Accuracy target as pot fraction (<0 = unset / iteration-only).
+    accuracy_target: f64 = -1,
+    /// Job wall-clock time limit seconds (<0 = unset).
+    time_limit_seconds: f64 = -1,
     frozen: bool = false,
     /// Shared worker budget for frozen chance steal (D3). From config `threads` or host override.
     threads: u32 = 1,
@@ -318,6 +339,7 @@ pub const Session = struct {
         self.clearStrategyEditBaseline();
         self.metrics = .{};
         self.has_metrics = false;
+        self.clearProgressTracking();
         self.frozen = false;
         self.threads = 1;
         self.has_training = false;
@@ -1021,6 +1043,25 @@ pub const Session = struct {
         return .{ .trained = trained, .eval = eval };
     }
 
+    fn clearProgressTracking(self: *Session) void {
+        self.train_started_ns = 0;
+        self.runtime_seconds_cached = -1;
+        self.gap_series_len = 0;
+        self.accuracy_target = -1;
+        self.time_limit_seconds = -1;
+    }
+
+    fn freezeRuntime(self: *Session) void {
+        if (self.train_started_ns == 0) return;
+        const now = std.time.nanoTimestamp();
+        const elapsed = if (now < self.train_started_ns)
+            0.0
+        else
+            @as(f64, @floatFromInt(now - self.train_started_ns)) / 1e9;
+        self.runtime_seconds_cached = elapsed;
+        self.train_started_ns = 0;
+    }
+
     fn recordEvalMetrics(self: *Session, eval: poker_engine.solve.frozen_walk.FrozenEval) void {
         self.setMetrics(.{
             .value = eval.u0,
@@ -1031,10 +1072,45 @@ pub const Session = struct {
         });
     }
 
-    /// Accuracy / time gated train loop shared with gate-bench (ZR-91 / ZR-153).
+    fn appendGapSeries(self: *Session, trained: i32, eval: poker_engine.solve.frozen_walk.FrozenEval) void {
+        const point = GapSeriesPoint{
+            .iterations = trained,
+            .value = eval.u0,
+            .nash_gap = eval.nash_gap,
+            .accuracy_chips = eval.accuracy,
+        };
+        if (self.gap_series_len < self.gap_series.len) {
+            self.gap_series[self.gap_series_len] = point;
+            self.gap_series_len += 1;
+            return;
+        }
+        var i: usize = 0;
+        while (i + 1 < self.gap_series.len) : (i += 1) {
+            self.gap_series[i] = self.gap_series[i + 1];
+        }
+        self.gap_series[self.gap_series.len - 1] = point;
+    }
+
+    fn recordProgressEval(self: *Session, trained: i32, eval: poker_engine.solve.frozen_walk.FrozenEval) void {
+        self.recordEvalMetrics(eval);
+        self.appendGapSeries(trained, eval);
+    }
+
+    /// Elapsed train seconds for Study status (null when no active/last job clock).
+    pub fn runtimeSeconds(self: *const Session) ?f64 {
+        if (self.train_started_ns != 0) {
+            const now = std.time.nanoTimestamp();
+            if (now < self.train_started_ns) return 0;
+            return @as(f64, @floatFromInt(now - self.train_started_ns)) / 1e9;
+        }
+        if (self.runtime_seconds_cached >= 0) return self.runtime_seconds_cached;
+        return null;
+    }
+
+    /// Accuracy / time / progress train loop shared with gate-bench (ZR-91 / ZR-153 / ZR-171).
     /// Each step is `train(1)` so pause/stop still land on iteration boundaries.
-    /// Uses `accuracyThresholdChips` + `evaluateExactIteration` so the stop signal
-    /// compares chip Accuracy to a chip threshold on the exact reported iter.
+    /// Always records EV/gap samples on `eval_every` so Study footer Acc/ETA stay live
+    /// even for iteration-only jobs (accuracy ≤ 0). Accuracy stop only when target > 0.
     pub fn trainGated(
         self: *Session,
         max_iterations: i32,
@@ -1045,9 +1121,22 @@ pub const Session = struct {
         if (max_iterations < 1) return error.InvalidSession;
         const every: i32 = if (eval_every < 1) 1 else eval_every;
         const pot_tenths: i32 = if (self.game) |g| g.pot else 0;
-        const threshold_chips = accuracyThresholdChips(pot_tenths, accuracy_pot_fraction, true);
+        // accuracy ≤ 0 means iteration/time-only — still eval for Study progress.
+        const want_accuracy = accuracy_pot_fraction > 0;
+        const threshold_chips = if (want_accuracy)
+            accuracyThresholdChips(pot_tenths, accuracy_pot_fraction, true)
+        else
+            -1.0;
         const use_time = time_limit_seconds >= 0;
-        const t0 = std.time.nanoTimestamp();
+        self.accuracy_target = if (want_accuracy) accuracy_pot_fraction else -1;
+        self.time_limit_seconds = if (use_time) time_limit_seconds else -1;
+        // New job clock: Continue after pause keeps the same wall clock + series.
+        if (self.train_started_ns == 0) {
+            self.gap_series_len = 0;
+            self.runtime_seconds_cached = -1;
+            self.train_started_ns = std.time.nanoTimestamp();
+        }
+        const t0 = self.train_started_ns;
         var completed: i32 = 0;
         var fresh_eval = false;
 
@@ -1059,6 +1148,7 @@ pub const Session = struct {
                 self.phase = .paused;
                 self.mu.unlock();
                 self.clearControlFlags();
+                self.freezeRuntime();
                 return;
             }
             if (self.pause_requested.load(.acquire)) {
@@ -1067,37 +1157,44 @@ pub const Session = struct {
                 self.phase = .paused;
                 self.mu.unlock();
                 self.clearControlFlags();
+                // Keep wall clock live across Pause → Continue (ZR-171).
                 return;
             }
             try self.train(1);
-            if (self.last_terminal == .cancelled or self.last_terminal == .paused) return;
+            if (self.last_terminal == .cancelled) {
+                self.freezeRuntime();
+                return;
+            }
+            if (self.last_terminal == .paused) return;
             completed += 1;
             fresh_eval = false;
 
-            if (@rem(completed, every) == 0 and threshold_chips >= 0) {
+            if (@rem(completed, every) == 0) {
                 const exact = try self.evaluateExactIteration();
-                if (exact.trained != completed) return error.InvalidSession;
-                self.recordEvalMetrics(exact.eval);
+                // `completed` is job-relative; `exact.trained` is absolute (Continue-safe).
+                self.recordProgressEval(exact.trained, exact.eval);
                 fresh_eval = true;
-                if (accuracyReached(exact.eval.accuracy, threshold_chips)) {
+                if (want_accuracy and accuracyReached(exact.eval.accuracy, threshold_chips)) {
                     self.last_terminal = .accuracy_reached;
                     self.mu.lock();
                     self.phase = .published;
                     self.mu.unlock();
+                    self.freezeRuntime();
                     return;
                 }
             }
             if (use_time) {
                 const elapsed = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e9;
                 if (elapsed >= time_limit_seconds) {
-                    if (!fresh_eval and threshold_chips >= 0) {
+                    if (!fresh_eval) {
                         const exact = try self.evaluateExactIteration();
-                        self.recordEvalMetrics(exact.eval);
+                        self.recordProgressEval(exact.trained, exact.eval);
                     }
                     self.last_terminal = .time_limit_reached;
                     self.mu.lock();
                     self.phase = if (self.published != null) .published else .paused;
                     self.mu.unlock();
+                    self.freezeRuntime();
                     return;
                 }
             }
@@ -1108,12 +1205,23 @@ pub const Session = struct {
             const keep = self.published != null and isSoftPublishPressure(err);
             if (keep) self.softSkipPublishLocked();
             self.mu.unlock();
-            if (!keep) return err;
+            if (!keep) {
+                self.freezeRuntime();
+                return err;
+            }
         };
+        if (!fresh_eval) {
+            // Final sample so Complete footer shows Acc/EV even when iters % every != 0.
+            if (self.published != null) {
+                const exact = self.evaluateExactIteration() catch null;
+                if (exact) |e| self.recordProgressEval(e.trained, e.eval);
+            }
+        }
         self.last_terminal = .completed;
         self.mu.lock();
         self.phase = if (self.published != null) .published else .paused;
         self.mu.unlock();
+        self.freezeRuntime();
     }
 
     /// Frozen NashConv / Accuracy on the Session-owned engine (reuses ranks).

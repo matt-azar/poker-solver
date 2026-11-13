@@ -37,6 +37,17 @@ export function decodeStatusPayload(data: unknown): StatusPayload {
   optionalFiniteNumber(data, "iterations");
   optionalFiniteNumber(data, "iterations_requested");
   optionalFiniteNumber(data, "policy_revision");
+  // ZR-171 Study footer progress fields (additive).
+  optionalFiniteNumber(data, "runtime_seconds");
+  optionalFiniteNumber(data, "runtime");
+  optionalFiniteNumber(data, "nash_gap");
+  optionalFiniteNumber(data, "accuracy_chips");
+  optionalFiniteNumber(data, "value");
+  optionalFiniteNumber(data, "player0_expected_utility");
+  optionalFiniteNumber(data, "pot");
+  optionalFiniteNumber(data, "engine_allocated");
+  optionalFiniteNumber(data, "engine_peak");
+  optionalFiniteNumber(data, "engine_heap_bytes");
   if ("has_training" in data) {
     requireBoolean(data, "has_training");
   }

@@ -66,6 +66,24 @@ describe("sessionRecovery", () => {
     expect(next.failed).toBe(true);
   });
 
+  it("aliases Zig heap + value fields for Study footer metrics (ZR-171)", () => {
+    const next = normalizeStatusForPhase({
+      running: true,
+      paused: false,
+      cancelled: false,
+      status_generation: 2,
+      allocated_bytes: 4096,
+      peak_allocated_bytes: 8192,
+      nash_gap: 2,
+      value: 1.5,
+    });
+    expect(next.engine_allocated).toBe(4096);
+    expect(next.engine_heap_bytes).toBe(4096);
+    expect(next.engine_peak).toBe(8192);
+    expect(next.accuracy_chips).toBe(1);
+    expect(next.player0_expected_utility).toBe(1.5);
+  });
+
   it("marks status-poll dead immediately for session-dead faults, else after threshold (ZR-148)", () => {
     expect(
       shouldMarkStatusPollDead({
