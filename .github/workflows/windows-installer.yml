@@ -126,6 +126,8 @@ jobs:
           # ZR-97/ZR-106: packaged Study must ship a GUI-subsystem sidecar so a
           # blank console cannot appear (closing it kills IPC).
           python scripts/zig/check-pe-subsystem.py zig-out/bin/solver-engine.exe --expect 2
+          # ZR-175: refuse AVX-512 EVEX (0xC000001D on AVX2-only hosts).
+          python scripts/zig/check-no-avx512.py zig-out/bin/solver-engine.exe
 
       - name: Install desktop npm dependencies
         working-directory: desktop

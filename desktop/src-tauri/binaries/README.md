@@ -39,8 +39,11 @@ bricks Study IPC.
 ## Source binary
 
 ```bash
-# Windows shipping/CI: pin -Dcpu=x86_64_v2 (no AVX-512; runner-native can SIGILL).
+# Portable floor is x86_64_v2 (build.zig default + CI pin). Bare ReleaseFast on an
+# AVX-512 host without the pin used to emit vmovdqu64/zmm → 0xC000001D on AVX2
+# laptops (ZR-175). Override with -Dcpu=native only for host-only digs.
 zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2
+python3 scripts/zig/check-no-avx512.py zig-out/bin/solver-engine.exe
 # Windows CI example:
 cp zig-out/bin/solver-engine.exe \
   desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Local Zig build + test entry point (mirrors .github/workflows/zig.yml defaults).
 # Default -Dcpu=x86_64_v2 matches Windows CI/installer so local packs stay portable
-# (override with ZIG_CPU=native for host-only digs).
+# (override with ZIG_CPU=native for host-only digs). build.zig also defaults to
+# x86_64_v2 when -Dcpu is omitted (ZR-175) so bare ReleaseFast cannot ship AVX-512.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,6 +20,7 @@ else
   echo "solver-engine missing under zig-out/bin" >&2
   exit 1
 fi
+python3 scripts/zig/check-no-avx512.py "$BIN"
 python3 scripts/zig/ready-smoke.py "$BIN"
 python3 scripts/zig/study-contract-smoke.py "$BIN"
 # ZR-143: kill sidecar mid-session → cold restart cannot restore unsaved;

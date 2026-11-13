@@ -67,6 +67,7 @@ jobs:
       - name: zig version
         run: zig version
 
+      # Omitting -Dcpu is OK after ZR-175 (build.zig defaults to x86_64_v2).
       - name: Build (ReleaseFast)
         run: zig build -Doptimize=ReleaseFast
 
@@ -77,6 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           test -x ./zig-out/bin/solver-engine
+          python3 scripts/zig/check-no-avx512.py ./zig-out/bin/solver-engine
           python3 scripts/zig/ready-smoke.py ./zig-out/bin/solver-engine
 
       # ZR-104 / audit §8: real-sidecar Study contract on river_gate_smoke (≤60s).
@@ -135,6 +137,7 @@ jobs:
 
       # Pin CPU: bare ReleaseFast follows the runner (can emit AVX-512).
       # ma1pc i7-10510U is AVX2-only — illegal instruction on CI zip without this.
+      # build.zig also defaults to x86_64_v2 when -Dcpu is omitted (ZR-175).
       - name: Build (ReleaseFast)
         shell: pwsh
         run: zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2
@@ -149,6 +152,7 @@ jobs:
           if (-not (Test-Path "zig-out/bin/solver-engine.exe")) {
             throw "solver-engine.exe missing"
           }
+          python scripts/zig/check-no-avx512.py zig-out/bin/solver-engine.exe
           python scripts/zig/ready-smoke.py zig-out/bin/solver-engine.exe
 
       # ZR-104 / audit §8: real-sidecar Study contract on river_gate_smoke (≤60s).
