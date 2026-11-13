@@ -402,6 +402,8 @@ pub fn decode(allocator: std.mem.Allocator, file: []const u8) OpenError!Document
 }
 
 pub const max_psol_bytes: usize = 512 * 1024 * 1024;
+/// Bounded scratch for streaming Save/Open (ZR-156). Not a second full-file buffer.
+pub const stream_chunk_bytes: usize = 64 * 1024;
 
 /// Injectable save faults for unit tests (ZR-144). Production callers use `.none`.
 /// Every non-`.none` fault must leave an existing destination checkpoint readable.
@@ -417,27 +419,209 @@ pub const SaveFault = enum {
     interrupt_before_replace,
 };
 
-/// Atomic save (ZR-92 / ZR-144): stream encoded bytes to a same-directory sibling
-/// temp, require write+flush success, then replace the destination in one rename.
-/// Never deletes the destination on failure — a failed overwrite must leave the
-/// previous checkpoint readable so Save is safe to retry.
+/// Exact on-disk size (header + payload) without building the file bytes.
+pub fn encodedFileBytes(document: Document) OpenError!u64 {
+    const payload = try encodedPayloadBytes(document);
+    const total = std.math.add(u64, header_bytes, payload) catch return error.InvalidPsol;
+    return total;
+}
+
+fn encodedPayloadBytes(document: Document) OpenError!u64 {
+    if (document.algorithm != algorithm_cfr_plus) return error.InvalidPsol;
+    if (document.config_text.len == 0) return error.InvalidPsol;
+    if (document.average.len == 0 and document.slot_actions.len != 0) return error.InvalidPsol;
+
+    var n: u64 = 4; // algorithm + frozen + pad u16
+    n = try addLenPrefixed(n, document.config_text.len, 1);
+    n = try addLenPrefixed(n, document.oop_combos.len, 4);
+    n = try addLenPrefixed(n, document.ip_combos.len, 4);
+    n = try addLenPrefixed(n, document.slot_actions.len, 2);
+    n = try addLenPrefixed(n, document.average.len, 4);
+    if (document.hasTraining()) {
+        n = std.math.add(u64, n, 4) catch return error.InvalidPsol; // trained i32
+        n = try addLenPrefixed(n, document.regret.len, 4);
+        n = try addLenPrefixed(n, document.strategy_sum.len, 4);
+        if (document.regret.len != document.average.len) return error.InvalidPsol;
+        if (document.strategy_sum.len != document.average.len) return error.InvalidPsol;
+    }
+    if (document.hasOverlays()) {
+        n = try addLenPrefixed(n, document.locks_text.len, 1);
+        n = try addLenPrefixed(n, document.strategy_edits_text.len, 1);
+    }
+    if (document.has_metrics) {
+        n = std.math.add(u64, n, 5 * 8) catch return error.InvalidPsol;
+    }
+    return n;
+}
+
+fn addLenPrefixed(base: u64, count: usize, elem_size: usize) OpenError!u64 {
+    const body = std.math.mul(u64, count, elem_size) catch return error.InvalidPsol;
+    const with_len = std.math.add(u64, base, 4) catch return error.InvalidPsol;
+    return std.math.add(u64, with_len, body) catch return error.InvalidPsol;
+}
+
+/// Streams payload bytes to a file while hashing and enforcing `max_psol_bytes`.
+const PayloadSink = struct {
+    file: std.fs.File,
+    hash: u64 = 0xcbf29ce484222325,
+    payload_len: u64 = 0,
+
+    fn writeAll(self: *PayloadSink, bytes: []const u8) OpenError!void {
+        if (bytes.len == 0) return;
+        const next = std.math.add(u64, self.payload_len, bytes.len) catch return error.InvalidPsol;
+        const total = std.math.add(u64, header_bytes, next) catch return error.InvalidPsol;
+        if (total > max_psol_bytes) return error.InvalidPsol;
+        for (bytes) |b| {
+            self.hash ^= b;
+            self.hash *%= 0x100000001b3;
+        }
+        self.file.writeAll(bytes) catch return error.InvalidPsol;
+        self.payload_len = next;
+        std.debug.assert(header_bytes + self.payload_len <= max_psol_bytes);
+    }
+
+    fn u8w(self: *PayloadSink, value: u8) OpenError!void {
+        try self.writeAll(&[_]u8{value});
+    }
+
+    fn u16w(self: *PayloadSink, value: u16) OpenError!void {
+        var buf: [2]u8 = undefined;
+        std.mem.writeInt(u16, &buf, value, .little);
+        try self.writeAll(&buf);
+    }
+
+    fn u32w(self: *PayloadSink, value: u32) OpenError!void {
+        var buf: [4]u8 = undefined;
+        std.mem.writeInt(u32, &buf, value, .little);
+        try self.writeAll(&buf);
+    }
+
+    fn i32w(self: *PayloadSink, value: i32) OpenError!void {
+        try self.u32w(@bitCast(value));
+    }
+
+    fn f64w(self: *PayloadSink, value: f64) OpenError!void {
+        var buf: [8]u8 = undefined;
+        std.mem.writeInt(u64, &buf, @bitCast(value), .little);
+        try self.writeAll(&buf);
+    }
+
+    fn text(self: *PayloadSink, value: []const u8) OpenError!void {
+        if (value.len > std.math.maxInt(u32)) return error.InvalidPsol;
+        try self.u32w(@intCast(value.len));
+        try self.writeAll(value);
+    }
+
+    fn i32s(self: *PayloadSink, values: []const i32) OpenError!void {
+        if (values.len > std.math.maxInt(u32)) return error.InvalidPsol;
+        try self.u32w(@intCast(values.len));
+        var i: usize = 0;
+        var buf: [stream_chunk_bytes]u8 = undefined;
+        while (i < values.len) {
+            const n = @min(values.len - i, buf.len / 4);
+            var j: usize = 0;
+            while (j < n) : (j += 1) {
+                std.mem.writeInt(i32, buf[j * 4 ..][0..4], values[i + j], .little);
+            }
+            try self.writeAll(buf[0 .. n * 4]);
+            i += n;
+        }
+    }
+
+    fn u16s(self: *PayloadSink, values: []const u16) OpenError!void {
+        if (values.len > std.math.maxInt(u32)) return error.InvalidPsol;
+        try self.u32w(@intCast(values.len));
+        var i: usize = 0;
+        var buf: [stream_chunk_bytes]u8 = undefined;
+        while (i < values.len) {
+            const n = @min(values.len - i, buf.len / 2);
+            var j: usize = 0;
+            while (j < n) : (j += 1) {
+                std.mem.writeInt(u16, buf[j * 2 ..][0..2], values[i + j], .little);
+            }
+            try self.writeAll(buf[0 .. n * 2]);
+            i += n;
+        }
+    }
+
+    fn f32s(self: *PayloadSink, values: []const f32) OpenError!void {
+        if (values.len > std.math.maxInt(u32)) return error.InvalidPsol;
+        try self.u32w(@intCast(values.len));
+        var i: usize = 0;
+        var buf: [stream_chunk_bytes]u8 = undefined;
+        while (i < values.len) {
+            const n = @min(values.len - i, buf.len / 4);
+            var j: usize = 0;
+            while (j < n) : (j += 1) {
+                std.mem.writeInt(u32, buf[j * 4 ..][0..4], @bitCast(values[i + j]), .little);
+            }
+            try self.writeAll(buf[0 .. n * 4]);
+            i += n;
+        }
+    }
+};
+
+fn streamDocumentPayload(sink: *PayloadSink, document: Document, flags: u32) OpenError!void {
+    if (document.algorithm != algorithm_cfr_plus) return error.InvalidPsol;
+    if (document.config_text.len == 0) return error.InvalidPsol;
+    if (document.average.len == 0 and document.slot_actions.len != 0) return error.InvalidPsol;
+    std.debug.assert(document.algorithm == algorithm_cfr_plus);
+    std.debug.assert(document.config_text.len > 0);
+
+    try sink.u8w(document.algorithm);
+    try sink.u8w(if (document.frozen) 1 else 0);
+    try sink.u16w(0);
+    try sink.text(document.config_text);
+    try sink.i32s(document.oop_combos);
+    try sink.i32s(document.ip_combos);
+    try sink.u16s(document.slot_actions);
+    try sink.f32s(document.average);
+
+    if ((flags & flag_training) != 0) {
+        try sink.i32w(document.trained);
+        try sink.f32s(document.regret);
+        try sink.f32s(document.strategy_sum);
+        if (document.regret.len != document.average.len) return error.InvalidPsol;
+        if (document.strategy_sum.len != document.average.len) return error.InvalidPsol;
+        std.debug.assert(document.regret.len == document.average.len);
+        std.debug.assert(document.strategy_sum.len == document.average.len);
+    }
+    if ((flags & flag_overlays) != 0) {
+        try sink.text(document.locks_text);
+        try sink.text(document.strategy_edits_text);
+    }
+    if ((flags & flag_metrics) != 0) {
+        try sink.f64w(document.metrics.value);
+        try sink.f64w(document.metrics.br0);
+        try sink.f64w(document.metrics.br1);
+        try sink.f64w(document.metrics.nash_gap);
+        try sink.f64w(document.metrics.accuracy);
+    }
+}
+
+/// Atomic save (ZR-92 / ZR-144 / ZR-156): stream the payload with a bounded scratch
+/// buffer (no full-file encode before the 512 MiB gate), require write+flush, then
+/// replace the destination in one rename. Never deletes the destination on failure.
 pub fn writeFile(allocator: std.mem.Allocator, path: []const u8, document: Document) OpenError!void {
-    return writeFileInjected(allocator, path, document, .none);
+    _ = allocator;
+    return writeFileInjected(path, document, .none);
 }
 
 pub fn writeFileInjected(
-    allocator: std.mem.Allocator,
     path: []const u8,
     document: Document,
     fault: SaveFault,
 ) OpenError!void {
-    const bytes = try encode(allocator, document);
-    defer allocator.free(bytes);
-    if (bytes.len > max_psol_bytes) return error.InvalidPsol;
-    // Encode + size gate passed: bytes are a real v4 file under the hard ceiling.
-    std.debug.assert(bytes.len >= header_bytes);
-    std.debug.assert(bytes.len <= max_psol_bytes);
-    std.debug.assert(std.mem.eql(u8, bytes[0..4], magic));
+    // Size gate before any disk write — exact, no staging buffer.
+    const total_bytes = try encodedFileBytes(document);
+    if (total_bytes > max_psol_bytes) return error.InvalidPsol;
+    std.debug.assert(total_bytes >= header_bytes);
+    std.debug.assert(total_bytes <= max_psol_bytes);
+
+    var flags: u32 = 0;
+    if (document.hasTraining()) flags |= flag_training;
+    if (document.hasOverlays()) flags |= flag_overlays;
+    if (document.has_metrics) flags |= flag_metrics;
 
     // Callers pass an already-unescaped filesystem path (host JSON unescape).
     const dirname = std.fs.path.dirname(path) orelse ".";
@@ -467,16 +651,30 @@ pub fn writeFileInjected(
         dir.deleteFile(tmp_name) catch {};
     }
 
+    // Placeholder header; rewritten after the payload hash/length are known.
+    var zero_header: [header_bytes]u8 = .{0} ** header_bytes;
+    file.writeAll(&zero_header) catch return error.InvalidPsol;
+
     if (fault == .write) {
         // Partial write then fail: models ENOSPC mid-stream without truncating dest.
-        // Negative space: injected write faults must not reach rename.
         std.debug.assert(fault == .write);
-        const n = @min(bytes.len, @as(usize, 32));
-        if (n != 0) file.writeAll(bytes[0..n]) catch {};
+        const stub = [_]u8{algorithm_cfr_plus, 0, 0, 0};
+        file.writeAll(&stub) catch {};
         return error.InvalidPsol;
     }
 
-    file.writeAll(bytes) catch return error.InvalidPsol;
+    var sink = PayloadSink{ .file = file };
+    try streamDocumentPayload(&sink, document, flags);
+    std.debug.assert(sink.payload_len + header_bytes == total_bytes);
+
+    var header: [header_bytes]u8 = undefined;
+    writeHeader(&header, flags, sink.payload_len, sink.hash);
+    std.debug.assert(std.mem.eql(u8, header[0..4], magic));
+    std.debug.assert(std.mem.readInt(u32, header[4..8], .little) == version);
+    std.debug.assert(std.mem.readInt(u64, header[12..20], .little) == sink.payload_len);
+
+    file.seekTo(0) catch return error.InvalidPsol;
+    file.writeAll(&header) catch return error.InvalidPsol;
 
     if (fault == .sync) {
         std.debug.assert(fault == .sync);
@@ -505,12 +703,261 @@ pub fn writeFileInjected(
     dir.rename(tmp_name, basename) catch return error.InvalidPsol;
 }
 
+/// Streaming payload reader with a bounded readahead buffer (ZR-156).
+const PayloadSource = struct {
+    file: std.fs.File,
+    remaining: u64,
+    hash: u64 = 0xcbf29ce484222325,
+    buf: [stream_chunk_bytes]u8 = undefined,
+    at: usize = 0,
+    len: usize = 0,
+
+    fn fill(self: *PayloadSource) OpenError!void {
+        std.debug.assert(self.at == self.len);
+        if (self.remaining == 0) return error.InvalidPsol;
+        const want = @min(self.buf.len, self.remaining);
+        const n = self.file.read(self.buf[0..want]) catch return error.InvalidPsol;
+        if (n == 0) return error.InvalidPsol;
+        self.at = 0;
+        self.len = n;
+        std.debug.assert(self.len <= self.remaining);
+    }
+
+    fn readExact(self: *PayloadSource, dest: []u8) OpenError!void {
+        var filled: usize = 0;
+        while (filled < dest.len) {
+            if (self.at == self.len) try self.fill();
+            const take = @min(dest.len - filled, self.len - self.at);
+            @memcpy(dest[filled .. filled + take], self.buf[self.at .. self.at + take]);
+            var i: usize = 0;
+            while (i < take) : (i += 1) {
+                self.hash ^= self.buf[self.at + i];
+                self.hash *%= 0x100000001b3;
+            }
+            self.at += take;
+            self.remaining -= take;
+            filled += take;
+        }
+    }
+
+    fn need(self: *PayloadSource, n: usize) OpenError!void {
+        if (self.remaining < n) return error.InvalidPsol;
+    }
+
+    fn needCount(self: *PayloadSource, count: usize, elem_size: usize) OpenError!void {
+        std.debug.assert(elem_size > 0);
+        const nbytes = std.math.mul(usize, count, elem_size) catch return error.InvalidPsol;
+        try self.need(nbytes);
+        std.debug.assert(self.remaining >= nbytes);
+    }
+
+    fn u8r(self: *PayloadSource) OpenError!u8 {
+        var b: [1]u8 = undefined;
+        try self.readExact(&b);
+        return b[0];
+    }
+
+    fn u16r(self: *PayloadSource) OpenError!u16 {
+        var b: [2]u8 = undefined;
+        try self.readExact(&b);
+        return std.mem.readInt(u16, &b, .little);
+    }
+
+    fn u32r(self: *PayloadSource) OpenError!u32 {
+        var b: [4]u8 = undefined;
+        try self.readExact(&b);
+        return std.mem.readInt(u32, &b, .little);
+    }
+
+    fn i32r(self: *PayloadSource) OpenError!i32 {
+        return @bitCast(try self.u32r());
+    }
+
+    fn f32r(self: *PayloadSource) OpenError!f32 {
+        return @bitCast(try self.u32r());
+    }
+
+    fn f64r(self: *PayloadSource) OpenError!f64 {
+        var b: [8]u8 = undefined;
+        try self.readExact(&b);
+        return @bitCast(std.mem.readInt(u64, &b, .little));
+    }
+
+    fn text(self: *PayloadSource, allocator: std.mem.Allocator) OpenError![]u8 {
+        const len = try self.u32r();
+        try self.needCount(len, 1);
+        const out = allocator.alloc(u8, len) catch return error.OutOfMemory;
+        errdefer allocator.free(out);
+        try self.readExact(out);
+        return out;
+    }
+
+    fn i32s(self: *PayloadSource, allocator: std.mem.Allocator) OpenError![]i32 {
+        const len = try self.u32r();
+        try self.needCount(len, @sizeOf(i32));
+        var out = allocator.alloc(i32, len) catch return error.OutOfMemory;
+        errdefer allocator.free(out);
+        var i: usize = 0;
+        var scratch: [stream_chunk_bytes]u8 = undefined;
+        while (i < len) {
+            const n = @min(len - i, scratch.len / 4);
+            try self.readExact(scratch[0 .. n * 4]);
+            var j: usize = 0;
+            while (j < n) : (j += 1) {
+                out[i + j] = std.mem.readInt(i32, scratch[j * 4 ..][0..4], .little);
+            }
+            i += n;
+        }
+        return out;
+    }
+
+    fn u16s(self: *PayloadSource, allocator: std.mem.Allocator) OpenError![]u16 {
+        const len = try self.u32r();
+        try self.needCount(len, @sizeOf(u16));
+        var out = allocator.alloc(u16, len) catch return error.OutOfMemory;
+        errdefer allocator.free(out);
+        var i: usize = 0;
+        var scratch: [stream_chunk_bytes]u8 = undefined;
+        while (i < len) {
+            const n = @min(len - i, scratch.len / 2);
+            try self.readExact(scratch[0 .. n * 2]);
+            var j: usize = 0;
+            while (j < n) : (j += 1) {
+                out[i + j] = std.mem.readInt(u16, scratch[j * 2 ..][0..2], .little);
+            }
+            i += n;
+        }
+        return out;
+    }
+
+    fn f32s(self: *PayloadSource, allocator: std.mem.Allocator) OpenError![]f32 {
+        const len = try self.u32r();
+        try self.needCount(len, @sizeOf(f32));
+        var out = allocator.alloc(f32, len) catch return error.OutOfMemory;
+        errdefer allocator.free(out);
+        var i: usize = 0;
+        var scratch: [stream_chunk_bytes]u8 = undefined;
+        while (i < len) {
+            const n = @min(len - i, scratch.len / 4);
+            try self.readExact(scratch[0 .. n * 4]);
+            var j: usize = 0;
+            while (j < n) : (j += 1) {
+                out[i + j] = @bitCast(std.mem.readInt(u32, scratch[j * 4 ..][0..4], .little));
+            }
+            i += n;
+        }
+        return out;
+    }
+};
+
+/// Stream only the street-config text from a v4 file (bounded; for memory-mib peek).
+pub fn peekConfigText(allocator: std.mem.Allocator, path: []const u8) OpenError![]u8 {
+    const file = std.fs.cwd().openFile(path, .{}) catch return error.UnsupportedFormat;
+    defer file.close();
+
+    var header_buf: [header_bytes]u8 = undefined;
+    const header_n = file.readAll(&header_buf) catch return error.UnsupportedFormat;
+    if (header_n < header_bytes) return error.UnsupportedFormat;
+    if (!std.mem.eql(u8, header_buf[0..4], magic)) return error.UnsupportedFormat;
+
+    const file_version = std.mem.readInt(u32, header_buf[4..8], .little);
+    if (file_version < 4) {
+        var kind_buf: [1]u8 = undefined;
+        const kn = file.read(&kind_buf) catch return error.LegacyCheckpointRejected;
+        if (kn == 1 and kind_buf[0] == 2) return error.Kind2RiverRejected;
+        return error.LegacyCheckpointRejected;
+    }
+    if (file_version != 4) return error.UnsupportedFormat;
+
+    const payload_len = std.mem.readInt(u64, header_buf[12..20], .little);
+    const total = std.math.add(u64, header_bytes, payload_len) catch return error.InvalidPsol;
+    if (total > max_psol_bytes) return error.InvalidPsol;
+
+    var src = PayloadSource{ .file = file, .remaining = payload_len };
+    const algorithm = try src.u8r();
+    const frozen = try src.u8r();
+    _ = try src.u16r();
+    if (algorithm != algorithm_cfr_plus) return error.InvalidPsol;
+    if (frozen != 0 and frozen != 1) return error.InvalidPsol;
+    const config_text = try src.text(allocator);
+    if (config_text.len == 0) {
+        allocator.free(config_text);
+        return error.InvalidPsol;
+    }
+    return config_text;
+}
+
+/// Open a v4 checkpoint by streaming the payload (bounded readahead; no full-file alloc).
 pub fn readFile(allocator: std.mem.Allocator, path: []const u8) OpenError!Document {
     const file = std.fs.cwd().openFile(path, .{}) catch return error.UnsupportedFormat;
     defer file.close();
-    const bytes = file.readToEndAlloc(allocator, max_psol_bytes) catch return error.OutOfMemory;
-    defer allocator.free(bytes);
-    return decode(allocator, bytes);
+
+    var header_buf: [header_bytes]u8 = undefined;
+    const header_n = file.readAll(&header_buf) catch return error.UnsupportedFormat;
+    if (header_n < header_bytes) return error.UnsupportedFormat;
+    if (!std.mem.eql(u8, header_buf[0..4], magic)) return error.UnsupportedFormat;
+
+    const file_version = std.mem.readInt(u32, header_buf[4..8], .little);
+    if (file_version < 4) {
+        // Legacy kind check needs the first payload byte; peek one byte.
+        var kind_buf: [1]u8 = undefined;
+        const kn = file.read(&kind_buf) catch return error.LegacyCheckpointRejected;
+        if (kn == 1 and kind_buf[0] == 2) return error.Kind2RiverRejected;
+        return error.LegacyCheckpointRejected;
+    }
+    if (file_version != 4) return error.UnsupportedFormat;
+
+    const flags = std.mem.readInt(u32, header_buf[8..12], .little);
+    const payload_len = std.mem.readInt(u64, header_buf[12..20], .little);
+    const expected = std.mem.readInt(u64, header_buf[20..28], .little);
+    const total = std.math.add(u64, header_bytes, payload_len) catch return error.InvalidPsol;
+    if (total > max_psol_bytes) return error.InvalidPsol;
+
+    var src = PayloadSource{ .file = file, .remaining = payload_len };
+    var document = Document{ .allocator = allocator };
+    errdefer document.deinit();
+
+    document.algorithm = try src.u8r();
+    const frozen = try src.u8r();
+    _ = try src.u16r();
+    if (document.algorithm != algorithm_cfr_plus) return error.InvalidPsol;
+    if (frozen != 0 and frozen != 1) return error.InvalidPsol;
+    document.frozen = frozen == 1;
+    document.config_text = try src.text(allocator);
+    if (document.config_text.len == 0) return error.InvalidPsol;
+    document.oop_combos = try src.i32s(allocator);
+    document.ip_combos = try src.i32s(allocator);
+    document.slot_actions = try src.u16s(allocator);
+    document.average = try src.f32s(allocator);
+    if (document.average.len == 0 and document.slot_actions.len != 0) return error.InvalidPsol;
+    if (document.slot_actions.len != 0) std.debug.assert(document.average.len > 0);
+
+    if ((flags & flag_training) != 0) {
+        document.has_training_flag = true;
+        document.trained = try src.i32r();
+        document.regret = try src.f32s(allocator);
+        document.strategy_sum = try src.f32s(allocator);
+        if (document.regret.len != document.average.len) return error.InvalidPsol;
+        if (document.strategy_sum.len != document.average.len) return error.InvalidPsol;
+        std.debug.assert(document.regret.len == document.average.len);
+        std.debug.assert(document.strategy_sum.len == document.average.len);
+    }
+    if ((flags & flag_overlays) != 0) {
+        document.locks_text = try src.text(allocator);
+        document.strategy_edits_text = try src.text(allocator);
+    }
+    if ((flags & flag_metrics) != 0) {
+        document.metrics.value = try src.f64r();
+        document.metrics.br0 = try src.f64r();
+        document.metrics.br1 = try src.f64r();
+        document.metrics.nash_gap = try src.f64r();
+        document.metrics.accuracy = try src.f64r();
+        document.has_metrics = true;
+    }
+    if (src.remaining != 0 or src.at != src.len) return error.InvalidPsol;
+    if (src.hash != expected) return error.InvalidPsol;
+    _ = poker_engine;
+    return document;
 }
 
 test "v4 roundtrip browse + training + overlays" {
@@ -679,6 +1126,62 @@ fn expectReadableMarker(allocator: std.mem.Allocator, path: []const u8, marker: 
     try std.testing.expect(std.mem.indexOf(u8, loaded.config_text, marker) != null);
 }
 
+test "streamed writeFile rejects over max_psol_bytes before touching payload" {
+    var doc = Document{ .allocator = std.testing.allocator };
+    defer {
+        // Fake oversize slice — never allocated; clear before deinit.
+        doc.average = &.{};
+        doc.deinit();
+    }
+    doc.config_text = try std.testing.allocator.dupe(u8, "street-config 1\nboard Ah Kd 7c\npot 100\n");
+    doc.slot_actions = try std.testing.allocator.dupe(u16, &.{2});
+    // Length-only slice: size gate must refuse without encoding/allocating 512 MiB+.
+    const too_many: usize = (max_psol_bytes / 4) + 1024;
+    doc.average = @as([*]f32, @ptrFromInt(@alignOf(f32)))[0..too_many];
+
+    const total = try encodedFileBytes(doc);
+    try std.testing.expect(total > max_psol_bytes);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "too_big.psol" });
+    defer std.testing.allocator.free(path);
+    // writeFile checks encoded size before createFile/stream — no payload deref.
+    try std.testing.expectError(error.InvalidPsol, writeFile(std.testing.allocator, path, doc));
+}
+
+test "streamed writeFile readFile roundtrip matches encode decode" {
+    var doc = try testDoc(std.testing.allocator, "stream-roundtrip");
+    defer doc.deinit();
+    doc.trained = 3;
+    doc.regret = try std.testing.allocator.dupe(f32, &.{ 1, 2 });
+    doc.strategy_sum = try std.testing.allocator.dupe(f32, &.{ 3, 4 });
+    doc.has_training_flag = true;
+
+    const encoded = try encode(std.testing.allocator, doc);
+    defer std.testing.allocator.free(encoded);
+    try std.testing.expectEqual(encoded.len, try encodedFileBytes(doc));
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "stream.psol" });
+    defer std.testing.allocator.free(path);
+    try writeFile(std.testing.allocator, path, doc);
+
+    var loaded = try readFile(std.testing.allocator, path);
+    defer loaded.deinit();
+    var from_bytes = try decode(std.testing.allocator, encoded);
+    defer from_bytes.deinit();
+    try std.testing.expectEqualStrings(from_bytes.config_text, loaded.config_text);
+    try std.testing.expectEqual(from_bytes.average.len, loaded.average.len);
+    try std.testing.expectEqual(from_bytes.regret.len, loaded.regret.len);
+    try std.testing.expectEqual(@as(i32, 3), loaded.trained);
+}
+
 test "writeFile overwrite replaces and stays readable" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -690,6 +1193,7 @@ test "writeFile overwrite replaces and stays readable" {
     var first = try testDoc(std.testing.allocator, "first");
     defer first.deinit();
     try writeFile(std.testing.allocator, path, first);
+    try std.testing.expect((try encodedFileBytes(first)) <= max_psol_bytes);
     try expectReadableMarker(std.testing.allocator, path, "first");
 
     var second = try testDoc(std.testing.allocator, "second");
@@ -712,7 +1216,7 @@ test "injected write fault leaves prior checkpoint readable" {
 
     var next = try testDoc(std.testing.allocator, "next-write");
     defer next.deinit();
-    try std.testing.expectError(error.InvalidPsol, writeFileInjected(std.testing.allocator, path, next, .write));
+    try std.testing.expectError(error.InvalidPsol, writeFileInjected(path, next, .write));
     try expectReadableMarker(std.testing.allocator, path, "prior-write");
 }
 
@@ -730,7 +1234,7 @@ test "injected sync fault leaves prior checkpoint readable" {
 
     var next = try testDoc(std.testing.allocator, "next-sync");
     defer next.deinit();
-    try std.testing.expectError(error.InvalidPsol, writeFileInjected(std.testing.allocator, path, next, .sync));
+    try std.testing.expectError(error.InvalidPsol, writeFileInjected(path, next, .sync));
     try expectReadableMarker(std.testing.allocator, path, "prior-sync");
 }
 
@@ -748,7 +1252,7 @@ test "injected rename fault leaves prior checkpoint readable" {
 
     var next = try testDoc(std.testing.allocator, "next-rename");
     defer next.deinit();
-    try std.testing.expectError(error.InvalidPsol, writeFileInjected(std.testing.allocator, path, next, .rename));
+    try std.testing.expectError(error.InvalidPsol, writeFileInjected(path, next, .rename));
     try expectReadableMarker(std.testing.allocator, path, "prior-rename");
 }
 
@@ -768,7 +1272,7 @@ test "interrupted save before replace leaves prior checkpoint readable" {
     defer next.deinit();
     try std.testing.expectError(
         error.InvalidPsol,
-        writeFileInjected(std.testing.allocator, path, next, .interrupt_before_replace),
+        writeFileInjected(path, next, .interrupt_before_replace),
     );
     try expectReadableMarker(std.testing.allocator, path, "prior-interrupt");
 }
