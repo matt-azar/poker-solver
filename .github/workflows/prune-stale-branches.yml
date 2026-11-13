@@ -24,8 +24,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Long-lived heads. Keep zig-rewrite protected until the cutover alias is deleted.
-          protected='^(main|master|zig-rewrite)$'
+          # Long-lived product head.
+          protected='^(main|master)$'
 
           mapfile -t open_heads < <(
             gh pr list -R "$REPO" --state open --limit 500 \
