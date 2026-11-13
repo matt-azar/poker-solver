@@ -1034,6 +1034,8 @@ pub const Session = struct {
     /// Force-publish the exact average for `training.trained`, then evaluate it.
     /// Guarantees the returned policy matches the iteration being reported (no
     /// stale publish-cadence snapshot). Shared by Study `trainGated` and gate-bench.
+    /// Bumps `policy_revision` when a publish is required — use only for Accuracy
+    /// stop / exact reporting, not routine footer progress (ZR-133 / ZR-171).
     pub fn evaluateExactIteration(self: *Session) SessionError!ExactIterEval {
         try self.ensurePublishedExact();
         const published = self.published orelse return error.NothingPublished;
@@ -1041,6 +1043,14 @@ pub const Session = struct {
         if (published.trained != trained) return error.InvalidSession;
         const eval = try self.evaluateFrozen(published.average);
         return .{ .trained = trained, .eval = eval };
+    }
+
+    /// Sample EV/gap from the current published average without forcing a publish.
+    /// Footer Acc/ETA track the publish watermark (ZR-133: progress ≠ publish).
+    fn recordProgressFromPublished(self: *Session) void {
+        const published = self.published orelse return;
+        const eval = self.evaluateFrozen(published.average) catch return;
+        self.recordProgressEval(published.trained, eval);
     }
 
     fn clearProgressTracking(self: *Session) void {
@@ -1170,25 +1180,36 @@ pub const Session = struct {
             fresh_eval = false;
 
             if (@rem(completed, every) == 0) {
-                const exact = try self.evaluateExactIteration();
-                // `completed` is job-relative; `exact.trained` is absolute (Continue-safe).
-                self.recordProgressEval(exact.trained, exact.eval);
-                fresh_eval = true;
-                if (want_accuracy and accuracyReached(exact.eval.accuracy, threshold_chips)) {
-                    self.last_terminal = .accuracy_reached;
-                    self.mu.lock();
-                    self.phase = .published;
-                    self.mu.unlock();
-                    self.freezeRuntime();
-                    return;
+                if (want_accuracy) {
+                    // Accuracy stop must see the exact trained average (may publish).
+                    const exact = try self.evaluateExactIteration();
+                    self.recordProgressEval(exact.trained, exact.eval);
+                    fresh_eval = true;
+                    if (accuracyReached(exact.eval.accuracy, threshold_chips)) {
+                        self.last_terminal = .accuracy_reached;
+                        self.mu.lock();
+                        self.phase = .published;
+                        self.mu.unlock();
+                        self.freezeRuntime();
+                        return;
+                    }
+                } else {
+                    // Iteration/time jobs: sample published watermark — do not
+                    // force-publish (keeps ZR-133 cadence / Study continue rev).
+                    self.recordProgressFromPublished();
+                    fresh_eval = self.has_metrics;
                 }
             }
             if (use_time) {
                 const elapsed = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e9;
                 if (elapsed >= time_limit_seconds) {
                     if (!fresh_eval) {
-                        const exact = try self.evaluateExactIteration();
-                        self.recordProgressEval(exact.trained, exact.eval);
+                        if (want_accuracy) {
+                            const exact = try self.evaluateExactIteration();
+                            self.recordProgressEval(exact.trained, exact.eval);
+                        } else {
+                            self.recordProgressFromPublished();
+                        }
                     }
                     self.last_terminal = .time_limit_reached;
                     self.mu.lock();
@@ -1211,11 +1232,8 @@ pub const Session = struct {
             }
         };
         if (!fresh_eval) {
-            // Final sample so Complete footer shows Acc/EV even when iters % every != 0.
-            if (self.published != null) {
-                const exact = self.evaluateExactIteration() catch null;
-                if (exact) |e| self.recordProgressEval(e.trained, e.eval);
-            }
+            // Final sample on the completion-flush average (no extra publish).
+            self.recordProgressFromPublished();
         }
         self.last_terminal = .completed;
         self.mu.lock();
