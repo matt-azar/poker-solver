@@ -3314,6 +3314,48 @@ test "forced train failure surfaces sticky last_error on status" {
     try std.testing.expect(std.mem.indexOf(u8, cleared, "\"failed\":false") != null);
 }
 
+test "cadence publish OOM soft-skips without sticky last_error (ZR-164)" {
+    // Soft BudgetExceeded on cadence must complete train without StrategyPublishFailed
+    // sticky brick (desktop phaseFromStatus maps any last_error → failed).
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "zr164-soft-publish");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    state.session.publish_every = 1;
+    state.session.inject_publish_oom = true;
+    // Mirrors trainWorker success path: soft-skip returns ok → clearLastError.
+    try state.session.train(1);
+    state.clearLastError();
+    const status_body = try formatStatusBody(std.testing.allocator, &state);
+    defer std.testing.allocator.free(status_body);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"last_error\":null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"failed\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status_body, "\"can_continue\":true") != null);
+    try std.testing.expectEqual(@as(u32, 1), state.session.publish_skips);
+    try std.testing.expectEqual(@as(i32, 1), state.session.last_published_trained);
+    try std.testing.expectEqual(@as(i32, 2), state.session.training.?.trained);
+}
+
 test "publish failure keeps can_continue; mid-pass clears it" {
     // ZR-145: StrategyPublishFailed ≠ mid-pass InvalidFrozen for Continue gates.
     const config =
