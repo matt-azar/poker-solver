@@ -102,13 +102,15 @@ export async function killSolverEngineIpc(): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
+  // Clear transport first so status polls cannot keep enqueueing 240s waits
+  // while kill_solver_engine_cmd runs (ZR-175 orphan-invoke hang).
+  setNoEngineTransport("sidecar terminated");
   try {
     // Rust kill path also writes last-fault.json (ZR-160).
     await invoke("kill_solver_engine_cmd");
   } catch {
     // Already dead / no session — Reconnect/ensure will recover.
   }
-  setNoEngineTransport("sidecar terminated");
 }
 
 export type IpcRequestEnvelope = {

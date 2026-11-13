@@ -38,8 +38,12 @@ const PROTOCOL: u32 = 2;
 const SIDECAR_BASENAME: &str = "solver-engine";
 const EXTERNAL_BIN: &str = "binaries/solver-engine";
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
-/// Default RPC budget (status / node / most ops).
+/// Default RPC budget (node / values / most ops).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(240);
+/// Status must match the Study poll budget (JS aborts at 4s). A 240s status
+/// wait leaves orphan Tauri invokes after each soft timeout → UI slowdown /
+/// memory spikes while the sidecar is hung (ZR-175).
+const STATUS_RPC_TIMEOUT: Duration = Duration::from_secs(8);
 /// `begin_config` can compile a flop tree for a while on the stdin loop.
 const BEGIN_CONFIG_TIMEOUT: Duration = Duration::from_secs(600);
 /// Legacy completion-shaped train replies (pre short-admit clients). Host now
@@ -51,6 +55,7 @@ fn timeout_for_op(op: &str) -> Duration {
     match op {
         "solve" | "resolve_locked" => TRAIN_RPC_TIMEOUT,
         "begin_config" => BEGIN_CONFIG_TIMEOUT,
+        "status" => STATUS_RPC_TIMEOUT,
         _ => REQUEST_TIMEOUT,
     }
 }
@@ -816,6 +821,16 @@ mod tests {
             "envelope kind must precede nested body kind; payload={payload}"
         );
         assert!(payload.contains("\"op\":\"put_strategy_edit\""));
+    }
+
+    #[test]
+    fn status_rpc_timeout_is_short_vs_default() {
+        // ZR-175: status must not inherit the 240s default or soft poll aborts
+        // leave orphan Tauri invokes for minutes.
+        assert!(STATUS_RPC_TIMEOUT < REQUEST_TIMEOUT);
+        assert_eq!(timeout_for_op("status"), STATUS_RPC_TIMEOUT);
+        assert_eq!(timeout_for_op("node"), REQUEST_TIMEOUT);
+        assert_eq!(timeout_for_op("values"), REQUEST_TIMEOUT);
     }
 
     #[test]

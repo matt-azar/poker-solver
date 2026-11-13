@@ -19,6 +19,8 @@ export function isEngineSessionDead(detail: string): boolean {
     text.includes("session killed") ||
     text.includes("session shut down") ||
     text.includes("engine unreachable") ||
+    text.includes("no engine url") ||
+    text.includes("ipc not connected") ||
     text.includes("invalidframe") ||
     text.includes("invalid_frame") ||
     text.includes("solver-engine exiting") ||

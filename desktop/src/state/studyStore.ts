@@ -99,7 +99,7 @@ import {
   statusIndicatesFailure,
   statusStickyError,
 } from "../domain/sessionRecovery";
-import { killSolverEngineIpc } from "../engine/transport";
+import { killSolverEngineIpc, setNoEngineTransport } from "../engine/transport";
 import { presentUserText } from "../domain/userText";
 import {
   DEFAULT_SPOT,
@@ -1964,11 +1964,18 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   markEngineSessionDead(detail, opts) {
+    // ZR-175: stop status polling immediately. Continuing to poll after session
+    // death re-enters hung/kill, overwrites last-fault with "No engine URL", and
+    // leaves orphan Tauri status invokes (JS 4s abort vs Rust 240s wait).
+    get().stopPolling();
     continuationPending = false;
     pendingReloadNodeId = undefined;
     invalidateLifecycleRequests();
     // Failed/orphan job id must not outlive the dead pipe (ZR-143).
     engineClient.clearLastStudyJobId();
+    // Drop IPC selection before async kill finishes so stray status cannot
+    // enqueue more pipe waits against a dead/hung sidecar.
+    setNoEngineTransport("session dead");
     const patch = sessionDeadUiPatch({
       detail,
       phase: get().phase,

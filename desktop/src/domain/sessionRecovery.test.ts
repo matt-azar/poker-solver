@@ -25,6 +25,12 @@ describe("sessionRecovery", () => {
     expect(isEngineSessionDead("Broken pipe")).toBe(true);
     expect(isEngineSessionDead("ipc read error: InvalidFrame")).toBe(true);
     expect(isEngineSessionDead("invalid_frame")).toBe(true);
+    expect(isEngineSessionDead("No engine URL — Study requires the Tauri shell")).toBe(
+      true,
+    );
+    expect(
+      isEngineSessionDead("solver-engine IPC not connected — use Reconnect"),
+    ).toBe(true);
     expect(isEngineSessionDead("strategy edit rejected: bad probs")).toBe(false);
     expect(classifyEngineSessionFault(new Error("Broken pipe")).sessionDead).toBe(
       true,
