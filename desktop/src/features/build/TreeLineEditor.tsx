@@ -127,8 +127,19 @@ function DecisionRow({
   );
 }
 
+/** Phases where Build must not issue tree_preview (ZR-158 stdin starvation). */
+function previewBlockedPhase(phase: string): boolean {
+  return (
+    phase === "building" ||
+    phase === "solving" ||
+    phase === "pause_requested" ||
+    phase === "stop_requested"
+  );
+}
+
 export function TreeLineEditor() {
   const draft = useStudyStore((s) => s.draft);
+  const phase = useStudyStore((s) => s.phase);
   const updateDraft = useStudyStore((s) => s.updateDraft);
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<TreePreviewPayload | null>(null);
@@ -149,6 +160,11 @@ export function TreeLineEditor() {
   };
 
   const refresh = async () => {
+    // Host tree_preview is still sync on the sidecar stdin loop. Issuing it while
+    // Solve/begin owns the engine starves status polls → "Solve failed." (ZR-158).
+    if (previewBlockedPhase(useStudyStore.getState().phase)) {
+      return;
+    }
     const id = ++requestId.current;
     const revision = draftRevision.current;
     setBusy(true);
@@ -185,6 +201,9 @@ export function TreeLineEditor() {
 
   useEffect(() => {
     clearStalePreview();
+    if (previewBlockedPhase(phase)) {
+      return;
+    }
     const handle = window.setTimeout(() => {
       void refresh();
     }, 350);
@@ -192,6 +211,7 @@ export function TreeLineEditor() {
     // Spot + bet + edit fields that reshape the public tree / memory plan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    phase,
     draft.boardText,
     draft.oopRange,
     draft.ipRange,

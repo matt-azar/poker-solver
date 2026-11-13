@@ -72,6 +72,7 @@ describe("TreeLineEditor", () => {
       },
     });
     useStudyStore.setState({
+      phase: "idle",
       draft: {
         ...useStudyStore.getState().draft,
         boardText: "Ah Kd 7c 2s",
@@ -85,6 +86,13 @@ describe("TreeLineEditor", () => {
         memoryMib: 64,
       },
     });
+  });
+
+  it("does not issue tree_preview while Solve is running (ZR-158)", async () => {
+    useStudyStore.setState({ phase: "solving" });
+    render(<TreeLineEditor />);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(treePreview).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

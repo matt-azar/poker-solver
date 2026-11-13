@@ -1116,7 +1116,16 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     // ZR-83 / ZR-156: side-effect-free preview/plan — never begin_config /
     // clearSolution. Compile through the Session budget allocator (shared
     // memory-mib ceiling); JSON reply body stays on the host IPC allocator.
+    //
+    // ZR-158: these ops still run on the product stdin loop (sync). A flop
+    // recompile can take seconds and starves `status`/Stop. Build's TreeLineEditor
+    // debounce issues tree_preview while the user stays on Build during Solve —
+    // refuse while begin/train own the Session allocator so Study polling stays live
+    // and we do not race train's heap traffic through the parent GPA.
     if (std.mem.eql(u8, req.op, "tree_preview")) {
+        if (state.beginOrTrainBusy()) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
+        }
         const escaped = bodyStringField(req.body_json, "config_text") orelse
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
         const config = try unescapeConfig(state.allocator, escaped);
@@ -1138,6 +1147,9 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "plan_memory")) {
+        if (state.beginOrTrainBusy()) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
+        }
         const escaped = bodyStringField(req.body_json, "config_text") orelse
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
         const config = try unescapeConfig(state.allocator, escaped);
@@ -2466,6 +2478,59 @@ test "pause cancel and status-shaped open reply" {
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"has_training\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"status_generation\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"solution_id\":\"s") != null);
+}
+
+test "tree_preview refuses while train running (ZR-158)" {
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range 2c3d:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "preview-busy");
+    defer state.deinit();
+    try state.session.begin(config);
+    state.train_running.store(true, .release);
+    defer state.train_running.store(false, .release);
+
+    var preview_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "tp-busy"),
+        .op = try std.testing.allocator.dupe(u8, "tree_preview"),
+        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"config_text\":{s}}}", .{std.json.fmt(config, .{})}),
+    };
+    defer preview_req.deinit();
+    var preview_reply = try handle(&state, preview_req);
+    defer preview_reply.deinit();
+    try std.testing.expect(!preview_reply.ok);
+    try std.testing.expectEqualStrings("busy", preview_reply.error_code orelse "");
+
+    var plan_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "pm-busy"),
+        .op = try std.testing.allocator.dupe(u8, "plan_memory"),
+        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"config_text\":{s}}}", .{std.json.fmt(config, .{})}),
+    };
+    defer plan_req.deinit();
+    var plan_reply = try handle(&state, plan_req);
+    defer plan_reply.deinit();
+    try std.testing.expect(!plan_reply.ok);
+    try std.testing.expectEqualStrings("busy", plan_reply.error_code orelse "");
 }
 
 test "tree_preview and plan_memory leave begun session unchanged" {
