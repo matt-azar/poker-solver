@@ -773,7 +773,7 @@ fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     state.budget.prioritizeAnalysis(1);
     defer state.budget.returnToTraining();
     const wait_ns: u64 = 30 * std.time.ns_per_s;
-    var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+    var lease = borrowPublishedForAnalysis(state, wait_ns) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
     };
     defer lease.deinit();
@@ -838,8 +838,10 @@ fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
 fn handleCategories(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     state.budget.prioritizeAnalysis(1);
     defer state.budget.returnToTraining();
+    // Categories sync path historically waited 120s; still bound mid-train, but
+    // idle sessions fail immediately (ZR-170).
     const wait_ns: u64 = 120 * std.time.ns_per_s;
-    var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+    var lease = borrowPublishedForAnalysis(state, wait_ns) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
     };
     defer lease.deinit();
@@ -1251,9 +1253,9 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         // Sync path for unit tests. Product stdin loop uses `startValues` (ZR-151).
         state.budget.prioritizeAnalysis(1);
         defer state.budget.returnToTraining();
-        // Bounded wait for mid-train first publish (R10). Off-loop workers use 30s too.
+        // Bounded wait for mid-train first publish (R10). Idle skips the wait (ZR-170).
         const wait_ns: u64 = 30 * std.time.ns_per_s;
-        var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+        var lease = borrowPublishedForAnalysis(state, wait_ns) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
         defer lease.deinit();
@@ -1734,6 +1736,24 @@ fn analysisSupersededReply(state: *HostState, task: *AnalysisTask) void {
     state.writeReply(err_reply) catch {};
 }
 
+/// Borrow published policy for analysis.
+///
+/// Mid-train / mid-begin may race the first publish, so wait up to `wait_ns`
+/// (ZR-151). Idle / paused / failed sessions have no pending publish — fail
+/// immediately with `NothingPublished` instead of burning the full wait
+/// (ZR-170 stress: idle `values` was a 30s no-op).
+fn borrowPublishedForAnalysis(
+    state: *HostState,
+    wait_ns: u64,
+) poker_app.session.SessionError!poker_app.PublishedLease {
+    const phase = state.session.phase;
+    const expect_publish = state.beginOrTrainBusy() or phase == .training or phase == .compiling;
+    if (expect_publish) {
+        return state.session.borrowPublishedWait(wait_ns);
+    }
+    return state.session.borrowPublished();
+}
+
 fn analysisWorker(task: *AnalysisTask) void {
     const state = task.state;
     defer {
@@ -1755,9 +1775,10 @@ fn analysisWorker(task: *AnalysisTask) void {
     defer state.budget.returnToTraining();
 
     // Bound the policy wait so a hung publish cannot pin analysis forever; the
-    // stdin loop stays free for Stop/status either way (ZR-151).
+    // stdin loop stays free for Stop/status either way (ZR-151). Idle sessions
+    // skip the wait (ZR-170).
     const wait_ns: u64 = 30 * std.time.ns_per_s;
-    var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+    var lease = borrowPublishedForAnalysis(state, wait_ns) catch |err| {
         if (!state.analysisGenCurrent(task.gen)) {
             analysisSupersededReply(state, task);
             return;
