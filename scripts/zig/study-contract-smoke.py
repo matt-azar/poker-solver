@@ -384,6 +384,46 @@ def main() -> int:
             "failed": status0.get("failed"),
         }
 
+        # --- ZR-170: idle values/equity must fail fast (no 30s publish wait) ---
+        t_idle_vals = time.perf_counter()
+        idle_vals = inbox.rpc(
+            proc,
+            "values",
+            {"node_id": "r"},
+            "c-idle-values",
+            expect_ok=False,
+            timeout_s=2.0,
+        )
+        idle_vals_s = round(time.perf_counter() - t_idle_vals, 4)
+        require(idle_vals.get("ok") is False, f"idle values should fail: {idle_vals}")
+        require(
+            idle_vals.get("error_code") == "nothing_published",
+            f"idle values code: {idle_vals}",
+        )
+        require(idle_vals_s < 2.0, f"idle values too slow: {idle_vals_s}s")
+        t_idle_eq = time.perf_counter()
+        idle_eq = inbox.rpc(
+            proc,
+            "equity",
+            {"node_id": "r"},
+            "c-idle-equity",
+            expect_ok=False,
+            timeout_s=2.0,
+        )
+        idle_eq_s = round(time.perf_counter() - t_idle_eq, 4)
+        require(idle_eq.get("ok") is False, f"idle equity should fail: {idle_eq}")
+        require(
+            idle_eq.get("error_code") == "nothing_published",
+            f"idle equity code: {idle_eq}",
+        )
+        require(idle_eq_s < 2.0, f"idle equity too slow: {idle_eq_s}s")
+        stages["idle_analysis_fast_fail"] = {
+            "values_s": idle_vals_s,
+            "equity_s": idle_eq_s,
+            "values_error": idle_vals.get("error_code"),
+            "equity_error": idle_eq.get("error_code"),
+        }
+
         # --- begin + short solve ---
         begin = body_dict(
             inbox.rpc(proc, "begin_config", {"config_text": config_text}, "c-begin")
