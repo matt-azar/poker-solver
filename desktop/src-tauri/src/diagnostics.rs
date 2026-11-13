@@ -7,14 +7,18 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+use serde_json::Value;
 
 const PRODUCT_DIR: &str = "Holdem Study";
 const DIAGNOSTICS_SUBDIR: &str = "diagnostics";
 const ENGINE_LOG: &str = "engine.log";
 const LAST_FAULT: &str = "last-fault.json";
+const LAST_SOLVE: &str = "last-solve.json";
+const HOST_RESOURCES: &str = "host-resources.json";
 const SESSION_META: &str = "session-meta.json";
 const README_NAME: &str = "README.txt";
 const OVERRIDE_ENV: &str = "HOLDEM_STUDY_DIAGNOSTICS_DIR";
@@ -33,9 +37,29 @@ Folder (Windows packaged):
   %LOCALAPPDATA%\\Holdem Study\\diagnostics\\
 
 Contents:
-  engine.log        — recent solver-engine stderr (rolling)
-  last-fault.json   — last Solve failed / session-dead / kill / ensure-fail
-  session-meta.json — app version, protocol, launch_id, OS
+  engine.log           — recent solver-engine stderr (rolling)
+  last-fault.json      — last Solve failed / session-dead / kill / ensure-fail
+  last-solve.json      — compact parameters of the last Solve (no range blobs)
+  host-resources.json  — best-effort UI/sidecar RSS + system RAM/CPU
+  session-meta.json    — app version, protocol, launch_id, OS
+
+Timing:
+  Before each Solve / Continue train start, Study writes a cheap pre-solve
+  snapshot (last-solve.json + host-resources.json with snapshotKind=pre-solve)
+  so a zip is still useful if the process dies before last-fault can write.
+  Later fault writes overwrite host-resources with snapshotKind=fault and
+  write last-fault.json. Compare timestamps / snapshotKind — do not treat a
+  lone pre-solve host-resources file as post-crash state.
+
+last-solve.json fields (typical):
+  snapshotKind (pre-solve), timestamp, street, board, pot, stack, bet sizes,
+  accuracy, iterations, threads, memoryMib, rake/ICM flags, algorithm, frozen,
+  timeLimit, range hashes/sizes (not full range text), publishEveryHint
+
+host-resources.json fields (best-effort; omitted when sampling fails):
+  snapshotKind (pre-solve|fault), timestamp, uiRssBytes, sidecarPid,
+  sidecarRssBytes, systemTotalRamBytes, systemAvailableRamBytes,
+  cpuLoad1 (Linux), cpuPercentApprox (when a prior sample exists), os, note
 
 Hard crash minidumps (if Windows LocalDumps is registered) land under:
   %LOCALAPPDATA%\\CrashDumps\\
@@ -43,6 +67,20 @@ Hard crash minidumps (if Windows LocalDumps is registered) land under:
 
 Do not include assistant API keys or full range text unless asked.
 ";
+
+/// Last known solver-engine PID (for host-resources after UI-side faults).
+static LAST_SIDECAR_PID: Mutex<Option<u32>> = Mutex::new(None);
+
+/// Remember / clear the live sidecar PID (spawn / kill).
+pub fn remember_sidecar_pid(pid: Option<u32>) {
+    if let Ok(mut slot) = LAST_SIDECAR_PID.lock() {
+        *slot = pid;
+    }
+}
+
+fn sidecar_pid_snapshot() -> Option<u32> {
+    LAST_SIDECAR_PID.lock().ok().and_then(|g| *g)
+}
 
 /// Resolve the diagnostics directory (creates nothing).
 ///
@@ -162,7 +200,14 @@ pub struct FaultSnapshot {
 }
 
 /// Write `last-fault.json` (best-effort; never panics into the UI path).
+///
+/// Also refreshes `host-resources.json` on the same triggers (ZR-169).
 pub fn write_last_fault(snapshot: &FaultSnapshot) {
+    write_last_fault_with_sidecar(snapshot, sidecar_pid_snapshot());
+}
+
+/// Same as [`write_last_fault`] but samples a known sidecar PID (pre-kill).
+pub fn write_last_fault_with_sidecar(snapshot: &FaultSnapshot, sidecar_pid: Option<u32>) {
     let Ok(dir) = ensure_diagnostics_dir() else {
         return;
     };
@@ -175,6 +220,45 @@ pub fn write_last_fault(snapshot: &FaultSnapshot) {
         }
         Err(err) => eprintln!("warn: diagnostics last-fault encode failed: {err}"),
     }
+    // Never let host sampling block or undo the fault write.
+    write_host_resources_labeled(sidecar_pid, "fault", /*cheap*/ false);
+}
+
+/// Persist compact last-solve parameters from the Study UI (ZR-169).
+///
+/// Caller must omit secrets and full range catalogues; board + size lists OK.
+pub fn write_last_solve(summary: &Value) {
+    let Ok(dir) = ensure_diagnostics_dir() else {
+        return;
+    };
+    let path = dir.join(LAST_SOLVE);
+    match serde_json::to_string_pretty(summary) {
+        Ok(body) => {
+            if let Err(err) = fs::write(&path, body) {
+                eprintln!("warn: diagnostics last-solve write failed: {err}");
+            }
+        }
+        Err(err) => eprintln!("warn: diagnostics last-solve encode failed: {err}"),
+    }
+}
+
+/// Cheap pre-solve / pre-continue snapshot so a zip stays useful if the process
+/// dies before `last-fault.json` can be written (ZR-169).
+///
+/// Writes `last-solve.json` (caller summary + `snapshotKind: pre-solve`) and a
+/// best-effort `host-resources.json` labeled the same. Skips expensive CPU
+/// interval sampling; never blocks the Solve start path on sampling failure.
+pub fn write_pre_solve_snapshot(summary: &Value) {
+    let mut enriched = summary.clone();
+    if let Some(obj) = enriched.as_object_mut() {
+        obj.entry("snapshotKind".to_string())
+            .or_insert_with(|| Value::String("pre-solve".into()));
+        obj.entry("timestamp".to_string())
+            .or_insert_with(|| Value::String(iso_timestamp()));
+        obj.insert("uiVersion".to_string(), Value::String(UI_VERSION.into()));
+    }
+    write_last_solve(&enriched);
+    write_host_resources_labeled(sidecar_pid_snapshot(), "pre-solve", /*cheap*/ true);
 }
 
 /// Convenience for Rust kill / ensure / pipe-death paths.
@@ -185,16 +269,386 @@ pub fn record_fault(
     exit_reason: &str,
     protocol: u32,
 ) {
-    write_last_fault(&FaultSnapshot {
-        timestamp: iso_timestamp(),
-        launch_id: launch_id.to_string(),
-        last_op: last_op.map(|s| s.to_string()),
-        reason: reason.to_string(),
-        exit_reason: exit_reason.to_string(),
-        ui_version: UI_VERSION.to_string(),
+    record_fault_with_sidecar(
+        launch_id,
+        last_op,
+        reason,
+        exit_reason,
         protocol,
-        consecutive_status_failures: None,
-    });
+        sidecar_pid_snapshot(),
+    );
+}
+
+/// Like [`record_fault`] with an explicit sidecar PID for RSS sampling.
+pub fn record_fault_with_sidecar(
+    launch_id: &str,
+    last_op: Option<&str>,
+    reason: &str,
+    exit_reason: &str,
+    protocol: u32,
+    sidecar_pid: Option<u32>,
+) {
+    write_last_fault_with_sidecar(
+        &FaultSnapshot {
+            timestamp: iso_timestamp(),
+            launch_id: launch_id.to_string(),
+            last_op: last_op.map(|s| s.to_string()),
+            reason: reason.to_string(),
+            exit_reason: exit_reason.to_string(),
+            ui_version: UI_VERSION.to_string(),
+            protocol,
+            consecutive_status_failures: None,
+        },
+        sidecar_pid,
+    );
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostResources {
+    pub timestamp: String,
+    /// `pre-solve` | `fault` — distinguishes start snapshot from post-fault.
+    pub snapshot_kind: String,
+    pub os: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ui_rss_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sidecar_pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sidecar_rss_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_total_ram_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_available_ram_bytes: Option<u64>,
+    /// Linux 1-minute load average (cheap).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_load1: Option<f64>,
+    /// Approx CPU % from a prior sample delta (may be null on first sample).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_percent_approx: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Prior CPU tick sample for non-blocking percent approx (updated on each sample).
+#[derive(Clone, Copy, Default)]
+struct CpuTickSample {
+    idle: u64,
+    total: u64,
+}
+
+static LAST_CPU_TICKS: Mutex<Option<CpuTickSample>> = Mutex::new(None);
+
+fn write_host_resources_labeled(sidecar_pid: Option<u32>, kind: &str, cheap: bool) {
+    let sample = sample_host_resources(sidecar_pid, kind, cheap);
+    let Ok(dir) = ensure_diagnostics_dir() else {
+        return;
+    };
+    let path = dir.join(HOST_RESOURCES);
+    match serde_json::to_string_pretty(&sample) {
+        Ok(body) => {
+            if let Err(err) = fs::write(&path, body) {
+                eprintln!("warn: diagnostics host-resources write failed: {err}");
+            }
+        }
+        Err(err) => eprintln!("warn: diagnostics host-resources encode failed: {err}"),
+    }
+}
+
+fn sample_host_resources(sidecar_pid: Option<u32>, kind: &str, cheap: bool) -> HostResources {
+    let ui_rss = process_rss_bytes(None);
+    let sidecar_rss = sidecar_pid.and_then(|pid| process_rss_bytes(Some(pid)));
+    let (total_ram, avail_ram) = system_ram_bytes();
+    let load1 = cpu_load1();
+    // Interval CPU % needs a prior sample; never sleep on the Solve path.
+    let cpu_pct = if cheap {
+        // Still refresh the tick baseline so a later fault can compute %.
+        let _ = cpu_percent_approx_nonblocking();
+        None
+    } else {
+        cpu_percent_approx_nonblocking()
+    };
+    let mut notes: Vec<&str> = Vec::new();
+    if cheap {
+        notes.push("cheap pre-solve sample (no CPU interval wait)");
+    }
+    if ui_rss.is_none() && total_ram.is_none() && load1.is_none() && cpu_pct.is_none() {
+        notes.push("host sampling unavailable on this platform/build");
+    }
+    let note = if notes.is_empty() {
+        None
+    } else {
+        Some(notes.join("; "))
+    };
+    HostResources {
+        timestamp: iso_timestamp(),
+        snapshot_kind: kind.to_string(),
+        os: std::env::consts::OS.to_string(),
+        ui_rss_bytes: ui_rss,
+        sidecar_pid,
+        sidecar_rss_bytes: sidecar_rss,
+        system_total_ram_bytes: total_ram,
+        system_available_ram_bytes: avail_ram,
+        cpu_load1: load1,
+        cpu_percent_approx: cpu_pct,
+        note,
+    }
+}
+
+fn process_rss_bytes(pid: Option<u32>) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let path = match pid {
+            Some(p) => format!("/proc/{p}/status"),
+            None => "/proc/self/status".to_string(),
+        };
+        let text = fs::read_to_string(path).ok()?;
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("VmRSS:") {
+                let kb: u64 = rest
+                    .split_whitespace()
+                    .next()?
+                    .parse()
+                    .ok()?;
+                return Some(kb.saturating_mul(1024));
+            }
+        }
+        None
+    }
+    #[cfg(windows)]
+    {
+        windows_process_working_set(pid)
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+fn system_ram_bytes() -> (Option<u64>, Option<u64>) {
+    #[cfg(target_os = "linux")]
+    {
+        let text = match fs::read_to_string("/proc/meminfo") {
+            Ok(t) => t,
+            Err(_) => return (None, None),
+        };
+        let mut total = None;
+        let mut avail = None;
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                if let Some(kb) = rest.split_whitespace().next().and_then(|s| s.parse().ok()) {
+                    total = Some(kb * 1024);
+                }
+            } else if let Some(rest) = line.strip_prefix("MemAvailable:") {
+                if let Some(kb) = rest.split_whitespace().next().and_then(|s| s.parse().ok()) {
+                    avail = Some(kb * 1024);
+                }
+            }
+        }
+        (total, avail)
+    }
+    #[cfg(windows)]
+    {
+        windows_system_ram()
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        (None, None)
+    }
+}
+
+fn cpu_load1() -> Option<f64> {
+    #[cfg(target_os = "linux")]
+    {
+        let text = fs::read_to_string("/proc/loadavg").ok()?;
+        text.split_whitespace().next()?.parse().ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+fn cpu_percent_approx_nonblocking() -> Option<f64> {
+    let now = read_cpu_ticks()?;
+    let mut slot = LAST_CPU_TICKS.lock().ok()?;
+    let prev = slot.replace(now)?;
+    let total_delta = now.total.saturating_sub(prev.total);
+    if total_delta == 0 {
+        return None;
+    }
+    let idle_delta = now.idle.saturating_sub(prev.idle);
+    let busy = total_delta.saturating_sub(idle_delta) as f64;
+    Some(((busy / total_delta as f64) * 100.0).clamp(0.0, 100.0))
+}
+
+fn read_cpu_ticks() -> Option<CpuTickSample> {
+    #[cfg(target_os = "linux")]
+    {
+        let text = fs::read_to_string("/proc/stat").ok()?;
+        let line = text.lines().next()?;
+        // cpu user nice system idle iowait irq softirq …
+        let mut parts = line.split_whitespace();
+        if parts.next()? != "cpu" {
+            return None;
+        }
+        let mut vals: Vec<u64> = Vec::new();
+        for p in parts.take(8) {
+            vals.push(p.parse().ok()?);
+        }
+        if vals.len() < 4 {
+            return None;
+        }
+        let idle = vals[3].saturating_add(if vals.len() > 4 { vals[4] } else { 0 });
+        let total: u64 = vals.iter().sum();
+        Some(CpuTickSample { idle, total })
+    }
+    #[cfg(windows)]
+    {
+        windows_cpu_ticks()
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn windows_system_ram() -> (Option<u64>, Option<u64>) {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        length: u32,
+        memory_load: u32,
+        total_phys: u64,
+        avail_phys: u64,
+        total_page_file: u64,
+        avail_page_file: u64,
+        total_virtual: u64,
+        avail_virtual: u64,
+        avail_extended_virtual: u64,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalMemoryStatusEx(status: *mut MemoryStatusEx) -> i32;
+    }
+    let mut status = MemoryStatusEx {
+        length: std::mem::size_of::<MemoryStatusEx>() as u32,
+        memory_load: 0,
+        total_phys: 0,
+        avail_phys: 0,
+        total_page_file: 0,
+        avail_page_file: 0,
+        total_virtual: 0,
+        avail_virtual: 0,
+        avail_extended_virtual: 0,
+    };
+    // SAFETY: struct layout matches MEMORYSTATUSEX; length set correctly.
+    let ok = unsafe { GlobalMemoryStatusEx(&mut status) };
+    if ok == 0 {
+        return (None, None);
+    }
+    (Some(status.total_phys), Some(status.avail_phys))
+}
+
+#[cfg(windows)]
+fn windows_process_working_set(pid: Option<u32>) -> Option<u64> {
+    #[repr(C)]
+    struct ProcessMemoryCounters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentProcess() -> *mut core::ffi::c_void;
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut core::ffi::c_void;
+        fn CloseHandle(handle: *mut core::ffi::c_void) -> i32;
+    }
+    #[link(name = "psapi")]
+    extern "system" {
+        fn GetProcessMemoryInfo(
+            process: *mut core::ffi::c_void,
+            counters: *mut ProcessMemoryCounters,
+            cb: u32,
+        ) -> i32;
+    }
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+    const PROCESS_VM_READ: u32 = 0x0010;
+
+    // SAFETY: Win32 process handles; closed before return when opened.
+    unsafe {
+        let (handle, owned) = match pid {
+            None => (GetCurrentProcess(), false),
+            Some(p) => {
+                let h = OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+                    0,
+                    p,
+                );
+                if h.is_null() {
+                    let h2 = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, p);
+                    if h2.is_null() {
+                        return None;
+                    }
+                    (h2, true)
+                } else {
+                    (h, true)
+                }
+            }
+        };
+        let mut counters = ProcessMemoryCounters {
+            cb: std::mem::size_of::<ProcessMemoryCounters>() as u32,
+            page_fault_count: 0,
+            peak_working_set_size: 0,
+            working_set_size: 0,
+            quota_peak_paged_pool_usage: 0,
+            quota_paged_pool_usage: 0,
+            quota_peak_non_paged_pool_usage: 0,
+            quota_non_paged_pool_usage: 0,
+            pagefile_usage: 0,
+            peak_pagefile_usage: 0,
+        };
+        let ok = GetProcessMemoryInfo(handle, &mut counters, counters.cb);
+        if owned {
+            let _ = CloseHandle(handle);
+        }
+        if ok == 0 {
+            return None;
+        }
+        Some(counters.working_set_size as u64)
+    }
+}
+
+#[cfg(windows)]
+fn windows_cpu_ticks() -> Option<CpuTickSample> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetSystemTimes(
+            idle: *mut u64,
+            kernel: *mut u64,
+            user: *mut u64,
+        ) -> i32;
+    }
+    let mut idle = 0u64;
+    let mut kernel = 0u64;
+    let mut user = 0u64;
+    // SAFETY: out-params are valid stack u64s (FILETIME-sized).
+    let ok = unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) };
+    if ok == 0 {
+        return None;
+    }
+    // Kernel includes idle on Windows.
+    let total = kernel.saturating_add(user);
+    Some(CpuTickSample { idle, total })
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -566,6 +1020,9 @@ mod tests {
         assert_eq!(got, dir);
         let readme = fs::read_to_string(dir.join(README_NAME)).expect("readme");
         assert!(readme.contains("Zip this folder"));
+        assert!(readme.contains("last-solve.json"));
+        assert!(readme.contains("host-resources.json"));
+        assert!(readme.contains("snapshotKind=pre-solve"));
     }
 
     #[test]
@@ -600,6 +1057,50 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(dir.join(SESSION_META)).unwrap()).unwrap();
         assert_eq!(meta["protocol"], 2);
         assert_eq!(meta["workers"], 4);
+        let host: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(HOST_RESOURCES)).unwrap()).unwrap();
+        assert_eq!(host["snapshotKind"], "fault");
+        assert!(host.get("os").is_some());
+    }
+
+    #[test]
+    fn pre_solve_snapshot_labels_files() {
+        let (dir, _guard) = isolated_dir("presolve");
+        let summary = serde_json::json!({
+            "street": "flop",
+            "boardLen": 3,
+            "board": ["Ah", "Kd", "7c"],
+            "pot": 100,
+            "stack": 1000,
+            "iterations": 50,
+            "memoryMib": 2048,
+            "threads": 4,
+            "ranges": {
+                "oop": { "seat": "oop", "chars": 2, "hash": "deadbeef" },
+                "ip": { "seat": "ip", "chars": 2, "hash": "cafebabe" }
+            }
+        });
+        write_pre_solve_snapshot(&summary);
+        let solve: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(LAST_SOLVE)).unwrap()).unwrap();
+        assert_eq!(solve["snapshotKind"], "pre-solve");
+        assert_eq!(solve["street"], "flop");
+        assert_eq!(solve["boardLen"], 3);
+        assert!(solve.get("oop_range").is_none());
+        assert!(solve["ranges"]["oop"]["hash"].is_string());
+        let host: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(HOST_RESOURCES)).unwrap()).unwrap();
+        assert_eq!(host["snapshotKind"], "pre-solve");
+
+        // Fault overwrites host-resources kind; last-solve stays pre-solve params.
+        record_fault("zig-x", Some("solve"), "boom", "solve-failed", 2);
+        let host2: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(HOST_RESOURCES)).unwrap()).unwrap();
+        assert_eq!(host2["snapshotKind"], "fault");
+        let solve2: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(LAST_SOLVE)).unwrap()).unwrap();
+        assert_eq!(solve2["snapshotKind"], "pre-solve");
+        assert_eq!(solve2["iterations"], 50);
     }
 
     #[test]

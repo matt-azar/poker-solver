@@ -141,7 +141,10 @@ import { isTauriRuntime } from "../platform";
 import {
   boardLenFromStatusBoard,
   clearSolveFaultDedupe,
+  persistPreSolveDiagnostics,
   reportSolveFailedFault,
+  summarizeContinueSolve,
+  summarizeLastSolve,
 } from "../platform/diagnostics";
 import { ensureEngine, readEngineStatus } from "../platform/engine";
 
@@ -2339,7 +2342,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     get().startPolling();
     try {
       await stopOrphanTrainIfRunning();
-      await engineClient.solve(buildJob(get().draft));
+      const job = buildJob(get().draft);
+      // ZR-169: await cheap local snapshot so a zip survives hard death mid-solve.
+      await persistPreSolveDiagnostics(summarizeLastSolve(job, "solve"));
+      await engineClient.solve(job);
       await get().refresh();
     } catch (error) {
       if (await recoverTrainRpcTimeout(get, error)) {
@@ -2396,6 +2402,25 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       };
       if (get().draft.timeLimit.trim() !== "") {
         body.time_limit = Number(get().draft.timeLimit);
+      }
+      // ZR-169: re-stamp pre-solve snapshot before Continue train starts.
+      let continueSummary = summarizeContinueSolve(null, {
+        iterations: body.iterations,
+        timeLimit: body.time_limit ?? null,
+      });
+      if (!continueSummary) {
+        try {
+          continueSummary = summarizeLastSolve(buildJob(get().draft), "continue");
+          continueSummary.iterations = body.iterations;
+          if (body.time_limit != null) {
+            continueSummary.timeLimit = body.time_limit;
+          }
+        } catch {
+          continueSummary = null;
+        }
+      }
+      if (continueSummary) {
+        await persistPreSolveDiagnostics(continueSummary);
       }
       await engineClient.continueSolve(solutionId, body);
       await get().refresh();

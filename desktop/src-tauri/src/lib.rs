@@ -107,6 +107,13 @@ fn report_engine_fault(
     Ok(())
 }
 
+/// Persist compact last-solve + cheap host sample before train starts (ZR-169).
+#[tauri::command]
+fn persist_pre_solve_diagnostics(summary: serde_json::Value) -> Result<(), String> {
+    diagnostics::write_pre_solve_snapshot(&summary);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg_attr(not(windows), allow(unused_mut))]
@@ -148,6 +155,7 @@ pub fn run() {
             copy_diagnostics_bundle,
             diagnostics_dir_path,
             report_engine_fault,
+            persist_pre_solve_diagnostics,
             library::library_list_templates,
             library::library_list_ranges,
             library::library_list_recent,
