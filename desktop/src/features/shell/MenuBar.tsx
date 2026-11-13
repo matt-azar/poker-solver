@@ -27,6 +27,10 @@ import {
   executeStop,
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
+import {
+  canOfferReopenLastCheckpoint,
+  lastValidCheckpointPath,
+} from "../../domain/sessionRecovery";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -59,6 +63,8 @@ export function MenuBar({
   const stop = useStudyStore((s) => s.stop);
   const saveSolution = useStudyStore((s) => s.saveSolution);
   const openSolution = useStudyStore((s) => s.openSolution);
+  const reopenLastCheckpoint = useStudyStore((s) => s.reopenLastCheckpoint);
+  const lastCheckpointPath = useStudyStore((s) => s.lastCheckpointPath);
   const updateDraft = useStudyStore((s) => s.updateDraft);
   const toggleTheme = useStudyStore((s) => s.toggleTheme);
   const resetLayout = useStudyStore((s) => s.resetLayout);
@@ -177,6 +183,11 @@ export function MenuBar({
   const pauseGate = canExecutePause(commandCtx);
   const stopGate = canExecuteStop(commandCtx);
   const saveGate = canExecuteSave(commandCtx);
+  const checkpointPath = lastValidCheckpointPath(
+    draft.solutionPath,
+    lastCheckpointPath,
+  );
+  const canReopenCheckpoint = canOfferReopenLastCheckpoint(checkpointPath);
   const evGate = canExecuteCalculateEv(commandCtx);
   const lockGate = canExecuteOpenLockEditor(commandCtx);
   const strategyGate = canExecuteOpenStrategyEditor(commandCtx);
@@ -229,6 +240,16 @@ export function MenuBar({
                         ),
                     }),
                 });
+              },
+            },
+            {
+              label: "Reopen last checkpoint",
+              disabled: !canReopenCheckpoint,
+              title: canReopenCheckpoint
+                ? `Open ${checkpointPath}`
+                : "Save or Open a .psol first",
+              onClick: () => {
+                void reopenLastCheckpoint();
               },
             },
             { sep: true },

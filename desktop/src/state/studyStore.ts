@@ -84,6 +84,7 @@ import {
 } from "../domain/strategyEdits";
 import {
   classifyEngineSessionFault,
+  canOfferReopenLastCheckpoint,
   coldReconnectMessage,
   ensureFailedRecoveryMessage,
   isRecoveryOrUnreachableMessage,
@@ -339,6 +340,12 @@ interface StudyState {
   phase: SolvePhase;
   message: string;
   connection: "connected" | "disconnected" | "connecting";
+  /**
+   * Path of the last successful Save or Open (ZR-157). Independent of the
+   * editable draft.solutionPath so typed-but-never-opened paths cannot drive
+   * Reopen last checkpoint.
+   */
+  lastCheckpointPath: string;
   solutionId: string | null;
   baselineSolutionId: string | null;
   currentNode: NodePayload | null;
@@ -457,6 +464,11 @@ interface StudyState {
     detail: string,
     opts?: { message?: string },
   ) => void;
+  /**
+   * Reopen the last successful Save/Open checkpoint (ZR-157). Re-ensures the
+   * engine first when the session is disconnected/connecting.
+   */
+  reopenLastCheckpoint: () => Promise<OpenSolutionResult>;
   refresh: () => Promise<void>;
   solve: () => Promise<void>;
   continueSolve: () => Promise<void>;
@@ -1132,6 +1144,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   phase: "idle",
   message: "Connecting to local engine…",
   connection: "connecting",
+  lastCheckpointPath: "",
   solutionId: null,
   baselineSolutionId: null,
   currentNode: null,
@@ -1967,7 +1980,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     engineClient.clearLastStudyJobId();
     const priorPhase = get().phase;
     const hadSolution = Boolean(get().solutionId);
-    const checkpointPath = lastValidCheckpointPath(get().draft.solutionPath);
+    const checkpointPath = lastValidCheckpointPath(
+      get().draft.solutionPath,
+      get().lastCheckpointPath,
+    );
     set({
       connection: "connecting",
       message: reconnectingMessage(),
@@ -2015,8 +2031,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         strategyEditDrawerOpen: false,
         compareNote: null,
         // Cold host after crash: prior "failed" was the dead session, not a
-        // sticky train fault on this sidecar. Keep draft.solutionPath so Open
-        // can reload the last valid checkpoint.
+        // sticky train fault on this sidecar. Keep lastCheckpointPath so
+        // Reopen last checkpoint can reload the last successful Save/Open.
         phase: "idle",
         message: coldReconnectMessage({
           label,
@@ -2025,6 +2041,30 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       });
     }
     return { ok: true };
+  },
+
+  async reopenLastCheckpoint() {
+    const checkpointPath = lastValidCheckpointPath(
+      get().draft.solutionPath,
+      get().lastCheckpointPath,
+    );
+    if (!canOfferReopenLastCheckpoint(checkpointPath)) {
+      const error =
+        "No last checkpoint — Save or Open a .psol before Reopen last checkpoint.";
+      set({ message: error });
+      return { ok: false, error };
+    }
+    const connection = get().connection;
+    if (connection === "disconnected" || connection === "connecting") {
+      const recovered = await get().recoverEngineSession();
+      if (!recovered.ok) {
+        return {
+          ok: false,
+          error: recovered.error ?? "Engine reconnect failed",
+        };
+      }
+    }
+    return get().openSolution(checkpointPath);
   },
 
   async refresh() {
@@ -3373,6 +3413,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     set({
       draft: { ...get().draft, solutionPath: target },
+      lastCheckpointPath: target,
       phase: phaseFromStatus(get().status, "complete"),
       message: `Saved ${target}`,
     });
@@ -3380,7 +3421,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   async openSolution(path) {
-    const target = (path ?? get().draft.solutionPath).trim();
+    const target = (
+      path ??
+      lastValidCheckpointPath(get().draft.solutionPath, get().lastCheckpointPath)
+    ).trim();
     if (!target) {
       const error = "Set a solution path before opening.";
       set({ message: error });
@@ -3466,6 +3510,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       : "Build draft replaced from status; ranges/bet sizes cleared.";
     set({
       draft: opened.draft,
+      lastCheckpointPath: target,
       weights,
       draftRevision: bumpRevision(get().draftRevision),
       pathTrail: [],

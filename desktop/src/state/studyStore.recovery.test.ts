@@ -176,12 +176,13 @@ describe("studyStore session recovery (ZR-123)", () => {
     expect(state.message).toMatch(/Reconnect/i);
   });
 
-  it("crash mid-solve → recover → reopen last saved checkpoint (ZR-143)", async () => {
+  it("crash mid-solve → recover → reopen last saved checkpoint (ZR-143/ZR-157)", async () => {
     const checkpoint = "/tmp/zr143-last.psol";
     useStudyStore.setState({
       phase: "solving",
       connection: "connected",
       solutionId: "s-live",
+      lastCheckpointPath: checkpoint,
       draft: {
         ...useStudyStore.getState().draft,
         solutionPath: checkpoint,
@@ -209,12 +210,14 @@ describe("studyStore session recovery (ZR-123)", () => {
     const afterRecover = useStudyStore.getState();
     expect(afterRecover.solutionId).toBeNull();
     expect(afterRecover.phase).toBe("idle");
+    expect(afterRecover.lastCheckpointPath).toBe(checkpoint);
     expect(afterRecover.draft.solutionPath).toBe(checkpoint);
     expect(afterRecover.message).toMatch(/Unsaved train progress is gone/i);
+    expect(afterRecover.message).toMatch(/Reopen last checkpoint/i);
     expect(afterRecover.message).toMatch(/zr143-last\.psol/);
     expect(solveControlFlags(afterRecover.phase).canSolve).toBe(true);
 
-    // Open last valid checkpoint restores published identity from disk only.
+    // Reopen last checkpoint restores published identity from disk only.
     engineMocks.engineClient.open.mockResolvedValueOnce(undefined);
     engineMocks.setStatusImpl(async () => ({
       running: false,
@@ -229,13 +232,61 @@ describe("studyStore session recovery (ZR-123)", () => {
       can_continue: true,
       iterations: 10,
     }));
-    const opened = await useStudyStore.getState().openSolution(checkpoint);
+    const opened = await useStudyStore.getState().reopenLastCheckpoint();
     expect(opened).toEqual({ ok: true, path: checkpoint });
     expect(engineMocks.engineClient.open).toHaveBeenCalledWith(checkpoint);
     const afterOpen = useStudyStore.getState();
     expect(afterOpen.solutionId).toBe("s-ckpt");
+    expect(afterOpen.lastCheckpointPath).toBe(checkpoint);
     expect(afterOpen.draft.solutionPath).toBe(checkpoint);
     expect(afterOpen.status?.iterations).toBe(10);
+  });
+
+  it("reopenLastCheckpoint recovers a dead session then opens the Save/Open path (ZR-157)", async () => {
+    const checkpoint = "/tmp/zr157-reopen.psol";
+    useStudyStore.setState({
+      phase: "failed",
+      connection: "disconnected",
+      solutionId: null,
+      lastCheckpointPath: checkpoint,
+      draft: {
+        ...useStudyStore.getState().draft,
+        // Typed draft path must not win over last successful Save/Open.
+        solutionPath: "/tmp/typed-but-never-opened.psol",
+      },
+    });
+    // Cold status until Open succeeds, then published checkpoint status.
+    engineMocks.setStatusImpl(async () => ({
+      running: false,
+      paused: false,
+      cancelled: false,
+      failed: false,
+      solution_id: null,
+      status_generation: 4,
+      phase: "idle",
+    }));
+    engineMocks.engineClient.open.mockImplementationOnce(async () => {
+      engineMocks.setStatusImpl(async () => ({
+        running: false,
+        paused: false,
+        cancelled: false,
+        failed: false,
+        solution_id: "s-reopen",
+        root_node_id: "p0.t-1.r-1",
+        status_generation: 5,
+        phase: "published",
+        has_training: true,
+        can_continue: true,
+        iterations: 10,
+      }));
+    });
+
+    const result = await useStudyStore.getState().reopenLastCheckpoint();
+    expect(result).toEqual({ ok: true, path: checkpoint });
+    expect(engineMocks.ensureEngine).toHaveBeenCalled();
+    expect(engineMocks.engineClient.open).toHaveBeenCalledWith(checkpoint);
+    expect(useStudyStore.getState().solutionId).toBe("s-reopen");
+    expect(useStudyStore.getState().lastCheckpointPath).toBe(checkpoint);
   });
 
   it("restart alone does not silently restore unsaved progress (ZR-143)", async () => {
@@ -244,6 +295,7 @@ describe("studyStore session recovery (ZR-123)", () => {
       phase: "solving",
       connection: "connected",
       solutionId: "s-unsaved",
+      lastCheckpointPath: "",
       draft: {
         ...useStudyStore.getState().draft,
         solutionPath: "",
@@ -275,10 +327,11 @@ describe("studyStore session recovery (ZR-123)", () => {
     expect(state.solutionId).toBeNull();
     expect(state.status?.solution_id ?? null).toBeNull();
     expect(state.draft.solutionPath).toBe("");
+    expect(state.lastCheckpointPath).toBe("");
     expect(state.message).toMatch(/Unsaved train progress is gone/i);
     expect(state.message).toMatch(/Save before a crash/i);
 
-    const missing = await useStudyStore.getState().openSolution();
+    const missing = await useStudyStore.getState().reopenLastCheckpoint();
     expect(missing.ok).toBe(false);
     expect(engineMocks.engineClient.open).not.toHaveBeenCalled();
   });

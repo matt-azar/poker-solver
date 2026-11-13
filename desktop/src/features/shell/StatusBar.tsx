@@ -10,6 +10,10 @@ import {
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
 import {
+  canOfferReopenLastCheckpoint,
+  lastValidCheckpointPath,
+} from "../../domain/sessionRecovery";
+import {
   engineActivityMessage,
   phaseLabel,
   statusMetrics,
@@ -25,9 +29,17 @@ interface Props {
   phase: SolvePhase;
   status?: StatusPayload | null;
   onReconnect?: () => void;
+  onReopenLastCheckpoint?: () => void;
 }
 
-export function StatusBar({ message, connection, phase, status, onReconnect }: Props) {
+export function StatusBar({
+  message,
+  connection,
+  phase,
+  status,
+  onReconnect,
+  onReopenLastCheckpoint,
+}: Props) {
   const activity = engineActivityMessage(phase, status, message);
   const metrics = statusMetrics(status);
   const solve = useStudyStore((s) => s.solve);
@@ -35,10 +47,19 @@ export function StatusBar({ message, connection, phase, status, onReconnect }: P
   const stop = useStudyStore((s) => s.stop);
   const continueSolve = useStudyStore((s) => s.continueSolve);
   const draft = useStudyStore((s) => s.draft);
+  const lastCheckpointPath = useStudyStore((s) => s.lastCheckpointPath);
   const solutionId = useStudyStore((s) => s.solutionId);
   const workspace = useStudyStore((s) => s.workspace);
   const currentNode = useStudyStore((s) => s.currentNode);
   const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
+  const checkpointPath = lastValidCheckpointPath(
+    draft.solutionPath,
+    lastCheckpointPath,
+  );
+  const showReopen =
+    Boolean(onReopenLastCheckpoint) &&
+    canOfferReopenLastCheckpoint(checkpointPath) &&
+    (connection === "disconnected" || !solutionId);
 
   const commandCtx = studyCommandContextFromStore({
     phase,
@@ -127,6 +148,16 @@ export function StatusBar({ message, connection, phase, status, onReconnect }: P
       {connection === "disconnected" && onReconnect ? (
         <button type="button" className="toolbar-btn" onClick={onReconnect}>
           Reconnect
+        </button>
+      ) : null}
+      {showReopen ? (
+        <button
+          type="button"
+          className="toolbar-btn"
+          title={`Reopen last checkpoint (${checkpointPath})`}
+          onClick={onReopenLastCheckpoint}
+        >
+          Reopen last checkpoint
         </button>
       ) : null}
       <span className="status-bar__metrics tabular" aria-label="Solve metrics">
