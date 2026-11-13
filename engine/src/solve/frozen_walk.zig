@@ -2148,6 +2148,11 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
         }
         // PoolJob::Slots: static partition when threads > 1 (D3 worker budget).
         try training_state.freezeSigmaThreaded(allocator, game, state, slot_threads, ctx.locks);
+        // ZR-151: safe cancel point after freeze, before mutating regrets this iter.
+        if (stop_hook) |hook| {
+            const sctx = stop_ctx orelse return error.InvalidFrozen;
+            if (hook(sctx)) break;
+        }
         @memset(w.scratch[0].pi0, 1.0);
         @memset(w.scratch[0].pi1, 1.0);
         w.resetSupport();
@@ -2160,6 +2165,8 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
             // Mid-pass: OOP regrets updated; IP pass not done — tables partial.
             hook(sctx, .after_oop_pass) catch return error.InvalidFrozen;
         }
+        // Do not stop between OOP/IP — that would leave mid-pass corruption (ZR-145).
+        // Finish both passes, then honor stop at the next loop-head / post-commit check.
         @memset(w.scratch[0].pi0, 1.0);
         @memset(w.scratch[0].pi1, 1.0);
         w.resetSupport();
@@ -2172,6 +2179,35 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
         if (stage_hook) |hook| {
             const sctx = stage_ctx orelse return error.InvalidFrozen;
             hook(sctx, .committed) catch return error.InvalidFrozen;
+        }
+        // ZR-151: after a committed iteration, Stop can exit before cadence publish.
+        if (stop_hook) |hook| {
+            const sctx = stop_ctx orelse return error.InvalidFrozen;
+            if (hook(sctx)) {
+                // Still run after_iter when present so Session cadence stays consistent
+                // for the committed iter; Session.train forces exact publish on stop.
+                if (after_iter_hook) |ahook| {
+                    const hook_ctx = after_iter_ctx orelse return error.InvalidFrozen;
+                    ahook(hook_ctx, state.trained) catch return error.StrategyPublishFailed;
+                    if (published.average.len != 0) published.deinit();
+                    published = .{
+                        .allocator = allocator,
+                        .average = &.{},
+                        .revision = state.policy_revision,
+                        .trained = state.trained,
+                    };
+                } else {
+                    const next = training_state.publishAverageThreaded(allocator, game, state, slot_threads) catch |err| {
+                        return switch (err) {
+                            error.OutOfMemory => error.OutOfMemory,
+                            else => error.StrategyPublishFailed,
+                        };
+                    };
+                    if (published.average.len != 0) published.deinit();
+                    published = next;
+                }
+                break;
+            }
         }
         if (after_iter_hook) |hook| {
             const hook_ctx = after_iter_ctx orelse return error.InvalidFrozen;

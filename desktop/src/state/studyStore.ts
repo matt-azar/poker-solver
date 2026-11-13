@@ -94,9 +94,11 @@ import {
   reconnectingMessage,
   sessionDeadUiPatch,
   shouldMarkStatusPollDead,
+  shouldTerminateHungSidecar,
   statusIndicatesFailure,
   statusStickyError,
 } from "../domain/sessionRecovery";
+import { killSolverEngineIpc } from "../engine/transport";
 import { presentUserText } from "../domain/userText";
 import {
   DEFAULT_SPOT,
@@ -2180,12 +2182,21 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           const fullDetail = shellHint ? `${detail}.${shellHint}` : detail;
           // Soft blips: backoff only. Hard session-dead or N consecutive
           // failures: paint disconnected + clear sticky busy (ZR-123 / ZR-148).
+          // ZR-151: when hung, terminate the sidecar so Reconnect can spawn fresh.
           if (
             shouldMarkStatusPollDead({
               consecutiveFailures: getStatusConsecutiveFailures(),
               detail: fullDetail,
             })
           ) {
+            if (
+              shouldTerminateHungSidecar({
+                consecutiveFailures: getStatusConsecutiveFailures(),
+                detail: fullDetail,
+              })
+            ) {
+              void killSolverEngineIpc();
+            }
             get().markEngineSessionDead(fullDetail);
           }
         } finally {

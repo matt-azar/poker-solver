@@ -11,7 +11,12 @@ const betting = @import("betting.zig");
 pub const CompileError = error{
     InvalidCompile,
     OutOfMemory,
+    /// Cooperative abort at a stage boundary (ZR-151). No partial game installed.
+    Cancelled,
 };
+
+/// Optional poll between compile stages so Stop can abort tree build safely.
+pub const CancelPoll = *const fn (?*anyopaque) bool;
 
 pub const NodeKind = enum { decision, chance, terminal };
 
@@ -202,6 +207,23 @@ pub const CompiledGame = struct {
 };
 
 pub fn compile(allocator: std.mem.Allocator, spec: street_spec.StreetSpec) CompileError!CompiledGame {
+    return compileCancelable(allocator, spec, null, null);
+}
+
+fn checkCompileCancel(poll: ?CancelPoll, ctx: ?*anyopaque) CompileError!void {
+    if (poll) |p| {
+        if (p(ctx)) return error.Cancelled;
+    }
+}
+
+/// Compile with cooperative cancel checks between major stages (ZR-151).
+/// On Cancelled the partial game is freed; callers keep any prior solution.
+pub fn compileCancelable(
+    allocator: std.mem.Allocator,
+    spec: street_spec.StreetSpec,
+    cancel_poll: ?CancelPoll,
+    cancel_ctx: ?*anyopaque,
+) CompileError!CompiledGame {
     if (spec.board.len != 3 and spec.board.len != 4 and spec.board.len != 5) return error.InvalidCompile;
     card.validateBoard(spec.board) catch return error.InvalidCompile;
     if (spec.pot <= 0) return error.InvalidCompile;
@@ -211,6 +233,8 @@ pub fn compile(allocator: std.mem.Allocator, spec: street_spec.StreetSpec) Compi
     payoff.RakeConfig.validate(.{ .rate = spec.rake.rate, .cap = spec.rake.cap }) catch return error.InvalidCompile;
     const icm_cfg = icm.IcmConfig{ .stacks = spec.icm.stacks, .payouts = spec.icm.payouts };
     icm_cfg.validate(spec.pot, spec.stack) catch return error.InvalidCompile;
+
+    try checkCompileCancel(cancel_poll, cancel_ctx);
 
     var game = CompiledGame{ .allocator = allocator };
     errdefer game.deinit();
@@ -226,13 +250,19 @@ pub fn compile(allocator: std.mem.Allocator, spec: street_spec.StreetSpec) Compi
     }
     try copyIncentives(allocator, &game, spec);
 
+    try checkCompileCancel(cancel_poll, cancel_ctx);
     try buildRunoutIndex(allocator, &game);
+    try checkCompileCancel(cancel_poll, cancel_ctx);
     try buildPublicTree(allocator, &game, spec);
+    try checkCompileCancel(cancel_poll, cancel_ctx);
     try buildHandIndex(allocator, &game, spec);
     try setHandCounts(&game);
     try fillTerminalIncentives(allocator, &game);
+    try checkCompileCancel(cancel_poll, cancel_ctx);
     try buildDeals(allocator, &game, spec);
+    try checkCompileCancel(cancel_poll, cancel_ctx);
     try buildPolicyMap(allocator, &game);
+    try checkCompileCancel(cancel_poll, cancel_ctx);
     return game;
 }
 
@@ -1073,6 +1103,46 @@ test "compile river check-only AA vs KK" {
     try std.testing.expectEqual(@as(u64, 1), game.hands.counted_deals);
     // River: only check/check path → decision Check, decision Check, terminal
     try std.testing.expectEqual(@as(usize, 0), game.runouts.mode2_turn.len);
+}
+
+test "ZR-151 compileCancelable aborts at stage boundary" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range QcQd:1
+        \\ip-range JcJd:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var spec = try @import("street_config.zig").parseStreetConfig(std.testing.allocator, text);
+    defer spec.deinit();
+    var hits: usize = 0;
+    const Ctx = struct {
+        hits: *usize,
+        fn poll(ctx: ?*anyopaque) bool {
+            const self: *@This() = @ptrCast(@alignCast(ctx orelse return false));
+            self.hits.* += 1;
+            // First poll is pre-build; second is after incentives / before runouts.
+            return self.hits.* >= 2;
+        }
+    };
+    var ctx = Ctx{ .hits = &hits };
+    try std.testing.expectError(
+        error.Cancelled,
+        compileCancelable(std.testing.allocator, spec, Ctx.poll, &ctx),
+    );
+    try std.testing.expect(hits >= 2);
 }
 
 test "compile flop runout index size" {

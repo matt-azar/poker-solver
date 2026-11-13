@@ -46,9 +46,12 @@ pub fn main() !void {
 
     var state = try dispatch.HostState.init(allocator, launch_id);
     defer {
-        // Fail pending on exit (D1).
+        // Fail pending on exit (D1). Supersede in-flight analysis so workers exit.
+        _ = state.bumpAnalysisGen();
         state.joinBegin();
         state.joinTrain();
+        state.joinAnalysis();
+        state.joinIo();
         for (state.pending.items) |rid| {
             var err_reply = ipc.makeErrorReply(allocator, rid, null, "exit", "sidecar_exit", "solver-engine exiting") catch continue;
             defer err_reply.deinit();
@@ -102,7 +105,8 @@ pub fn main() !void {
             continue;
         }
 
-        // Async begin/train: keep stdin free so status/values stay live (R10 / ZR-120).
+        // Async begin/train/analysis/IO: keep stdin free so status/Stop stay live
+        // (R10 / ZR-120 / ZR-151). Sync `handle` remains for unit tests.
         if (std.mem.eql(u8, req.op, "begin_config")) {
             dispatch.startBeginConfig(&state, req) catch |err| {
                 var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
@@ -121,6 +125,47 @@ pub fn main() !void {
         }
         if (std.mem.eql(u8, req.op, "resolve_locked")) {
             dispatch.startResolveLocked(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
+        // ZR-151: heavy Study ops off the critical IPC loop.
+        if (std.mem.eql(u8, req.op, "values")) {
+            dispatch.startValues(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
+        if (std.mem.eql(u8, req.op, "equity")) {
+            dispatch.startEquity(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
+        if (std.mem.eql(u8, req.op, "node")) {
+            dispatch.startNode(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
+        if (std.mem.eql(u8, req.op, "save")) {
+            dispatch.startSave(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
+        if (std.mem.eql(u8, req.op, "open")) {
+            dispatch.startOpen(&state, req) catch |err| {
                 var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
                 defer fail.deinit();
                 try state.writeReply(fail);

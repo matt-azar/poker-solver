@@ -31,6 +31,29 @@ const BeginTask = struct {
     config: []u8,
 };
 
+const AnalysisKind = enum { values, equity, node };
+
+const AnalysisTask = struct {
+    state: *HostState,
+    request_id: []u8,
+    job_id: ?[]u8,
+    op: []u8,
+    body_json: []u8,
+    kind: AnalysisKind,
+    gen: u64,
+};
+
+const IoKind = enum { save, open };
+
+const IoTask = struct {
+    state: *HostState,
+    request_id: []u8,
+    job_id: ?[]u8,
+    op: []u8,
+    path: []u8,
+    kind: IoKind,
+};
+
 pub const HostState = struct {
     allocator: std.mem.Allocator,
     session: poker_app.Session,
@@ -47,6 +70,14 @@ pub const HostState = struct {
     /// Flop/turn compile off the stdin loop so Study can poll `status` (ZR-120).
     begin_thread: ?std.Thread = null,
     begin_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// ZR-151: values/equity/node off the stdin loop so Stop/status stay live.
+    analysis_thread: ?std.Thread = null,
+    analysis_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// Bumped on each new analysis request; older workers reply `superseded`.
+    analysis_gen: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    /// ZR-151: Save/Open off the stdin loop (large PSOL must not starve control).
+    io_thread: ?std.Thread = null,
+    io_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     /// Active train job id (owned); null when idle.
     active_job_id: ?[]u8 = null,
     job_mu: std.Thread.Mutex = .{},
@@ -78,6 +109,8 @@ pub const HostState = struct {
     pub fn deinit(self: *HostState) void {
         self.joinBegin();
         self.joinTrain();
+        self.joinAnalysis();
+        self.joinIo();
         self.equity_jobs.deinit();
         self.clearPending();
         self.session.deinit();
@@ -126,8 +159,31 @@ pub const HostState = struct {
         }
     }
 
+    pub fn joinAnalysis(self: *HostState) void {
+        if (self.analysis_thread) |t| {
+            t.join();
+            self.analysis_thread = null;
+        }
+    }
+
+    pub fn joinIo(self: *HostState) void {
+        if (self.io_thread) |t| {
+            t.join();
+            self.io_thread = null;
+        }
+    }
+
     pub fn beginOrTrainBusy(self: *HostState) bool {
         return self.begin_running.load(.acquire) or self.train_running.load(.acquire);
+    }
+
+    /// Mint a generation for a new analysis request; older gens are superseded.
+    pub fn bumpAnalysisGen(self: *HostState) u64 {
+        return self.analysis_gen.fetchAdd(1, .acq_rel) + 1;
+    }
+
+    pub fn analysisGenCurrent(self: *HostState, gen: u64) bool {
+        return self.analysis_gen.load(.acquire) == gen;
     }
 
     pub fn writeReply(self: *HostState, reply: ipc.Envelope) !void {
@@ -713,9 +769,10 @@ fn handleDeleteStrategyEdit(state: *HostState, req: ipc.Envelope) !ipc.Envelope 
 
 /// ZR-137: fat `equity` body extracted from `handle` (op discriminator stays in parent).
 fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
+    // Sync path for unit tests. Product stdin loop uses `startEquity` (ZR-151).
     state.budget.prioritizeAnalysis(1);
     defer state.budget.returnToTraining();
-    const wait_ns: u64 = 120 * std.time.ns_per_s;
+    const wait_ns: u64 = 30 * std.time.ns_per_s;
     var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
     };
@@ -1138,10 +1195,11 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "values")) {
+        // Sync path for unit tests. Product stdin loop uses `startValues` (ZR-151).
         state.budget.prioritizeAnalysis(1);
         defer state.budget.returnToTraining();
-        // Wait briefly for mid-train publish when solve just started (R10).
-        const wait_ns: u64 = 120 * std.time.ns_per_s;
+        // Bounded wait for mid-train first publish (R10). Off-loop workers use 30s too.
+        const wait_ns: u64 = 30 * std.time.ns_per_s;
         var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
@@ -1448,7 +1506,11 @@ fn beginWorker(task: *BeginTask) void {
     }
 
     state.session.begin(task.config) catch |err| {
-        const code: []const u8 = if (err == error.BudgetExceeded) "budget_exceeded" else "begin_failed";
+        const code: []const u8 = switch (err) {
+            error.BudgetExceeded => "budget_exceeded",
+            error.Cancelled => "cancelled",
+            else => "begin_failed",
+        };
         var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, "begin_config", code, @errorName(err)) catch return;
         defer err_reply.deinit();
         // Intentional best-effort: worker exit must not panic if stdout is gone.
@@ -1604,6 +1666,392 @@ pub fn startResolveLocked(state: *HostState, req: ipc.Envelope) !void {
         .replied => return,
         .ok => try writeTrainAdmitReply(state, req),
     }
+}
+
+fn analysisSupersededReply(state: *HostState, task: *AnalysisTask) void {
+    var err_reply = ipc.makeErrorReply(
+        state.allocator,
+        task.request_id,
+        task.job_id,
+        task.op,
+        "superseded",
+        "analysis superseded by a newer node request",
+    ) catch return;
+    defer err_reply.deinit();
+    state.writeReply(err_reply) catch {};
+}
+
+fn analysisWorker(task: *AnalysisTask) void {
+    const state = task.state;
+    defer {
+        state.untrack(task.request_id);
+        state.analysis_running.store(false, .release);
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.free(task.body_json);
+        state.allocator.destroy(task);
+    }
+
+    if (!state.analysisGenCurrent(task.gen)) {
+        analysisSupersededReply(state, task);
+        return;
+    }
+
+    state.budget.prioritizeAnalysis(1);
+    defer state.budget.returnToTraining();
+
+    // Bound the policy wait so a hung publish cannot pin analysis forever; the
+    // stdin loop stays free for Stop/status either way (ZR-151).
+    const wait_ns: u64 = 30 * std.time.ns_per_s;
+    var lease = state.session.borrowPublishedWait(wait_ns) catch |err| {
+        if (!state.analysisGenCurrent(task.gen)) {
+            analysisSupersededReply(state, task);
+            return;
+        }
+        var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "nothing_published", @errorName(err)) catch return;
+        defer err_reply.deinit();
+        state.writeReply(err_reply) catch {};
+        return;
+    };
+    defer lease.deinit();
+
+    if (!state.analysisGenCurrent(task.gen)) {
+        analysisSupersededReply(state, task);
+        return;
+    }
+
+    var reply = switch (task.kind) {
+        .values => buildValuesReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
+            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "values_failed", @errorName(err)) catch return;
+        },
+        .equity => buildEquityReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
+            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "equity_failed", @errorName(err)) catch return;
+        },
+        .node => buildNodeReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
+            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "inspect_failed", @errorName(err)) catch return;
+        },
+    };
+    defer reply.deinit();
+
+    if (!state.analysisGenCurrent(task.gen)) {
+        analysisSupersededReply(state, task);
+        return;
+    }
+    state.writeReply(reply) catch {};
+}
+
+fn buildValuesReply(
+    state: *HostState,
+    request_id: []const u8,
+    job_id: ?[]const u8,
+    body_json: []const u8,
+    lease: *poker_app.PublishedLease,
+) !ipc.Envelope {
+    const located = try resolveLocatedNode(lease.game, body_json);
+    const t0 = std.time.nanoTimestamp();
+    var page = try poker_engine.analysis.action_ev.actionValues(
+        state.session.allocator,
+        lease.game,
+        lease.published,
+        located.node_index,
+        located.turn,
+        located.river,
+    );
+    defer page.deinit();
+    const elapsed_ns = std.time.nanoTimestamp() - t0;
+    const elapsed_ms = @divTrunc(elapsed_ns, 1_000_000);
+    const body = try format_study_bodies.formatValuesBody(
+        state.allocator,
+        &page,
+        located,
+        lease.solution_id,
+        elapsed_ms,
+        state.train_running.load(.acquire),
+    );
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, request_id, job_id, "values", body);
+}
+
+fn buildEquityReply(
+    state: *HostState,
+    request_id: []const u8,
+    job_id: ?[]const u8,
+    body_json: []const u8,
+    lease: *poker_app.PublishedLease,
+) !ipc.Envelope {
+    // Reuse handleEquity shape via a temporary envelope — keep packing local.
+    const located = resolveLocatedNode(lease.game, body_json) catch |err| {
+        const code: []const u8 = switch (err) {
+            error.UnknownNode => "unknown_node",
+            error.OutOfMemory => "oom",
+        };
+        return ipc.makeErrorReply(state.allocator, request_id, job_id, "equity", code, @errorName(err));
+    };
+    const node_id_text = try poker_engine.analysis.node_id.formatNodeId(
+        state.allocator,
+        located.node_index,
+        located.turn,
+        located.river,
+    );
+    defer state.allocator.free(node_id_text);
+    const t0 = std.time.nanoTimestamp();
+    var page = poker_engine.analysis.equity.checkdownEquityAtNode(
+        state.session.allocator,
+        lease.game,
+        lease.published,
+        located.node_index,
+        located.turn,
+        located.river,
+        poker_engine.analysis.equity.study_explorer_max_pair_runouts,
+    ) catch |err| {
+        const code: []const u8 = switch (err) {
+            error.WorkLimit => "work_limit",
+            error.InvalidEquity => "invalid_equity",
+            error.InvalidWeight => "invalid_weight",
+            error.OutOfMemory => if (state.session.budget.limit() > 0) "budget_exceeded" else "oom",
+        };
+        return ipc.makeErrorReply(state.allocator, request_id, job_id, "equity", code, @errorName(err));
+    };
+    defer page.deinit();
+    const elapsed_ns = std.time.nanoTimestamp() - t0;
+    const elapsed_ms: i64 = @intCast(@divTrunc(elapsed_ns, 1_000_000));
+    const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
+    const body = try equity_json.packStudyEquityBody(state.allocator, .{
+        .solution_id = lease.solution_id,
+        .node_id = node_id_text,
+        .node_index = located.node_index,
+        .policy_revision = state.session.policyRevision(),
+        .status_generation = state.session.solution_id + state.session.policyRevision(),
+        .query_seconds = query_seconds,
+        .elapsed_ms = elapsed_ms,
+        .live_under_train = state.train_running.load(.acquire),
+        .page = &page,
+    });
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, request_id, job_id, "equity", body);
+}
+
+fn buildNodeReply(
+    state: *HostState,
+    request_id: []const u8,
+    job_id: ?[]const u8,
+    body_json: []const u8,
+    lease: *poker_app.PublishedLease,
+) !ipc.Envelope {
+    const located = try resolveLocatedNode(lease.game, body_json);
+    var page = try poker_engine.analysis.inspect.inspectNode(
+        state.allocator,
+        lease.game,
+        lease.published,
+        located.node_index,
+        located.turn,
+        located.river,
+    );
+    defer page.deinit();
+    const body = try format_study_bodies.formatNodeBody(state.allocator, &page, located, lease.solution_id);
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, request_id, job_id, "node", body);
+}
+
+fn startAnalysis(state: *HostState, req: ipc.Envelope, kind: AnalysisKind) !void {
+    try state.track(req.request_id);
+    errdefer state.untrack(req.request_id);
+
+    // Coalesce: bump gen so any in-flight older analysis replies superseded.
+    const gen = state.bumpAnalysisGen();
+
+    const request_id = try state.allocator.dupe(u8, req.request_id);
+    errdefer state.allocator.free(request_id);
+    const job_id: ?[]u8 = if (req.job_id) |j| try state.allocator.dupe(u8, j) else null;
+    errdefer if (job_id) |j| state.allocator.free(j);
+    const op = try state.allocator.dupe(u8, req.op);
+    errdefer state.allocator.free(op);
+    const body_json = try state.allocator.dupe(u8, req.body_json);
+    errdefer state.allocator.free(body_json);
+
+    const task = try state.allocator.create(AnalysisTask);
+    errdefer state.allocator.destroy(task);
+    task.* = .{
+        .state = state,
+        .request_id = request_id,
+        .job_id = job_id,
+        .op = op,
+        .body_json = body_json,
+        .kind = kind,
+        .gen = gen,
+    };
+
+    // Reclaim prior join handle without blocking the stdin loop on EV work.
+    if (state.analysis_thread) |old_t| {
+        state.analysis_thread = null;
+        old_t.detach();
+    }
+
+    state.analysis_running.store(true, .release);
+    state.analysis_thread = std.Thread.spawn(.{}, analysisWorker, .{task}) catch |err| {
+        state.analysis_running.store(false, .release);
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.free(task.body_json);
+        state.allocator.destroy(task);
+        state.untrack(req.request_id);
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    };
+}
+
+pub fn startValues(state: *HostState, req: ipc.Envelope) !void {
+    try startAnalysis(state, req, .values);
+}
+
+pub fn startEquity(state: *HostState, req: ipc.Envelope) !void {
+    try startAnalysis(state, req, .equity);
+}
+
+pub fn startNode(state: *HostState, req: ipc.Envelope) !void {
+    try startAnalysis(state, req, .node);
+}
+
+fn ioWorker(task: *IoTask) void {
+    const state = task.state;
+    defer {
+        state.untrack(task.request_id);
+        state.io_running.store(false, .release);
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.free(task.path);
+        state.allocator.destroy(task);
+    }
+
+    switch (task.kind) {
+        .save => {
+            state.session.save(task.path) catch |err| {
+                const code: []const u8 = if (err == error.BudgetExceeded) "budget_exceeded" else "save_failed";
+                var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+                defer err_reply.deinit();
+                state.writeReply(err_reply) catch {};
+                return;
+            };
+            var reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, task.op, "{\"saved\":true}") catch return;
+            defer reply.deinit();
+            state.writeReply(reply) catch {};
+        },
+        .open => {
+            state.session.open(task.path) catch |err| {
+                const code: []const u8 = switch (err) {
+                    error.InvalidStrategy => "invalid_strategy",
+                    error.Busy => "busy",
+                    error.BudgetExceeded => "budget_exceeded",
+                    else => "open_failed",
+                };
+                var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+                defer err_reply.deinit();
+                state.writeReply(err_reply) catch {};
+                return;
+            };
+            state.last_cancelled = false;
+            state.setActiveJob(null) catch {};
+            const body = formatStatusBody(state.allocator, state) catch return;
+            defer state.allocator.free(body);
+            var reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, task.op, body) catch return;
+            defer reply.deinit();
+            state.writeReply(reply) catch {};
+        },
+    }
+}
+
+fn startIo(state: *HostState, req: ipc.Envelope, kind: IoKind, path: []u8) !void {
+    // Caller transferred path ownership. Free on every early-exit before worker owns it.
+    var path_owned = true;
+    errdefer if (path_owned) state.allocator.free(path);
+
+    try state.track(req.request_id);
+    errdefer state.untrack(req.request_id);
+
+    // Serialize Save/Open: reject if busy rather than block Stop on the stdin loop.
+    if (state.io_running.load(.acquire)) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "save or open already running");
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    }
+    state.joinIo();
+
+    const request_id = try state.allocator.dupe(u8, req.request_id);
+    errdefer state.allocator.free(request_id);
+    const job_id: ?[]u8 = if (req.job_id) |j| try state.allocator.dupe(u8, j) else null;
+    errdefer if (job_id) |j| state.allocator.free(j);
+    const op = try state.allocator.dupe(u8, req.op);
+    errdefer state.allocator.free(op);
+
+    const task = try state.allocator.create(IoTask);
+    errdefer state.allocator.destroy(task);
+    task.* = .{
+        .state = state,
+        .request_id = request_id,
+        .job_id = job_id,
+        .op = op,
+        .path = path,
+        .kind = kind,
+    };
+    path_owned = false;
+
+    state.io_running.store(true, .release);
+    state.io_thread = std.Thread.spawn(.{}, ioWorker, .{task}) catch |err| {
+        state.io_running.store(false, .release);
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.free(task.path);
+        state.allocator.destroy(task);
+        state.untrack(req.request_id);
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    };
+}
+
+pub fn startSave(state: *HostState, req: ipc.Envelope) !void {
+    const path = (try bodyUnescapedStringField(state.allocator, req.body_json, "path")) orelse {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    };
+    try startIo(state, req, .save, path);
+}
+
+pub fn startOpen(state: *HostState, req: ipc.Envelope) !void {
+    if (state.beginOrTrainBusy()) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    }
+    const path = (try bodyUnescapedStringField(state.allocator, req.body_json, "path")) orelse {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    };
+    try startIo(state, req, .open, path);
+}
+
+test "ZR-151 analysis gen coalesce marks older gens stale" {
+    var state = try HostState.init(std.testing.allocator, "analysis-gen");
+    defer state.deinit();
+    const g1 = state.bumpAnalysisGen();
+    try std.testing.expect(state.analysisGenCurrent(g1));
+    const g2 = state.bumpAnalysisGen();
+    try std.testing.expect(state.analysisGenCurrent(g2));
+    try std.testing.expect(!state.analysisGenCurrent(g1));
 }
 
 test "ready dispatch" {

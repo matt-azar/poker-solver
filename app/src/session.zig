@@ -13,6 +13,8 @@ pub const SessionError = error{
     OutOfMemory,
     BudgetExceeded,
     InvalidStrategy,
+    /// Cooperative Stop during begin/compile (ZR-151). Prior solution kept.
+    Cancelled,
     /// Average install failed after a committed CFR+ iteration (ZR-145).
     /// Trainer tables remain resumable; distinct from mid-pass corruption.
     StrategyPublishFailed,
@@ -181,6 +183,11 @@ pub const Session = struct {
     fn shouldStopTrain(ctx: *anyopaque) bool {
         const self: *Session = @ptrCast(@alignCast(ctx));
         return self.stop_requested.load(.acquire) or self.pause_requested.load(.acquire);
+    }
+
+    fn shouldCancelCompile(ctx: ?*anyopaque) bool {
+        const self: *Session = @ptrCast(@alignCast(ctx orelse return false));
+        return self.stop_requested.load(.acquire);
     }
 
     fn busyForReplace(self: *const Session) bool {
@@ -356,13 +363,27 @@ pub const Session = struct {
     }
 
     /// Begin a new solve from street-config text. On failure, prior solution is kept.
+    /// Stop (`requestStop`) aborts at compile stage boundaries without installing (ZR-151).
     pub fn begin(self: *Session, config_text: []const u8) SessionError!void {
         self.mu.lock();
         if (self.busyForReplace()) {
             self.mu.unlock();
             return error.Busy;
         }
+        const prior_phase = self.phase;
+        // Mark compiling so Open/Save busy guards and status agree with begin_running.
+        self.phase = .compiling;
         self.mu.unlock();
+        errdefer {
+            self.mu.lock();
+            if (self.phase == .compiling) self.phase = prior_phase;
+            self.mu.unlock();
+        }
+
+        if (self.stop_requested.load(.acquire)) {
+            self.clearControlFlags();
+            return error.Cancelled;
+        }
 
         // Parse against parent so a tiny over-budget config cannot fail on the
         // street-config text itself when the session is already near its ceiling.
@@ -384,12 +405,27 @@ pub const Session = struct {
         }
 
         // Under a declared budget, construction OOM is a budget failure (charge-
-        // before-allocate during compile growth + tables).
-        var game = poker_engine.game.compile.compile(self.allocator, spec) catch |err| {
+        // before-allocate during compile growth + tables). Cancel polls between
+        // compile stages so Stop during flop tree build exits without install.
+        var game = poker_engine.game.compile.compileCancelable(
+            self.allocator,
+            spec,
+            shouldCancelCompile,
+            self,
+        ) catch |err| {
+            if (err == error.Cancelled) {
+                self.clearControlFlags();
+                return error.Cancelled;
+            }
             if (err == error.OutOfMemory) return error.BudgetExceeded;
             return err;
         };
         errdefer game.deinit();
+        if (self.stop_requested.load(.acquire)) {
+            game.deinit();
+            self.clearControlFlags();
+            return error.Cancelled;
+        }
         const estimated = estimateSolutionBytes(game);
         if (estimated > budget_bytes) return error.BudgetExceeded;
 
@@ -398,6 +434,10 @@ pub const Session = struct {
             return err;
         };
         errdefer training.deinit();
+        if (self.stop_requested.load(.acquire)) {
+            self.clearControlFlags();
+            return error.Cancelled;
+        }
         const owned_config = self.allocator.dupe(u8, config_text) catch return error.BudgetExceeded;
         errdefer self.allocator.free(owned_config);
         const threads = clampThreads(spec.threads);
@@ -405,7 +445,12 @@ pub const Session = struct {
         // Install only after compile+train tables succeed (fail-closed).
         self.mu.lock();
         defer self.mu.unlock();
-        if (self.busyForReplace()) return error.Busy;
+        // `.compiling` is our own begin gate; treat other busy phases as conflict.
+        if (self.phase != .compiling and self.busyForReplace()) return error.Busy;
+        if (self.stop_requested.load(.acquire)) {
+            self.clearControlFlags();
+            return error.Cancelled;
+        }
         while (self.readers != 0) {
             self.quiet.wait(&self.mu);
         }

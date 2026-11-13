@@ -184,6 +184,37 @@ export function shouldMarkStatusPollDead(args: {
   return args.consecutiveFailures >= threshold;
 }
 
+/**
+ * ZR-151: after N soft status failures Study may kill the sidecar (hung host)
+ * then Reconnect. Hard pipe-death faults already imply a dead process.
+ * Soft timeouts alone must not look like "kill the train" — only the hung
+ * threshold path terminates.
+ */
+export function shouldTerminateHungSidecar(args: {
+  consecutiveFailures: number;
+  detail: string;
+  threshold?: number;
+}): boolean {
+  if (isEngineSessionDead(args.detail)) {
+    // Pipe already dead — kill is best-effort cleanup, still useful.
+    return true;
+  }
+  return shouldMarkStatusPollDead(args);
+}
+
+/**
+ * A slow values/EV RPC timeout must not be classified as session-dead and must
+ * not stop an in-flight solve (ZR-151 / #289).
+ */
+export function isSoftRpcTimeoutDetail(detail: string): boolean {
+  const text = detail.toLowerCase();
+  return (
+    text.includes("timed out") ||
+    text.includes("timeout") ||
+    text.includes("recv timeout")
+  );
+}
+
 /** True when store message is a disconnected / ensure-fail recovery string. */
 export function isRecoveryOrUnreachableMessage(message: string): boolean {
   const text = message.toLowerCase();
