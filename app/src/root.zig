@@ -679,6 +679,134 @@ test "strategy publish failure is distinct from mid-pass train failure" {
     try std.testing.expect(sess.policyRevision() > prior_rev);
 }
 
+test "cadence publish OOM soft-skips and train continues (ZR-164)" {
+    // Flop Solve @ iter 11: second cadence publish under memory-mib must not abort
+    // train or sticky-brick Solve when a prior average remains.
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(1);
+    const prior_rev = sess.policyRevision();
+    const prior_published = sess.last_published_trained;
+    try std.testing.expectEqual(@as(i32, 1), prior_published);
+
+    // Cadence bound on the next committed iter; inject budget pressure.
+    sess.publish_every = 1;
+    sess.inject_publish_oom = true;
+    try sess.train(1);
+    try std.testing.expectEqual(@as(i32, 2), sess.training.?.trained);
+    try std.testing.expectEqual(@as(i32, 2), sess.last_committed_trained);
+    try std.testing.expectEqual(prior_published, sess.last_published_trained);
+    try std.testing.expectEqual(prior_rev, sess.policyRevision());
+    try std.testing.expectEqual(@as(u32, 1), sess.publish_skips);
+    try std.testing.expect(sess.has_training);
+    try std.testing.expect(sess.canContinue());
+    try std.testing.expect(sess.phase == .published);
+
+    // Next cadence publish (no inject) refreshes the average; Solve stays healthy.
+    try sess.train(1);
+    try std.testing.expectEqual(@as(i32, 3), sess.last_published_trained);
+    try std.testing.expect(sess.policyRevision() > prior_rev);
+    try std.testing.expectEqual(@as(u32, 1), sess.publish_skips);
+}
+
+test "second cadence publish reuses average buffer in place (ZR-164)" {
+    // Need non-empty table_entries so the average buffer is real (check-only
+    // single-combo trees can compile to zero-sized strategy tables).
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(1);
+    const live_after_first = sess.allocatedBytes();
+    const peak_after_first = sess.peakAllocatedBytes();
+    const avg_bytes: u64 = @intCast(sess.published.?.average.len * @sizeOf(f32));
+    try std.testing.expect(avg_bytes > 0);
+
+    sess.publish_every = 1;
+    try sess.train(1);
+    try std.testing.expectEqual(@as(i32, 2), sess.last_published_trained);
+    // In-place rewrite must not allocate a second average buffer.
+    try std.testing.expectEqual(live_after_first, sess.allocatedBytes());
+    try std.testing.expect(sess.peakAllocatedBytes() < peak_after_first + avg_bytes);
+}
+
+test "multi-iter train soft-skips final flush OOM (ZR-164)" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    sess.publish_every = 100;
+    try sess.train(1);
+    const prior_rev = sess.policyRevision();
+    // Cadence bound never hit; completion flush would publish — inject OOM there.
+    sess.inject_publish_oom = true;
+    try sess.train(5);
+    try std.testing.expectEqual(@as(i32, 6), sess.training.?.trained);
+    try std.testing.expectEqual(@as(i32, 1), sess.last_published_trained);
+    try std.testing.expectEqual(prior_rev, sess.policyRevision());
+    try std.testing.expectEqual(@as(u32, 1), sess.publish_skips);
+    try std.testing.expect(sess.phase == .published);
+    try std.testing.expect(sess.canContinue());
+}
+
 test "accuracyThresholdChips converts tenths pot to chip EV" {
     // pot 100 chips → 1000 tenths. Fraction 0.05 → 5 chip threshold, not 50.
     try std.testing.expectApproxEqAbs(

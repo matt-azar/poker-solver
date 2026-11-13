@@ -119,6 +119,11 @@ pub const Session = struct {
     force_next_publish: bool = false,
     /// Recycled average buffer after readers release (C++ ensure_average reuse).
     average_spare: ?[]f32 = null,
+    /// True while an in-place average rewrite holds the live published buffer (ZR-164).
+    /// Study `borrowPublished` waits until clear so readers never see a half-filled average.
+    publishing_in_place: bool = false,
+    /// Soft cadence/final publish skips under budget (ZR-164). Does not brick Solve.
+    publish_skips: u32 = 0,
     /// Last fully completed CFR+ iteration (both player passes). Matches
     /// `training.trained` when clean; used to refuse resume after mid-pass faults (ZR-145).
     last_committed_trained: i32 = 0,
@@ -128,6 +133,8 @@ pub const Session = struct {
     inject_mid_pass_fault: bool = false,
     /// Test fault injection: fail the next strategy publish after a committed iter.
     inject_publish_fault: bool = false,
+    /// Test fault injection: next cadence publish returns BudgetExceeded (soft-skip path).
+    inject_publish_oom: bool = false,
 
     pub fn init(parent: std.mem.Allocator) SessionError!Session {
         const budget = parent.create(BudgetAllocator) catch return error.OutOfMemory;
@@ -255,6 +262,9 @@ pub const Session = struct {
         self.cfr_pass_mutated = false;
         self.inject_mid_pass_fault = false;
         self.inject_publish_fault = false;
+        self.inject_publish_oom = false;
+        self.publishing_in_place = false;
+        self.publish_skips = 0;
         if (self.average_spare) |buf| {
             self.allocator.free(buf);
             self.average_spare = null;
@@ -268,6 +278,7 @@ pub const Session = struct {
         self.cfr_pass_mutated = false;
         self.inject_mid_pass_fault = false;
         self.inject_publish_fault = false;
+        self.inject_publish_oom = false;
         std.debug.assert(!self.has_training);
         std.debug.assert(!self.cfr_pass_mutated);
         std.debug.assert(!self.canContinue());
@@ -520,7 +531,7 @@ pub const Session = struct {
 
     fn installPublishedLocked(self: *Session, next: poker_engine.solve.training_state.PublishedPolicy) void {
         // Caller holds `mu`. Wait until no Study readers hold the prior average.
-        while (self.readers != 0) {
+        while (self.readers != 0 or self.publishing_in_place) {
             self.quiet.wait(&self.mu);
         }
         if (self.published) |*old| {
@@ -535,10 +546,15 @@ pub const Session = struct {
             }
         }
         self.published = next;
-        self.last_published_trained = next.trained;
+        // Fresh CFR publish invalidates free-form overlays (C++ clear on solve).
+        self.notePublishedInstalledLocked(next.trained);
+    }
+
+    /// Bookkeeping shared by swap-install and in-place rewrite after a successful fill.
+    fn notePublishedInstalledLocked(self: *Session, trained: i32) void {
+        self.last_published_trained = trained;
         self.iters_since_publish = 0;
         self.force_next_publish = false;
-        // Fresh CFR publish invalidates free-form overlays (C++ clear on solve).
         if (self.strategy_edits_text.len != 0) {
             self.allocator.free(self.strategy_edits_text);
             self.strategy_edits_text = &.{};
@@ -554,8 +570,28 @@ pub const Session = struct {
         return self.iters_since_publish >= self.publish_every;
     }
 
+    /// True when a publish fault is soft (keep prior average + continue train).
+    fn isSoftPublishPressure(err: anyerror) bool {
+        return err == error.OutOfMemory or err == error.BudgetExceeded;
+    }
+
+    /// Soft-skip a cadence/final publish under memory pressure when a prior average
+    /// remains browsable (ZR-164). Defers the next attempt by a full cadence window
+    /// so we do not thrash alloc every subsequent iter.
+    fn softSkipPublishLocked(self: *Session) void {
+        std.debug.assert(self.published != null);
+        self.iters_since_publish = 0;
+        self.force_next_publish = false;
+        self.publish_skips +%= 1;
+        std.debug.assert(self.publish_skips > 0);
+    }
+
     /// Materialize the exact average for the current `training.trained` and install it.
     /// Used by cadence publishes, Acc eval, save, and pause/stop/completion flushes.
+    ///
+    /// ZR-164: when a published buffer already exists and Study readers are quiet,
+    /// rewrite it in place so flop cadence does not peak at old+new average under
+    /// `memory-mib`. Otherwise allocate (spare reuse) then swap-install.
     fn publishExactAverage(self: *Session) SessionError!void {
         const game = self.game orelse return error.InvalidSession;
         const state = &(self.training orelse return error.InvalidSession);
@@ -563,6 +599,55 @@ pub const Session = struct {
         const threads = if (self.threads < 1) @as(u32, 1) else self.threads;
 
         self.mu.lock();
+        if (self.inject_publish_oom) {
+            self.inject_publish_oom = false;
+            self.mu.unlock();
+            return error.BudgetExceeded;
+        }
+        // Wait until quiet — required for in-place rewrite and for a stable swap.
+        while (self.readers != 0 or self.publishing_in_place) {
+            self.quiet.wait(&self.mu);
+        }
+
+        // Prefer in-place rewrite: no second `table_entries` f32 buffer (flop cadence).
+        if (self.published) |*pub_policy| {
+            if (pub_policy.average.len == n and n != 0) {
+                const buf = pub_policy.average;
+                self.publishing_in_place = true;
+                std.debug.assert(self.publishing_in_place);
+                std.debug.assert(self.readers == 0);
+                self.mu.unlock();
+
+                const fill_err = poker_engine.solve.training_state.publishAverageIntoThreaded(
+                    self.allocator,
+                    game,
+                    state,
+                    buf,
+                    threads,
+                );
+
+                self.mu.lock();
+                defer {
+                    self.publishing_in_place = false;
+                    self.quiet.broadcast();
+                    self.mu.unlock();
+                }
+                fill_err catch |err| {
+                    if (err == error.OutOfMemory) return self.mapAllocErr(err);
+                    return error.InvalidSession;
+                };
+                while (self.readers != 0) {
+                    self.quiet.wait(&self.mu);
+                }
+                const live = &(self.published orelse return error.InvalidSession);
+                std.debug.assert(live.average.ptr == buf.ptr);
+                live.revision = state.policy_revision;
+                live.trained = state.trained;
+                self.notePublishedInstalledLocked(state.trained);
+                return;
+            }
+        }
+
         const buf = self.takeAverageBufferLocked(n) catch {
             self.mu.unlock();
             return self.mapAllocErr(error.OutOfMemory);
@@ -698,9 +783,20 @@ pub const Session = struct {
         }
         self.iters_since_publish += 1;
         const want = self.shouldPublishCadenceLocked();
+        const had_published = self.published != null;
         self.mu.unlock();
         if (!want) return;
-        self.publishExactAverage() catch return error.StrategyPublishFailed;
+        self.publishExactAverage() catch |err| {
+            // ZR-164: cadence OOM must not abort train / sticky-brick Solve when a
+            // prior average is still browsable. Defer and keep iterating.
+            if (had_published and isSoftPublishPressure(err)) {
+                self.mu.lock();
+                self.softSkipPublishLocked();
+                self.mu.unlock();
+                return;
+            }
+            return error.StrategyPublishFailed;
+        };
     }
 
     /// Stage hook: mark mutation window, inject mid-pass faults, stamp commit (ZR-145).
@@ -850,7 +946,15 @@ pub const Session = struct {
         // Single-iter Acc `train(1)` carries cadence; trainGated / save force when needed.
         const force_final = stopped or paused or iterations != 1;
         if (force_final) {
-            self.ensurePublishedExact() catch return error.StrategyPublishFailed;
+            self.ensurePublishedExact() catch |err| {
+                // ZR-164: completion/pause flush under budget keeps prior average +
+                // completed train (no sticky StrategyPublishFailed brick).
+                self.mu.lock();
+                const keep = self.published != null and isSoftPublishPressure(err);
+                if (keep) self.softSkipPublishLocked();
+                self.mu.unlock();
+                if (!keep) return error.StrategyPublishFailed;
+            };
         }
 
         self.mu.lock();
@@ -998,7 +1102,14 @@ pub const Session = struct {
                 }
             }
         }
-        try self.ensurePublishedExact();
+        self.ensurePublishedExact() catch |err| {
+            // ZR-164: gated completion under publish pressure keeps prior average.
+            self.mu.lock();
+            const keep = self.published != null and isSoftPublishPressure(err);
+            if (keep) self.softSkipPublishLocked();
+            self.mu.unlock();
+            if (!keep) return err;
+        };
         self.last_terminal = .completed;
         self.mu.lock();
         self.phase = if (self.published != null) .published else .paused;
@@ -1018,6 +1129,10 @@ pub const Session = struct {
     pub fn borrowPublished(self: *Session) SessionError!PublishedLease {
         self.mu.lock();
         defer self.mu.unlock();
+        // Do not observe a half-rewritten in-place average (ZR-164).
+        while (self.publishing_in_place) {
+            self.quiet.wait(&self.mu);
+        }
         const game = self.game orelse return error.NothingPublished;
         const published = self.published orelse return error.NothingPublished;
         self.readers += 1;
@@ -1034,11 +1149,15 @@ pub const Session = struct {
         const deadline = std.time.nanoTimestamp() + @as(i128, @intCast(timeout_ns));
         self.mu.lock();
         defer self.mu.unlock();
-        while (self.published == null) {
+        while (self.published == null or self.publishing_in_place) {
             const now = std.time.nanoTimestamp();
             if (now >= deadline) return error.NothingPublished;
             const remaining: u64 = @intCast(deadline - now);
-            self.published_cv.timedWait(&self.mu, remaining) catch return error.NothingPublished;
+            if (self.publishing_in_place) {
+                self.quiet.timedWait(&self.mu, remaining) catch return error.NothingPublished;
+            } else {
+                self.published_cv.timedWait(&self.mu, remaining) catch return error.NothingPublished;
+            }
         }
         const game = self.game orelse return error.NothingPublished;
         const published = self.published orelse return error.NothingPublished;
