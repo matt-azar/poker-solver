@@ -25,6 +25,8 @@ python3 scripts/zig/study-contract-smoke.py "$BIN"
 # open last saved checkpoint restores disk only (Linux cloud; Windows installer
 # kill remains ZR-147).
 python3 scripts/zig/engine-crash-recovery-smoke.py "$BIN"
+# ZR-151: Stop/status during values; compile cancel; coalesce; slow EV ≠ kill train.
+python3 scripts/zig/stop-close-responsive-smoke.py "$BIN"
 # ZR-152: overlapping Solve/Stop/Continue/Open/nav with analysis in flight;
 # late replies must not overwrite solution; memory settles; stdin EOF exits.
 # Windows packaged Study overlap suite waits for ma1pc (ZR-147 follow-up).

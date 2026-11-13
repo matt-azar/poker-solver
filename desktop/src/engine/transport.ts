@@ -94,6 +94,22 @@ export async function ensureSolverEngineIpc(): Promise<IpcTransportInfo> {
   });
 }
 
+/**
+ * ZR-151: terminate a hung sidecar so Reconnect can spawn a fresh process.
+ * No-op outside Tauri. Does not throw on kill races (already dead).
+ */
+export async function killSolverEngineIpc(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  try {
+    await invoke("kill_solver_engine_cmd");
+  } catch {
+    // Already dead / no session — Reconnect/ensure will recover.
+  }
+  setNoEngineTransport("sidecar terminated");
+}
+
 export type IpcRequestEnvelope = {
   v?: number;
   kind?: string;
@@ -281,8 +297,16 @@ export async function ipcDeleteStrategyEdit(opts?: {
   return env.body;
 }
 
-export async function ipcBeginConfig(configText: string): Promise<unknown> {
-  const env = await solverEngineRequest("begin_config", { config_text: configText });
+export async function ipcBeginConfig(
+  configText: string,
+  jobId?: string | null,
+): Promise<unknown> {
+  // Pass Study job id so Stop during compile cancel-tracks the same job (ZR-151).
+  const env = await solverEngineRequest(
+    "begin_config",
+    { config_text: configText },
+    jobId ?? null,
+  );
   return env.body;
 }
 

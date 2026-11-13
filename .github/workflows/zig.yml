@@ -90,6 +90,12 @@ jobs:
           set -euo pipefail
           python3 scripts/zig/engine-crash-recovery-smoke.py ./zig-out/bin/solver-engine
 
+      # ZR-151: Stop/status during values; compile cancel; coalesce; slow EV ≠ kill train.
+      - name: Stop/Close responsive smoke
+        run: |
+          set -euo pipefail
+          python3 scripts/zig/stop-close-responsive-smoke.py ./zig-out/bin/solver-engine
+
       # ZR-152: overlapping Study actions + late-reply / memory / exit invariants.
       # Windows packaged installer overlap remains ZR-147 / ma1pc follow-up.
       - name: Study overlap actions smoke

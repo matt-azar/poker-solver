@@ -639,6 +639,13 @@ pub fn kill_solver_engine(state: &SolverEngineState) {
     kill_session(&mut guard);
 }
 
+/// ZR-151: Study may terminate a hung/unresponsive sidecar before Reconnect.
+#[tauri::command]
+pub fn kill_solver_engine_cmd(state: State<'_, SolverEngineState>) -> Result<(), String> {
+    kill_solver_engine(&state);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

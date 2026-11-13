@@ -250,6 +250,44 @@ test "train recovers from sticky failed phase without re-begin" {
     try std.testing.expect(sess.phase == .published);
 }
 
+test "ZR-151 begin respects stop_requested without installing" {
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    const prior_id = sess.solution_id;
+    try std.testing.expect(prior_id != 0);
+    try sess.train(1);
+    try std.testing.expect(sess.published != null);
+
+    // Stop during a replacement begin: prior published solution must survive.
+    sess.requestStop();
+    try std.testing.expectError(error.Cancelled, sess.begin(text));
+    try std.testing.expect(sess.solution_id == prior_id);
+    try std.testing.expect(sess.published != null);
+    try std.testing.expect(sess.phase == .published or sess.phase == .paused);
+}
+
 test "early stop before publish leaves session paused and continuable" {
     const text =
         \\street-config 1

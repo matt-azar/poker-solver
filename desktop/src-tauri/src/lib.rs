@@ -70,6 +70,7 @@ pub fn run() {
             solver_engine::ensure_solver_engine,
             solver_engine::solver_engine_info,
             solver_engine::solver_engine_request,
+            solver_engine::kill_solver_engine_cmd,
             library::library_list_templates,
             library::library_list_ranges,
             library::library_list_recent,

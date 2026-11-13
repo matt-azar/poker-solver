@@ -243,7 +243,7 @@ export class EngineClient {
       const iterations = Math.max(1, Math.trunc(job.iterations || 1));
       const jobId = mintStudyJobId();
       this.lastJobId = jobId;
-      await ipcBeginConfig(configText);
+      await ipcBeginConfig(configText, jobId);
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }

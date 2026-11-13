@@ -5,12 +5,14 @@ import {
   disconnectedRecoveryMessage,
   isEngineSessionDead,
   isRecoveryOrUnreachableMessage,
+  isSoftRpcTimeoutDetail,
   isStickyBusyPhase,
   lastValidCheckpointPath,
   normalizeStatusForPhase,
   phaseAfterSessionFault,
   sessionDeadUiPatch,
   shouldMarkStatusPollDead,
+  shouldTerminateHungSidecar,
   STATUS_POLL_DEAD_AFTER_FAILURES,
   statusIndicatesFailure,
   statusStickyError,
@@ -123,6 +125,30 @@ describe("sessionRecovery", () => {
     expect(isRecoveryOrUnreachableMessage("Solving — 12/200 iterations")).toBe(
       false,
     );
+  });
+
+  it("ZR-151: soft RPC timeout is not session-dead; hung threshold may terminate", () => {
+    expect(isSoftRpcTimeoutDetail("status request timed out")).toBe(true);
+    expect(isSoftRpcTimeoutDetail("values request timed out")).toBe(true);
+    expect(isEngineSessionDead("values request timed out")).toBe(false);
+    expect(
+      shouldTerminateHungSidecar({
+        consecutiveFailures: 1,
+        detail: "values request timed out",
+      }),
+    ).toBe(false);
+    expect(
+      shouldTerminateHungSidecar({
+        consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+        detail: "status request timed out",
+      }),
+    ).toBe(true);
+    expect(
+      shouldTerminateHungSidecar({
+        consecutiveFailures: 1,
+        detail: "Broken pipe",
+      }),
+    ).toBe(true);
   });
 
   it("cold reconnect copy keeps checkpoint reopen honest and rejects silent restore (ZR-143)", () => {
