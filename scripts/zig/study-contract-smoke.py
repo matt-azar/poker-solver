@@ -761,6 +761,8 @@ def main() -> int:
         ckpt15 = wait_until_idle(inbox, proc, "ckpt-5")
         require(ckpt15.get("terminal_reason") == "completed", f"ckpt continue: {ckpt15}")
         # Open@1 + multi-iter completion flush (cadence bound not hit in 5 steps).
+        # ZR-171: footer Acc/gap samples must not force-publish every eval — only
+        # ZR-133 strategy cadence + completion flush advance policy_revision.
         require(
             int(ckpt15.get("policy_revision") or 0) == 2,
             f"continue revision!=2 (open@1 + completion flush): {ckpt15}",

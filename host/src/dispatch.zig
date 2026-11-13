@@ -1551,14 +1551,19 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
     const accuracy = bodyFloatField(req.body_json, "accuracy") orelse 0;
     const time_limit = bodyFloatField(req.body_json, "time_limit") orelse -1;
     // Study Settings "Samples" = desired EV/gap refresh count. Cap cadence at 10
-    // iters so the footer never waits longer (DESKTOP_UI / ZR-171). Explicit
-    // `eval_every` still wins when callers set it (gate-bench / resolve_locked).
+    // iters so the footer never waits longer (DESKTOP_UI / ZR-171). When Samples
+    // is omitted (IPC smoke / gate-bench), default to publish_every (10) so
+    // progress sampling aligns with ZR-133 strategy cadence — not every iter.
+    // Explicit `eval_every` still wins when callers set it.
     const samples = bodyIntField(req.body_json, "samples");
     const job_iters: i32 = if (iterations < 1) 1 else iterations;
     const eval_every = bodyIntField(req.body_json, "eval_every") orelse blk: {
-        const refresh_count: i32 = if (samples) |s| (if (s < 1) 1 else s) else 5;
-        const period = @divTrunc(job_iters + refresh_count - 1, refresh_count);
-        break :blk @max(@as(i32, 1), @min(@as(i32, 10), period));
+        if (samples) |s| {
+            const refresh_count: i32 = if (s < 1) 1 else s;
+            const period = @divTrunc(job_iters + refresh_count - 1, refresh_count);
+            break :blk @max(@as(i32, 1), @min(@as(i32, 10), period));
+        }
+        break :blk @max(@as(i32, 1), state.session.publish_every);
     };
     state.budget.returnToTraining();
     // Honor config threads; never raise above Session/config (ZR-91). Cap by host budget.
@@ -3229,7 +3234,8 @@ test "status body publishes progress metrics after trainGated (ZR-171)" {
     try state.session.begin(config);
     state.train_iterations_requested = 4;
     // Iteration-only job (accuracy ≤ 0) must still record EV/gap for the footer.
-    try state.session.trainGated(4, -1.0, 2, -1.0);
+    state.session.publish_every = 10;
+    try state.session.trainGated(4, -1.0, 1, -1.0);
 
     const status_body = try formatStatusBody(std.testing.allocator, &state);
     defer std.testing.allocator.free(status_body);
@@ -3242,6 +3248,10 @@ test "status body publishes progress metrics after trainGated (ZR-171)" {
     try std.testing.expect(std.mem.indexOf(u8, status_body, "\"pot\":100") != null);
     try std.testing.expect(state.session.has_metrics);
     try std.testing.expect(state.session.gap_series_len >= 1);
+    // Progress samples must not turn every eval into a revision bump (ZR-133).
+    const rev = state.session.policyRevision();
+    try std.testing.expect(rev >= 2);
+    try std.testing.expect(rev < 4);
 }
 
 test "status copies last_error; iterations use committed count" {

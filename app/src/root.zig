@@ -824,6 +824,64 @@ test "accuracyThresholdChips converts tenths pot to chip EV" {
     try std.testing.expect(Session.accuracyReached(4.9, 5.0));
 }
 
+// ZR-171: iteration-only progress samples must not force-publish every eval_every
+// (ZR-133 cadence). Continue-shaped +5 with eval_every=1 stays open@1 + flush.
+test "trainGated progress samples do not force-publish every eval (ZR-171)" {
+    const text =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    sess.publish_every = 10;
+
+    // Warm to open@1 watermark (trained=10, revision reset-shaped via republish).
+    try sess.train(10);
+    const after_10 = sess.policyRevision();
+    try std.testing.expect(after_10 >= 2);
+    try std.testing.expect(after_10 < 10);
+
+    // Simulate Study open revision reset (session.open sets both published and
+    // trainer policy_revision to 1) while keeping trainer.trained.
+    {
+        sess.mu.lock();
+        defer sess.mu.unlock();
+        if (sess.published) |*published| {
+            published.revision = 1;
+        }
+        if (sess.training) |*training| {
+            training.policy_revision = 1;
+        }
+    }
+    try std.testing.expectEqual(@as(u64, 1), sess.policyRevision());
+
+    // Continue +5 with aggressive progress cadence — must not become rev 6.
+    try sess.trainGated(5, -1.0, 1, -1.0);
+    try std.testing.expect(sess.last_terminal == .completed);
+    try std.testing.expectEqual(@as(u64, 2), sess.policyRevision());
+    try std.testing.expectEqual(@as(i32, 15), sess.training.?.trained);
+    try std.testing.expect(sess.has_metrics);
+    try std.testing.expect(sess.gap_series_len >= 1);
+}
+
 // ZR-153: Accuracy-reached must be true for the exact published average at the
 // claimed iteration (chip units, not tenths; no stale publish cadence snapshot).
 test "trainGated accuracy_reached meets threshold on exact published average" {
