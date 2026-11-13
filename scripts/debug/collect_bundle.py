@@ -23,6 +23,7 @@ import argparse
 import json
 import shutil
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -62,8 +63,9 @@ def main() -> int:
     ap.add_argument(
         "--out",
         type=Path,
-        default=Path("/tmp") / f"holdem-study-debug-{utc_now_iso().replace(':', '')}",
-        help="Output directory for the bundle",
+        default=Path(tempfile.gettempdir())
+        / f"holdem-study-debug-{utc_now_iso().replace(':', '')}",
+        help="Output directory for the bundle (default: system temp)",
     )
     ap.add_argument("--zip", action="store_true", help="Also write <out>.zip")
     ap.add_argument("--stacks", action="store_true", help="Sample stacks if live")

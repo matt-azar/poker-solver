@@ -67,6 +67,10 @@ def default_solver_engine() -> Path:
         ROOT / "zig-out" / "bin" / "solver-engine",
         ROOT / "zig-out" / "bin" / "solver-engine.exe",
     ]
+    # Windows installed Study: allow HOLDEM_STUDY_SOLVER_ENGINE or sibling of UI.
+    env_bin = os.environ.get("HOLDEM_STUDY_SOLVER_ENGINE")
+    if env_bin:
+        candidates.insert(0, Path(env_bin).expanduser())
     for path in candidates:
         if path.is_file():
             return path
