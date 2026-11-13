@@ -93,7 +93,8 @@ export function reconnectedMessage(label?: string): string {
 /**
  * After a cold reconnect the new sidecar has no in-memory train state.
  * Restart alone never restores unsaved progress (ZR-143) — only Open of a
- * previously saved checkpoint can.
+ * previously saved checkpoint can. ZR-157 surfaces that as Reopen last
+ * checkpoint (backed by last successful Save or Open), not path-only copy.
  */
 export function coldReconnectMessage(opts?: {
   label?: string;
@@ -102,14 +103,35 @@ export function coldReconnectMessage(opts?: {
   const base = reconnectedMessage(opts?.label);
   const path = opts?.solutionPath?.trim() ?? "";
   if (path) {
-    return `${base} Unsaved train progress is gone. Open the last saved checkpoint (${path}) to restore it.`;
+    return `${base} Unsaved train progress is gone. Use Reopen last checkpoint to restore ${path}.`;
   }
   return `${base} Unsaved train progress is gone — Save before a crash to keep a checkpoint.`;
 }
 
-/** Last known on-disk checkpoint path Study can reopen after engine death. */
-export function lastValidCheckpointPath(solutionPath: string | null | undefined): string {
+/**
+ * Last known on-disk checkpoint Study can reopen after engine death.
+ * Prefer the dedicated last-successful Save/Open path; fall back to the
+ * draft field only for recovery copy when older sessions never recorded one.
+ */
+export function lastValidCheckpointPath(
+  solutionPath: string | null | undefined,
+  lastSuccessfulPath?: string | null | undefined,
+): string {
+  const successful = (lastSuccessfulPath ?? "").trim();
+  if (successful) {
+    return successful;
+  }
   return (solutionPath ?? "").trim();
+}
+
+/**
+ * True when Study can offer Reopen last checkpoint.
+ * Only a successful Save/Open path qualifies — typed draft paths do not.
+ */
+export function canOfferReopenLastCheckpoint(
+  lastCheckpointPath: string | null | undefined,
+): boolean {
+  return (lastCheckpointPath ?? "").trim().length > 0;
 }
 
 /**

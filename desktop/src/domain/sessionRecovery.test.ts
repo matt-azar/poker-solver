@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canOfferReopenLastCheckpoint,
   classifyEngineSessionFault,
   coldReconnectMessage,
   disconnectedRecoveryMessage,
@@ -151,15 +152,23 @@ describe("sessionRecovery", () => {
     ).toBe(true);
   });
 
-  it("cold reconnect copy keeps checkpoint reopen honest and rejects silent restore (ZR-143)", () => {
+  it("cold reconnect copy keeps checkpoint reopen honest and rejects silent restore (ZR-143/ZR-157)", () => {
     expect(lastValidCheckpointPath(" /tmp/last.psol ")).toBe("/tmp/last.psol");
     expect(lastValidCheckpointPath("")).toBe("");
+    expect(lastValidCheckpointPath("/draft.psol", "/saved.psol")).toBe(
+      "/saved.psol",
+    );
+    expect(lastValidCheckpointPath("/draft.psol", "")).toBe("/draft.psol");
+    expect(canOfferReopenLastCheckpoint("/saved.psol")).toBe(true);
+    expect(canOfferReopenLastCheckpoint("")).toBe(false);
+    expect(canOfferReopenLastCheckpoint("   ")).toBe(false);
     const withPath = coldReconnectMessage({
       label: "solver-engine IPC (protocol 2)",
       solutionPath: "/tmp/last.psol",
     });
     expect(withPath).toMatch(/reconnected/i);
     expect(withPath).toMatch(/Unsaved train progress is gone/i);
+    expect(withPath).toMatch(/Reopen last checkpoint/i);
     expect(withPath).toMatch(/\/tmp\/last\.psol/);
     const withoutPath = coldReconnectMessage({ label: "engine" });
     expect(withoutPath).toMatch(/Unsaved train progress is gone/i);

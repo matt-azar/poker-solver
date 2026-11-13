@@ -31,6 +31,7 @@ export function AppShell() {
   const startPolling = useStudyStore((s) => s.startPolling);
   const stopPolling = useStudyStore((s) => s.stopPolling);
   const recoverEngineSession = useStudyStore((s) => s.recoverEngineSession);
+  const reopenLastCheckpoint = useStudyStore((s) => s.reopenLastCheckpoint);
   const assistantOpen = useHelpChatStore((s) => s.layout.visible);
   const toggleAssistant = useHelpChatStore((s) => s.toggleVisible);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -61,6 +62,16 @@ export function AppShell() {
       console.info("[tauri] recover engine session ok");
     } else {
       console.warn("[tauri] recover engine session failed", result.error);
+    }
+  }
+
+  async function reopenCheckpoint() {
+    // ZR-157: action backed by last successful Save/Open, not path-only copy.
+    const result = await reopenLastCheckpoint();
+    if (result.ok) {
+      console.info("[tauri] reopen last checkpoint ok", result.path);
+    } else {
+      console.warn("[tauri] reopen last checkpoint failed", result.error);
     }
   }
 
@@ -95,6 +106,9 @@ export function AppShell() {
         status={status}
         onReconnect={() => {
           void reconnectEngine();
+        }}
+        onReopenLastCheckpoint={() => {
+          void reopenCheckpoint();
         }}
       />
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
