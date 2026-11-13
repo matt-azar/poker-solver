@@ -44,9 +44,11 @@ const poker::holdem::ShowdownEquity equity =
 
 `measure_showdown_work` counts legal pairs and pair-runouts and does not evaluate showdowns. `showdown_equity_json` writes undefined numbers as null.
 
-The default work limit is `kDefaultMaxPairRunouts` (1,100,000 pair-runouts). A full off-board random-vs-random river is `kFullRangeRiverPairRunouts` (1,070,190) and succeeds at the default. A request above the limit throws before showdown evaluation and reports required and allowed counts. A full-range turn is about 51M pair-runouts (`As Kd Qc Jh` measures 51,369,120) and still rejects at the library default. Packaged Study passes `--max-pair-runouts` with `kStudyExplorerMaxPairRunouts` (= `kFullRangeTurnPairRunouts`, 51,369,120) so on-demand Study equity admits a full-range turn without raising the library default. Dense flop check-downs can still exceed that ceiling. Manual explorer or `equity_calculator` can use the same flag. The caller can also raise or lower the limit through `ShowdownEquityOptions::max_pair_runouts` or `POKER_EQUITY_MAX_PAIR_RUNOUTS`. The calculator does not sample or drop runouts. Cancellation uses `ShowdownEquityOptions::cancel_poll`. One deterministic thread performs the enumeration.
+The library default work limit is `default_max_pair_runouts` (1,100,000 pair-runouts; old C++ name `kDefaultMaxPairRunouts`). A full off-board random-vs-random river is 1,070,190 pair-runouts and succeeds at that default. A request above the limit fails before showdown evaluation. A full-range turn is 51,369,120 pair-runouts (`As Kd Qc Jh`) and fails at the library default. Study node equity uses `study_explorer_max_pair_runouts` (the same 51,369,120) inside the host. There is no `--max-pair-runouts` flag and no `equity_calculator` binary on `main`. Dense flop check-downs can still exceed the Study ceiling. The calculator does not sample or drop runouts. One deterministic thread performs the enumeration.
 
-## CLI
+## CLI (removed C++ binary)
+
+`equity_calculator` is not in this tree. The command and the JSON sample below are from the old tool.
 
 ```sh
 equity_calculator --board "Kh Kd 7c 4s" \
@@ -103,7 +105,7 @@ Rounding `1 + 1e-18` to `1` is ordinary double-precision behavior. Losing `AhAd`
 
 `AhAc` stays in the result because it is compatible with `9c9d`. `2c3d` has compatible mass 2. For `1e-18`, `9c9d`'s own mass prints as 1 because `1 + 1e-18` rounds to 1. For `1e-12`, that mass prints as `1.0000000000010001`.
 
-The oracle in `tests/equity/test_equity.cpp` stores each pair's runout results, then accumulates in descending combo order with `long double`. It shares `compare_showdown` and does not call the production accumulators. Agreement on the small fixtures, including a seeded 5-combo flop, is within `1e-12`. On this MSVC toolchain `long double` is the same width as `double`, so that bound is justified by compensated summation of a few dozen nonnegative terms of size at most 1, not by extra significand bits.
+The old oracle in `tests/equity/test_equity.cpp` stored each pair's runout results, then accumulated in descending combo order with `long double`. That file is gone. It shared `compare_showdown` and did not call the production accumulators. Agreement on the small fixtures, including a seeded 5-combo flop, was within `1e-12`. On that MSVC toolchain `long double` was the same width as `double`, so that bound came from compensated summation of a few dozen nonnegative terms of size at most 1, not from extra significand bits.
 
 ## Tests
 
@@ -134,4 +136,4 @@ The desktop **Equity** workspace is independent of any solution. On `main`, pack
 | `POST` | `/api/equity/jobs/{id}/cancel` |
 | `GET` | `/api/equity/jobs/{id}/result` |
 
-Numerical entry point: `poker::holdem::calculate_equity` in `include/poker/equity_calculator.hpp`. Supports 2–6 players; boards of length 0/3/4/5; explicit dead cards; methods `auto`, `exact`, and `monte_carlo`. Equity is expected fractional pot ownership (k-way ties share `1/k`). Win/Tie/Loss are exclusive event probabilities. Auto selects exact when the bounded deal estimate is at or below `kEquityCalculatorAutoExactThreshold` (2,000,000); otherwise Monte Carlo. Exact requests that exceed `max_exact_deals` (default 5,000,000) fail with a work-limit error rather than returning a partial ratio. Monte Carlo uses an unbiased reject-entire-tuple sampler with a dedicated seeded RNG; approximate 95% intervals come from sample variance of pot-share outcomes. Per-combo / next-card analysis panes are follow-on work and are not mounted yet.
+Zig entry point: `engine/src/analysis/equity_calculator.zig`. The old header `include/poker/equity_calculator.hpp` is gone. The calculator supports 2–6 players; boards of length 0/3/4/5; explicit dead cards; methods `auto`, `exact`, and `monte_carlo`. Equity is expected fractional pot ownership (k-way ties share `1/k`). Win/Tie/Loss are exclusive event probabilities. Auto selects exact when the bounded deal estimate is at or below 2,000,000 deals; otherwise Monte Carlo. Exact requests that exceed `max_exact_deals` (default 5,000,000) fail with a work-limit error rather than returning a partial ratio. Monte Carlo uses an unbiased reject-entire-tuple sampler with a dedicated seeded RNG; approximate 95% intervals come from sample variance of pot-share outcomes. Per-combo / next-card analysis panes are not mounted.

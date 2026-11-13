@@ -18,7 +18,7 @@ Product entry points: Zig `solver-engine` + Study UI (`desktop/`). Living status
 ## Still open
 
 - Compact/lazy saves; durable batch queue; dual-session Compare over IPC; host `runouts`
-- **ICM Study solves (ZR-93):** reject until complete; low priority — not a near-term release blocker
+- ICM on frozen CFR train: Settings can send stacks, but `frozen_walk` pays chip + rake. `terminalPayoff` and best response apply ICM. That is not an ICM equilibrium.
 - Trainer packs/drills; preflop
 - Code-signed Windows release; Pio matched quality/timing runs
 

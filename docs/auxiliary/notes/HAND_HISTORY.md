@@ -1,8 +1,8 @@
 # Hand history export
 
-`hand-history 1` is a versioned text document for one heads-up played hand — the export contract for future self-play and trainer fills. Not a Monte-Carlo trainer, pack loader, or session-statistics report.
+`hand-history 1` is a versioned text document for one heads-up played hand. It is a schema note for a future self-play export. It is not a trainer, a pack loader, or a session-statistics report.
 
-`format_hand_history` writes one document from a `HandHistoryRecord`. `parse_hand_history` reads it. Formatting a parsed document produces the same text.
+`format_hand_history` and `parse_hand_history` were C++ names. They are not in this tree. Nothing in Study writes this file yet. The field list below is the contract text.
 
 ## Fields
 

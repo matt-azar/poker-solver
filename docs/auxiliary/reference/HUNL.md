@@ -1,6 +1,6 @@
 # Unrestricted heads-up no-limit Hold'em
 
-The production solvers find an equilibrium of a finite bet-size tree: a river, turn, or flop small enough to store under the engine budget. Unrestricted HUNL — any legal chip amount at every decision, full unbucketed postflop — exceeds commodity memory. The largest exact tree measured here is a uniform full-range check-down on `Ah Kd 7c`: 5,197,920 stored information sets and about 399 MiB of solver-owned heap inside the default 1024 MiB budget. Expanded histories on that tree are in the billions. Smaller checked abstractions include a `22+` versus `22+` river with two bet sizes (882 information sets) and a one-combo check-only flop (4,052). See [BENCHMARKS.md](../engineering/BENCHMARKS.md).
+The solver finds an equilibrium of a finite bet-size tree: a river, turn, or flop small enough to store under the engine budget. Unrestricted HUNL — any legal chip amount at every decision, full unbucketed postflop — exceeds commodity memory. The largest exact tree in the historical C++ measurements is a uniform full-range check-down on `Ah Kd 7c`: 5,197,920 stored information sets and about 399 MiB of solver-owned heap inside the default 1024 MiB budget. Those byte counts are not a current Zig measurement. Expanded histories on that tree are in the billions. Smaller checked abstractions from the same corpus include a `22+` versus `22+` river with two bet sizes (882 information sets) and a one-combo check-only flop (4,052). See [BENCHMARKS.md](../engineering/BENCHMARKS.md).
 
 ## Abstraction choices
 

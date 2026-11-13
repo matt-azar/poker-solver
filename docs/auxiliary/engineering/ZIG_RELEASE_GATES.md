@@ -1,27 +1,10 @@
-# Zig release gates (Phase 7 scaffolding)
+# Zig release gates
 
-Living cutover numbers and GO/NO-GO live in the Zig rewrite store docs (not this
-file). This page is the **in-repo** procedure pointer so CI and reviewers know
-what to run and what must stay blocked.
+Product path on `main`: Zig `solver-engine` typed IPC. The Windows NSIS installer ships that binary only. HTTP `holdem-explorer` is not packaged.
 
-## Authority
+Accuracy, NashConv, and time-to-Accuracy numbers are not merge gates. Required checks are the sidecar contract tests and the Windows installer workflow. Optional timing digs stay bounded. They are not a green check in this file.
 
-| Topic | Store doc |
-| --- | --- |
-| Scoreboard + measurement procedure | `zig-perf-scoreboard.md` |
-| Cutover checklist / open blockers | `zig-cutover-criteria.md` |
-| Toolchain pin | `zig-toolchain-pin.md` |
-| Phase exit gates | `zig-phase-checklist.md` |
-| Parity / oracle log | `zig-parity-oracle-log.md` |
-
-Owner GO 2026-11-12: stable Windows NSIS ships Zig `solver-engine` only
-(typed IPC). HTTP `holdem-explorer` is not a packaged Study path on
-`main`. Scoreboard/evidence remain in the store docs above.
-
-**Acc / perf are not cutover blockers** (owner preference 2026-11-12): do not
-block merge or ship on Accuracy/NashConv / time-to-Accuracy walls. Keep real
-sidecar contract tests and the Windows installer workflow. Optional Acc digs
-stay bounded and store-recorded — they are not a green-check gate in this file.
+These files are not in the repository: `zig-perf-scoreboard.md`, `zig-cutover-criteria.md`, `zig-toolchain-pin.md`, `zig-phase-checklist.md`, `zig-parity-oracle-log.md`. Do not treat them as the product procedure. This file and [TESTING.md](TESTING.md) are the procedure.
 
 ## Locked fixtures (D12)
 
@@ -29,21 +12,23 @@ stay bounded and store-recorded — they are not a green-check gate in this file
 - `flop_srp_two_sizes` — same tree with both players’ flop opening bets set to
   **⅓ pot** and **¾ pot** only
 
-Fixture assets live under `benchmarks/study/` (and parity harnesses that
-consume them). The in-repo C++ tree is removed on `main`; historical
-C++ `--plan-memory` / tip-C++ rematch notes live in store digs only.
+Fixture assets live under `benchmarks/study/`. The C++ tree is removed.
+Old `--plan-memory` notes are not in this repository.
 
-## Optional measurement procedure (digs only — not a cutover gate)
+## Optional measurement procedure
 
-When recording store scoreboard rows (optional; not required for cutover):
+These runs are optional. They are not a merge gate.
+
+When recording a timing dig:
 
 1. Windows **Release** builds; **matched** thread counts.
 2. Columns may include: cold wall to Accuracy/pot ≤ **0.001**, warm fixed-iteration
    train, Accuracy at cap, peak memory (RSS + plan notes).
 3. Separately measure **live Study node EV latency** under active train on the
    same fixtures when that dig is scheduled.
-4. Record rows in the store scoreboard — not as a green check here. Do not
-   schedule new hour-long Acc walls by default (prefer ≤30–45 min soft+hard kill).
+4. Keep the numbers with the dig. Do not treat them as a green check in this
+   file. Do not schedule new hour-long Accuracy walls by default (prefer a
+   30–45 minute kill).
 
 ## CI scaffolding on `main`
 
@@ -55,7 +40,7 @@ When recording store scoreboard rows (optional; not required for cutover):
 | `.github/workflows/ci.yml` | Desktop Vitest / `tsc` / build (no C++ explorer matrix) |
 
 The labeled Zig tech-preview installer workflow was removed with the C++ strip
-(#287). Stable Study ships Zig typed IPC only after owner GO (2026-11-12).
+(#287). Stable Study ships Zig typed IPC only.
 There is no dual-sidecar / dormant `holdem-explorer` packaging path.
 
 ## Local toolchain

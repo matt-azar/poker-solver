@@ -8,7 +8,7 @@ Supporting material outside the main CFR+ workflow and Study UI docs. Prefer the
 | [engineering/](engineering/) | Testing, benchmarks, agent lessons |
 | [payoffs/](payoffs/) | Rake, ICM, action-label incentives |
 | [reference/](reference/) | HUNL abstraction limits and research notes |
-| [notes/](notes/) | Hand-history export contract; historical river-integration note |
+| [notes/](notes/) | Hand-history text schema (no writer in the tree); historical river-integration note |
 
 ## Index
 
@@ -22,6 +22,7 @@ Supporting material outside the main CFR+ workflow and Study UI docs. Prefer the
 
 - [TESTING.md](engineering/TESTING.md)
 - [BENCHMARKS.md](engineering/BENCHMARKS.md)
+- [ZIG_RELEASE_GATES.md](engineering/ZIG_RELEASE_GATES.md)
 - [AGENT_LESSONS.md](engineering/AGENT_LESSONS.md)
 - [AGENT_LESSONS_REFRESH.md](engineering/AGENT_LESSONS_REFRESH.md)
 

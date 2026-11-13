@@ -22,7 +22,7 @@ Player 0's terminal utility is `pot / 2` plus the opponent's river investment wh
 
 An opening fraction `f` bets `round(f * pot)` tenths of a chip (pot stored at scale 10). A raise fraction `f` increases the bet by `round(f * pot_after_the_call)`. The minimum later raise equals the previous full bet or raise; the minimum opening add is 0.1 chip. Reported utilities stay in chips. Details and a solved toy are in [RIVER.md](RIVER.md).
 
-A turn tree adds one chance node after turn betting: the river, uniform over remaining cards. A flop tree adds two. A five-card tree adds none. Range weights enter only through the root hand distribution. `StreetBatchSolver` solves all three board lengths on one public tree and pins five-card results against `RiverGame`. The chip rule is the river rule with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
+A turn tree adds one chance node after turn betting: the river, uniform over remaining cards. A flop tree adds two. A five-card tree adds none. Range weights enter only through the root hand distribution. The shipping solver is the Zig Session public tree for all three board lengths. `StreetBatchSolver` and `RiverGame` are the old C++ names for that split. The chip rule is the river rule with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
 
 Checked cases:
 

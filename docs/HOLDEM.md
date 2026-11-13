@@ -1,6 +1,6 @@
 # Hold'em cards, hands, and ranges
 
-52-card deck, seven-card showdown evaluator, and 1,326-hand ranges under `poker::holdem`. This layer does not build a betting tree or run CFR.
+52-card deck, seven-card showdown evaluator, and 1,326-hand ranges. Zig code is under `engine/src/poker/`. The old C++ namespace was `poker::holdem`. This layer does not build a betting tree or run CFR.
 
 ## Cards
 

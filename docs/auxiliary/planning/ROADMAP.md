@@ -20,7 +20,7 @@ Foundation in place: shared street/river public tree, pass-frozen CFR variants, 
 
 Flop, turn, and river are one betting tree (two, one, or zero cards left) in the Zig engine Session. Historical C++ names `StreetGame` / `StreetBatchSolver` / `RiverGame` describe the same public-tree idea in older math docs; they are not a shipping binary path on `main`.
 
-Also landed on the Zig Study path: conditional action EV; stop-and-keep / pause / continue; versioned PSOL; check-down equity (+ buckets); made-hand categories; node locks + strategy edits; pot rake wiring; Windows NSIS Study installer (Zig sidecar only); flop/turn draw and backdoor tags in Study. Compact saves, a durable batch queue, trainer packs, preflop, dual-session Compare, and **complete ICM Study solves (ZR-93 — reject until done; low priority)** are still open. No head-to-head Pio performance or solution-quality equivalence. Acc / time-to-Accuracy walls are not cutover blockers.
+Also landed on the Zig Study path: conditional action EV; stop-and-keep / pause / continue; versioned PSOL; check-down equity (+ buckets); made-hand categories; node locks + strategy edits; pot rake on frozen train; Windows NSIS Study installer (Zig sidecar only); flop/turn draw and backdoor tags in Study; reopen last checkpoint after a dead engine. Still open: compact saves, a durable batch queue, trainer packs, preflop, dual-session Compare, and ICM on the frozen train path (train pays chip + rake; `terminalPayoff` and best response apply ICM). No head-to-head Pio performance or solution-quality equivalence. Acc / time-to-Accuracy walls are not merge gates.
 
 Full-range check-down measures whether a large tree fits. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them. Assertion counts and sanitizer notes: [TESTING.md](../engineering/TESTING.md), [BENCHMARKS.md](../engineering/BENCHMARKS.md).
 
@@ -39,7 +39,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Full saves, resumable checkpoints, compact saves, lazy load | Versioned PSOL + recent files; compact/lazy open | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Study corpus + Zig digs; Pio parity unproven | M6 |
 | Full and combo node locking, editing, re-solving | Locks + resolve_locked + strategy edits over IPC; Compare still soft-gated | M7 |
-| Rake, ICM, opponent incentives | Pot-rake on Zig path; ICM reject-until-ZR-93 (low priority); incentives docs remain partial | M8 |
+| Rake, ICM, opponent incentives | Pot rake on frozen train; ICM only on `terminalPayoff` / best response; incentive path deltas on the frozen walk | M8 |
 | Turn/river and multi-flop aggregation, filtered reports | Client Compare runouts; aggregation open | M9 |
 | Scriptable engine, durable batch queue, exports | Zig CLI + typed IPC; durable queue open | M9 |
 | Drill trainer, packs, session statistics, hand histories | `hand-history 1` schema only | M11 |
@@ -73,7 +73,7 @@ Preserve explicit player signs and the existing root-centered net-chip utility. 
 
 ### M2 — Range and equity analysis with a useful study screen
 
-Create a shared range model/editor: 13×13 grid, exact combos, arbitrary nonnegative weights, brush/select controls, text import/export, copy/paste, undo/redo, and presets. Named presets under `configs/ranges` support nested folders via `GET /api/ranges` (`id` with `/`, `folder` field) and the Study Library UI. Clearly distinguish input weights, strategy-conditioned weights, compatible-pair marginals, and combo counts.
+Create a shared range model/editor: 13×13 grid, exact combos, arbitrary nonnegative weights, brush/select controls, text import/export, copy/paste, undo/redo, and presets. Named presets under `configs/ranges` support nested folders. Study Library reads them with Tauri FS (`library_*`). There is no `GET /api/ranges`. Clearly distinguish input weights, strategy-conditioned weights, compatible-pair marginals, and combo counts.
 
 Add exact showdown equity per combo and range, conditional on the current board and compatible opponent distribution. State whether an equity display assumes check-down, and keep that label separate from strategic EV. Check-down equity distributions are ten fixed buckets on the explorer equity JSON; the Study Equity tab draws histograms, a band filter, and an OOP vs IP chart from compact hand rows. Made-hand categories cover five-card boards; flop/turn expose multi-label draw/backdoor tags. Support a standalone equity-calculator workflow.
 
@@ -87,7 +87,7 @@ Version a canonical game/tree configuration. Include board, initial contribution
 
 Pio's documented builder includes sizing expressions, betting caps, forced lines and line editing [S3]. Turn these into leaf items in our ledger, including less-used spread-limit/limit-style options if required for literal reference coverage. A size restriction and a node lock are separate ledger items.
 
-Add a visual tree preview with add/remove/force line operations, explicit canonical action labels, saved templates, and a pre-build memory plan. Distinguish estimated engine allocation from measured allocation and whole-process memory. Validate before destructive replacement of a useful current solution. `street_solver --plan-memory` / `plan_street_memory` / `POST /api/plan-memory` use a mid-construction dry-run (`StreetBatchSolver` + `kPlanOnly`) that records the labeled peak without allocating the remaining training buffers. `TreeEditSet` Force/Remove/AddSize apply on `StreetGame` and `StreetBatchSolver` and round-trip in `street-config 1`; the Study Build workspace ships a visual line editor over `POST /api/tree-preview`.
+Add a visual tree preview with add/remove/force line operations, explicit canonical action labels, saved templates, and a pre-build memory plan. Distinguish estimated engine allocation from measured allocation and whole-process memory. Validate before destructive replacement of a useful current solution. Study Build calls host `tree_preview` and `plan_memory`. Both return `busy` while begin or train is running and do not replace the loaded session. `street-config 1` still round-trips `tree-edit` lines. The C++ commands `street_solver --plan-memory`, `POST /api/plan-memory`, and `POST /api/tree-preview` are removed.
 
 **Gate:** canonical configuration rebuilds the same tree; every displayed sizing rule has legal-edge-case tests; edits invalidate derived results; failed estimates/builds explain the offending configuration. Curated small trees match independent enumerators.
 
@@ -105,7 +105,7 @@ Design immutable solution revisions and an exclusive training owner. Browsing an
 
 Define a versioned native container with configuration, structural fingerprint, action/combo order, algorithm/version parameters, iteration/averaging state, precision, utility model, locks, and checksums. Store a study snapshot and a resumable training checkpoint as separate files.
 
-Implement atomic save/replace, load validation, bounded decompression and allocations, corruption/truncation handling, unsupported-version errors, and migration fixtures. Rebuild disposable rank caches at load time. A bounded recent-files MRU (sidecar + explorer dropdown/API) is in place; folders/tags, previews, and explicit overwrite behavior in the UI remain.
+Implement atomic save/replace, load validation, bounded decompression and allocations, corruption/truncation handling, unsupported-version errors, and migration fixtures. Rebuild disposable rank caches at load time. Study has a recent-files list and File → Reopen last checkpoint. Folders, tags, and previews remain open. There is no explorer HTTP recent-files API.
 
 **Gate:** fresh-process load reproduces strategies, values, node queries and configuration; continuation matches an uninterrupted run. Interrupted writes preserve the prior file. Over-budget load fails cleanly without leaking the old/new engine. Full-size saves work before compact/lazy formats.
 
@@ -119,13 +119,13 @@ Investigate exact suit isomorphisms, compact slot indexing, memory layout, SIMD,
 
 Address stored-index limits with checked wider/segmented representations when required. Keep the small enumerator as an oracle. Scale one batch solver, and publish a hardware profile for each supported tree size, including which trees fit in 1 GiB.
 
-Five-card boards already solve on the shared production tree. Cards still to come are two, one, or zero. `StreetGame` / `StreetBatchSolver` accept a five-card board and match `RiverGame` on the pinned fixtures. Explorer and `river_solver` both use that path (`river_solver` maps river JSON/CLI into `StreetConfig`). `RiverGame` is the five-card oracle; `RiverBatchSolver` is oracle/legacy only. Remaining M6 work is scale, algorithm alternatives, and time-to-accuracy — not a second river product kernel.
+Five-card boards solve on the Zig Session public tree. Cards still to come are two, one, or zero. `StreetGame`, `StreetBatchSolver`, `RiverGame`, `river_solver`, and `RiverBatchSolver` are removed C++ names. Remaining M6 work is scale, algorithm alternatives, and time-to-accuracy. There is no second river product kernel.
 
 **Gate:** each optimization passes an appropriate oracle/parity gate and budget failure tests. Five-card public-tree pins against `RiverGame` stay green. Algebra-preserving kernel changes retain pins; algorithm and precision changes compare on solution quality. Publish same-machine paired measurements, including evaluation cost and variance. Multi-size full-range betting trees must converge within a declared hardware envelope before broad practical parity is claimed.
 
 ### M7 — Strategy editing, node locking and constrained re-solving
 
-The immutable node-lock data model landed in `include/solver/node_lock.hpp`, and locked rows are applied during regret matching on `CfrTrainer`, `StreetBatchSolver`, and `RiverBatchSolver` (`solve` / `continue_*` / `run_*`). Explorer exposes lock CRUD, `resolve-locked` (reset + re-solve with Session baseline retention), `/api/compare`, and PSOL v2 `locks_text`. StreetBatch and RiverBatch key locks by public-node index with SelectedCombos on acting-player hand index. Explorer locking remains street-first. Free-form strategy edits land via `StrategyEditSet` + explorer `/strategy-edits` and the Study Strategy editor drawer (session overlays; not in PSOL v2).
+Node locks, `resolve_locked`, and strategy edits are Zig host IPC ops. Study has a Node Locking workspace and a strategy editor. Strategy edits are session overlays. Dual-session Compare stays off (`compare: false`). The C++ header `include/solver/node_lock.hpp` and Explorer `/api/compare` are removed.
 
 Implement immutable scenario forks, manual strategy editing, full-node and selected-combo locks, validated probability rows, lock visualization, copy/paste, presets, undo, unlock and reset. The UI separates editing a stored strategy from locking selected hands against later updates [S5].
 
@@ -137,7 +137,7 @@ Add baseline-versus-modified comparison: strategy changes, both-player EV change
 
 ### M8 — Rake, ICM and opponent incentives
 
-The dual-player payoff abstraction is in place: `PlayerPayoff` holds both utilities, and `ChipPayoff` reproduces today's root-centered chip rule with `utility[1] == -utility[0]` when rake is zero. `RiverGame::terminal_payoff` and `StreetGame::terminal_payoff` use that adapter with `config.rake`; street and river batch solvers apply the same rake at training terminals. Optional `IcmConfig` (`stacks` / `payouts`) on street/river configs wraps those chip terminals through `IcmPayoff::from_chip_terminal` when enabled (`docs/auxiliary/payoffs/ICM.md`); empty ICM stays bit-identical to chip/rake. Optional `IncentiveConfig` path-attributes ActionLabelMatch and CategoryTag deltas at those same terminals after chip/ICM (`docs/auxiliary/payoffs/INCENTIVES.md`); `edge-tag` lines assign mid-tree category tags on public edges so CategoryTag rules fire during solve; empty incentives stay bit-identical. CFR and best response maximize each seat's own modeled utility (player-1 incentives affect training/response). Pot-rake rate/cap collection (whole-chip floor, optional cap) and CLI/config wiring are documented in `docs/auxiliary/payoffs/RAKE.md`. Explorer exposes `rake_rate` / `rake_cap`, `icm_stacks` / `icm_payouts`, and `incentives` / `edge_tags` on solve and status.
+`PlayerPayoff` holds both utilities. With rake at zero, chip EV is zero-sum. Frozen CFR train applies rake and path-incentive deltas. It does not call `applyIcmTerminal`. `terminalPayoff` and best response do. Empty ICM stacks leave chip/rake terminals unchanged. `street-config 1` carries `rake-rate`, `rake-cap`, `icm-stacks`, `icm-payouts`, `incentive`, and `edge-tag`. See [RAKE.md](../payoffs/RAKE.md), [ICM.md](../payoffs/ICM.md), and [INCENTIVES.md](../payoffs/INCENTIVES.md). Explorer JSON keys for those fields are removed.
 
 Next: previews and scenario persistence, combo/draw auto-tags, runout incentives. Keep chip EV and modeled utility separately labeled. Do not claim chip Nash-gap under active incentives.
 
@@ -147,7 +147,7 @@ Pio exposes rake/ICM configuration and opponent profiling [S6, S7]. State conver
 
 ### M9 — Reports, automation and batch solving
 
-A first stable export is in: `street_solver` and `river_solver` accept `--report` and write a versioned `strategy-report 1` document (solve summary plus the root decision mixture). Deliver runout aggregation next: turn/river tables of action frequencies, EV/equity and hand-category breakdowns, sorting/filtering, charts and CSV. Extend to multi-flop reports over explicitly weighted board sets with board-texture filters. Pio's 3.9 release specifically adds richer flop aggregation [S8].
+The C++ CLIs `street_solver` and `river_solver` wrote a `strategy-report 1` document. Those binaries are removed. There is no strategy-report command on `main`. Still open: turn/river tables of action frequencies, EV/equity and hand-category breakdowns, sorting, filtering, charts, and CSV, then multi-flop reports over weighted boards. Pio's 3.9 release adds richer flop aggregation [S8].
 
 Every report states its weighting measure. Weight each report by compatible-pair mass. Distinguish ex-ante board frequency, frequency conditional on reaching a line, and an intentionally uniform study-board sample.
 

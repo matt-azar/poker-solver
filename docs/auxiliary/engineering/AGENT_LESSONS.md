@@ -80,7 +80,7 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 | stderr not drained | Windows ready handshake deadlocks when parent redirects stderr | Drain sidecar stderr during spawn/ready (#288) |
 | Lifecycle mutex around whole RPC | Mid-train `values` stalls behind `solve` | Hold lifecycle mutex only for spawn/take/kill; short stdin write lock; demux stdout by `request_id` (#282) |
 | Timeout kills train | One slow RPC aborts an in-flight solve | Kill on write/`Broken pipe`/shutdown; **don't** nuke train on a single RPC timeout (#289) |
-| Preview mutates session | Build Preview / plan-memory wipes a loaded Study | `tree_preview` / `plan_memory` must temp-compile **without** `begin_config` / `clearSolution` (#295) |
+| Preview mutates session or runs during train | Build Preview wipes a loaded Study, or status/Stop stall while a flop preview recompiles | `tree_preview` / `plan_memory` temp-compile **without** `begin_config` / `clearSolution` (#295). While begin or train is running they return host error `busy` (ZR-158). |
 | Status omits iterations / sync begin | Packaged flop Solve looks frozen at “Solving — 0” until done | Host `status` must publish `iterations` + `iterations_requested`; run `begin_config` **off** the stdin loop so polls stay live during flop compile; Study awaits admit only and polls for progress (ZR-120) |
 | Continue re-begins config | Continue broken after pause | `continueSolve` = host `solve` on the **open** session (no `begin_config`); mint a fresh job id (#292) |
 | Study `stop` ≠ host cancel | Stop leaves jobs running | Map Study stop → host job **cancel** (#284) |
@@ -228,14 +228,13 @@ Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via no
 
 | Kind | Format | Example |
 | --- | --- | --- |
-| Street CLI / PSOL canonical | `street-config 1` text, LF, trailing newline | `configs/street_default.txt` |
-| River explorer default JSON | JSON field names (`effective_stack`, arrays) | `configs/river_default.json` |
-| River canonical text | `river-config 1` | `include/game/river_config_text.hpp` |
+| Live tree text | `street-config 1`, LF, trailing newline | `configs/street_default.txt` |
+| Old river JSON | Not parsed by Zig. File remains as a fixture | `configs/river_default.json` |
+| Old river text | `river-config 1` parser is gone | `include/game/river_config_text.hpp` was removed |
 
-Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fraction.  
-`--config` loads tree fields; **iterations / algorithm / accuracy / `--reference` / `--frozen` stay on the CLI** and override the file.
+Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fraction. Unknown keys fail parse. Iterations, algorithm, and accuracy are solve parameters, not street-config fields.
 
-**Don't:** Invent JSON street configs or put iteration caps inside `street-config 1`.
+**Don't:** Invent JSON street configs, revive `river-config 1`, or put iteration caps inside `street-config 1`.
 
 ### Study / street-config bet arrays
 
@@ -338,6 +337,12 @@ On historically flop/turn-only pages, river `/values` returned 400 until river E
 
 Check-down equity is a **fraction of the pot** under check-down. Strategic EV is **root-centered chips**. Keep units and labels separate (`docs/EQUITY.md`, `StreetNodeEquity`).
 
+### ICM is not on the frozen train path
+
+`terminalPayoff`, traversal expected value, and best response call `applyIcmTerminal`. Frozen CFR train (`frozen_walk.applyTerminal`) uses chip + rake + path incentives and does not. Study Settings sends `icm-stacks` when Use ICM is checked. That solve is not an ICM equilibrium. Do not write that Study rejects ICM, and do not write that a checked ICM box trained an ICM strategy.
+
+**Pointers:** `docs/auxiliary/payoffs/ICM.md`, `engine/src/kernel/terminal.zig`, `engine/src/solve/frozen_walk.zig`.
+
 Made-hand **categories** (when present) are category mass on a **five-card** board — not draws/backdoors unless explicitly implemented.
 
 ### Memory budget
@@ -388,7 +393,7 @@ Release A emphasis: M0→M5 plus **core M6**. Most `FEATURE_PARITY.md` rows are 
 | M2 study screen “done” | Categories/draws/composition/undo still thin even if one slice lands |
 | M5 saves “done” | PSOL exists; compact/lazy/multi-file library does not |
 | M6 “done” | Zig Session five-card pins + study corpus; Pio timing/quality unproven |
-| M8 rake/ICM | Pot-rake on Zig path; **ICM Study solves reject until ZR-93** (low priority) |
+| M8 rake/ICM | Pot rake is on the frozen train path. ICM is not: train uses chip+rake; `terminalPayoff` and best response apply ICM. Study does not reject an ICM config. |
 | “As fast as Pio” | Forbidden without matched protocol (`docs/auxiliary/planning/ROADMAP.md` §6); Acc walls ≠ cutover gates |
 
 **Do:** Update ledger rows only with the demonstrating commit.  

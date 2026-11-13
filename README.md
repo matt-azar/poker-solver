@@ -2,7 +2,7 @@
 
 Heads-up no-limit Texas Hold'em GTO solver (**Zig**) with a local Study workstation.
 
-**Product surface:** postflop Study through the Zig `solver-engine` sidecar and the React Study UI (`desktop/`) — solve, browse, lock, compare, save/reopen, and analyze. A Windows NSIS installer wraps that stack. Details: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md). Doc index: [docs/README.md](docs/README.md).
+**Product surface:** postflop Study through the Zig `solver-engine` sidecar and the React Study UI (`desktop/`) — solve, browse, lock, compare runouts, save/reopen, and analyze. The Compare workspace (two sessions) is not available. A Windows NSIS installer wraps that stack. Details: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md). Doc index: [docs/README.md](docs/README.md).
 
 Flop, turn, and river share one public betting tree. Convergence is an equilibrium of the configured bet-size tree.
 

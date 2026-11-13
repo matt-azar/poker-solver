@@ -49,10 +49,11 @@ IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/
 | Resolve locked | `resolve_locked` | Solver menu + drawer | New solution + baseline | client IPC tests (ZR-100) |
 | Compare | *(soft-gated)* | Compare workspace | Dual-session baseline not available over Zig IPC yet (`compare: false`) | — |
 | Save / Open | `save`, `open` | File menu / Build | PSOL + locks; invalid strategy rows rejected before replace | contract smoke; checkpoint vitest |
+| Reopen last checkpoint | `open` on the last saved path | File menu and status bar | Runs only when a checkpoint path was recorded; does not invent a solve after a crash | `sessionRecovery` / study store recovery tests |
 | Recent / templates / ranges | Tauri FS `library_*` (not engine HTTP) | Library + File menu | Nested `configs/ranges`; flat `configs/templates`; staged via `bundle.resources` | library IPC vitest; `check:library-assets` |
 | Config parse | local TS (`streetConfigText`) | Build | street/river text only; street echoes `tree_edits`; no host session mutate | `streetConfigText.test.ts` |
 | Memory plan dry-run | `plan_memory` | Collapsible Build preflight shows labeled peak vs budget | Labeled `estimated_peak_bytes`; not RSS; temp compile | TreeLineEditor tests |
-| Tree preview / line edits | `tree_preview` | Mounted collapsible Preview tree; Force/Remove/Add size → draft `tree_edits`; same `buildJob` serializer as Solve | Canonical labels; must not wipe loaded Study; failed preview leaves solution | tree-edit vitest |
+| Tree preview / line edits | `tree_preview` | Mounted collapsible Preview tree; Force/Remove/Add size → draft `tree_edits`; same `buildJob` serializer as Solve | Canonical labels; temp compile only; host returns `busy` while begin or train is running; failed preview leaves the loaded solution | tree-edit vitest |
 | Betting tree Save / Open | Client JSON (`holdem-study-betting-tree` v1) in localStorage | Build → Betting tree catalogue | Sizes, caps, `tree_edits` only; flat list (no folders) | `bettingTreeCatalogue` |
 | Compare runouts | Client `getNode` + rewrite | Study dock + context-strip | Desktop orchestration; no dedicated host report op | `lineCardReport` + LowerDock |
 | Create Build spot from here | Client draft from node + `get_config` | Context strip → Build draft | Midstreet (facing bet / contrib) not supported; asymmetric stacks use `min` | `build/transferFromStudy` |
@@ -75,7 +76,8 @@ IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/
 | Contracts + `EngineClient` | Done |
 | Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
 | Analysis dock + Build + Library | Done — Equity hist + band filter + OOP vs IP chart; Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
-| Locks + Strategy edits + Compare | Done |
+| Locks + strategy edits | Done |
+| Compare workspace | Not available — `compare: false` in `ipcCapabilities.ts` (needs a second session) |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |
 | Visual / a11y / perf polish | Partial — focus-visible, reduced-motion, compact ≤1280, light/dark themes |
 

@@ -77,7 +77,9 @@ Player 0/1 utilities are net chips (zero-sum when rake is zero). `acting_player`
 
 On the street/river path, player 0 is out of position. Chance deals ordered hand pairs from the joint range distribution, then later board cards when any remain.
 
-## Solver storage
+## Solver storage (removed C++ layout)
+
+This section describes `StreetBatchSolver` storage. That type is not in the tree. Zig train tables are under `engine/src/solve/`.
 
 `StreetBatchSolver` stores regret, strategy-sum, and one shared sigma workspace as `TableScalar` (`float`) tables, with a compact offset table from information set to first action. Slot lookup is keyed by public node, legal runout (off-board card or ordered pair), and supported hand — not a dense `52×52×hands` map. One-action decisions omit stored rows (implicit probability 1). The sigma workspace holds the frozen strategy during a training pass and the normalized average during evaluation; those two views are mutually exclusive, so they share one full-size buffer. Counterfactual values, NashConv, and other sensitive reductions stay double. `CfrTrainer` (Hold’em reference enumerators) and legacy `RiverBatchSolver` keep `double` tables. The action-count scratch limit is 8 per information set. See `include/solver/table_scalar.hpp` and [STREETS.md](STREETS.md).
 

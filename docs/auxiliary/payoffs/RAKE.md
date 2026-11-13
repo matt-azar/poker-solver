@@ -1,18 +1,17 @@
 # Pot rake
 
-M8 pot-rake model on `ChipPayoff`, wired through street/river training terminals.
+Pot rake on chip terminals. Frozen CFR train includes it.
 
 ## Config
 
-`RakeConfig` has a `rate` in `[0, 1]` and a chip `cap` with `cap >= 0`. A zero
-cap means uncapped. Invalid values fail `validate()` / `valid()`.
+`rate` is in `[0, 1]`. `cap` is chips, `cap >= 0`. A zero cap means uncapped.
+Invalid values fail validation.
 
-`StreetConfig::rake` and `RiverConfig::rake` carry the same fields. Defaults are
-zero (no rake). `street-config 1` / `river-config 1` always write `rake-rate` and
-`rake-cap`. CLI flags `--rake-rate` and `--rake-cap` set them on `street_solver`
-and `river_solver`. Explorer Job JSON uses flat keys `rake_rate` and `rake_cap`
-(same validation); the GUI solve form sends them and status echoes them.
-Building a `StreetGame` or `RiverGame` with an invalid rake rejects the config.
+`street-config 1` writes `rake-rate` and `rake-cap`. Defaults are zero (no rake).
+Zig compile reads those fields. Frozen CFR train applies the rake inside
+`chipTerminal`. The C++ flags `--rake-rate` / `--rake-cap` on `street_solver`
+and `river_solver`, and Explorer JSON keys `rake_rate` / `rake_cap`, are
+removed. An invalid rake fails config validation.
 
 ## Collection
 
@@ -42,12 +41,10 @@ Fold win, pot 100, contrib 100/0, IP folds, 5%: no-rake `(50, -50)` becomes
 
 ## Solve path
 
-`StreetGame::terminal_payoff` and `RiverGame::terminal_payoff` pass `config.rake`
-into `ChipPayoff::terminal`. `StreetBatchSolver` and `RiverBatchSolver` use the
-same rake at public-tree / per-deal terminals, including the frozen showdown
-kernel (winner pays full rake; ties split it). CFR still trains on the player-0
-scalar. Nash-gap and best-response helpers that assume chip zero-sum remain
-approximate under positive rake (same caveat as ICM). Opponent incentives are
-out of scope here. Optional ICM wraps these chip terminals afterward; see
-[ICM.md](ICM.md). Zero rake reproduces prior chip terminals and pinned
-fixtures bit-identically.
+`chipTerminal` applies this rake. Frozen CFR train calls `chipTerminal`, so
+training sees the rake. Winner pays the full rake; ties split it. Nash-gap
+helpers that assume chip zero-sum stay approximate when rake is positive.
+Incentives are a separate overlay. ICM is not applied on the frozen train
+path; see [ICM.md](ICM.md). Zero rake keeps the no-rake chip terminals. The
+old C++ sites were `StreetGame::terminal_payoff`, `RiverGame::terminal_payoff`,
+`StreetBatchSolver`, and `RiverBatchSolver`.

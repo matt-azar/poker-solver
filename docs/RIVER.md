@@ -18,7 +18,7 @@ Player 0's utility is net chips from the start of the river:
 
 An uncalled raise is not profit. Betting 100 into a pot of 100 and getting a fold wins 50, the same as winning a check-down. A called bet that wins is worth `pot / 2` plus the call.
 
-Optional pot rake (`RiverConfig::rake`, CLI `--rake-rate` / `--rake-cap`, and `rake-rate` / `rake-cap` on `river-config 1`) subtracts the house take from the winner, or half each on a tie. Zero rake keeps the chip rule above bit-for-bit. See [RAKE.md](auxiliary/payoffs/RAKE.md). Optional tournament ICM (`RiverConfig::icm`, CLI `--icm-stacks` / `--icm-payouts`) wraps chip/rake terminals into equity deltas; empty ICM stays bit-identical. See [ICM.md](auxiliary/payoffs/ICM.md). Optional action-label incentives (`RiverConfig::incentives`, CLI `--incentive`) are path-attributed at terminals after chip/ICM; see [INCENTIVES.md](auxiliary/payoffs/INCENTIVES.md).
+Optional pot rake (`rake-rate` / `rake-cap` on `street-config 1`) subtracts the house take from the winner, or half each on a tie. Zero rake keeps the chip rule above bit-for-bit. See [RAKE.md](auxiliary/payoffs/RAKE.md). ICM stacks on that same file are applied by `terminalPayoff` and best response, not by frozen CFR train. See [ICM.md](auxiliary/payoffs/ICM.md). Action-label incentives are path deltas after the chip terminal. See [INCENTIVES.md](auxiliary/payoffs/INCENTIVES.md). There is no `river-config 1` parser and no `river_solver` flag for these fields.
 
 ## Sizes
 
@@ -45,9 +45,11 @@ Check-down is worth +50 with aces and -50 with fives. A fold to the all-in wins 
 - Kings call with probability 1/2.
 - Player 0's value is +25.
 
-`tests/unit/test_river.cpp` checks this profile. The solver computes it.
+`tests/unit/test_river.cpp` checked this profile. That file is gone. The equilibrium above is the definition of the spot.
 
-## Command line
+## Command line (removed C++ CLI)
+
+`river_solver` is not in this tree. The block below is the old command shape. Do not run it. Five-card solves go through `solver-engine` with a five-card `street-config 1` file.
 
 ```sh
 river_solver --config configs/river_default.json
@@ -59,7 +61,7 @@ river_solver --iterations 100000 --time-limit 5
 river_solver --iterations 200 --report report.txt
 ```
 
-`--time-limit SECONDS` stops at the next iteration boundary once that many wall-clock seconds have elapsed. The solver prints `time_limit_reached: 1` when the wall clock caused the stop. The same flag exists on `street_solver`. `--report FILE` writes a versioned `strategy-report 1` summary after the solve.
+On that removed CLI, `--time-limit SECONDS` stopped at the next iteration boundary and printed `time_limit_reached: 1` when the wall clock caused the stop. `--report FILE` wrote a `strategy-report 1` summary. Neither flag exists on `solver-engine`.
 
 The reported Nash gap is NashConv, the sum of unilateral BR gains
 `(u0(BR0)-u0(σ̄)) + (u1(BR1)-u1(σ̄))`. Under zero-sum chips that equals
@@ -67,6 +69,6 @@ The reported Nash gap is NashConv, the sum of unilateral BR gains
 `--accuracy` defaults to pot fraction; `--gap-threshold` is Accuracy in chips.
 Player 0 is out of position.
 
-## Strategy report
+## Strategy report (removed C++ export)
 
-`--report FILE` writes a `strategy-report 1` document after the solve (`-` for stdout). Fields match the street solver export. On the public-tree path, root-action probabilities are the **reach-weighted** mixture from root inspection (`weighting reach`), the same aggregation as `street_solver`. `--reference` falls back to an unweighted open-infoset mean. There is still no batch queue.
+`river_solver --report FILE` wrote a `strategy-report 1` document (`-` for stdout). There is no report command on `main`. On the old public-tree path, root-action probabilities were the reach-weighted mixture (`weighting reach`). `--reference` used an unweighted open-infoset mean. There is still no batch queue.

@@ -1,6 +1,6 @@
 # Opponent incentives
 
-Action-label / category-tag utility overlay on a base `PlayerPayoff` (chip or ICM), wired through street/river solve terminals, dual-utility best response / CFR, and explorer Job JSON/GUI. Chip EV: [RAKE.md](RAKE.md). ICM: [ICM.md](ICM.md).
+Action-label / category-tag utility overlay on a base payoff (chip, then optional ICM on the paths that call it). Chip EV: [RAKE.md](RAKE.md). ICM: [ICM.md](ICM.md). Explorer Job JSON is removed.
 
 ## Model
 
@@ -34,10 +34,9 @@ Base chip terminal `(+10, -10)`:
 
 ## Config
 
-`IncentiveConfig` carries `rules[]` and optional `edge_tags[]`. Empty rules mean
-incentives are off. `StreetConfig::incentives` and `RiverConfig::incentives` are
-optional. `street-config 1` / `river-config 1` emit one `incentive` line per
-rule and one `edge-tag` line per tag assignment:
+Empty rules mean incentives are off. `street-config 1` writes one `incentive`
+line per rule and one `edge-tag` line per tag assignment. There is no
+`river-config 1` parser. Example:
 
 ```
 incentive label 0 b100 3.5
@@ -46,11 +45,13 @@ edge-tag b100 bluff
 edge-tag 1 f give_up
 ```
 
-CLI:
+Current input is `street-config 1`:
 
-- `--incentive kind,player,key,delta` (repeatable) on `street_solver` /
-  `river_solver`
-- `--edge-tag [player,]action,tag[,tag...]` (repeatable)
+- one `incentive` line per rule
+- one `edge-tag` line per tag assignment
+
+The old CLI flags `--incentive` and `--edge-tag` on `street_solver` /
+`river_solver` are removed.
 
 Preferred ActionLabelMatch keys are the compact tokens also used by tree edits
 (`f`, `c`, `call`, `b100`, `r200`, …); display chip labels (`Fold`, `Bet 100`, …)
@@ -58,14 +59,13 @@ also match on the solve path.
 
 ### How CategoryTag tags are assigned
 
-Solve-path edges are public betting actions. Category tags are **not** inferred
-from hand strength in this milestone. Configure them explicitly:
+Solve-path edges are public betting actions. Category tags are not inferred
+from hand strength. Configure them explicitly:
 
-1. Add an `edge-tag` (config / CLI / Job `edge_tags`) that matches the edge's
-   compact token or display label. Optional `player` `0`/`1` restricts the seat;
-   omitted / `-1` means either seat.
-2. Matching edges receive those tags via `attach_edge_tags` when the root-to-
-   terminal path is built (`StreetGame` / `RiverGame` / street & river batch).
+1. Add an `edge-tag` line that matches the edge's compact token or display
+   label. Optional `player` `0`/`1` restricts the seat; omitted means either seat.
+2. Compile copies those tags onto the public edge. The old C++ names were
+   `attach_edge_tags` on `StreetGame` / `RiverGame`.
 3. `incentive tag PLAYER KEY DELTA` then fires when `KEY` appears on that edge's
    tag list and the acting seat equals `PLAYER`.
 
@@ -74,16 +74,11 @@ match on the solve path. Combo / draw category auto-tagging remains ahead.
 
 ## Solve path
 
-After `ChipPayoff::terminal(..., rake)` and optional ICM, matching rules are
-path-attributed at terminals: every betting action on the root-to-terminal path
-contributes its matching deltas via `apply_path_incentives`. Sites:
-
-- `StreetGame::terminal_payoff` / `RiverGame::terminal_payoff`
-- `StreetBatch` serial `payoff` / `apply_terminal` (precomputed `incentive_u0` /
-  `incentive_u1`)
-- `RiverBatchSolver::payoff` (precomputed `incentive_u0` / `incentive_u1`)
-
-Empty incentives reproduce prior chip/ICM terminals bit-identically.
+Compile stores path incentive deltas on the terminal node as `incentive_u0`
+and `incentive_u1`. Frozen CFR train adds those deltas after `chipTerminal`.
+`terminalPayoff` adds them after the optional ICM wrap. Empty rules leave the
+base terminal unchanged. The old C++ sites were `StreetGame::terminal_payoff`,
+`RiverGame::terminal_payoff`, `StreetBatch`, and `RiverBatchSolver`.
 
 ## Dual-utility training and best response
 

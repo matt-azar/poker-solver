@@ -46,18 +46,22 @@ Zero-ICM / plain-chip mode is unchanged: keep calling `ChipPayoff::terminal`.
 ## Config
 
 `IcmConfig` carries tournament `stacks[]` and `payouts[]`. Empty `stacks`
-means ICM is off. `StreetConfig::stack` / `RiverConfig::stack` remain the
-betting effective stack for the hand — not tournament ICM stacks.
+means ICM is off. The street-config `stack` field is the betting effective
+stack for the hand, not the tournament ICM stacks.
 
-`street-config 1` / `river-config 1` emit `icm-stacks` / `icm-payouts` only
-when stacks are non-empty. Empty or omitted stacks leave the chip/rake path
-unchanged. Zig keeps Malmuth-Harville math pins under `engine/`; Study still
-serializes the keys in draft/config text.
+`street-config 1` writes `icm-stacks` / `icm-payouts` only when stacks are
+non-empty. There is no `river-config 1` parser. Empty or omitted stacks leave
+the chip/rake path unchanged. Zig keeps Malmuth-Harville math pins under
+`engine/`. Study serializes the keys in draft/config text.
 
-**Product stance (ZR-93):** ICM Study solves stay **reject-until-done**
-(consistent ICM in train/BR/EV; payout units; busted finishing-place credit).
-ICM is **low priority — not a near-term release blocker**. Do not invent a
-finished Study ICM shipping claim from the math pins alone.
+Study does not reject an ICM config. Settings → Use ICM writes `icm-stacks`
+and `icm-payouts` into the street-config text. Compile accepts that text when
+`IcmConfig.validate` passes.
+
+Frozen CFR train does not use those stacks. `frozen_walk.applyTerminal` pays
+chip + rake + path incentives. `terminalPayoff`, traversal expected value, and
+best response call `applyIcmTerminal`. A solve with Use ICM checked is not an
+ICM equilibrium. Math pins are not a finished ICM product.
 
 Historical C++ Explorer Job JSON used flat keys `icm_stacks` / `icm_payouts`
 and returned HTTP 400 on invalid values; that HTTP surface is removed on
@@ -65,13 +69,13 @@ and returned HTTP 400 on invalid values; that HTTP surface is removed on
 
 ## Solve path
 
-When ICM is enabled on a compiled game, chip/rake terminals are wrapped with
-the chip→ICM delta (`applyIcmTerminal` / historical `IcmPayoff::from_chip_terminal`).
-Empty ICM reproduces chip/rake terminals bit-identically. HU WTA fold and
-check-down pins match the chip→ICM examples above (chip `+50` → ICM `+2.5` on
-equal 1000 stacks with prize 100). Historical C++ sites were
-`StreetGame` / `StreetBatch` / `RiverBatchSolver` payoffs; Zig Session terminals
-follow the same wrap once ZR-93 completeness lands for Study solves.
+`applyIcmTerminal` (historical name `IcmPayoff::from_chip_terminal`) turns a
+chip terminal into an ICM delta. Empty stacks leave the chip/rake terminal
+unchanged. HU WTA fold and check-down pins match the examples above (chip
+`+50` → ICM `+2.5` on equal 1000 stacks with prize 100). Call sites that use
+the wrap: `engine/src/kernel/terminal.zig`, traversal expected value, and best
+response. The frozen train walk does not call it. Historical C++ sites were
+`StreetGame` / `StreetBatch` / `RiverBatchSolver`.
 
 Nash-gap and best-response helpers that assume chip zero-sum remain
 approximate under ICM (same caveat as positive rake). Multiway spectators are

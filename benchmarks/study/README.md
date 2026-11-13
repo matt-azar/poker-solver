@@ -133,17 +133,19 @@ Other runner flags:
 
 Raw stdout, stderr, `results.json`, and `summary.md` are written to the output directory. `benchmarks/study/out/` is gitignored by `benchmarks/study/.gitignore`. Do not commit those logs. The committed record of hardware, source revision, outcomes, and timings is `benchmarks/study/RESULTS.md`.
 
-Each `results.json` also records provenance: checkout SHA/branch/dirty, SHA-256 digests of the solver binaries and any `--config` files, CMake toolchain fields from the build directory, host CPU/RAM, and per-case argv / thread / memory notes. `street_solver`, `river_solver`, and `explorer` accept `--version` (`poker_solver <version> git=<sha|unknown>`). Explorer `GET /api/ready` includes additive `version` and `git_sha` fields without bumping ready protocol `1`.
+Each old `results.json` recorded provenance: checkout SHA/branch/dirty, SHA-256 digests of the solver binaries and any `--config` files, CMake toolchain fields from the build directory, host CPU/RAM, and per-case argv / thread / memory notes. `street_solver`, `river_solver`, and `explorer` accepted `--version` (`poker_solver <version> git=<sha|unknown>`). Explorer `GET /api/ready` included `version` and `git_sha` without bumping ready protocol `1`. Those binaries are gone.
 
-CI runs the diagnostic smoke set (`--cases smoke`) after the Linux Release build to keep outcome classification wired. That lane is contended and is not a performance claim.
+CI does not run `benchmarks/run_study_benchmarks.py`. Zig CI runs `zig build test`, the ready smoke, the Study contract smoke, and the Linux overlap-actions smoke. See [TESTING.md](../../docs/auxiliary/engineering/TESTING.md).
 
-## Flushed phases
+## Flushed phases (removed C++ CLI)
 
-`street_solver` writes `phase:` records to stdout and flushes each one. The records are `start`, `construction`, `cache_init`, `training`, `checkpoint`, and `final`. A checkpoint is one accuracy evaluation. The runner keeps the last value of each key, so a killed process still yields the last flushed phase. `phase: final` is a completed report. Any other phase means the process was interrupted. A checkpoint's iteration count is the last finished accuracy check, not an iteration still in progress. Construction does not print cache, train, or evaluation clocks. Those clocks are zero until their phase has run, and printing them early would look like a measurement.
+`street_solver` wrote `phase:` records to stdout and flushed each one. That binary is gone. The records were `start`, `construction`, `cache_init`, `training`, `checkpoint`, and `final`. A checkpoint is one accuracy evaluation. The runner keeps the last value of each key, so a killed process still yields the last flushed phase. `phase: final` is a completed report. Any other phase means the process was interrupted. A checkpoint's iteration count is the last finished accuracy check, not an iteration still in progress. Construction does not print cache, train, or evaluation clocks. Those clocks are zero until their phase has run, and printing them early would look like a measurement.
 
 `street_solver --reference` prints `start` and `final` only. The reference walk has no construction or cache split.
 
-## CLI notes
+## CLI notes (removed C++ binaries)
+
+The bullets below describe `street_solver` and `river_solver`. Those binaries are not in the tree.
 
 - When `street_solver --accuracy` is set and `--eval-every` is omitted, the check cadence is 20. `--eval-every N` changes it. `N` must be a positive integer.
 - `river_solver --gap-threshold` is Pio Accuracy in chips. `river_solver --accuracy` defaults to a pot fraction. Both accept `--eval-every` (alias `--eval-interval`).
@@ -155,5 +157,7 @@ CI runs the diagnostic smoke set (`--cases smoke`) after the Linux Release build
 - If `street_solver` raise flags and raise multiples are both omitted, the CLI copies the shared bet sizes into the shared raise sizes. The street-config fixtures list raises explicitly. The engine does not perform that copy.
 
 ## Quiet-machine note
+
+This note is about the retired C++ runner above. Do not treat it as a current benchmark command.
 
 Run the reference cases when the machine is not compiling, solving, or running another heavy analysis. Simultaneous work contaminates wall time. Label that run `contended` and do not use it as a speed claim. If the full iteration caps cannot be finished, leave the cases unchanged, keep any smaller run under a different output directory or a different case id, and mark the reference timing pending.

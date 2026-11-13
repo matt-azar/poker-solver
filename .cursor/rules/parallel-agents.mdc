@@ -25,6 +25,6 @@ alwaysApply: true
 - Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; Equity is check-down pot fraction ≠ chip EV.
 - Study node equity must be reach-weighted at the selected node; Equity Calculator jobs are a separate IPC surface. Local EV: `local_offset` + Fold from `values.actions`.
 - Heap-stable runout ranks under MT; train freeze must apply locks; frozen-root aev reports `Q_i`.
-- Street config is `street-config 1` text; empty bet arrays mean check-only; absent keys mean defaults. No Flop donk control. Preview/plan-memory must not mutate Session.
+- Street config is `street-config 1` text; empty bet arrays mean check-only; absent keys mean defaults. No Flop donk control. Preview/plan-memory must not mutate Session and returns `busy` while begin or train is running. Frozen CFR train does not apply ICM.
 - AI packs: edit `docs/ai-context/source/` then `npm run sync:ai-context` / CI `check:ai-context`. Do not hand-edit generated packs.
 - Do not change `LICENSE`. Update `docs/auxiliary/planning/FEATURE_PARITY.md` only with the commit that demonstrates the row.

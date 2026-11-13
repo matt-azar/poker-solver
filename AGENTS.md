@@ -8,6 +8,7 @@ Also:
 
 - Do not change `LICENSE` / SPDX (see `.cursor/rules/licensing.mdc`).
 - On `main`, the product engine is Zig (`engine/` / `solver-engine` typed IPC). Do **not** reintroduce `holdem-explorer`, CMake product builds, HTTP `:8765` fallbacks, or `fetch("")` while IPC is active.
+- `tree_preview` / `plan_memory` return `busy` while begin or train is running, and must not mutate the session. Frozen CFR train does not apply ICM.
 - After Study UI / analysis changes: desktop tests + `npx tsc -b`; after assistant/UI label moves: `cd desktop && npm run check:ai-context`.
 - After Zig engine/host changes: `zig build` + `zig build test` (prefer `-Dcpu=x86_64_v2` for Windows artifacts).
 - Refresh playbook: [`docs/auxiliary/engineering/AGENT_LESSONS_REFRESH.md`](docs/auxiliary/engineering/AGENT_LESSONS_REFRESH.md).
