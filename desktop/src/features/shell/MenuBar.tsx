@@ -28,6 +28,12 @@ import {
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
 import { canOfferReopenLastCheckpoint } from "../../domain/sessionRecovery";
+import {
+  copyDiagnosticsBundle,
+  copyTextToClipboard,
+  openDiagnosticsFolder,
+} from "../../platform/diagnostics";
+import { isTauriRuntime } from "../../platform";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -490,11 +496,46 @@ function Menu({
 }
 
 export function HelpOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [diagMessage, setDiagMessage] = useState<string | null>(null);
+  const [diagBusy, setDiagBusy] = useState(false);
+
+  async function onOpenDiagnostics() {
+    setDiagBusy(true);
+    setDiagMessage(null);
+    try {
+      const path = await openDiagnosticsFolder();
+      setDiagMessage(`Opened: ${path}`);
+    } catch (err) {
+      setDiagMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDiagBusy(false);
+    }
+  }
+
+  async function onCopyDiagnostics() {
+    setDiagBusy(true);
+    setDiagMessage(null);
+    try {
+      const path = await copyDiagnosticsBundle();
+      try {
+        await copyTextToClipboard(path);
+        setDiagMessage(`Copied zip path: ${path}`);
+      } catch {
+        setDiagMessage(`Zip ready (copy path manually): ${path}`);
+      }
+    } catch (err) {
+      setDiagMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDiagBusy(false);
+    }
+  }
+
   if (!open) {
     return null;
   }
+
   return (
-    <div className="help-overlay" role="dialog" aria-label="Keyboard shortcuts">
+    <div className="help-overlay" role="dialog" aria-label="Help">
       <div className="help-panel">
         <h2>Keyboard shortcuts</h2>
         <ul>
@@ -507,6 +548,48 @@ export function HelpOverlay({ open, onClose }: { open: boolean; onClose: () => v
         <p className="muted" style={{ marginTop: 12 }}>
           Shortcuts are ignored while typing in a field.
         </p>
+        <h2 style={{ marginTop: 20 }}>Diagnostics</h2>
+        <p className="muted">
+          After a hang or engine crash, zip the diagnostics folder (or copy the zip path)
+          and send it with a short repro. Hard-crash dumps may also appear under CrashDumps.
+        </p>
+        <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="toolbar-btn"
+            disabled={diagBusy || !isTauriRuntime()}
+            title={
+              isTauriRuntime()
+                ? "Open %LOCALAPPDATA%\\Holdem Study\\diagnostics"
+                : "Available in the desktop app"
+            }
+            onClick={() => {
+              void onOpenDiagnostics();
+            }}
+          >
+            Open diagnostics folder
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
+            disabled={diagBusy || !isTauriRuntime()}
+            title={
+              isTauriRuntime()
+                ? "Build a zip and copy its path"
+                : "Available in the desktop app"
+            }
+            onClick={() => {
+              void onCopyDiagnostics();
+            }}
+          >
+            Copy diagnostics zip
+          </button>
+        </div>
+        {diagMessage ? (
+          <p className="muted" style={{ marginTop: 8 }} data-testid="diagnostics-message">
+            {diagMessage}
+          </p>
+        ) : null}
         <div style={{ marginTop: 12, textAlign: "right" }}>
           <button type="button" className="toolbar-btn" onClick={onClose}>
             Close

@@ -68,6 +68,7 @@ Street sizes stay on `treeEdits` / `intent.treePreset`: `oopFlop`, `ipFlop`, `oo
 - Local postflop solver: React Study UI + `explorer` engine. OpenAI is optional; **Solve** is local.
 - Workspaces (menu bar tabs): **Study**, **Build**, **Equity**, **Compare**, **Library**.
 - Primary AI surface: floating **Study assistant** — menu bar **Assistant** toggle. Hideable, movable, resizable. Available on every workspace. Keyboard shortcuts stay on `?` (Help overlay).
+- Help overlay (`?`) also offers **Open diagnostics folder** / **Copy diagnostics zip** (desktop only; local crash/session logs under `%LOCALAPPDATA%\Holdem Study\diagnostics`).
 - There is **no** separate Build-page Setup assistant and **no** Help-menu “Study assistant…” entry.
 
 ### Apply / write behavior

@@ -32,6 +32,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 
+use crate::diagnostics;
+
 const PROTOCOL: u32 = 2;
 const SIDECAR_BASENAME: &str = "solver-engine";
 const EXTERNAL_BIN: &str = "binaries/solver-engine";
@@ -87,6 +89,8 @@ pub struct SolverEngineState {
     session: Mutex<Option<PipeSession>>,
     /// Serializes ensure probe/kill/spawn so only one reconnect runs at a time.
     reconnect: Mutex<()>,
+    /// Last IPC op attempted (for last-fault.json).
+    last_op: Mutex<Option<String>>,
 }
 
 impl SolverEngineState {
@@ -94,7 +98,28 @@ impl SolverEngineState {
         Self {
             session: Mutex::new(None),
             reconnect: Mutex::new(()),
+            last_op: Mutex::new(None),
         }
+    }
+
+    fn remember_op(&self, op: &str) {
+        if let Ok(mut slot) = self.last_op.lock() {
+            *slot = Some(op.to_string());
+        }
+    }
+
+    pub fn last_op_snapshot(&self) -> Option<String> {
+        self.last_op
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+    }
+
+    pub fn launch_id_snapshot(&self) -> Option<String> {
+        self.session
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|s| s.launch_id.clone()))
     }
 }
 
@@ -276,8 +301,22 @@ fn reader_loop(mut stdout: ChildStdout, io: Arc<SessionIo>) {
     fail_all_pending(&io, "solver-engine pipe closed");
 }
 
-fn kill_session(slot: &mut Option<PipeSession>) {
+fn kill_session(
+    slot: &mut Option<PipeSession>,
+    last_op: Option<&str>,
+    reason: &str,
+    record_fault: bool,
+) {
     if let Some(mut session) = slot.take() {
+        if record_fault {
+            diagnostics::record_fault(
+                &session.launch_id,
+                last_op,
+                reason,
+                "session-killed",
+                PROTOCOL,
+            );
+        }
         session.io.shut_down.store(true, Ordering::SeqCst);
         let _ = session.child.kill();
         let _ = session.child.wait();
@@ -301,14 +340,15 @@ fn is_current_connection(installed: Option<&Arc<SessionIo>>, failed_io: &Arc<Ses
 
 /// Kill the installed session only when it is still `io` (the connection that
 /// failed). No-op when a newer sidecar has already replaced it.
-fn kill_solver_engine_if_current(state: &SolverEngineState, io: &Arc<SessionIo>) {
+fn kill_solver_engine_if_current(state: &SolverEngineState, io: &Arc<SessionIo>, reason: &str) {
+    let last_op = state.last_op_snapshot();
     let mut guard = state
         .session
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let current = guard.as_ref().map(|s| &s.io);
     if is_current_connection(current, io) {
-        kill_session(&mut guard);
+        kill_session(&mut guard, last_op.as_deref(), reason, true);
     }
 }
 
@@ -355,6 +395,8 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
                     match stderr.read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => {
+                            // Persist for packaged GUI builds (no console); keep eprint for dev.
+                            diagnostics::append_engine_log(&buf[..n]);
                             let text = String::from_utf8_lossy(&buf[..n]);
                             eprint!("{text}");
                         }
@@ -539,12 +581,17 @@ pub fn ensure_solver_engine_session(
             .map(|s| (Arc::clone(&s.io), s.info.clone(), s.launch_id.clone()))
     };
     if let Some((io, info, launch_id)) = existing {
+        state.remember_op("ready");
         match rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT) {
             Ok(_) => return Ok(info),
-            Err(_) => {
+            Err(err) => {
                 let _ = launch_id;
                 // Only tear down the pipes we probed — not a newer install.
-                kill_solver_engine_if_current(state, &io);
+                kill_solver_engine_if_current(
+                    state,
+                    &io,
+                    &format!("ensure ready probe failed: {err}"),
+                );
             }
         }
     }
@@ -563,13 +610,27 @@ pub fn ensure_solver_engine_session(
     let io = Arc::clone(&session.io);
     // Handshake waits on the demux oneshot; lifecycle lock stays held only for
     // install/fail so two ensures cannot double-spawn. Ready is short (READY_TIMEOUT).
+    state.remember_op("ready");
     match ready_handshake(&io, &launch_id) {
         Ok(info) => {
+            diagnostics::write_session_meta(
+                &info.launch_id,
+                info.protocol,
+                info.workers,
+                &info.sidecar,
+            );
             session.info = info.clone();
             *guard = Some(session);
             Ok(info)
         }
         Err(err) => {
+            diagnostics::record_fault(
+                &launch_id,
+                Some("ready"),
+                &err,
+                "ensure-fail",
+                PROTOCOL,
+            );
             session.io.shut_down.store(true, Ordering::SeqCst);
             let _ = session.child.kill();
             let _ = session.child.wait();
@@ -608,6 +669,7 @@ pub fn solver_engine_request(
     // Capture the connection that issued this RPC so a late fatal cannot kill a
     // sidecar installed by a later reconnect (ZR-154).
     let io = session_io(&state)?;
+    state.remember_op(&op);
     let reply = rpc_shared(
         &io,
         &op,
@@ -624,25 +686,36 @@ pub fn solver_engine_request(
             || err.contains("shut down")
             || err.contains("stdin lock poisoned");
         if fatal {
-            kill_solver_engine_if_current(&state, &io);
+            kill_solver_engine_if_current(&state, &io, err);
         }
     }
     reply
 }
 
+/// Clean app Exit — tear down sidecar without overwriting a useful last-fault.
 pub fn kill_solver_engine(state: &SolverEngineState) {
     // Poisoned mutex must not skip Exit/kill — orphan sidecars lock NSIS upgrades.
     let mut guard = state
         .session
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    kill_session(&mut guard);
+    kill_session(&mut guard, None, "app-exit", false);
 }
 
 /// ZR-151: Study may terminate a hung/unresponsive sidecar before Reconnect.
 #[tauri::command]
 pub fn kill_solver_engine_cmd(state: State<'_, SolverEngineState>) -> Result<(), String> {
-    kill_solver_engine(&state);
+    let last_op = state.last_op_snapshot();
+    let mut guard = state
+        .session
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    kill_session(
+        &mut guard,
+        last_op.as_deref(),
+        "kill_solver_engine_cmd (hung/reconnect)",
+        true,
+    );
     Ok(())
 }
 
@@ -799,7 +872,7 @@ mod tests {
             };
             {
                 let mut guard = state.session.lock().expect("session lock");
-                kill_session(&mut guard);
+                kill_session(&mut guard, None, "test-reinstall", false);
                 *guard = Some(session);
             }
             (io, pid)
@@ -867,7 +940,7 @@ mod tests {
             assert!(!Arc::ptr_eq(&io_a, &io_b));
 
             // Late fatal from a request issued against A must not kill B.
-            kill_solver_engine_if_current(&state, &io_a);
+            kill_solver_engine_if_current(&state, &io_a, "delayed A failure");
 
             {
                 let guard = state.session.lock().expect("session lock");
@@ -895,7 +968,7 @@ mod tests {
             let state = SolverEngineState::new();
             let (io, pid) = install_test_session(&state, "engine-current");
             assert!(process_alive(pid));
-            kill_solver_engine_if_current(&state, &io);
+            kill_solver_engine_if_current(&state, &io, "current fatal");
             assert!(
                 state.session.lock().expect("session lock").is_none(),
                 "current connection fatal must clear the slot"
