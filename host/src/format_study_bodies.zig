@@ -182,11 +182,152 @@ fn appendMixedEv(
     try w.writeAll("]");
 }
 
-fn appendRootCenteredDual(
+/// Study matrix rank order (A…2) — must match desktop `RANKS`.
+const study_ranks = "AKQJT98765432";
+
+fn rankIndex(rank: u8) isize {
+    return if (std.mem.indexOfScalar(u8, study_ranks, rank)) |i| @intCast(i) else -1;
+}
+
+const CellKey = struct {
+    row: u8,
+    col: u8,
+    text: [3]u8 = undefined,
+    text_len: u8 = 0,
+
+    fn label(self: *const CellKey) []const u8 {
+        return self.text[0..self.text_len];
+    }
+};
+
+/// Map a 4-char combo (`AhKd`) onto the 13×13 Study cell (same rules as desktop groupHands).
+fn comboCellKey(combo: []const u8) ?CellKey {
+    if (combo.len < 4) return null;
+    const high = rankIndex(combo[0]);
+    const low = rankIndex(combo[2]);
+    if (high < 0 or low < 0) return null;
+    const suited = combo[1] == combo[3];
+    var row: i32 = @intCast(high);
+    var column: i32 = @intCast(low);
+    if (combo[0] != combo[2] and suited) {
+        row = @intCast(@min(high, low));
+        column = @intCast(@max(high, low));
+    } else if (combo[0] != combo[2]) {
+        row = @intCast(@max(high, low));
+        column = @intCast(@min(high, low));
+    }
+    var key = CellKey{ .row = @intCast(row), .col = @intCast(column) };
+    if (combo[0] == combo[2]) {
+        key.text[0] = study_ranks[@intCast(row)];
+        key.text[1] = study_ranks[@intCast(column)];
+        key.text_len = 2;
+    } else if (row < column) {
+        key.text[0] = study_ranks[@intCast(row)];
+        key.text[1] = study_ranks[@intCast(column)];
+        key.text[2] = 's';
+        key.text_len = 3;
+    } else {
+        key.text[0] = study_ranks[@intCast(column)];
+        key.text[1] = study_ranks[@intCast(row)];
+        key.text[2] = 'o';
+        key.text_len = 3;
+    }
+    return key;
+}
+
+fn cellIndex(row: u8, col: u8) usize {
+    return @as(usize, row) * 13 + @as(usize, col);
+}
+
+/// Posterior-weighted 169-cell EV aggregates (same math as desktop `groupEv`).
+fn appendCellEvAggregates(
+    allocator: std.mem.Allocator,
     list: *std.ArrayList(u8),
     page: *const action_ev.ActionValues,
     n_actions: usize,
     n_hands: usize,
+    marginal: []const f32,
+    local_basis: bool,
+    field_name: []const u8,
+) !void {
+    if (marginal.len != n_hands or n_actions == 0) return;
+
+    const n_cells: usize = 13 * 13;
+    var mass = try allocator.alloc(f64, n_cells);
+    defer allocator.free(mass);
+    @memset(mass, 0);
+    var mixed = try allocator.alloc(f64, n_cells);
+    defer allocator.free(mixed);
+    @memset(mixed, 0);
+    var action_sum = try allocator.alloc(f64, n_cells * n_actions);
+    defer allocator.free(action_sum);
+    @memset(action_sum, 0);
+    var labels = try allocator.alloc(CellKey, n_cells);
+    defer allocator.free(labels);
+    var labeled = try allocator.alloc(u8, n_cells);
+    defer allocator.free(labeled);
+    @memset(labeled, 0);
+    var defined_ok = try allocator.alloc(u8, n_cells);
+    defer allocator.free(defined_ok);
+    @memset(defined_ok, 1);
+
+    var hand: usize = 0;
+    while (hand < n_hands) : (hand += 1) {
+        const m: f64 = @floatCast(marginal[hand]);
+        if (!(m > 0)) continue;
+        const key = comboCellKey(page.combos[hand]) orelse continue;
+        const ci = cellIndex(key.row, key.col);
+        if (labeled[ci] == 0) {
+            labels[ci] = key;
+            labeled[ci] = 1;
+        }
+        if (hand >= page.ev_defined.len or page.ev_defined[hand] == 0) {
+            // Match desktop groupEv: any undefined hand in a positive-mass cell → null.
+            defined_ok[ci] = 0;
+            continue;
+        }
+        const baseline: f64 = if (local_basis) localEvBaseline(page, hand, n_actions) else 0;
+        mass[ci] += m;
+        mixed[ci] += m * (page.mixed_ev[hand] - baseline);
+        var a: usize = 0;
+        while (a < n_actions) : (a += 1) {
+            const idx = hand * n_actions + a;
+            const root: f64 = if (idx < page.action_ev.len) page.action_ev[idx] else 0;
+            action_sum[ci * n_actions + a] += m * (root - baseline);
+        }
+    }
+
+    const w = list.writer();
+    try w.writeAll(",\"");
+    try w.writeAll(field_name);
+    try w.writeAll("\":[");
+    var first = true;
+    var ci: usize = 0;
+    while (ci < n_cells) : (ci += 1) {
+        if (!(mass[ci] > 0) or defined_ok[ci] == 0 or labeled[ci] == 0) continue;
+        if (!first) try w.writeAll(",");
+        first = false;
+        const key = labels[ci];
+        try w.print("{{\"row\":{d},\"col\":{d},\"text\":", .{ key.row, key.col });
+        try appendJsonString(list, key.label());
+        try w.print(",\"mixed\":{d:.6},\"action\":[", .{mixed[ci] / mass[ci]});
+        var a: usize = 0;
+        while (a < n_actions) : (a += 1) {
+            if (a > 0) try w.writeAll(",");
+            try w.print("{d:.6}", .{action_sum[ci * n_actions + a] / mass[ci]});
+        }
+        try w.writeAll("]}");
+    }
+    try w.writeAll("]");
+}
+
+fn appendRootCenteredDual(
+    allocator: std.mem.Allocator,
+    list: *std.ArrayList(u8),
+    page: *const action_ev.ActionValues,
+    n_actions: usize,
+    n_hands: usize,
+    marginal: ?[]const f32,
 ) !void {
     // Dual columns so Settings Global can flip without refetch / reverse-shift.
     const w = list.writer();
@@ -198,7 +339,50 @@ fn appendRootCenteredDual(
     }
     try appendActionEvMatrix(list, page, n_actions, n_hands, false);
     try appendMixedEv(list, page, n_hands, n_actions, false);
+    if (marginal) |m| {
+        try appendCellEvAggregates(allocator, list, page, n_actions, n_hands, m, false, "cell_ev");
+    }
     try w.writeAll("}");
+}
+
+fn appendActionFrequencies(
+    list: *std.ArrayList(u8),
+    page: *const inspect.NodePage,
+    n_actions: usize,
+    n_hands: usize,
+) !void {
+    if (page.kind != .decision or n_actions == 0 or !page.reach_defined) return;
+    if (page.marginal.len != n_hands) return;
+    if (page.strategy.len == 0 and n_actions > 1) return;
+
+    var totals = [_]f64{0} ** 16;
+    if (n_actions > totals.len) return;
+    var mass: f64 = 0;
+    var hand: usize = 0;
+    while (hand < n_hands) : (hand += 1) {
+        const m: f64 = @floatCast(page.marginal[hand]);
+        if (!(m > 0)) continue;
+        mass += m;
+        if (n_actions == 1) {
+            totals[0] += m;
+            continue;
+        }
+        var a: usize = 0;
+        while (a < n_actions) : (a += 1) {
+            const idx = hand * n_actions + a;
+            const p: f64 = if (idx < page.strategy.len) @floatCast(page.strategy[idx]) else 0;
+            totals[a] += m * p;
+        }
+    }
+    const w = list.writer();
+    try w.writeAll(",\"action_frequencies\":[");
+    var a: usize = 0;
+    while (a < n_actions) : (a += 1) {
+        if (a > 0) try w.writeAll(",");
+        const freq: f64 = if (mass > 0) totals[a] / mass else 0;
+        try w.print("{d:.6}", .{freq});
+    }
+    try w.writeAll("]");
 }
 
 /// Study `node` reply body. Field order is contract-sensitive — do not reorder keys.
@@ -279,12 +463,14 @@ pub fn formatNodeBody(
     try appendOpponentBlock(&list, page);
     try appendCards(&list, page.cards);
     try appendStrategyMatrix(&list, page, n_actions, n_hands);
+    try appendActionFrequencies(&list, page, n_actions, n_hands);
 
     try w.writeAll("}");
     return try list.toOwnedSlice();
 }
 
 /// Study `values` reply body. Field order is contract-sensitive — do not reorder keys.
+/// `marginal` (acting-seat posterior, aligned with `page.combos`) enables 169-cell EV aggregates.
 pub fn formatValuesBody(
     allocator: std.mem.Allocator,
     page: *const action_ev.ActionValues,
@@ -292,6 +478,7 @@ pub fn formatValuesBody(
     solution_id: u64,
     elapsed_ms: i128,
     live_under_train: bool,
+    marginal: ?[]const f32,
 ) ![]u8 {
     var list = std.ArrayList(u8).init(allocator);
     errdefer list.deinit();
@@ -361,10 +548,47 @@ pub fn formatValuesBody(
 
     try appendActionEvMatrix(&list, page, n_actions, n_hands, true);
     try appendMixedEv(&list, page, n_hands, n_actions, true);
-    try appendRootCenteredDual(&list, page, n_actions, n_hands);
+    if (marginal) |m| {
+        try appendCellEvAggregates(allocator, &list, page, n_actions, n_hands, m, true, "cell_ev");
+    }
+    try appendRootCenteredDual(allocator, &list, page, n_actions, n_hands, marginal);
 
     try w.writeAll("}");
     return try list.toOwnedSlice();
+}
+
+/// Align inspect marginal onto values combo order (usually identical PrivateHandIndex order).
+pub fn marginalForValuesCombos(
+    allocator: std.mem.Allocator,
+    values_combos: []const []const u8,
+    inspect_combos: []const []const u8,
+    inspect_marginal: []const f32,
+) !?[]f32 {
+    if (inspect_marginal.len != inspect_combos.len or values_combos.len == 0) return null;
+    if (inspect_combos.len == values_combos.len) {
+        var same = true;
+        for (values_combos, 0..) |combo, i| {
+            if (!std.mem.eql(u8, combo, inspect_combos[i])) {
+                same = false;
+                break;
+            }
+        }
+        if (same) {
+            return try allocator.dupe(f32, inspect_marginal);
+        }
+    }
+    // Fallback: match by combo string (O(n·m); tiny vs EV walk).
+    var out = try allocator.alloc(f32, values_combos.len);
+    @memset(out, 0);
+    for (values_combos, 0..) |combo, vi| {
+        for (inspect_combos, 0..) |ic, ii| {
+            if (std.mem.eql(u8, combo, ic)) {
+                out[vi] = inspect_marginal[ii];
+                break;
+            }
+        }
+    }
+    return out;
 }
 
 test "formatValuesBody emits local primary and root_centered dual" {
@@ -395,7 +619,7 @@ test "formatValuesBody emits local primary and root_centered dual" {
     page.mixed_ev[0] = -50;
 
     const located = node_id.ParsedNodeId{ .node_index = 1, .turn = -1, .river = -1 };
-    const body = try formatValuesBody(allocator, &page, located, 1, 0, false);
+    const body = try formatValuesBody(allocator, &page, located, 1, 0, false, null);
     defer allocator.free(body);
 
     try std.testing.expect(std.mem.indexOf(u8, body, "\"utility_basis\":\"local\"") != null);
@@ -437,7 +661,8 @@ test "formatValuesBody flop Check/Bet uses local_offset when Fold absent" {
     page.mixed_ev[0] = 0;
 
     const located = node_id.ParsedNodeId{ .node_index = 0, .turn = -1, .river = -1 };
-    const body = try formatValuesBody(allocator, &page, located, 1, 0, false);
+    const marginal = [_]f32{1.0};
+    const body = try formatValuesBody(allocator, &page, located, 1, 0, false, &marginal);
     defer allocator.free(body);
 
     try std.testing.expect(std.mem.indexOf(u8, body, "\"utility_basis\":\"local\"") != null);
@@ -446,5 +671,19 @@ test "formatValuesBody flop Check/Bet uses local_offset when Fold absent" {
     try std.testing.expect(std.mem.indexOf(u8, body, "\"action_ev\":[[40.000000,60.000000]]") != null);
     try std.testing.expect(std.mem.indexOf(u8, body, "\"value\":[50.000000]") != null);
     try std.testing.expect(std.mem.indexOf(u8, body, "\"node_ev\":50.000000") != null);
-    try std.testing.expect(std.mem.indexOf(u8, body, "\"root_centered\":{\"node_ev\":0.000000,\"action_ev\":[[-10.000000,10.000000]],\"value\":[0.000000]}") != null);
+    // AA cell (row0,col0) local aggregate.
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"cell_ev\":[{\"row\":0,\"col\":0,\"text\":\"AA\",\"mixed\":50.000000,\"action\":[40.000000,60.000000]}]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"root_centered\":{\"node_ev\":0.000000,\"action_ev\":[[-10.000000,10.000000]],\"value\":[0.000000],\"cell_ev\":[{\"row\":0,\"col\":0,\"text\":\"AA\",\"mixed\":0.000000,\"action\":[-10.000000,10.000000]}]}") != null);
+}
+
+test "comboCellKey maps pairs suited offsuit like desktop groupHands" {
+    const aa = comboCellKey("AhAd").?;
+    try std.testing.expect(aa.row == 0 and aa.col == 0);
+    try std.testing.expectEqualStrings("AA", aa.label());
+    const aks = comboCellKey("AhKh").?;
+    try std.testing.expect(aks.row == 0 and aks.col == 1);
+    try std.testing.expectEqualStrings("AKs", aks.label());
+    const ako = comboCellKey("AhKd").?;
+    try std.testing.expect(ako.row == 1 and ako.col == 0);
+    try std.testing.expectEqualStrings("AKo", ako.label());
 }
