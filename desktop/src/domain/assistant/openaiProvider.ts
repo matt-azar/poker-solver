@@ -228,6 +228,11 @@ const INTERPRET_JSON_SCHEMA = {
         samples: { type: "integer" },
         maxRaises: { type: "integer" },
         mergeThresholdPct: { type: "number" },
+        allInThresholdPct: {
+          type: "number",
+          description:
+            "Pio all-in threshold as percent of starting stack (0 = off)",
+        },
         potCap: { type: "number" },
         rakeRate: {
           type: "number",
@@ -240,7 +245,6 @@ const INTERPRET_JSON_SCHEMA = {
         accuracy: { type: "string" },
         timeLimit: { type: "string" },
         algorithm: { type: "string", enum: ["cfr_plus", "cfr", "dcfr"] },
-        noThreeBet: { type: "boolean" },
         donkFlop: { type: "boolean" },
         donkTurn: { type: "boolean" },
         donkRiver: { type: "boolean" },
@@ -458,7 +462,6 @@ function asTreeEdits(raw: unknown): StudySetupTreePreset | undefined {
     }
   }
   if (typeof src.potCap === "number") out.potCap = src.potCap;
-  if (typeof src.noThreeBet === "boolean") out.noThreeBet = src.noThreeBet;
   if (typeof src.maxRaises === "number") out.maxRaises = src.maxRaises;
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -477,10 +480,12 @@ const FIELD_EDIT_NUMBERS = [
   "rakeCap",
 ] as const satisfies readonly LimitedSetupField[];
 
+/** Assistant percent field; SpotDraft stores the engine fraction as allInThreshold. */
+const FIELD_EDIT_THRESHOLD_PCT = "allInThresholdPct" as const;
+
 const FIELD_EDIT_STRINGS = ["accuracy", "timeLimit", "incentives", "edgeTags"] as const;
 
 const FIELD_EDIT_BOOLS = [
-  "noThreeBet",
   "donkFlop",
   "donkTurn",
   "donkRiver",
@@ -497,7 +502,13 @@ function coalesceFieldEdits(obj: Record<string, unknown>): StudyFieldEdits | und
     obj.fieldEdits && typeof obj.fieldEdits === "object" && !Array.isArray(obj.fieldEdits)
       ? { ...(obj.fieldEdits as Record<string, unknown>) }
       : {};
-  for (const key of [...FIELD_EDIT_NUMBERS, ...FIELD_EDIT_STRINGS, ...FIELD_EDIT_BOOLS, "algorithm"] as const) {
+  for (const key of [
+    ...FIELD_EDIT_NUMBERS,
+    FIELD_EDIT_THRESHOLD_PCT,
+    ...FIELD_EDIT_STRINGS,
+    ...FIELD_EDIT_BOOLS,
+    "algorithm",
+  ] as const) {
     if (nested[key] === undefined && obj[key] !== undefined) {
       nested[key] = obj[key];
     }
@@ -534,6 +545,21 @@ export function asFieldEdits(raw: unknown): StudyFieldEdits | undefined {
     throw new AssistantProviderError(
       "invalid_response",
       limitConflicts.map((c) => c.message).join("; "),
+    );
+  }
+  const thresholdPct = src[FIELD_EDIT_THRESHOLD_PCT];
+  if (typeof thresholdPct === "number" && Number.isFinite(thresholdPct)) {
+    if (thresholdPct < 0) {
+      throw new AssistantProviderError(
+        "invalid_response",
+        "All-in threshold cannot be negative",
+      );
+    }
+    out.allInThresholdPct = thresholdPct;
+  } else if (thresholdPct !== undefined && thresholdPct !== null) {
+    throw new AssistantProviderError(
+      "invalid_response",
+      `fieldEdits.${FIELD_EDIT_THRESHOLD_PCT} must be a finite number`,
     );
   }
   for (const key of FIELD_EDIT_STRINGS) {

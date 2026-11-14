@@ -32,11 +32,11 @@ A geometric size splits the chips still behind into equal pot fractions over the
 
 One street left, that fraction is all-in. PioSOLVER's geometric size is this split.
 
-An all-in threshold is a fraction of the starting stack. A size that would commit more than that fraction is replaced by all-in, when all-ins are allowed. Zero leaves every listed size unchanged. The all-in switch adds an all-in action only when that situation already has a size (including an `a` or `e` token). A blank list with the switch on stays check-only.
+An all-in threshold is a fraction of the starting stack (Pio "All-in threshold"). A size that would commit more than that fraction is replaced by all-in. Zero leaves every listed size unchanged. A listed size larger than the chips still behind is always re-interpreted as all-in; Study's `allow_all_in: 0` does not drop that shove. The all-in switch adds an *extra* all-in action only when that situation already has a size (including an `a` or `e` token). A blank list with the switch on stays check-only.
 
 `merge-threshold` is a fraction of the larger chip amount (Study's 10% sends `0.1`). Sizes inside that gap collapse to the larger amount. Zero, the default, keeps every distinct amount and is omitted from the config text.
 
-Two listed sizes that round to the same tenth-of-a-chip amount are one action. A raise increment smaller than the previous raise is omitted. The first bet of a street only has to add at least 0.1 chip. An all-in shorter than the minimum raise is kept when all-ins are allowed, and omitted when they are not.
+Two listed sizes that round to the same tenth-of-a-chip amount are one action. A raise increment smaller than the previous raise is omitted. The first bet of a street only has to add at least 0.1 chip. An all-in shorter than the minimum raise is kept when all-ins are allowed, when the size was an explicit `a`, or when oversize / all-in-threshold shove-up produced it; other short all-ins are omitted when the switch is off.
 
 Pot, stack, and contributions are stored as integer tenths of a chip (`include/game/chips.hpp`). Config / JSON / CLI values stay in chip units (`pot 100` → 100.0 chips → 1000 tenths). `round(f * pot)` with a tenths pot already yields tenths (for example pot 5.0 and `b75` → 3.8 chips). Terminal utilities and reported EV convert back to chips. Rake still floors in whole chips.
 

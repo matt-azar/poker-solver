@@ -201,7 +201,7 @@ function collectWarnings(draft: SpotDraft, source: BuildSpotSource): string[] {
   }
   if (draft.allInThreshold > 0) {
     warnings.push(
-      "All-in threshold is a fraction of the new starting stack — confirm it still fits.",
+      "All-in threshold (% of starting stack) still applies against the new stack — confirm it still fits.",
     );
   }
   if (draft.potCap > 0) {
