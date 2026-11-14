@@ -76,6 +76,7 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 | HTTP fallthrough while IPC is active | `Engine unreachable: Failed to fetch` after a healthy sidecar spawn (#288) | **Don't** `fetch("")` or hit `:8765` from Library/Study when IPC transport is selected. Block HTTP fallthrough. |
 | Library needs live pipes | Templates/ranges fail until solve works | Serve templates/ranges via **Tauri FS** (`library_*`) without requiring a healthy engine session (#288, #289) |
 | Console PE under GUI shell | Blank console; closing it kills the sidecar and bricks Study (#290) | Link `solver-engine` with Windows **GUI subsystem**; pass `CREATE_NO_WINDOW` on spawn as defense in depth. Keep CLI tools Console. |
+| `reg.exe` LocalDumps on setup | Several brief console flashes on every Windows Study start (not the sidecar) | `diagnostics::register_local_dumps` spawns Console-subsystem `reg add` — pass `CREATE_NO_WINDOW` (and null stdio). Sidecar already has the flag; do not remove it. |
 | AVX-512 default CPU | `0xc000001d` illegal instruction on older hosts | Pin `zig build -Dcpu=x86_64_v2` (scripts + CI); override with `ZIG_CPU` (#288, #289) |
 | stderr not drained | Windows ready handshake deadlocks when parent redirects stderr | Drain sidecar stderr during spawn/ready (#288) |
 | Lifecycle mutex around whole RPC | Mid-train `values` stalls behind `solve` | Hold lifecycle mutex only for spawn/take/kill; short stdin write lock; demux stdout by `request_id` (#282) |

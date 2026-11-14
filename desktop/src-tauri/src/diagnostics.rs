@@ -1038,40 +1038,51 @@ fn register_local_dumps_windows() -> Result<(), String> {
     Ok(())
 }
 
+/// Run `reg.exe` without a console flash under the Windows-subsystem UI.
+///
+/// `reg.exe` is Console PE. Spawning it from Holdem Study without
+/// `CREATE_NO_WINDOW` briefly allocates a visible console (~3 exe names × 3
+/// values = up to 9 flashes on every `.setup` LocalDumps registration).
+#[cfg(windows)]
+fn run_reg(args: &[&str]) -> Result<std::process::ExitStatus, String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    Command::new("reg")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|err| format!("reg: {err}"))
+}
+
 #[cfg(windows)]
 fn set_local_dump_key(exe_name: &str, dump_folder: &str) -> Result<(), String> {
     // Prefer reg.exe so we stay dependency-free on rustc 1.83.
     let key = format!(
         r"HKCU\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\{exe_name}"
     );
-    let status = std::process::Command::new("reg")
-        .args([
-            "add",
-            &key,
-            "/v",
-            "DumpFolder",
-            "/t",
-            "REG_EXPAND_SZ",
-            "/d",
-            dump_folder,
-            "/f",
-        ])
-        .status()
-        .map_err(|err| format!("reg DumpFolder: {err}"))?;
+    let status = run_reg(&[
+        "add",
+        &key,
+        "/v",
+        "DumpFolder",
+        "/t",
+        "REG_EXPAND_SZ",
+        "/d",
+        dump_folder,
+        "/f",
+    ])?;
     if !status.success() {
         return Err(format!("reg DumpFolder failed for {exe_name}"));
     }
-    let status = std::process::Command::new("reg")
-        .args(["add", &key, "/v", "DumpCount", "/t", "REG_DWORD", "/d", "5", "/f"])
-        .status()
-        .map_err(|err| format!("reg DumpCount: {err}"))?;
+    let status = run_reg(&["add", &key, "/v", "DumpCount", "/t", "REG_DWORD", "/d", "5", "/f"])?;
     if !status.success() {
         return Err(format!("reg DumpCount failed for {exe_name}"));
     }
-    let status = std::process::Command::new("reg")
-        .args(["add", &key, "/v", "DumpType", "/t", "REG_DWORD", "/d", "1", "/f"])
-        .status()
-        .map_err(|err| format!("reg DumpType: {err}"))?;
+    let status = run_reg(&["add", &key, "/v", "DumpType", "/t", "REG_DWORD", "/d", "1", "/f"])?;
     if !status.success() {
         return Err(format!("reg DumpType failed for {exe_name}"));
     }
