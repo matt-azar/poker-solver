@@ -10,34 +10,69 @@ against a built `zig-out/bin/solver-engine` for engine-only digs.
 
 ---
 
-## How Matt runs this on Windows
+## Windows capture loop (feed reports back to Cursor)
 
-You need a **clone of this repo** (tooling only) and **Python 3.10+** on PATH.
-The installed Study app stays in Program Files / the NSIS install dir — do **not**
-copy the installed exe into the repo.
+Goal: systematically capture runtime evidence from the **installed** Study build
+and drop it into this Debugging Suite Project / Cursor chat.
 
-Diagnostics the app already writes live under
-`%LOCALAPPDATA%\Holdem Study\diagnostics\`.
+You need a **clone** at e.g. `C:\Users\matta\poker-solver` (tooling only) and
+**Python 3.10+** on PATH. Do **not** copy the installed exe into the repo.
 
-### One of these (pick a front door)
+### Once per machine
 
 ```powershell
-# A) Local debug receiver + mini-app (no Cloudflare, no gh auth)
-#    Saves send-report zips under %LOCALAPPDATA%\Holdem Study\debug-reports
-.\scripts\debug\study-debug-local.cmd
-
-# B) Mini-app only (collect / analyze / dumps / sidecar / watch)
-.\scripts\debug\study-debug.cmd
-
-# C) Same as B via PowerShell
-powershell -ExecutionPolicy Bypass -File .\scripts\debug\study-debug.ps1
+cd C:\Users\matta\poker-solver
+.\scripts\debug\study-debug.cmd enable-dumps   # elevated; LocalDumps for Study + solver-engine
 ```
 
-**No Cloudflare path:** double-click `study-debug-local.cmd` while you run the
-**installed** Study as usual. When you have a diagnostics zip (Help → Copy
-diagnostics zip, or `collect`), use the mini-app **Send report** button — it
-POSTs to `http://127.0.0.1:8787/report` and the receiver writes the zip +
-analysis to disk. GitHub Issue upload is optional (`--github` + a token).
+### Every debug session
+
+```powershell
+cd C:\Users\matta\poker-solver
+.\scripts\debug\study-debug-local.cmd
+```
+
+That starts:
+
+1. Local report receiver on `127.0.0.1` (saves under
+   `%LOCALAPPDATA%\Holdem Study\debug-reports\`)
+2. Always-on hang watcher → `debug-reports\hang-watch\hang-watch-events.jsonl`
+3. Study-debug mini-app (fill the **Repro diary** fields)
+
+Keep the launcher window open. Run **installed** Study as usual.
+
+### When it crashes or hangs
+
+1. Leave Study open if hung (`collect` while frozen).
+2. Fill diary (what clicked / street / notes) in the mini-app.
+3. `Collect bundle` **or** Help → **Copy diagnostics zip**, then **Send report**.
+4. Reports + diary land in:
+   - `%LOCALAPPDATA%\Holdem Study\debug-reports\`
+   - Hang log: `…\debug-reports\hang-watch\`
+   - Crash dumps (if LocalDumps enabled): `%LOCALAPPDATA%\CrashDumps\`
+
+### Drag into Cursor / this Project
+
+In Cursor chat or the Debugging Suite Project, attach / drag:
+
+- The folder under `debug-reports\<timestamp>_…\` (zip + `issue-body.md` + diary)
+- Or the Help diagnostics zip + `repro-diary.md`
+- Optional: matching `.dmp` from `CrashDumps` and `hang-watch-events.jsonl`
+
+That is the evidence pack for root-cause work — no Cloudflare required.
+
+### Front doors
+
+```powershell
+# A) Local receiver + hang watcher + mini-app (preferred)
+.\scripts\debug\study-debug-local.cmd
+
+# B) Mini-app only
+.\scripts\debug\study-debug.cmd
+
+# C) PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\debug\study-debug.ps1
+```
 
 ### Or 4 CLI commands (while Study is frozen, leave it open)
 
@@ -208,7 +243,9 @@ Override diagnostics path: `$env:HOLDEM_STUDY_DIAGNOSTICS_DIR = "D:\copy\diagnos
 | `collect` | `collect_bundle.py` | Evidence dir/zip (default `--zip --stacks`) |
 | `analyze` | `analyze_diagnostics.py` | Crash vs hang triage on dir or Help zip |
 | `send` | `send_report.py` | Local/webhook/gh → disk and/or GitHub Issue |
-| `local-debug` | `start_local_debug.py` | Start localhost receiver + mini-app |
+| `local-debug` | `start_local_debug.py` | Start localhost receiver + hang watcher + mini-app |
+| `enable-dumps` | `enable_local_dumps.ps1` | One-shot LocalDumps for Study + solver-engine |
+| `diary` | `repro_diary.py` | Create / prompt a repro diary |
 | `dumps` | `find_crash_dumps.py` | LocalDumps / cores |
 | `sidecar` | `windows_sidecar_check.py` | GUI PE / CREATE_NO_WINDOW checklist |
 | `probe` | `ipc_probe.py` | Ready + demux + status budget |
@@ -266,8 +303,10 @@ On Windows you can point probes at the **installed** sidecar:
 | `windows_collect.ps1` | Windows install | One-shot snapshot + diagnostics analysis + dump search + zip |
 | `collect_bundle.py` | any | Cross-platform evidence directory/zip |
 | `send_report.py` | any | Webhook POST or local Issue + gist/release (no git commit) |
-| `start_local_debug.py` | any | Local disk receiver launcher (no Cloudflare) |
+| `start_local_debug.py` | any | Local disk receiver + hang watcher launcher |
 | `study-debug-local.cmd` / `.ps1` | Windows | Double-click local debug launcher |
+| `enable_local_dumps.ps1` | Windows | One-shot LocalDumps registry (admin) |
+| `repro_diary.py` / `repro_diary_template.md` | any | Repro diary for collect/send |
 | `report-receiver/` | any | Intake (local-disk / CF Worker / Python); optional GitHub PAT |
 | `smoke_selftest.py` | suite health | Synthetic diagnostics + import smoke |
 
