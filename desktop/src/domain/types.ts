@@ -144,6 +144,10 @@ export interface StatusPayload {
   baseline_solution_id?: string | null;
   root_node_id?: string | null;
   status_generation?: number;
+  /** Host published-average epoch (bumps on cadence / final publish). */
+  policy_revision?: number;
+  /** Alias some analysis replies use for policy_revision. */
+  analysis_revision?: number;
   iterations?: number | null;
   iterations_requested?: number | null;
   runtime_seconds?: number | null;
@@ -195,6 +199,9 @@ export interface NodePayload {
   solution_id?: string;
   job_id?: string;
   status_generation?: number;
+  /** Host published-average epoch at inspect time. */
+  policy_revision?: number;
+  analysis_revision?: number;
   node_id: string;
   kind?: string;
   player?: number | null;

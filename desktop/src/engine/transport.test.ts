@@ -15,6 +15,7 @@ import {
   ipcCancel,
   ipcDeleteLock,
   ipcDeleteStrategyEdit,
+  ipcEquity,
   ipcListLocks,
   ipcListStrategyEdits,
   ipcNode,
@@ -29,6 +30,7 @@ import {
   ipcValues,
   killSolverEngineIpc,
   parseSolverIpcInvokeError,
+  resetAnalysisIpcSerialForTests,
   setNoEngineTransport,
   setIpcTransport,
   SolverIpcError,
@@ -66,6 +68,7 @@ describe("solver transport selection", () => {
 describe("ipcValues node targeting", () => {
   beforeEach(() => {
     invoke.mockReset();
+    resetAnalysisIpcSerialForTests();
     setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
   });
 
@@ -113,9 +116,108 @@ describe("ipcValues node targeting", () => {
   });
 });
 
+describe("analysis IPC serialization", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    resetAnalysisIpcSerialForTests();
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("holds values until an overlapping node inspect finishes admitting", async () => {
+    const order: string[] = [];
+    let releaseNode!: () => void;
+    const nodeGate = new Promise<void>((resolve) => {
+      releaseNode = resolve;
+    });
+    invoke.mockImplementation(async (_cmd: string, args: { op?: string }) => {
+      const op = args?.op ?? "";
+      if (op === "node") {
+        order.push("node-start");
+        await nodeGate;
+        order.push("node-end");
+        return {
+          v: 2,
+          kind: "reply",
+          request_id: "n",
+          op: "node",
+          ok: true,
+          body: { node_id: "root", strategy: [[0.7, 0.3]] },
+        };
+      }
+      if (op === "values") {
+        order.push("values");
+        return {
+          v: 2,
+          kind: "reply",
+          request_id: "v",
+          op: "values",
+          ok: true,
+          body: { node_id: "root", pending: false },
+        };
+      }
+      throw new Error(`unexpected op ${op}`);
+    });
+
+    const nodePromise = ipcNode("root");
+    await Promise.resolve();
+    const valuesPromise = ipcValues("root");
+    await vi.waitFor(() => expect(order).toContain("node-start"));
+    expect(order).not.toContain("values");
+    releaseNode();
+    await Promise.all([nodePromise, valuesPromise]);
+    expect(order).toEqual(["node-start", "node-end", "values"]);
+  });
+
+  it("serializes equity behind values on the worker chain", async () => {
+    const order: string[] = [];
+    let releaseValues!: () => void;
+    const valuesGate = new Promise<void>((resolve) => {
+      releaseValues = resolve;
+    });
+    invoke.mockImplementation(async (_cmd: string, args: { op?: string }) => {
+      const op = args?.op ?? "";
+      if (op === "values") {
+        order.push("values-start");
+        await valuesGate;
+        order.push("values-end");
+        return {
+          v: 2,
+          kind: "reply",
+          request_id: "v",
+          op: "values",
+          ok: true,
+          body: { pending: false },
+        };
+      }
+      if (op === "equity") {
+        order.push("equity");
+        return {
+          v: 2,
+          kind: "reply",
+          request_id: "e",
+          op: "equity",
+          ok: true,
+          body: { pending: false },
+        };
+      }
+      throw new Error(`unexpected op ${op}`);
+    });
+
+    const valuesPromise = ipcValues("root");
+    await Promise.resolve();
+    const equityPromise = ipcEquity({ nodeId: "root" });
+    await vi.waitFor(() => expect(order).toContain("values-start"));
+    expect(order).not.toContain("equity");
+    releaseValues();
+    await Promise.all([valuesPromise, equityPromise]);
+    expect(order).toEqual(["values-start", "values-end", "equity"]);
+  });
+});
+
 describe("Slice A IPC lifecycle + node helpers", () => {
   beforeEach(() => {
     invoke.mockReset();
+    resetAnalysisIpcSerialForTests();
     setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
   });
 

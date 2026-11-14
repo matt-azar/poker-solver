@@ -179,16 +179,19 @@ The retired C++ explorer accept loop handled **one client at a time**. Open/save
 
 Explorer used to have a **single-slot** ValueWorker. Overlapping `/equity` + `/values` (and status polls that re-enqueued) cancelled each other → blinking footers, stuck “Calculating…”, lost overlays (#181–#190).
 
+Zig IPC host still has **one analysis worker** with gen supersession for `node` / `values` / `equity` / `categories`. After async Tauri IPC (#380), Study can overlap those admits: a late `values`/`categories`/LineCard call supersedes navigateTo `node` or live EV → blank strategy/EV/eq until manual navigate-away (DS-28). Cache keys that ignore host `policy_revision` can also keep a stale uniform strategy after final publish.
+
 **Do:**
 
 - Prefer `POST/GET …/nodes/{id}/analysis` (multi-metric) or **lookup-first** enqueue so status reads never replace sibling work.
 - Client: serialize ValueWorker-bound jobs; `pollAnalysis` must await the full ready/failed lifecycle (do not release the queue on the first `202`).
-- Cache pages by solution / node / `analysis_revision` (profile epoch); restore on navigate instead of recomputing.
+- Transport: serialize worker-bound IPC admits; let `node` preempt so navigate cannot lose to a late worker admit. Retry transient `superseded` / `nothing_published` while the analysis token is current.
+- Cache pages by solution / node / `policy_revision` (profile epoch; also `analysis_revision` alias); restore on navigate instead of recomputing. Soft re-inspect when status `policy_revision` advances past the painted node.
 - Settled permanent failures (e.g. work-limit) must not thrash auto-resubmit; transient/settled errors must not stick forever when the node/revision changed.
 
-**Don't:** Fire equity and values in parallel against a single analysis worker. Don't clear a failed payload to `null` in a way that creates an infinite auto-retry loop.
+**Don't:** Fire equity and values in parallel against a single analysis worker. Don't clear a failed payload to `null` in a way that creates an infinite auto-retry loop. Don't mask `SolverIpcError` as a generic `"Analysis request failed"` — keep host `error_code` visible for recovery.
 
-**Pointers:** PRs #181, #182, #184, #188, #190; `docs/EXPLORER.md`.
+**Pointers:** PRs #181, #182, #184, #188, #190; `docs/EXPLORER.md`; `desktop/src/engine/transport.ts` analysis IPC serial; `studySessionController.pollAnalysis`.
 
 ### Local EV vs Global / root-centered
 

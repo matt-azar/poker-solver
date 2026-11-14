@@ -304,14 +304,63 @@ export async function ipcStatus(): Promise<unknown> {
   return env.body;
 }
 
+/**
+ * Host analysis ops (`node` / `values` / `equity` / `categories`) share one
+ * worker and bump a generation that supersedes in-flight work. Client admits
+ * must cooperate:
+ *   - `node` inspects admit immediately (navigation / LineCard may preempt).
+ *   - Worker-bound metrics serialize and wait until no node inspect is live so
+ *     they cannot supersede an in-flight navigateTo getNode.
+ */
+let analysisNodeInflight = 0;
+let analysisWorkerChain: Promise<unknown> = Promise.resolve();
+
+async function runAnalysisNodeIpc<T>(run: () => Promise<T>): Promise<T> {
+  analysisNodeInflight += 1;
+  try {
+    return await run();
+  } finally {
+    analysisNodeInflight -= 1;
+  }
+}
+
+async function runAnalysisWorkerIpc<T>(run: () => Promise<T>): Promise<T> {
+  const waitForNodeQuietThenRun = async (): Promise<T> => {
+    while (analysisNodeInflight > 0) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
+    return run();
+  };
+  const scheduled = analysisWorkerChain.then(
+    waitForNodeQuietThenRun,
+    waitForNodeQuietThenRun,
+  );
+  // Keep the chain alive regardless of success/failure so later jobs still run.
+  analysisWorkerChain = scheduled.then(
+    () => undefined,
+    () => undefined,
+  );
+  return scheduled;
+}
+
+/** Test helper — reset analysis IPC serialization between cases. */
+export function resetAnalysisIpcSerialForTests(): void {
+  analysisNodeInflight = 0;
+  analysisWorkerChain = Promise.resolve();
+}
+
 /** Study node id (`pN.tT.rR`) or legacy numeric node_index (root = 0). */
 export async function ipcValues(nodeIdOrIndex: string | number = 0): Promise<unknown> {
-  const body =
-    typeof nodeIdOrIndex === "string"
-      ? { node_id: nodeIdOrIndex }
-      : { node_index: nodeIdOrIndex };
-  const env = await solverEngineRequest("values", body);
-  return env.body;
+  return runAnalysisWorkerIpc(async () => {
+    const body =
+      typeof nodeIdOrIndex === "string"
+        ? { node_id: nodeIdOrIndex }
+        : { node_index: nodeIdOrIndex };
+    const env = await solverEngineRequest("values", body);
+    return env.body;
+  });
 }
 
 /** Study check-down equity (host `equity` → reach-weighted `checkdownEquityAtNode`). */
@@ -319,21 +368,25 @@ export async function ipcEquity(opts?: {
   nodeIndex?: number;
   nodeId?: string;
 }): Promise<unknown> {
-  const env = await solverEngineRequest("equity", {
-    node_index: opts?.nodeIndex ?? 0,
-    ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
+  return runAnalysisWorkerIpc(async () => {
+    const env = await solverEngineRequest("equity", {
+      node_index: opts?.nodeIndex ?? 0,
+      ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
+    });
+    return env.body;
   });
-  return env.body;
 }
 
 /** Study node inspect (`pN.tT.rR`) or legacy numeric node_index (root = 0). */
 export async function ipcNode(nodeIdOrIndex: string | number = 0): Promise<unknown> {
-  const body =
-    typeof nodeIdOrIndex === "string"
-      ? { node_id: nodeIdOrIndex }
-      : { node_index: nodeIdOrIndex };
-  const env = await solverEngineRequest("node", body);
-  return env.body;
+  return runAnalysisNodeIpc(async () => {
+    const body =
+      typeof nodeIdOrIndex === "string"
+        ? { node_id: nodeIdOrIndex }
+        : { node_index: nodeIdOrIndex };
+    const env = await solverEngineRequest("node", body);
+    return env.body;
+  });
 }
 
 export async function ipcPause(jobId?: string | null): Promise<unknown> {
@@ -554,9 +607,11 @@ export async function ipcCategories(opts?: {
   nodeIndex?: number;
   nodeId?: string;
 }): Promise<unknown> {
-  const env = await solverEngineRequest("categories", {
-    node_index: opts?.nodeIndex ?? 0,
-    ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
+  return runAnalysisWorkerIpc(async () => {
+    const env = await solverEngineRequest("categories", {
+      node_index: opts?.nodeIndex ?? 0,
+      ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
+    });
+    return env.body;
   });
-  return env.body;
 }
