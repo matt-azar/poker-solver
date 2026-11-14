@@ -391,7 +391,7 @@ export function openDraftBase(solutionPath = ""): SpotDraft {
     donkRiver: false,
     potCap: 0,
     noThreeBet: false,
-    allInThreshold: 0,
+    allInThreshold: 0.5,
     accuracy: "",
     timeLimit: "",
     useIcm: false,
@@ -564,10 +564,6 @@ export function draftPartialFromSolutionConfig(
     );
     partial.oopRiverDonk = donk.text;
     partial.donkRiver = donk.copyBets;
-  }
-  if ("allow_all_in" in config) {
-    partial.allowAllIn =
-      config.allow_all_in === true || config.allow_all_in === 1;
   }
   const mergeThreshold = asFiniteNumber(config.merge_threshold);
   if (mergeThreshold !== undefined) {

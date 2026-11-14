@@ -83,7 +83,6 @@ export type LastSolveSummary = {
   potCap: number;
   allowThreeBet: number;
   allInThreshold: number;
-  allowAllIn: number;
   maxRaises: number;
   mergeThreshold: number;
   /** Host default when the UI does not set cadence (app/session.zig). */
@@ -265,8 +264,9 @@ export function summarizeLastSolve(
     icmPayouts,
     potCap: Number(job.pot_cap) || 0,
     allowThreeBet: Number(job.allow_three_bet ?? 1),
-    allInThreshold: Number(job.all_in_threshold) || 0,
-    allowAllIn: Number(job.allow_all_in ?? 0),
+    allInThreshold: Number.isFinite(Number(job.all_in_threshold))
+      ? Number(job.all_in_threshold)
+      : 0.5,
     maxRaises: Number(job.max_raises ?? 2),
     mergeThreshold: Number(job.merge_threshold) || 0,
     publishEveryHint: 10,

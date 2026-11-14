@@ -57,7 +57,6 @@ export interface SolveJobRequest {
   pot_cap?: number;
   allow_three_bet?: number;
   all_in_threshold?: number;
-  allow_all_in?: number;
   frozen?: number;
   accuracy?: number;
   max_raises?: number;
@@ -326,15 +325,11 @@ export interface SpotDraft {
   noThreeBet: boolean;
   /**
    * Pio all-in threshold as a fraction of starting stack (0 = off).
-   * Build shows percent; engine `all-in-threshold` is this fraction.
+   * Default 0.5 (more than half the stack → all-in). Build shows percent;
+   * engine `all-in-threshold` is this fraction. List `a` for an explicit
+   * all-in size; oversized listed sizes also shove.
    */
   allInThreshold: number;
-  /**
-   * Draft mirror of engine `allow_all_in`. Study solve/preview hardcode 0 —
-   * list `a` per street for an *extra* all-in. Oversized listed sizes and
-   * all-in-threshold shove-ups still become all-in without this flag.
-   */
-  allowAllIn: boolean;
   frozen: boolean;
   accuracy: string;
   maxRaises: number;
@@ -408,8 +403,7 @@ export const DEFAULT_SPOT: SpotDraft = {
   mergeThresholdPct: 10,
   potCap: 0,
   noThreeBet: false,
-  allInThreshold: 0,
-  allowAllIn: false,
+  allInThreshold: 0.5,
   frozen: true,
   accuracy: "",
   // Facing raises only — opening street bets do not consume this cap.

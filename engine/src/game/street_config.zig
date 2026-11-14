@@ -90,7 +90,6 @@ pub fn formatStreetConfig(allocator: std.mem.Allocator, config: street_spec.Stre
     try appendRangeLine(allocator, &out, "ip-range", config.ip);
     try appendInt(&out, "first-to-act", config.first_to_act);
     try appendInt(&out, "max-raises", config.max_raises);
-    try appendFlag(&out, "allow-all-in", config.allow_all_in);
     try appendFlag(&out, "allow-three-bet", config.allow_three_bet);
     try appendNumber(&out, "all-in-threshold", config.all_in_threshold);
     try appendNumber(&out, "pot-cap", config.pot_cap);
@@ -238,7 +237,8 @@ fn assignUniqueField(
     } else if (std.mem.eql(u8, key, "max-raises")) {
         config.max_raises = parseInt(value) catch return error.InvalidStreetConfig;
     } else if (std.mem.eql(u8, key, "allow-all-in")) {
-        config.allow_all_in = parseFlag(value) catch return error.InvalidStreetConfig;
+        // Legacy: ignored. List `a` for explicit all-in; oversize/threshold shove.
+        _ = parseFlag(value) catch return error.InvalidStreetConfig;
     } else if (std.mem.eql(u8, key, "allow-three-bet")) {
         config.allow_three_bet = parseFlag(value) catch return error.InvalidStreetConfig;
     } else if (std.mem.eql(u8, key, "geometric")) {
@@ -537,18 +537,19 @@ test "parse street default fixture" {
     try std.testing.expectEqual(@as(usize, 4), config.board.len);
     try std.testing.expectEqual(chips.chipUnits(100), config.pot);
     try std.testing.expectEqual(@as(i32, 0), config.first_to_act);
-    try std.testing.expect(!config.allow_all_in);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), config.all_in_threshold, 1e-12);
     try std.testing.expectEqual(@as(usize, 1), config.oop_bet_sizes.len);
     try std.testing.expectApproxEqAbs(@as(f64, 1.0), config.oop_bet_sizes[0], 1e-12);
 
     const formatted = try formatStreetConfig(std.testing.allocator, config);
     defer std.testing.allocator.free(formatted);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, "allow-all-in") == null);
     var again = try parseStreetConfig(std.testing.allocator, formatted);
     defer again.deinit();
     try std.testing.expectEqual(config.board.len, again.board.len);
     try std.testing.expectEqual(config.pot, again.pot);
     try std.testing.expectEqual(config.stack, again.stack);
-    try std.testing.expectEqual(config.allow_all_in, again.allow_all_in);
+    try std.testing.expectApproxEqAbs(config.all_in_threshold, again.all_in_threshold, 1e-12);
 }
 
 test "reject bad version" {

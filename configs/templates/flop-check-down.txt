@@ -6,9 +6,8 @@ oop-range AcAd:1
 ip-range 2c3d:1
 first-to-act 0
 max-raises 0
-allow-all-in 0
 allow-three-bet 1
-all-in-threshold 0
+all-in-threshold 0.5
 pot-cap 0
 rake-rate 0
 rake-cap 0

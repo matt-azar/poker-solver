@@ -125,9 +125,9 @@ test "tree shape flop-small-bet root arity + decision count" {
     for (game.nodes) |node| {
         if (node.kind == .decision) decisions += 1;
     }
-    // Oversized listed raises become all-in (DS-26); tree grows vs historical drop.
-    try std.testing.expectEqual(@as(usize, 90), decisions);
-    try std.testing.expectEqual(@as(usize, 201), game.nodes.len);
+    // Default half-stack all-in threshold (0.5) shoves pot-sized raises earlier.
+    try std.testing.expectEqual(@as(usize, 62), decisions);
+    try std.testing.expectEqual(@as(usize, 129), game.nodes.len);
     const root = game.nodes[0];
     try std.testing.expect(root.kind == .decision);
     try std.testing.expectEqual(@as(u8, 2), root.n_actions);
