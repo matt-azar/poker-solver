@@ -105,11 +105,37 @@ fn appendStrategyMatrix(
     try w.writeAll("]");
 }
 
+fn foldActionIndex(actions: []const []const u8) isize {
+    for (actions, 0..) |label, i| {
+        if (std.mem.eql(u8, label, "Fold")) return @intCast(i);
+    }
+    return -1;
+}
+
+/// Baseline subtracted from root-centered chips for local decision EV.
+/// Prefer the Fold column when present (Fold → 0 even with path incentives);
+/// otherwise use -local_offset so local = root + local_offset.
+fn localEvBaseline(
+    page: *const action_ev.ActionValues,
+    hand: usize,
+    n_actions: usize,
+) f64 {
+    const offset_baseline = -page.local_offset;
+    const fold_idx = foldActionIndex(page.actions);
+    if (fold_idx < 0) return offset_baseline;
+    if (hand >= page.ev_defined.len or page.ev_defined[hand] == 0) return offset_baseline;
+    const idx = hand * n_actions + @as(usize, @intCast(fold_idx));
+    if (idx >= page.action_ev.len) return offset_baseline;
+    return page.action_ev[idx];
+}
+
 fn appendActionEvMatrix(
     list: *std.ArrayList(u8),
     page: *const action_ev.ActionValues,
     n_actions: usize,
     n_hands: usize,
+    /// When true, emit Fold≈0 / sunk-cost local chips; otherwise root-centered.
+    local_basis: bool,
 ) !void {
     const w = list.writer();
     try w.writeAll(",\"action_ev\":[");
@@ -120,13 +146,14 @@ fn appendActionEvMatrix(
             try w.writeAll("null");
             continue;
         }
+        const baseline: f64 = if (local_basis) localEvBaseline(page, hand, n_actions) else 0;
         try w.writeAll("[");
         var action: usize = 0;
         while (action < n_actions) : (action += 1) {
             if (action > 0) try w.writeAll(",");
             const idx = hand * n_actions + action;
-            const value: f64 = if (idx < page.action_ev.len) page.action_ev[idx] else 0;
-            try w.print("{d:.6}", .{value});
+            const root: f64 = if (idx < page.action_ev.len) page.action_ev[idx] else 0;
+            try w.print("{d:.6}", .{root - baseline});
         }
         try w.writeAll("]");
     }
@@ -137,6 +164,8 @@ fn appendMixedEv(
     list: *std.ArrayList(u8),
     page: *const action_ev.ActionValues,
     n_hands: usize,
+    n_actions: usize,
+    local_basis: bool,
 ) !void {
     const w = list.writer();
     try w.writeAll(",\"value\":[");
@@ -147,9 +176,29 @@ fn appendMixedEv(
             try w.writeAll("null");
             continue;
         }
-        try w.print("{d:.6}", .{page.mixed_ev[hand]});
+        const baseline: f64 = if (local_basis) localEvBaseline(page, hand, n_actions) else 0;
+        try w.print("{d:.6}", .{page.mixed_ev[hand] - baseline});
     }
     try w.writeAll("]");
+}
+
+fn appendRootCenteredDual(
+    list: *std.ArrayList(u8),
+    page: *const action_ev.ActionValues,
+    n_actions: usize,
+    n_hands: usize,
+) !void {
+    // Dual columns so Settings Global can flip without refetch / reverse-shift.
+    const w = list.writer();
+    try w.writeAll(",\"root_centered\":{");
+    if (page.node_ev_defined) {
+        try w.print("\"node_ev\":{d:.6}", .{page.node_ev});
+    } else {
+        try w.writeAll("\"node_ev\":null");
+    }
+    try appendActionEvMatrix(list, page, n_actions, n_hands, false);
+    try appendMixedEv(list, page, n_hands, n_actions, false);
+    try w.writeAll("}");
 }
 
 /// Study `node` reply body. Field order is contract-sensitive — do not reorder keys.
@@ -273,11 +322,14 @@ pub fn formatValuesBody(
         page.player,
         page.policy_revision,
     });
-    try w.writeAll(",\"units\":\"chips\",\"utility_basis\":\"root_centered\"");
+    // Primary action_ev / value / node_ev are local decision EV (Fold≈0).
+    // Dual root_centered{} keeps Global Settings toggle refetch-free.
+    try w.writeAll(",\"units\":\"chips\",\"utility_basis\":\"local\"");
     try w.print(",\"local_offset\":{d:.6},\"reach_defined\":{}", .{ page.local_offset, page.reach_defined });
     try w.print(",\"node_ev_defined\":{}", .{page.node_ev_defined});
     if (page.node_ev_defined) {
-        try w.print(",\"node_ev\":{d:.6}", .{page.node_ev});
+        // Match desktop withEvBasis: node_ev_local = node_ev_root + local_offset.
+        try w.print(",\"node_ev\":{d:.6}", .{page.node_ev + page.local_offset});
     } else {
         try w.writeAll(",\"node_ev\":null");
     }
@@ -307,9 +359,92 @@ pub fn formatValuesBody(
     }
     try w.writeAll("]");
 
-    try appendActionEvMatrix(&list, page, n_actions, n_hands);
-    try appendMixedEv(&list, page, n_hands);
+    try appendActionEvMatrix(&list, page, n_actions, n_hands, true);
+    try appendMixedEv(&list, page, n_hands, n_actions, true);
+    try appendRootCenteredDual(&list, page, n_actions, n_hands);
 
     try w.writeAll("}");
     return try list.toOwnedSlice();
+}
+
+test "formatValuesBody emits local primary and root_centered dual" {
+    const allocator = std.testing.allocator;
+    var page = action_ev.ActionValues{
+        .allocator = allocator,
+        .node_index = 1,
+        .player = 0,
+        .policy_revision = 1,
+        .local_offset = 50,
+        .reach_defined = true,
+        .node_ev_defined = true,
+        .node_ev = -50,
+    };
+    defer page.deinit();
+
+    page.actions = try allocator.alloc([]const u8, 2);
+    page.actions[0] = try allocator.dupe(u8, "Fold");
+    page.actions[1] = try allocator.dupe(u8, "Call");
+    page.combos = try allocator.alloc([]const u8, 1);
+    page.combos[0] = try allocator.dupe(u8, "AhAd");
+    page.ev_defined = try allocator.alloc(u8, 1);
+    page.ev_defined[0] = 1;
+    page.action_ev = try allocator.alloc(f64, 2);
+    page.action_ev[0] = -50;
+    page.action_ev[1] = -25;
+    page.mixed_ev = try allocator.alloc(f64, 1);
+    page.mixed_ev[0] = -50;
+
+    const located = node_id.ParsedNodeId{ .node_index = 1, .turn = -1, .river = -1 };
+    const body = try formatValuesBody(allocator, &page, located, 1, 0, false);
+    defer allocator.free(body);
+
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"utility_basis\":\"local\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"local_offset\":50.000000") != null);
+    // Local primary: Fold → 0, Call → 25, mixed → 0, node_ev → 0.
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"node_ev\":0.000000") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"action_ev\":[[0.000000,25.000000]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"value\":[0.000000]") != null);
+    // Dual root keeps original chips for Global toggle.
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"root_centered\":{\"node_ev\":-50.000000,\"action_ev\":[[-50.000000,-25.000000]],\"value\":[-50.000000]}") != null);
+}
+
+test "formatValuesBody flop Check/Bet uses local_offset when Fold absent" {
+    // Flop roots are typically Check/Bet — local = root + local_offset (baseline = -offset).
+    const allocator = std.testing.allocator;
+    var page = action_ev.ActionValues{
+        .allocator = allocator,
+        .node_index = 0,
+        .player = 0,
+        .policy_revision = 1,
+        .local_offset = 50,
+        .reach_defined = true,
+        .node_ev_defined = true,
+        .node_ev = 0,
+    };
+    defer page.deinit();
+
+    page.actions = try allocator.alloc([]const u8, 2);
+    page.actions[0] = try allocator.dupe(u8, "Check");
+    page.actions[1] = try allocator.dupe(u8, "Bet 50");
+    page.combos = try allocator.alloc([]const u8, 1);
+    page.combos[0] = try allocator.dupe(u8, "AsAc");
+    page.ev_defined = try allocator.alloc(u8, 1);
+    page.ev_defined[0] = 1;
+    page.action_ev = try allocator.alloc(f64, 2);
+    page.action_ev[0] = -10;
+    page.action_ev[1] = 10;
+    page.mixed_ev = try allocator.alloc(f64, 1);
+    page.mixed_ev[0] = 0;
+
+    const located = node_id.ParsedNodeId{ .node_index = 0, .turn = -1, .river = -1 };
+    const body = try formatValuesBody(allocator, &page, located, 1, 0, false);
+    defer allocator.free(body);
+
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"utility_basis\":\"local\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"engine\":\"frozen_response_walk\"") != null);
+    // local Check=40, Bet=60, mixed=50, node_ev=50.
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"action_ev\":[[40.000000,60.000000]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"value\":[50.000000]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"node_ev\":50.000000") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"root_centered\":{\"node_ev\":0.000000,\"action_ev\":[[-10.000000,10.000000]],\"value\":[0.000000]}") != null);
 }
