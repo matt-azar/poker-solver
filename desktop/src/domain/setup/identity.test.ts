@@ -297,17 +297,12 @@ describe("openDraftBase / draftFromOpenedSolution", () => {
     expect(inherited.ipTurn).toBe("");
     expect(inherited.oopFlopRaises).toBe("-");
 
-    const legacyAllInIgnored = draftPartialFromSolutionConfig({
-      allow_all_in: true,
+    const withThreshold = draftPartialFromSolutionConfig({
       oop_bets: [0.5],
       ip_bets: [0.5],
       all_in_threshold: 0.5,
     });
-    // Legacy allow_all_in is ignored; threshold still maps.
-    expect(Object.prototype.hasOwnProperty.call(legacyAllInIgnored, "allowAllIn")).toBe(
-      false,
-    );
-    expect(legacyAllInIgnored.allInThreshold).toBe(0.5);
+    expect(withThreshold.allInThreshold).toBe(0.5);
 
     const checkOnly = draftPartialFromSolutionConfig({
       oop_bets: [],

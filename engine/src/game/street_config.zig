@@ -236,9 +236,6 @@ fn assignUniqueField(
         config.first_to_act = parseInt(value) catch return error.InvalidStreetConfig;
     } else if (std.mem.eql(u8, key, "max-raises")) {
         config.max_raises = parseInt(value) catch return error.InvalidStreetConfig;
-    } else if (std.mem.eql(u8, key, "allow-all-in")) {
-        // Legacy: ignored. List `a` for explicit all-in; oversize/threshold shove.
-        _ = parseFlag(value) catch return error.InvalidStreetConfig;
     } else if (std.mem.eql(u8, key, "allow-three-bet")) {
         config.allow_three_bet = parseFlag(value) catch return error.InvalidStreetConfig;
     } else if (std.mem.eql(u8, key, "geometric")) {
@@ -520,7 +517,6 @@ test "parse street default fixture" {
         \\ip-range 3d2c:1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -543,13 +539,35 @@ test "parse street default fixture" {
 
     const formatted = try formatStreetConfig(std.testing.allocator, config);
     defer std.testing.allocator.free(formatted);
-    try std.testing.expect(std.mem.indexOf(u8, formatted, "allow-all-in") == null);
     var again = try parseStreetConfig(std.testing.allocator, formatted);
     defer again.deinit();
     try std.testing.expectEqual(config.board.len, again.board.len);
     try std.testing.expectEqual(config.pot, again.pot);
     try std.testing.expectEqual(config.stack, again.stack);
     try std.testing.expectApproxEqAbs(config.all_in_threshold, again.all_in_threshold, 1e-12);
+}
+
+test "reject unknown scalar key" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range AhAd:1
+        \\ip-range KcKd:1
+        \\first-to-act 0
+        \\max-raises 1
+        \\not-a-real-field 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0.5
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    try std.testing.expectError(error.InvalidStreetConfig, parseStreetConfig(std.testing.allocator, text));
 }
 
 test "reject bad version" {
@@ -572,7 +590,6 @@ test "accept CRLF line endings" {
         "ip-range 3d2c:1\r\n" ++
         "first-to-act 0\r\n" ++
         "max-raises 1\r\n" ++
-        "allow-all-in 0\r\n" ++
         "allow-three-bet 1\r\n" ++
         "all-in-threshold 0\r\n" ++
         "pot-cap 0\r\n" ++
@@ -606,7 +623,6 @@ test "tree-edit round trip line" {
         \\ip-range KcKd:1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

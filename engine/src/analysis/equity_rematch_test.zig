@@ -201,7 +201,6 @@ test "checkdownEquity on compiled river matches showdownEquity" {
         \\ip-range QsQc:1,JsJc:0.25
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -255,7 +254,6 @@ test "node equity pins turn root 18.1818 and Ac river 100 (audit P0-2)" {
         \\ip-river-bets 0.5
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -300,7 +298,6 @@ test "node equity pins turn root 18.1818 and Ac river 100 (audit P0-2)" {
         \\ip-river-bets 0.5
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -384,7 +381,6 @@ test "same board different lines reach-weight distinct ranges" {
         \\ip-river-bets 0.5
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -458,7 +454,6 @@ test "frozen OnCtx checkdown matches pair-enumeration at flop root" {
         \\ip-range QsQc:1,JsJc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

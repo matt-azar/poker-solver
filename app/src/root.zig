@@ -32,7 +32,6 @@ test "session train save open roundtrip" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -148,7 +147,6 @@ test "browse-only open keeps has_training false and continue disabled" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -222,7 +220,6 @@ test "train recovers from sticky failed phase without re-begin" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -262,7 +259,6 @@ test "ZR-151 begin respects stop_requested without installing" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -300,7 +296,6 @@ test "early stop before publish leaves session paused and continuable" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -341,7 +336,6 @@ test "prepareResolveLocked reset stamps baseline and zeros trained" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -376,7 +370,6 @@ test "publish cadence carries across train(1) and flushes on exact" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -431,7 +424,6 @@ test "multi-iter train forces publish at completion" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -464,7 +456,6 @@ test "begin over budget preserves prior published solution" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -508,7 +499,6 @@ test "adequate river budget begin succeeds and tracks live bytes" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -540,7 +530,6 @@ test "mid-pass train fault keeps published browsable and blocks Continue" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -584,7 +573,6 @@ test "Continue after mid-pass fault requires open checkpoint or fresh begin" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -641,7 +629,6 @@ test "strategy publish failure is distinct from mid-pass train failure" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -691,7 +678,6 @@ test "cadence publish OOM soft-skips and train continues (ZR-164)" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -743,7 +729,6 @@ test "second cadence publish reuses average buffer in place (ZR-164)" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -780,7 +765,6 @@ test "multi-iter train soft-skips final flush OOM (ZR-164)" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -839,7 +823,6 @@ test "pause during trainGated published gap stops early (ZR-178)" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -895,7 +878,6 @@ test "trainGated progress samples do not force-publish every eval (ZR-171)" {
         \\ip-river-bets 
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -953,7 +935,6 @@ test "trainGated accuracy_reached meets threshold on exact published average" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -1015,7 +996,6 @@ test "shared ceiling refuses begin when old and new cannot coexist" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -1062,7 +1042,6 @@ test "two-size flop streamed save open continue roundtrip" {
         \\ip-range QcQd:1,JcJh:1
         \\first-to-act 0
         \\max-raises 2
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

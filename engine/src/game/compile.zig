@@ -1080,7 +1080,6 @@ test "compile river check-only AA vs KK" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -1115,7 +1114,6 @@ test "ZR-151 compileCancelable aborts at stage boundary" {
         \\ip-range JcJd:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -1155,7 +1153,6 @@ test "compile flop runout index size" {
         \\ip-range JcJd:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -1187,7 +1184,6 @@ test "policy rows are runout-major; PSOL map is hand-major" {
         \\oop-raises 1.0
         \\ip-raises 1.0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

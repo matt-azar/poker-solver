@@ -147,7 +147,7 @@ fn expandAndConsider(
 /// A listed size above remaining stack is always re-interpreted as all-in (NLHE shove).
 /// Pio all-in threshold (fraction of starting stack) likewise converts a regular size
 /// to all-in. Short-of-min-raise shoves are kept only for `a` / oversize / threshold —
-/// there is no separate Add-all-in switch (list `a` for an explicit extra all-in).
+/// list `a` for an explicit extra all-in.
 fn resolveAggressiveAdd(
     config: street_spec.StreetSpec,
     state: BetState,
@@ -652,7 +652,7 @@ test "check-only root has Check" {
 }
 
 test "oversized listed bet becomes all-in" {
-    // b100 with stack < pot must shove (DS-26); no allow_all_in switch.
+    // b100 with stack < pot must shove (DS-26).
     var config = street_spec.StreetSpec.init(std.testing.allocator);
     defer config.deinit();
     const ah = try @import("../poker/card.zig").parseCard("Ah");

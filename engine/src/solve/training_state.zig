@@ -363,7 +363,6 @@ test "slot passes: 4-thread matches serial" {
         \\ip-bets 0.5
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
