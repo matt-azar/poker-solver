@@ -186,6 +186,22 @@ pub fn main() !void {
             };
             continue;
         }
+        if (std.mem.eql(u8, req.op, "line_card_report")) {
+            dispatch.startLineCardReport(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
+        if (std.mem.eql(u8, req.op, "value_bluffs_post_call")) {
+            dispatch.startValueBluffsPostCall(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
         if (std.mem.eql(u8, req.op, "save")) {
             dispatch.startSave(&state, req) catch |err| {
                 var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));

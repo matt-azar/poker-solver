@@ -74,16 +74,64 @@ export async function pollNodeEquity(
   throw new Error("Timed out waiting for post-call equity");
 }
 
+/** Prefer host `value_bluffs_post_call` when deps expose it (IPC Study). */
+export type PostCallHostDeps = PostCallFetchDeps & {
+  getValueBluffsPostCall?: (
+    solutionId: string,
+    nodeId: string,
+    opts?: { minBetFreq?: number; signal?: AbortSignal },
+  ) => Promise<unknown>;
+};
+
+function postCallResultFromHostBody(body: unknown): PostCallEquityResult | null {
+  if (!body || typeof body !== "object") {
+    return null;
+  }
+  const raw = body as {
+    pending?: boolean;
+    kind?: string;
+    hands?: Array<{ combo?: string; equity?: number; weight?: number }>;
+    call_node_ids?: string[];
+    missing_call_count?: number;
+    error?: string | null;
+  };
+  if (raw.pending) {
+    return null;
+  }
+  if (raw.kind && raw.kind !== "value_bluffs_post_call") {
+    return null;
+  }
+  if (!Array.isArray(raw.hands)) {
+    return null;
+  }
+  return {
+    hands: raw.hands
+      .filter((hand) => hand?.combo)
+      .map((hand) => ({
+        combo: String(hand.combo),
+        equity: Number(hand.equity),
+        weight: Number(hand.weight ?? 0),
+      })),
+    callNodeIds: Array.isArray(raw.call_node_ids)
+      ? raw.call_node_ids.map(String)
+      : [],
+    missingCallCount: Number(raw.missing_call_count ?? 0),
+    error: raw.error ?? null,
+  };
+}
+
 /**
  * For each dominant betting size on `node`, walk bet → facing → Call and load
  * check-down equity at the Call child. Returns synthetic acting-seat hands
  * keyed by each combo's max-prob size.
+ *
+ * Prefers a single host `value_bluffs_post_call` when available.
  */
 export async function fetchPostCallEquityHands(args: {
   solutionId: string;
   node: NodePayload;
   heroPlayer: number | null | undefined;
-  deps: PostCallFetchDeps;
+  deps: PostCallHostDeps;
   signal?: AbortSignal;
   minBetFreq?: number;
 }): Promise<PostCallEquityResult> {
@@ -95,6 +143,21 @@ export async function fetchPostCallEquityHands(args: {
     signal,
     minBetFreq = MIN_VALUE_BLUFFS_BET_FREQ,
   } = args;
+
+  if (deps.getValueBluffsPostCall && node.node_id) {
+    try {
+      const body = await deps.getValueBluffsPostCall(solutionId, node.node_id, {
+        minBetFreq,
+        signal,
+      });
+      const mapped = postCallResultFromHostBody(body);
+      if (mapped) {
+        return mapped;
+      }
+    } catch {
+      // Fall through to multi-getNode orchestration.
+    }
+  }
 
   const actionIndices = dominantBettingActionIndices(node, minBetFreq);
   if (!actionIndices.length) {
