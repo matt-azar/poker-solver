@@ -72,7 +72,7 @@ import {
   createTimeoutSignal,
   nextStatusPollDelay,
   statusPollFailureDetail,
-  STATUS_POLL_TIMEOUT_MS,
+  statusPollTimeoutMs,
   studyMutationScopeIsCurrent,
 } from "../domain/requestScope";
 import {
@@ -96,6 +96,7 @@ import {
   sessionDeadUiPatch,
   shouldMarkStatusPollDead,
   shouldTerminateHungSidecar,
+  softStatusTimeoutPreservesSession,
   statusIndicatesFailure,
   statusStickyError,
 } from "../domain/sessionRecovery";
@@ -1966,7 +1967,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   markEngineSessionDead(detail, opts) {
     // ZR-175: stop status polling immediately. Continuing to poll after session
     // death re-enters hung/kill, overwrites last-fault with "No engine URL", and
-    // leaves orphan Tauri status invokes (JS 4s abort vs Rust 240s wait).
+    // leaves orphan Tauri status invokes (JS abort vs long Rust wait).
     get().stopPolling();
     continuationPending = false;
     pendingReloadNodeId = undefined;
@@ -2112,7 +2113,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         const token = bumpStatusToken();
         const abort = new AbortController();
         setStatusAbortController(abort);
-        const timed = createTimeoutSignal(STATUS_POLL_TIMEOUT_MS, abort.signal);
+        const pollPhase = get().phase;
+        const timed = createTimeoutSignal(
+          statusPollTimeoutMs(softStatusTimeoutPreservesSession(pollPhase)),
+          abort.signal,
+        );
         const pollStartedAt =
           typeof performance !== "undefined" && typeof performance.now === "function"
             ? performance.now()
@@ -2301,10 +2306,12 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           // Soft blips: backoff only. Hard session-dead or N consecutive
           // failures: paint disconnected + clear sticky busy (ZR-123 / ZR-148).
           // ZR-151: when hung, terminate the sidecar so Reconnect can spawn fresh.
+          const hungPhase = get().phase;
           if (
             shouldMarkStatusPollDead({
               consecutiveFailures,
               detail: fullDetail,
+              phase: hungPhase,
             })
           ) {
             void reportUiHangEvent({
@@ -2313,12 +2320,13 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               detail: fullDetail,
               lastOp: "status",
               consecutiveStatusFailures: consecutiveFailures,
-              phase: get().phase,
+              phase: hungPhase,
             });
             if (
               shouldTerminateHungSidecar({
                 consecutiveFailures,
                 detail: fullDetail,
+                phase: hungPhase,
               })
             ) {
               void killSolverEngineIpc();

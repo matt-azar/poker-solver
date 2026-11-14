@@ -12,6 +12,9 @@ import {
   STATUS_POLL_BACKOFF_INITIAL_MS,
   STATUS_POLL_BACKOFF_MAX_MS,
   STATUS_POLL_INTERVAL_MS,
+  STATUS_POLL_TIMEOUT_ACTIVE_MS,
+  STATUS_POLL_TIMEOUT_MS,
+  statusPollTimeoutMs,
   studyMutationScopeIsCurrent,
   studyMutationScopesEqual,
 } from "./requestScope";
@@ -104,6 +107,12 @@ describe("compare request scope", () => {
 });
 
 describe("status poll scheduling", () => {
+  it("uses a longer status abort budget during build/train/EV", () => {
+    expect(statusPollTimeoutMs(false)).toBe(STATUS_POLL_TIMEOUT_MS);
+    expect(statusPollTimeoutMs(true)).toBe(STATUS_POLL_TIMEOUT_ACTIVE_MS);
+    expect(STATUS_POLL_TIMEOUT_ACTIVE_MS).toBeGreaterThan(STATUS_POLL_TIMEOUT_MS);
+  });
+
   it("uses base interval on success and backoff on failure", () => {
     expect(
       nextStatusPollDelay({ outcome: "success", consecutiveFailures: 0 }),

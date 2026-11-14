@@ -220,6 +220,22 @@ export function statusIndicatesFailure(
 export const STATUS_POLL_DEAD_AFTER_FAILURES = 3;
 
 /**
+ * Soft status timeouts during these phases must not paint disconnected or kill
+ * the sidecar. Packaged flop build/train can CPU-saturate Windows so status
+ * exceeds the poll budget while the engine is healthy (hot CPU, growing RSS).
+ * Killing after 3× soft timeouts aborts a working solve (debug 2026-11-14).
+ */
+export function softStatusTimeoutPreservesSession(phase: SolvePhase): boolean {
+  return (
+    phase === "building" ||
+    phase === "solving" ||
+    phase === "pause_requested" ||
+    phase === "stop_requested" ||
+    phase === "analysis_pending"
+  );
+}
+
+/**
  * Decide whether a status-poll failure should paint Reconnect / unreachable.
  * Transient decode/timeout blips must not flicker "Engine unreachable" over a
  * healthy sidecar (ZR-148).
@@ -228,6 +244,8 @@ export function shouldMarkStatusPollDead(args: {
   consecutiveFailures: number;
   detail: string;
   threshold?: number;
+  /** Current Study phase — soft timeouts preserve session while train/EV busy. */
+  phase?: SolvePhase;
 }): boolean {
   // Preconditions: failure counts are non-negative; threshold is at least 1.
   if (args.consecutiveFailures < 0) {
@@ -241,6 +259,15 @@ export function shouldMarkStatusPollDead(args: {
   if (isEngineSessionDead(args.detail)) {
     return true;
   }
+  // Soft timeout while compile/train/EV is expected: backoff only — do not
+  // declare session-dead (false hung-kill under Windows CPU saturation).
+  if (
+    args.phase != null &&
+    softStatusTimeoutPreservesSession(args.phase) &&
+    isSoftRpcTimeoutDetail(args.detail)
+  ) {
+    return false;
+  }
   // Negative: soft blips stay alive until the threshold.
   return args.consecutiveFailures >= threshold;
 }
@@ -249,12 +276,13 @@ export function shouldMarkStatusPollDead(args: {
  * ZR-151: after N soft status failures Study may kill the sidecar (hung host)
  * then Reconnect. Hard pipe-death faults already imply a dead process.
  * Soft timeouts alone must not look like "kill the train" — only the hung
- * threshold path terminates.
+ * threshold path terminates, and never during active build/train/EV (above).
  */
 export function shouldTerminateHungSidecar(args: {
   consecutiveFailures: number;
   detail: string;
   threshold?: number;
+  phase?: SolvePhase;
 }): boolean {
   if (isEngineSessionDead(args.detail)) {
     // Pipe already dead — kill is best-effort cleanup, still useful.

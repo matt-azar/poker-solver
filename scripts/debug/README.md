@@ -385,11 +385,14 @@ From `desktop/src-tauri/src/solver_engine.rs` and Study JS:
 | Op | Budget |
 | --- | --- |
 | `ready` | 8s |
-| `status` (Rust) | 8s |
-| status poll abort (JS) | 4s |
+| status poll abort (JS idle) | 8s |
+| status poll abort (JS build/train/EV) | 15s |
+| `status` (Rust) | 20s |
 | default RPC (`values`, `node`, …) | 240s |
 | `begin_config` | 600s |
 | `solve` / `resolve_locked` | 2h ceiling |
+
+Soft status timeouts during Building/Solving must **not** hung-kill a hot sidecar.
 
 ## Other workflows
 

@@ -176,6 +176,46 @@ describe("sessionRecovery", () => {
     ).toBe(true);
   });
 
+  it("soft status timeouts during build/train/EV do not hung-kill (Windows flop)", () => {
+    for (const phase of [
+      "building",
+      "solving",
+      "pause_requested",
+      "stop_requested",
+      "analysis_pending",
+    ] as const) {
+      expect(
+        shouldMarkStatusPollDead({
+          consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+          detail: "status request timed out. Shell: solver-engine IPC (protocol 2).",
+          phase,
+        }),
+      ).toBe(false);
+      expect(
+        shouldTerminateHungSidecar({
+          consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+          detail: "status request timed out",
+          phase,
+        }),
+      ).toBe(false);
+    }
+    // Idle still hung-kills after threshold; hard pipe death always terminates.
+    expect(
+      shouldTerminateHungSidecar({
+        consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+        detail: "status request timed out",
+        phase: "idle",
+      }),
+    ).toBe(true);
+    expect(
+      shouldTerminateHungSidecar({
+        consecutiveFailures: 1,
+        detail: "Broken pipe",
+        phase: "solving",
+      }),
+    ).toBe(true);
+  });
+
   it("cold reconnect copy keeps checkpoint reopen honest and rejects silent restore (ZR-143/ZR-157)", () => {
     expect(lastValidCheckpointPath(" /tmp/last.psol ")).toBe("/tmp/last.psol");
     expect(lastValidCheckpointPath("")).toBe("");

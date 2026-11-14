@@ -42,7 +42,7 @@ DIAG_FILES = (
 # Mirror desktop/src-tauri/src/solver_engine.rs timeout_for_op (seconds).
 IPC_TIMEOUTS_SEC = {
     "ready": 8,
-    "status": 8,
+    "status": 20,
     "begin_config": 600,
     "solve": 2 * 60 * 60,
     "resolve_locked": 2 * 60 * 60,
@@ -50,7 +50,10 @@ IPC_TIMEOUTS_SEC = {
 }
 
 # Mirror desktop JS status-poll budget (requestScope.ts).
-STATUS_POLL_TIMEOUT_MS = 4_000
+# Keep in sync with desktop/src/domain/requestScope.ts (idle budget).
+STATUS_POLL_TIMEOUT_MS = 8_000
+STATUS_POLL_TIMEOUT_ACTIVE_MS = 15_000
+STATUS_RPC_TIMEOUT_S = 20.0
 STATUS_POLL_DEAD_AFTER_FAILURES = 3
 
 
