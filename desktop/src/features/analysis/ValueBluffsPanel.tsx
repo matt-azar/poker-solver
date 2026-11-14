@@ -256,6 +256,8 @@ export function ValueBluffsPanel() {
             getNode: (sid, nid, signal) => engineClient.getNode(sid, nid, signal),
             getEquity: (sid, nid, signal) =>
               engineClient.getEquity(sid, nid, signal),
+            getValueBluffsPostCall: (sid, nid, opts) =>
+              engineClient.getValueBluffsPostCall(sid, nid, opts),
           },
         });
         if (controller.signal.aborted) {

@@ -7,6 +7,7 @@ const workers = @import("workers.zig");
 const equity_json = @import("equity_json.zig");
 const equity_jobs = @import("equity_jobs.zig");
 const categories_json = @import("categories_json.zig");
+const study_reports = @import("study_reports.zig");
 const locks_json = @import("locks_json.zig");
 const strategy_edits_json = @import("strategy_edits_json.zig");
 const format_study_bodies = @import("format_study_bodies.zig");
@@ -31,7 +32,7 @@ const BeginTask = struct {
     config: []u8,
 };
 
-const AnalysisKind = enum { values, equity, node, categories };
+const AnalysisKind = enum { values, equity, node, categories, line_card_report, value_bluffs_post_call };
 
 const AnalysisTask = struct {
     state: *HostState,
@@ -1449,6 +1450,32 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return handleCategories(state, req);
     }
 
+    // Fat Study reports (Compare runouts / Value-Bluffs after-call). Product uses start* off stdin.
+    if (std.mem.eql(u8, req.op, "line_card_report")) {
+        state.prioritizeAnalysisBudget(1);
+        defer state.returnBudgetToTraining();
+        const wait_ns: u64 = 30 * std.time.ns_per_s;
+        var lease = borrowPublishedForAnalysis(state, wait_ns) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+        defer lease.deinit();
+        return buildLineCardReportReply(state, req.request_id, req.job_id, req.body_json, &lease) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "line_card_report_failed", @errorName(err));
+        };
+    }
+    if (std.mem.eql(u8, req.op, "value_bluffs_post_call")) {
+        state.prioritizeAnalysisBudget(1);
+        defer state.returnBudgetToTraining();
+        const wait_ns: u64 = 30 * std.time.ns_per_s;
+        var lease = borrowPublishedForAnalysis(state, wait_ns) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+        };
+        defer lease.deinit();
+        return buildValueBluffsPostCallReply(state, req.request_id, req.job_id, req.body_json, &lease) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "value_bluffs_post_call_failed", @errorName(err));
+        };
+    }
+
     // Study locks CRUD over Session.locks_text (node_lock codec).
     // resolve_locked is async (main.zig → startResolveLocked), like solve.
     if (std.mem.eql(u8, req.op, "list_locks")) {
@@ -2010,6 +2037,18 @@ fn analysisWorker(task: *AnalysisTask) void {
                 return;
             };
         },
+        .line_card_report => buildLineCardReportReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
+            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "line_card_report_failed", @errorName(err)) catch {
+                lease.deinit();
+                return;
+            };
+        },
+        .value_bluffs_post_call => buildValueBluffsPostCallReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
+            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "value_bluffs_post_call_failed", @errorName(err)) catch {
+                lease.deinit();
+                return;
+            };
+        },
     };
     // Reply body is owned JSON — release the publish lease before the blocking
     // stdout write so publish/replace is not held behind a large frame (audit #3).
@@ -2295,6 +2334,76 @@ pub fn startNode(state: *HostState, req: ipc.Envelope) !void {
 
 pub fn startCategories(state: *HostState, req: ipc.Envelope) !void {
     try startAnalysis(state, req, .categories);
+}
+
+pub fn startLineCardReport(state: *HostState, req: ipc.Envelope) !void {
+    try startAnalysis(state, req, .line_card_report);
+}
+
+pub fn startValueBluffsPostCall(state: *HostState, req: ipc.Envelope) !void {
+    try startAnalysis(state, req, .value_bluffs_post_call);
+}
+
+fn buildLineCardReportReply(
+    state: *HostState,
+    request_id: []const u8,
+    job_id: ?[]const u8,
+    body_json: []const u8,
+    lease: *poker_app.PublishedLease,
+) !ipc.Envelope {
+    const located = try resolveLocatedNode(lease.game, body_json);
+    const vary = bodyStringField(body_json, "vary_street");
+    const body = try study_reports.buildLineCardReportBody(
+        state.allocator,
+        lease.game,
+        lease.published,
+        located,
+        lease.solution_id,
+        vary,
+    );
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, request_id, job_id, "line_card_report", body);
+}
+
+fn equityAtLocatedNoCtx(
+    allocator: std.mem.Allocator,
+    game: poker_engine.game.CompiledGame,
+    published: poker_engine.solve.training_state.PublishedPolicy,
+    node_index: u32,
+    turn: i32,
+    river: i32,
+) poker_engine.analysis.equity.EquityError!poker_engine.analysis.equity.ShowdownEquity {
+    return poker_engine.analysis.equity.checkdownEquityAtNode(
+        allocator,
+        game,
+        published,
+        node_index,
+        turn,
+        river,
+        poker_engine.analysis.equity.study_explorer_max_pair_runouts,
+    );
+}
+
+fn buildValueBluffsPostCallReply(
+    state: *HostState,
+    request_id: []const u8,
+    job_id: ?[]const u8,
+    body_json: []const u8,
+    lease: *poker_app.PublishedLease,
+) !ipc.Envelope {
+    const located = try resolveLocatedNode(lease.game, body_json);
+    const min_bet = bodyFloatField(body_json, "min_bet_freq") orelse 0.01;
+    const body = try study_reports.buildValueBluffsPostCallBody(
+        state.allocator,
+        lease.game,
+        lease.published,
+        located,
+        lease.solution_id,
+        min_bet,
+        &equityAtLocatedNoCtx,
+    );
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, request_id, job_id, "value_bluffs_post_call", body);
 }
 
 fn ioWorker(task: *IoTask) void {
@@ -4666,4 +4775,155 @@ test "ZR-116 dig: equity calculator invalid board + cancel under busy" {
         }
         std.Thread.sleep(50 * std.time.ns_per_ms);
     }
+}
+
+test "line_card_report flop solve turn compare has rows" {
+    // Flop tree → check-check → turn chance → first card decision → compare turn cards.
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range 2s2h:1,3s3h:1,AsAc:1
+        \\ip-range 2s2h:1,3s3h:1,AsAc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\oop-bets
+        \\ip-bets
+        \\oop-raises
+        \\ip-raises
+        \\oop-turn-bets
+        \\ip-turn-bets
+        \\oop-river-bets 0.5
+        \\ip-river-bets 0.5
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "line-card-flop");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    // Root Check child.
+    var root_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "lc-root"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer root_req.deinit();
+    var root_reply = try handle(&state, root_req);
+    defer root_reply.deinit();
+    try std.testing.expect(root_reply.ok);
+    const p1_start = std.mem.indexOf(u8, root_reply.body_json, "\"children\":[\"") orelse return error.TestUnexpectedResult;
+    const p1_id_start = p1_start + "\"children\":[\"".len;
+    const p1_id_end = std.mem.indexOfPos(u8, root_reply.body_json, p1_id_start, "\"") orelse return error.TestUnexpectedResult;
+    const p1_id = root_reply.body_json[p1_id_start..p1_id_end];
+
+    var p1_body: [96]u8 = undefined;
+    const p1_json = try std.fmt.bufPrint(&p1_body, "{{\"node_id\":\"{s}\"}}", .{p1_id});
+    var p1_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "lc-p1"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, p1_json),
+    };
+    defer p1_req.deinit();
+    var p1_reply = try handle(&state, p1_req);
+    defer p1_reply.deinit();
+    try std.testing.expect(p1_reply.ok);
+    // IP Check → chance.
+    const ch_start = std.mem.indexOf(u8, p1_reply.body_json, "\"children\":[\"") orelse return error.TestUnexpectedResult;
+    const ch_id_start = ch_start + "\"children\":[\"".len;
+    const ch_id_end = std.mem.indexOfPos(u8, p1_reply.body_json, ch_id_start, "\"") orelse return error.TestUnexpectedResult;
+    const chance_id = p1_reply.body_json[ch_id_start..ch_id_end];
+
+    var ch_body: [96]u8 = undefined;
+    const ch_json = try std.fmt.bufPrint(&ch_body, "{{\"node_id\":\"{s}\"}}", .{chance_id});
+    var ch_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "lc-ch"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, ch_json),
+    };
+    defer ch_req.deinit();
+    var ch_reply = try handle(&state, ch_req);
+    defer ch_reply.deinit();
+    try std.testing.expect(ch_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, ch_reply.body_json, "\"kind\":\"chance\"") != null);
+    // First chance card child → turn decision.
+    const card_key = "\"child_id\":\"";
+    const card_at = std.mem.indexOf(u8, ch_reply.body_json, card_key) orelse return error.TestUnexpectedResult;
+    const card_id_start = card_at + card_key.len;
+    const card_id_end = std.mem.indexOfPos(u8, ch_reply.body_json, card_id_start, "\"") orelse return error.TestUnexpectedResult;
+    const turn_decision_id = ch_reply.body_json[card_id_start..card_id_end];
+
+    var report_body: [128]u8 = undefined;
+    const report_json = try std.fmt.bufPrint(&report_body, "{{\"node_id\":\"{s}\",\"vary_street\":\"turn\"}}", .{turn_decision_id});
+    var report_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "lc-report"),
+        .op = try std.testing.allocator.dupe(u8, "line_card_report"),
+        .body_json = try std.testing.allocator.dupe(u8, report_json),
+    };
+    defer report_req.deinit();
+    var report_reply = try handle(&state, report_req);
+    defer report_reply.deinit();
+    try std.testing.expect(report_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, report_reply.body_json, "\"kind\":\"line_card_report\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_reply.body_json, "\"vary_street\":\"turn\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_reply.body_json, "\"rows\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_reply.body_json, "\"frequencies\":[") != null);
+}
+
+test "value_bluffs_post_call flop bet returns hands shape" {
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range 2s2h:1,3s3h:1,AsAc:1,KsKh:1
+        \\ip-range 2s2h:1,3s3h:1,AsAc:1,KsKh:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "vb-post-call-flop");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(2);
+
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "vb1"),
+        .op = try std.testing.allocator.dupe(u8, "value_bluffs_post_call"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\",\"min_bet_freq\":0.01}"),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"kind\":\"value_bluffs_post_call\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"hands\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"call_node_ids\":[") != null);
 }

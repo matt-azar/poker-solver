@@ -13,6 +13,7 @@ import {
 } from "../domain/build/transferFromStudy";
 import {
   lineCardOptionsFromChance,
+  lineCardReportFromHostBody,
   lineCardReportStreet,
   lineCardTargetId,
   rowFromResolvedNode,
@@ -2873,6 +2874,50 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     });
 
     try {
+      // Prefer host fat report (one IPC) when solver-engine is live.
+      try {
+        const hostBody = await engineClient.getLineCardReport(
+          solutionId,
+          reportNodeId,
+          { varyStreet: street },
+        );
+        if (token !== lineCardReportToken) {
+          return;
+        }
+        if (get().solutionId !== solutionId || get().currentNode?.node_id !== reportNodeId) {
+          set({
+            lineCardReport: {
+              ...pending,
+              pending: false,
+              error:
+                "Study solution or decision changed while building Compare runouts. Retry on the intended decision.",
+            },
+            message:
+              "Study solution or decision changed while building Compare runouts. Retry on the intended decision.",
+          });
+          return;
+        }
+        const mapped = lineCardReportFromHostBody(hostBody, {
+          reportNodeId,
+          line: String(node.line || reportNodeId),
+          street,
+          solutionId,
+          activeFilter: pendingFilter,
+        });
+        if (mapped && mapped.rows.length > 0) {
+          set({
+            lineCardReport: mapped,
+            analysisTab: "line-cards",
+            message: mapped.matchedCards
+              ? `Line card report ready (${mapped.matchedCards.length} matched ${street}s).`
+              : `Line card report ready (${mapped.rows.length} ${street}s).`,
+          });
+          return;
+        }
+      } catch {
+        // Fall through to legacy multi-getNode orchestration.
+      }
+
       const gate = await get().prepareBoardCardChange(street);
       if (token !== lineCardReportToken) {
         return;

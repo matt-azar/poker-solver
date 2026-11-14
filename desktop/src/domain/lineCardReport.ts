@@ -541,3 +541,95 @@ export function withLineCardReportFilter(
     matchedCards: matched.map((row) => row.card),
   };
 }
+
+/** Map host `line_card_report` body onto the Study report model. */
+export function lineCardReportFromHostBody(
+  body: unknown,
+  opts: {
+    reportNodeId: string;
+    line: string;
+    street: LineCardVaryStreet;
+    solutionId?: string;
+    activeFilter?: LineCardReportActiveFilter | null;
+  },
+): LineCardReportModel | null {
+  if (!body || typeof body !== "object") {
+    return null;
+  }
+  const raw = body as {
+    pending?: boolean;
+    kind?: string;
+    report_node_id?: string;
+    chance_node_id?: string;
+    vary_street?: string;
+    action_labels?: string[];
+    rows?: Array<{
+      card?: string;
+      deal_probability?: number | null;
+      available?: boolean;
+      reason?: string | null;
+      resolved_node_id?: string | null;
+      joint?: number | null;
+      player?: number | null;
+      actions?: string[];
+      frequencies?: number[];
+    }>;
+  };
+  if (raw.pending) {
+    return null;
+  }
+  if (raw.kind && raw.kind !== "line_card_report") {
+    return null;
+  }
+  if (!Array.isArray(raw.rows)) {
+    return null;
+  }
+  const rows: LineCardReportRow[] = raw.rows.map((row) => {
+    const joint =
+      typeof row.joint === "number" && Number.isFinite(row.joint)
+        ? row.joint
+        : null;
+    return {
+      card: String(row.card ?? ""),
+      dealProbability:
+        typeof row.deal_probability === "number" &&
+        Number.isFinite(row.deal_probability)
+          ? row.deal_probability
+          : null,
+      dealProbabilityDefined:
+        typeof row.deal_probability === "number" &&
+        Number.isFinite(row.deal_probability),
+      reach: joint,
+      reachDefined: joint != null,
+      zeroReach: joint === 0,
+      available: Boolean(row.available),
+      reason: row.reason ?? null,
+      resolvedNodeId: row.resolved_node_id ?? null,
+      actions: Array.isArray(row.actions) ? row.actions.map(String) : [],
+      frequencies: Array.isArray(row.frequencies)
+        ? row.frequencies.map((v) => Number(v))
+        : [],
+      player: typeof row.player === "number" ? row.player : null,
+      ev: null,
+      evDefined: false,
+      equity: null,
+      equityDefined: false,
+    };
+  });
+  const model: LineCardReportModel = {
+    pending: false,
+    reportNodeId: raw.report_node_id || opts.reportNodeId,
+    line: opts.line,
+    street:
+      raw.vary_street === "turn" || raw.vary_street === "river"
+        ? raw.vary_street
+        : opts.street,
+    chanceNodeId: String(raw.chance_node_id ?? ""),
+    actionLabels: Array.isArray(raw.action_labels)
+      ? raw.action_labels.map(String)
+      : [],
+    rows,
+    solutionId: opts.solutionId,
+  };
+  return withLineCardReportFilter(model, opts.activeFilter ?? null);
+}

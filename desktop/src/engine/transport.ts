@@ -615,3 +615,31 @@ export async function ipcCategories(opts?: {
     return env.body;
   });
 }
+
+/** Compare-runouts fat report (host `line_card_report`). */
+export async function ipcLineCardReport(opts: {
+  nodeId: string;
+  varyStreet?: "turn" | "river";
+}): Promise<unknown> {
+  return runAnalysisWorkerIpc(async () => {
+    const env = await solverEngineRequest("line_card_report", {
+      node_id: opts.nodeId,
+      ...(opts.varyStreet ? { vary_street: opts.varyStreet } : {}),
+    });
+    return env.body;
+  });
+}
+
+/** Value/Bluffs Mode B after-call equity join (host `value_bluffs_post_call`). */
+export async function ipcValueBluffsPostCall(opts: {
+  nodeId: string;
+  minBetFreq?: number;
+}): Promise<unknown> {
+  return runAnalysisWorkerIpc(async () => {
+    const env = await solverEngineRequest("value_bluffs_post_call", {
+      node_id: opts.nodeId,
+      ...(opts.minBetFreq != null ? { min_bet_freq: opts.minBetFreq } : {}),
+    });
+    return env.body;
+  });
+}

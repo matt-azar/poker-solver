@@ -22,6 +22,7 @@ import {
   ipcEquity,
   ipcGetConfig,
   ipcGetEquityJob,
+  ipcLineCardReport,
   ipcListLocks,
   ipcListStrategyEdits,
   ipcNode,
@@ -35,6 +36,7 @@ import {
   ipcStartEquityJob,
   ipcStatus,
   ipcTreePreview,
+  ipcValueBluffsPostCall,
   ipcValues,
   mintStudyJobId,
   isIpcTransport,
@@ -587,6 +589,52 @@ export class EngineClient {
     const { response, data } = await this.request("GET", path, undefined, { signal });
     this.ensureOk(response, data, true);
     return data;
+  }
+
+  /** Host fat Compare-runouts report (`line_card_report`). IPC only. */
+  async getLineCardReport(
+    solutionId: string,
+    nodeId: string,
+    opts?: { varyStreet?: "turn" | "river"; signal?: AbortSignal },
+  ): Promise<unknown> {
+    if (!isIpcTransport()) {
+      throw new EngineError("line_card_report requires solver-engine IPC", 501, null);
+    }
+    if (opts?.signal?.aborted) {
+      throw new EngineError("aborted", 0, null);
+    }
+    const data = await ipcLineCardReport({
+      nodeId,
+      varyStreet: opts?.varyStreet,
+    });
+    return {
+      ...(data as object),
+      solution_id: solutionId,
+      node_id: nodeId,
+    };
+  }
+
+  /** Host Value/Bluffs after-call equity join (`value_bluffs_post_call`). IPC only. */
+  async getValueBluffsPostCall(
+    solutionId: string,
+    nodeId: string,
+    opts?: { minBetFreq?: number; signal?: AbortSignal },
+  ): Promise<unknown> {
+    if (!isIpcTransport()) {
+      throw new EngineError("value_bluffs_post_call requires solver-engine IPC", 501, null);
+    }
+    if (opts?.signal?.aborted) {
+      throw new EngineError("aborted", 0, null);
+    }
+    const data = await ipcValueBluffsPostCall({
+      nodeId,
+      minBetFreq: opts?.minBetFreq,
+    });
+    return {
+      ...(data as object),
+      solution_id: solutionId,
+      node_id: nodeId,
+    };
   }
 
   /** Poll status until a file/solve overlay leaves `running` (fixture HTTP path). */
