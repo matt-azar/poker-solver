@@ -4,6 +4,7 @@ const range_mod = @import("../poker/range.zig");
 const hand_eval = @import("../poker/hand_eval.zig");
 const compile = @import("../game/compile.zig");
 const training_state = @import("../solve/training_state.zig");
+const frozen_walk = @import("../solve/frozen_walk.zig");
 
 pub const EquityError = error{ InvalidEquity, OutOfMemory, WorkLimit, InvalidWeight };
 
@@ -621,9 +622,210 @@ fn boardThroughNode(
     return out[0..n];
 }
 
+fn resolveSigmaForEquity(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    published: training_state.PublishedPolicy,
+    owned: *?[]f32,
+) EquityError![]const f32 {
+    if (published.average.len != 0) return published.average;
+    var uniform = training_state.TrainingState.init(allocator, game) catch return error.OutOfMemory;
+    defer uniform.deinit();
+    owned.* = allocator.dupe(f32, uniform.sigma) catch return error.OutOfMemory;
+    return owned.*.?;
+}
+
+fn rangesFromReach(
+    game: compile.CompiledGame,
+    q0: []const f64,
+    q1: []const f64,
+) struct { r0: range_mod.Range, r1: range_mod.Range } {
+    var r0 = range_mod.Range{};
+    var r1 = range_mod.Range{};
+    for (game.hands.combos[0], 0..) |combo, i| {
+        if (i < q0.len and q0[i] > 0 and std.math.isFinite(q0[i])) {
+            r0.weights[@intCast(combo)] = q0[i];
+        }
+    }
+    for (game.hands.combos[1], 0..) |combo, i| {
+        if (i < q1.len and q1[i] > 0 and std.math.isFinite(q1[i])) {
+            r1.weights[@intCast(combo)] = q1[i];
+        }
+    }
+    return .{ .r0 = r0, .r1 = r1 };
+}
+
+/// Compatible-mass (runout-independent) for compiled hands under reach weights.
+fn fillCompatibleMassFromReach(
+    game: compile.CompiledGame,
+    q0: []const f64,
+    q1: []const f64,
+    turn: i32,
+    river: i32,
+    rows0: []ComboEquity,
+    rows1: []ComboEquity,
+) void {
+    var h0: usize = 0;
+    while (h0 < rows0.len) : (h0 += 1) {
+        if (!(q0[h0] > 0)) continue;
+        if (handBlocksCards(game, 0, h0, turn, river)) continue;
+        const a0 = game.hands.hole_low[0][h0];
+        const a1 = game.hands.hole_high[0][h0];
+        var h1: usize = 0;
+        while (h1 < rows1.len) : (h1 += 1) {
+            if (!(q1[h1] > 0)) continue;
+            if (handBlocksCards(game, 1, h1, turn, river)) continue;
+            const b0 = game.hands.hole_low[1][h1];
+            const b1 = game.hands.hole_high[1][h1];
+            if (a0 == b0 or a0 == b1 or a1 == b0 or a1 == b1) continue;
+            rows0[h0].compatible_mass += q1[h1];
+            rows1[h1].compatible_mass += q0[h0];
+        }
+    }
+}
+
+fn allocHandRowsFromGame(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    player: usize,
+    reach: []const f64,
+) EquityError![]ComboEquity {
+    const n = game.hands.combos[player].len;
+    var rows = allocator.alloc(ComboEquity, n) catch return error.OutOfMemory;
+    errdefer allocator.free(rows);
+    var hand: usize = 0;
+    while (hand < n) : (hand += 1) {
+        const combo = game.hands.combos[player][hand];
+        var buf: [4]u8 = undefined;
+        const text = range_mod.Range.comboText(combo, &buf) catch return error.InvalidEquity;
+        const w = if (hand < reach.len) reach[hand] else 0;
+        rows[hand] = .{
+            .index = combo,
+            .combo = allocator.dupe(u8, text) catch return error.OutOfMemory,
+            .input_weight = if (w > 0 and std.math.isFinite(w)) w else 0,
+        };
+    }
+    return rows;
+}
+
+/// Study node check-down on a warm FrozenCtx (Session ranks after train).
+/// Same reach + board semantics as `checkdownEquityAtNode`, but O(hands·runouts)
+/// via RunoutRanks prefix/block cuts instead of O(n0·n1·runouts) pair walks.
+pub fn checkdownEquityAtNodeOnCtx(
+    allocator: std.mem.Allocator,
+    ctx: *frozen_walk.FrozenCtx,
+    game: compile.CompiledGame,
+    published: training_state.PublishedPolicy,
+    node_index: u32,
+    turn: i32,
+    river: i32,
+    max_pair_runouts: u64,
+) EquityError!ShowdownEquity {
+    if (ctx.game.hands.combos[0].len != game.hands.combos[0].len) return error.InvalidEquity;
+    if (ctx.game.hands.combos[1].len != game.hands.combos[1].len) return error.InvalidEquity;
+
+    var owned_sigma: ?[]f32 = null;
+    defer if (owned_sigma) |buf| allocator.free(buf);
+    const sigma = try resolveSigmaForEquity(allocator, game, published, &owned_sigma);
+
+    const reach = try replayReachWeights(allocator, game, sigma, node_index, turn, river);
+    defer {
+        allocator.free(reach.q0);
+        allocator.free(reach.q1);
+    }
+
+    const ranges = rangesFromReach(game, reach.q0, reach.q1);
+    var board_buf: [5]card.Card = undefined;
+    const board = try boardThroughNode(game, turn, river, &board_buf);
+
+    // Work preflight (same ceiling as pair-enumeration path).
+    var combos0 = std.ArrayList(i32).init(allocator);
+    defer combos0.deinit();
+    var combos1 = std.ArrayList(i32).init(allocator);
+    defer combos1.deinit();
+    var index: i32 = 0;
+    while (index < card.combo_count) : (index += 1) {
+        if (ranges.r0.weights[@intCast(index)] > 0) combos0.append(index) catch return error.OutOfMemory;
+        if (ranges.r1.weights[@intCast(index)] > 0) combos1.append(index) catch return error.OutOfMemory;
+    }
+    const legal = countCompatiblePairRunouts(board, combos0.items, combos1.items);
+
+    var result = ShowdownEquity{ .allocator = allocator };
+    errdefer result.deinit();
+    result.pair_runouts = legal;
+    if (legal > max_pair_runouts) return error.WorkLimit;
+
+    result.player0.combos = try allocHandRowsFromGame(allocator, game, 0, reach.q0);
+    result.player1.combos = try allocHandRowsFromGame(allocator, game, 1, reach.q1);
+    fillCompatibleMassFromReach(game, reach.q0, reach.q1, turn, river, result.player0.combos, result.player1.combos);
+
+    const win0 = allocator.alloc(f64, ctx.n0) catch return error.OutOfMemory;
+    defer allocator.free(win0);
+    const tie0 = allocator.alloc(f64, ctx.n0) catch return error.OutOfMemory;
+    defer allocator.free(tie0);
+    const loss0 = allocator.alloc(f64, ctx.n0) catch return error.OutOfMemory;
+    defer allocator.free(loss0);
+    const win1 = allocator.alloc(f64, ctx.n1) catch return error.OutOfMemory;
+    defer allocator.free(win1);
+    const tie1 = allocator.alloc(f64, ctx.n1) catch return error.OutOfMemory;
+    defer allocator.free(tie1);
+    const loss1 = allocator.alloc(f64, ctx.n1) catch return error.OutOfMemory;
+    defer allocator.free(loss1);
+
+    // Pins relative to CompiledGame.board (Session FrozenCtx street).
+    const turn_pin: i32 = if (game.board.len == 3) turn else -1;
+    const river_pin: i32 = if (game.board.len <= 4) river else -1;
+    ctx.checkdownWinTieLoss(
+        reach.q0,
+        reach.q1,
+        turn_pin,
+        river_pin,
+        win0,
+        tie0,
+        loss0,
+        win1,
+        tie1,
+        loss1,
+    ) catch return error.InvalidEquity;
+
+    var joint: f64 = 0;
+    var agg_win0: f64 = 0;
+    var agg_tie0: f64 = 0;
+    var agg_loss0: f64 = 0;
+    var h0: usize = 0;
+    while (h0 < result.player0.combos.len) : (h0 += 1) {
+        const row = &result.player0.combos[h0];
+        if (!(row.input_weight > 0)) continue;
+        joint += row.input_weight * row.compatible_mass;
+        // win0[h] is Σ opp_mass over runouts (already × inv); match fillRunoutEquity.
+        row.win = win0[h0];
+        row.tie = tie0[h0];
+        row.loss = loss0[h0];
+        agg_win0 += row.input_weight * win0[h0];
+        agg_tie0 += row.input_weight * tie0[h0];
+        agg_loss0 += row.input_weight * loss0[h0];
+    }
+    var h1: usize = 0;
+    while (h1 < result.player1.combos.len) : (h1 += 1) {
+        const row = &result.player1.combos[h1];
+        if (!(row.input_weight > 0)) continue;
+        row.win = win1[h1];
+        row.tie = tie1[h1];
+        row.loss = loss1[h1];
+    }
+
+    if (joint <= 0) return result;
+    result.joint_defined = true;
+    // Joint W/T/L use hero-weighted opponent masses (same as fillRunoutEquity scale).
+    finalizePlayer(&result.player0, agg_win0, agg_tie0, agg_loss0, joint);
+    finalizePlayer(&result.player1, agg_loss0, agg_tie0, agg_win0, joint);
+    return result;
+}
+
 /// Study node check-down equity: both players' strategy-conditioned reach along
 /// the line, board through the node, pair enumeration. Zero-weight hands are
 /// omitted from showdownEquity inputs and aggregates (ZR-95 / audit P0-2).
+/// Prefer `checkdownEquityAtNodeOnCtx` when a warm Session FrozenCtx is held.
 pub fn checkdownEquityAtNode(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
@@ -635,13 +837,7 @@ pub fn checkdownEquityAtNode(
 ) EquityError!ShowdownEquity {
     var owned_sigma: ?[]f32 = null;
     defer if (owned_sigma) |buf| allocator.free(buf);
-    const sigma: []const f32 = blk: {
-        if (published.average.len != 0) break :blk published.average;
-        var uniform = training_state.TrainingState.init(allocator, game) catch return error.OutOfMemory;
-        defer uniform.deinit();
-        owned_sigma = allocator.dupe(f32, uniform.sigma) catch return error.OutOfMemory;
-        break :blk owned_sigma.?;
-    };
+    const sigma = try resolveSigmaForEquity(allocator, game, published, &owned_sigma);
 
     const reach = try replayReachWeights(allocator, game, sigma, node_index, turn, river);
     defer {
@@ -649,22 +845,10 @@ pub fn checkdownEquityAtNode(
         allocator.free(reach.q1);
     }
 
-    var r0 = range_mod.Range{};
-    var r1 = range_mod.Range{};
-    for (game.hands.combos[0], 0..) |combo, i| {
-        if (i < reach.q0.len and reach.q0[i] > 0 and std.math.isFinite(reach.q0[i])) {
-            r0.weights[@intCast(combo)] = reach.q0[i];
-        }
-    }
-    for (game.hands.combos[1], 0..) |combo, i| {
-        if (i < reach.q1.len and reach.q1[i] > 0 and std.math.isFinite(reach.q1[i])) {
-            r1.weights[@intCast(combo)] = reach.q1[i];
-        }
-    }
-
+    const ranges = rangesFromReach(game, reach.q0, reach.q1);
     var board_buf: [5]card.Card = undefined;
     const board = try boardThroughNode(game, turn, river, &board_buf);
-    return showdownEquity(allocator, board, r0, r1, max_pair_runouts);
+    return showdownEquity(allocator, board, ranges.r0, ranges.r1, max_pair_runouts);
 }
 
 pub fn emptyEquityDistribution() [equity_distribution_buckets]EquityDistributionBucket {

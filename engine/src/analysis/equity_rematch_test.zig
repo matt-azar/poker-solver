@@ -443,3 +443,70 @@ test "same board different lines reach-weight distinct ranges" {
     try std.testing.expect(@abs(at_root.player0.equity - at_bet.player0.equity) > 1e-6);
     _ = empty;
 }
+
+test "frozen OnCtx checkdown matches pair-enumeration at flop root" {
+    const compile = @import("../game/compile.zig");
+    const street_config = @import("../game/street_config.zig");
+    const training_state = @import("../solve/training_state.zig");
+    const frozen_walk = @import("../solve/frozen_walk.zig");
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1,KsKc:1
+        \\ip-range QsQc:1,JsJc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var cfg = try street_config.parseStreetConfig(std.testing.allocator, text);
+    defer cfg.deinit();
+    var game = try compile.compile(std.testing.allocator, cfg);
+    defer game.deinit();
+
+    const empty_pub = training_state.PublishedPolicy{ .allocator = std.testing.allocator };
+    var pair = try equity.checkdownEquityAtNode(
+        std.testing.allocator,
+        game,
+        empty_pub,
+        0,
+        -1,
+        -1,
+        equity.study_explorer_max_pair_runouts,
+    );
+    defer pair.deinit();
+
+    var ctx = try frozen_walk.FrozenCtx.initEval(std.testing.allocator, game);
+    defer ctx.deinit();
+    try ctx.ensureAllRanksReady();
+    var frozen = try equity.checkdownEquityAtNodeOnCtx(
+        std.testing.allocator,
+        &ctx,
+        game,
+        empty_pub,
+        0,
+        -1,
+        -1,
+        equity.study_explorer_max_pair_runouts,
+    );
+    defer frozen.deinit();
+
+    try std.testing.expect(pair.joint_defined);
+    try std.testing.expect(frozen.joint_defined);
+    try std.testing.expectEqual(pair.pair_runouts, frozen.pair_runouts);
+    try std.testing.expectApproxEqAbs(pair.player0.equity, frozen.player0.equity, 1e-9);
+    try std.testing.expectApproxEqAbs(pair.player1.equity, frozen.player1.equity, 1e-9);
+    const aa_pair = findCombo(pair.player0.combos, "AcAd").?;
+    const aa_frozen = findCombo(frozen.player0.combos, "AcAd").?;
+    try std.testing.expect(aa_pair.defined and aa_frozen.defined);
+    try std.testing.expectApproxEqAbs(aa_pair.equity, aa_frozen.equity, 1e-9);
+}

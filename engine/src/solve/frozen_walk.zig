@@ -1755,6 +1755,217 @@ pub const FrozenCtx = struct {
         w.resetSupport();
     }
 
+    /// Load Study check-down reach into amount[] (already strategy-conditioned —
+    /// do **not** multiply by `range_w` again the way CFR `collectReach` does).
+    fn loadCheckdownReach(
+        self: *FrozenCtx,
+        w: *WorkerLocal,
+        player: usize,
+        reach: []const f64,
+        amount: []f64,
+    ) void {
+        const hands = if (player == 0) self.n0 else self.n1;
+        const live = if (player == 0) w.live0 else w.live1;
+        @memset(amount, 0);
+        var hand: usize = 0;
+        while (hand < hands) : (hand += 1) {
+            if (!live[hand]) continue;
+            if (hand >= reach.len) continue;
+            const mass = reach[hand];
+            if (mass > 0 and std.math.isFinite(mass)) amount[hand] = mass;
+        }
+    }
+
+    /// Per-hand W/T/L opponent masses for one runout via prefix/block cuts
+    /// (same O(n) showdown as terminals — not O(n0·n1) pair walks).
+    fn accumulateCheckdownRunout(
+        self: *FrozenCtx,
+        w: *WorkerLocal,
+        table: *const RunoutRanks,
+        hero: usize,
+        opp_amount: []const f64,
+        inv_runouts: f64,
+        win: []f64,
+        tie: []f64,
+        loss: []f64,
+    ) FrozenError!void {
+        try self.orderReach(w, 1 - hero, opp_amount, table);
+        const opp_hands = opp_amount.len;
+        const prefix = w.prefix_buf;
+        const block = w.block_buf;
+        const block_base = &w.block_base;
+        const worse_end = table.worse_end[hero];
+        const better_begin = table.better_begin[hero];
+        const card_cut = table.card_cut[hero];
+        const card_off = table.card_off[1 - hero];
+        const pos = table.pos[1 - hero];
+        const twins = if (hero == 0) self.twin0 else self.twin1;
+        const live_idx = if (hero == 0) w.idx0[0..w.idx0_len] else w.idx1[0..w.idx1_len];
+        const hero_amount = if (hero == 0) w.amount0 else w.amount1;
+        const prefix_end = prefix[opp_hands];
+
+        for (live_idx) |hand_u| {
+            const hand: usize = hand_u;
+            const hero_w = hero_amount[hand];
+            if (!(hero_w > 0)) continue;
+            const worse: i32 = worse_end[hand];
+            const after_tie: i32 = better_begin[hand];
+            const c0: usize = @intCast(self.game.hands.hole_low[hero][hand]);
+            const c1: usize = @intCast(self.game.hands.hole_high[hero][hand]);
+            const cut_at = hand * 4;
+            const cut0_worse: u32 = card_cut[cut_at];
+            const cut1_worse: u32 = card_cut[cut_at + 1];
+            const cut0_better: u32 = card_cut[cut_at + 2];
+            const cut1_better: u32 = card_cut[cut_at + 3];
+            const base0 = block_base[c0];
+            const base1 = block_base[c1];
+            const len0 = card_off[c0 + 1] - card_off[c0];
+            const len1 = card_off[c1 + 1] - card_off[c1];
+            const b0_0 = block[base0];
+            const b0_w = block[base0 + cut0_worse];
+            const b0_b = block[base0 + cut0_better];
+            const b0_l = block[base0 + len0];
+            const b1_0 = block[base1];
+            const b1_w = block[base1 + cut1_worse];
+            const b1_b = block[base1 + cut1_better];
+            const b1_l = block[base1 + len1];
+            const twin = twins[hand];
+            const add_hand: i32 = if (twin >= 0 and opp_amount[@intCast(twin)] != 0.0) twin else -1;
+            const add_at: i32 = if (add_hand >= 0) @intCast(pos[@intCast(add_hand)]) else -1;
+            const add_piece: f64 = if (add_hand >= 0) opp_amount[@intCast(add_hand)] else 0.0;
+
+            var worse_mass = prefix[@intCast(worse)] - (b0_w - b0_0) - (b1_w - b1_0);
+            if (add_at >= 0 and add_at < worse) worse_mass += add_piece;
+            var better_mass = prefix_end - prefix[@intCast(after_tie)] - (b0_l - b0_b) - (b1_l - b1_b);
+            if (add_at >= after_tie and add_at < @as(i32, @intCast(opp_hands))) better_mass += add_piece;
+            var tie_mass = prefix[@intCast(after_tie)] - prefix[@intCast(worse)] - (b0_b - b0_w) - (b1_b - b1_w);
+            if (add_at >= worse and add_at < after_tie) tie_mass += add_piece;
+
+            // Stable-residual fallback matches terminal showdown (tiny ranges).
+            const amount_total = prefix_end;
+            const worse_ok = differenceIsStable(amount_total, amount_total - worse_mass, worse_mass);
+            const better_ok = differenceIsStable(amount_total, amount_total - better_mass, better_mass);
+            const tie_ok = differenceIsStable(amount_total, amount_total - tie_mass, tie_mass);
+            if (!worse_ok or !better_ok or !tie_ok) {
+                self.directRankMasses(table, hero, hand, opp_amount, &worse_mass, &better_mass, &tie_mass);
+            }
+
+            // Hero-0: worse_mass = opp hands hero beats → win; better → loss.
+            // Hero-1: same table orientation (order is absolute rank).
+            win[hand] += worse_mass * inv_runouts;
+            loss[hand] += better_mass * inv_runouts;
+            tie[hand] += tie_mass * inv_runouts;
+        }
+    }
+
+    /// Study check-down equity using cached RunoutRanks (C++ StreetBatch checkdown_equity).
+    /// `reach0`/`reach1` are strategy-conditioned masses indexed by compiled hand.
+    /// Fills per-hand win/tie/loss **opponent-mass** sums (still need /compatible_mass).
+    /// `turn_fixed`/`river_fixed` pin public cards already dealt at the node (-1 = open).
+    pub fn checkdownWinTieLoss(
+        self: *FrozenCtx,
+        reach0: []const f64,
+        reach1: []const f64,
+        turn_fixed: i32,
+        river_fixed: i32,
+        win0: []f64,
+        tie0: []f64,
+        loss0: []f64,
+        win1: []f64,
+        tie1: []f64,
+        loss1: []f64,
+    ) FrozenError!void {
+        if (reach0.len != self.n0 or reach1.len != self.n1) return error.InvalidFrozen;
+        if (win0.len != self.n0 or tie0.len != self.n0 or loss0.len != self.n0) return error.InvalidFrozen;
+        if (win1.len != self.n1 or tie1.len != self.n1 or loss1.len != self.n1) return error.InvalidFrozen;
+        try self.ensureAllRanksReady();
+        const w = &self.workspace;
+        @memset(win0, 0);
+        @memset(tie0, 0);
+        @memset(loss0, 0);
+        @memset(win1, 0);
+        @memset(tie1, 0);
+        @memset(loss1, 0);
+
+        var dead: [52]bool = .{false} ** 52;
+        for (self.game.board) |c| dead[@intCast(c)] = true;
+        if (turn_fixed >= 0) dead[@intCast(turn_fixed)] = true;
+        if (river_fixed >= 0) dead[@intCast(river_fixed)] = true;
+
+        // Completions match equity.completionsPerCompatiblePair on the node board.
+        const board_len = self.game.board.len +
+            @as(usize, @intFromBool(turn_fixed >= 0)) +
+            @as(usize, @intFromBool(river_fixed >= 0));
+        const completions: u64 = blk: {
+            if (board_len == 5) break :blk 1;
+            if (board_len == 4) break :blk 52 - @as(u64, @intCast(board_len)) - 4;
+            if (board_len == 3) {
+                const rem = 52 - @as(u64, @intCast(board_len)) - 4;
+                break :blk rem * (rem - 1) / 2;
+            }
+            return error.InvalidFrozen;
+        };
+        if (completions == 0) return error.InvalidFrozen;
+        const inv: f64 = 1.0 / @as(f64, @floatFromInt(completions));
+
+        const applyOne = struct {
+            fn go(
+                ctx: *FrozenCtx,
+                wl: *WorkerLocal,
+                turn: i32,
+                river: i32,
+                r0: []const f64,
+                r1: []const f64,
+                inv_runouts: f64,
+                w0: []f64,
+                t0: []f64,
+                l0: []f64,
+                w1: []f64,
+                t1: []f64,
+                l1: []f64,
+            ) FrozenError!void {
+                ctx.ensureBoardSupport(wl, turn, river);
+                ctx.loadCheckdownReach(wl, 0, r0, wl.amount0);
+                ctx.loadCheckdownReach(wl, 1, r1, wl.amount1);
+                const table = try ctx.ensureRanks(turn, river);
+                try ctx.accumulateCheckdownRunout(wl, table, 0, wl.amount1, inv_runouts, w0, t0, l0);
+                try ctx.accumulateCheckdownRunout(wl, table, 1, wl.amount0, inv_runouts, w1, t1, l1);
+            }
+        }.go;
+
+        if (board_len == 5) {
+            // Complete board: river game, or flop/turn node with all cards dealt.
+            const turn_arg: i32 = if (self.game.board.len == 3) turn_fixed else -1;
+            const river_arg: i32 = if (self.game.board.len == 5) -1 else river_fixed;
+            try applyOne(self, w, turn_arg, river_arg, reach0, reach1, inv, win0, tie0, loss0, win1, tie1, loss1);
+            return;
+        }
+        if (self.game.board.len == 4 or (self.game.board.len == 3 and turn_fixed >= 0 and river_fixed < 0)) {
+            // Turn board (or flop node with turn dealt): enumerate rivers.
+            const turn_arg: i32 = if (self.game.board.len == 4) -1 else turn_fixed;
+            var river: i32 = 0;
+            while (river < 52) : (river += 1) {
+                if (dead[@intCast(river)]) continue;
+                try applyOne(self, w, turn_arg, river, reach0, reach1, inv, win0, tie0, loss0, win1, tie1, loss1);
+            }
+            return;
+        }
+        if (self.game.board.len == 3) {
+            // Unordered flop completions (t < r) — match showdownEquity / EQUITY.md.
+            var turn: i32 = 0;
+            while (turn < 52) : (turn += 1) {
+                if (dead[@intCast(turn)]) continue;
+                var river: i32 = turn + 1;
+                while (river < 52) : (river += 1) {
+                    if (dead[@intCast(river)]) continue;
+                    try applyOne(self, w, turn, river, reach0, reach1, inv, win0, tie0, loss0, win1, tie1, loss1);
+                }
+            }
+            return;
+        }
+        return error.InvalidFrozen;
+    }
+
     fn chanceDenom(self: *const FrozenCtx, turn: i32, river: i32) FrozenError!i32 {
         var denom: i32 = 52 - @as(i32, @intCast(self.game.board.len)) - 4;
         if (turn >= 0) denom -= 1;

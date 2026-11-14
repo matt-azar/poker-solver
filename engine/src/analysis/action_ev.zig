@@ -192,20 +192,16 @@ fn rootCompatibleOpponentMass(
     }
 }
 
-/// Frozen StreetBatch-style action EV at the **root** under published average.
-/// Reuses FrozenCtx rank cache / response_walk (same engine as flop train + #256 BR / #259 MT),
-/// then Q_i-normalizes raw CF aev: `conditional = raw / (prior * joint_scale * open)`
-/// (C++ `compute_action_values` / MATHEMATICS.md).
-///
-/// When `threads > 1`, parallelize the first future public card (same as train/BR).
-/// Callers must have borrowed those cores via WorkerBudget.prioritizeAnalysis so
-/// mid-train values do not oversubscribe against CFR workers.
-pub fn actionValuesFrozen(
+/// Frozen StreetBatch-style action EV at the **root** on a caller-owned FrozenCtx.
+/// Prefer this after train: Session ranks are already warm — a fresh `initEval`
+/// rebuilds the entire flop/turn rank cache on every Study values request.
+pub fn actionValuesFrozenOnCtx(
     allocator: std.mem.Allocator,
+    ctx: *frozen_walk.FrozenCtx,
     game: compile.CompiledGame,
     published: training_state.PublishedPolicy,
     node_index: u32,
-    threads: u32,
+    serial_chance: bool,
 ) ActionEvError!ActionValues {
     if (node_index != 0) return error.InvalidAnalysis;
     if (node_index >= game.nodes.len) return error.InvalidAnalysis;
@@ -216,17 +212,9 @@ pub fn actionValuesFrozen(
     defer if (owned_sigma) |buf| allocator.free(buf);
     const sigma = try resolveSigma(allocator, game, published, &owned_sigma);
 
-    const use_threads = @max(threads, 1);
-    var ctx = (if (use_threads > 1)
-        frozen_walk.FrozenCtx.initEvalThreaded(allocator, game, use_threads)
-    else
-        frozen_walk.FrozenCtx.initEval(allocator, game)) catch return error.InvalidAnalysis;
-    defer ctx.deinit();
+    ctx.ensureAllRanksReady() catch return error.InvalidAnalysis;
     const w = &ctx.workspace;
     ctx.prepareResponseRoot(w);
-    // Parallel first-card steal when threaded (pool starts lazily inside the walk).
-    // Nested chance stays serial on the claiming worker.
-    const serial_chance = use_threads <= 1;
     ctx.responseWalk(w, 0, -1, -1, 0, -1, sigma, serial_chance) catch return error.InvalidAnalysis;
 
     const actor: usize = @intCast(node.player);
@@ -310,6 +298,31 @@ pub fn actionValuesFrozen(
     page.node_ev_defined = any and node_ok;
     if (page.node_ev_defined) page.node_ev = node_ev;
     return page;
+}
+
+/// Frozen StreetBatch-style action EV at the **root** under published average.
+/// Reuses FrozenCtx rank cache / response_walk (same engine as flop train + #256 BR / #259 MT),
+/// then Q_i-normalizes raw CF aev: `conditional = raw / (prior * joint_scale * open)`
+/// (C++ `compute_action_values` / MATHEMATICS.md).
+///
+/// When `threads > 1`, parallelize the first future public card (same as train/BR).
+/// Callers must have borrowed those cores via WorkerBudget.prioritizeAnalysis so
+/// mid-train values do not oversubscribe against CFR workers.
+/// Prefer `actionValuesFrozenOnCtx` when Session already holds warm ranks.
+pub fn actionValuesFrozen(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    published: training_state.PublishedPolicy,
+    node_index: u32,
+    threads: u32,
+) ActionEvError!ActionValues {
+    const use_threads = @max(threads, 1);
+    var ctx = (if (use_threads > 1)
+        frozen_walk.FrozenCtx.initEvalThreaded(allocator, game, use_threads)
+    else
+        frozen_walk.FrozenCtx.initEval(allocator, game)) catch return error.InvalidAnalysis;
+    defer ctx.deinit();
+    return actionValuesFrozenOnCtx(allocator, &ctx, game, published, node_index, use_threads <= 1);
 }
 
 /// True when `deal` holes collide with a fixed turn and/or river (C++ oracle skip).
