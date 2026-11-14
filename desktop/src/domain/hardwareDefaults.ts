@@ -33,17 +33,25 @@ function readDeviceMemoryGib(): number {
 }
 
 /**
- * Prefer using most logical cores (leave one free when many are available so
- * the UI stays responsive) and about half of reported device RAM for the
- * engine budget — the pattern pros expect from Pio / GTO Wizard defaults.
+ * Prefer most logical cores but leave headroom so packaged Study IPC stays
+ * live under Windows flop MT train: one core for the solver-engine stdin loop
+ * and one for the UI / OS when many cores are available. About half of reported
+ * device RAM for the engine budget — Pio / GTO Wizard style.
  */
 export function fastSolveDefaults(
   cores = readLogicalCores(),
   deviceMemoryGib = readDeviceMemoryGib(),
 ): FastSolveDefaults {
   const logical = Math.max(1, Math.floor(cores));
+  // Match host `WorkerBudget.maxTrainThreads`: ≤2 → all/1; 3 → 2; ≥4 → n-2.
   const threads =
-    logical <= 2 ? logical : Math.min(THREAD_CAP, Math.max(1, logical - 1));
+    logical <= 2
+      ? logical === 2
+        ? 1
+        : logical
+      : logical === 3
+        ? 2
+        : Math.min(THREAD_CAP, Math.max(1, logical - 2));
   const halfRamMib = Math.floor(deviceMemoryGib * 1024 * 0.5);
   const memoryMib = Math.min(
     MEMORY_MAX_MIB,

@@ -36,6 +36,7 @@ if str(_HERE) not in sys.path:
 from _common import (  # noqa: E402
     IPC_TIMEOUTS_SEC,
     STATUS_POLL_TIMEOUT_MS,
+    STATUS_RPC_TIMEOUT_S,
     default_solver_engine,
     eprint,
     utc_now_iso,
@@ -214,7 +215,8 @@ def run_probe(binary: Path, status_budget_sec: float) -> dict[str, Any]:
             "budgetMs": int(status_budget_sec * 1000),
             "note": (
                 "Study JS aborts status at 4s; Rust STATUS_RPC_TIMEOUT is 8s. "
-                "A hung status path causes soft hang events then hung threshold."
+                "Host must keep IPC live under MT train (CPU reserve + lock "
+                "hygiene); soft timeouts must not hung-kill a hot sidecar."
             ),
         }
         if not results["checks"]["status_budget"]["ok"]:
@@ -257,8 +259,8 @@ def main() -> int:
     ap.add_argument(
         "--status-budget",
         type=float,
-        default=max(STATUS_POLL_TIMEOUT_MS / 1000.0, 8.0),
-        help="Seconds to wait for status (default max(4s JS, 8s Rust)=8)",
+        default=max(STATUS_POLL_TIMEOUT_MS / 1000.0, STATUS_RPC_TIMEOUT_S),
+        help="Seconds to wait for status (default max(idle JS, Rust STATUS_RPC))",
     )
     ap.add_argument("--out", type=Path)
     ap.add_argument("--json-only", action="store_true")

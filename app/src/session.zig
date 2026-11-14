@@ -305,38 +305,114 @@ pub const Session = struct {
         std.debug.assert(!self.canContinue());
     }
 
-    fn clearSolution(self: *Session) void {
-        // Drop frozen engine before game tables it references.
-        if (self.frozen_ctx) |*ctx| {
-            ctx.deinit();
+    /// Owned solution pieces moved off Session so teardown can run without
+    /// holding `session.mu` (status/Stop must stay live on the IPC loop).
+    const DetachedSolution = struct {
+        allocator: std.mem.Allocator,
+        frozen_ctx: ?poker_engine.solve.frozen_walk.FrozenCtx = null,
+        config_text: []u8 = &.{},
+        game: ?poker_engine.game.compile.CompiledGame = null,
+        training: ?poker_engine.solve.training_state.TrainingState = null,
+        published: ?poker_engine.solve.training_state.PublishedPolicy = null,
+        average_spare: ?[]f32 = null,
+        locks_text: []u8 = &.{},
+        strategy_edits_text: []u8 = &.{},
+        strategy_edit_baseline: ?[]f32 = null,
+
+        fn empty(allocator: std.mem.Allocator) DetachedSolution {
+            return .{ .allocator = allocator };
+        }
+
+        fn deinit(self: *DetachedSolution) void {
+            if (self.frozen_ctx) |*ctx| {
+                ctx.deinit();
+                self.frozen_ctx = null;
+            }
+            if (self.config_text.len != 0) {
+                self.allocator.free(self.config_text);
+                self.config_text = &.{};
+            }
+            if (self.game) |*game| {
+                game.deinit();
+                self.game = null;
+            }
+            if (self.training) |*state| {
+                state.deinit();
+                self.training = null;
+            }
+            if (self.published) |*policy| {
+                policy.deinit();
+                self.published = null;
+            }
+            if (self.average_spare) |buf| {
+                self.allocator.free(buf);
+                self.average_spare = null;
+            }
+            if (self.locks_text.len != 0) {
+                self.allocator.free(self.locks_text);
+                self.locks_text = &.{};
+            }
+            if (self.strategy_edits_text.len != 0) {
+                self.allocator.free(self.strategy_edits_text);
+                self.strategy_edits_text = &.{};
+            }
+            if (self.strategy_edit_baseline) |buf| {
+                self.allocator.free(buf);
+                self.strategy_edit_baseline = null;
+            }
+        }
+    };
+
+    /// Caller holds `mu` and has waited until `readers == 0`. Moves owned
+    /// solution memory out for free-after-unlock; resets Session bookkeeping.
+    fn detachSolutionLocked(self: *Session) DetachedSolution {
+        var out = DetachedSolution.empty(self.allocator);
+        if (self.frozen_ctx) |ctx| {
+            out.frozen_ctx = ctx;
             self.frozen_ctx = null;
         }
         if (self.config_text.len != 0) {
-            self.allocator.free(self.config_text);
+            out.config_text = self.config_text;
             self.config_text = &.{};
         }
-        if (self.game) |*game| {
-            game.deinit();
+        if (self.game) |g| {
+            out.game = g;
             self.game = null;
         }
-        if (self.training) |*state| {
-            state.deinit();
+        if (self.training) |state| {
+            out.training = state;
             self.training = null;
         }
-        if (self.published) |*policy| {
-            policy.deinit();
+        if (self.published) |policy| {
+            out.published = policy;
             self.published = null;
         }
-        self.clearPublishCadence();
+        if (self.average_spare) |buf| {
+            out.average_spare = buf;
+            self.average_spare = null;
+        }
         if (self.locks_text.len != 0) {
-            self.allocator.free(self.locks_text);
+            out.locks_text = self.locks_text;
             self.locks_text = &.{};
         }
         if (self.strategy_edits_text.len != 0) {
-            self.allocator.free(self.strategy_edits_text);
+            out.strategy_edits_text = self.strategy_edits_text;
             self.strategy_edits_text = &.{};
         }
-        self.clearStrategyEditBaseline();
+        if (self.strategy_edit_baseline) |buf| {
+            out.strategy_edit_baseline = buf;
+            self.strategy_edit_baseline = null;
+        }
+        self.iters_since_publish = 0;
+        self.last_published_trained = 0;
+        self.force_next_publish = false;
+        self.last_committed_trained = 0;
+        self.cfr_pass_mutated = false;
+        self.inject_mid_pass_fault = false;
+        self.inject_publish_fault = false;
+        self.inject_publish_oom = false;
+        self.publishing_in_place = false;
+        self.publish_skips = 0;
         self.metrics = .{};
         self.has_metrics = false;
         self.clearProgressTracking();
@@ -347,6 +423,14 @@ pub const Session = struct {
         self.last_terminal = .completed;
         self.clearControlFlags();
         self.phase = .idle;
+        return out;
+    }
+
+    fn clearSolution(self: *Session) void {
+        // Prefer detach + free-after-unlock when callers can release `mu`.
+        // deinit / fail paths may still clear under lock (process teardown).
+        var detached = self.detachSolutionLocked();
+        detached.deinit();
     }
 
     fn clampThreads(threads: i32) u32 {
@@ -480,18 +564,27 @@ pub const Session = struct {
         const threads = clampThreads(spec.threads);
 
         // Install only after compile+train tables succeed (fail-closed).
+        // Detach the prior solution under the session mutex, then free it *after*
+        // unlock — freeing a ~GiB flop tree under session.mu blocks status/Stop
+        // on the IPC stdin loop (Windows installed Study hang zips 2026-11-14).
+        var detached = DetachedSolution.empty(self.allocator);
+        defer detached.deinit();
+
         self.mu.lock();
-        defer self.mu.unlock();
         // `.compiling` is our own begin gate; treat other busy phases as conflict.
-        if (self.phase != .compiling and self.busyForReplace()) return error.Busy;
+        if (self.phase != .compiling and self.busyForReplace()) {
+            self.mu.unlock();
+            return error.Busy;
+        }
         if (self.stop_requested.load(.acquire)) {
             self.clearControlFlags();
+            self.mu.unlock();
             return error.Cancelled;
         }
         while (self.readers != 0) {
             self.quiet.wait(&self.mu);
         }
-        self.clearSolution();
+        detached = self.detachSolutionLocked();
         self.budget.setLimit(budget_bytes);
         self.config_text = owned_config;
         self.game = game;
@@ -516,6 +609,10 @@ pub const Session = struct {
         std.debug.assert(self.budget.live() <= budget_bytes);
         std.debug.assert(!self.cfr_pass_mutated);
         std.debug.assert(self.last_committed_trained == 0);
+        self.mu.unlock();
+        // Heavy free runs here so status can take session.mu during teardown.
+        detached.deinit();
+        detached = DetachedSolution.empty(self.allocator);
     }
 
     fn clearStrategyEditBaseline(self: *Session) void {

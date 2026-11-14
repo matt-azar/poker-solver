@@ -2,17 +2,17 @@ import { describe, expect, it } from "vitest";
 import { fastSolveDefaults, formatHardwareHint } from "./hardwareDefaults";
 
 describe("fastSolveDefaults", () => {
-  it("uses all cores on dual-core machines and enables frozen", () => {
+  it("leaves an IPC core free on dual-core machines and enables frozen", () => {
     expect(fastSolveDefaults(2, 8)).toEqual({
-      threads: 2,
+      threads: 1,
       memoryMib: 4096,
       frozen: true,
     });
   });
 
-  it("leaves one core free when many logical cores are available", () => {
+  it("leaves IPC + UI/OS cores free when many logical cores are available", () => {
     expect(fastSolveDefaults(8, 16)).toEqual({
-      threads: 7,
+      threads: 6,
       memoryMib: 8192,
       frozen: true,
     });
@@ -26,9 +26,9 @@ describe("fastSolveDefaults", () => {
     });
   });
 
-  it("floors memory at 1024 MiB", () => {
+  it("floors memory at 1024 MiB and reserves two cores on quad-core", () => {
     expect(fastSolveDefaults(4, 1)).toEqual({
-      threads: 3,
+      threads: 2,
       memoryMib: 1024,
       frozen: true,
     });
@@ -36,7 +36,7 @@ describe("fastSolveDefaults", () => {
 
   it("formats a short hardware hint", () => {
     expect(
-      formatHardwareHint({ threads: 7, memoryMib: 8192, frozen: true }),
-    ).toBe("7 threads · 8 GiB engine budget (machine default)");
+      formatHardwareHint({ threads: 6, memoryMib: 8192, frozen: true }),
+    ).toBe("6 threads · 8 GiB engine budget (machine default)");
   });
 });

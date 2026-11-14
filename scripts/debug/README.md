@@ -391,6 +391,8 @@ From `desktop/src-tauri/src/solver_engine.rs` and Study JS:
 | `begin_config` | 600s |
 | `solve` / `resolve_locked` | 2h ceiling |
 
+Root cause for Windows “Solve stuck then Reconnect”: MT train pinning every core (or begin free under `session.mu`) so status never replies — fix IPC headroom / lock hygiene, do not paper over with longer timeouts. Soft status timeouts during Building/Solving still must **not** hung-kill a hot sidecar.
+
 ## Other workflows
 
 ### Cloud / Linux engine dig (no UI)

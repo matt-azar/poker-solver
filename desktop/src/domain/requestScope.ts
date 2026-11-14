@@ -10,7 +10,12 @@ import { actionsSignature } from "./setup/identity";
 
 /** Default gap between successful status polls (ms). */
 export const STATUS_POLL_INTERVAL_MS = 250;
-/** Abort an in-flight status request after this many ms. */
+/**
+ * Abort an in-flight status request after this many ms.
+ * Keep at or below Tauri `STATUS_RPC_TIMEOUT` so JS abort does not leave long
+ * orphan invokes (ZR-175). Do not "fix" timeouts to paper over IPC starvation —
+ * host must leave CPU headroom / not hold session.mu across heavy frees.
+ */
 export const STATUS_POLL_TIMEOUT_MS = 4_000;
 /** First retry delay after a failed status poll (ms). */
 export const STATUS_POLL_BACKOFF_INITIAL_MS = 500;
@@ -18,7 +23,7 @@ export const STATUS_POLL_BACKOFF_INITIAL_MS = 500;
 export const STATUS_POLL_BACKOFF_MAX_MS = 8_000;
 
 /**
- * Race a promise against AbortSignal so IPC status honors the 4s poll budget
+ * Race a promise against AbortSignal so IPC status honors the poll budget
  * and shutdown cancel (Tauri invoke itself is not cancelled).
  */
 export function raceWithAbort<T>(

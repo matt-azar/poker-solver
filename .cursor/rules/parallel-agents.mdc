@@ -20,7 +20,7 @@ alwaysApply: true
 
 - On `main`, Study ships Zig `solver-engine` typed IPC only. Do not reintroduce `holdem-explorer`, CMake product builds, HTTP `:8765`, or HTTP fallthrough while IPC is active.
 - Windows: GUI subsystem + `CREATE_NO_WINDOW` for `solver-engine`; pin `-Dcpu=x86_64_v2`; drain stderr on spawn.
-- Tauri IPC: demux by `request_id`; don't hold the lifecycle mutex for the whole RPC; don't kill train on one timeout.
+- Tauri IPC: demux by `request_id`; don't hold the lifecycle mutex for the whole RPC; don't kill train on one timeout. Cap train threads so IPC stdin is not CPU-starved; never free GiB trees under `session.mu`; soft status timeouts during Building/Solving must not hung-kill a hot Windows sidecar.
 - Nash gap is NashConv (sum of BR gains). Accuracy / stop criterion is Pio’s average (NashConv/2); default unit is pot fraction. Compare stop thresholds to Accuracy chips, not raw NashConv.
 - Own-reach averaging; CF regret uses opponent×chance; tiny compatible mass must not invent a uniform opponent; Equity is check-down pot fraction ≠ chip EV.
 - Study node equity must be reach-weighted at the selected node; Equity Calculator jobs are a separate IPC surface. Local EV: `local_offset` + Fold from `values.actions`.

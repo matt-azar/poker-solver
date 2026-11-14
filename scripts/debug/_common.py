@@ -51,6 +51,7 @@ IPC_TIMEOUTS_SEC = {
 
 # Mirror desktop JS status-poll budget (requestScope.ts).
 STATUS_POLL_TIMEOUT_MS = 4_000
+STATUS_RPC_TIMEOUT_S = 8.0
 STATUS_POLL_DEAD_AFTER_FAILURES = 3
 
 
