@@ -2526,7 +2526,7 @@ dependencies = [
 
 [[package]]
 name = "poker-solver-study"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "cargo_toml",
  "dlopen2",
