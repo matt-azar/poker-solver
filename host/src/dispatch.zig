@@ -2080,6 +2080,32 @@ fn buildValuesReply(
     }
     const elapsed_ns = std.time.nanoTimestamp() - t0;
     const elapsed_ms = @divTrunc(elapsed_ns, 1_000_000);
+
+    // Inspect marginal for 169-cell EV aggregates (Study groupEv hotspot).
+    var marginal_owned: ?[]f32 = null;
+    defer if (marginal_owned) |m| state.allocator.free(m);
+    {
+        var insp = poker_engine.analysis.inspect.inspectNode(
+            state.allocator,
+            lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch null;
+        if (insp) |*node_page| {
+            defer node_page.deinit();
+            if (node_page.reach_defined and node_page.marginal.len != 0) {
+                marginal_owned = format_study_bodies.marginalForValuesCombos(
+                    state.allocator,
+                    page.combos,
+                    node_page.combos,
+                    node_page.marginal,
+                ) catch null;
+            }
+        }
+    }
+
     const body = try format_study_bodies.formatValuesBody(
         state.allocator,
         &page,
@@ -2087,6 +2113,7 @@ fn buildValuesReply(
         lease.solution_id,
         elapsed_ms,
         state.train_running.load(.acquire),
+        marginal_owned,
     );
     defer state.allocator.free(body);
     return ipc.makeReply(state.allocator, request_id, job_id, "values", body);
@@ -2531,6 +2558,8 @@ test "node flop root reach uses range-weight scale not 1/n deal mass" {
     defer reply.deinit();
     try std.testing.expect(reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"reach_defined\":true") != null);
+    // Optional PR2: posterior action mix on flop root (Check/Bet).
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"action_frequencies\":[") != null);
     const reach_key = "\"reach\":[";
     const reach_at = std.mem.indexOf(u8, reply.body_json, reach_key) orelse unreachable;
     const after = reply.body_json[reach_at + reach_key.len ..];
@@ -3358,6 +3387,9 @@ test "values flop solve returns local utility_basis and dual root_centered" {
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"local_offset\":") != null);
     // Primary action_ev present; dual block also carries action_ev for Global.
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"action_ev\":[") != null);
+    // Flop 169-cell EV aggregates (PR2 hotspot) on local + dual root.
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"cell_ev\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"text\":\"") != null);
 }
 
 

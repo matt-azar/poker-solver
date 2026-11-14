@@ -225,6 +225,8 @@ export interface NodePayload {
   reach?: number[];
   marginal?: number[];
   strategy?: number[][] | null;
+  /** Posterior-weighted node action mix from Zig (optional; same as strategyFrequencies). */
+  action_frequencies?: number[];
   reach_defined?: boolean;
   /** Non-acting seat at a decision (0 OOP / 1 IP). */
   opponent_player?: number | null;
@@ -268,13 +270,28 @@ export interface ActionValuesPayload {
   ev_defined?: boolean[];
   node_ev?: number | null;
   node_ev_defined?: boolean;
+  /**
+   * Pre-aggregated 169-cell posterior-weighted EV (Zig). Same math as
+   * `groupEv`; preferred over per-cell client joins when present.
+   */
+  cell_ev?: CellEvAggregate[];
   /** Dual root-centered columns when primary `utility_basis` is `"local"`. */
   root_centered?: {
     action_ev?: Array<Array<number | null>>;
     value?: Array<number | null>;
     node_ev?: number | null;
+    cell_ev?: CellEvAggregate[];
   };
   [key: string]: unknown;
+}
+
+/** One 169-grid cell of posterior-weighted action / mixed EV from Zig `values`. */
+export interface CellEvAggregate {
+  row: number;
+  col: number;
+  text?: string;
+  mixed: number;
+  action: number[];
 }
 
 export interface HandCell {
