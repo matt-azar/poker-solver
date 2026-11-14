@@ -13,65 +13,105 @@ against a built `zig-out/bin/solver-engine` for engine-only digs.
 ## Windows capture loop (feed reports back to Cursor)
 
 Goal: systematically capture runtime evidence from the **installed** Study build
-and drop it into this Debugging Suite Project / Cursor chat.
+and drop it into this Debugging Suite Project / Cursor chat — **minimal manual
+steps**, no Cloudflare / `gh` auth.
 
 You need a **clone** at e.g. `C:\Users\matta\poker-solver` (tooling only) and
 **Python 3.10+** on PATH. Do **not** copy the installed exe into the repo.
 
-### Once per machine
+### Automated path (preferred)
 
 ```powershell
 cd C:\Users\matta\poker-solver
-.\scripts\debug\study-debug.cmd enable-dumps   # elevated; LocalDumps for Study + solver-engine
+.\scripts\debug\study-debug-session.cmd
 ```
 
-### Every debug session
+That single entrypoint:
+
+1. Optionally `git pull --ff-only` when the clone is on `main`
+2. Ensures LocalDumps (idempotent; elevates **once** only if needed)
+3. Starts local receiver + hang watcher if not already healthy
+4. Launches installed Study when found (Program Files / LOCALAPPDATA / registry;
+   skip with `--no-launch-study` or set `HOLDEM_STUDY_EXE`)
+5. Interactive keys: **C** = collect, **H** = handoff, **O** = open folder,
+   **G** = mini-app, **Q** = quit (receiver keeps running)
+
+On freeze/crash (or on demand):
+
+```powershell
+.\scripts\debug\study-debug-session.cmd collect
+# or press C in the session window
+```
+
+Collect writes under `%LOCALAPPDATA%\Holdem Study\debug-reports\` and stages:
+
+| Path | Purpose |
+| --- | --- |
+| `debug-reports\<stamp>_session-collect\` | Full bundle (zip + snapshot + stacks + diary) |
+| `debug-reports\CURSOR_DROP\CURSOR_HANDOFF.md` | Short summary to **paste/drag into Cursor** |
+| `debug-reports\CURSOR_DROP\latest-report\` | Junction to the latest report folder |
+| `debug-reports\CURSOR_DROP\LATEST.txt` | Absolute path pointer |
+
+Explorer opens the report + `CURSOR_DROP` automatically. Drag
+`CURSOR_HANDOFF.md` or `latest-report\` into Cursor / this Project.
+
+```powershell
+.\scripts\debug\study-debug-session.cmd handoff   # re-stage latest without re-collect
+.\scripts\debug\study-debug-session.cmd status
+```
+
+### Set and forget (login)
+
+Start receiver + hang watcher with Windows login (disk intake only; no Cloudflare):
 
 ```powershell
 cd C:\Users\matta\poker-solver
-.\scripts\debug\study-debug-local.cmd
+# Startup folder shortcut (simplest):
+.\scripts\debug\study-debug-session.cmd install-startup
+
+# Or Task Scheduler at logon:
+.\scripts\debug\study-debug-session.cmd install-startup --method schtasks
+
+# Optional: also launch Study at login
+.\scripts\debug\study-debug-session.cmd install-startup --with-study
+
+# Remove:
+.\scripts\debug\study-debug-session.cmd install-startup --remove
+.\scripts\debug\study-debug-session.cmd install-startup --method schtasks --remove
 ```
 
-That starts:
+Startup uses `--background` (no interactive menu / UAC dump prompt). Enable
+LocalDumps once interactively first (`enable-dumps` or a normal session start).
 
-1. Local report receiver on `127.0.0.1` (saves under
-   `%LOCALAPPDATA%\Holdem Study\debug-reports\`)
-2. Always-on hang watcher → `debug-reports\hang-watch\hang-watch-events.jsonl`
-3. Study-debug mini-app (fill the **Repro diary** fields)
+### Notify without secrets (optional)
 
-Keep the launcher window open. Run **installed** Study as usual.
+Safe, no-auth options already covered by the drop folder:
 
-### When it crashes or hangs
+- **Disk + Explorer** (default) — drag into Cursor
+- Desktop shortcut to `CURSOR_DROP` (create manually if you want)
+- Do **not** put webhook secrets in chat; local receiver secret stays under
+  `%LOCALAPPDATA%\Holdem Study\local-receiver-secret.txt`
 
-1. Leave Study open if hung (`collect` while frozen).
-2. Fill diary (what clicked / street / notes) in the mini-app.
-3. `Collect bundle` **or** Help → **Copy diagnostics zip**, then **Send report**.
-4. Reports + diary land in:
-   - `%LOCALAPPDATA%\Holdem Study\debug-reports\`
-   - Hang log: `…\debug-reports\hang-watch\`
-   - Crash dumps (if LocalDumps enabled): `%LOCALAPPDATA%\CrashDumps\`
+Cloudflare Worker / `gh` remain optional for remote GitHub Issues — not required
+for this Project loop.
 
-### Drag into Cursor / this Project
-
-In Cursor chat or the Debugging Suite Project, attach / drag:
-
-- The folder under `debug-reports\<timestamp>_…\` (zip + `issue-body.md` + diary)
-- Or the Help diagnostics zip + `repro-diary.md`
-- Optional: matching `.dmp` from `CrashDumps` and `hang-watch-events.jsonl`
-
-That is the evidence pack for root-cause work — no Cloudflare required.
-
-### Front doors
+### Manual / lower-level front doors
 
 ```powershell
-# A) Local receiver + hang watcher + mini-app (preferred)
+# A) Receiver + hang watcher + mini-app (no session menu)
 .\scripts\debug\study-debug-local.cmd
 
 # B) Mini-app only
 .\scripts\debug\study-debug.cmd
 
-# C) PowerShell
-powershell -ExecutionPolicy Bypass -File .\scripts\debug\study-debug.ps1
+# C) PowerShell session launcher
+powershell -ExecutionPolicy Bypass -File .\scripts\debug\study-debug-session.ps1
+```
+
+Once per machine if you skip the session launcher:
+
+```powershell
+.\scripts\debug\study-debug.cmd enable-dumps   # elevated; LocalDumps for Study + solver-engine
 ```
 
 ### Or 4 CLI commands (while Study is frozen, leave it open)
@@ -106,18 +146,20 @@ Cloudflare: **local Python receiver** saves the zip to disk. Optional: open a
 GitHub Issue (Worker, local receiver + token, or `gh` on the PC). Dumps are
 **not** committed to `main`.
 
-### Preferred: local receiver (no Cloudflare, no `gh`)
+### Preferred: session / local receiver (no Cloudflare, no `gh`)
 
 ```powershell
 cd C:\Users\matta\poker-solver
-.\scripts\debug\study-debug-local.cmd
-# leave that window open; run installed Study as usual
-# then: mini-app → Send report  (or study-debug.cmd send --zip … --yes)
+.\scripts\debug\study-debug-session.cmd          # automated (preferred)
+# or: .\scripts\debug\study-debug-local.cmd      # receiver + mini-app only
+# leave tools running; use installed Study as usual
+# then: press C / session collect, or mini-app → Send report
 ```
 
 Reports land in `%LOCALAPPDATA%\Holdem Study\debug-reports\` (zip + issue body +
-analysis). The launcher writes `%USERPROFILE%\.holdem-study\report-webhook.json`
-for the session. Details: [`report-receiver/README.md`](report-receiver/README.md).
+analysis + `CURSOR_DROP\`). The launcher writes
+`%USERPROFILE%\.holdem-study\report-webhook.json` for the session. Details:
+[`report-receiver/README.md`](report-receiver/README.md).
 
 ### Optional remote webhook (Cloudflare Worker)
 
@@ -240,6 +282,7 @@ Override diagnostics path: `$env:HOLDEM_STUDY_DIAGNOSTICS_DIR = "D:\copy\diagnos
 
 | Command | Wraps | Purpose |
 | --- | --- | --- |
+| `session` | `study_debug_session.py` | **Automated** capture loop + CURSOR_DROP handoff |
 | `collect` | `collect_bundle.py` | Evidence dir/zip (default `--zip --stacks`) |
 | `analyze` | `analyze_diagnostics.py` | Crash vs hang triage on dir or Help zip |
 | `send` | `send_report.py` | Local/webhook/gh → disk and/or GitHub Issue |
@@ -304,6 +347,8 @@ On Windows you can point probes at the **installed** sidecar:
 | `collect_bundle.py` | any | Cross-platform evidence directory/zip |
 | `send_report.py` | any | Webhook POST or local Issue + gist/release (no git commit) |
 | `start_local_debug.py` | any | Local disk receiver + hang watcher launcher |
+| `study_debug_session.py` | Windows | Automated session: dumps + receiver + collect + CURSOR_DROP |
+| `study-debug-session.cmd` / `.ps1` | Windows | **Preferred** double-click / Startup entrypoint |
 | `study-debug-local.cmd` / `.ps1` | Windows | Double-click local debug launcher |
 | `enable_local_dumps.ps1` | Windows | One-shot LocalDumps registry (admin) |
 | `repro_diary.py` / `repro_diary_template.md` | any | Repro diary for collect/send |

@@ -468,6 +468,100 @@ def main() -> int:
             )
             if local_help != 0:
                 failures.append("study_debug local-debug --help")
+            session_help = subprocess.call(
+                [sys.executable, str(front), "session", "help"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if session_help != 0:
+                failures.append("study_debug session help")
+        # Session automation: handoff staging + summary (no live Study / receiver).
+        session_script = _HERE / "study_debug_session.py"
+        if not session_script.is_file():
+            failures.append("missing study_debug_session.py")
+        else:
+            sess_help = subprocess.call(
+                [sys.executable, str(session_script), "help"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if sess_help != 0:
+                failures.append("study_debug_session help")
+            for name in (
+                "study-debug-session.cmd",
+                "study-debug-session.ps1",
+            ):
+                if not (_HERE / name).is_file():
+                    failures.append(f"missing {name}")
+            with tempfile.TemporaryDirectory(prefix="study-debug-session-") as tmp_s:
+                root = Path(tmp_s) / "debug-reports"
+                report = root / "20260101T000000Z_session-collect"
+                report.mkdir(parents=True)
+                write_json(
+                    report / "INDEX.json",
+                    {
+                        "createdAt": "2026-01-01T00:00:00Z",
+                        "primaryHint": "hang",
+                        "files": ["INDEX.json"],
+                    },
+                )
+                (report / "repro-diary.md").write_text(
+                    "# Study repro diary\n\n- Symptom: hang\n",
+                    encoding="utf-8",
+                )
+                hand_rc = subprocess.call(
+                    [
+                        sys.executable,
+                        str(session_script),
+                        "handoff",
+                        "--save-dir",
+                        str(root),
+                        "--report",
+                        str(report),
+                        "--no-open-folder",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                drop = root / "CURSOR_DROP"
+                summary = drop / "CURSOR_HANDOFF.md"
+                if hand_rc != 0 or not summary.is_file():
+                    failures.append("session handoff staging")
+                elif "paste / drag into Cursor" not in summary.read_text(
+                    encoding="utf-8"
+                ):
+                    failures.append("session handoff summary content")
+                elif not (drop / "LATEST.txt").is_file():
+                    failures.append("session LATEST pointer")
+                # collect into save-dir without diary prompt / stacks (fast).
+                col_rc = subprocess.call(
+                    [
+                        sys.executable,
+                        str(session_script),
+                        "collect",
+                        "--save-dir",
+                        str(root),
+                        "--no-diary-prompt",
+                        "--no-stacks",
+                        "--no-open-folder",
+                        "--diary-symptom",
+                        "hang",
+                        "--diary-notes",
+                        "smoke",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if col_rc != 0:
+                    failures.append("session collect")
+                else:
+                    stamped = [
+                        p
+                        for p in root.iterdir()
+                        if p.is_dir() and p.name.endswith("_session-collect")
+                    ]
+                    if not stamped:
+                        failures.append("session collect out dir")
         # Mini-app file must exist; skip import if tkinter missing (headless CI).
         if not (_HERE / "study_debug_app.py").is_file():
             failures.append("missing study_debug_app.py")
