@@ -4,26 +4,30 @@
 //! Study never talks HTTP to this process. The shell owns inherited pipes
 //! (stdin/stdout frames; logs on stderr) and exposes request/reply commands.
 //!
+//! ## Connection supervisor (async ownership)
+//!
+//! Rust owns the child from spawn through a bounded exit reap:
+//!
+//! 1. One dedicated **stdin writer** thread per launch (blocking writes live
+//!    only there — never on a Tauri invoke / Tokio worker via `spawn_blocking`).
+//! 2. One dedicated **stdout reader** thread demuxes replies by `request_id`.
+//! 3. A **kill handle** (`Child`) independent of the writer so shutdown can
+//!    interrupt a child that stopped reading stdin (unblocks a stuck write).
+//! 4. Async Tauri commands await their own oneshot reply; a delayed EV cannot
+//!    occupy the native main thread or prevent Status / Stop / Close.
+//!
 //! ## Concurrent mid-train `values` (R10 / ZR-62)
 //!
 //! The host keeps the stdin loop free during async `solve`, so Study can issue
-//! `values` while train is in flight. The Tauri bridge must match that: the
-//! session lifecycle mutex is **not** held across blocking RPC waits. Instead:
-//!
-//! 1. Allocate a `request_id` and register a oneshot in a pending map.
-//! 2. Serialize stdin writes under a short write lock.
-//! 3. A dedicated reader thread owns stdout and demuxes replies by
-//!    `request_id` to waiting callers.
-//!
-//! Callers block only on their oneshot (`recv_timeout`), so a long `solve`
-//! cannot deadlock a concurrent `values` invoke.
+//! `values` while train is in flight. The Tauri bridge matches that: the
+//! session lifecycle mutex is **not** held across RPC waits.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -31,12 +35,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
+use tokio::sync::oneshot;
 
 use crate::diagnostics;
 
 const PROTOCOL: u32 = 2;
 const SIDECAR_BASENAME: &str = "solver-engine";
 const EXTERNAL_BIN: &str = "binaries/solver-engine";
+/// Override sidecar path for acceptance / harness (test sidecar).
+const SIDECAR_ENV: &str = "STUDY_SOLVER_ENGINE";
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
 /// Default RPC budget (node / values / most ops).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(240);
@@ -50,6 +57,8 @@ const BEGIN_CONFIG_TIMEOUT: Duration = Duration::from_secs(600);
 /// admits `solve` / `resolve_locked` immediately; keep a long ceiling so a
 /// completion-shaped sidecar cannot brick Study at 240s on flop (ZR-106).
 const TRAIN_RPC_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
+/// Bounded Exit / kill reap — join writer+reader and wait on the child.
+const EXIT_REAP_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn timeout_for_op(op: &str) -> Duration {
     match op {
@@ -73,19 +82,29 @@ pub struct SolverEngineInfo {
     pub http_fallback_label: String,
 }
 
-/// Shared pipe IO: short stdin write lock + reply demux (not held across waits).
+/// Write job for the dedicated stdin writer thread (one per launch).
+struct WriteRequest {
+    frame: Vec<u8>,
+    done: oneshot::Sender<Result<(), String>>,
+}
+
+/// Shared pipe IO: reply demux + write channel (stdin owned by writer thread).
 struct SessionIo {
-    stdin: Mutex<ChildStdin>,
+    write_tx: Sender<WriteRequest>,
     next_request: AtomicU64,
-    pending: Mutex<HashMap<String, SyncSender<Result<Value, String>>>>,
-    shut_down: AtomicBool,
+    pending: Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>,
+    /// Shared with the writer poll loop so kill can exit without dropping all Senders.
+    shut_down: Arc<AtomicBool>,
     /// Copied at spawn so the reader thread can fault with a real launch id.
     launch_id: String,
 }
 
+/// One supervised launch: kill handle is independent of the writer.
 struct PipeSession {
+    /// OS child — kill/wait without touching the writer’s stdin handle.
     child: Child,
     io: Arc<SessionIo>,
+    writer: Option<JoinHandle<()>>,
     reader: Option<JoinHandle<()>>,
     launch_id: String,
     info: SolverEngineInfo,
@@ -95,7 +114,8 @@ pub struct SolverEngineState {
     /// Lifecycle only: spawn / take / kill. Never hold across RPC waits.
     session: Mutex<Option<PipeSession>>,
     /// Serializes ensure probe/kill/spawn so only one reconnect runs at a time.
-    reconnect: Mutex<()>,
+    /// Tokio mutex so ensure can `.await` the ready handshake while single-flight.
+    reconnect: tokio::sync::Mutex<()>,
     /// Last IPC op attempted (for last-fault.json).
     last_op: Mutex<Option<String>>,
     /// Survives kill/clear so UI `report_engine_fault` can still stamp launchId
@@ -107,7 +127,7 @@ impl SolverEngineState {
     pub fn new() -> Self {
         Self {
             session: Mutex::new(None),
-            reconnect: Mutex::new(()),
+            reconnect: tokio::sync::Mutex::new(()),
             last_op: Mutex::new(None),
             last_launch_id: Mutex::new(None),
         }
@@ -169,6 +189,13 @@ fn unblock_path(path: &Path) {
 
 fn sidecar_candidates(app: &AppHandle) -> Vec<PathBuf> {
     let mut out = Vec::new();
+    // Acceptance / harness override (test sidecar). Checked first.
+    if let Ok(override_path) = std::env::var(SIDECAR_ENV) {
+        let trimmed = override_path.trim();
+        if !trimmed.is_empty() {
+            out.push(PathBuf::from(trimmed));
+        }
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             out.push(dir.join(format!("{SIDECAR_BASENAME}.exe")));
@@ -208,7 +235,7 @@ fn resolve_sidecar(app: &AppHandle) -> Result<PathBuf, String> {
     }
     Err(format!(
         "missing `{SIDECAR_BASENAME}` beside the app or under zig-out/bin \
-         (bundle key `{EXTERNAL_BIN}`)"
+         (bundle key `{EXTERNAL_BIN}`; override via {SIDECAR_ENV})"
     ))
 }
 
@@ -284,6 +311,27 @@ fn reply_to_result(reply: Value) -> Result<Value, String> {
     Ok(reply)
 }
 
+fn writer_loop(mut stdin: ChildStdin, rx: Receiver<WriteRequest>, shut_down: Arc<AtomicBool>) {
+    // Poll so tear-down can exit even while in-flight RPCs still hold Sender clones.
+    loop {
+        match rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(req) => {
+                let result = stdin
+                    .write_all(&req.frame)
+                    .and_then(|_| stdin.flush())
+                    .map_err(|err| format!("solver-engine write: {err}"));
+                let _ = req.done.send(result);
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                if shut_down.load(Ordering::SeqCst) {
+                    break;
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
 fn reader_loop(mut stdout: ChildStdout, io: Arc<SessionIo>) {
     let mut stash = Vec::new();
     let mut unexpected_eof: Option<String> = None;
@@ -343,6 +391,53 @@ fn reader_loop(mut stdout: ChildStdout, io: Arc<SessionIo>) {
     fail_all_pending(&io, "solver-engine pipe closed");
 }
 
+fn join_handle_bounded(handle: JoinHandle<()>, deadline: Instant, label: &str) {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        eprintln!("warn: {label} join skipped — exit reap deadline exceeded");
+        return;
+    }
+    // std JoinHandle has no timed join; poll with try-style by spawning a
+    // waiter channel. Prefer a short park loop via thread::spawn bridge.
+    let (tx, rx) = mpsc::channel();
+    let watcher = thread::spawn(move || {
+        let _ = handle.join();
+        let _ = tx.send(());
+    });
+    match rx.recv_timeout(remaining) {
+        Ok(()) => {
+            let _ = watcher.join();
+        }
+        Err(_) => {
+            eprintln!("warn: {label} join timed out after exit reap deadline");
+            // Detach watcher — process is exiting anyway.
+        }
+    }
+}
+
+fn wait_child_bounded(child: &mut Child, deadline: Instant) {
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    eprintln!(
+                        "warn: solver-engine child still alive after exit reap deadline \
+                         (pid {})",
+                        child.id()
+                    );
+                    return;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(err) => {
+                eprintln!("warn: solver-engine try_wait: {err}");
+                return;
+            }
+        }
+    }
+}
+
 fn kill_session(
     slot: &mut Option<PipeSession>,
     last_op: Option<&str>,
@@ -363,13 +458,21 @@ fn kill_session(
             );
         }
         session.io.shut_down.store(true, Ordering::SeqCst);
+        fail_all_pending(&session.io, "solver-engine session killed");
+        // Kill handle is independent of the writer — interrupts a stuck write.
         let _ = session.child.kill();
-        let _ = session.child.wait();
+        let deadline = Instant::now() + EXIT_REAP_TIMEOUT;
+        wait_child_bounded(&mut session.child, deadline);
+        // Reader holds Arc<SessionIo> (and thus write_tx). Join it first so the
+        // writer channel can close; then drop our Arc and join the writer.
         if let Some(handle) = session.reader.take() {
-            let _ = handle.join();
+            join_handle_bounded(handle, deadline, "solver-engine reader");
+        }
+        drop(session.io);
+        if let Some(handle) = session.writer.take() {
+            join_handle_bounded(handle, deadline, "solver-engine writer");
         }
         diagnostics::remember_sidecar_pid(None);
-        fail_all_pending(&session.io, "solver-engine session killed");
     }
 }
 
@@ -452,11 +555,20 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
                 }
             });
     }
+
+    let shut_down = Arc::new(AtomicBool::new(false));
+    let (write_tx, write_rx) = mpsc::channel::<WriteRequest>();
+    let writer_flag = Arc::clone(&shut_down);
+    let writer = thread::Builder::new()
+        .name("solver-engine-stdin".into())
+        .spawn(move || writer_loop(stdin, write_rx, writer_flag))
+        .map_err(|err| format!("spawn solver-engine writer: {err}"))?;
+
     let io = Arc::new(SessionIo {
-        stdin: Mutex::new(stdin),
+        write_tx,
         next_request: AtomicU64::new(1),
         pending: Mutex::new(HashMap::new()),
-        shut_down: AtomicBool::new(false),
+        shut_down,
         launch_id: launch_id.to_string(),
     });
     let reader_io = Arc::clone(&io);
@@ -468,6 +580,7 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
     Ok(PipeSession {
         child,
         io,
+        writer: Some(writer),
         reader: Some(reader),
         launch_id: launch_id.to_string(),
         info: SolverEngineInfo {
@@ -488,24 +601,27 @@ fn allocate_request_id(io: &SessionIo) -> String {
     format!("r{n}")
 }
 
-fn rpc_shared(
+/// Async RPC: enqueue write on the dedicated writer thread, await demuxed reply.
+///
+/// Never uses per-invoke `spawn_blocking` for pipe I/O (Tokio cannot abort those).
+async fn rpc_shared(
     io: &Arc<SessionIo>,
     op: &str,
     body: Value,
     job_id: Option<String>,
-    timeout: Duration,
+    rpc_timeout: Duration,
 ) -> Result<Value, String> {
     if io.shut_down.load(Ordering::SeqCst) {
         return Err("solver-engine session shut down".into());
     }
     let request_id = allocate_request_id(io);
-    let (tx, rx) = mpsc::sync_channel(1);
+    let (reply_tx, reply_rx) = oneshot::channel();
     {
         let mut pending = io
             .pending
             .lock()
             .map_err(|_| "solver-engine pending lock poisoned".to_string())?;
-        pending.insert(request_id.clone(), tx);
+        pending.insert(request_id.clone(), reply_tx);
     }
     let envelope = json!({
         "v": PROTOCOL,
@@ -515,44 +631,69 @@ fn rpc_shared(
         "op": op,
         "body": body,
     });
-    let frame = encode_frame(&envelope)?;
-    {
-        let mut stdin = io
-            .stdin
-            .lock()
-            .map_err(|_| "solver-engine stdin lock poisoned".to_string())?;
-        if let Err(err) = stdin
-            .write_all(&frame)
-            .and_then(|_| stdin.flush())
-            .map_err(|err| format!("solver-engine write: {err}"))
-        {
+    let frame = match encode_frame(&envelope) {
+        Ok(f) => f,
+        Err(err) => {
             if let Ok(mut pending) = io.pending.lock() {
                 pending.remove(&request_id);
             }
             return Err(err);
         }
+    };
+
+    let (write_done_tx, write_done_rx) = oneshot::channel();
+    if io
+        .write_tx
+        .send(WriteRequest {
+            frame,
+            done: write_done_tx,
+        })
+        .is_err()
+    {
+        if let Ok(mut pending) = io.pending.lock() {
+            pending.remove(&request_id);
+        }
+        return Err("solver-engine writer closed".into());
     }
+
+    // Await write completion on the writer thread (abortible via child kill).
+    match write_done_rx.await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => {
+            if let Ok(mut pending) = io.pending.lock() {
+                pending.remove(&request_id);
+            }
+            return Err(err);
+        }
+        Err(_) => {
+            if let Ok(mut pending) = io.pending.lock() {
+                pending.remove(&request_id);
+            }
+            return Err("solver-engine writer dropped".into());
+        }
+    }
+
     // Session lifecycle lock is not held here — concurrent RPCs can write/wait.
-    match rx.recv_timeout(timeout) {
-        Ok(result) => result,
-        Err(RecvTimeoutError::Timeout) => {
+    match tokio::time::timeout(rpc_timeout, reply_rx).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err("solver-engine pipe closed".into()),
+        Err(_) => {
             if let Ok(mut pending) = io.pending.lock() {
                 pending.remove(&request_id);
             }
             Err("solver-engine IPC read timed out".into())
         }
-        Err(RecvTimeoutError::Disconnected) => Err("solver-engine pipe closed".into()),
     }
 }
 
-fn ready_handshake(io: &Arc<SessionIo>, launch_id: &str) -> Result<SolverEngineInfo, String> {
+async fn ready_handshake(io: &Arc<SessionIo>, launch_id: &str) -> Result<SolverEngineInfo, String> {
     let deadline = Instant::now() + READY_TIMEOUT;
     while Instant::now() < deadline {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             break;
         }
-        match rpc_shared(io, "ready", Value::Null, None, remaining) {
+        match rpc_shared(io, "ready", Value::Null, None, remaining).await {
             Ok(reply) => {
                 let body = reply.get("body").cloned().unwrap_or(Value::Null);
                 let protocol = body.get("protocol").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
@@ -574,12 +715,17 @@ fn ready_handshake(io: &Arc<SessionIo>, launch_id: &str) -> Result<SolverEngineI
                     }
                 }
                 let workers = body.get("workers").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let sidecar = body
+                    .get("sidecar")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(SIDECAR_BASENAME)
+                    .to_string();
                 return Ok(SolverEngineInfo {
-                    status: format!("ready via solver-engine IPC (protocol {PROTOCOL})"),
+                    status: format!("ready via {sidecar} IPC (protocol {PROTOCOL})"),
                     transport: "ipc".into(),
                     protocol: PROTOCOL,
                     launch_id: launch_id.to_string(),
-                    sidecar: SIDECAR_BASENAME.into(),
+                    sidecar,
                     workers,
                     http_fallback_label: "no engine (browser/dev — Study requires Tauri + solver-engine IPC)"
                         .into(),
@@ -589,7 +735,7 @@ fn ready_handshake(io: &Arc<SessionIo>, launch_id: &str) -> Result<SolverEngineI
                 if Instant::now() >= deadline {
                     return Err(err);
                 }
-                std::thread::sleep(Duration::from_millis(50));
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
     }
@@ -608,15 +754,14 @@ fn session_io(state: &SolverEngineState) -> Result<Arc<SessionIo>, String> {
 }
 
 /// Prefer Zig typed IPC. Callers surface a non-engine label when this fails.
-pub fn ensure_solver_engine_session(
+///
+/// Single-flight reconnect; ready handshake is awaited without holding the
+/// lifecycle mutex (only the reconnect permit + brief install locks).
+pub async fn ensure_solver_engine_session(
     app: &AppHandle,
     state: &SolverEngineState,
 ) -> Result<SolverEngineInfo, String> {
-    // Single-flight reconnect: concurrent ensures share one probe/kill/spawn.
-    let _reconnect = state
-        .reconnect
-        .lock()
-        .map_err(|_| "solver-engine reconnect lock poisoned".to_string())?;
+    let _reconnect = state.reconnect.lock().await;
 
     // Existing session: probe ready without holding the lifecycle lock across the wait.
     let existing = {
@@ -630,7 +775,7 @@ pub fn ensure_solver_engine_session(
     };
     if let Some((io, info, launch_id)) = existing {
         state.remember_op("ready");
-        match rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT) {
+        match rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT).await {
             Ok(_) => return Ok(info),
             Err(err) => {
                 let _ = launch_id;
@@ -644,23 +789,27 @@ pub fn ensure_solver_engine_session(
         }
     }
 
-    let mut guard = state
-        .session
-        .lock()
-        .map_err(|_| "solver-engine state lock poisoned".to_string())?;
-    // Another ensure may have won the race while we were unlocked.
-    if let Some(session) = guard.as_ref() {
-        return Ok(session.info.clone());
-    }
+    // Spawn under the lifecycle lock, then release before awaiting ready.
+    let (io, launch_id) = {
+        let mut guard = state
+            .session
+            .lock()
+            .map_err(|_| "solver-engine state lock poisoned".to_string())?;
+        // Another ensure may have won the race while we were unlocked.
+        if let Some(session) = guard.as_ref() {
+            return Ok(session.info.clone());
+        }
 
-    let launch_id = new_launch_id();
-    state.remember_launch_id(&launch_id);
-    let mut session = spawn_session(app, &launch_id)?;
-    let io = Arc::clone(&session.io);
-    // Handshake waits on the demux oneshot; lifecycle lock stays held only for
-    // install/fail so two ensures cannot double-spawn. Ready is short (READY_TIMEOUT).
+        let launch_id = new_launch_id();
+        state.remember_launch_id(&launch_id);
+        let session = spawn_session(app, &launch_id)?;
+        let io = Arc::clone(&session.io);
+        *guard = Some(session);
+        (io, launch_id)
+    };
+
     state.remember_op("ready");
-    match ready_handshake(&io, &launch_id) {
+    match ready_handshake(&io, &launch_id).await {
         Ok(info) => {
             diagnostics::write_session_meta(
                 &info.launch_id,
@@ -669,12 +818,24 @@ pub fn ensure_solver_engine_session(
                 &info.sidecar,
             );
             state.remember_launch_id(&info.launch_id);
-            session.info = info.clone();
-            *guard = Some(session);
+            let mut guard = state
+                .session
+                .lock()
+                .map_err(|_| "solver-engine state lock poisoned".to_string())?;
+            if let Some(session) = guard.as_mut() {
+                if session.launch_id == launch_id {
+                    session.info = info.clone();
+                }
+            }
             Ok(info)
         }
         Err(err) => {
-            let sidecar_pid = Some(session.child.id());
+            // Tear down the half-ready install; record ensure-fail (do not let
+            // kill_session overwrite with a generic session-killed fault).
+            let sidecar_pid = {
+                let guard = state.session.lock().unwrap_or_else(|p| p.into_inner());
+                guard.as_ref().map(|s| s.child.id())
+            };
             diagnostics::record_fault_with_sidecar(
                 &launch_id,
                 Some("ready"),
@@ -683,24 +844,38 @@ pub fn ensure_solver_engine_session(
                 PROTOCOL,
                 sidecar_pid,
             );
-            session.io.shut_down.store(true, Ordering::SeqCst);
-            let _ = session.child.kill();
-            let _ = session.child.wait();
-            if let Some(handle) = session.reader.take() {
-                let _ = handle.join();
+            let mut guard = state
+                .session
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if is_current_connection(guard.as_ref().map(|s| &s.io), &io) {
+                kill_session(&mut guard, Some("ready"), &err, false);
             }
-            diagnostics::remember_sidecar_pid(None);
             Err(err)
         }
     }
 }
 
+/// Warm-start from Tauri setup without blocking window open.
+pub fn spawn_background_ensure(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<SolverEngineState>();
+        match ensure_solver_engine_session(&app, &*state).await {
+            Ok(info) => eprintln!("info: {}", info.status),
+            Err(err) => eprintln!(
+                "error: solver-engine IPC unavailable ({err}). \
+                 Window opened; use Reconnect after fixing the install."
+            ),
+        }
+    });
+}
+
 #[tauri::command]
-pub fn ensure_solver_engine(
+pub async fn ensure_solver_engine(
     app: AppHandle,
     state: State<'_, SolverEngineState>,
 ) -> Result<SolverEngineInfo, String> {
-    ensure_solver_engine_session(&app, &state)
+    ensure_solver_engine_session(&app, &*state).await
 }
 
 #[tauri::command]
@@ -713,7 +888,7 @@ pub fn solver_engine_info(state: State<'_, SolverEngineState>) -> Option<SolverE
 }
 
 #[tauri::command]
-pub fn solver_engine_request(
+pub async fn solver_engine_request(
     state: State<'_, SolverEngineState>,
     op: String,
     body: Option<Value>,
@@ -721,7 +896,7 @@ pub fn solver_engine_request(
 ) -> Result<Value, String> {
     // Capture the connection that issued this RPC so a late fatal cannot kill a
     // sidecar installed by a later reconnect (ZR-154).
-    let io = session_io(&state)?;
+    let io = session_io(&*state)?;
     state.remember_op(&op);
     let reply = rpc_shared(
         &io,
@@ -729,7 +904,8 @@ pub fn solver_engine_request(
         body.unwrap_or(Value::Null),
         job_id,
         timeout_for_op(&op),
-    );
+    )
+    .await;
     if let Err(err) = &reply {
         // Kill only on pipe/session death. A single RPC timeout must not nuke an
         // in-flight Study train (values/solve can be slow under flop fixtures).
@@ -737,15 +913,17 @@ pub fn solver_engine_request(
             || err.contains("write:")
             || err.contains("Broken pipe")
             || err.contains("shut down")
-            || err.contains("stdin lock poisoned");
+            || err.contains("writer closed")
+            || err.contains("writer dropped");
         if fatal {
-            kill_solver_engine_if_current(&state, &io, err);
+            kill_solver_engine_if_current(&*state, &io, err);
         }
     }
     reply
 }
 
 /// Clean app Exit — tear down sidecar without overwriting a useful last-fault.
+/// Bounded: kill handle first, then reap within [`EXIT_REAP_TIMEOUT`].
 pub fn kill_solver_engine(state: &SolverEngineState) {
     // Poisoned mutex must not skip Exit/kill — orphan sidecars lock NSIS upgrades.
     let mut guard = state
@@ -791,16 +969,33 @@ fn kill_solver_engine_for_launch(
 /// ZR-151: Study may terminate a hung/unresponsive sidecar before Reconnect.
 /// Requires the launch id Study believes is hung so a reconnect cannot be torn down.
 #[tauri::command]
-pub fn kill_solver_engine_cmd(
+pub async fn kill_solver_engine_cmd(
     state: State<'_, SolverEngineState>,
     expected_launch_id: String,
 ) -> Result<(), String> {
+    // Kill handle is independent of the writer; EXIT_REAP_TIMEOUT bounds wait.
+    // Async entry point keeps this off the native UI thread.
     kill_solver_engine_for_launch(
-        &state,
+        &*state,
         &expected_launch_id,
         "kill_solver_engine_cmd (hung/reconnect)",
         true,
     )
+}
+
+/// True when `STUDY_IPC_ACCEPTANCE=1` — WebView runs the concurrency probe.
+#[tauri::command]
+pub fn ipc_acceptance_enabled() -> bool {
+    matches!(
+        std::env::var("STUDY_IPC_ACCEPTANCE").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
+/// Exit the process with a code (acceptance harness).
+#[tauri::command]
+pub fn exit_with_code(code: i32) {
+    std::process::exit(code);
 }
 
 #[cfg(test)]
@@ -904,10 +1099,10 @@ mod tests {
         assert!(err.contains("train running"));
     }
 
-    #[test]
-    fn only_one_reconnect_attempt_holds_the_lock() {
+    #[tokio::test]
+    async fn only_one_reconnect_attempt_holds_the_lock() {
         let state = SolverEngineState::new();
-        let _held = state.reconnect.lock().expect("reconnect lock");
+        let _held = state.reconnect.lock().await;
         assert!(
             state.reconnect.try_lock().is_err(),
             "second reconnect must wait — only one attempt at a time"
@@ -937,6 +1132,7 @@ mod tests {
         use std::sync::{Arc, Mutex};
         use std::collections::HashMap;
         use std::process::{Command, Stdio};
+        use std::sync::mpsc;
 
         fn test_engine_info(launch_id: &str) -> SolverEngineInfo {
             SolverEngineInfo {
@@ -965,16 +1161,26 @@ mod tests {
             let stdin = child.stdin.take().expect("stdin");
             let _stdout = child.stdout.take();
             let pid = child.id();
+            let (write_tx, write_rx) = mpsc::channel::<WriteRequest>();
+            // Drain writes so senders do not block forever in tests.
+            let _writer = thread::spawn(move || {
+                let mut stdin = stdin;
+                while let Ok(req) = write_rx.recv() {
+                    let _ = stdin.write_all(&req.frame);
+                    let _ = req.done.send(Ok(()));
+                }
+            });
             let io = Arc::new(SessionIo {
-                stdin: Mutex::new(stdin),
+                write_tx,
                 next_request: AtomicU64::new(1),
                 pending: Mutex::new(HashMap::new()),
-                shut_down: AtomicBool::new(false),
+                shut_down: Arc::new(AtomicBool::new(false)),
                 launch_id: launch_id.to_string(),
             });
             let session = PipeSession {
                 child,
                 io: Arc::clone(&io),
+                writer: None,
                 reader: None,
                 launch_id: launch_id.to_string(),
                 info: test_engine_info(launch_id),
@@ -1002,12 +1208,13 @@ mod tests {
                     .stderr(Stdio::null())
                     .spawn()
                     .unwrap();
-                let stdin = child.stdin.take().unwrap();
+                let _stdin = child.stdin.take().unwrap();
+                let (write_tx, _write_rx) = mpsc::channel();
                 let io = Arc::new(SessionIo {
-                    stdin: Mutex::new(stdin),
+                    write_tx,
                     next_request: AtomicU64::new(1),
                     pending: Mutex::new(HashMap::new()),
-                    shut_down: AtomicBool::new(false),
+                    shut_down: Arc::new(AtomicBool::new(false)),
                     launch_id: "engine-a".into(),
                 });
                 (child, io)
@@ -1020,12 +1227,13 @@ mod tests {
                     .stderr(Stdio::null())
                     .spawn()
                     .unwrap();
-                let stdin = child.stdin.take().unwrap();
+                let _stdin = child.stdin.take().unwrap();
+                let (write_tx, _write_rx) = mpsc::channel();
                 let io = Arc::new(SessionIo {
-                    stdin: Mutex::new(stdin),
+                    write_tx,
                     next_request: AtomicU64::new(1),
                     pending: Mutex::new(HashMap::new()),
-                    shut_down: AtomicBool::new(false),
+                    shut_down: Arc::new(AtomicBool::new(false)),
                     launch_id: "engine-b".into(),
                 });
                 (child, io)
@@ -1148,6 +1356,184 @@ mod tests {
             assert!(err.contains("expected_launch_id"));
             assert!(process_alive(pid), "blind kill must not tear down the child");
             kill_solver_engine(&state);
+        }
+    }
+
+    /// Supervisor concurrency with the controllable test sidecar (Unix).
+    #[cfg(unix)]
+    mod supervisor_concurrency {
+        use super::super::*;
+        use std::process::{Command, Stdio};
+
+        fn test_sidecar_bin() -> PathBuf {
+            // Standalone crate: desktop/ipc-test-sidecar (no Tauri/GTK deps).
+            let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let candidates = [
+                manifest
+                    .join("..")
+                    .join("ipc-test-sidecar")
+                    .join("target")
+                    .join("debug")
+                    .join("ipc-test-sidecar"),
+                manifest
+                    .join("..")
+                    .join("ipc-test-sidecar")
+                    .join("target")
+                    .join("release")
+                    .join("ipc-test-sidecar"),
+            ];
+            for path in &candidates {
+                if path.is_file() {
+                    return path.clone();
+                }
+            }
+            // Fall back to python script when the Rust bin is not built yet.
+            let py = manifest
+                .join("..")
+                .join("..")
+                .join("scripts")
+                .join("desktop")
+                .join("ipc_test_sidecar.py");
+            if py.is_file() {
+                return py;
+            }
+            candidates[0].clone()
+        }
+
+        fn spawn_test_sidecar_command(bin: &Path, launch_id: &str) -> Command {
+            let mut cmd = if bin
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("py"))
+                .unwrap_or(false)
+            {
+                let mut c = Command::new("python3");
+                c.arg(bin);
+                c
+            } else {
+                Command::new(bin)
+            };
+            cmd.arg("--launch-id").arg(launch_id);
+            cmd
+        }
+
+        fn spawn_supervised_test_sidecar(launch_id: &str) -> PipeSession {
+            let bin = test_sidecar_bin();
+            assert!(
+                bin.is_file(),
+                "ipc-test-sidecar missing at {} — build with \
+                 `cargo build` in desktop/ipc-test-sidecar (or use the .py fallback)",
+                bin.display()
+            );
+            let mut child = spawn_test_sidecar_command(&bin, launch_id)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap_or_else(|err| panic!("spawn ipc-test-sidecar ({}): {err}", bin.display()));
+            let stdin = child.stdin.take().expect("stdin");
+            let stdout = child.stdout.take().expect("stdout");
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = thread::spawn(move || {
+                    let mut buf = [0u8; 512];
+                    while let Ok(n) = stderr.read(&mut buf) {
+                        if n == 0 {
+                            break;
+                        }
+                    }
+                });
+            }
+            let shut_down = Arc::new(AtomicBool::new(false));
+            let (write_tx, write_rx) = mpsc::channel::<WriteRequest>();
+            let writer_flag = Arc::clone(&shut_down);
+            let writer = thread::spawn(move || writer_loop(stdin, write_rx, writer_flag));
+            let io = Arc::new(SessionIo {
+                write_tx,
+                next_request: AtomicU64::new(1),
+                pending: Mutex::new(HashMap::new()),
+                shut_down,
+                launch_id: launch_id.to_string(),
+            });
+            let reader_io = Arc::clone(&io);
+            let reader = thread::spawn(move || reader_loop(stdout, reader_io));
+            PipeSession {
+                child,
+                io,
+                writer: Some(writer),
+                reader: Some(reader),
+                launch_id: launch_id.to_string(),
+                info: SolverEngineInfo {
+                    status: "test".into(),
+                    transport: "ipc".into(),
+                    protocol: PROTOCOL,
+                    launch_id: launch_id.to_string(),
+                    sidecar: "ipc-test-sidecar".into(),
+                    workers: 1,
+                    http_fallback_label: "test".into(),
+                },
+            }
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn status_and_cancel_complete_while_values_held() {
+            let session = spawn_supervised_test_sidecar("accept-values-hold");
+            let io = Arc::clone(&session.io);
+
+            let ready = rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT)
+                .await
+                .expect("ready");
+            assert_eq!(ready["body"]["protocol"], 2);
+
+            // Start values — test sidecar withholds the reply while still reading.
+            let values_io = Arc::clone(&io);
+            let values_task = tokio::spawn(async move {
+                rpc_shared(
+                    &values_io,
+                    "values",
+                    json!({ "node_index": 0 }),
+                    None,
+                    Duration::from_secs(30),
+                )
+                .await
+            });
+
+            // Give the values frame time to land and be withheld.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let status = rpc_shared(&io, "status", Value::Null, None, STATUS_RPC_TIMEOUT)
+                .await
+                .expect("status while values pending");
+            assert_eq!(status["body"]["held_values"], true);
+
+            let cancel = rpc_shared(
+                &io,
+                "cancel",
+                Value::Null,
+                Some("j-accept".into()),
+                STATUS_RPC_TIMEOUT,
+            )
+            .await
+            .expect("cancel while values pending");
+            assert_eq!(cancel["body"]["cancelled"], true);
+
+            // Values must still be pending (sidecar withheld).
+            assert!(
+                !values_task.is_finished(),
+                "values invoke must still be awaiting the withheld reply"
+            );
+
+            // Kill handle reaps independently of the pending values await.
+            let state = SolverEngineState::new();
+            {
+                let mut guard = state.session.lock().unwrap();
+                *guard = Some(session);
+            }
+            kill_solver_engine(&state);
+            let values_result = values_task.await.expect("join values task");
+            assert!(
+                values_result.is_err(),
+                "pending values must settle after kill/reap"
+            );
         }
     }
 }

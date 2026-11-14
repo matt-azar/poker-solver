@@ -7,6 +7,7 @@ import { applyDocumentTheme, resolveTheme, useThemeStore } from "./state/themeSt
 import { detectAndInstallPlatform } from "./platform";
 import { startUiHangMonitor } from "./platform/diagnostics";
 import { ensureEngine } from "./platform/engine";
+import { maybeRunIpcAcceptanceAndExit } from "./platform/ipcAcceptance";
 import { useStudyStore } from "./state/studyStore";
 
 applyDocumentTheme(resolveTheme(useThemeStore.getState().preference));
@@ -15,7 +16,13 @@ detectAndInstallPlatform();
 startUiHangMonitor();
 
 async function bootEngineThenRender(): Promise<void> {
+  // Packaged Windows acceptance: WebView → Tauri → test sidecar (exits process).
+  if (await maybeRunIpcAcceptanceAndExit()) {
+    return;
+  }
+
   // Packaged Tauri: solver-engine IPC only.
+  // Native window already opened — ready handshake no longer blocks Tauri setup.
   const result = await ensureEngine();
   if (result.ok) {
     console.info("[tauri] ensure_engine", result.status, result.transport.kind);
