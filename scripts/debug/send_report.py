@@ -1058,7 +1058,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "url": wh.get("issue_url"),
                     "number": wh.get("issue_number"),
                 }
-                if args.webhook_dry_run or wh.get("dry_run"):
+                if args.webhook_dry_run or (
+                    wh.get("dry_run") and not wh.get("local_disk")
+                ):
                     result = {
                         "ok": True,
                         "dry_run": True,
@@ -1073,6 +1075,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                 "zip_name",
                                 "attach",
                                 "stashed_zip",
+                                "saved_dir",
+                                "saved_zip",
+                                "local_disk",
                             )
                             if k in wh
                         },
@@ -1081,6 +1086,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         write_json(args.json_out, result)
                     print(json.dumps(result, indent=2))
                     return 0
+                # Local-disk receiver: surface save paths even without an Issue.
+                if wh.get("local_disk") and wh.get("saved_dir"):
+                    eprint(f"saved locally: {wh.get('saved_dir')}")
+                    if not issue.get("url"):
+                        result = {
+                            "ok": True,
+                            "dry_run": False,
+                            "local_disk": True,
+                            "repo": repo,
+                            "title": title,
+                            "transport": "webhook",
+                            "saved_dir": wh.get("saved_dir"),
+                            "saved_zip": wh.get("saved_zip"),
+                            "issue_url": None,
+                            "issue_number": None,
+                            "attachment_url": attachment_url or None,
+                            "partial": bool(wh.get("partial")),
+                            "primary": (
+                                analysis.get("classification") or {}
+                            ).get("primary"),
+                        }
+                        if args.json_out:
+                            write_json(args.json_out, result)
+                        print(json.dumps(result, indent=2))
+                        print(f"\nSaved: {wh.get('saved_dir')}")
+                        return 0
             else:
                 if args.attach == "gist":
                     staged_zip = work / f"diagnostics-{utc_now_iso().replace(':', '')}.zip"

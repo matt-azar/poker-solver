@@ -22,12 +22,22 @@ Diagnostics the app already writes live under
 ### One of these (pick a front door)
 
 ```powershell
-# A) Mini-app (buttons for collect / analyze / dumps / sidecar / watch)
+# A) Local debug receiver + mini-app (no Cloudflare, no gh auth)
+#    Saves send-report zips under %LOCALAPPDATA%\Holdem Study\debug-reports
+.\scripts\debug\study-debug-local.cmd
+
+# B) Mini-app only (collect / analyze / dumps / sidecar / watch)
 .\scripts\debug\study-debug.cmd
 
-# B) Same thing via PowerShell
+# C) Same as B via PowerShell
 powershell -ExecutionPolicy Bypass -File .\scripts\debug\study-debug.ps1
 ```
+
+**No Cloudflare path:** double-click `study-debug-local.cmd` while you run the
+**installed** Study as usual. When you have a diagnostics zip (Help → Copy
+diagnostics zip, or `collect`), use the mini-app **Send report** button — it
+POSTs to `http://127.0.0.1:8787/report` and the receiver writes the zip +
+analysis to disk. GitHub Issue upload is optional (`--github` + a token).
 
 ### Or 4 CLI commands (while Study is frozen, leave it open)
 
@@ -54,22 +64,32 @@ Optional: `pip install psutil` for better CPU% on snapshot / watch.
 
 ---
 
-## Send report (Windows → GitHub)
+## Send report (Windows → local disk or GitHub)
 
-Uploads a diagnostics zip + analyze summary into the **poker-solver** repo as a
-**GitHub Issue** (structured body). The zip is attached via a release asset
-(webhook path) or **secret gist** (local `gh` path). Dumps are **not**
-committed to `main`.
+Uploads a diagnostics zip + analyze summary. Preferred on Windows without
+Cloudflare: **local Python receiver** saves the zip to disk. Optional: open a
+GitHub Issue (Worker, local receiver + token, or `gh` on the PC). Dumps are
+**not** committed to `main`.
 
-### Authenticate once (preferred: webhook — no `gh` on the PC)
-
-Deploy the small receiver once (Cloudflare Worker or stdlib Python server), then
-set two env vars on Windows. GitHub PAT stays on the server only.
-
-Full steps: [`report-receiver/README.md`](report-receiver/README.md).
+### Preferred: local receiver (no Cloudflare, no `gh`)
 
 ```powershell
-# After deploying the Worker / server (Matt does this once):
+cd C:\Users\matta\poker-solver
+.\scripts\debug\study-debug-local.cmd
+# leave that window open; run installed Study as usual
+# then: mini-app → Send report  (or study-debug.cmd send --zip … --yes)
+```
+
+Reports land in `%LOCALAPPDATA%\Holdem Study\debug-reports\` (zip + issue body +
+analysis). The launcher writes `%USERPROFILE%\.holdem-study\report-webhook.json`
+for the session. Details: [`report-receiver/README.md`](report-receiver/README.md).
+
+### Optional remote webhook (Cloudflare Worker)
+
+If you later want always-on intake without keeping a local window open, deploy
+the Worker once (see report-receiver README) and set:
+
+```powershell
 [System.Environment]::SetEnvironmentVariable(
   "HOLDEM_STUDY_REPORT_WEBHOOK_URL",
   "https://holdem-study-report-receiver.<you>.workers.dev/report",
@@ -79,9 +99,6 @@ Full steps: [`report-receiver/README.md`](report-receiver/README.md).
   "<same REPORT_SHARED_SECRET as the server>",
   "User")
 ```
-
-Optional URL-only config file: `%USERPROFILE%\.holdem-study\report-webhook.json`
-(`{ "webhook_url": "https://…" }`) — keep the secret in env, never commit it.
 
 ### Fallback: local GitHub CLI / PAT
 
@@ -190,7 +207,8 @@ Override diagnostics path: `$env:HOLDEM_STUDY_DIAGNOSTICS_DIR = "D:\copy\diagnos
 | --- | --- | --- |
 | `collect` | `collect_bundle.py` | Evidence dir/zip (default `--zip --stacks`) |
 | `analyze` | `analyze_diagnostics.py` | Crash vs hang triage on dir or Help zip |
-| `send` | `send_report.py` | Webhook or local gh → GitHub Issue + zip attach |
+| `send` | `send_report.py` | Local/webhook/gh → disk and/or GitHub Issue |
+| `local-debug` | `start_local_debug.py` | Start localhost receiver + mini-app |
 | `dumps` | `find_crash_dumps.py` | LocalDumps / cores |
 | `sidecar` | `windows_sidecar_check.py` | GUI PE / CREATE_NO_WINDOW checklist |
 | `probe` | `ipc_probe.py` | Ready + demux + status budget |
@@ -248,7 +266,9 @@ On Windows you can point probes at the **installed** sidecar:
 | `windows_collect.ps1` | Windows install | One-shot snapshot + diagnostics analysis + dump search + zip |
 | `collect_bundle.py` | any | Cross-platform evidence directory/zip |
 | `send_report.py` | any | Webhook POST or local Issue + gist/release (no git commit) |
-| `report-receiver/` | any | Deployable intake (CF Worker / Python); holds GitHub PAT |
+| `start_local_debug.py` | any | Local disk receiver launcher (no Cloudflare) |
+| `study-debug-local.cmd` / `.ps1` | Windows | Double-click local debug launcher |
+| `report-receiver/` | any | Intake (local-disk / CF Worker / Python); optional GitHub PAT |
 | `smoke_selftest.py` | suite health | Synthetic diagnostics + import smoke |
 
 Shared helpers: `_common.py` (not a CLI).
