@@ -11,8 +11,9 @@ defaults. Does not replace the individual tools — it just routes to them.
   python scripts/debug/study_debug.py local-debug
   python scripts/debug/study_debug.py gui
 
-Windows: double-click ``study-debug.cmd`` (mini-app) or
-``study-debug-local.cmd`` (local receiver + mini-app, no Cloudflare).
+Windows: prefer ``study-debug-session.cmd`` (automated capture loop).
+Also: ``study-debug.cmd`` (mini-app) or ``study-debug-local.cmd``
+(local receiver + mini-app, no Cloudflare).
 """
 
 from __future__ import annotations
@@ -66,6 +67,9 @@ _ALIASES: dict[str, str] = {
     "dumps-enable": "enable-dumps",
     "diary": "diary",
     "repro-diary": "diary",
+    "session": "session",
+    "capture-session": "session",
+    "debug-session": "session",
 }
 
 
@@ -146,23 +150,26 @@ Holdem Study crash/hang debug — front door
 
 Windows (from a clone of this repo):
 
-  scripts\\debug\\study-debug.cmd              # opens mini-app
+  scripts\\debug\\study-debug-session.cmd      # AUTOMATED capture loop (preferred)
+  scripts\\debug\\study-debug-session.cmd collect
+  scripts\\debug\\study-debug-local.cmd        # receiver + hang watcher + mini-app
+  scripts\\debug\\study-debug.cmd              # mini-app only
   scripts\\debug\\study-debug.cmd collect      # evidence zip while frozen
   scripts\\debug\\study-debug.cmd analyze --zip path\\to\\diagnostics.zip
-  scripts\\debug\\study-debug-local.cmd   # local receiver + mini-app (no Cloudflare)
   scripts\\debug\\study-debug.cmd send --zip path\\to\\diagnostics.zip
   scripts\\debug\\study-debug.cmd dumps
   scripts\\debug\\study-debug.cmd sidecar --exe "C:\\Path\\To\\Install\\solver-engine.exe"
 
 Or:
   python scripts\\debug\\study_debug.py <command> ...
+  python scripts\\debug\\study_debug.py session
   python scripts\\debug\\study_debug.py local-debug
   python scripts\\debug\\study_debug.py gui
 
 Diagnostics folder: {diag}
 
-Subcommands: collect, analyze, send, local-debug, enable-dumps, diary, dumps,
-             sidecar, probe, freeze, watch, snapshot, stacks, smoke, gui,
+Subcommands: session, collect, analyze, send, local-debug, enable-dumps, diary,
+             dumps, sidecar, probe, freeze, watch, snapshot, stacks, smoke, gui,
              windows-collect
 """.format(
             diag=diag
@@ -173,6 +180,8 @@ Subcommands: collect, analyze, send, local-debug, enable-dumps, diary, dumps,
 def _build_parser() -> argparse.ArgumentParser:
     epilog = """
 examples (Windows installed Study):
+  study_debug.py session
+  study_debug.py session collect
   study_debug.py gui
   study_debug.py collect --zip --stacks
   study_debug.py analyze --zip %%USERPROFILE%%\\Desktop\\holdem-study-diagnostics.zip
@@ -192,9 +201,9 @@ examples (Windows installed Study):
     ap.add_argument(
         "command",
         nargs="?",
-        help="collect | analyze | send | local-debug | enable-dumps | diary | "
-        "dumps | sidecar | probe | freeze | watch | snapshot | stacks | smoke | "
-        "gui | windows-collect",
+        help="session | collect | analyze | send | local-debug | enable-dumps | "
+        "diary | dumps | sidecar | probe | freeze | watch | snapshot | stacks | "
+        "smoke | gui | windows-collect",
     )
     ap.add_argument(
         "args",
@@ -227,6 +236,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if command == "gui":
         return _cmd_gui(rest)
+    if command == "session":
+        return _run_script("study_debug_session.py", rest)
     if command in ("local-debug", "local_debug"):
         return _run_script("start_local_debug.py", rest)
     if command in ("enable-dumps", "enable_dumps"):
