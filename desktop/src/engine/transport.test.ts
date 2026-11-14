@@ -27,6 +27,7 @@ import {
   ipcSave,
   ipcTreePreview,
   ipcValues,
+  killSolverEngineIpc,
   setNoEngineTransport,
   setIpcTransport,
   solverEngineRequest,
@@ -355,6 +356,52 @@ describe("solverEngineRequest honest errors", () => {
     await expect(solverEngineRequest("node", { node_id: "p0.t-1.r-1" })).rejects.toThrow(
       /expected request|invalid_frame/i,
     );
+  });
+});
+
+describe("launch-scoped hung kill", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    invoke.mockResolvedValue(undefined);
+    setNoEngineTransport();
+  });
+
+  it("passes expected launch id and clears matching IPC transport", async () => {
+    setIpcTransport({
+      protocol: 2,
+      launchId: "zig-hung-1",
+      sidecar: "solver-engine",
+      workers: 1,
+    });
+    await killSolverEngineIpc("zig-hung-1");
+    expect(invoke).toHaveBeenCalledWith("kill_solver_engine_cmd", {
+      expectedLaunchId: "zig-hung-1",
+    });
+    expect(getActiveTransport().kind).toBe("no-engine");
+  });
+
+  it("stale launch id does not clear a newer IPC session", async () => {
+    setIpcTransport({
+      protocol: 2,
+      launchId: "zig-engine-b",
+      sidecar: "solver-engine",
+      workers: 1,
+    });
+    await killSolverEngineIpc("zig-engine-a");
+    expect(invoke).toHaveBeenCalledWith("kill_solver_engine_cmd", {
+      expectedLaunchId: "zig-engine-a",
+    });
+    const transport = getActiveTransport();
+    expect(transport.kind).toBe("ipc");
+    if (transport.kind === "ipc") {
+      expect(transport.launchId).toBe("zig-engine-b");
+    }
+  });
+
+  it("refuses blind kill when no launch id is known", async () => {
+    setNoEngineTransport();
+    await killSolverEngineIpc();
+    expect(invoke).not.toHaveBeenCalled();
   });
 });
 
