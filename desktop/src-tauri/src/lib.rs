@@ -6,6 +6,7 @@ mod diagnostics;
 mod library;
 mod solver_admission;
 mod solver_engine;
+mod solver_ipc;
 
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, RunEvent};
@@ -179,6 +180,7 @@ pub fn run() {
             solver_engine::ensure_solver_engine,
             solver_engine::solver_engine_info,
             solver_engine::solver_engine_request,
+            solver_engine::solver_engine_ipc_diagnostics,
             solver_engine::kill_solver_engine_cmd,
             solver_engine::ipc_acceptance_enabled,
             solver_engine::exit_with_code,

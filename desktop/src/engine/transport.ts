@@ -139,11 +139,119 @@ export type IpcRequestEnvelope = {
   body?: unknown;
 };
 
+/** Typed Rust `IpcError` classes serialized through Tauri invoke Err. */
+export type IpcErrorClass =
+  | "queue_saturation"
+  | "timeout"
+  | "engine_rejection"
+  | "protocol_failure"
+  | "connection_loss";
+
+export type SolverIpcErrorPayload = {
+  class: IpcErrorClass;
+  message: string;
+  errorCode?: string | null;
+  op?: string | null;
+  requestId?: string | null;
+  launchId?: string | null;
+  degraded?: boolean;
+  phase?: string | null;
+};
+
+/** Error thrown by the TS adapter; preserves host `error_code` when present. */
+export class SolverIpcError extends Error {
+  readonly ipcClass: IpcErrorClass;
+  readonly errorCode: string | null;
+  readonly op: string | null;
+  readonly requestId: string | null;
+  readonly launchId: string | null;
+  readonly degraded: boolean;
+
+  constructor(payload: SolverIpcErrorPayload) {
+    super(payload.message);
+    this.name = "SolverIpcError";
+    this.ipcClass = payload.class;
+    this.errorCode = payload.errorCode ?? null;
+    this.op = payload.op ?? null;
+    this.requestId = payload.requestId ?? null;
+    this.launchId = payload.launchId ?? null;
+    this.degraded = payload.degraded === true;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  return value as Record<string, unknown>;
+}
+
+/** Parse a Tauri invoke rejection into a structured SolverIpcError when possible. */
+export function parseSolverIpcInvokeError(err: unknown, fallbackOp?: string): SolverIpcError {
+  const record = asRecord(err);
+  if (record && typeof record.class === "string") {
+    const cls = record.class as IpcErrorClass;
+    const message =
+      (typeof record.message === "string" && record.message) ||
+      (typeof record.error_message === "string" && record.error_message) ||
+      String(err);
+    return new SolverIpcError({
+      class: cls,
+      message,
+      errorCode:
+        typeof record.error_code === "string"
+          ? record.error_code
+          : typeof record.errorCode === "string"
+            ? record.errorCode
+            : null,
+      op: typeof record.op === "string" ? record.op : fallbackOp ?? null,
+      requestId:
+        typeof record.request_id === "string"
+          ? record.request_id
+          : typeof record.requestId === "string"
+            ? record.requestId
+            : null,
+      launchId:
+        typeof record.launch_id === "string"
+          ? record.launch_id
+          : typeof record.launchId === "string"
+            ? record.launchId
+            : null,
+      degraded: record.degraded === true,
+      phase: typeof record.phase === "string" ? record.phase : null,
+    });
+  }
+  const text =
+    err instanceof Error
+      ? err.message
+      : typeof err === "string"
+        ? err
+        : typeof record?.message === "string"
+          ? record.message
+          : String(err);
+  const lower = text.toLowerCase();
+  let ipcClass: IpcErrorClass = "protocol_failure";
+  if (lower.includes("connection_loss") || lower.includes("pipe closed") || lower.includes("broken pipe")) {
+    ipcClass = "connection_loss";
+  } else if (lower.includes("admission saturated") || lower.includes("queued bytes")) {
+    ipcClass = "queue_saturation";
+  } else if (lower.includes("timed out") || lower.includes("expired-before-write") || lower.includes("unknown-after-write")) {
+    ipcClass = "timeout";
+  }
+  return new SolverIpcError({
+    class: ipcClass,
+    message: text,
+    op: fallbackOp ?? null,
+    degraded: ipcClass === "timeout" && (fallbackOp === "status" || lower.includes("degraded")),
+  });
+}
+
 /**
  * Framed request/reply via the Tauri-owned pipe ends.
  * Safe to overlap mid-train `values` with an in-flight `solve`: the shell
  * demuxes replies by `request_id` and does not hold the session mutex across
  * the blocking wait (host stdin already serves live-under-train).
+ *
+ * Host `ok:false` replies return through invoke Ok so `error_code` is preserved
+ * on {@link SolverIpcError}. Transport failures use the Rust `IpcError` enum.
  */
 export async function solverEngineRequest(
   op: string,
@@ -153,21 +261,40 @@ export async function solverEngineRequest(
   if (!isTauriRuntime()) {
     throw new Error("solverEngineRequest requires the Tauri shell");
   }
-  const raw = await invoke("solver_engine_request", {
-    op,
-    body,
-    jobId: jobId ?? null,
-  });
+  let raw: unknown;
+  try {
+    raw = await invoke("solver_engine_request", {
+      op,
+      body,
+      jobId: jobId ?? null,
+    });
+  } catch (err) {
+    throw parseSolverIpcInvokeError(err, op);
+  }
   if (!raw || typeof raw !== "object") {
-    throw new Error("solver_engine_request returned a non-object");
+    throw new SolverIpcError({
+      class: "protocol_failure",
+      message: "solver_engine_request returned a non-object",
+      op,
+    });
   }
   const env = raw as IpcRequestEnvelope;
   if (env.ok === false) {
+    const code =
+      typeof env.error_code === "string" && env.error_code.trim()
+        ? env.error_code.trim()
+        : null;
     const detail =
       (typeof env.error_message === "string" && env.error_message.trim()) ||
-      (typeof env.error_code === "string" && env.error_code.trim()) ||
+      code ||
       `${op} failed`;
-    throw new Error(detail);
+    throw new SolverIpcError({
+      class: "engine_rejection",
+      message: detail,
+      errorCode: code,
+      op: typeof env.op === "string" ? env.op : op,
+      requestId: typeof env.request_id === "string" ? env.request_id : null,
+    });
   }
   return env;
 }

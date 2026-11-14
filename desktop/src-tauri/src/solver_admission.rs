@@ -70,8 +70,8 @@ struct QueuedWrite {
 
 #[derive(Debug)]
 pub struct WriteComplete {
-    #[allow(dead_code)]
     pub queue_wait: Duration,
+    pub write_duration: Duration,
     #[allow(dead_code)]
     pub behind_inflight_write: bool,
 }
@@ -349,10 +349,12 @@ pub fn spawn_writer(
                     }
                 }
 
+                let write_started = Instant::now();
                 let write_result = stdin
                     .write_all(&q.frame)
                     .and_then(|_| stdin.flush())
                     .map_err(|err| format!("solver-engine write: {err}"));
+                let write_duration = write_started.elapsed();
 
                 if let Ok(mut inner) = board.inner.lock() {
                     inner.write_inflight = false;
@@ -363,10 +365,14 @@ pub fn spawn_writer(
                     Ok(()) => {
                         let _ = q.done.send(Ok(WriteComplete {
                             queue_wait,
+                            write_duration,
                             behind_inflight_write: q.enqueued_behind_write,
                         }));
                     }
                     Err(err) => {
+                        // Signal shutdown so the reader/session can fail waiters once.
+                        board.shut_down.store(true, Ordering::SeqCst);
+                        board.signal_shutdown();
                         let _ = q.done.send(Err(err));
                     }
                 }

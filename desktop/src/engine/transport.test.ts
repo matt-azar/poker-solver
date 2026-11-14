@@ -28,8 +28,10 @@ import {
   ipcTreePreview,
   ipcValues,
   killSolverEngineIpc,
+  parseSolverIpcInvokeError,
   setNoEngineTransport,
   setIpcTransport,
+  SolverIpcError,
   solverEngineRequest,
 } from "./transport";
 
@@ -353,9 +355,30 @@ describe("solverEngineRequest honest errors", () => {
       error_message: "expected request",
       body: null,
     });
-    await expect(solverEngineRequest("node", { node_id: "p0.t-1.r-1" })).rejects.toThrow(
-      /expected request|invalid_frame/i,
+    try {
+      await solverEngineRequest("node", { node_id: "p0.t-1.r-1" });
+      throw new Error("expected rejection");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SolverIpcError);
+      const ipcErr = err as SolverIpcError;
+      expect(ipcErr.ipcClass).toBe("engine_rejection");
+      expect(ipcErr.errorCode).toBe("invalid_frame");
+      expect(ipcErr.message).toMatch(/expected request/i);
+    }
+  });
+
+  it("parses structured connection_loss invoke errors", () => {
+    const err = parseSolverIpcInvokeError(
+      {
+        class: "connection_loss",
+        message: "solver-engine pipe closed",
+        launch_id: "zig-abc",
+      },
+      "status",
     );
+    expect(err.ipcClass).toBe("connection_loss");
+    expect(err.launchId).toBe("zig-abc");
+    expect(err.message).toMatch(/pipe closed/i);
   });
 });
 

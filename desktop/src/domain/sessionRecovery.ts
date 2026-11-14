@@ -13,6 +13,7 @@ import type { SolvePhase, StatusPayload } from "./types";
 export function isEngineSessionDead(detail: string): boolean {
   const text = detail.toLowerCase();
   return (
+    text.includes("connection_loss") ||
     text.includes("pipe closed") ||
     text.includes("broken pipe") ||
     text.includes("shut down") ||
@@ -23,6 +24,7 @@ export function isEngineSessionDead(detail: string): boolean {
     text.includes("ipc not connected") ||
     text.includes("invalidframe") ||
     text.includes("invalid_frame") ||
+    text.includes("malformed ipc") ||
     text.includes("solver-engine exiting") ||
     text.includes("sidecar_exit") ||
     text.includes("not started") ||
