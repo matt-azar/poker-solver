@@ -36,7 +36,7 @@ Windows: use `python` and `zig-out/bin/solver-engine.exe` the same way. Prefer `
 | Ready smoke | `scripts/zig/ready-smoke.py` | Protocol-2 ready handshake on a live `solver-engine` process |
 | Study contract smoke | `scripts/zig/study-contract-smoke.py` | Real-sidecar typed IPC lifecycle used by Study (ZR-104). Uses `benchmarks/study/configs/river_gate_smoke.txt`. **No Accuracy wall.** |
 | Study overlap actions smoke | `scripts/zig/study-overlap-actions-smoke.py` | Alternating Solve/Stop/Continue/Open/nav with analysis in flight; late reply must not overwrite solution; memory settles; stdin EOF exits engine (ZR-152). Linux CI; Windows packaged suite → ZR-147/ma1pc. |
-| Async IPC supervisor (Rust) | `scripts/desktop/ipc-async-acceptance.sh` | Controllable `ipc-test-sidecar` withholds `values` while status/cancel complete; kill reaps. Proves dedicated writer/reader ownership (not Zig-only). |
+| Async IPC supervisor (Rust) | `scripts/desktop/ipc-async-acceptance.sh` | Controllable `ipc-test-sidecar` withholds `values` while status/cancel complete; kill reaps. Proves dedicated writer/reader ownership (not Zig-only). Also covers admission saturation, status coalesce, short solve-admit (`cargo test --lib solver_engine::`). |
 | Async IPC WebView (Windows) | `scripts/desktop/ipc-async-acceptance.ps1 -StudyExe …` | Packaged/dev Study with `STUDY_IPC_ACCEPTANCE=1` + `STUDY_SOLVER_ENGINE` → WebView concurrent invokes; exit 0 on pass. |
 | Desktop Vitest | `cd desktop && npm test` | `EngineClient` IPC branches, Study store/lifecycle, locks/strategy-edits soft gates, analysis helpers, UI domain |
 | Desktop typecheck | `cd desktop && npx tsc -b` | Store/client nullability that vitest can miss |
