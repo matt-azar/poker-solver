@@ -214,9 +214,9 @@ def run_probe(binary: Path, status_budget_sec: float) -> dict[str, Any]:
             "ms": round(elapsed * 1000, 1),
             "budgetMs": int(status_budget_sec * 1000),
             "note": (
-                "Study JS aborts status at 8s idle / 15s active; Rust "
-                "STATUS_RPC_TIMEOUT is 20s. Soft timeouts during build/train "
-                "must not hung-kill a hot sidecar."
+                "Study JS aborts status at 4s; Rust STATUS_RPC_TIMEOUT is 8s. "
+                "Host must keep IPC live under MT train (CPU reserve + lock "
+                "hygiene); soft timeouts must not hung-kill a hot sidecar."
             ),
         }
         if not results["checks"]["status_budget"]["ok"]:

@@ -385,14 +385,13 @@ From `desktop/src-tauri/src/solver_engine.rs` and Study JS:
 | Op | Budget |
 | --- | --- |
 | `ready` | 8s |
-| status poll abort (JS idle) | 8s |
-| status poll abort (JS build/train/EV) | 15s |
-| `status` (Rust) | 20s |
+| `status` (Rust) | 8s |
+| status poll abort (JS) | 4s |
 | default RPC (`values`, `node`, …) | 240s |
 | `begin_config` | 600s |
 | `solve` / `resolve_locked` | 2h ceiling |
 
-Soft status timeouts during Building/Solving must **not** hung-kill a hot sidecar.
+Root cause for Windows “Solve stuck then Reconnect”: MT train pinning every core (or begin free under `session.mu`) so status never replies — fix IPC headroom / lock hygiene, do not paper over with longer timeouts. Soft status timeouts during Building/Solving still must **not** hung-kill a hot sidecar.
 
 ## Other workflows
 

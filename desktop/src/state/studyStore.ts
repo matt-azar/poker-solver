@@ -72,7 +72,7 @@ import {
   createTimeoutSignal,
   nextStatusPollDelay,
   statusPollFailureDetail,
-  statusPollTimeoutMs,
+  STATUS_POLL_TIMEOUT_MS,
   studyMutationScopeIsCurrent,
 } from "../domain/requestScope";
 import {
@@ -96,7 +96,6 @@ import {
   sessionDeadUiPatch,
   shouldMarkStatusPollDead,
   shouldTerminateHungSidecar,
-  softStatusTimeoutPreservesSession,
   statusIndicatesFailure,
   statusStickyError,
 } from "../domain/sessionRecovery";
@@ -2113,11 +2112,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         const token = bumpStatusToken();
         const abort = new AbortController();
         setStatusAbortController(abort);
-        const pollPhase = get().phase;
-        const timed = createTimeoutSignal(
-          statusPollTimeoutMs(softStatusTimeoutPreservesSession(pollPhase)),
-          abort.signal,
-        );
+        const timed = createTimeoutSignal(STATUS_POLL_TIMEOUT_MS, abort.signal);
         const pollStartedAt =
           typeof performance !== "undefined" && typeof performance.now === "function"
             ? performance.now()

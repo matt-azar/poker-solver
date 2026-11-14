@@ -907,6 +907,9 @@ fn resolveLocatedNode(
 
 fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     // Snapshot under session + job locks (ZR-90 / ZR-155 / ZR-171).
+    // Do NOT call BudgetAllocator.live/peak while holding session.mu — compile /
+    // publish alloc storms take budget.mu, and nesting session→budget stalls the
+    // IPC stdin loop's status replies under Windows flop build/train.
     state.session.mu.lock();
     const phase = state.session.phase;
     const solution_id = state.session.solution_id;
@@ -917,8 +920,6 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     const threads = state.session.threads;
     const terminal = state.session.last_terminal;
     const memory_budget_bytes = state.session.memory_budget_bytes;
-    const allocated_bytes = state.session.allocatedBytes();
-    const peak_allocated_bytes = state.session.peakAllocatedBytes();
     const has_metrics = state.session.has_metrics;
     const metrics = state.session.metrics;
     const accuracy_target = state.session.accuracy_target;
@@ -944,6 +945,9 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
         }
     }
     state.session.mu.unlock();
+
+    const allocated_bytes = state.session.allocatedBytes();
+    const peak_allocated_bytes = state.session.peakAllocatedBytes();
 
     const begin_running = state.begin_running.load(.acquire);
     const train_running = state.train_running.load(.acquire);
@@ -1566,9 +1570,15 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
         break :blk @max(@as(i32, 1), state.session.publish_every);
     };
     state.budget.returnToTraining();
-    // Honor config threads; never raise above Session/config (ZR-91). Cap by host budget.
-    if (state.budget.training > 0 and state.session.threads > state.budget.training) {
-        state.session.setThreads(state.budget.training);
+    // Honor config threads; never raise above Session/config (ZR-91). Cap by host
+    // budget so MT flop train cannot pin every core and starve the IPC stdin loop
+    // (Windows installed Study: status-poll-hung while sidecar is CPU-hot).
+    const train_cap = if (state.budget.training > 0)
+        state.budget.training
+    else
+        workers.WorkerBudget.maxTrainThreads(state.budget.total);
+    if (state.session.threads > train_cap) {
+        state.session.setThreads(train_cap);
     }
     state.session.clearControlFlags();
     state.last_cancelled = false;

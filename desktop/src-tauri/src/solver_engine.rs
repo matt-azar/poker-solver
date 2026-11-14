@@ -40,11 +40,10 @@ const EXTERNAL_BIN: &str = "binaries/solver-engine";
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
 /// Default RPC budget (node / values / most ops).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(240);
-/// Status must cover Study poll budgets (idle 8s / active build·train 15s).
-/// A 240s status wait leaves orphan Tauri invokes after each soft timeout → UI
-/// slowdown / memory spikes while the sidecar is hung (ZR-175). Cap modestly
-/// above the active JS abort so Windows CPU-saturated flop compiles can reply.
-const STATUS_RPC_TIMEOUT: Duration = Duration::from_secs(20);
+/// Status must match the Study poll budget (JS aborts at 4s). A 240s status
+/// wait leaves orphan Tauri invokes after each soft timeout → UI slowdown /
+/// memory spikes while the sidecar is hung (ZR-175).
+const STATUS_RPC_TIMEOUT: Duration = Duration::from_secs(8);
 /// `begin_config` can compile a flop tree for a while on the stdin loop.
 const BEGIN_CONFIG_TIMEOUT: Duration = Duration::from_secs(600);
 /// Legacy completion-shaped train replies (pre short-admit clients). Host now

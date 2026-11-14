@@ -2,6 +2,7 @@
 //! Logs → stderr. IPC frames on stdin/stdout. Outside the engine.
 //! Solve runs on a background thread so Study `values` can overlap train (R10).
 const std = @import("std");
+const builtin = @import("builtin");
 const poker_app = @import("poker_app");
 const poker_engine = @import("poker_engine");
 const poker_formats = @import("poker_formats");
@@ -33,6 +34,24 @@ fn parseLaunchId(args: []const []const u8) []const u8 {
     return "local";
 }
 
+/// Prefer the IPC stdin loop over MT train workers so status/Stop stay live when
+/// flop CFR saturates the machine (Windows Study hung-kill false positives).
+fn preferIpcThreadScheduling() void {
+    if (builtin.os.tag != .windows) return;
+    // Explicit imports: not all Zig versions export SetThreadPriority on kernel32.
+    const WINAPI = std.os.windows.WINAPI;
+    const HANDLE = std.os.windows.HANDLE;
+    const BOOL = std.os.windows.BOOL;
+    const GetCurrentThread = struct {
+        extern "kernel32" fn GetCurrentThread() callconv(WINAPI) HANDLE;
+    }.GetCurrentThread;
+    const SetThreadPriority = struct {
+        extern "kernel32" fn SetThreadPriority(hThread: HANDLE, nPriority: c_int) callconv(WINAPI) BOOL;
+    }.SetThreadPriority;
+    // Win32 THREAD_PRIORITY_ABOVE_NORMAL = 1 (not TIME_CRITICAL).
+    _ = SetThreadPriority(GetCurrentThread(), 1);
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -41,6 +60,8 @@ pub fn main() !void {
     const arg_list = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, arg_list);
     const launch_id = parseLaunchId(arg_list);
+
+    preferIpcThreadScheduling();
 
     std.debug.print("solver-engine starting protocol={d} launch_id={s}\n", .{ ipc.protocol_version, launch_id });
 
