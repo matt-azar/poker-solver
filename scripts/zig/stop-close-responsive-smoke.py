@@ -339,6 +339,10 @@ def main() -> int:
                 status_after_begin.get("solution_id") == prior_id,
                 f"cancelled begin wiped prior solution: {status_after_begin}",
             )
+            require(
+                begin_stop_latched,
+                f"compile cancel should match live begin job: {cancel_begin}",
+            )
         stages["compile_cancel"] = {
             "begin_cancelled": begin_cancelled,
             "begin_stop_latched": begin_stop_latched,
@@ -346,7 +350,26 @@ def main() -> int:
             "error_code": begin_cancel.get("error_code"),
             "solution_id": status_after_begin.get("solution_id"),
             "prior_solution_id": prior_id,
+            "cancel_body": body_dict(cancel_begin),
         }
+
+        # Coalesce needs a published policy. A completed begin installs paused /
+        # unpublished — re-publish with a tiny solve before overlapping values.
+        if int(status_after_begin.get("policy_revision") or 0) < 1:
+            write_req(
+                proc,
+                "solve",
+                {"iterations": 2},
+                "solve-for-coalesce",
+                job_id="j-zr151-coalesce",
+            )
+            admit_c = inbox.take("solve-for-coalesce", timeout_s=10.0)
+            require(admit_c.get("ok"), f"coalesce setup solve failed: {admit_c}")
+            status_after_begin = wait_until_idle(inbox, proc, "coalesce-setup")
+            require(
+                int(status_after_begin.get("policy_revision") or 0) >= 1,
+                f"coalesce setup did not publish: {status_after_begin}",
+            )
 
         # Coalesce: two rapid values — later request should win; older may supersede.
         write_req(proc, "values", {"node_index": 0}, "values-old")
