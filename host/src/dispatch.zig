@@ -341,6 +341,13 @@ pub const HostState = struct {
         defer self.budget_mu.unlock();
         return self.budget;
     }
+
+    /// Cores Study analysis may borrow (same IPC headroom as train).
+    /// Wide-range flop root EV needs these for first-card chance parallelism.
+    pub fn analysisThreadBudget(self: *HostState) u32 {
+        const snap = self.snapshotBudget();
+        return @max(workers.WorkerBudget.maxTrainThreads(snap.total), 1);
+    }
 };
 
 fn bodyStringField(body: []const u8, key: []const u8) ?[]const u8 {
@@ -1379,7 +1386,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
 
     if (std.mem.eql(u8, req.op, "values")) {
         // Sync path for unit tests. Product stdin loop uses `startValues` (ZR-151).
-        state.prioritizeAnalysisBudget(1);
+        const threads = state.analysisThreadBudget();
+        state.prioritizeAnalysisBudget(threads);
         defer state.returnBudgetToTraining();
         // Bounded wait for mid-train first publish (R10). Idle skips the wait (ZR-170).
         const wait_ns: u64 = 30 * std.time.ns_per_s;
@@ -1391,13 +1399,14 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
         };
         const t0 = std.time.nanoTimestamp();
-        var page = poker_engine.analysis.action_ev.actionValues(
+        var page = poker_engine.analysis.action_ev.actionValuesWithThreads(
             state.session.allocator,
             lease.game,
             lease.published,
             located.node_index,
             located.turn,
             located.river,
+            threads,
         ) catch |err| {
             const code: []const u8 = if (err == error.OutOfMemory and state.session.budget.limit() > 0)
                 "budget_exceeded"
@@ -1940,7 +1949,8 @@ fn analysisWorker(task: *AnalysisTask) void {
         return;
     }
 
-    state.prioritizeAnalysisBudget(1);
+    const analysis_threads = state.analysisThreadBudget();
+    state.prioritizeAnalysisBudget(analysis_threads);
     budget_held = true;
 
     // Bound the policy wait so a hung publish cannot pin analysis forever; the
@@ -1965,7 +1975,7 @@ fn analysisWorker(task: *AnalysisTask) void {
     }
 
     var reply = switch (task.kind) {
-        .values => buildValuesReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
+        .values => buildValuesReply(state, task.request_id, task.job_id, task.body_json, &lease, analysis_threads) catch |err| blk: {
             break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "values_failed", @errorName(err)) catch {
                 lease.deinit();
                 return;
@@ -2016,16 +2026,18 @@ fn buildValuesReply(
     job_id: ?[]const u8,
     body_json: []const u8,
     lease: *poker_app.PublishedLease,
+    threads: u32,
 ) !ipc.Envelope {
     const located = try resolveLocatedNode(lease.game, body_json);
     const t0 = std.time.nanoTimestamp();
-    var page = try poker_engine.analysis.action_ev.actionValues(
+    var page = try poker_engine.analysis.action_ev.actionValuesWithThreads(
         state.session.allocator,
         lease.game,
         lease.published,
         located.node_index,
         located.turn,
         located.river,
+        threads,
     );
     defer page.deinit();
     const elapsed_ns = std.time.nanoTimestamp() - t0;

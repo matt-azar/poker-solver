@@ -40,6 +40,26 @@ test "study pair-runout packaging constants match C++" {
     try std.testing.expect(equity.study_explorer_max_pair_runouts > equity.default_max_pair_runouts);
 }
 
+test "wide flop work-limit rejects without O(n2*runouts) preflight" {
+    // Full-ish ranges exceed Study's 51M pair-runout ceiling. Preflight must be
+    // O(n0·n1) closed-form — nested runout counting historically stalled Study.
+    const board = try boardOf(&.{ "Ah", "Kd", "7c" });
+    const r0 = try range_mod.Range.parse("random");
+    const r1 = try range_mod.Range.parse("random");
+    const t0 = std.time.nanoTimestamp();
+    const err = equity.showdownEquity(
+        std.testing.allocator,
+        board[0..3],
+        r0,
+        r1,
+        equity.study_explorer_max_pair_runouts,
+    );
+    const elapsed_ns = std.time.nanoTimestamp() - t0;
+    try std.testing.expectError(error.WorkLimit, err);
+    // Generous bound: nested 1326²·1081 counting was ~30s; O(n²) should be <<1s.
+    try std.testing.expect(elapsed_ns < 2 * std.time.ns_per_s);
+}
+
 test "river certainty AhAd vs 2c3d and royal board tie" {
     const board = try boardOf(&.{ "Kh", "Kd", "7c", "4s", "2h" });
     const r0 = try range_mod.Range.parse("AhAd");

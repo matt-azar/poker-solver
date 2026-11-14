@@ -80,6 +80,8 @@ fn resolveSigma(
 
 /// Prefer frozen public-tree `response_walk` + Q_i normalize for root EV (Study latency).
 /// Non-root / explicit turn·river pins keep the deal-by-deal oracle path.
+/// `threads` steals first-future-card chance work on flop/turn roots (idle Study
+/// analysis should not force a single-core walk — wide ranges otherwise stall UI).
 pub fn actionValues(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
@@ -88,8 +90,20 @@ pub fn actionValues(
     turn: i32,
     river: i32,
 ) ActionEvError!ActionValues {
+    return actionValuesWithThreads(allocator, game, published, node_index, turn, river, 1);
+}
+
+pub fn actionValuesWithThreads(
+    allocator: std.mem.Allocator,
+    game: compile.CompiledGame,
+    published: training_state.PublishedPolicy,
+    node_index: u32,
+    turn: i32,
+    river: i32,
+    threads: u32,
+) ActionEvError!ActionValues {
     if (node_index == 0 and turn < 0 and river < 0) {
-        if (actionValuesFrozen(allocator, game, published, 0)) |page| {
+        if (actionValuesFrozen(allocator, game, published, 0, threads)) |page| {
             return page;
         } else |_| {
             // Malformed frozen tables → deal-by-deal fallback (tiny oracles).
@@ -182,11 +196,16 @@ fn rootCompatibleOpponentMass(
 /// Reuses FrozenCtx rank cache / response_walk (same engine as flop train + #256 BR / #259 MT),
 /// then Q_i-normalizes raw CF aev: `conditional = raw / (prior * joint_scale * open)`
 /// (C++ `compute_action_values` / MATHEMATICS.md).
+///
+/// When `threads > 1`, parallelize the first future public card (same as train/BR).
+/// Callers must have borrowed those cores via WorkerBudget.prioritizeAnalysis so
+/// mid-train values do not oversubscribe against CFR workers.
 pub fn actionValuesFrozen(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
     published: training_state.PublishedPolicy,
     node_index: u32,
+    threads: u32,
 ) ActionEvError!ActionValues {
     if (node_index != 0) return error.InvalidAnalysis;
     if (node_index >= game.nodes.len) return error.InvalidAnalysis;
@@ -197,12 +216,18 @@ pub fn actionValuesFrozen(
     defer if (owned_sigma) |buf| allocator.free(buf);
     const sigma = try resolveSigma(allocator, game, published, &owned_sigma);
 
-    var ctx = frozen_walk.FrozenCtx.initEval(allocator, game) catch return error.InvalidAnalysis;
+    const use_threads = @max(threads, 1);
+    var ctx = (if (use_threads > 1)
+        frozen_walk.FrozenCtx.initEvalThreaded(allocator, game, use_threads)
+    else
+        frozen_walk.FrozenCtx.initEval(allocator, game)) catch return error.InvalidAnalysis;
     defer ctx.deinit();
     const w = &ctx.workspace;
     ctx.prepareResponseRoot(w);
-    // serial_chance=true: Study values share the process with optional train workers (D3).
-    ctx.responseWalk(w, 0, -1, -1, 0, -1, sigma, true) catch return error.InvalidAnalysis;
+    // Parallel first-card steal when threaded (pool starts lazily inside the walk).
+    // Nested chance stays serial on the claiming worker.
+    const serial_chance = use_threads <= 1;
+    ctx.responseWalk(w, 0, -1, -1, 0, -1, sigma, serial_chance) catch return error.InvalidAnalysis;
 
     const actor: usize = @intCast(node.player);
     const hands: usize = if (actor == 0) ctx.n0 else ctx.n1;
