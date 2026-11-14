@@ -432,10 +432,11 @@ fn cloneRequest(allocator: std.mem.Allocator, src: JobRequest) !JobRequest {
     dst.players = try allocator.alloc(PlayerSpec, src.players.len);
     for (dst.players) |*p| p.* = .{ .id = &.{}, .range_text = &.{} };
     for (src.players, 0..) |p, i| {
-        dst.players[i] = .{
-            .id = try allocator.dupe(u8, p.id),
-            .range_text = try allocator.dupe(u8, p.range_text),
-        };
+        // Stage dupes so a mid-literal OOM cannot leak the first field (ZR-180).
+        const id = try allocator.dupe(u8, p.id);
+        errdefer allocator.free(id);
+        const range_text = try allocator.dupe(u8, p.range_text);
+        dst.players[i] = .{ .id = id, .range_text = range_text };
     }
     dst.board = try allocator.dupe(card.Card, src.board);
     dst.dead_cards = try allocator.dupe(card.Card, src.dead_cards);
@@ -445,12 +446,22 @@ fn cloneRequest(allocator: std.mem.Allocator, src: JobRequest) !JobRequest {
 fn appendEscaped(w: anytype, text: []const u8) !void {
     try w.writeByte('"');
     for (text) |c| {
-        if (c == '"' or c == '\\') try w.writeByte('\\');
-        if (c == '\n') {
-            try w.writeAll("\\n");
-            continue;
+        switch (c) {
+            '"' => try w.writeAll("\\\""),
+            '\\' => try w.writeAll("\\\\"),
+            '\n' => try w.writeAll("\\n"),
+            '\r' => try w.writeAll("\\r"),
+            '\t' => try w.writeAll("\\t"),
+            else => {
+                if (c < 0x20) {
+                    const hexdigits = "0123456789abcdef";
+                    const esc = [_]u8{ '\\', 'u', '0', '0', hexdigits[c >> 4], hexdigits[c & 0xf] };
+                    try w.writeAll(&esc);
+                } else {
+                    try w.writeByte(c);
+                }
+            },
         }
-        try w.writeByte(c);
     }
     try w.writeByte('"');
 }
@@ -616,10 +627,10 @@ pub fn parseJobRequest(allocator: std.mem.Allocator, body_json: []const u8) !Job
         if (p.id.len == 0 or p.range.len == 0) return error.InvalidInput;
         // Validate range parse early.
         _ = range_mod.Range.parse(p.range) catch return error.InvalidInput;
-        request.players[i] = .{
-            .id = try allocator.dupe(u8, p.id),
-            .range_text = try allocator.dupe(u8, p.range),
-        };
+        const id = try allocator.dupe(u8, p.id);
+        errdefer allocator.free(id);
+        const range_text = try allocator.dupe(u8, p.range);
+        request.players[i] = .{ .id = id, .range_text = range_text };
     }
     return request;
 }
@@ -634,14 +645,19 @@ fn testMkRequest(allocator: std.mem.Allocator) !JobRequest {
     };
     errdefer request.deinit(allocator);
     request.players = try allocator.alloc(PlayerSpec, 2);
-    request.players[0] = .{
-        .id = try allocator.dupe(u8, "p1"),
-        .range_text = try allocator.dupe(u8, "AsAd"),
-    };
-    request.players[1] = .{
-        .id = try allocator.dupe(u8, "p2"),
-        .range_text = try allocator.dupe(u8, "KcKd"),
-    };
+    for (request.players) |*p| p.* = .{ .id = &.{}, .range_text = &.{} };
+    {
+        const id = try allocator.dupe(u8, "p1");
+        errdefer allocator.free(id);
+        const range_text = try allocator.dupe(u8, "AsAd");
+        request.players[0] = .{ .id = id, .range_text = range_text };
+    }
+    {
+        const id = try allocator.dupe(u8, "p2");
+        errdefer allocator.free(id);
+        const range_text = try allocator.dupe(u8, "KcKd");
+        request.players[1] = .{ .id = id, .range_text = range_text };
+    }
     request.board = try allocator.dupe(card.Card, &.{});
     request.dead_cards = try allocator.dupe(card.Card, &.{});
     return request;

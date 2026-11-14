@@ -151,7 +151,15 @@ fn appendJsonString(list: *std.ArrayList(u8), value: []const u8) !void {
             '\n' => try list.appendSlice("\\n"),
             '\r' => try list.appendSlice("\\r"),
             '\t' => try list.appendSlice("\\t"),
-            else => try list.append(c),
+            else => {
+                if (c < 0x20) {
+                    const hexdigits = "0123456789abcdef";
+                    const esc = [_]u8{ '\\', 'u', '0', '0', hexdigits[c >> 4], hexdigits[c & 0xf] };
+                    try list.appendSlice(&esc);
+                } else {
+                    try list.append(c);
+                }
+            },
         }
     }
     try list.append('"');

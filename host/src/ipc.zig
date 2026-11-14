@@ -56,19 +56,96 @@ fn parseKind(name: []const u8) IpcError!FrameKind {
     return error.InvalidFrame;
 }
 
-fn writeJsonString(list: *std.ArrayList(u8), value: []const u8) IpcError!void {
-    list.append('"') catch return error.OutOfMemory;
+/// Escape a JSON string value (quotes included). Shared by envelope encode and
+/// other host JSON packers so control bytes cannot break Study parsers (ZR-180).
+pub fn appendJsonString(list: *std.ArrayList(u8), value: []const u8) error{OutOfMemory}!void {
+    try list.append('"');
     for (value) |c| {
         switch (c) {
-            '"' => list.appendSlice("\\\"") catch return error.OutOfMemory,
-            '\\' => list.appendSlice("\\\\") catch return error.OutOfMemory,
-            '\n' => list.appendSlice("\\n") catch return error.OutOfMemory,
-            '\r' => list.appendSlice("\\r") catch return error.OutOfMemory,
-            '\t' => list.appendSlice("\\t") catch return error.OutOfMemory,
-            else => list.append(c) catch return error.OutOfMemory,
+            '"' => try list.appendSlice("\\\""),
+            '\\' => try list.appendSlice("\\\\"),
+            '\n' => try list.appendSlice("\\n"),
+            '\r' => try list.appendSlice("\\r"),
+            '\t' => try list.appendSlice("\\t"),
+            else => {
+                if (c < 0x20) {
+                    const hexdigits = "0123456789abcdef";
+                    const esc = [_]u8{ '\\', 'u', '0', '0', hexdigits[c >> 4], hexdigits[c & 0xf] };
+                    try list.appendSlice(&esc);
+                } else {
+                    try list.append(c);
+                }
+            },
         }
     }
-    list.append('"') catch return error.OutOfMemory;
+    try list.append('"');
+}
+
+fn writeJsonString(list: *std.ArrayList(u8), value: []const u8) IpcError!void {
+    appendJsonString(list, value) catch return error.OutOfMemory;
+}
+
+/// Unescape a JSON string body (contents between quotes). Handles \\ \" \/ \\n \\r \\t \\uXXXX.
+pub fn unescapeJsonString(allocator: std.mem.Allocator, escaped: []const u8) error{OutOfMemory}![]u8 {
+    var raw = std.ArrayList(u8).init(allocator);
+    errdefer raw.deinit();
+    var i: usize = 0;
+    while (i < escaped.len) : (i += 1) {
+        if (escaped[i] == '\\' and i + 1 < escaped.len) {
+            switch (escaped[i + 1]) {
+                'n' => {
+                    try raw.append('\n');
+                    i += 1;
+                    continue;
+                },
+                'r' => {
+                    try raw.append('\r');
+                    i += 1;
+                    continue;
+                },
+                't' => {
+                    try raw.append('\t');
+                    i += 1;
+                    continue;
+                },
+                '\\' => {
+                    try raw.append('\\');
+                    i += 1;
+                    continue;
+                },
+                '"' => {
+                    try raw.append('"');
+                    i += 1;
+                    continue;
+                },
+                '/' => {
+                    try raw.append('/');
+                    i += 1;
+                    continue;
+                },
+                'u' => {
+                    if (i + 5 >= escaped.len) break;
+                    const hex = escaped[i + 2 .. i + 6];
+                    const code = std.fmt.parseInt(u21, hex, 16) catch break;
+                    var utf8_buf: [4]u8 = undefined;
+                    const n = std.unicode.utf8Encode(code, &utf8_buf) catch break;
+                    try raw.appendSlice(utf8_buf[0..n]);
+                    i += 5;
+                    continue;
+                },
+                else => {},
+            }
+        }
+        try raw.append(escaped[i]);
+    }
+    return raw.toOwnedSlice();
+}
+
+fn dupeUnescaped(allocator: std.mem.Allocator, escaped: []const u8) IpcError![]u8 {
+    if (std.mem.indexOfScalar(u8, escaped, '\\') == null) {
+        return allocator.dupe(u8, escaped) catch return error.OutOfMemory;
+    }
+    return unescapeJsonString(allocator, escaped) catch return error.OutOfMemory;
 }
 
 /// Encode one envelope to a length-prefixed frame.
@@ -260,33 +337,37 @@ pub fn decodePayload(allocator: std.mem.Allocator, json: []const u8) IpcError!En
     env.v = std.fmt.parseInt(u32, v_text, 10) catch return error.InvalidFrame;
     if (env.v != protocol_version) return error.UnsupportedProtocol;
 
-    const kind_text = findStringField(json, "kind") orelse return error.InvalidFrame;
+    const kind_raw = findStringField(json, "kind") orelse return error.InvalidFrame;
+    const kind_text = try dupeUnescaped(allocator, kind_raw);
+    defer allocator.free(kind_text);
     env.kind = try parseKind(kind_text);
 
     const rid = findStringField(json, "request_id") orelse return error.InvalidFrame;
-    env.request_id = allocator.dupe(u8, rid) catch return error.OutOfMemory;
+    env.request_id = try dupeUnescaped(allocator, rid);
 
     if (findRawField(json, "job_id")) |jid| {
+        // findRawField returns inner string content (no quotes) or the literal "null".
         if (!std.mem.eql(u8, jid, "null")) {
-            env.job_id = allocator.dupe(u8, jid) catch return error.OutOfMemory;
+            env.job_id = try dupeUnescaped(allocator, jid);
         }
     }
 
     const op = findStringField(json, "op") orelse "";
-    env.op = allocator.dupe(u8, op) catch return error.OutOfMemory;
+    env.op = try dupeUnescaped(allocator, op);
 
     if (findRawField(json, "ok")) |ok_text| {
         env.ok = std.mem.eql(u8, ok_text, "true");
     }
 
     if (findStringField(json, "error_code")) |code| {
-        env.error_code = allocator.dupe(u8, code) catch return error.OutOfMemory;
+        env.error_code = try dupeUnescaped(allocator, code);
     }
     if (findStringField(json, "error_message")) |msg| {
-        env.error_message = allocator.dupe(u8, msg) catch return error.OutOfMemory;
+        env.error_message = try dupeUnescaped(allocator, msg);
     }
 
     if (findRawField(json, "body")) |body| {
+        // Body is raw JSON (object/array/literal) — do not string-unescape.
         env.body_json = allocator.dupe(u8, body) catch return error.OutOfMemory;
     } else {
         env.body_json = allocator.dupe(u8, "null") catch return error.OutOfMemory;
@@ -318,15 +399,16 @@ pub fn makeReply(
     op: []const u8,
     body_json: []const u8,
 ) IpcError!Envelope {
-    return .{
-        .allocator = allocator,
-        .kind = .reply,
-        .request_id = allocator.dupe(u8, request_id) catch return error.OutOfMemory,
-        .job_id = if (job_id) |j| allocator.dupe(u8, j) catch return error.OutOfMemory else null,
-        .op = allocator.dupe(u8, op) catch return error.OutOfMemory,
-        .body_json = allocator.dupe(u8, body_json) catch return error.OutOfMemory,
-        .ok = true,
-    };
+    // Stage dupes so a mid-chain OOM cannot leak earlier fields (ZR-180).
+    var env = Envelope{ .allocator = allocator, .kind = .reply, .ok = true };
+    errdefer env.deinit();
+    env.request_id = allocator.dupe(u8, request_id) catch return error.OutOfMemory;
+    if (job_id) |j| {
+        env.job_id = allocator.dupe(u8, j) catch return error.OutOfMemory;
+    }
+    env.op = allocator.dupe(u8, op) catch return error.OutOfMemory;
+    env.body_json = allocator.dupe(u8, body_json) catch return error.OutOfMemory;
+    return env;
 }
 
 pub fn makeErrorReply(
@@ -337,17 +419,17 @@ pub fn makeErrorReply(
     code: []const u8,
     message: []const u8,
 ) IpcError!Envelope {
-    return .{
-        .allocator = allocator,
-        .kind = .reply,
-        .request_id = allocator.dupe(u8, request_id) catch return error.OutOfMemory,
-        .job_id = if (job_id) |j| allocator.dupe(u8, j) catch return error.OutOfMemory else null,
-        .op = allocator.dupe(u8, op) catch return error.OutOfMemory,
-        .body_json = allocator.dupe(u8, "null") catch return error.OutOfMemory,
-        .ok = false,
-        .error_code = allocator.dupe(u8, code) catch return error.OutOfMemory,
-        .error_message = allocator.dupe(u8, message) catch return error.OutOfMemory,
-    };
+    var env = Envelope{ .allocator = allocator, .kind = .reply, .ok = false };
+    errdefer env.deinit();
+    env.request_id = allocator.dupe(u8, request_id) catch return error.OutOfMemory;
+    if (job_id) |j| {
+        env.job_id = allocator.dupe(u8, j) catch return error.OutOfMemory;
+    }
+    env.op = allocator.dupe(u8, op) catch return error.OutOfMemory;
+    env.body_json = allocator.dupe(u8, "null") catch return error.OutOfMemory;
+    env.error_code = allocator.dupe(u8, code) catch return error.OutOfMemory;
+    env.error_message = allocator.dupe(u8, message) catch return error.OutOfMemory;
+    return env;
 }
 
 pub fn makeProgress(
@@ -356,15 +438,13 @@ pub fn makeProgress(
     job_id: []const u8,
     body_json: []const u8,
 ) IpcError!Envelope {
-    return .{
-        .allocator = allocator,
-        .kind = .progress,
-        .request_id = allocator.dupe(u8, request_id) catch return error.OutOfMemory,
-        .job_id = allocator.dupe(u8, job_id) catch return error.OutOfMemory,
-        .op = allocator.dupe(u8, "progress") catch return error.OutOfMemory,
-        .body_json = allocator.dupe(u8, body_json) catch return error.OutOfMemory,
-        .ok = true,
-    };
+    var env = Envelope{ .allocator = allocator, .kind = .progress, .ok = true };
+    errdefer env.deinit();
+    env.request_id = allocator.dupe(u8, request_id) catch return error.OutOfMemory;
+    env.job_id = allocator.dupe(u8, job_id) catch return error.OutOfMemory;
+    env.op = allocator.dupe(u8, "progress") catch return error.OutOfMemory;
+    env.body_json = allocator.dupe(u8, body_json) catch return error.OutOfMemory;
+    return env;
 }
 
 test "frame roundtrip ready" {
@@ -405,4 +485,18 @@ test "decodePayload put_lock alphabetical order with nested kind" {
     defer decoded.deinit();
     try std.testing.expect(decoded.kind == .request);
     try std.testing.expectEqualStrings("put_lock", decoded.op);
+}
+
+test "decodePayload unescapes request_id and writeJsonString escapes controls" {
+    const json =
+        \\{"v":2,"kind":"request","request_id":"r\"1\n","job_id":null,"op":"ready","body":null}
+    ;
+    var decoded = try decodePayload(std.testing.allocator, json);
+    defer decoded.deinit();
+    try std.testing.expectEqualStrings("r\"1\n", decoded.request_id);
+
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    try appendJsonString(&list, "a\"b\n\x01");
+    try std.testing.expectEqualStrings("\"a\\\"b\\n\\u0001\"", list.items);
 }

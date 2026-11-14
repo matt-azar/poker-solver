@@ -23,7 +23,15 @@ fn appendJsonString(list: *std.ArrayList(u8), value: []const u8) PackError!void 
             '\n' => list.appendSlice("\\n") catch return error.OutOfMemory,
             '\r' => list.appendSlice("\\r") catch return error.OutOfMemory,
             '\t' => list.appendSlice("\\t") catch return error.OutOfMemory,
-            else => list.append(c) catch return error.OutOfMemory,
+            else => {
+                if (c < 0x20) {
+                    const hexdigits = "0123456789abcdef";
+                    const esc = [_]u8{ '\\', 'u', '0', '0', hexdigits[c >> 4], hexdigits[c & 0xf] };
+                    list.appendSlice(&esc) catch return error.OutOfMemory;
+                } else {
+                    list.append(c) catch return error.OutOfMemory;
+                }
+            },
         }
     }
     list.append('"') catch return error.OutOfMemory;

@@ -13,6 +13,29 @@ fn appendF64(list: *std.ArrayList(u8), value: f64) PackError!void {
     list.appendSlice(rendered) catch return error.OutOfMemory;
 }
 
+fn appendJsonString(list: *std.ArrayList(u8), value: []const u8) PackError!void {
+    list.append('"') catch return error.OutOfMemory;
+    for (value) |c| {
+        switch (c) {
+            '"' => list.appendSlice("\\\"") catch return error.OutOfMemory,
+            '\\' => list.appendSlice("\\\\") catch return error.OutOfMemory,
+            '\n' => list.appendSlice("\\n") catch return error.OutOfMemory,
+            '\r' => list.appendSlice("\\r") catch return error.OutOfMemory,
+            '\t' => list.appendSlice("\\t") catch return error.OutOfMemory,
+            else => {
+                if (c < 0x20) {
+                    const hexdigits = "0123456789abcdef";
+                    const esc = [_]u8{ '\\', 'u', '0', '0', hexdigits[c >> 4], hexdigits[c & 0xf] };
+                    list.appendSlice(&esc) catch return error.OutOfMemory;
+                } else {
+                    list.append(c) catch return error.OutOfMemory;
+                }
+            },
+        }
+    }
+    list.append('"') catch return error.OutOfMemory;
+}
+
 fn appendBuckets(
     list: *std.ArrayList(u8),
     buckets: *const [equity.equity_distribution_buckets]equity.EquityDistributionBucket,
@@ -42,9 +65,9 @@ fn appendHandRows(list: *std.ArrayList(u8), player: equity.PlayerEquity) PackErr
         if (eq < 0.0) eq = 0.0 else if (eq > 1.0) eq = 1.0;
         if (!first) list.append(',') catch return error.OutOfMemory;
         first = false;
-        list.appendSlice("{\"combo\":\"") catch return error.OutOfMemory;
-        list.appendSlice(row.combo) catch return error.OutOfMemory;
-        list.appendSlice("\",\"equity\":") catch return error.OutOfMemory;
+        list.appendSlice("{\"combo\":") catch return error.OutOfMemory;
+        try appendJsonString(list, row.combo);
+        list.appendSlice(",\"equity\":") catch return error.OutOfMemory;
         try appendF64(list, eq);
         list.appendSlice(",\"weight\":") catch return error.OutOfMemory;
         try appendF64(list, row.input_weight);
@@ -84,7 +107,7 @@ pub fn packStudyEquityBody(allocator: std.mem.Allocator, args: PackArgs) PackErr
     w.writeAll("{\"pending\":false,\"kind\":\"equity\",\"solution_id\":\"s") catch return error.OutOfMemory;
     w.print("{d}", .{args.solution_id}) catch return error.OutOfMemory;
     w.writeAll("\",\"node_id\":") catch return error.OutOfMemory;
-    w.print("\"{s}\"", .{args.node_id}) catch return error.OutOfMemory;
+    try appendJsonString(&list, args.node_id);
     w.writeAll(",\"node_index\":") catch return error.OutOfMemory;
     w.print("{d}", .{args.node_index}) catch return error.OutOfMemory;
     w.writeAll(",\"policy_revision\":") catch return error.OutOfMemory;
