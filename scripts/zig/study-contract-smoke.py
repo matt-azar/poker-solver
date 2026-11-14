@@ -667,9 +667,15 @@ def main() -> int:
         inbox.rpc(proc, "begin_config", {"config_text": config_text}, "c-begin-pause")
         admit_solve(inbox, proc, long_iters, "c-solve-pause", "j-contract-pause")
         wait_until_training(inbox, proc, "pause")
-        write_req(proc, "pause", None, "c-pause")
+        # #373: mid-train pause must carry the active train job_id (bare pause
+        # is only valid when begin/train is idle).
+        write_req(proc, "pause", None, "c-pause", job_id="j-contract-pause")
         pause_env = inbox.take("pause", timeout_s=10.0)
         require(pause_env.get("ok"), f"pause failed: {pause_env}")
+        require(
+            body_dict(pause_env).get("phase") == "paused",
+            f"pause body: {pause_env}",
+        )
         status_paused = wait_until_idle(inbox, proc, "pause")
         require(
             status_paused.get("terminal_reason") == "paused",
