@@ -4,25 +4,27 @@
 
 Same protocol as ``src/worker.js`` (Cloudflare Worker). Use this for:
 
+  * **Local debug (preferred without Cloudflare):** ``--local-disk`` saves
+    every POST under a reports folder; GitHub Issue upload is optional
+    when ``GITHUB_TOKEN`` is set
   * Local smoke / dry-run without wrangler
   * A tiny VPS / container deploy if you prefer Python over Workers
 
-GitHub credentials stay in the process environment only — never on the
-Windows Study machine that POSTs the zip.
-
 Env (server)::
 
-  REPORT_SHARED_SECRET   required — shared with the Windows client
-  GITHUB_TOKEN           required unless --dry-run / DRY_RUN=1
+  REPORT_SHARED_SECRET   required (auto-generated in --local-disk if missing)
+  LOCAL_DISK=1           save zip+body to disk; GitHub optional
+  HOLDEM_STUDY_REPORT_SAVE_DIR  override reports directory
+  GITHUB_TOKEN           optional in local-disk mode; required otherwise
   GITHUB_REPO            default matt-azar/poker-solver
   PORT                   default 8787
-  DRY_RUN=1              accept POSTs; do not call GitHub
+  DRY_RUN=1              accept POSTs; stash only; no GitHub
 
 Examples::
 
+  python3 scripts/debug/report-receiver/server.py --local-disk
   REPORT_SHARED_SECRET=devsecret DRY_RUN=1 \\
     python3 scripts/debug/report-receiver/server.py
-
   REPORT_SHARED_SECRET=… GITHUB_TOKEN=ghp_… \\
     python3 scripts/debug/report-receiver/server.py --host 127.0.0.1 --port 8787
 """
@@ -52,6 +54,7 @@ RELEASE_TAG = "study-debug-reports"
 MAX_ZIP_BYTES = 40 * 1024 * 1024
 DEFAULT_REPO = "matt-azar/poker-solver"
 USER_AGENT = "holdem-study-report-receiver-py"
+DEFAULT_PORT = 8787
 
 
 def _eprint(*args: object) -> None:
@@ -64,6 +67,88 @@ def _timing_safe_eq(a: str, b: str) -> bool:
 
 def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def holdem_study_config_dir() -> Path:
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA") or ""
+        if local:
+            return Path(local) / "Holdem Study"
+    return Path.home() / ".holdem-study"
+
+
+def default_save_dir() -> Path:
+    env = os.environ.get("HOLDEM_STUDY_REPORT_SAVE_DIR", "").strip()
+    if env:
+        return Path(env).expanduser()
+    return holdem_study_config_dir() / "debug-reports"
+
+
+def persistent_secret_path() -> Path:
+    return holdem_study_config_dir() / "local-receiver-secret.txt"
+
+
+def ensure_shared_secret(*, allow_generate: bool) -> str:
+    existing = os.environ.get("REPORT_SHARED_SECRET", "").strip()
+    if existing:
+        return existing
+    path = persistent_secret_path()
+    if path.is_file():
+        secret = path.read_text(encoding="utf-8").strip()
+        if secret:
+            os.environ["REPORT_SHARED_SECRET"] = secret
+            return secret
+    if not allow_generate:
+        raise RuntimeError("REPORT_SHARED_SECRET not set")
+    secret = hashlib.sha256(
+        (f"holdem-study-local|{os.urandom(16).hex()}").encode("utf-8")
+    ).hexdigest()[:40]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(secret + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    os.environ["REPORT_SHARED_SECRET"] = secret
+    _eprint(f"note: wrote local shared secret to {path}")
+    return secret
+
+
+def save_report_to_disk(
+    *,
+    save_root: Path,
+    title: str,
+    body: str,
+    zip_name: str,
+    zip_bytes: bytes,
+    analysis_json: str,
+    meta: dict[str, Any],
+) -> dict[str, str]:
+    """Write one report folder; return paths."""
+    import datetime as _dt
+
+    stamp = _dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    safe_title = re.sub(r"[^\w.\-]+", "_", title)[:60].strip("_") or "report"
+    folder = save_root / f"{stamp}_{safe_title}"
+    folder.mkdir(parents=True, exist_ok=True)
+    zip_path = folder / (Path(zip_name).name or "diagnostics.zip")
+    zip_path.write_bytes(zip_bytes)
+    body_path = folder / "issue-body.md"
+    body_path.write_text(body, encoding="utf-8")
+    meta_path = folder / "meta.json"
+    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    analysis_path = ""
+    if analysis_json.strip():
+        ap = folder / "analysis-redacted.json"
+        ap.write_text(analysis_json, encoding="utf-8")
+        analysis_path = str(ap)
+    return {
+        "saved_dir": str(folder),
+        "saved_zip": str(zip_path),
+        "saved_body": str(body_path),
+        "saved_meta": str(meta_path),
+        "saved_analysis": analysis_path,
+    }
 
 
 def github_api(
@@ -305,7 +390,19 @@ class ReportHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path in ("/", "/health"):
-            self._send_json({"ok": True, "service": "holdem-study-report-receiver"})
+            self._send_json(
+                {
+                    "ok": True,
+                    "service": "holdem-study-report-receiver",
+                    "local_disk": _env_truthy("LOCAL_DISK"),
+                    "dry_run": _env_truthy("DRY_RUN"),
+                    "github_token_configured": bool(
+                        os.environ.get("GITHUB_TOKEN", "").strip()
+                        or os.environ.get("HOLDEM_STUDY_GITHUB_TOKEN", "").strip()
+                    ),
+                    "save_dir": str(default_save_dir()),
+                }
+            )
             return
         self._send_json({"ok": False, "error": "not_found"}, 404)
 
@@ -404,10 +501,11 @@ class ReportHandler(BaseHTTPRequestHandler):
         zip_name = field("zip_name").strip() or str(
             zip_item.get("filename") or "diagnostics.zip"
         )
+        analysis_json = field("analysis_json")
         dry_run = field("dry_run").lower() == "true" or _env_truthy("DRY_RUN")
+        local_disk = _env_truthy("LOCAL_DISK")
 
-        if dry_run:
-            # Optionally stash the zip under a temp dir for inspection.
+        if dry_run and not local_disk:
             stash = Path(tempfile.gettempdir()) / "holdem-study-report-dry-run"
             stash.mkdir(parents=True, exist_ok=True)
             out = stash / Path(zip_name).name
@@ -430,9 +528,64 @@ class ReportHandler(BaseHTTPRequestHandler):
             )
             return
 
+        saved: dict[str, str] = {}
+        if local_disk or dry_run:
+            disk_body = body
+            if ATTACHMENT_PLACEHOLDER in disk_body:
+                disk_body = disk_body.replace(
+                    ATTACHMENT_PLACEHOLDER,
+                    "_(saved on local disk — see saved_zip)_",
+                )
+            try:
+                saved = save_report_to_disk(
+                    save_root=default_save_dir(),
+                    title=title,
+                    body=disk_body,
+                    zip_name=zip_name,
+                    zip_bytes=zip_bytes,
+                    analysis_json=analysis_json,
+                    meta={
+                        "title": title,
+                        "repo": repo,
+                        "labels": labels,
+                        "zip_name": zip_name,
+                        "zip_bytes": len(zip_bytes),
+                        "local_disk": True,
+                        "dry_run": dry_run,
+                    },
+                )
+                _eprint(f"saved report: {saved.get('saved_dir')}")
+            except OSError as exc:
+                self._send_json(
+                    {"ok": False, "error": "save_failed", "detail": str(exc)}, 500
+                )
+                return
+
         token = os.environ.get("GITHUB_TOKEN", "").strip() or os.environ.get(
             "HOLDEM_STUDY_GITHUB_TOKEN", ""
         ).strip()
+
+        # Local-disk primary path: GitHub is optional.
+        if local_disk and (dry_run or not token):
+            self._send_json(
+                {
+                    "ok": True,
+                    "dry_run": bool(dry_run),
+                    "local_disk": True,
+                    "repo": repo,
+                    "title": title,
+                    "zip_name": zip_name,
+                    "zip_bytes": len(zip_bytes),
+                    "labels": labels,
+                    "attach": "local-disk",
+                    "issue_url": None,
+                    "issue_number": None,
+                    "attachment_url": None,
+                    **saved,
+                }
+            )
+            return
+
         if not token:
             self._send_json(
                 {"ok": False, "error": "server_misconfigured_github_token"}, 500
@@ -443,6 +596,8 @@ class ReportHandler(BaseHTTPRequestHandler):
         try:
             attachment_url = ""
             attachment_line = "_Not uploaded (`attach=none`)._"
+            if local_disk and saved.get("saved_zip"):
+                attachment_line = f"Local disk: `{saved['saved_zip']}`"
             if attach == "none":
                 pass
             elif attach in ("release", "gist", "default", ""):
@@ -462,6 +617,8 @@ class ReportHandler(BaseHTTPRequestHandler):
                 body = body.replace(ATTACHMENT_PLACEHOLDER, attachment_line)
             else:
                 body = f"{body}\n\n### Attachment\n\n{attachment_line}\n"
+            if saved.get("saved_dir"):
+                body += f"\n\n_Also saved locally: `{saved['saved_dir']}`_\n"
 
             issue = create_issue(
                 token, repo, api, title=title, body=body, labels=labels
@@ -470,17 +627,40 @@ class ReportHandler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "dry_run": False,
+                    "local_disk": local_disk,
                     "repo": repo,
                     "title": title,
                     "issue_url": issue.get("html_url"),
                     "issue_number": issue.get("number"),
                     "attachment_url": attachment_url or None,
-                    "attach": "release" if attachment_url else "none",
+                    "attach": "release" if attachment_url else ("local-disk" if saved else "none"),
                     "zip_name": zip_name,
                     "zip_bytes": len(zip_bytes),
+                    **saved,
                 }
             )
         except RuntimeError as exc:
+            # If we already saved locally, still report partial success.
+            if saved:
+                self._send_json(
+                    {
+                        "ok": True,
+                        "partial": True,
+                        "local_disk": True,
+                        "error": "github_api_failed",
+                        "detail": str(exc),
+                        "repo": repo,
+                        "title": title,
+                        "issue_url": None,
+                        "issue_number": None,
+                        "attachment_url": None,
+                        "attach": "local-disk",
+                        "zip_name": zip_name,
+                        "zip_bytes": len(zip_bytes),
+                        **saved,
+                    }
+                )
+                return
             self._send_json(
                 {"ok": False, "error": "github_api_failed", "detail": str(exc)},
                 502,
@@ -493,39 +673,65 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("PORT", "8787")),
+        default=int(os.environ.get("PORT", str(DEFAULT_PORT))),
     )
     ap.add_argument(
         "--dry-run",
         action="store_true",
         help="Force DRY_RUN=1 (no GitHub calls)",
     )
+    ap.add_argument(
+        "--local-disk",
+        action="store_true",
+        help="Save reports to disk; GitHub Issue only if GITHUB_TOKEN is set",
+    )
+    ap.add_argument(
+        "--save-dir",
+        type=Path,
+        default=None,
+        help="Override HOLDEM_STUDY_REPORT_SAVE_DIR (local-disk reports root)",
+    )
     args = ap.parse_args(argv)
 
     if args.dry_run:
         os.environ["DRY_RUN"] = "1"
+    if args.local_disk:
+        os.environ["LOCAL_DISK"] = "1"
+    if args.save_dir is not None:
+        os.environ["HOLDEM_STUDY_REPORT_SAVE_DIR"] = str(args.save_dir.expanduser())
 
-    if not os.environ.get("REPORT_SHARED_SECRET", "").strip():
-        # Dev convenience: generate an ephemeral secret so local smoke works.
-        if _env_truthy("DRY_RUN"):
-            secret = hashlib.sha256(b"local-dev-report-receiver").hexdigest()[:32]
-            os.environ["REPORT_SHARED_SECRET"] = secret
-            _eprint(f"note: DRY_RUN using ephemeral REPORT_SHARED_SECRET={secret}")
-        else:
-            _eprint("error: set REPORT_SHARED_SECRET")
-            return 2
+    local_disk = _env_truthy("LOCAL_DISK")
+    dry_run = _env_truthy("DRY_RUN")
 
-    if not _env_truthy("DRY_RUN") and not (
+    try:
+        secret = ensure_shared_secret(allow_generate=local_disk or dry_run)
+    except RuntimeError:
+        _eprint("error: set REPORT_SHARED_SECRET (or pass --local-disk / --dry-run)")
+        return 2
+    # Keep secret available for launchers that read the env after start.
+    os.environ["REPORT_SHARED_SECRET"] = secret
+
+    if not local_disk and not dry_run and not (
         os.environ.get("GITHUB_TOKEN", "").strip()
         or os.environ.get("HOLDEM_STUDY_GITHUB_TOKEN", "").strip()
     ):
-        _eprint("error: set GITHUB_TOKEN (or pass --dry-run)")
+        _eprint(
+            "error: set GITHUB_TOKEN, or pass --local-disk (disk-only) / --dry-run"
+        )
         return 2
 
-    httpd = ThreadingHTTPServer((args.host, args.port), ReportHandler)
+    if local_disk:
+        save_root = default_save_dir()
+        save_root.mkdir(parents=True, exist_ok=True)
+        _eprint(f"local-disk save dir: {save_root}")
+
+    # Bind loopback by default — never expose intake without explicit host.
+    host = args.host or "127.0.0.1"
+    httpd = ThreadingHTTPServer((host, args.port), ReportHandler)
     _eprint(
-        f"listening on http://{args.host}:{args.port}/report "
-        f"(dry_run={_env_truthy('DRY_RUN')})"
+        f"listening on http://{host}:{args.port}/report "
+        f"(local_disk={local_disk} dry_run={dry_run} "
+        f"github={'yes' if (os.environ.get('GITHUB_TOKEN') or os.environ.get('HOLDEM_STUDY_GITHUB_TOKEN')) else 'no'})"
     )
     try:
         httpd.serve_forever()

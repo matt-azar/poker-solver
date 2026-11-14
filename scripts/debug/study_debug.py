@@ -8,9 +8,11 @@ defaults. Does not replace the individual tools — it just routes to them.
   python scripts/debug/study_debug.py collect
   python scripts/debug/study_debug.py analyze --zip path\\to\\zip
   python scripts/debug/study_debug.py send --zip path\\to\\zip
+  python scripts/debug/study_debug.py local-debug
   python scripts/debug/study_debug.py gui
 
-Windows: double-click or run ``study-debug.cmd`` (no args opens the mini-app).
+Windows: double-click ``study-debug.cmd`` (mini-app) or
+``study-debug-local.cmd`` (local receiver + mini-app, no Cloudflare).
 """
 
 from __future__ import annotations
@@ -55,6 +57,10 @@ _ALIASES: dict[str, str] = {
     "report": "send",
     "upload": "send",
     "gh-send": "send",
+    "local": "local-debug",
+    "local-receiver": "local-debug",
+    "debug-local": "local-debug",
+    "receiver": "local-debug",
 }
 
 
@@ -117,18 +123,20 @@ Windows (from a clone of this repo):
   scripts\\debug\\study-debug.cmd              # opens mini-app
   scripts\\debug\\study-debug.cmd collect      # evidence zip while frozen
   scripts\\debug\\study-debug.cmd analyze --zip path\\to\\diagnostics.zip
+  scripts\\debug\\study-debug-local.cmd   # local receiver + mini-app (no Cloudflare)
   scripts\\debug\\study-debug.cmd send --zip path\\to\\diagnostics.zip
   scripts\\debug\\study-debug.cmd dumps
   scripts\\debug\\study-debug.cmd sidecar --exe "C:\\Path\\To\\Install\\solver-engine.exe"
 
 Or:
   python scripts\\debug\\study_debug.py <command> ...
+  python scripts\\debug\\study_debug.py local-debug
   python scripts\\debug\\study_debug.py gui
 
 Diagnostics folder: {diag}
 
-Subcommands: collect, analyze, send, dumps, sidecar, probe, freeze, watch,
-             snapshot, stacks, smoke, gui, windows-collect
+Subcommands: collect, analyze, send, local-debug, dumps, sidecar, probe, freeze,
+             watch, snapshot, stacks, smoke, gui, windows-collect
 """.format(
             diag=diag
         ).strip()
@@ -141,6 +149,7 @@ examples (Windows installed Study):
   study_debug.py gui
   study_debug.py collect --zip --stacks
   study_debug.py analyze --zip %%USERPROFILE%%\\Desktop\\holdem-study-diagnostics.zip
+  study_debug.py local-debug
   study_debug.py send --zip %%USERPROFILE%%\\Desktop\\holdem-study-diagnostics.zip
   study_debug.py dumps --since-hours 48
   study_debug.py sidecar --exe "C:\\Program Files\\Holdem Study\\solver-engine.exe"
@@ -156,8 +165,8 @@ examples (Windows installed Study):
     ap.add_argument(
         "command",
         nargs="?",
-        help="collect | analyze | send | dumps | sidecar | probe | freeze | watch | "
-        "snapshot | stacks | smoke | gui | windows-collect",
+        help="collect | analyze | send | local-debug | dumps | sidecar | probe | "
+        "freeze | watch | snapshot | stacks | smoke | gui | windows-collect",
     )
     ap.add_argument(
         "args",
@@ -190,6 +199,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if command == "gui":
         return _cmd_gui(rest)
+    if command in ("local-debug", "local_debug"):
+        return _run_script("start_local_debug.py", rest)
     if command in ("windows-collect", "win-collect", "wcollect"):
         return _cmd_windows_collect(rest)
     if command == "help":

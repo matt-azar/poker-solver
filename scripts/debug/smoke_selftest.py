@@ -253,6 +253,119 @@ def main() -> int:
                     except subprocess.TimeoutExpired:
                         proc.kill()
 
+                # Local-disk receiver (primary no-Cloudflare path).
+                sock2 = socket.socket()
+                sock2.bind(("127.0.0.1", 0))
+                port2 = int(sock2.getsockname()[1])
+                sock2.close()
+                save_root = Path(tmp_send) / "local-reports"
+                secret2 = "smoke-local-disk-secret"
+                env2 = os.environ.copy()
+                env2["REPORT_SHARED_SECRET"] = secret2
+                env2["LOCAL_DISK"] = "1"
+                env2["HOLDEM_STUDY_REPORT_SAVE_DIR"] = str(save_root)
+                for k in (
+                    "HOLDEM_STUDY_GITHUB_TOKEN",
+                    "GH_TOKEN",
+                    "GITHUB_TOKEN",
+                    "HOLDEM_STUDY_REPORT_WEBHOOK_URL",
+                    "HOLDEM_STUDY_REPORT_WEBHOOK_SECRET",
+                    "DRY_RUN",
+                ):
+                    env2.pop(k, None)
+                proc2 = subprocess.Popen(
+                    [
+                        sys.executable,
+                        str(receiver),
+                        "--local-disk",
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        str(port2),
+                        "--save-dir",
+                        str(save_root),
+                    ],
+                    env=env2,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                try:
+                    ready2 = False
+                    for _ in range(50):
+                        if proc2.poll() is not None:
+                            break
+                        try:
+                            with socket.create_connection(
+                                ("127.0.0.1", port2), timeout=0.2
+                            ):
+                                ready2 = True
+                                break
+                        except OSError:
+                            time.sleep(0.05)
+                    if not ready2:
+                        failures.append("local-disk receiver failed to start")
+                    else:
+                        ld_json = Path(tmp_send) / "local-disk-send.json"
+                        ld_env = env2.copy()
+                        ld_env["HOLDEM_STUDY_REPORT_WEBHOOK_URL"] = (
+                            f"http://127.0.0.1:{port2}/report"
+                        )
+                        ld_env["HOLDEM_STUDY_REPORT_WEBHOOK_SECRET"] = secret2
+                        ld_rc = subprocess.call(
+                            [
+                                sys.executable,
+                                str(send_script),
+                                "--zip",
+                                str(zpath),
+                                "--yes",
+                                "--json-out",
+                                str(ld_json),
+                            ],
+                            env=ld_env,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        if ld_rc != 0 or not ld_json.is_file():
+                            failures.append("send_report local-disk")
+                        else:
+                            import json as _json2
+
+                            try:
+                                ld_payload = _json2.loads(
+                                    ld_json.read_text(encoding="utf-8")
+                                )
+                            except _json2.JSONDecodeError:
+                                failures.append("local-disk bad json")
+                            else:
+                                if not ld_payload.get("ok") or not ld_payload.get(
+                                    "saved_dir"
+                                ):
+                                    failures.append(
+                                        "local-disk payload missing saved_dir"
+                                    )
+                                elif not Path(str(ld_payload["saved_dir"])).is_dir():
+                                    failures.append(
+                                        "local-disk saved_dir missing on disk"
+                                    )
+                        sld = _HERE / "start_local_debug.py"
+                        if not sld.is_file():
+                            failures.append("missing start_local_debug.py")
+                        else:
+                            help_rc = subprocess.call(
+                                [sys.executable, str(sld), "--help"],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
+                            if help_rc != 0:
+                                failures.append("start_local_debug --help")
+                finally:
+                    proc2.terminate()
+                    try:
+                        proc2.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc2.kill()
+
     # Front-door CLI routes to the same scripts (no rewrite).
     front = _HERE / "study_debug.py"
     if not front.is_file():
@@ -292,6 +405,13 @@ def main() -> int:
             )
             if send_help != 0:
                 failures.append("study_debug send --help")
+            local_help = subprocess.call(
+                [sys.executable, str(front), "local-debug", "--help"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if local_help != 0:
+                failures.append("study_debug local-debug --help")
         # Mini-app file must exist; skip import if tkinter missing (headless CI).
         if not (_HERE / "study_debug_app.py").is_file():
             failures.append("missing study_debug_app.py")
