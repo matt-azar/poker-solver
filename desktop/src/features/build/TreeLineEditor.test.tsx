@@ -56,6 +56,21 @@ describe("TreeLineEditor", () => {
           ],
           children: [1, 2],
         },
+        {
+          index: 2,
+          terminal: false,
+          chance: false,
+          player: 1,
+          street: 0,
+          path: "Bet 50",
+          chance_child: -1,
+          actions: [
+            { label: "Fold", compact: "f", child_index: 3 },
+            { label: "Call", compact: "call", child_index: 4 },
+            { label: "Raise to 150", compact: "r150", child_index: 5 },
+          ],
+          children: [3, 4, 5],
+        },
       ],
       tree_edits: [],
       plan: {
@@ -113,18 +128,34 @@ describe("TreeLineEditor", () => {
     const body = treePreview.mock.calls[0]?.[0];
     expect(body).toEqual(buildJob(useStudyStore.getState().draft));
     expect(screen.queryByText("Check")).toBeNull();
-    await expandPreview();
-    expect(await screen.findByText("Check")).toBeTruthy();
+    // Plan memory sits above Preview tree even while collapsed.
     expect(screen.getByText(/Plan peak/i)).toBeTruthy();
     expect(screen.getByText(/2\.0 MiB/)).toBeTruthy();
+    await expandPreview();
+    expect(await screen.findByText("Check")).toBeTruthy();
+    // Bet 50 into pot 100 → b50 (pot-%), not a chip+tag mashup.
+    expect(screen.getByText("b50")).toBeTruthy();
+    expect(screen.queryByText(/Bet 50/)).toBeNull();
   });
 
-  it("writes Force edits into the draft consumed by Solve", async () => {
+  it("reveals Force / Remove only after clicking a node", async () => {
     render(<TreeLineEditor />);
     const user = await expandPreview();
     await screen.findByText("Check");
-    await user.click(screen.getAllByRole("button", { name: "Force" })[0]!);
+    expect(screen.queryByRole("button", { name: "Force" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Check" }));
+    expect(screen.getByRole("button", { name: "Force" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Force" }));
     expect(useStudyStore.getState().draft.treeEdits).toContain("force - c");
+  });
+
+  it("tags nested raises as pot percent of pot-before-bet", async () => {
+    render(<TreeLineEditor />);
+    await expandPreview();
+    // After Bet 50 into 100, pot=150 facing=50; Raise to 150 → raise-by 100 → r67
+    // (100/150). sizePot for raise tags is pot+call = 200 → r50.
+    expect(await screen.findByText("r50")).toBeTruthy();
   });
 
   it("clears a stale preview when the draft changes", async () => {

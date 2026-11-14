@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  abbreviateActionLine,
+  potFacingAfterPath,
+} from "../../domain/actionHistory";
+import { formatActionDisplay } from "../../domain/betSizes";
 import { engineClient, EngineError } from "../../engine/client";
 import type {
   MemoryPlanPayload,
   SpotDraft,
+  TreePreviewAction,
   TreePreviewNode,
   TreePreviewPayload,
 } from "../../domain/types";
@@ -66,65 +72,208 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MiB`;
 }
 
-function DecisionRow({
+function actionKey(nodeIndex: number, compact: string): string {
+  return `${nodeIndex}:${compact}`;
+}
+
+/** Follow chance links to the next decision (or null at a terminal). */
+function nextDecision(
+  nodes: TreePreviewNode[],
+  startIndex: number,
+): TreePreviewNode | null {
+  let index = startIndex;
+  const guard = nodes.length + 2;
+  for (let i = 0; i < guard; i += 1) {
+    const node = nodes[index];
+    if (!node) {
+      return null;
+    }
+    if (node.terminal) {
+      return null;
+    }
+    if (!node.chance) {
+      return node;
+    }
+    if (node.chance_child < 0) {
+      return null;
+    }
+    index = node.chance_child;
+  }
+  return null;
+}
+
+function MemoryPlanStrip({
+  plan,
+  pot,
+  stack,
+}: {
+  plan: MemoryPlanPayload;
+  pot: number;
+  stack: number;
+}) {
+  return (
+    <div
+      className="memory-plan"
+      data-over-budget={plan.fits_budget ? undefined : "true"}
+      title="estimated_peak_bytes is a labeled plan, not RSS"
+    >
+      <span>
+        Plan peak {formatBytes(plan.estimated_peak_bytes)}
+        {plan.fits_budget ? "" : " (over budget)"}
+      </span>
+      <span>
+        Budget {formatBytes(plan.memory_budget_bytes)} · {plan.public_decisions}{" "}
+        decisions · {plan.deals} deals
+      </span>
+      <span className="tree-meta">
+        pot {pot} · stack {stack} · {plan.dry_run ? "dry-run plan" : "plan"} · not
+        process RSS
+      </span>
+    </div>
+  );
+}
+
+function TreeActionBranch({
+  nodes,
   node,
+  action,
+  rootPot,
+  selectedKey,
+  onSelect,
   onForce,
   onRemove,
   onAddSize,
 }: {
+  nodes: TreePreviewNode[];
   node: TreePreviewNode;
+  action: TreePreviewAction;
+  rootPot: number;
+  selectedKey: string | null;
+  onSelect: (key: string) => void;
+  onForce: (path: string, compact: string) => void;
+  onRemove: (path: string, compact: string) => void;
+  onAddSize: (path: string) => void;
+}) {
+  const key = actionKey(node.index, action.compact);
+  const selected = selectedKey === key;
+  const { pot, toCall } = potFacingAfterPath(node.path, rootPot);
+  // Raise tags size against pot+call (same basis as Study action blocks).
+  const sizePot = toCall > 0 ? pot + toCall : pot;
+  const display = formatActionDisplay(action.label, sizePot, "pot", { toCall });
+  const child = nextDecision(nodes, action.child_index);
+
+  return (
+    <li className="tree-diagram-branch">
+      <div className="tree-diagram-edge" aria-hidden="true" />
+      <div
+        className="tree-diagram-action"
+        data-selected={selected ? "true" : undefined}
+      >
+        <button
+          type="button"
+          className="tree-diagram-action-btn"
+          title={display.raw}
+          aria-pressed={selected}
+          onClick={() => onSelect(selected ? "" : key)}
+        >
+          <span className="tree-diagram-dot" aria-hidden="true" />
+          <span className="tree-diagram-label">{display.primary}</span>
+        </button>
+        {selected ? (
+          <span className="tree-action-btns">
+            <button
+              type="button"
+              className="toolbar-btn"
+              title="Force this action at this decision"
+              onClick={() => onForce(node.path, action.compact)}
+            >
+              Force
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              title="Remove this action at this decision"
+              onClick={() => onRemove(node.path, action.compact)}
+            >
+              Remove
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              title="Add a bet/raise size at this decision"
+              onClick={() => onAddSize(node.path)}
+            >
+              Add size…
+            </button>
+          </span>
+        ) : null}
+      </div>
+      {child ? (
+        <DecisionBranch
+          nodes={nodes}
+          node={child}
+          rootPot={rootPot}
+          selectedKey={selectedKey}
+          onSelect={onSelect}
+          onForce={onForce}
+          onRemove={onRemove}
+          onAddSize={onAddSize}
+        />
+      ) : null}
+    </li>
+  );
+}
+
+function DecisionBranch({
+  nodes,
+  node,
+  rootPot,
+  selectedKey,
+  onSelect,
+  onForce,
+  onRemove,
+  onAddSize,
+}: {
+  nodes: TreePreviewNode[];
+  node: TreePreviewNode;
+  rootPot: number;
+  selectedKey: string | null;
+  onSelect: (key: string) => void;
   onForce: (path: string, compact: string) => void;
   onRemove: (path: string, compact: string) => void;
   onAddSize: (path: string) => void;
 }) {
   const seat = node.player === 0 ? "OOP" : node.player === 1 ? "IP" : "—";
-  const pathLabel = node.path === "" ? "(root)" : node.path;
   return (
-    <li className="tree-node" data-street={node.street}>
-      <div className="tree-node-head">
-        <span className="tree-path tabular">{pathLabel}</span>
+    <div className="tree-diagram-decision" data-street={node.street}>
+      <div className="tree-diagram-decision-head">
         <span className="tree-meta">
           {seat} · street {node.street}
+          {node.path ? ` · ${abbreviatePathForMeta(node.path, rootPot)}` : " · root"}
         </span>
       </div>
-      <ul className="tree-actions">
+      <ul className="tree-diagram-children">
         {node.actions.map((action) => (
-          <li key={`${node.index}-${action.compact}`}>
-            <span className="tree-action-label">
-              {action.label} <code>{action.compact}</code>
-            </span>
-            <span className="tree-action-btns">
-              <button
-                type="button"
-                className="toolbar-btn"
-                title="Force this action at this decision"
-                onClick={() => onForce(node.path, action.compact)}
-              >
-                Force
-              </button>
-              <button
-                type="button"
-                className="toolbar-btn"
-                title="Remove this action at this decision"
-                onClick={() => onRemove(node.path, action.compact)}
-              >
-                Remove
-              </button>
-            </span>
-          </li>
+          <TreeActionBranch
+            key={`${node.index}-${action.compact}`}
+            nodes={nodes}
+            node={node}
+            action={action}
+            rootPot={rootPot}
+            selectedKey={selectedKey}
+            onSelect={onSelect}
+            onForce={onForce}
+            onRemove={onRemove}
+            onAddSize={onAddSize}
+          />
         ))}
       </ul>
-      <div className="tree-add-size">
-        <button
-          type="button"
-          className="toolbar-btn"
-          onClick={() => onAddSize(node.path)}
-        >
-          Add size…
-        </button>
-      </div>
-    </li>
+    </div>
   );
+}
+
+function abbreviatePathForMeta(path: string, rootPot: number): string {
+  return abbreviateActionLine(path, rootPot);
 }
 
 /** Phases where Build must not issue tree_preview (ZR-158 stdin starvation). */
@@ -146,6 +295,7 @@ export function TreeLineEditor() {
   const [plan, setPlan] = useState<MemoryPlanPayload | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [addSizePath, setAddSizePath] = useState<string | null>(null);
   const [addSizeValue, setAddSizeValue] = useState("0.33");
   const requestId = useRef(0);
@@ -157,6 +307,7 @@ export function TreeLineEditor() {
     setPreview(null);
     setPlan(null);
     setError("");
+    setSelectedKey(null);
   };
 
   const refresh = async () => {
@@ -273,11 +424,22 @@ export function TreeLineEditor() {
     updateDraft({ treeEdits: draft.treeEdits.filter((_, i) => i !== index) });
   };
 
-  const decisions =
-    preview?.nodes.filter((node) => !node.terminal && !node.chance) ?? [];
+  const rootDecision = useMemo(() => {
+    if (!preview?.nodes.length) {
+      return null;
+    }
+    return (
+      preview.nodes.find((node) => !node.terminal && !node.chance && node.path === "") ??
+      preview.nodes.find((node) => !node.terminal && !node.chance) ??
+      null
+    );
+  }, [preview]);
 
   return (
     <section className="build-section tree-editor" data-span="2">
+      {plan ? (
+        <MemoryPlanStrip plan={plan} pot={draft.pot} stack={draft.stack} />
+      ) : null}
       <div className="panel-title-row">
         <h2>
           <button
@@ -303,32 +465,12 @@ export function TreeLineEditor() {
       {open ? (
         <>
           <p className="tree-editor-help">
-            Shows effective legal actions after chip rounding, capping, and merging,
-            plus the labeled engine heap plan against the budget. Force / Remove / Add
-            size write <code>tree-edit</code> lines into the draft; Solve rebuilds from
-            the same draft serializer.
+            Click a node for Force / Remove / Add size. Labels are pot-% tags
+            (`b50` = 50% of the pot before the bet). Edits write{" "}
+            <code>tree-edit</code> lines into the draft; Solve rebuilds from the
+            same draft serializer.
           </p>
           {error ? <p className="tree-editor-error">{error}</p> : null}
-          {plan ? (
-            <div
-              className="memory-plan"
-              data-over-budget={plan.fits_budget ? undefined : "true"}
-              title="estimated_peak_bytes is a labeled plan, not RSS"
-            >
-              <span>
-                Plan peak {formatBytes(plan.estimated_peak_bytes)}
-                {plan.fits_budget ? "" : " (over budget)"}
-              </span>
-              <span>
-                Budget {formatBytes(plan.memory_budget_bytes)} · {plan.public_decisions}{" "}
-                decisions · {plan.deals} deals
-              </span>
-              <span className="tree-meta">
-                pot {draft.pot} · stack {draft.stack} ·{" "}
-                {plan.dry_run ? "dry-run plan" : "plan"} · not process RSS
-              </span>
-            </div>
-          ) : null}
           {draft.treeEdits.length > 0 ? (
             <div className="tree-edits-list">
               <div className="panel-title-row">
@@ -357,11 +499,14 @@ export function TreeLineEditor() {
               </ul>
             </div>
           ) : null}
-          <ul className="tree-preview">
-            {decisions.map((node) => (
-              <DecisionRow
-                key={node.index}
-                node={node}
+          {rootDecision && preview ? (
+            <div className="tree-diagram" role="tree">
+              <DecisionBranch
+                nodes={preview.nodes}
+                node={rootDecision}
+                rootPot={draft.pot}
+                selectedKey={selectedKey}
+                onSelect={(key) => setSelectedKey(key || null)}
                 onForce={(path, compact) => appendEdit(forceLine(path, compact))}
                 onRemove={(path, compact) => appendEdit(removeLine(path, compact))}
                 onAddSize={(path) => {
@@ -369,8 +514,10 @@ export function TreeLineEditor() {
                   setAddSizeValue("0.33");
                 }}
               />
-            ))}
-          </ul>
+            </div>
+          ) : !error && !busy ? (
+            <p className="tree-editor-help">No decision nodes in this preview.</p>
+          ) : null}
           {addSizePath !== null ? (
             <div className="tree-add-dialog">
               <label>
@@ -406,7 +553,7 @@ export function TreeLineEditor() {
         </>
       ) : (
         <p className="tree-editor-help">
-          Expand to preview legal actions, memory plan, and line edits before Solve.
+          Expand to preview legal actions and line edits before Solve.
         </p>
       )}
     </section>

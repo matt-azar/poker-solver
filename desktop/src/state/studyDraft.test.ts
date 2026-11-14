@@ -109,6 +109,27 @@ describe("phaseFromStatus", () => {
   });
 });
 
+describe("buildJob Accuracy % field", () => {
+  it("converts Build percent-of-pot into engine pot fraction", () => {
+    const job = buildJob({
+      ...DEFAULT_SPOT,
+      boardText: "Ah Kd 7c",
+      accuracy: "0.5",
+    });
+    // 0.5 on Build = 0.5% pot = engine fraction 0.005
+    expect(job.accuracy).toBeCloseTo(0.005, 12);
+  });
+
+  it("leaves Accuracy unset when the field is blank", () => {
+    const job = buildJob({
+      ...DEFAULT_SPOT,
+      boardText: "Ah Kd 7c",
+      accuracy: "",
+    });
+    expect(job.accuracy).toBe(-1);
+  });
+});
+
 describe("buildJob all-in", () => {
   it("defaults all_in_threshold to half stack and does not invent a", () => {
     const job = buildJob({

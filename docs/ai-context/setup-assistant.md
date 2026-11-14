@@ -87,7 +87,7 @@ Visible on Build today:
 - **Turn donk** and **River donk** size fields only (Build has no donk size control on the flop)
 - **Save tree** / **Open tree** open a one-level in-app betting-tree catalogue (localStorage; save / open / rename / delete; no OS file dialog) for sizes, caps, and `tree_edits` (leaves board, ranges, and stop alone)
 - Pot cap, merge threshold (%), All-in threshold (%)
-- Stop: iterations, accuracy (pot fraction), time limit (s)
+- Stop: iterations, accuracy (% of pot; `0.5` = 0.5% pot), time limit (s)
 - Ranges: paint grids, Catalogue (seat×action tree), range text, Swap / Undo / Redo / Clear
 - Collapsible **Preview tree** (tree line edits → `tree_edits`)
 - **Open ranges in Equity** copies board + ranges into the Equity workspace

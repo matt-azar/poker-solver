@@ -11,7 +11,6 @@ import {
 import { useStudyStore } from "../../state/studyStore";
 import { useEquityStore } from "../../state/equityStore";
 import { draftFromBuild } from "../../domain/equity/transfer";
-import { comboCount } from "../../domain/range";
 import { RANKS } from "../../domain/types";
 import { BettingTreeCatalogue } from "./BettingTreeCatalogue";
 import { SeatActionCatalogueTree } from "./SeatActionCatalogueTree";
@@ -157,7 +156,6 @@ function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
 export function BuildWorkspace() {
   const draft = useStudyStore((s) => s.draft);
   const updateDraft = useStudyStore((s) => s.updateDraft);
-  const weights = useStudyStore((s) => s.weights);
   const setRangeText = useStudyStore((s) => s.setRangeText);
   const paintWeight = useStudyStore((s) => s.paintWeight);
   const setPaintWeight = useStudyStore((s) => s.setPaintWeight);
@@ -244,10 +242,6 @@ export function BuildWorkspace() {
           <span>{draft.boardText || "no board"}</span>
           <span>
             pot {draft.pot} · stack {draft.stack}
-          </span>
-          <span>
-            OOP {comboCount(weights.oop, draft.boardText).toFixed(1)} · IP{" "}
-            {comboCount(weights.ip, draft.boardText).toFixed(1)}
           </span>
           <button
             type="button"
@@ -570,10 +564,11 @@ export function BuildWorkspace() {
               />
             </label>
             <label>
-              Accuracy (pot fraction)
+              Accuracy (%)
               <input
                 value={draft.accuracy}
                 placeholder="off"
+                title="Stop when Pio Accuracy ≤ this percent of the pot (0.5 = 0.5% pot)"
                 onChange={(event) => updateDraft({ accuracy: event.target.value })}
               />
             </label>

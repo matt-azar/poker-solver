@@ -23,7 +23,7 @@
 
 - **Chip EV**: root-centered, chips.
 - **Action EV**: local decision EV by default (Fold = 0); Global = root-centered (Settings).
-- **Accuracy**: Pio exploitability = average of BR gains (NashConv/2); targets are Accuracy/pot by default. NashConv (sum) remains available as a diagnostic.
+- **Accuracy**: Pio exploitability = average of BR gains (NashConv/2); Build stop target is percent of pot by default. NashConv (sum) remains available as a diagnostic.
 - **Equity**: fraction of pot — **not** chip EV. Study shows equity to a tenth of a percent.
 - Locks: 0% inside a row that sums to 1 is a constraint; unlock is DELETE; all-zero rows rejected.
 
@@ -34,7 +34,7 @@
 | “Why does folding show 0 EV?” | Local EV uses folding now as the zero point. Open the **Settings** gear → **EV display** → **Global EV (root-centered)** to show EV on the root basis. |
 | “Where do I see hand EV and equity?” | In **Study**, open a decision, choose **Overlay → EV+Eq**, and select a hand for details. Study starts loading EV and equity automatically on decision nodes. If a number is pending, say so. |
 | “Which river cards are best for IP on this line?” | Prefer `compare_runouts` when the player is already on that river decision: open **Compare runouts** with filters (suit, board-pair, action frequency). Check the seat and supported sizes; wrong seat/size → path hint or supported actions. Otherwise navigate them to the river decision and **Compare runouts**. |
-| “What does Accuracy mean?” | Accuracy is the average of the two best-response gains, or NashConv divided by two. The Build target is a fraction of the pot in ordinary chip-EV solves. Enter `0.005` for 0.5% of pot. |
+| “What does Accuracy mean?” | Accuracy is the average of the two best-response gains, or NashConv divided by two. On Build, enter percent of pot — `0.5` means stop at 0.5% of pot (engine pot fraction 0.005). |
 | “Why is equity higher than EV?” | Equity is a share of the pot. EV measures expected utility in the solve, with future actions and the displayed reference point. Explain the different units before comparing the hand's figures. |
 | “Where can I compare river cards?” | From a river decision in **Study**, open **Compare runouts**, or ask the assistant to filter/rank runouts on the current line. |
 

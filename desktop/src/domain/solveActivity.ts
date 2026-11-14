@@ -114,14 +114,6 @@ function iterationsPerSecond(status: StatusPayload | null | undefined): number |
   return iterations / runtime;
 }
 
-function jobIdPart(status: StatusPayload | null | undefined): string {
-  const jobId =
-    typeof status?.job_id === "string" && status.job_id.trim()
-      ? status.job_id.trim()
-      : "";
-  return jobId ? ` · ${jobId}` : "";
-}
-
 /**
  * Primary status-bar sentence: what the engine is doing right now.
  * Prefer sticky last_error / host message when present; otherwise derive from
@@ -146,44 +138,24 @@ export function engineActivityMessage(
     return String(status.message).trim();
   }
 
-  const iter = status?.iterations ?? 0;
-  const target = status?.iterations_requested;
-  const iterPart =
-    target != null && Number(target) > 0
-      ? `${iter} / ${target} iters`
-      : `${iter} iters`;
-  const accuracyChips = measuredAccuracyChips(status);
-  const gapPart =
-    accuracyChips != null
-      ? ` · Acc ${formatAccuracy(accuracyChips, status?.pot)}`
-      : "";
-  const runtime = formatRuntime(
-    status?.runtime_seconds ?? status?.runtime ?? null,
-  );
-  const rate = iterationsPerSecond(status);
-  const ratePart = rate != null ? ` · ${rate.toFixed(1)} it/s` : "";
-  const timePart = runtime ? ` · ${runtime}` : "";
-  const jobPart = jobIdPart(status);
-
-  // Derive live / terminal copy before store fallback so "Solve complete." or
-  // sticky unreachable text cannot lie over Failed / Solving / Complete.
+  // Mid-footer stays short — iters / Acc / time live in status-bar metrics.
   switch (phase) {
     case "building":
-      return `Building public tree and allocating engine memory…${jobPart}`;
+      return "Building public tree and allocating engine memory…";
     case "solving":
-      return `Solving — ${iterPart}${gapPart}${ratePart}${timePart}${jobPart}`;
+      return "Solving…";
     case "pause_requested":
-      return `Pausing after current sample — ${iterPart}${gapPart}${jobPart}`;
+      return "Pausing after current sample…";
     case "paused":
-      return `Paused at ${iterPart}${gapPart}. Browse freely; Continue resumes.`;
+      return "Paused. Browse freely; Continue resumes.";
     case "stop_requested":
-      return `Stopping — keeping completed iterations (${iterPart})…${jobPart}`;
+      return "Stopping — keeping completed iterations…";
     case "complete":
       return status?.cancelled
-        ? `Stopped at ${iterPart}${gapPart}${timePart}${jobPart}`
+        ? "Stopped."
         : status?.time_limit_reached
-          ? `Time limit at ${iterPart}${gapPart}${timePart}${jobPart}`
-          : `Solve complete — ${iterPart}${gapPart}${timePart}${jobPart}`;
+          ? "Time limit reached."
+          : "Solve complete.";
     case "failed":
       return "Solve failed.";
     case "loading":
