@@ -98,9 +98,8 @@ export function formatSolveJobStreetConfig(job: SolveJobRequest): string {
   appendLine(lines, "ip-range", job.ip_range);
   appendInt(lines, "first-to-act", 0);
   appendInt(lines, "max-raises", job.max_raises ?? 2);
-  appendFlag(lines, "allow-all-in", (job.allow_all_in ?? 1) !== 0);
   appendFlag(lines, "allow-three-bet", (job.allow_three_bet ?? 1) !== 0);
-  appendNumber(lines, "all-in-threshold", job.all_in_threshold ?? 0);
+  appendNumber(lines, "all-in-threshold", job.all_in_threshold ?? 0.5);
   appendNumber(lines, "pot-cap", job.pot_cap ?? 0);
   if ((job.merge_threshold ?? 0) !== 0) {
     appendNumber(lines, "merge-threshold", job.merge_threshold ?? 0);
@@ -233,7 +232,6 @@ export function parseStreetConfigTextToSolutionConfig(
       case "pot":
       case "stack":
       case "max-raises":
-      case "allow-all-in":
       case "allow-three-bet":
       case "all-in-threshold":
       case "pot-cap":
@@ -244,6 +242,9 @@ export function parseStreetConfigTextToSolutionConfig(
       case "threads":
       case "first-to-act":
         out[key.replace(/-/g, "_")] = Number(value);
+        break;
+      case "allow-all-in":
+        // Legacy: ignored. List `a` for explicit all-in.
         break;
       case "oop-range":
         out.oop_range = value;

@@ -64,10 +64,12 @@ pub const StreetSpec = struct {
     oop_river_donk: []f64 = &.{},
     oop_raise_multiples: []f64 = &.{},
     ip_raise_multiples: []f64 = &.{},
-    all_in_threshold: f64 = 0,
+    /// Pio all-in threshold: fraction of starting stack. A size that would
+    /// commit more than this fraction is replaced by all-in. Default 0.5
+    /// (more than half the stack). Zero disables the snap.
+    all_in_threshold: f64 = 0.5,
     pot_cap: f64 = 0,
     merge_threshold: f64 = 0,
-    allow_all_in: bool = true,
     allow_three_bet: bool = true,
     max_raises: i32 = 1,
     first_to_act: i32 = 0,

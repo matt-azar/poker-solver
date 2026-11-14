@@ -381,8 +381,8 @@ describe("EngineClient parseConfig IPC (ZR-86)", () => {
       "oop-range AcAd:1",
       "ip-range 2c3d:1",
       "max-raises 0",
-      "allow-all-in 0",
       "allow-three-bet 1",
+      "all-in-threshold 0.5",
       "memory-mib 64",
       "threads 1",
       "",
@@ -393,6 +393,7 @@ describe("EngineClient parseConfig IPC (ZR-86)", () => {
     expect(parsed.oop_range).toBe("AcAd:1");
     expect(parsed.ip_range).toBe("2c3d:1");
     expect(parsed.pot).toBe(100);
+    expect(parsed.all_in_threshold).toBe(0.5);
     expect(parsed.tree_edits).toEqual([]);
     expect(invoke).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalledWith(

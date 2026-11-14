@@ -6,7 +6,7 @@
   "ip_range": "KK",
   "oop_bet_sizes": [0.5, 1.0],
   "ip_bet_sizes": [0.5, 1.0],
-  "allow_all_in": true,
+  "all_in_threshold": 0.5,
   "max_raises": 2,
   "first_to_act": "oop",
   "algorithm": "cfr_plus",
