@@ -46,7 +46,9 @@ const poker::holdem::ShowdownEquity equity =
 
 The default work limit is `kDefaultMaxPairRunouts` (1,100,000 pair-runouts). A full off-board random-vs-random river is `kFullRangeRiverPairRunouts` (1,070,190) and succeeds at the default. A request above the limit throws before showdown evaluation and reports required and allowed counts. A full-range turn is about 51M pair-runouts (`As Kd Qc Jh` measures 51,369,120) and still rejects at the library default. Packaged Study passes `--max-pair-runouts` with `kStudyExplorerMaxPairRunouts` (= `kFullRangeTurnPairRunouts`, 51,369,120) so on-demand Study equity admits a full-range turn without raising the library default. Dense flop check-downs can still exceed that ceiling. Manual explorer or `equity_calculator` can use the same flag. The caller can also raise or lower the limit through `ShowdownEquityOptions::max_pair_runouts` or `POKER_EQUITY_MAX_PAIR_RUNOUTS`. The calculator does not sample or drop runouts. Cancellation uses `ShowdownEquityOptions::cancel_poll`. One deterministic thread performs the enumeration.
 
-## CLI
+## Historical CLI (removed)
+
+`equity_calculator` is not built. The command and exit codes below are the old C++ tool. Study equity is the IPC surface in the banner.
 
 ```sh
 equity_calculator --board "Kh Kd 7c 4s" \

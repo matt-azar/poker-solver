@@ -57,6 +57,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/
 | Compare runouts | Client `getNode` + rewrite | Study dock + context-strip | Desktop orchestration; no dedicated host report op | `lineCardReport` + LowerDock |
 | Create Build spot from here | Client draft from node + `get_config` | Context strip → Build draft | Midstreet (facing bet / contrib) not supported; asymmetric stacks use `min` | `build/transferFromStudy` |
 | Study assistant (AI) | Client-side unified chat + bounded Study evidence tools | Floating Study assistant (menu bar **Assistant**) | OpenAI credentials required in product UI; no autonomous solve / filesystem; pot type required; silent rake → cEV, silent stack → 100bb | assistant domain vitest — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md), [ai-context](ai-context/README.md) |
+| Algorithm | Host always trains CFR+ (`trainFrozenCfrPlus`) | Settings lists CFR+, Vanilla CFR, and DCFR | The other two values stay on the draft. PSOL v4 stores the CFR+ byte only. Train threads from config are capped by `WorkerBudget` (n−2 on 4+ CPUs) | `formats/src/psol_v4.zig`; `host/src/workers.zig` |
 
 ## Numerical labels (do not relabel without math)
 

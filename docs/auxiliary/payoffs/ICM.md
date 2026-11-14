@@ -46,37 +46,33 @@ Zero-ICM / plain-chip mode is unchanged: keep calling `ChipPayoff::terminal`.
 ## Config
 
 `IcmConfig` carries tournament `stacks[]` and `payouts[]`. Empty `stacks`
-means ICM is off. `StreetConfig::stack` / `RiverConfig::stack` remain the
-betting effective stack for the hand — not tournament ICM stacks.
+means ICM is off. The betting `stack` field is the effective stack for the
+hand, not the tournament ICM stacks.
 
-`street-config 1` / `river-config 1` emit `icm-stacks` / `icm-payouts` only
-when stacks are non-empty. Empty or omitted stacks leave the chip/rake path
-unchanged. Zig keeps Malmuth-Harville math pins under `engine/`; Study still
-serializes the keys in draft/config text.
+`street-config 1` writes `icm-stacks` / `icm-payouts` only when stacks are
+non-empty. Empty or omitted stacks leave the chip/rake path unchanged.
+Malmuth-Harville pins live under `engine/src/poker/icm_rematch_test.zig`.
 
-**Product stance (ZR-93):** ICM Study solves stay **reject-until-done**
-(consistent ICM in train/BR/EV; payout units; busted finishing-place credit).
-ICM is **low priority — not a near-term release blocker**. Do not invent a
-finished Study ICM shipping claim from the math pins alone.
+Study Settings has an ICM switch. With it on, the draft requires at least two
+stacks and writes `icm-stacks` / `icm-payouts` into `street-config 1`. Compile
+validates those arrays (`engine/src/poker/icm.zig`). Empty stacks leave ICM off.
+Do not treat the math pins as a Pio ICM parity claim.
 
 Historical C++ Explorer Job JSON used flat keys `icm_stacks` / `icm_payouts`
-and returned HTTP 400 on invalid values; that HTTP surface is removed on
-`main`.
+and returned HTTP 400 on invalid values. That HTTP surface is removed.
 
 ## Solve path
 
-When ICM is enabled on a compiled game, chip/rake terminals are wrapped with
-the chip→ICM delta (`applyIcmTerminal` / historical `IcmPayoff::from_chip_terminal`).
-Empty ICM reproduces chip/rake terminals bit-identically. HU WTA fold and
-check-down pins match the chip→ICM examples above (chip `+50` → ICM `+2.5` on
-equal 1000 stacks with prize 100). Historical C++ sites were
-`StreetGame` / `StreetBatch` / `RiverBatchSolver` payoffs; Zig Session terminals
-follow the same wrap once ZR-93 completeness lands for Study solves.
+When ICM stacks are present, chip/rake terminals are wrapped with the
+chip→ICM delta (`applyIcmTerminal` in `engine/src/poker/icm.zig`, called from
+`engine/src/kernel/terminal.zig`). Empty ICM keeps the chip/rake terminal.
+HU WTA fold and check-down pins match the examples above (chip `+50` → ICM
+`+2.5` on equal 1000 stacks with prize 100). The removed C++ sites were
+`StreetGame`, `StreetBatch`, and `RiverBatchSolver`.
 
-Nash-gap and best-response helpers that assume chip zero-sum remain
-approximate under ICM (same caveat as positive rake). Multiway spectators are
-accepted by the adapter but the p0-scalar CFR path is HU-oriented; incentives
-CFR hooks beyond the p0 scalar, dual-utility Nash-gap, action-EV unit labels,
-and dedicated PSOL ICM UI fields beyond config round-trip are out of scope
-here. Action-label incentives are a separate overlay after this wrap
+Regret uses each seat's own utility. NashConv is the sum of the two
+unilateral gains, `(br0-u0)+(br1-u1)`, including when ICM or rake makes the
+utilities non-zero-sum (`engine/src/analysis/evaluation.zig`). The sum of the
+two best-response utilities is a different number in that case. Action-label
+incentives are a separate overlay after this wrap
 ([INCENTIVES.md](INCENTIVES.md)).

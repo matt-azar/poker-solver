@@ -45,9 +45,11 @@ Check-down is worth +50 with aces and -50 with fives. A fold to the all-in wins 
 - Kings call with probability 1/2.
 - Player 0's value is +25.
 
-`tests/unit/test_river.cpp` checks this profile. The solver computes it.
+`tests/unit/test_river.cpp` recorded this profile. That file is gone. The numbers are kept here as the checked toy.
 
-## Command line
+## Historical command line (removed)
+
+`river_solver` is not built. The commands below are the old C++ CLI.
 
 ```sh
 river_solver --config configs/river_default.json
@@ -67,6 +69,6 @@ The reported Nash gap is NashConv, the sum of unilateral BR gains
 `--accuracy` defaults to pot fraction; `--gap-threshold` is Accuracy in chips.
 Player 0 is out of position.
 
-## Strategy report
+## Historical strategy report
 
-`--report FILE` writes a `strategy-report 1` document after the solve (`-` for stdout). Fields match the street solver export. On the public-tree path, root-action probabilities are the **reach-weighted** mixture from root inspection (`weighting reach`), the same aggregation as `street_solver`. `--reference` falls back to an unweighted open-infoset mean. There is still no batch queue.
+The removed `river_solver --report FILE` wrote a `strategy-report 1` document (`-` for stdout). On the public-tree path, root-action probabilities were the reach-weighted mixture from root inspection. `--reference` fell back to an unweighted open-infoset mean. There is still no batch queue. Current Study saves are PSOL v4.

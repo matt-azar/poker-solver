@@ -1,6 +1,6 @@
 # Opponent incentives
 
-Action-label / category-tag utility overlay on a base `PlayerPayoff` (chip or ICM), wired through street/river solve terminals, dual-utility best response / CFR, and explorer Job JSON/GUI. Chip EV: [RAKE.md](RAKE.md). ICM: [ICM.md](ICM.md).
+Action-label / category-tag utility overlay on a chip or ICM terminal. Chip EV: [RAKE.md](RAKE.md). ICM: [ICM.md](ICM.md).
 
 ## Model
 
@@ -46,7 +46,7 @@ edge-tag b100 bluff
 edge-tag 1 f give_up
 ```
 
-CLI:
+`street-config 1` lines are the live format. The removed C++ CLIs used:
 
 - `--incentive kind,player,key,delta` (repeatable) on `street_solver` /
   `river_solver`
@@ -74,14 +74,10 @@ match on the solve path. Combo / draw category auto-tagging remains ahead.
 
 ## Solve path
 
-After `ChipPayoff::terminal(..., rake)` and optional ICM, matching rules are
-path-attributed at terminals: every betting action on the root-to-terminal path
-contributes its matching deltas via `apply_path_incentives`. Sites:
-
-- `StreetGame::terminal_payoff` / `RiverGame::terminal_payoff`
-- `StreetBatch` serial `payoff` / `apply_terminal` (precomputed `incentive_u0` /
-  `incentive_u1`)
-- `RiverBatchSolver::payoff` (precomputed `incentive_u0` / `incentive_u1`)
+After the chip+rake terminal and optional ICM, `engine/src/kernel/terminal.zig`
+adds the path's precomputed `incentive_u0` / `incentive_u1`. The removed C++
+sites did the same add on `StreetGame`, `RiverGame`, `StreetBatch`, and
+`RiverBatchSolver`.
 
 Empty incentives reproduce prior chip/ICM terminals bit-identically.
 

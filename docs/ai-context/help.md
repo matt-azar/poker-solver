@@ -96,7 +96,7 @@ Not mounted as Build form controls (but still draft fields the assistant may wri
 
 ### Settings (Solve section)
 
-Settings dialog (menu **Settings → Open settings…**): algorithm (`cfr_plus` | `cfr` | `dcfr`), samples, threads, memory MiB, solution path, incentives, edge tags, ICM stacks/payouts, display prefs (theme, **EV display** Local / **Global EV (root-centered)**, bet-size labels).
+Settings dialog (menu **Settings → Open settings…**): algorithm draft (`cfr_plus` | `cfr` | `dcfr`), samples, threads, memory MiB, solution path, incentives, edge tags, ICM stacks/payouts, display prefs (theme, **EV display** Local / **Global EV (root-centered)**, bet-size labels). The engine trains CFR+ for every algorithm draft value. PSOL saves store the CFR+ algorithm byte.
 
 ### Study / other
 

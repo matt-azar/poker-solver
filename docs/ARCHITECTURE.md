@@ -4,6 +4,23 @@
 
 Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [DESKTOP_UI.md](DESKTOP_UI.md), [HOLDEM.md](HOLDEM.md). Retired HTTP explorer notes: [EXPLORER.md](EXPLORER.md).
 
+## Current layout
+
+`zig build` installs `solver-engine` (Study IPC), `street-config-check` (parse a `street-config 1` file), and `gate-bench` (optional measurement harness). The shipped trainer is CFR+. PSOL files are version 4 and store that algorithm byte (`formats/src/psol_v4.zig`).
+
+| Path | Role |
+| --- | --- |
+| `engine/src/poker/` | Cards, evaluator, ranges, chips, rake, ICM, incentives |
+| `engine/src/game/` | `street-config 1`, betting rules, compile |
+| `engine/src/solve/` | CFR+ train, frozen walk, locks, strategy edits |
+| `engine/src/analysis/` | Action values, equity, categories, best response |
+| `engine/src/kernel/terminal.zig` | Chip + rake, then ICM, then path incentives |
+| `app/src/session.zig` | Session train, pause, save, open |
+| `host/` | `solver-engine` typed IPC |
+| `desktop/` | React Study UI and Tauri shell |
+
+Study Settings lists CFR+, Vanilla CFR, and DCFR. The host trains with `trainFrozenCfrPlus` either way.
+
 ## One postflop tree
 
 | Board | Production idea | Reference / oracle idea |
@@ -79,11 +96,13 @@ On the street/river path, player 0 is out of position. Chance deals ordered hand
 
 ## Solver storage
 
-`StreetBatchSolver` stores regret, strategy-sum, and one shared sigma workspace as `TableScalar` (`float`) tables, with a compact offset table from information set to first action. Slot lookup is keyed by public node, legal runout (off-board card or ordered pair), and supported hand — not a dense `52×52×hands` map. One-action decisions omit stored rows (implicit probability 1). The sigma workspace holds the frozen strategy during a training pass and the normalized average during evaluation; those two views are mutually exclusive, so they share one full-size buffer. Counterfactual values, NashConv, and other sensitive reductions stay double. `CfrTrainer` (Hold’em reference enumerators) and legacy `RiverBatchSolver` keep `double` tables. The action-count scratch limit is 8 per information set. See `include/solver/table_scalar.hpp` and [STREETS.md](STREETS.md).
+The layout in this section is the removed C++ `StreetBatchSolver`. Zig training tables are in `engine/src/solve/training_state.zig`. The CFR+ floor and the NashConv definition below still match the Zig trainer.
+
+`StreetBatchSolver` stored regret, strategy-sum, and one shared sigma workspace as `TableScalar` (`float`) tables, with a compact offset table from information set to first action. Slot lookup is keyed by public node, legal runout (off-board card or ordered pair), and supported hand — not a dense `52×52×hands` map. One-action decisions omit stored rows (implicit probability 1). The sigma workspace holds the frozen strategy during a training pass and the normalized average during evaluation; those two views are mutually exclusive, so they share one full-size buffer. Counterfactual values, NashConv, and other sensitive reductions stay double. `CfrTrainer` (Hold’em reference enumerators) and legacy `RiverBatchSolver` keep `double` tables. The action-count scratch limit is 8 per information set. See `include/solver/table_scalar.hpp` and [STREETS.md](STREETS.md).
 
 Node locks (`poker::solver::NodeLock` / `LockSet` in `node_lock.hpp`) are an immutable constraint layer keyed by `(infoset / public-node index, turn, river)`. A line lock uses `turn=river=-1` and applies on every runout of that betting line; a node lock keeps the selected cards and applies only there. Lookup prefers the exact runout, then falls back to the line lock. A `FullNode` lock applies one validated action-probability row to every combo; `SelectedCombos` applies that row only to listed combo indices. An empty probability row means unlocked and is distinct from locking an action at probability zero. When `SolveConfig::locks` is set, `CfrTrainer`, `StreetBatchSolver`, and `RiverBatchSolver` call `apply_lock_to_strategy` after regret matching. Explorer locking is street-first.
 
-CFR+ floors the updating player's cumulative regrets once after that player's pass. The opponent's table is unchanged. The average strategy is weighted by the iteration index. Linear CFR weights both the new regret and the average by the iteration index and leaves regrets signed. Fixed DCFR(1.5, 0, 2) discounts signed regrets after each frozen pass. See [MATHEMATICS.md](MATHEMATICS.md).
+CFR+ floors the updating player's cumulative regrets once after that player's pass. The opponent's table is unchanged. The average strategy is weighted by the iteration index. The removed C++ tree also had Linear CFR (iteration weight on regret and average, regrets left signed) and fixed DCFR(1.5, 0, 2). See [MATHEMATICS.md](MATHEMATICS.md).
 
 ## Best response and Nash gap
 

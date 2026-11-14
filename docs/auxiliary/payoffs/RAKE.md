@@ -1,18 +1,16 @@
 # Pot rake
 
-M8 pot-rake model on `ChipPayoff`, wired through street/river training terminals.
+Pot rake on the Zig chip terminal, then applied in training.
 
 ## Config
 
 `RakeConfig` has a `rate` in `[0, 1]` and a chip `cap` with `cap >= 0`. A zero
-cap means uncapped. Invalid values fail `validate()` / `valid()`.
+cap means uncapped. Invalid values fail validation.
 
-`StreetConfig::rake` and `RiverConfig::rake` carry the same fields. Defaults are
-zero (no rake). `street-config 1` / `river-config 1` always write `rake-rate` and
-`rake-cap`. CLI flags `--rake-rate` and `--rake-cap` set them on `street_solver`
-and `river_solver`. Explorer Job JSON uses flat keys `rake_rate` and `rake_cap`
-(same validation); the GUI solve form sends them and status echoes them.
-Building a `StreetGame` or `RiverGame` with an invalid rake rejects the config.
+`street-config 1` always writes `rake-rate` and `rake-cap`. Defaults are zero
+(no rake). Study puts the same numbers on the solve job as `rake_rate` and
+`rake_cap`. Compile rejects an invalid rake. The old `street_solver` /
+`river_solver` flags and Explorer Job JSON used the same field meanings.
 
 ## Collection
 
@@ -42,12 +40,8 @@ Fold win, pot 100, contrib 100/0, IP folds, 5%: no-rake `(50, -50)` becomes
 
 ## Solve path
 
-`StreetGame::terminal_payoff` and `RiverGame::terminal_payoff` pass `config.rake`
-into `ChipPayoff::terminal`. `StreetBatchSolver` and `RiverBatchSolver` use the
-same rake at public-tree / per-deal terminals, including the frozen showdown
-kernel (winner pays full rake; ties split it). CFR still trains on the player-0
-scalar. Nash-gap and best-response helpers that assume chip zero-sum remain
-approximate under positive rake (same caveat as ICM). Opponent incentives are
-out of scope here. Optional ICM wraps these chip terminals afterward; see
-[ICM.md](ICM.md). Zero rake reproduces prior chip terminals and pinned
-fixtures bit-identically.
+`engine/src/kernel/terminal.zig` takes rake on the chip terminal, then optional
+ICM, then path incentives. The winner pays the full rake; ties split it. CFR
+trains on that modeled utility. NashConv under positive rake is the sum of
+the two unilateral gains in that utility. See [ICM.md](ICM.md). Zero rake keeps the
+no-rake chip terminals.
