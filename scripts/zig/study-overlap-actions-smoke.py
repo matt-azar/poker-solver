@@ -342,7 +342,9 @@ def main() -> int:
         require(ready.get("protocol") == 2, f"bad protocol: {ready}")
 
         root_id = "p0.t-1.r-1"
-        long_iters = 50_000
+        # #373 / ZR-178: tiny river ReleaseFast can burn through short jobs before
+        # Stop lands; keep a long live job_id for mid-train cancel.
+        long_iters = 2_000_000
         settle_alloc: list[int] = []
         cycle_notes: list[dict[str, Any]] = []
 
@@ -367,7 +369,7 @@ def main() -> int:
             wait_until_training(inbox, proc, f"solve-{cycle}")
             burst_a = fire_analysis_burst(proc, f"zr152-a-{cycle}", root_id)
 
-            # --- Stop mid-train ---
+            # --- Stop mid-train (job-scoped cancel must match active train id) ---
             write_req(
                 proc,
                 "cancel",
@@ -379,6 +381,10 @@ def main() -> int:
                 "cancel", timeout_s=10.0, request_id=f"zr152-cancel-{cycle}"
             )
             require(cancel_env.get("ok"), f"cancel failed: {cancel_env}")
+            require(
+                body_dict(cancel_env).get("cancelled") is True,
+                f"cancel body (expected live job stop): {cancel_env}",
+            )
             collect_analysis(inbox, burst_a, timeout_s=20.0)
             stopped = wait_until_idle(inbox, proc, f"stop-{cycle}")
             note["after_stop"] = {

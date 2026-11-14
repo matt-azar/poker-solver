@@ -147,6 +147,33 @@ def wait_until_idle(inbox: Inbox, proc: subprocess.Popen, label: str, timeout_s:
     raise SmokeError(f"still running after {timeout_s}s ({label}): {last}")
 
 
+def wait_until_training(
+    inbox: Inbox,
+    proc: subprocess.Popen,
+    label: str,
+    *,
+    timeout_s: float = 5.0,
+) -> dict:
+    """Wait until train is live with progress so job-scoped Stop can match."""
+    deadline = time.monotonic() + timeout_s
+    n = 0
+    while time.monotonic() < deadline:
+        n += 1
+        rid = f"wait-train-{label}-{n}"
+        write_req(proc, "status", None, rid)
+        env = inbox.take(rid, timeout_s=5.0)
+        require(env.get("ok"), f"status failed ({label}): {env}")
+        st = body_dict(env)
+        rev = int(st.get("policy_revision") or 0)
+        iters = int(st.get("iterations") or 0)
+        if st.get("phase") == "training" and (rev > 0 or iters > 0):
+            return st
+        if st.get("running") is False and st.get("phase") != "paused":
+            raise SmokeError(f"{label}: left running before phase=training: {st}")
+        time.sleep(0.001)
+    raise SmokeError(f"{label}: phase never became training with progress")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", default=str(DEFAULT_BINARY))
@@ -203,19 +230,22 @@ def main() -> int:
             "iterations": status_done.get("iterations"),
         }
 
-        # --- longish train + overlapping values; Stop/status must reply fast ---
+        # --- long train + overlapping values; Stop/status must reply fast ---
+        # #373: cancel must match the live active_job_id. Tiny river ReleaseFast
+        # can finish a few hundred iters before Stop lands — use a long job and
+        # wait until training is observed (same pattern as study-contract-smoke).
+        long_iters = 2_000_000
         write_req(
             proc,
             "solve",
-            {"iterations": 200},
+            {"iterations": long_iters},
             "solve-long",
             job_id="j-zr151-long",
         )
         admit_long = inbox.take("solve-long", timeout_s=10.0)
         require(admit_long.get("ok"), f"long admit failed: {admit_long}")
+        wait_until_training(inbox, proc, "long")
 
-        # Give train a moment to be mid-iteration, then fire values + controls.
-        time.sleep(0.05)
         write_req(proc, "values", {"node_index": 0}, "values-live")
         t_status = time.monotonic()
         write_req(proc, "status", None, "status-during-values")
@@ -282,12 +312,22 @@ def main() -> int:
         }
 
         # --- compile cancel: Stop before/during begin keeps prior solution ---
+        # #373: begin must register the same job_id Stop will match.
         prior_id = status_fresh.get("solution_id")
-        write_req(proc, "begin_config", {"config_text": config_text}, "begin-cancel")
+        write_req(
+            proc,
+            "begin_config",
+            {"config_text": config_text},
+            "begin-cancel",
+            job_id="j-zr151-begin",
+        )
         # Immediately request stop so begin observes Cancelled at a stage boundary.
         write_req(proc, "cancel", None, "cancel-begin", job_id="j-zr151-begin")
         cancel_begin = inbox.take("cancel-begin", timeout_s=5.0)
         require(cancel_begin.get("ok"), f"cancel during begin failed: {cancel_begin}")
+        cancel_begin_body = body_dict(cancel_begin)
+        # Tiny fixtures may finish before Stop matches — not_running is ok then.
+        begin_stop_latched = cancel_begin_body.get("cancelled") is True
         begin_cancel = inbox.take("begin-cancel", timeout_s=30.0)
         # begin may finish before cancel lands on tiny fixtures (ok), or return cancelled.
         begin_cancelled = (not begin_cancel.get("ok")) and begin_cancel.get(
@@ -301,6 +341,7 @@ def main() -> int:
             )
         stages["compile_cancel"] = {
             "begin_cancelled": begin_cancelled,
+            "begin_stop_latched": begin_stop_latched,
             "begin_ok": bool(begin_cancel.get("ok")),
             "error_code": begin_cancel.get("error_code"),
             "solution_id": status_after_begin.get("solution_id"),
