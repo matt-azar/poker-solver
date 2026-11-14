@@ -22,7 +22,6 @@ fn checkOnlyRiver(allocator: std.mem.Allocator, oop: []const u8, ip: []const u8)
         \\ip-range {s}
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -67,7 +66,6 @@ test "nashconv zero under rake uses gain formula" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -105,7 +103,6 @@ test "inspect copies published strategy rows" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -157,7 +154,6 @@ test "inspect root reach uses range-weight scale not deal probability" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -211,7 +207,6 @@ test "action ev local_offset makes fold local zero when facing bet" {
         \\oop-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -329,7 +324,6 @@ test "inspect flop root reach uses range-weight scale not 1/n deal mass" {
         \\ip-range 2s2h:1,3s3h:1,4s4h:1,5s5h:1,6s6h:1,8s8h:1,9s9h:1,TsTh:1,JsJh:1,QsQh:1,KsKh:1,AsAc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -373,7 +367,6 @@ test "inspect flop post-chance turn reach uses range-weight scale" {
         \\ip-bets -
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -430,7 +423,6 @@ test "inspect turn root reach uses range-weight scale" {
         \\ip-range JcJd:1,TcTd:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

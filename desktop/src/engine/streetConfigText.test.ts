@@ -36,8 +36,8 @@ describe("formatSolveJobStreetConfig", () => {
       oop_river_bets: [1],
       ip_river_bets: [1],
       max_raises: 0,
-      allow_all_in: 1,
       allow_three_bet: 1,
+      all_in_threshold: 0.5,
       iterations: 1,
       memory_mib: 256,
       threads: 1,
@@ -66,7 +66,6 @@ describe("formatSolveJobStreetConfig", () => {
       oop_raises: [0.75],
       ip_raises: [0.75],
       max_raises: 2,
-      allow_all_in: 1,
       allow_three_bet: 1,
       all_in_threshold: 0,
       pot_cap: 0,
@@ -103,8 +102,8 @@ describe("parseStreetConfigTextToSolutionConfig", () => {
     expect(parsed.oop_range).toBe("AcAd:1");
     expect(parsed.ip_range).toBe("2c3d:1");
     expect(parsed.max_raises).toBe(0);
-    expect(parsed.allow_all_in).toBe(0);
     expect(parsed.allow_three_bet).toBe(1);
+    expect(parsed.all_in_threshold).toBe(0.5);
     expect(parsed.memory_mib).toBe(64);
     expect(parsed.threads).toBe(1);
     expect(parsed.street_config_text).toBe(text);

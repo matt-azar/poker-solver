@@ -14,7 +14,6 @@ fn compileWithEdits(edits_block: []const u8) !compile.CompiledGame {
         \\ip-range JcJd:1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -144,7 +143,6 @@ test "add-size respects pot-cap clamp" {
         \\ip-range JcJd:1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0.25
@@ -182,7 +180,6 @@ test "add-size min-raise rejection when facing" {
         \\ip-range JcJd:1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -217,7 +214,6 @@ test "add-size all-in-threshold shove-up" {
         \\ip-range JcJd:1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0.8
         \\pot-cap 0
@@ -265,7 +261,6 @@ test "all-in compact path token matches Bet N all-in" {
         \\ip-range 2c3d:1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

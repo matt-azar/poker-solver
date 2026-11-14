@@ -1,6 +1,6 @@
 # Mathematics
 
-Definitions used by the Hold'em street/river solvers and the shared CFR trainer.
+Definitions used by the postflop solver. The shipped trainer is CFR+. The vanilla, linear, and DCFR sections record schedules from the removed C++ tree.
 
 ## Hold'em showdown and hand distributions
 
@@ -95,7 +95,7 @@ Fixed DCFR(α=1.5, β=0, γ=2) uses alternating frozen passes like CFR+, keeps s
 
 ## Best response and Nash gap
 
-With \(\bar\sigma_{-i}\) frozen, player \(i\)'s best response maximizes that player's utility. The **Nash gap** reported by the CLI is NashConv, the sum of unilateral deviation gains under the same modeled payoff as training:
+With \(\bar\sigma_{-i}\) frozen, player \(i\)'s best response maximizes that player's utility. The reported **Nash gap** is NashConv, the sum of unilateral deviation gains under the same modeled payoff as training:
 
 \[
 \bigl(u_0(\mathrm{BR}_0,\bar\sigma_1)-u_0(\bar\sigma)\bigr)

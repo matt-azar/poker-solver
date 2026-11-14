@@ -303,20 +303,13 @@ describe("openDraftBase / draftFromOpenedSolution", () => {
     expect(inherited.oopTurn).toBe("");
     expect(inherited.ipTurn).toBe("");
     expect(inherited.oopFlopRaises).toBe("-");
-    expect(inherited.allowAllIn).toBeUndefined();
 
-    const withAllInFlag = draftPartialFromSolutionConfig({
-      allow_all_in: true,
+    const withThreshold = draftPartialFromSolutionConfig({
       oop_bets: [0.5],
       ip_bets: [0.5],
+      all_in_threshold: 0.5,
     });
-    expect(withAllInFlag.allowAllIn).toBe(true);
-    const withoutAllInFlag = draftPartialFromSolutionConfig({
-      allow_all_in: false,
-      oop_bets: [0.5],
-      ip_bets: [0.5],
-    });
-    expect(withoutAllInFlag.allowAllIn).toBe(false);
+    expect(withThreshold.allInThreshold).toBe(0.5);
 
     const checkOnly = draftPartialFromSolutionConfig({
       oop_bets: [],

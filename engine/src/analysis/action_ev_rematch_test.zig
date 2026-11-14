@@ -93,7 +93,6 @@ fn riverBluffConfig(allocator: std.mem.Allocator) !compile.CompiledGame {
         \\oop-river-bets 1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -217,7 +216,6 @@ test "local_offset includes street contrib after bet+call" {
         \\ip-turn-bets 0.5
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -320,7 +318,6 @@ fn flopCheckOnlyTurnBluffConfig(allocator: std.mem.Allocator) !compile.CompiledG
         \\oop-turn-bets 1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -458,7 +455,6 @@ test "frozen-root Q_i matches deal-by-deal under unequal OOP priors" {
         \\oop-river-bets 1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -507,7 +503,6 @@ test "frozen-root flop check-only Q_i matches deal-by-deal" {
         \\ip-bets -
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

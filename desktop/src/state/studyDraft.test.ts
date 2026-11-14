@@ -130,8 +130,8 @@ describe("buildJob Accuracy % field", () => {
   });
 });
 
-describe("buildJob allow_all_in", () => {
-  it("sends allow_all_in: 0 for Build sizes without a", () => {
+describe("buildJob all-in", () => {
+  it("defaults all_in_threshold to half stack and does not invent a", () => {
     const job = buildJob({
       ...DEFAULT_SPOT,
       boardText: "Ah Kd 7c",
@@ -141,9 +141,8 @@ describe("buildJob allow_all_in", () => {
       ipTurn: "50",
       oopRiver: "50",
       ipRiver: "50",
-      allowAllIn: true, // draft flag must not invent engine all-in
     });
-    expect(job.allow_all_in).toBe(0);
+    expect(job.all_in_threshold).toBe(0.5);
     expect(job.oop_flop_bets).toEqual([0.5]);
     expect(job.oop_flop_bets).not.toContain(ALL_IN_SPEC);
   });
@@ -159,7 +158,6 @@ describe("buildJob allow_all_in", () => {
       oopRiver: "a",
       ipRiver: "50, a",
     });
-    expect(job.allow_all_in).toBe(0);
     expect(job.oop_flop_bets).toEqual([0.5, ALL_IN_SPEC]);
     expect(job.oop_river_bets).toEqual([ALL_IN_SPEC]);
     expect(job.ip_river_bets).toEqual([0.5, ALL_IN_SPEC]);

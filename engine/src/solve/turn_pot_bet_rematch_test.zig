@@ -37,7 +37,6 @@ test "turn check-down AhAd vs 3d2c pins +50 / gap 0 vs tip C++" {
         \\ip-range 3d2c:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

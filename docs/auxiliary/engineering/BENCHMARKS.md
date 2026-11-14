@@ -11,7 +11,7 @@ cutover blockers.
 
 ## Five-card evaluator
 
-Same machine and compiler. The unit suite (then one binary, `poker_solver_tests`; now `poker_engine_tests`) evaluates all `C(52, 5) = 2,598,960` five-card hands in two card orders, which is 5,197,920 calls to `evaluate`. Measured time: 0.5565473 seconds, about 9.340e6 evaluations per second. The check confirms that reordering a hand keeps the same value. The timed work is those 5,197,920 five-card calls.
+Same machine and compiler. The C++ unit binary `poker_solver_tests` evaluated all `C(52, 5) = 2,598,960` five-card hands in two card orders, which is 5,197,920 calls to `evaluate`. Measured time: 0.5565473 seconds, about 9.340e6 evaluations per second. The check confirms that reordering a hand keeps the same value. The timed work is those 5,197,920 five-card calls. That binary is gone. Current engine tests are `zig build test`.
 
 ## River
 
@@ -26,7 +26,7 @@ The unit-test toy (aces or fives versus kings, one all-in) is smaller: 4 informa
 
 ## Public-tree river traversal
 
-Same machine and compiler, measured when `RiverBatchSolver` was the river product path. Current `river_solver` uses `StreetBatchSolver`. The numbers below are from that earlier run. `runtime_seconds` is the regret loop. Wall time is the process from start to exit, so it includes tree construction and the final best-response pass. The reference rows use `river_solver --reference`. The public-tree rows use the default traversal. Strategies on the unit-test trees matched the reference with a maximum absolute difference of 0. The values below are from these CLI runs.
+Same machine and compiler, measured when `RiverBatchSolver` was the river product path. A later C++ `river_solver` used `StreetBatchSolver`. Both binaries are gone. The numbers below are from that earlier run. `runtime_seconds` is the regret loop. Wall time is the process from start to exit, so it includes tree construction and the final best-response pass. The reference rows use `river_solver --reference`. The public-tree rows use the default traversal. Strategies on the unit-test trees matched the reference with a maximum absolute difference of 0. The values below are from these CLI runs.
 
 `22+` versus `22+`, same board, pot, stack, and sizes as the table above, 30 vanilla CFR iterations. 3,684 deals, 882 information sets, 51,576 decision nodes, 92,100 terminals.
 

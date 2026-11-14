@@ -20,7 +20,6 @@ fn tinyTurnConfig(allocator: std.mem.Allocator, oop: []const u8, ip: []const u8)
         \\oop-turn-bets 1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

@@ -35,7 +35,6 @@ const BOOLEAN_KEYS = [
   "donkTurn",
   "donkRiver",
   "noThreeBet",
-  "allowAllIn",
 ] as const;
 
 const NUMBER_KEYS = [
@@ -131,7 +130,6 @@ export function bettingTreeFromDraft(
     potCap: draft.potCap,
     noThreeBet: draft.noThreeBet,
     allInThreshold: draft.allInThreshold,
-    allowAllIn: draft.allowAllIn,
     maxRaises: draft.maxRaises,
     treeEdits: [...draft.treeEdits],
   };
