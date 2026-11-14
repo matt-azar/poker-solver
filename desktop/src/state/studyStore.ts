@@ -818,6 +818,13 @@ function prefetchChildValues(
   node: NodePayload,
   revision: number,
 ): void {
+  // Non-root flop/turn EV is deal-by-deal and can take minutes per child on wide
+  // ranges; that saturates the single host analysis worker behind live equity.
+  // River children stay cheap — warm those only (AGENT_LESSONS: no full-tree frontload).
+  const boardLen = Array.isArray(node.board) ? node.board.length : 0;
+  if (boardLen > 0 && boardLen < 5) {
+    return;
+  }
   const children = node.children;
   if (!children?.length) {
     return;

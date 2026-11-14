@@ -83,6 +83,39 @@ fn compareHoles(
     return hand_eval.compareShowdown(h0[0], h0[1], h1[0], h1[1], board) catch return error.InvalidEquity;
 }
 
+/// Completions for one compatible hole-pair (4 distinct holes off the board).
+/// Flop: C(45,2)=990 unordered turn+river; turn: 44 rivers; river: 1.
+fn completionsPerCompatiblePair(board_len: usize) u64 {
+    if (board_len == 5) return 1;
+    if (board_len != 3 and board_len != 4) return 0;
+    const remaining: u64 = 52 - @as(u64, @intCast(board_len)) - 4;
+    if (board_len == 4) return remaining;
+    return remaining * (remaining - 1) / 2;
+}
+
+/// Count legal pair-runouts in O(n0·n1) — never nest the runout list in the
+/// preflight (wide flop O(n²·C(45,2)) counting alone starved Study for minutes).
+fn countCompatiblePairRunouts(
+    board: []const card.Card,
+    combos0: []const i32,
+    combos1: []const i32,
+) u64 {
+    const per = completionsPerCompatiblePair(board.len);
+    if (per == 0) return 0;
+    var legal: u64 = 0;
+    for (combos0) |c0| {
+        const p0 = range_mod.Range.comboCards(c0) catch continue;
+        if (boardBlocked(board, p0[0], p0[1])) continue;
+        for (combos1) |c1| {
+            const p1 = range_mod.Range.comboCards(c1) catch continue;
+            if (boardBlocked(board, p1[0], p1[1])) continue;
+            if (cardsOverlap(p0[0], p0[1], p1[0], p1[1])) continue;
+            legal += per;
+        }
+    }
+    return legal;
+}
+
 /// Check-down showdown equity for a fixed board (Phase 4: river first; flop/turn via enumeration).
 /// Tie contributes half. Values are pot fractions in [0, 1], not chip EV.
 pub fn showdownEquity(
@@ -112,21 +145,12 @@ pub fn showdownEquity(
     result.player0.combos = try allocComboRows(allocator, combos0.items, range0);
     result.player1.combos = try allocComboRows(allocator, combos1.items, range1);
 
-    // Estimate work for river (board.len==5): one runout per legal pair.
+    // Work preflight before allocating runout lists / showdown bins.
+    const legal = countCompatiblePairRunouts(board, combos0.items, combos1.items);
+    result.pair_runouts = legal;
+    if (legal > max_pair_runouts) return error.WorkLimit;
+
     if (board.len == 5) {
-        var legal: u64 = 0;
-        for (combos0.items) |c0| {
-            const p0 = range_mod.Range.comboCards(c0) catch continue;
-            if (boardBlocked(board, p0[0], p0[1])) continue;
-            for (combos1.items) |c1| {
-                const p1 = range_mod.Range.comboCards(c1) catch continue;
-                if (boardBlocked(board, p1[0], p1[1])) continue;
-                if (cardsOverlap(p0[0], p0[1], p1[0], p1[1])) continue;
-                legal += 1;
-            }
-        }
-        result.pair_runouts = legal;
-        if (legal > max_pair_runouts) return error.WorkLimit;
         try fillRiverEquity(&result, board, range0, range1, combos0.items, combos1.items);
         return result;
     }
@@ -155,28 +179,6 @@ pub fn showdownEquity(
         }
     }
 
-    var legal_pairs: u64 = 0;
-    for (combos0.items) |c0| {
-        const p0 = range_mod.Range.comboCards(c0) catch continue;
-        if (boardBlocked(board, p0[0], p0[1])) continue;
-        for (combos1.items) |c1| {
-            const p1 = range_mod.Range.comboCards(c1) catch continue;
-            if (boardBlocked(board, p1[0], p1[1])) continue;
-            if (cardsOverlap(p0[0], p0[1], p1[0], p1[1])) continue;
-            // Count runouts that also avoid hole cards.
-            var count: u64 = 0;
-            for (runouts.items) |ro| {
-                if (ro[0] == p0[0] or ro[0] == p0[1] or ro[0] == p1[0] or ro[0] == p1[1]) continue;
-                if (board.len == 3) {
-                    if (ro[1] == p0[0] or ro[1] == p0[1] or ro[1] == p1[0] or ro[1] == p1[1]) continue;
-                }
-                count += 1;
-            }
-            legal_pairs += count;
-        }
-    }
-    result.pair_runouts = legal_pairs;
-    if (legal_pairs > max_pair_runouts) return error.WorkLimit;
     try fillRunoutEquity(&result, board, range0, range1, combos0.items, combos1.items, runouts.items);
     return result;
 }
@@ -259,6 +261,58 @@ fn fillRunoutEquity(
 ) EquityError!void {
     _ = range0;
     _ = range1;
+    const per_pair = completionsPerCompatiblePair(board.len);
+    if (per_pair == 0 or runouts.len == 0) return;
+    const inv_runouts: f64 = 1.0 / @as(f64, @floatFromInt(per_pair));
+
+    const allocator = result.allocator;
+    const holes0 = allocator.alloc([2]card.Card, combos0.len) catch return error.OutOfMemory;
+    defer allocator.free(holes0);
+    const holes1 = allocator.alloc([2]card.Card, combos1.len) catch return error.OutOfMemory;
+    defer allocator.free(holes1);
+    const live0 = allocator.alloc(bool, combos0.len) catch return error.OutOfMemory;
+    defer allocator.free(live0);
+    const live1 = allocator.alloc(bool, combos1.len) catch return error.OutOfMemory;
+    defer allocator.free(live1);
+    const ranks0 = allocator.alloc(hand_eval.HandValue, combos0.len) catch return error.OutOfMemory;
+    defer allocator.free(ranks0);
+    const ranks1 = allocator.alloc(hand_eval.HandValue, combos1.len) catch return error.OutOfMemory;
+    defer allocator.free(ranks1);
+    const ranked0 = allocator.alloc(bool, combos0.len) catch return error.OutOfMemory;
+    defer allocator.free(ranked0);
+    const ranked1 = allocator.alloc(bool, combos1.len) catch return error.OutOfMemory;
+    defer allocator.free(ranked1);
+
+    @memset(live0, false);
+    @memset(live1, false);
+    for (combos0, 0..) |c0, i| {
+        const p0 = range_mod.Range.comboCards(c0) catch continue;
+        holes0[i] = p0;
+        if (!boardBlocked(board, p0[0], p0[1])) live0[i] = true;
+    }
+    for (combos1, 0..) |c1, i| {
+        const p1 = range_mod.Range.comboCards(c1) catch continue;
+        holes1[i] = p1;
+        if (!boardBlocked(board, p1[0], p1[1])) live1[i] = true;
+    }
+
+    // Compatible-mass is runout-independent for off-board pairs — fill once.
+    for (combos0, 0..) |_, row0| {
+        if (!live0[row0]) continue;
+        const p0 = holes0[row0];
+        const w0 = result.player0.combos[row0].input_weight;
+        if (!(w0 > 0)) continue;
+        for (combos1, 0..) |_, row1| {
+            if (!live1[row1]) continue;
+            const p1 = holes1[row1];
+            if (cardsOverlap(p0[0], p0[1], p1[0], p1[1])) continue;
+            const w1 = result.player1.combos[row1].input_weight;
+            if (!(w1 > 0)) continue;
+            result.player0.combos[row0].compatible_mass += w1;
+            result.player1.combos[row1].compatible_mass += w0;
+        }
+    }
+
     var joint: f64 = 0;
     var win0: f64 = 0;
     var tie0: f64 = 0;
@@ -266,51 +320,85 @@ fn fillRunoutEquity(
     var board_buf: [5]card.Card = undefined;
     @memcpy(board_buf[0..board.len], board);
 
-    for (combos0, 0..) |c0, row0| {
-        const p0 = range_mod.Range.comboCards(c0) catch continue;
-        if (boardBlocked(board, p0[0], p0[1])) continue;
-        const w0 = result.player0.combos[row0].input_weight;
-        for (combos1, 0..) |c1, row1| {
-            const p1 = range_mod.Range.comboCards(c1) catch continue;
-            if (boardBlocked(board, p1[0], p1[1])) continue;
-            if (cardsOverlap(p0[0], p0[1], p1[0], p1[1])) continue;
-            const w1 = result.player1.combos[row1].input_weight;
-            if (w0 * w1 == 0) continue;
-            var local_win: f64 = 0;
-            var local_tie: f64 = 0;
-            var local_loss: f64 = 0;
-            var runout_count: f64 = 0;
-            for (runouts) |ro| {
-                if (ro[0] == p0[0] or ro[0] == p0[1] or ro[0] == p1[0] or ro[0] == p1[1]) continue;
-                var len = board.len;
-                board_buf[len] = ro[0];
-                len += 1;
-                if (board.len == 3) {
-                    if (ro[1] == p0[0] or ro[1] == p0[1] or ro[1] == p1[0] or ro[1] == p1[1]) continue;
-                    board_buf[len] = ro[1];
-                    len += 1;
+    // Runout-outer: evaluate each hand once per board, then compare ranks.
+    // Avoids O(n0·n1·runouts) full showdown re-evals on wide flop/turn ranges.
+    for (runouts) |ro| {
+        var len = board.len;
+        board_buf[len] = ro[0];
+        len += 1;
+        if (board.len == 3) {
+            board_buf[len] = ro[1];
+            len += 1;
+        }
+        const full = board_buf[0..len];
+
+        @memset(ranked0, false);
+        @memset(ranked1, false);
+        for (combos0, 0..) |_, row0| {
+            if (!live0[row0]) continue;
+            const p0 = holes0[row0];
+            if (p0[0] == ro[0] or p0[1] == ro[0]) continue;
+            if (board.len == 3 and (p0[0] == ro[1] or p0[1] == ro[1])) continue;
+            var cards: [7]card.Card = undefined;
+            cards[0] = p0[0];
+            cards[1] = p0[1];
+            @memcpy(cards[2 .. 2 + full.len], full);
+            ranks0[row0] = hand_eval.evaluate(cards[0 .. 2 + full.len]) catch return error.InvalidEquity;
+            ranked0[row0] = true;
+        }
+        for (combos1, 0..) |_, row1| {
+            if (!live1[row1]) continue;
+            const p1 = holes1[row1];
+            if (p1[0] == ro[0] or p1[1] == ro[0]) continue;
+            if (board.len == 3 and (p1[0] == ro[1] or p1[1] == ro[1])) continue;
+            var cards: [7]card.Card = undefined;
+            cards[0] = p1[0];
+            cards[1] = p1[1];
+            @memcpy(cards[2 .. 2 + full.len], full);
+            ranks1[row1] = hand_eval.evaluate(cards[0 .. 2 + full.len]) catch return error.InvalidEquity;
+            ranked1[row1] = true;
+        }
+
+        for (combos0, 0..) |_, row0| {
+            if (!ranked0[row0]) continue;
+            const p0 = holes0[row0];
+            const w0 = result.player0.combos[row0].input_weight;
+            if (!(w0 > 0)) continue;
+            for (combos1, 0..) |_, row1| {
+                if (!ranked1[row1]) continue;
+                const p1 = holes1[row1];
+                if (cardsOverlap(p0[0], p0[1], p1[0], p1[1])) continue;
+                const w1 = result.player1.combos[row1].input_weight;
+                if (!(w1 > 0)) continue;
+                const mass = w0 * w1;
+                const scale = mass * inv_runouts;
+                const cmp = hand_eval.compareValues(ranks0[row0], ranks1[row1]);
+                // joint / compatible_mass are filled once above; only W/T/L here.
+                if (cmp > 0) {
+                    win0 += scale;
+                    result.player0.combos[row0].win += w1 * inv_runouts;
+                    result.player1.combos[row1].loss += w0 * inv_runouts;
+                } else if (cmp < 0) {
+                    loss0 += scale;
+                    result.player0.combos[row0].loss += w1 * inv_runouts;
+                    result.player1.combos[row1].win += w0 * inv_runouts;
+                } else {
+                    tie0 += scale;
+                    result.player0.combos[row0].tie += w1 * inv_runouts;
+                    result.player1.combos[row1].tie += w0 * inv_runouts;
                 }
-                const cmp = try compareHoles(board_buf[0..len], .{ p0[0], p0[1] }, .{ p1[0], p1[1] });
-                runout_count += 1;
-                if (cmp > 0) local_win += 1 else if (cmp < 0) local_loss += 1 else local_tie += 1;
             }
-            if (runout_count == 0) continue;
-            const mass = w0 * w1;
-            const scale = mass / runout_count;
-            joint += mass;
-            result.player0.combos[row0].compatible_mass += w1;
-            result.player1.combos[row1].compatible_mass += w0;
-            win0 += scale * local_win;
-            tie0 += scale * local_tie;
-            loss0 += scale * local_loss;
-            result.player0.combos[row0].win += (w1 / runout_count) * local_win;
-            result.player0.combos[row0].tie += (w1 / runout_count) * local_tie;
-            result.player0.combos[row0].loss += (w1 / runout_count) * local_loss;
-            result.player1.combos[row1].win += (w0 / runout_count) * local_loss;
-            result.player1.combos[row1].tie += (w0 / runout_count) * local_tie;
-            result.player1.combos[row1].loss += (w0 / runout_count) * local_win;
         }
     }
+
+    // Joint mass = sum of compatible pair weights (runout-independent).
+    for (combos0, 0..) |_, row0| {
+        if (!live0[row0]) continue;
+        const w0 = result.player0.combos[row0].input_weight;
+        if (!(w0 > 0)) continue;
+        joint += w0 * result.player0.combos[row0].compatible_mass;
+    }
+
     if (joint <= 0) return;
     result.joint_defined = true;
     finalizePlayer(&result.player0, win0, tie0, loss0, joint);
