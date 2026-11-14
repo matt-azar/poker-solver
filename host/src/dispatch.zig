@@ -83,10 +83,13 @@ pub const HostState = struct {
     /// Active begin/train job id (owned); null when idle. Stop/Pause match this only.
     active_job_id: ?[]u8 = null,
     job_mu: std.Thread.Mutex = .{},
-    status_generation: u64 = 1,
-    last_cancelled: bool = false,
+    /// Serialize WorkerBudget mutations across stdin + analysis workers (ZR-180).
+    budget_mu: std.Thread.Mutex = .{},
+    /// Cross-thread status counter (Study cache invalidation). Atomic per ZR-180.
+    status_generation: std.atomic.Value(u64) = std.atomic.Value(u64).init(1),
+    last_cancelled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     /// Absolute iteration target for the active/last train job (start_trained + job iters).
-    train_iterations_requested: i32 = 0,
+    train_iterations_requested: std.atomic.Value(i32) = std.atomic.Value(i32).init(0),
     /// Sticky async-train failure code (ZR-130 / Tiger Phase 2). Set when the
     /// post-admit worker hits a train fault; surfaced on `status` because short
     /// admit already replied on that request_id (no second solve reply).
@@ -146,7 +149,7 @@ pub const HostState = struct {
         defer self.job_mu.unlock();
         if (self.last_error) |prev| self.allocator.free(prev);
         self.last_error = self.allocator.dupe(u8, code) catch null;
-        self.status_generation += 1;
+        self.bumpStatusGeneration();
     }
 
     pub fn joinTrain(self: *HostState) void {
@@ -220,7 +223,7 @@ pub const HostState = struct {
     pub fn finishAnalysisSlot(self: *HostState, gen: u64) void {
         if (!self.analysisGenCurrent(gen)) return;
         self.analysis_running.store(false, .release);
-        self.budget.returnToTraining();
+        self.returnBudgetToTraining();
     }
 
     pub fn writeReply(self: *HostState, reply: ipc.Envelope) !void {
@@ -263,15 +266,15 @@ pub const HostState = struct {
         defer self.cancelled_mu.unlock();
         // Idempotent: re-Stop of the live id must not leak duplicate key allocations.
         if (self.cancelled_jobs.contains(job_id)) {
-            self.last_cancelled = true;
-            self.status_generation += 1;
+            self.last_cancelled.store(true, .release);
+            self.bumpStatusGeneration();
             return;
         }
         const owned = try self.allocator.dupe(u8, job_id);
         errdefer self.allocator.free(owned);
         try self.cancelled_jobs.put(owned, {});
-        self.last_cancelled = true;
-        self.status_generation += 1;
+        self.last_cancelled.store(true, .release);
+        self.bumpStatusGeneration();
     }
 
     pub fn clearCancelled(self: *HostState, job_id: []const u8) void {
@@ -294,7 +297,7 @@ pub const HostState = struct {
         defer self.job_mu.unlock();
         if (self.active_job_id) |old| self.allocator.free(old);
         self.active_job_id = if (job_id) |j| try self.allocator.dupe(u8, j) else null;
-        self.status_generation += 1;
+        self.bumpStatusGeneration();
     }
 
     /// True when `job_id` is the live begin/train identity (under `job_mu`).
@@ -314,7 +317,29 @@ pub const HostState = struct {
         if (!std.mem.eql(u8, active, want)) return;
         self.allocator.free(active);
         self.active_job_id = null;
-        self.status_generation += 1;
+        self.bumpStatusGeneration();
+    }
+
+    pub fn bumpStatusGeneration(self: *HostState) void {
+        _ = self.status_generation.fetchAdd(1, .acq_rel);
+    }
+
+    pub fn prioritizeAnalysisBudget(self: *HostState, want: u32) void {
+        self.budget_mu.lock();
+        defer self.budget_mu.unlock();
+        self.budget.prioritizeAnalysis(want);
+    }
+
+    pub fn returnBudgetToTraining(self: *HostState) void {
+        self.budget_mu.lock();
+        defer self.budget_mu.unlock();
+        self.budget.returnToTraining();
+    }
+
+    pub fn snapshotBudget(self: *HostState) workers.WorkerBudget {
+        self.budget_mu.lock();
+        defer self.budget_mu.unlock();
+        return self.budget;
     }
 };
 
@@ -337,63 +362,7 @@ fn bodyStringField(body: []const u8, key: []const u8) ?[]const u8 {
 /// Unescape a JSON string field (paths, etc.) — do not return raw escaped bytes (ZR-92).
 fn bodyUnescapedStringField(allocator: std.mem.Allocator, body: []const u8, key: []const u8) !?[]u8 {
     const escaped = bodyStringField(body, key) orelse return null;
-    return try unescapeJsonString(allocator, escaped);
-}
-
-fn unescapeJsonString(allocator: std.mem.Allocator, escaped: []const u8) ![]u8 {
-    var raw = std.ArrayList(u8).init(allocator);
-    errdefer raw.deinit();
-    var i: usize = 0;
-    while (i < escaped.len) : (i += 1) {
-        if (escaped[i] == '\\' and i + 1 < escaped.len) {
-            switch (escaped[i + 1]) {
-                'n' => {
-                    try raw.append('\n');
-                    i += 1;
-                    continue;
-                },
-                'r' => {
-                    try raw.append('\r');
-                    i += 1;
-                    continue;
-                },
-                't' => {
-                    try raw.append('\t');
-                    i += 1;
-                    continue;
-                },
-                '\\' => {
-                    try raw.append('\\');
-                    i += 1;
-                    continue;
-                },
-                '"' => {
-                    try raw.append('"');
-                    i += 1;
-                    continue;
-                },
-                '/' => {
-                    try raw.append('/');
-                    i += 1;
-                    continue;
-                },
-                'u' => {
-                    // Decode a single \\uXXXX BMP code unit into UTF-8.
-                    if (i + 5 >= escaped.len) break;
-                    const hex = escaped[i + 2 .. i + 6];
-                    const code = std.fmt.parseInt(u21, hex, 16) catch break;
-                    var utf8_buf: [4]u8 = undefined;
-                    const n = std.unicode.utf8Encode(code, &utf8_buf) catch break;
-                    try raw.appendSlice(utf8_buf[0..n]);
-                    i += 5;
-                    continue;
-                },
-                else => {},
-            }
-        }
-        try raw.append(escaped[i]);
-    }
-    return raw.toOwnedSlice();
+    return try ipc.unescapeJsonString(allocator, escaped);
 }
 
 fn bodyIntField(body: []const u8, key: []const u8) ?i32 {
@@ -833,8 +802,8 @@ fn handleDeleteStrategyEdit(state: *HostState, req: ipc.Envelope) !ipc.Envelope 
 /// ZR-137: fat `equity` body extracted from `handle` (op discriminator stays in parent).
 fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     // Sync path for unit tests. Product stdin loop uses `startEquity` (ZR-151).
-    state.budget.prioritizeAnalysis(1);
-    defer state.budget.returnToTraining();
+    state.prioritizeAnalysisBudget(1);
+    defer state.returnBudgetToTraining();
     const wait_ns: u64 = 30 * std.time.ns_per_s;
     var lease = borrowPublishedForAnalysis(state, wait_ns) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
@@ -899,8 +868,8 @@ fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
 
 /// ZR-137: fat `categories` body extracted from `handle` (op discriminator stays in parent).
 fn handleCategories(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
-    state.budget.prioritizeAnalysis(1);
-    defer state.budget.returnToTraining();
+    state.prioritizeAnalysisBudget(1);
+    defer state.returnBudgetToTraining();
     // Categories sync path historically waited 120s; still bound mid-train, but
     // idle sessions fail immediately (ZR-170).
     const wait_ns: u64 = 120 * std.time.ns_per_s;
@@ -1019,8 +988,9 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     // While compile runs off-stdin, report compiling even though Session still
     // holds the prior solution until fail-closed install (ZR-120).
     const phase_name: []const u8 = if (begin_running) "compiling" else @tagName(phase);
-    const iterations_requested = state.train_iterations_requested;
+    const iterations_requested = state.train_iterations_requested.load(.acquire);
     const time_limit_reached = terminal == .time_limit_reached;
+    const budget_snap = state.snapshotBudget();
 
     // Copy owned strings under job_mu — train worker may free/replace them after unlock.
     var sticky_error_copy: ?[]u8 = null;
@@ -1029,7 +999,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     defer if (active_copy) |c| allocator.free(c);
 
     state.job_mu.lock();
-    const gen = state.status_generation + solution_id + policy_revision;
+    const gen = state.status_generation.load(.acquire) + solution_id + policy_revision;
     if (state.last_error) |err| {
         sticky_error_copy = allocator.dupe(u8, err) catch {
             state.job_mu.unlock();
@@ -1044,7 +1014,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     }
     state.job_mu.unlock();
 
-    var cancelled = state.last_cancelled and !running;
+    var cancelled = state.last_cancelled.load(.acquire) and !running;
     if (active_copy) |jid| {
         if (state.isCancelled(jid)) cancelled = true;
     }
@@ -1082,7 +1052,8 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
         try w.print(",\"baseline_solution_id\":\"s{d}\"", .{baseline_id});
     }
     if (active_copy) |jid| {
-        try w.print(",\"job_id\":\"{s}\"", .{jid});
+        try w.writeAll(",\"job_id\":");
+        try ipc.appendJsonString(&list, jid);
     } else {
         try w.writeAll(",\"job_id\":null");
     }
@@ -1092,7 +1063,10 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
     try w.writeAll(if (can_continue) "true" else "false");
     // Sticky async-train code (null when clear). Desktop also reads legacy `error`.
     if (sticky_error_copy) |code| {
-        try w.print(",\"last_error\":\"{s}\",\"error\":\"{s}\"", .{ code, code });
+        try w.writeAll(",\"last_error\":");
+        try ipc.appendJsonString(&list, code);
+        try w.writeAll(",\"error\":");
+        try ipc.appendJsonString(&list, code);
     } else {
         try w.writeAll(",\"last_error\":null,\"error\":\"\"");
     }
@@ -1105,7 +1079,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
             policy_revision,
             @tagName(terminal),
             threads,
-            state.budget.analysis,
+            budget_snap.analysis,
             threads,
             memory_budget_bytes,
             allocated_bytes,
@@ -1166,7 +1140,7 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
 
 fn unescapeConfig(allocator: std.mem.Allocator, escaped: []const u8) ![]u8 {
     // Same JSON unescape as paths (handles Windows CRLF fixtures: `\r\n`).
-    var raw = try unescapeJsonString(allocator, escaped);
+    var raw = try ipc.unescapeJsonString(allocator, escaped);
     errdefer allocator.free(raw);
     if (raw.len == 0 or raw[raw.len - 1] != '\n') {
         const grown = try allocator.realloc(raw, raw.len + 1);
@@ -1190,12 +1164,15 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "ready")) {
-        var buf: [320]u8 = undefined;
-        const body = try std.fmt.bufPrint(&buf, "{{\"protocol\":{d},\"sidecar\":\"solver-engine\",\"launch_id\":\"{s}\",\"workers\":{d}}}", .{
-            ipc.protocol_version,
-            state.launch_id,
-            state.budget.total,
-        });
+        var list = std.ArrayList(u8).init(state.allocator);
+        errdefer list.deinit();
+        const w = list.writer();
+        const budget = state.snapshotBudget();
+        try w.print("{{\"protocol\":{d},\"sidecar\":\"solver-engine\",\"launch_id\":", .{ipc.protocol_version});
+        try ipc.appendJsonString(&list, state.launch_id);
+        try w.print(",\"workers\":{d}}}", .{budget.total});
+        const body = try list.toOwnedSlice();
+        defer state.allocator.free(body);
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
@@ -1251,8 +1228,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             const code: []const u8 = if (err == error.BudgetExceeded) "budget_exceeded" else "begin_failed";
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };
-        state.last_cancelled = false;
-        state.train_iterations_requested = 0;
+        state.last_cancelled.store(false, .release);
+        state.train_iterations_requested.store(0, .release);
         var buf: [64]u8 = undefined;
         const body = try std.fmt.bufPrint(&buf, "{{\"solution_id\":{d}}}", .{state.session.solution_id});
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
@@ -1333,7 +1310,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         state.session.pause() catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "pause_failed", @errorName(err));
         };
-        state.status_generation += 1;
+        state.bumpStatusGeneration();
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, "{\"phase\":\"paused\"}");
     }
 
@@ -1364,7 +1341,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             };
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };
-        state.last_cancelled = false;
+        state.last_cancelled.store(false, .release);
         try state.setActiveJob(null);
         // Same Study status shape as `status` so EngineClient.open can decodeStatusPayload.
         const body = try formatStatusBody(state.allocator, state);
@@ -1373,8 +1350,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "node")) {
-        state.budget.prioritizeAnalysis(1);
-        defer state.budget.returnToTraining();
+        state.prioritizeAnalysisBudget(1);
+        defer state.returnBudgetToTraining();
         var lease = state.session.borrowPublished() catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
@@ -1402,8 +1379,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
 
     if (std.mem.eql(u8, req.op, "values")) {
         // Sync path for unit tests. Product stdin loop uses `startValues` (ZR-151).
-        state.budget.prioritizeAnalysis(1);
-        defer state.budget.returnToTraining();
+        state.prioritizeAnalysisBudget(1);
+        defer state.returnBudgetToTraining();
         // Bounded wait for mid-train first publish (R10). Idle skips the wait (ZR-170).
         const wait_ns: u64 = 30 * std.time.ns_per_s;
         var lease = borrowPublishedForAnalysis(state, wait_ns) catch |err| {
@@ -1447,7 +1424,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
 
     if (std.mem.eql(u8, req.op, "prioritize_analysis")) {
         const want: u32 = @intCast(@max(bodyIntField(req.body_json, "workers") orelse 1, 0));
-        state.budget.prioritizeAnalysis(want);
+        state.prioritizeAnalysisBudget(want);
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, "{\"ok\":true}");
     }
 
@@ -1551,7 +1528,7 @@ fn trainWorker(task: *TrainTask) void {
     defer {
         state.untrack(task.request_id);
         state.train_running.store(false, .release);
-        state.status_generation += 1;
+        state.bumpStatusGeneration();
         state.allocator.free(task.request_id);
         if (task.job_id) |j| {
             // Allow a fresh job id after stop; sticky cancel only while in-flight.
@@ -1651,19 +1628,20 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
         }
         break :blk @max(@as(i32, 1), state.session.publish_every);
     };
-    state.budget.returnToTraining();
+    state.returnBudgetToTraining();
     // Honor config threads; never raise above Session/config (ZR-91). Cap by host
     // budget so MT flop train cannot pin every core and starve the IPC stdin loop
     // (Windows installed Study: status-poll-hung while sidecar is CPU-hot).
-    const train_cap = if (state.budget.training > 0)
-        state.budget.training
+    const budget_snap = state.snapshotBudget();
+    const train_cap = if (budget_snap.training > 0)
+        budget_snap.training
     else
-        workers.WorkerBudget.maxTrainThreads(state.budget.total);
+        workers.WorkerBudget.maxTrainThreads(budget_snap.total);
     if (state.session.threads > train_cap) {
         state.session.setThreads(train_cap);
     }
     state.session.clearControlFlags();
-    state.last_cancelled = false;
+    state.last_cancelled.store(false, .release);
     // Fresh job: drop sticky train fault so status is not still "failed".
     state.clearLastError();
     try state.setActiveJob(req.job_id);
@@ -1672,25 +1650,37 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
     state.session.mu.lock();
     const start_trained: i32 = if (state.session.training) |*training| training.trained else 0;
     state.session.mu.unlock();
-    state.train_iterations_requested = start_trained + job_iters;
+    state.train_iterations_requested.store(start_trained + job_iters, .release);
 
-    const task = try state.allocator.create(TrainTask);
-    errdefer state.allocator.destroy(task);
-    task.* = .{
-        .state = state,
-        .request_id = try state.allocator.dupe(u8, req.request_id),
-        .job_id = if (req.job_id) |j| try state.allocator.dupe(u8, j) else null,
-        .op = try state.allocator.dupe(u8, req.op),
-        .iterations = iterations,
-        .accuracy = accuracy,
-        .time_limit = time_limit,
-        .eval_every = eval_every,
+    // Stage owned strings in a block so mid-OOM cannot leak, then transfer to task
+    // (same pattern as startBeginConfig / startAnalysis — ZR-180).
+    const task = blk: {
+        const request_id = try state.allocator.dupe(u8, req.request_id);
+        errdefer state.allocator.free(request_id);
+        const job_id: ?[]u8 = if (req.job_id) |j| try state.allocator.dupe(u8, j) else null;
+        errdefer if (job_id) |j| state.allocator.free(j);
+        const op = try state.allocator.dupe(u8, req.op);
+        errdefer state.allocator.free(op);
+        const created = try state.allocator.create(TrainTask);
+        created.* = .{
+            .state = state,
+            .request_id = request_id,
+            .job_id = job_id,
+            .op = op,
+            .iterations = iterations,
+            .accuracy = accuracy,
+            .time_limit = time_limit,
+            .eval_every = eval_every,
+        };
+        break :blk created;
     };
-    errdefer {
+    var worker_owns_task = false;
+    errdefer if (!worker_owns_task) {
         state.allocator.free(task.request_id);
         if (task.job_id) |j| state.allocator.free(j);
         state.allocator.free(task.op);
-    }
+        state.allocator.destroy(task);
+    };
 
     state.train_running.store(true, .release);
     state.train_thread = std.Thread.spawn(.{}, trainWorker, .{task}) catch |err| {
@@ -1700,12 +1690,14 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
         if (task.job_id) |j| state.allocator.free(j);
         state.allocator.free(task.op);
         state.allocator.destroy(task);
+        worker_owns_task = true;
         state.untrack(req.request_id);
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "solve_failed", @errorName(err));
         defer err_reply.deinit();
         try state.writeReply(err_reply);
         return .replied;
     };
+    worker_owns_task = true;
     return .ok;
 }
 
@@ -1714,7 +1706,7 @@ fn beginWorker(task: *BeginTask) void {
     defer {
         state.untrack(task.request_id);
         state.begin_running.store(false, .release);
-        state.status_generation += 1;
+        state.bumpStatusGeneration();
         state.allocator.free(task.request_id);
         if (task.job_id) |j| {
             state.clearCancelled(j);
@@ -1737,8 +1729,8 @@ fn beginWorker(task: *BeginTask) void {
         state.writeReply(err_reply) catch {};
         return;
     };
-    state.last_cancelled = false;
-    state.train_iterations_requested = 0;
+    state.last_cancelled.store(false, .release);
+    state.train_iterations_requested.store(0, .release);
     state.clearLastError();
     var buf: [64]u8 = undefined;
     const body = std.fmt.bufPrint(&buf, "{{\"solution_id\":{d}}}", .{state.session.solution_id}) catch return;
@@ -1819,9 +1811,9 @@ pub fn startBeginConfig(state: *HostState, req: ipc.Envelope) !void {
 
     // Register compile identity before dispatch so Stop can cancel this begin.
     try state.setActiveJob(req.job_id);
-    state.last_cancelled = false;
+    state.last_cancelled.store(false, .release);
     state.begin_running.store(true, .release);
-    state.status_generation += 1;
+    state.bumpStatusGeneration();
     state.begin_thread = std.Thread.spawn(.{}, beginWorker, .{task}) catch |err| {
         state.begin_running.store(false, .release);
         state.clearActiveJobIfMatch(req.job_id);
@@ -1948,7 +1940,7 @@ fn analysisWorker(task: *AnalysisTask) void {
         return;
     }
 
-    state.budget.prioritizeAnalysis(1);
+    state.prioritizeAnalysisBudget(1);
     budget_held = true;
 
     // Bound the policy wait so a hung publish cannot pin analysis forever; the
@@ -2269,7 +2261,7 @@ fn ioWorker(task: *IoTask) void {
                 state.writeReply(err_reply) catch {};
                 return;
             };
-            state.last_cancelled = false;
+            state.last_cancelled.store(false, .release);
             state.setActiveJob(null) catch {};
             const body = formatStatusBody(state.allocator, state) catch return;
             defer state.allocator.free(body);
@@ -2379,7 +2371,7 @@ test "superseded analysis finish does not clear live slot or train job" {
     try state.setActiveJob("train-current");
     state.train_running.store(true, .release);
     state.analysis_running.store(true, .release);
-    state.budget.prioritizeAnalysis(1);
+    state.prioritizeAnalysisBudget(1);
     try std.testing.expect(state.budget.analysis > 0);
 
     const stale_gen = state.bumpAnalysisGen();
@@ -3508,7 +3500,7 @@ test "status body exposes iterations and requested target" {
     var state = try HostState.init(std.testing.allocator, "status-iters");
     defer state.deinit();
     try state.session.begin(config);
-    state.train_iterations_requested = 7;
+    state.train_iterations_requested.store(7, .release);
     try state.session.train(3);
 
     const status_body = try formatStatusBody(std.testing.allocator, &state);
@@ -3544,7 +3536,7 @@ test "status body publishes progress metrics after trainGated (ZR-171)" {
     var state = try HostState.init(std.testing.allocator, "status-progress");
     defer state.deinit();
     try state.session.begin(config);
-    state.train_iterations_requested = 4;
+    state.train_iterations_requested.store(4, .release);
     // Iteration-only job (accuracy ≤ 0) must still record EV/gap for the footer.
     state.session.publish_every = 10;
     try state.session.trainGated(4, -1.0, 1, -1.0);
@@ -3741,7 +3733,7 @@ test "short-admit body shape and continue iterations_requested target" {
     state.session.mu.unlock();
     try std.testing.expectEqual(@as(i32, 3), start_trained);
     const job_iters: i32 = 5;
-    state.train_iterations_requested = start_trained + job_iters;
+    state.train_iterations_requested.store(start_trained + job_iters, .release);
     state.train_running.store(true, .release);
 
     const status_body = try formatStatusBody(std.testing.allocator, &state);
