@@ -144,7 +144,13 @@ fn expandAndConsider(
 
 /// Shared pot-cap / all-in-threshold / min-raise clamps for listed sizes and AddSize.
 /// Returns null when the amount is illegal after clamps. `force_all_in` is for size-list
-/// tokens only; AddSize always passes false (short all-in needs `allow_all_in`).
+/// `a` tokens only; AddSize always passes false.
+///
+/// A listed size above remaining stack is always re-interpreted as all-in (NLHE shove),
+/// even when `allow_all_in` is off — that flag only invents an *extra* all-in offer and
+/// keeps short-of-min-raise shoves that were not produced by oversize / threshold.
+/// Pio all-in threshold likewise converts a regular size to all-in without needing the
+/// Add-all-in switch.
 fn resolveAggressiveAdd(
     config: street_spec.StreetSpec,
     state: BetState,
@@ -156,17 +162,22 @@ fn resolveAggressiveAdd(
     const facing = to_call > 0;
     const max_add = config.stack - state.contrib[@intCast(player)];
     var add = add_in;
+    // Oversize / threshold shove-ups keep a short all-in even when allow_all_in is off.
+    var treat_as_all_in = force_all_in;
     if (facing and config.max_raises <= state.num_raises) return null;
     if (add < 1) return null;
     if (facing and !config.allow_three_bet and state.num_raises >= 1) return null;
     if (add > max_add) {
-        if (!config.allow_all_in and !force_all_in) return null;
         add = max_add;
+        treat_as_all_in = true;
     }
-    if (config.all_in_threshold > 0.0 and config.allow_all_in) {
+    if (config.all_in_threshold > 0.0) {
         const committed_after = @as(f64, @floatFromInt(state.contrib[@intCast(player)] + add));
         const limit = config.all_in_threshold * @as(f64, @floatFromInt(config.stack));
-        if (committed_after > limit and add < max_add) add = max_add;
+        if (committed_after > limit and add < max_add) {
+            add = max_add;
+            treat_as_all_in = true;
+        }
     }
     if (config.pot_cap > 0.0) {
         const reference = if (facing) state.pot + to_call else state.pot;
@@ -179,7 +190,7 @@ fn resolveAggressiveAdd(
     const min_increment: chips.Chip = if (state.last_raise == 0) 1 else state.last_raise;
     const full = raise_by >= min_increment;
     const shove = state.contrib[@intCast(player)] + add == config.stack;
-    if (!full and !(shove and (config.allow_all_in or force_all_in))) return null;
+    if (!full and !(shove and (config.allow_all_in or treat_as_all_in))) return null;
     return add;
 }
 
@@ -646,4 +657,56 @@ test "check-only root has Check" {
     try std.testing.expectEqual(@as(i32, 1), legal.count);
     try std.testing.expectEqual(@as(i32, 1), legal.code[0]);
     try std.testing.expectEqual(@as(i32, 0), legal.add[0]);
+}
+
+test "oversized listed bet becomes all-in when allow_all_in off" {
+    // Study hardcodes allow_all_in 0; b100 with stack < pot must still shove (DS-26).
+    var config = street_spec.StreetSpec.init(std.testing.allocator);
+    defer config.deinit();
+    const ah = try @import("../poker/card.zig").parseCard("Ah");
+    const kd = try @import("../poker/card.zig").parseCard("Kd");
+    const c7 = try @import("../poker/card.zig").parseCard("7c");
+    const s2 = try @import("../poker/card.zig").parseCard("2s");
+    const h2 = try @import("../poker/card.zig").parseCard("2h");
+    config.board = try std.testing.allocator.dupe(i32, &[_]i32{ ah, kd, c7, s2, h2 });
+    config.pot = try chips.chipsToTenths(82.2);
+    config.stack = try chips.chipsToTenths(61.4);
+    config.max_raises = 1;
+    config.allow_all_in = false;
+    config.all_in_threshold = 0;
+    config.oop_river_bets = try std.testing.allocator.dupe(f64, &[_]f64{1.0});
+
+    var state = BetState{};
+    state.pot = config.pot;
+    state.acting = config.first_to_act;
+    const legal = try legalActions(config, state);
+    try std.testing.expectEqual(@as(i32, 2), legal.count);
+    try std.testing.expectEqual(@as(i32, 1), legal.code[0]); // Check
+    try std.testing.expectEqual(@as(i32, 0), legal.add[0]);
+    try std.testing.expectEqual(@as(i32, 2), legal.code[1]); // Bet
+    try std.testing.expectEqual(config.stack, legal.add[1]); // all-in
+}
+
+test "all-in threshold shoves without allow_all_in" {
+    var config = street_spec.StreetSpec.init(std.testing.allocator);
+    defer config.deinit();
+    const ah = try @import("../poker/card.zig").parseCard("Ah");
+    const kd = try @import("../poker/card.zig").parseCard("Kd");
+    const c7 = try @import("../poker/card.zig").parseCard("7c");
+    const s2 = try @import("../poker/card.zig").parseCard("2s");
+    config.board = try std.testing.allocator.dupe(i32, &[_]i32{ ah, kd, c7, s2 });
+    config.pot = chips.chipUnits(100);
+    config.stack = chips.chipUnits(100);
+    config.max_raises = 1;
+    config.allow_all_in = false;
+    config.all_in_threshold = 0.8;
+    config.oop_turn_bets = try std.testing.allocator.dupe(f64, &[_]f64{0.9});
+
+    var state = BetState{};
+    state.pot = config.pot;
+    state.acting = config.first_to_act;
+    const legal = try legalActions(config, state);
+    try std.testing.expectEqual(@as(i32, 2), legal.count);
+    try std.testing.expectEqual(@as(i32, 2), legal.code[1]);
+    try std.testing.expectEqual(config.stack, legal.add[1]);
 }

@@ -61,6 +61,7 @@ export interface StudySetupTreePreset {
   oopTurnDonk?: string;
   oopRiverDonk?: string;
   potCap?: number;
+  /** @deprecated Prefer maxRaises; Build no longer exposes No 3-bet. */
   noThreeBet?: boolean;
   maxRaises?: number;
 }

@@ -58,6 +58,8 @@ export interface StudyFieldEdits {
   samples?: number;
   maxRaises?: number;
   mergeThresholdPct?: number;
+  /** Pio all-in threshold as percent of starting stack (converted to draft fraction). */
+  allInThresholdPct?: number;
   potCap?: number;
   /**
    * Engine solve-rake rate for this simulation.
@@ -66,7 +68,6 @@ export interface StudyFieldEdits {
   rakeRate?: number;
   /** Engine solve-rake cap. Cleared with rakeRate when making the sim rake-free. */
   rakeCap?: number;
-  noThreeBet?: boolean;
   donkFlop?: boolean;
   donkTurn?: boolean;
   donkRiver?: boolean;
