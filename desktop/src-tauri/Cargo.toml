@@ -35,13 +35,10 @@ keyring = { version = "=2.3.3", default-features = false, features = [
   "platform-windows",
 ] }
 
-# Native Open/Save pickers for the Windows installer build. Keep Linux off this
-# crate so the resolve graph stays clear of zbus/ashpd floats past rustc 1.83.
-[target.'cfg(windows)'.dependencies]
-tauri-plugin-dialog = "=2.2.0"
-
 # Keep the Linux/webview transitive graph on rustc-1.83-friendly crates.
 # Newer tauri-runtime-wry (≥2.7) pulls tao 0.34.8 → dlopen2 0.8 (edition2024 / rustc 1.85+).
+# NOTE: these must stay under [dependencies] (not after a target table) or Linux
+# builds will not see them — tokio is required for async IPC ownership.
 tauri-runtime-wry = "=2.6.0"
 tauri-runtime = "=2.6.0"
 tao = "=0.33.0"
@@ -70,6 +67,11 @@ encoding_rs = "=0.8.35"
 indexmap = "=2.7.1"
 tokio = { version = "=1.53.3", features = ["rt", "rt-multi-thread", "sync", "macros", "io-util", "net", "time"] }
 unicode-segmentation = "=1.12.0"
+
+# Native Open/Save pickers for the Windows installer build. Keep Linux off this
+# crate so the resolve graph stays clear of zbus/ashpd floats past rustc 1.83.
+[target.'cfg(windows)'.dependencies]
+tauri-plugin-dialog = "=2.2.0"
 
 [profile.release]
 panic = "abort"

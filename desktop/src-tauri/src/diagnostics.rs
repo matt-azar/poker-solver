@@ -573,11 +573,19 @@ fn system_ram_bytes() -> (Option<u64>, Option<u64>) {
         let mut avail = None;
         for line in text.lines() {
             if let Some(rest) = line.strip_prefix("MemTotal:") {
-                if let Some(kb) = rest.split_whitespace().next().and_then(|s| s.parse().ok()) {
+                if let Some(kb) = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse::<u64>().ok())
+                {
                     total = Some(kb * 1024);
                 }
             } else if let Some(rest) = line.strip_prefix("MemAvailable:") {
-                if let Some(kb) = rest.split_whitespace().next().and_then(|s| s.parse().ok()) {
+                if let Some(kb) = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse::<u64>().ok())
+                {
                     avail = Some(kb * 1024);
                 }
             }

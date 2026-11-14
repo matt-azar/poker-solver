@@ -1,0 +1,22 @@
+[package]
+name = "ipc-test-sidecar"
+version = "0.1.0"
+edition = "2021"
+# No license is granted. Do not treat this as MIT / open source.
+license = "UNLICENSED"
+publish = false
+description = "Controllable protocol-2 sidecar for Study async IPC acceptance tests"
+
+[[bin]]
+name = "ipc-test-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+# Pin below edition2024 / rustc-1.85 floats (match desktop/src-tauri).
+serde_json = { version = "=1.0.140", features = ["preserve_order"] }
+serde = { version = "=1.0.219", features = ["derive"] }
+indexmap = "=2.7.1"
+itoa = "=1.0.14"
+ryu = "=1.0.19"
+memchr = "=2.7.4"
+zmij = "=0.1.5"

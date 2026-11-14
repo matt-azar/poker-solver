@@ -169,20 +169,9 @@ pub fn run() {
             if let Err(err) = diagnostics::register_local_dumps() {
                 eprintln!("warn: LocalDumps registration skipped: {err}");
             }
-            // Shipping Study uses Zig solver-engine IPC only (no holdem-explorer).
-            let handle = app.handle().clone();
-            let zig_state = app.state::<solver_engine::SolverEngineState>();
-            match solver_engine::ensure_solver_engine_session(&handle, &zig_state) {
-                Ok(info) => {
-                    eprintln!("info: {}", info.status);
-                }
-                Err(err) => {
-                    eprintln!(
-                        "error: solver-engine IPC unavailable ({err}). \
-                         Window will still open; use Reconnect after fixing the install."
-                    );
-                }
-            }
+            // Ready handshake is async and must not block window open. Warm-start
+            // the sidecar in the background; the UI also calls ensure on boot.
+            solver_engine::spawn_background_ensure(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -190,6 +179,8 @@ pub fn run() {
             solver_engine::solver_engine_info,
             solver_engine::solver_engine_request,
             solver_engine::kill_solver_engine_cmd,
+            solver_engine::ipc_acceptance_enabled,
+            solver_engine::exit_with_code,
             open_diagnostics_folder,
             copy_diagnostics_bundle,
             diagnostics_dir_path,
@@ -210,9 +201,10 @@ pub fn run() {
         .expect("error while building Hold'em Study")
         .run(|app_handle, event| {
             // Only on final Exit — ExitRequested can still be cancelled.
+            // Bounded reap: kill handle first, then join I/O threads / wait child.
             if let RunEvent::Exit = event {
                 if let Some(state) = app_handle.try_state::<solver_engine::SolverEngineState>() {
-                    solver_engine::kill_solver_engine(&state);
+                    solver_engine::kill_solver_engine(&*state);
                 }
             }
         });
