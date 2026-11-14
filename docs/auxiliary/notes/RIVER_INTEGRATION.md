@@ -2,11 +2,10 @@
 
 Planning date: October 30, 2026. Branch at the time: `cursor/river-integrate-c006`.
 
-This note recorded the merge of overlapping river / five-card / payoff / solve-control stacks. That work landed on `main`. Current product path:
+This note recorded the merge of overlapping river / five-card / payoff / solve-control stacks. That work landed, then the C++ tree was removed. Current product path:
 
-- Five-card boards solve on `StreetBatchSolver` (explorer and `river_solver`)
-- `RiverGame` remains the five-card oracle
-- `RiverBatchSolver` remains for internal oracle and legacy fixtures only
+- Five-card boards solve on the Zig Session through `solver-engine`, same as flop and turn
+- `RiverGame` / `RiverBatchSolver` / `river_solver` are not in the tree
 
 Living docs: [ARCHITECTURE.md](../../ARCHITECTURE.md), [RIVER.md](../../RIVER.md), [STREETS.md](../../STREETS.md), [ROADMAP.md](../planning/ROADMAP.md) M6.
 

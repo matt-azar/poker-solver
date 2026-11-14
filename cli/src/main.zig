@@ -1,5 +1,5 @@
-//! Phase 1 smoke CLI: parse a `street-config 1` document and print key fields.
-//! Product street_solver / river alias arrives in later phases.
+//! Parse a `street-config 1` document and print key fields.
+//! Product solves go through `solver-engine`, not this binary.
 const std = @import("std");
 const poker_engine = @import("poker_engine");
 

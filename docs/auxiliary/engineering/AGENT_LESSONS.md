@@ -153,10 +153,9 @@ Historical C++ layout: engine/session under `include/game|solver|explorer|poker`
 
 - `--threads N>1` requires `--frozen`; per-deal walk stays serial.
 - Parallelism splits the **first future public card** only (turn→rivers, flop→turns).
-- Public frozen path: vanilla CFR, CFR+, fixed DCFR(1.5,0,2), and PCFR+ (not Linear CFR).
+- Shipped trainer is CFR+ (`trainFrozenCfrPlus`). PSOL v4 stores that algorithm byte and rejects any other. Settings still lists Vanilla CFR and DCFR; those strings are draft fields. The host does not switch trainers from them.
 - CFR+: sum counterfactual regret across the frozen pass, then **floor only the updating player**; leave the opponent table alone.
-- PCFR+: same alternating schedule and CFR+ floor / linear own-reach average; match on \(R+m\) with \(m=\) last instantaneous CF regret (cold-start zeros \(m\); PSOL v3 may restore \(m\), v1/v2 reload zeros \(m\)).
-- DCFR: same alternating frozen passes; after each pass **discount** the updating player's full regret row (signed; no CFR+ floor) with `t^α/(t^α+1)` on positives and `t^β/(t^β+1)` on non-positives; average with `t^γ` own-reach (defaults α=1.5, β=0, γ=2). PSOL v3 stores the actual params used. Reject DCFR and PCFR+ on the non-frozen walk and on legacy `RiverBatchSolver`.
+- Historical C++ schedules (removed): vanilla CFR, Linear CFR, fixed DCFR(1.5,0,2), and PCFR+. PCFR+ matched on \(R+m\) with \(m=\) last instantaneous CF regret (cold-start zeros \(m\); PSOL v3 could restore \(m\)). DCFR discounted the updating player's signed regret row after the pass (`t^α/(t^α+1)` on positives, `t^β/(t^β+1)` on non-positives; average `t^γ`; defaults α=1.5, β=0, γ=2) and was rejected off the frozen walk. Do not treat those schedules as live Zig code.
 
 **Pointers:** `docs/STREETS.md` (frozen threads), Zig frozen CFR under `engine/`, historical commits `9e0d87d`, `6a597df`, `e2ad8df`.
 
@@ -404,7 +403,7 @@ Release A emphasis: M0→M5 plus **core M6**. Most `FEATURE_PARITY.md` rows are 
 | M2 study screen “done” | Categories/draws/composition/undo still thin even if one slice lands |
 | M5 saves “done” | PSOL exists; compact/lazy/multi-file library does not |
 | M6 “done” | Zig Session five-card pins + study corpus; Pio timing/quality unproven |
-| M8 rake/ICM | Pot-rake on Zig path; **ICM Study solves reject until ZR-93** (low priority) |
+| M8 rake/ICM | Pot rake, ICM, and path incentives run on the Zig terminal when the config sets them. NashConv is then modeled utility |
 | “As fast as Pio” | Forbidden without matched protocol (`docs/auxiliary/planning/ROADMAP.md` §6); Acc walls ≠ cutover gates |
 
 **Do:** Update ledger rows only with the demonstrating commit.  

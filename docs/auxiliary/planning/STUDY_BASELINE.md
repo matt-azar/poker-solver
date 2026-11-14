@@ -18,7 +18,7 @@ Product entry points: Zig `solver-engine` + Study UI (`desktop/`). Living status
 ## Still open
 
 - Compact/lazy saves; durable batch queue; dual-session Compare over IPC; host `runouts`
-- **ICM Study solves (ZR-93):** reject until complete; low priority — not a near-term release blocker
+- ICM and path incentives: on when the street-config lists them. NashConv is then modeled utility (`docs/auxiliary/payoffs/ICM.md`)
 - Trainer packs/drills; preflop
 - Code-signed Windows release; Pio matched quality/timing runs
 

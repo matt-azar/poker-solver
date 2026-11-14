@@ -135,7 +135,7 @@ Raw stdout, stderr, `results.json`, and `summary.md` are written to the output d
 
 Each `results.json` also records provenance: checkout SHA/branch/dirty, SHA-256 digests of the solver binaries and any `--config` files, CMake toolchain fields from the build directory, host CPU/RAM, and per-case argv / thread / memory notes. `street_solver`, `river_solver`, and `explorer` accept `--version` (`poker_solver <version> git=<sha|unknown>`). Explorer `GET /api/ready` includes additive `version` and `git_sha` fields without bumping ready protocol `1`.
 
-CI runs the diagnostic smoke set (`--cases smoke`) after the Linux Release build to keep outcome classification wired. That lane is contended and is not a performance claim.
+CI does not run this Python runner. `.github/workflows/zig.yml` runs `scripts/zig/study-contract-smoke.py` on the Zig `solver-engine`. That smoke is a lifecycle check, not a performance claim.
 
 ## Flushed phases
 

@@ -1,10 +1,11 @@
-# Zig release gates (Phase 7 scaffolding)
+# Zig release gates
 
-Living cutover numbers and GO/NO-GO live in the Zig rewrite store docs (not this
-file). This page is the **in-repo** procedure pointer so CI and reviewers know
-what to run and what must stay blocked.
+The Windows cutover already shipped (owner GO 2026-11-12): stable NSIS is Zig
+`solver-engine` typed IPC. This page is the in-repo procedure for what CI runs
+and which measurements stay optional.
 
-## Authority
+Scoreboard notes named below are store documents. They are not files in this
+repository:
 
 | Topic | Store doc |
 | --- | --- |
