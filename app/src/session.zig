@@ -113,6 +113,9 @@ pub const Session = struct {
     /// Cleared on `begin` / deinit / thread-count change. Do not move after the
     /// chance pool has started (lazy on first parallel chance dispatch).
     frozen_ctx: ?poker_engine.solve.frozen_walk.FrozenCtx = null,
+    /// Analysis workers holding `frozen_ctx` for Study values/equity (warm ranks).
+    /// Train / begin / setThreads wait until zero before mutating or freeing ctx.
+    frozen_analysis_holds: u32 = 0,
     /// Protects phase / published swap / reader count (mid-train Study browse).
     mu: std.Thread.Mutex = .{},
     readers: u32 = 0,
@@ -264,7 +267,7 @@ pub const Session = struct {
 
     pub fn deinit(self: *Session) void {
         self.mu.lock();
-        while (self.readers != 0) {
+        while (self.readers != 0 or self.frozen_analysis_holds != 0) {
             self.quiet.wait(&self.mu);
         }
         self.mu.unlock();
@@ -443,39 +446,93 @@ pub const Session = struct {
     pub fn setThreads(self: *Session, threads: u32) void {
         const next: u32 = if (threads < 1) 1 else @min(threads, 64);
         if (next != self.threads) {
+            self.mu.lock();
+            while (self.frozen_analysis_holds != 0) {
+                self.quiet.wait(&self.mu);
+            }
             if (self.frozen_ctx) |*ctx| {
                 ctx.deinit();
                 self.frozen_ctx = null;
             }
+            self.mu.unlock();
         }
         self.threads = next;
+    }
+
+    /// Borrow Session FrozenCtx for Study values/equity when ranks are warm and
+    /// train is idle. Caller must `releaseFrozenCtxForAnalysis`. Returns `Busy`
+    /// mid-train / mid-begin or when ranks are not ready (caller falls back).
+    pub fn acquireFrozenCtxForAnalysis(self: *Session) SessionError!*poker_engine.solve.frozen_walk.FrozenCtx {
+        self.mu.lock();
+        defer self.mu.unlock();
+        if (self.phase == .training or self.phase == .compiling) return error.Busy;
+        const ctx = &(self.frozen_ctx orelse return error.Busy);
+        if (!ctx.ranks_ready) return error.Busy;
+        self.frozen_analysis_holds += 1;
+        return ctx;
+    }
+
+    pub fn releaseFrozenCtxForAnalysis(self: *Session) void {
+        self.mu.lock();
+        defer self.mu.unlock();
+        if (self.frozen_analysis_holds > 0) self.frozen_analysis_holds -= 1;
+        if (self.frozen_analysis_holds == 0) self.quiet.broadcast();
     }
 
     /// Create or reuse Session-owned FrozenCtx (ranks filled once).
     fn ensureFrozenCtx(self: *Session) SessionError!*poker_engine.solve.frozen_walk.FrozenCtx {
         const game = self.game orelse return error.InvalidSession;
         const state = &(self.training orelse return error.InvalidSession);
+        const want_threads = self.threads;
+
+        self.mu.lock();
+        while (self.frozen_analysis_holds != 0) {
+            self.quiet.wait(&self.mu);
+        }
         if (self.frozen_ctx) |*ctx| {
-            if (ctx.threads == self.threads) {
+            if (ctx.threads == want_threads) {
                 ctx.state = state;
                 ctx.game = game;
+                self.mu.unlock();
                 return ctx;
             }
             ctx.deinit();
             self.frozen_ctx = null;
         }
-        var ctx = poker_engine.solve.frozen_walk.FrozenCtx.initThreaded(
+        // Rank fill can be large — release mu so status/Stop stay live.
+        self.mu.unlock();
+
+        var built = poker_engine.solve.frozen_walk.FrozenCtx.initThreaded(
             self.allocator,
             game,
             state,
-            self.threads,
+            want_threads,
         ) catch |err| {
             if (err == error.OutOfMemory) return self.mapAllocErr(err);
             return err;
         };
-        errdefer ctx.deinit();
-        try ctx.ensureAllRanksReady();
-        self.frozen_ctx = ctx;
+        built.ensureAllRanksReady() catch |err| {
+            built.deinit();
+            return err;
+        };
+
+        self.mu.lock();
+        defer self.mu.unlock();
+        while (self.frozen_analysis_holds != 0) {
+            self.quiet.wait(&self.mu);
+        }
+        if (self.frozen_ctx) |*existing| {
+            // Another caller won the install (or threads changed). Prefer live.
+            if (existing.threads == self.threads and existing.ranks_ready) {
+                built.deinit();
+                existing.state = state;
+                existing.game = game;
+                return existing;
+            }
+            existing.deinit();
+            self.frozen_ctx = null;
+        }
+        self.frozen_ctx = built;
         return &(self.frozen_ctx.?);
     }
 
@@ -581,7 +638,7 @@ pub const Session = struct {
             self.mu.unlock();
             return error.Cancelled;
         }
-        while (self.readers != 0) {
+        while (self.readers != 0 or self.frozen_analysis_holds != 0) {
             self.quiet.wait(&self.mu);
         }
         detached = self.detachSolutionLocked();
