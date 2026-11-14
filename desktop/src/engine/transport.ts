@@ -96,20 +96,34 @@ export async function ensureSolverEngineIpc(): Promise<IpcTransportInfo> {
 
 /**
  * ZR-151: terminate a hung sidecar so Reconnect can spawn a fresh process.
- * No-op outside Tauri. Does not throw on kill races (already dead).
+ * No-op outside Tauri. Does not throw on kill races (already dead / stale id).
+ *
+ * Launch-scoped: pass the launch id Study believes is hung (or omit to use the
+ * active IPC transport). A stale id after Reconnect must not kill engine B.
+ * Blind kill (no launch id) is refused.
  */
-export async function killSolverEngineIpc(): Promise<void> {
+export async function killSolverEngineIpc(expectedLaunchId?: string): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  // Clear transport first so status polls cannot keep enqueueing 240s waits
-  // while kill_solver_engine_cmd runs (ZR-175 orphan-invoke hang).
-  setNoEngineTransport("sidecar terminated");
+  const launchId = (
+    expectedLaunchId?.trim() ||
+    (active.kind === "ipc" ? active.launchId : "")
+  ).trim();
+  if (!launchId) {
+    // No identity → refuse to tear down whatever child is installed.
+    return;
+  }
+  // Clear transport only when it still names the hung launch, so polls stop
+  // enqueueing waits (ZR-175) without dropping a newer reconnect session.
+  if (active.kind === "ipc" && active.launchId === launchId) {
+    setNoEngineTransport("sidecar terminated");
+  }
   try {
-    // Rust kill path also writes last-fault.json (ZR-160).
-    await invoke("kill_solver_engine_cmd");
+    // Rust kill path also writes last-fault.json (ZR-160) and no-ops on mismatch.
+    await invoke("kill_solver_engine_cmd", { expectedLaunchId: launchId });
   } catch {
-    // Already dead / no session — Reconnect/ensure will recover.
+    // Already dead / refused — Reconnect/ensure will recover when needed.
   }
 }
 

@@ -755,21 +755,52 @@ pub fn kill_solver_engine(state: &SolverEngineState) {
     kill_session(&mut guard, None, "app-exit", false);
 }
 
-/// ZR-151: Study may terminate a hung/unresponsive sidecar before Reconnect.
-#[tauri::command]
-pub fn kill_solver_engine_cmd(state: State<'_, SolverEngineState>) -> Result<(), String> {
+/// Kill the installed session only when its launch id matches `expected_launch_id`.
+///
+/// Watchdog / hung-kill must be launch-scoped: after Reconnect installs engine B,
+/// a late kill for engine A must be a no-op (audit #5). Empty expected id is an
+/// error — never blind-kill. Missing session is a quiet no-op.
+fn kill_solver_engine_for_launch(
+    state: &SolverEngineState,
+    expected_launch_id: &str,
+    reason: &str,
+    record_fault: bool,
+) -> Result<(), String> {
+    let expected = expected_launch_id.trim();
+    if expected.is_empty() {
+        return Err("kill_solver_engine_cmd requires expected_launch_id".into());
+    }
     let last_op = state.last_op_snapshot();
     let mut guard = state
         .session
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    kill_session(
-        &mut guard,
-        last_op.as_deref(),
+    match guard.as_ref() {
+        None => Ok(()),
+        Some(session) if session.launch_id != expected => {
+            // Stale watchdog / UI kill after reconnect — leave the live child alone.
+            Ok(())
+        }
+        Some(_) => {
+            kill_session(&mut guard, last_op.as_deref(), reason, record_fault);
+            Ok(())
+        }
+    }
+}
+
+/// ZR-151: Study may terminate a hung/unresponsive sidecar before Reconnect.
+/// Requires the launch id Study believes is hung so a reconnect cannot be torn down.
+#[tauri::command]
+pub fn kill_solver_engine_cmd(
+    state: State<'_, SolverEngineState>,
+    expected_launch_id: String,
+) -> Result<(), String> {
+    kill_solver_engine_for_launch(
+        &state,
+        &expected_launch_id,
         "kill_solver_engine_cmd (hung/reconnect)",
         true,
-    );
-    Ok(())
+    )
 }
 
 #[cfg(test)]
@@ -1055,6 +1086,68 @@ mod tests {
                 "current connection fatal must clear the slot"
             );
             assert!(!process_alive(pid));
+        }
+
+        #[test]
+        fn hung_kill_with_stale_launch_id_is_noop() {
+            let state = SolverEngineState::new();
+            let (_io_a, pid_a) = install_test_session(&state, "engine-a");
+            assert!(process_alive(pid_a));
+            let (_io_b, pid_b) = install_test_session(&state, "engine-b");
+            assert!(!process_alive(pid_a));
+            assert!(process_alive(pid_b));
+
+            kill_solver_engine_for_launch(
+                &state,
+                "engine-a",
+                "stale hung-kill after reconnect",
+                true,
+            )
+            .expect("stale kill is a quiet no-op");
+
+            {
+                let guard = state.session.lock().expect("session lock");
+                let session = guard
+                    .as_ref()
+                    .expect("engine B must remain after stale launch kill");
+                assert_eq!(session.launch_id, "engine-b");
+                assert_eq!(session.child.id(), pid_b);
+                assert!(!session.io.shut_down.load(Ordering::SeqCst));
+            }
+            assert!(
+                process_alive(pid_b),
+                "engine B must survive hung-kill scoped to engine A"
+            );
+
+            kill_solver_engine(&state);
+            assert!(!process_alive(pid_b));
+        }
+
+        #[test]
+        fn hung_kill_with_matching_launch_id_kills() {
+            let state = SolverEngineState::new();
+            let (_io, pid) = install_test_session(&state, "engine-hung");
+            assert!(process_alive(pid));
+            kill_solver_engine_for_launch(
+                &state,
+                "engine-hung",
+                "matching hung-kill",
+                true,
+            )
+            .expect("matching kill ok");
+            assert!(state.session.lock().expect("session lock").is_none());
+            assert!(!process_alive(pid));
+        }
+
+        #[test]
+        fn hung_kill_rejects_empty_launch_id() {
+            let state = SolverEngineState::new();
+            let (_io, pid) = install_test_session(&state, "engine-keep");
+            let err = kill_solver_engine_for_launch(&state, "  ", "blind kill", true)
+                .expect_err("empty launch id must refuse kill");
+            assert!(err.contains("expected_launch_id"));
+            assert!(process_alive(pid), "blind kill must not tear down the child");
+            kill_solver_engine(&state);
         }
     }
 }

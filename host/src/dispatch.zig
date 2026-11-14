@@ -72,6 +72,8 @@ pub const HostState = struct {
     begin_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     /// ZR-151 / ZR-171: values/equity/node/categories off the stdin loop so Stop/status stay live.
     analysis_thread: ?std.Thread = null,
+    /// Superseded analysis workers kept joinable (never detach). Bounded; joined on teardown.
+    analysis_orphans: std.ArrayList(std.Thread),
     analysis_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     /// Bumped on each new analysis request; older workers reply `superseded`.
     analysis_gen: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
@@ -102,6 +104,7 @@ pub const HostState = struct {
             .launch_id = try allocator.dupe(u8, launch_id),
             .pending = std.ArrayList([]u8).init(allocator),
             .cancelled_jobs = std.StringHashMap(void).init(allocator),
+            .analysis_orphans = std.ArrayList(std.Thread).init(allocator),
             .equity_jobs = equity_jobs.Manager.init(allocator),
         };
     }
@@ -126,6 +129,7 @@ pub const HostState = struct {
         self.job_mu.unlock();
         self.clearLastError();
         self.pending.deinit();
+        self.analysis_orphans.deinit();
     }
 
     /// Clear sticky async-train error (fresh admit / successful train / teardown).
@@ -164,6 +168,11 @@ pub const HostState = struct {
             t.join();
             self.analysis_thread = null;
         }
+        // Every superseded worker must be joined before HostState free (audit #3).
+        for (self.analysis_orphans.items) |t| {
+            t.join();
+        }
+        self.analysis_orphans.clearRetainingCapacity();
     }
 
     pub fn joinIo(self: *HostState) void {
@@ -184,6 +193,36 @@ pub const HostState = struct {
 
     pub fn analysisGenCurrent(self: *HostState, gen: u64) bool {
         return self.analysis_gen.load(.acquire) == gen;
+    }
+
+    /// Cap superseded backlog so rapid node navigation cannot unbounded-grow
+    /// join handles. Joining the oldest may briefly stall the stdin loop under
+    /// extreme churn; that beats detach + HostState UAF on teardown.
+    const max_analysis_orphans: usize = 2;
+
+    /// Park the prior analysis join handle without detach. Bounded: join oldest
+    /// when the orphan list is full so teardown always has a finite set.
+    pub fn retireAnalysisThread(self: *HostState) void {
+        if (self.analysis_thread) |old_t| {
+            self.analysis_thread = null;
+            while (self.analysis_orphans.items.len >= max_analysis_orphans) {
+                const oldest = self.analysis_orphans.orderedRemove(0);
+                oldest.join();
+            }
+            self.analysis_orphans.append(old_t) catch {
+                // OOM on the handle list: join synchronously rather than detach.
+                old_t.join();
+            };
+        }
+    }
+
+    /// Only the current analysis generation may clear shared running / budget.
+    /// A superseded worker must not flip `analysis_running` off while a newer
+    /// request is live, or return WorkerBudget to training under that request.
+    pub fn finishAnalysisSlot(self: *HostState, gen: u64) void {
+        if (!self.analysisGenCurrent(gen)) return;
+        self.analysis_running.store(false, .release);
+        self.budget.returnToTraining();
     }
 
     pub fn writeReply(self: *HostState, reply: ipc.Envelope) !void {
@@ -1888,9 +1927,17 @@ fn borrowPublishedForAnalysis(
 
 fn analysisWorker(task: *AnalysisTask) void {
     const state = task.state;
+    var budget_held = false;
     defer {
         state.untrack(task.request_id);
-        state.analysis_running.store(false, .release);
+        if (budget_held) {
+            // Gen-scoped: superseded workers must not clear shared budget/running.
+            state.finishAnalysisSlot(task.gen);
+        } else if (state.analysisGenCurrent(task.gen)) {
+            // Never borrowed budget (early supersede / nothing_published) but still
+            // own the running slot if we are current.
+            state.analysis_running.store(false, .release);
+        }
         state.allocator.free(task.request_id);
         if (task.job_id) |j| state.allocator.free(j);
         state.allocator.free(task.op);
@@ -1904,7 +1951,7 @@ fn analysisWorker(task: *AnalysisTask) void {
     }
 
     state.budget.prioritizeAnalysis(1);
-    defer state.budget.returnToTraining();
+    budget_held = true;
 
     // Bound the policy wait so a hung publish cannot pin analysis forever; the
     // stdin loop stays free for Stop/status either way (ZR-151). Idle sessions
@@ -1920,22 +1967,31 @@ fn analysisWorker(task: *AnalysisTask) void {
         state.writeReply(err_reply) catch {};
         return;
     };
-    defer lease.deinit();
 
     if (!state.analysisGenCurrent(task.gen)) {
+        lease.deinit();
         analysisSupersededReply(state, task);
         return;
     }
 
     var reply = switch (task.kind) {
         .values => buildValuesReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
-            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "values_failed", @errorName(err)) catch return;
+            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "values_failed", @errorName(err)) catch {
+                lease.deinit();
+                return;
+            };
         },
         .equity => buildEquityReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
-            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "equity_failed", @errorName(err)) catch return;
+            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "equity_failed", @errorName(err)) catch {
+                lease.deinit();
+                return;
+            };
         },
         .node => buildNodeReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
-            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "inspect_failed", @errorName(err)) catch return;
+            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "inspect_failed", @errorName(err)) catch {
+                lease.deinit();
+                return;
+            };
         },
         .categories => buildCategoriesReply(state, task.request_id, task.job_id, task.body_json, &lease) catch |err| blk: {
             const code: []const u8 = if (err == error.OutOfMemory and state.session.budget.limit() > 0)
@@ -1946,9 +2002,15 @@ fn analysisWorker(task: *AnalysisTask) void {
                 "invalid_weight"
             else
                 "categories_failed";
-            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+            break :blk ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch {
+                lease.deinit();
+                return;
+            };
         },
     };
+    // Reply body is owned JSON — release the publish lease before the blocking
+    // stdout write so publish/replace is not held behind a large frame (audit #3).
+    lease.deinit();
     defer reply.deinit();
 
     if (!state.analysisGenCurrent(task.gen)) {
@@ -2136,11 +2198,8 @@ fn startAnalysis(state: *HostState, req: ipc.Envelope, kind: AnalysisKind) !void
         .gen = gen,
     };
 
-    // Reclaim prior join handle without blocking the stdin loop on EV work.
-    if (state.analysis_thread) |old_t| {
-        state.analysis_thread = null;
-        old_t.detach();
-    }
+    // Park prior join handle (bounded orphans) — never detach (audit #3).
+    state.retireAnalysisThread();
 
     state.analysis_running.store(true, .release);
     state.analysis_thread = std.Thread.spawn(.{}, analysisWorker, .{task}) catch |err| {
@@ -2310,6 +2369,70 @@ test "ZR-151 analysis gen coalesce marks older gens stale" {
     const g2 = state.bumpAnalysisGen();
     try std.testing.expect(state.analysisGenCurrent(g2));
     try std.testing.expect(!state.analysisGenCurrent(g1));
+}
+
+test "superseded analysis finish does not clear live slot or train job" {
+    // Audit #3: a dead/superseded worker must not flip analysis_running off or
+    // return WorkerBudget while a newer analysis owns the slot — and must not
+    // disturb an unrelated in-flight train identity.
+    var state = try HostState.init(std.testing.allocator, "analysis-slot");
+    defer state.deinit();
+
+    try state.setActiveJob("train-current");
+    state.train_running.store(true, .release);
+    state.analysis_running.store(true, .release);
+    state.budget.prioritizeAnalysis(1);
+    try std.testing.expect(state.budget.analysis > 0);
+
+    const stale_gen = state.bumpAnalysisGen();
+    const live_gen = state.bumpAnalysisGen();
+    try std.testing.expect(state.analysisGenCurrent(live_gen));
+    try std.testing.expect(!state.analysisGenCurrent(stale_gen));
+
+    // Superseded worker exits — shared slot must stay live for live_gen.
+    state.finishAnalysisSlot(stale_gen);
+    try std.testing.expect(state.analysis_running.load(.acquire));
+    try std.testing.expect(state.budget.analysis > 0);
+    try std.testing.expect(state.train_running.load(.acquire));
+    try std.testing.expect(state.matchesActiveJob("train-current"));
+
+    // Current generation may clear the analysis slot without touching train.
+    state.finishAnalysisSlot(live_gen);
+    try std.testing.expect(!state.analysis_running.load(.acquire));
+    try std.testing.expectEqual(@as(u32, 0), state.budget.analysis);
+    try std.testing.expect(state.train_running.load(.acquire));
+    try std.testing.expect(state.matchesActiveJob("train-current"));
+}
+
+test "retireAnalysisThread parks orphans joinable without detach" {
+    var state = try HostState.init(std.testing.allocator, "analysis-orphans");
+    defer state.deinit();
+
+    const Gate = struct {
+        release: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        fn worker(self: *@This()) void {
+            while (!self.release.load(.acquire)) {
+                std.Thread.sleep(1 * std.time.ns_per_ms);
+            }
+        }
+    };
+    var gate1: Gate = .{};
+    var gate2: Gate = .{};
+
+    state.analysis_thread = try std.Thread.spawn(.{}, Gate.worker, .{&gate1});
+    state.retireAnalysisThread();
+    try std.testing.expect(state.analysis_thread == null);
+    try std.testing.expectEqual(@as(usize, 1), state.analysis_orphans.items.len);
+
+    state.analysis_thread = try std.Thread.spawn(.{}, Gate.worker, .{&gate2});
+    state.retireAnalysisThread();
+    try std.testing.expectEqual(@as(usize, 2), state.analysis_orphans.items.len);
+
+    gate1.release.store(true, .release);
+    gate2.release.store(true, .release);
+    state.joinAnalysis();
+    try std.testing.expectEqual(@as(usize, 0), state.analysis_orphans.items.len);
+    try std.testing.expect(state.analysis_thread == null);
 }
 
 test "ready dispatch" {

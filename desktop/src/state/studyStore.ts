@@ -99,7 +99,11 @@ import {
   statusIndicatesFailure,
   statusStickyError,
 } from "../domain/sessionRecovery";
-import { killSolverEngineIpc, setNoEngineTransport } from "../engine/transport";
+import {
+  getActiveTransport,
+  killSolverEngineIpc,
+  setNoEngineTransport,
+} from "../engine/transport";
 import { presentUserText } from "../domain/userText";
 import {
   DEFAULT_SPOT,
@@ -2324,7 +2328,12 @@ export const useStudyStore = create<StudyState>((set, get) => ({
                 phase: hungPhase,
               })
             ) {
-              void killSolverEngineIpc();
+              // Capture launch id before markEngineSessionDead / transport clear
+              // so a late kill cannot tear down a reconnected child (audit #5).
+              const transport = getActiveTransport();
+              const hungLaunchId =
+                transport.kind === "ipc" ? transport.launchId : undefined;
+              void killSolverEngineIpc(hungLaunchId);
             }
             get().markEngineSessionDead(fullDetail);
           }
