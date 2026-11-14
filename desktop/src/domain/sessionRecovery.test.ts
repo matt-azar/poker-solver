@@ -22,9 +22,13 @@ import {
 describe("sessionRecovery", () => {
   it("classifies pipe / InvalidFrame faults as session-dead", () => {
     expect(isEngineSessionDead("solver-engine pipe closed")).toBe(true);
+    expect(
+      isEngineSessionDead("connection_loss: solver-engine pipe closed (launch zig-1)"),
+    ).toBe(true);
     expect(isEngineSessionDead("Broken pipe")).toBe(true);
     expect(isEngineSessionDead("ipc read error: InvalidFrame")).toBe(true);
     expect(isEngineSessionDead("invalid_frame")).toBe(true);
+    expect(isEngineSessionDead("malformed IPC framing: decode ipc json")).toBe(true);
     expect(isEngineSessionDead("No engine URL — Study requires the Tauri shell")).toBe(
       true,
     );

@@ -17,6 +17,9 @@
 //!    occupy the native main thread or prevent Status / Stop / Close.
 //! 5. **Bounded admission** (PR2): outstanding count + queued bytes, Stop/Pause
 //!    reserve, status coalesce, control priority, deadlines from admission.
+//! 6. **Typed replies + recovery diagnostics** (PR3): serde envelopes, `IpcError`
+//!    taxonomy, reply validation vs pending, fail-once on connection loss,
+//!    launch-scoped late replies, bounded per-request timing samples.
 //!
 //! ## Concurrent mid-train `values` (R10 / ZR-62)
 //!
@@ -43,8 +46,12 @@ use crate::diagnostics;
 use crate::solver_admission::{
     self, classify_op, is_mutating, AdmissionBoard, OpClass, MAX_OUTSTANDING,
 };
+use crate::solver_ipc::{
+    duration_ms, validate_reply, IpcDiagSample, IpcError, PendingWaiter, ReplyValidation,
+    SharedDiagRing, TimeoutPhase, PROTOCOL,
+};
 
-const PROTOCOL: u32 = 2;
+// PROTOCOL is re-exported from solver_ipc (keep local alias sites compiling).
 const SIDECAR_BASENAME: &str = "solver-engine";
 const EXTERNAL_BIN: &str = "binaries/solver-engine";
 /// Override sidecar path for acceptance / harness (test sidecar).
@@ -92,11 +99,30 @@ pub struct SolverEngineInfo {
 struct SessionIo {
     board: Arc<AdmissionBoard>,
     next_request: AtomicU64,
-    pending: Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>,
+    pending: Mutex<HashMap<String, PendingWaiter>>,
     /// Shared with the writer poll loop so kill can exit without dropping all Senders.
     shut_down: Arc<AtomicBool>,
+    /// Fail waiters at most once on EOF / malformed framing / fatal write.
+    connection_closed: AtomicBool,
     /// Copied at spawn so the reader thread can fault with a real launch id.
     launch_id: String,
+    /// Bounded request/connection timing samples for this launch.
+    diag: SharedDiagRing,
+    /// Last observed child exit status string (set on reap when known).
+    child_exit: Mutex<Option<String>>,
+}
+
+fn new_session_io(launch_id: &str, shut_down: Arc<AtomicBool>, board: Arc<AdmissionBoard>) -> Arc<SessionIo> {
+    Arc::new(SessionIo {
+        board,
+        next_request: AtomicU64::new(1),
+        pending: Mutex::new(HashMap::new()),
+        shut_down,
+        connection_closed: AtomicBool::new(false),
+        launch_id: launch_id.to_string(),
+        diag: SharedDiagRing::default(),
+        child_exit: Mutex::new(None),
+    })
 }
 
 /// One supervised launch: kill handle is independent of the writer.
@@ -286,29 +312,86 @@ fn read_frame_blocking(stdout: &mut ChildStdout, stash: &mut Vec<u8>) -> Result<
     serde_json::from_slice(&payload).map_err(|err| format!("decode ipc json: {err}"))
 }
 
-fn fail_all_pending(io: &SessionIo, message: &str) {
+/// Close this connection at most once: shut down writer/reader waits and settle
+/// every pending waiter with the same typed error. Launch B is unaffected —
+/// callers must only invoke this on the SessionIo that failed.
+fn fail_connection_once(io: &SessionIo, err: IpcError) {
+    if io
+        .connection_closed
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    io.shut_down.store(true, Ordering::SeqCst);
+    io.board.signal_shutdown();
+    io.board.clear_status_coalesce();
+    let child_exit = io
+        .child_exit
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .or_else(|| match &err {
+            IpcError::ConnectionLoss { child_exit, .. } => child_exit.clone(),
+            _ => None,
+        });
+    let err = match err {
+        IpcError::ConnectionLoss {
+            message,
+            launch_id,
+            child_exit: _,
+        } => IpcError::connection_loss(message, launch_id, child_exit),
+        other => other,
+    };
+    io.diag.record(IpcDiagSample {
+        launch_id: io.launch_id.clone(),
+        request_id: None,
+        op: None,
+        queue_wait_ms: None,
+        write_duration_ms: None,
+        reply_wait_ms: None,
+        child_exit: match &err {
+            IpcError::ConnectionLoss { child_exit, .. } => child_exit.clone(),
+            _ => None,
+        },
+        outcome: match &err {
+            IpcError::ConnectionLoss { .. } => "connection_loss".into(),
+            IpcError::ProtocolFailure { .. } => "protocol_failure".into(),
+            _ => "connection_closed".into(),
+        },
+    });
     let mut pending = match io.pending.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    for (_, tx) in pending.drain() {
-        let _ = tx.send(Err(message.to_string()));
+    for (_, waiter) in pending.drain() {
+        let _ = waiter.tx.send(Err(err.clone()));
     }
 }
 
-fn reply_to_result(reply: Value) -> Result<Value, String> {
-    if reply.get("ok") == Some(&Value::Bool(false)) {
-        let code = reply
-            .get("error_code")
-            .and_then(|v| v.as_str())
-            .unwrap_or("ipc_error");
-        let message = reply
-            .get("error_message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("solver-engine request failed");
-        return Err(format!("{code}: {message}"));
-    }
+/// Host `ok:false` envelopes stay Ok(Value) so the TypeScript adapter can read
+/// `error_code` / `error_message` without Tauri mangling them into a string Err.
+fn deliver_reply_value(reply: Value) -> Result<Value, IpcError> {
     Ok(reply)
+}
+
+fn fanout_coalesce(
+    coalesce: Vec<oneshot::Sender<Result<Value, String>>>,
+    result: &Result<Value, IpcError>,
+) {
+    match result {
+        Ok(v) => {
+            for w in coalesce {
+                let _ = w.send(Ok(v.clone()));
+            }
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            for w in coalesce {
+                let _ = w.send(Err(msg.clone()));
+            }
+        }
+    }
 }
 
 fn reader_loop(mut stdout: ChildStdout, io: Arc<SessionIo>) {
@@ -320,66 +403,88 @@ fn reader_loop(mut stdout: ChildStdout, io: Arc<SessionIo>) {
         }
         match read_frame_blocking(&mut stdout, &mut stash) {
             Ok(reply) => {
-                let kind = reply.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-                if kind == "progress" {
-                    continue;
-                }
-                if kind != "reply" {
-                    continue;
-                }
                 let rid = reply
                     .get("request_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let result = reply_to_result(reply);
-                let tx = io
-                    .pending
-                    .lock()
-                    .ok()
-                    .and_then(|mut pending| pending.remove(&rid));
-                let coalesce = io.board.take_status_coalesce(&rid);
-                if let Some(tx) = tx {
-                    // Fan-out status to coalesced waiters (clone result via re-encode).
-                    if !coalesce.is_empty() {
-                        match &result {
-                            Ok(v) => {
-                                for w in coalesce {
-                                    let _ = w.send(Ok(v.clone()));
-                                }
-                            }
-                            Err(e) => {
-                                for w in coalesce {
-                                    let _ = w.send(Err(e.clone()));
-                                }
-                            }
+                let (validation, removed) = {
+                    let mut pending = match io.pending.lock() {
+                        Ok(g) => g,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                    let validation = {
+                        let waiter_ref = pending.get(&rid);
+                        validate_reply(&reply, waiter_ref, &rid)
+                    };
+                    match &validation {
+                        ReplyValidation::Ok | ReplyValidation::Reject(_) => {
+                            (validation, pending.remove(&rid))
+                        }
+                        ReplyValidation::Ignore(_) => (validation, None),
+                    }
+                };
+
+                match validation {
+                    ReplyValidation::Ignore("progress")
+                    | ReplyValidation::Ignore("non-reply")
+                    | ReplyValidation::Ignore("orphan") => continue,
+                    ReplyValidation::Ignore(_) => continue,
+                    ReplyValidation::Reject(proto_err) => {
+                        let coalesce = io.board.take_status_coalesce(&rid);
+                        let result = Err(proto_err);
+                        fanout_coalesce(coalesce, &result);
+                        if let Some(waiter) = removed {
+                            let _ = waiter.tx.send(result);
                         }
                     }
-                    let _ = tx.send(result);
-                } else if !coalesce.is_empty() {
-                    // Primary waiter timed out; still deliver to coalesced peers.
-                    match result {
-                        Ok(v) => {
-                            for w in coalesce {
-                                let _ = w.send(Ok(v.clone()));
+                    ReplyValidation::Ok => {
+                        let coalesce = io.board.take_status_coalesce(&rid);
+                        let result = deliver_reply_value(reply);
+                        if let Some(waiter) = removed {
+                            if let Some(wrote_at) = waiter.wrote_at {
+                                io.diag.record(IpcDiagSample {
+                                    launch_id: io.launch_id.clone(),
+                                    request_id: Some(rid.clone()),
+                                    op: Some(waiter.op.clone()),
+                                    queue_wait_ms: None,
+                                    write_duration_ms: None,
+                                    reply_wait_ms: Some(duration_ms(wrote_at.elapsed())),
+                                    child_exit: None,
+                                    outcome: "ok".into(),
+                                });
                             }
-                        }
-                        Err(e) => {
-                            for w in coalesce {
-                                let _ = w.send(Err(e.clone()));
-                            }
+                            fanout_coalesce(coalesce, &result);
+                            let _ = waiter.tx.send(result);
+                        } else if !coalesce.is_empty() {
+                            fanout_coalesce(coalesce, &result);
                         }
                     }
                 }
-                // Orphan / late reply after all waiters timed out: drop.
             }
             Err(err) => {
-                // Sidecar died or closed stdout before host kill — record now so
-                // last-fault keeps this launch_id (status-write 232 comes later).
+                // Malformed framing or EOF: close this connection and fail waiters once.
                 if !io.shut_down.load(Ordering::SeqCst) {
                     unexpected_eof = Some(err.clone());
                 }
-                fail_all_pending(&io, &err);
+                let lower = err.to_lowercase();
+                let close_err = if lower.contains("decode")
+                    || lower.contains("bad frame")
+                    || lower.contains("invalid")
+                {
+                    IpcError::connection_loss(
+                        format!("malformed IPC framing: {err}"),
+                        &io.launch_id,
+                        io.child_exit.lock().ok().and_then(|g| g.clone()),
+                    )
+                } else {
+                    IpcError::connection_loss(
+                        format!("solver-engine pipe closed ({err})"),
+                        &io.launch_id,
+                        io.child_exit.lock().ok().and_then(|g| g.clone()),
+                    )
+                };
+                fail_connection_once(&io, close_err);
                 break;
             }
         }
@@ -397,7 +502,15 @@ fn reader_loop(mut stdout: ChildStdout, io: Arc<SessionIo>) {
             PROTOCOL,
         );
     }
-    fail_all_pending(&io, "solver-engine pipe closed");
+    // Idempotent: settles any stragglers if EOF path did not run fail_connection_once.
+    fail_connection_once(
+        &io,
+        IpcError::connection_loss(
+            "solver-engine pipe closed",
+            &io.launch_id,
+            io.child_exit.lock().ok().and_then(|g| g.clone()),
+        ),
+    );
 }
 
 fn join_handle_bounded(handle: JoinHandle<()>, deadline: Instant, label: &str) {
@@ -469,11 +582,27 @@ fn kill_session(
         session.io.shut_down.store(true, Ordering::SeqCst);
         session.io.board.clear_status_coalesce();
         session.io.board.signal_shutdown();
-        fail_all_pending(&session.io, "solver-engine session killed");
-        // Kill handle is independent of the writer — interrupts a stuck write.
+        // Capture exit status after kill/reap for diagnostics.
         let _ = session.child.kill();
         let deadline = Instant::now() + EXIT_REAP_TIMEOUT;
         wait_child_bounded(&mut session.child, deadline);
+        let exit_str = match session.child.try_wait() {
+            Ok(Some(status)) => Some(status.to_string()),
+            _ => Some("killed".into()),
+        };
+        if let Ok(mut slot) = session.io.child_exit.lock() {
+            *slot = exit_str.clone();
+        }
+        fail_connection_once(
+            &session.io,
+            IpcError::connection_loss(
+                "solver-engine session killed",
+                &session.launch_id,
+                exit_str,
+            ),
+        );
+        // Kill handle is independent of the writer — interrupts a stuck write.
+        // (kill already issued above before reap)
         // Reader holds Arc<SessionIo>. Join it first; signal board shutdown so the
         // writer exits even if Senders remain; then drop our Arc and join the writer.
         if let Some(handle) = session.reader.take() {
@@ -571,13 +700,7 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
     let board = AdmissionBoard::new(Arc::clone(&shut_down));
     let writer = solver_admission::spawn_writer(stdin, Arc::clone(&board))?;
 
-    let io = Arc::new(SessionIo {
-        board,
-        next_request: AtomicU64::new(1),
-        pending: Mutex::new(HashMap::new()),
-        shut_down,
-        launch_id: launch_id.to_string(),
-    });
+    let io = new_session_io(launch_id, shut_down, board);
     let reader_io = Arc::clone(&io);
     let reader = thread::Builder::new()
         .name("solver-engine-stdout".into())
@@ -641,9 +764,13 @@ async fn rpc_shared(
     body: Value,
     job_id: Option<String>,
     rpc_timeout: Duration,
-) -> Result<Value, String> {
-    if io.shut_down.load(Ordering::SeqCst) {
-        return Err("solver-engine session shut down".into());
+) -> Result<Value, IpcError> {
+    if io.shut_down.load(Ordering::SeqCst) || io.connection_closed.load(Ordering::SeqCst) {
+        return Err(IpcError::connection_loss(
+            "solver-engine session shut down",
+            &io.launch_id,
+            io.child_exit.lock().ok().and_then(|g| g.clone()),
+        ));
     }
 
     let class = classify_op(op);
@@ -659,16 +786,27 @@ async fn rpc_shared(
             )
             .await
             {
-                Ok(Ok(result)) => result,
-                Ok(Err(_)) => Err("solver-engine pipe closed".into()),
-                Err(_) => Err("solver-engine IPC read timed out".into()),
+                Ok(Ok(Ok(v))) => Ok(v),
+                Ok(Ok(Err(msg))) => Err(IpcError::from_transport_message(&msg, &io.launch_id, op)),
+                Ok(Err(_)) => Err(IpcError::connection_loss(
+                    "solver-engine pipe closed",
+                    &io.launch_id,
+                    io.child_exit.lock().ok().and_then(|g| g.clone()),
+                )),
+                Err(_) => Err(IpcError::timeout(
+                    TimeoutPhase::ReplyWait,
+                    "solver-engine IPC read timed out",
+                    op,
+                    None,
+                    true, // status soft timeout = degraded responsiveness
+                )),
             };
         }
     }
 
     // Bound outstanding count (Stop/Pause reserve for non-control).
     if let Err(err) = io.board.try_reserve_slot(class) {
-        return Err(err);
+        return Err(IpcError::queue_saturation(err));
     }
     let _outstanding = OutstandingGuard::new(Arc::clone(&io.board));
 
@@ -678,10 +816,23 @@ async fn rpc_shared(
         let mut pending = match io.pending.lock() {
             Ok(g) => g,
             Err(_) => {
-                return Err("solver-engine pending lock poisoned".into());
+                return Err(IpcError::protocol_failure(
+                    "solver-engine pending lock poisoned",
+                    Some(request_id),
+                    Some(op.to_string()),
+                ));
             }
         };
-        pending.insert(request_id.clone(), reply_tx);
+        pending.insert(
+            request_id.clone(),
+            PendingWaiter {
+                tx: reply_tx,
+                op: op.to_string(),
+                job_id: job_id.clone(),
+                admitted_at,
+                wrote_at: None,
+            },
+        );
     }
     if class == OpClass::Status {
         io.board.begin_status_coalesce(&request_id);
@@ -704,7 +855,11 @@ async fn rpc_shared(
             if class == OpClass::Status {
                 let _ = io.board.take_status_coalesce(&request_id);
             }
-            return Err(err);
+            return Err(IpcError::protocol_failure(
+                err,
+                Some(request_id),
+                Some(op.to_string()),
+            ));
         }
     };
 
@@ -715,14 +870,19 @@ async fn rpc_shared(
         }
         if class == OpClass::Status {
             let waiters = io.board.take_status_coalesce(&request_id);
+            let msg = format!(
+                "expired-before-write: status deadline elapsed before enqueue"
+            );
             for w in waiters {
-                let _ = w.send(Err(
-                    "expired-before-write: status deadline elapsed before enqueue".into(),
-                ));
+                let _ = w.send(Err(msg.clone()));
             }
         }
-        return Err(format!(
-            "expired-before-write: op {op} deadline elapsed before stdin enqueue"
+        return Err(IpcError::timeout(
+            TimeoutPhase::BeforeWrite,
+            format!("expired-before-write: op {op} deadline elapsed before stdin enqueue"),
+            op,
+            Some(request_id),
+            false,
         ));
     }
 
@@ -735,7 +895,7 @@ async fn rpc_shared(
             if class == OpClass::Status {
                 let _ = io.board.take_status_coalesce(&request_id);
             }
-            return Err(err);
+            return Err(IpcError::from_transport_message(&err, &io.launch_id, op));
         }
     };
 
@@ -752,7 +912,14 @@ async fn rpc_shared(
                     let _ = w.send(Err(err.clone()));
                 }
             }
-            return Err(err);
+            let typed = IpcError::from_transport_message(&err, &io.launch_id, op);
+            if typed.is_connection_loss()
+                || err.to_lowercase().contains("write:")
+                || err.to_lowercase().contains("broken pipe")
+            {
+                fail_connection_once(io, typed.clone());
+            }
+            return Err(typed);
         }
         Err(_) => {
             if let Ok(mut pending) = io.pending.lock() {
@@ -761,10 +928,32 @@ async fn rpc_shared(
             if class == OpClass::Status {
                 let _ = io.board.take_status_coalesce(&request_id);
             }
-            return Err("solver-engine writer dropped".into());
+            let typed = IpcError::connection_loss(
+                "solver-engine writer dropped",
+                &io.launch_id,
+                io.child_exit.lock().ok().and_then(|g| g.clone()),
+            );
+            fail_connection_once(io, typed.clone());
+            return Err(typed);
         }
     };
-    let _ = write_outcome; // queue_wait / behind_inflight recorded on the board for control
+
+    // Stamp wrote_at for reply-wait diagnostics.
+    if let Ok(mut pending) = io.pending.lock() {
+        if let Some(w) = pending.get_mut(&request_id) {
+            w.wrote_at = Some(Instant::now());
+        }
+    }
+    io.diag.record(IpcDiagSample {
+        launch_id: io.launch_id.clone(),
+        request_id: Some(request_id.clone()),
+        op: Some(op.to_string()),
+        queue_wait_ms: Some(duration_ms(write_outcome.queue_wait)),
+        write_duration_ms: Some(duration_ms(write_outcome.write_duration)),
+        reply_wait_ms: None,
+        child_exit: None,
+        outcome: "wrote".into(),
+    });
 
     let remaining = deadline.saturating_duration_since(Instant::now());
     if remaining.is_zero() {
@@ -774,42 +963,79 @@ async fn rpc_shared(
         if class == OpClass::Status {
             let _ = io.board.take_status_coalesce(&request_id);
         }
-        // Write already hit the pipe — mutating outcomes are unknown.
         if is_mutating(op) {
-            return Err(format!(
-                "unknown-after-write: op {op} deadline elapsed after stdin write \
-                 (do not auto-replay Save/Open/Solve)"
+            return Err(IpcError::timeout(
+                TimeoutPhase::AfterWrite,
+                format!(
+                    "unknown-after-write: op {op} deadline elapsed after stdin write \
+                     (do not auto-replay Save/Open/Solve)"
+                ),
+                op,
+                Some(request_id),
+                false,
             ));
         }
-        return Err("solver-engine IPC read timed out".into());
+        return Err(IpcError::timeout(
+            TimeoutPhase::ReplyWait,
+            "solver-engine IPC read timed out",
+            op,
+            Some(request_id),
+            op == "status",
+        ));
     }
 
     let result = match tokio::time::timeout(remaining, reply_rx).await {
-        Ok(Ok(result)) => {
-            result
-        }
-        Ok(Err(_)) => {
-            Err("solver-engine pipe closed".into())
-        }
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err(IpcError::connection_loss(
+            "solver-engine pipe closed",
+            &io.launch_id,
+            io.child_exit.lock().ok().and_then(|g| g.clone()),
+        )),
         Err(_) => {
             if let Ok(mut pending) = io.pending.lock() {
                 pending.remove(&request_id);
             }
-            // Leave status coalesce installed so a late reply can still fan out;
-            // take_status_coalesce on reader clears it. If we abandon, clear now.
             if class == OpClass::Status {
                 let waiters = io.board.take_status_coalesce(&request_id);
                 for w in waiters {
                     let _ = w.send(Err("solver-engine IPC read timed out".into()));
                 }
             }
+            io.diag.record(IpcDiagSample {
+                launch_id: io.launch_id.clone(),
+                request_id: Some(request_id.clone()),
+                op: Some(op.to_string()),
+                queue_wait_ms: Some(duration_ms(write_outcome.queue_wait)),
+                write_duration_ms: Some(duration_ms(write_outcome.write_duration)),
+                reply_wait_ms: Some(duration_ms(remaining)),
+                child_exit: None,
+                outcome: if op == "status" {
+                    "degraded_timeout".into()
+                } else if is_mutating(op) {
+                    "unknown_after_write".into()
+                } else {
+                    "timeout".into()
+                },
+            });
             if is_mutating(op) {
-                Err(format!(
-                    "unknown-after-write: op {op} reply timed out after stdin write \
-                     (do not auto-replay Save/Open/Solve)"
+                Err(IpcError::timeout(
+                    TimeoutPhase::AfterWrite,
+                    format!(
+                        "unknown-after-write: op {op} reply timed out after stdin write \
+                         (do not auto-replay Save/Open/Solve)"
+                    ),
+                    op,
+                    Some(request_id),
+                    false,
                 ))
             } else {
-                Err("solver-engine IPC read timed out".into())
+                Err(IpcError::timeout(
+                    TimeoutPhase::ReplyWait,
+                    "solver-engine IPC read timed out",
+                    op,
+                    Some(request_id),
+                    op == "status",
+                ))
             }
         }
     };
@@ -863,7 +1089,7 @@ async fn ready_handshake(io: &Arc<SessionIo>, launch_id: &str) -> Result<SolverE
             }
             Err(err) => {
                 if Instant::now() >= deadline {
-                    return Err(err);
+                    return Err(err.to_string());
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
@@ -910,6 +1136,8 @@ pub async fn ensure_solver_engine_session(
             Err(err) => {
                 let _ = launch_id;
                 // Only tear down the pipes we probed — not a newer install.
+                // Soft/protocol timeouts on ready still warrant reconnect; connection
+                // loss must not kill a newer launch B.
                 kill_solver_engine_if_current(
                     state,
                     &io,
@@ -1023,10 +1251,12 @@ pub async fn solver_engine_request(
     op: String,
     body: Option<Value>,
     job_id: Option<String>,
-) -> Result<Value, String> {
+) -> Result<Value, IpcError> {
     // Capture the connection that issued this RPC so a late fatal cannot kill a
     // sidecar installed by a later reconnect (ZR-154).
-    let io = session_io(&*state)?;
+    let io = session_io(&*state).map_err(|e| {
+        IpcError::connection_loss(e, "none", None)
+    })?;
     state.remember_op(&op);
     let reply = rpc_shared(
         &io,
@@ -1037,19 +1267,28 @@ pub async fn solver_engine_request(
     )
     .await;
     if let Err(err) = &reply {
-        // Kill only on pipe/session death. A single RPC timeout must not nuke an
-        // in-flight Study train (values/solve can be slow under flop fixtures).
-        let fatal = err.contains("pipe closed")
-            || err.contains("write:")
-            || err.contains("Broken pipe")
-            || err.contains("shut down")
-            || err.contains("writer closed")
-            || err.contains("writer dropped");
-        if fatal {
-            kill_solver_engine_if_current(&*state, &io, err);
+        // Kill only on connection loss. Soft status timeouts are degraded
+        // responsiveness — never tear down a healthy train for those.
+        if err.is_connection_loss() {
+            kill_solver_engine_if_current(&*state, &io, &err.to_string());
         }
     }
     reply
+}
+
+/// Snapshot bounded IPC diagnostics for the current launch (tests / support).
+#[tauri::command]
+pub fn solver_engine_ipc_diagnostics(
+    state: State<'_, SolverEngineState>,
+) -> Result<Vec<IpcDiagSample>, String> {
+    let guard = state
+        .session
+        .lock()
+        .map_err(|_| "solver-engine state lock poisoned".to_string())?;
+    match guard.as_ref() {
+        Some(s) => Ok(s.io.diag.snapshot()),
+        None => Ok(Vec::new()),
+    }
 }
 
 /// Clean app Exit — tear down sidecar without overwriting a useful last-fault.
@@ -1219,17 +1458,53 @@ mod tests {
     }
 
     #[test]
-    fn reply_to_result_maps_ok_false() {
+    fn deliver_reply_preserves_host_error_codes() {
         let reply = json!({
+            "v": 2,
             "kind": "reply",
             "request_id": "r9",
+            "op": "node",
             "ok": false,
             "error_code": "busy",
             "error_message": "train running"
         });
-        let err = reply_to_result(reply).unwrap_err();
-        assert!(err.contains("busy"));
-        assert!(err.contains("train running"));
+        let ok = deliver_reply_value(reply).expect("host rejection stays Ok(envelope)");
+        assert_eq!(ok["ok"], false);
+        assert_eq!(ok["error_code"], "busy");
+        assert_eq!(ok["error_message"], "train running");
+    }
+
+    #[test]
+    fn fail_connection_once_is_idempotent() {
+        let shut_down = Arc::new(AtomicBool::new(false));
+        let io = new_session_io("launch-fail-once", Arc::clone(&shut_down), AdmissionBoard::new(shut_down));
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = io.pending.lock().unwrap();
+            pending.insert(
+                "r1".into(),
+                PendingWaiter {
+                    tx,
+                    op: "status".into(),
+                    job_id: None,
+                    admitted_at: Instant::now(),
+                    wrote_at: None,
+                },
+            );
+        }
+        fail_connection_once(
+            &io,
+            IpcError::connection_loss("pipe closed", "launch-fail-once", None),
+        );
+        let first = rx.blocking_recv().expect("waiter settled");
+        assert!(first.is_err());
+        // Second close must not panic / double-fail.
+        fail_connection_once(
+            &io,
+            IpcError::connection_loss("again", "launch-fail-once", None),
+        );
+        assert!(io.connection_closed.load(Ordering::SeqCst));
+        assert!(io.pending.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1261,9 +1536,8 @@ mod tests {
     mod connection_scoped {
         use super::super::*;
         use std::path::Path;
-        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-        use std::sync::{Arc, Mutex};
-        use std::collections::HashMap;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
         use std::process::{Command, Stdio};
 
         fn test_engine_info(launch_id: &str) -> SolverEngineInfo {
@@ -1296,13 +1570,7 @@ mod tests {
             let shut_down = Arc::new(AtomicBool::new(false));
             let board = AdmissionBoard::new(Arc::clone(&shut_down));
             let _writer = solver_admission::spawn_writer(stdin, Arc::clone(&board)).ok();
-            let io = Arc::new(SessionIo {
-                board,
-                next_request: AtomicU64::new(1),
-                pending: Mutex::new(HashMap::new()),
-                shut_down,
-                launch_id: launch_id.to_string(),
-            });
+            let io = new_session_io(launch_id, shut_down, board);
             let session = PipeSession {
                 child,
                 io: Arc::clone(&io),
@@ -1337,13 +1605,7 @@ mod tests {
                 let _stdin = child.stdin.take().unwrap();
                 let io = {
                     let shut_down = Arc::new(AtomicBool::new(false));
-                    Arc::new(SessionIo {
-                        board: AdmissionBoard::new(Arc::clone(&shut_down)),
-                        next_request: AtomicU64::new(1),
-                        pending: Mutex::new(HashMap::new()),
-                        shut_down,
-                        launch_id: "engine-a".into(),
-                    })
+                    new_session_io("engine-a", Arc::clone(&shut_down), AdmissionBoard::new(shut_down))
                 };
                 (child, io)
             };
@@ -1358,13 +1620,7 @@ mod tests {
                 let _stdin = child.stdin.take().unwrap();
                 let io = {
                     let shut_down = Arc::new(AtomicBool::new(false));
-                    Arc::new(SessionIo {
-                        board: AdmissionBoard::new(Arc::clone(&shut_down)),
-                        next_request: AtomicU64::new(1),
-                        pending: Mutex::new(HashMap::new()),
-                        shut_down,
-                        launch_id: "engine-b".into(),
-                    })
+                    new_session_io("engine-b", Arc::clone(&shut_down), AdmissionBoard::new(shut_down))
                 };
                 (child, io)
             };
@@ -1577,13 +1833,7 @@ mod tests {
             let board = AdmissionBoard::new(Arc::clone(&shut_down));
             let writer = solver_admission::spawn_writer(stdin, Arc::clone(&board))
                 .expect("spawn writer");
-            let io = Arc::new(SessionIo {
-                board,
-                next_request: AtomicU64::new(1),
-                pending: Mutex::new(HashMap::new()),
-                shut_down,
-                launch_id: launch_id.to_string(),
-            });
+            let io = new_session_io(launch_id, shut_down, board);
             let reader_io = Arc::clone(&io);
             let reader = thread::spawn(move || reader_loop(stdout, reader_io));
             PipeSession {
@@ -1749,7 +1999,9 @@ mod tests {
             let err = rpc_shared(&io, "values", json!({}), None, Duration::from_secs(1))
                 .await
                 .unwrap_err();
-            assert!(err.contains("admission saturated"), "{err}");
+            let err_s = err.to_string();
+            assert!(err_s.contains("admission saturated"), "{err_s}");
+            assert!(matches!(err, IpcError::QueueSaturation { .. }), "{err:?}");
             // Control reserve path for normal ops near the ceiling.
             solver_admission::force_outstanding_for_test(
                 &io.board,
@@ -1758,7 +2010,9 @@ mod tests {
             let err = rpc_shared(&io, "values", json!({}), None, Duration::from_secs(1))
                 .await
                 .unwrap_err();
-            assert!(err.contains("control reserve"), "{err}");
+            let err_s = err.to_string();
+            assert!(err_s.contains("control reserve"), "{err_s}");
+            assert!(matches!(err, IpcError::QueueSaturation { .. }), "{err:?}");
 
             let state = SolverEngineState::new();
             {
@@ -1770,28 +2024,280 @@ mod tests {
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn unknown_after_write_for_save_timeout() {
-            // Sidecar withholds nothing for save (echoes), but we use a zero remaining
-            // deadline after write by passing a tiny timeout that expires during queue
-            // wait behind a withheld values write — exercise unknown-after-write string.
             let session = spawn_supervised_test_sidecar("accept-unknown-save");
             let io = Arc::clone(&session.io);
             rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT)
                 .await
                 .expect("ready");
-
-            // Block the writer with a withheld values reply still requiring a write first.
-            // Actually values write completes immediately; withhold is on reply.
-            // Use save with an already-expired deadline via Duration::ZERO after admit:
-            // enqueue with deadline = now (expired-before-write) is different.
-            // For unknown-after-write: write succeeds then reply times out.
-            // Make save wait for reply with 1ms while sidecar... save is echoed immediately.
-            // Instead assert the error classifier helper path via a direct string check on
-            // is_mutating + format (unit), and a save that times out if we kill mid-flight.
             assert!(is_mutating("save"));
-            let err = format!(
-                "unknown-after-write: op save reply timed out after stdin write                  (do not auto-replay Save/Open/Solve)"
+            // Sidecar sleeps ~80ms on save; 1ms deadline forces unknown-after-write.
+            let err = rpc_shared(&io, "save", json!({ "path": "/tmp/x" }), None, Duration::from_millis(1))
+                .await
+                .unwrap_err();
+            let s = err.to_string();
+            assert!(
+                s.contains("unknown-after-write") || s.contains("expired-before-write"),
+                "expected deadline classification, got {s}"
             );
-            assert!(err.contains("do not auto-replay"));
+            assert!(matches!(err, IpcError::Timeout { .. }), "{err:?}");
+
+            let state = SolverEngineState::new();
+            {
+                let mut guard = state.session.lock().unwrap();
+                *guard = Some(session);
+            }
+            kill_solver_engine(&state);
+        }
+
+        fn spawn_supervised_test_sidecar_args(launch_id: &str, extra: &[&str]) -> PipeSession {
+            let bin = test_sidecar_bin();
+            assert!(bin.is_file(), "missing ipc-test-sidecar at {}", bin.display());
+            let mut cmd = spawn_test_sidecar_command(&bin, launch_id);
+            for a in extra {
+                cmd.arg(a);
+            }
+            let mut child = cmd
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn sidecar");
+            let stdin = child.stdin.take().expect("stdin");
+            let stdout = child.stdout.take().expect("stdout");
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = thread::spawn(move || {
+                    let mut buf = [0u8; 512];
+                    while let Ok(n) = stderr.read(&mut buf) {
+                        if n == 0 {
+                            break;
+                        }
+                    }
+                });
+            }
+            let shut_down = Arc::new(AtomicBool::new(false));
+            let board = AdmissionBoard::new(Arc::clone(&shut_down));
+            let writer = solver_admission::spawn_writer(stdin, Arc::clone(&board)).expect("writer");
+            let io = new_session_io(launch_id, shut_down, board);
+            let reader_io = Arc::clone(&io);
+            let reader = thread::spawn(move || reader_loop(stdout, reader_io));
+            PipeSession {
+                child,
+                io,
+                writer: Some(writer),
+                reader: Some(reader),
+                launch_id: launch_id.to_string(),
+                info: SolverEngineInfo {
+                    status: "test".into(),
+                    transport: "ipc".into(),
+                    protocol: PROTOCOL,
+                    launch_id: launch_id.to_string(),
+                    sidecar: "ipc-test-sidecar".into(),
+                    workers: 1,
+                    http_fallback_label: "test".into(),
+                },
+            }
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn malformed_reply_fails_pending_and_reconnect_is_fresh_launch() {
+            let session = spawn_supervised_test_sidecar_args(
+                "accept-malformed",
+                &["--malformed-after-ready"],
+            );
+            let io_a = Arc::clone(&session.io);
+            rpc_shared(&io_a, "ready", Value::Null, None, READY_TIMEOUT)
+                .await
+                .expect("ready");
+            // Next RPC should observe connection loss from malformed framing.
+            let err = rpc_shared(&io_a, "status", Value::Null, None, Duration::from_secs(2))
+                .await
+                .unwrap_err();
+            assert!(
+                err.is_connection_loss() || matches!(err, IpcError::ConnectionLoss { .. }),
+                "{err:?}"
+            );
+            assert!(io_a.connection_closed.load(Ordering::SeqCst));
+
+            // Fresh launch B must not share A's closed gate.
+            let session_b = spawn_supervised_test_sidecar("accept-malformed-b");
+            let io_b = Arc::clone(&session_b.io);
+            assert!(!Arc::ptr_eq(&io_a, &io_b));
+            let ready_b = rpc_shared(&io_b, "ready", Value::Null, None, READY_TIMEOUT)
+                .await
+                .expect("fresh launch ready");
+            assert_eq!(ready_b["body"]["protocol"], 2);
+
+            let state = SolverEngineState::new();
+            {
+                let mut guard = state.session.lock().unwrap();
+                *guard = Some(session);
+            }
+            kill_solver_engine(&state);
+            {
+                let mut guard = state.session.lock().unwrap();
+                *guard = Some(session_b);
+            }
+            kill_solver_engine(&state);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn host_rejection_preserves_error_code_on_ok_envelope() {
+            let session = spawn_supervised_test_sidecar_args(
+                "accept-reject",
+                &["--reject-next", "busy"],
+            );
+            let io = Arc::clone(&session.io);
+            rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT)
+                .await
+                .expect("ready");
+            let reply = rpc_shared(&io, "node", json!({ "node_index": 0 }), None, Duration::from_secs(2))
+                .await
+                .expect("host rejection returns Ok(envelope)");
+            assert_eq!(reply["ok"], false);
+            assert_eq!(reply["error_code"], "busy");
+            assert!(reply["error_message"].as_str().unwrap_or("").contains("rejection"));
+
+            let state = SolverEngineState::new();
+            {
+                let mut guard = state.session.lock().unwrap();
+                *guard = Some(session);
+            }
+            kill_solver_engine(&state);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn stop_reading_bounds_queue_and_kill_reaps() {
+            // Answer ready only, then stop reading — further writes queue/saturate.
+            let session = spawn_supervised_test_sidecar_args(
+                "accept-stop-read",
+                &["--stop-reading-after", "1"],
+            );
+            let io = Arc::clone(&session.io);
+            rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT)
+                .await
+                .expect("ready");
+
+            // Flood normal ops; at least one must hit admission saturation or deadline.
+            let mut saw_bound = false;
+            for i in 0..40 {
+                let err = rpc_shared(
+                    &io,
+                    "node",
+                    json!({ "node_index": i }),
+                    None,
+                    Duration::from_millis(200),
+                )
+                .await;
+                if let Err(e) = err {
+                    let s = e.to_string();
+                    if s.contains("admission saturated")
+                        || s.contains("queued bytes")
+                        || s.contains("timed out")
+                        || s.contains("expired-before-write")
+                        || e.is_connection_loss()
+                    {
+                        saw_bound = true;
+                        break;
+                    }
+                }
+            }
+            assert!(saw_bound, "queue/deadline must bound when sidecar stops reading");
+
+            let started = Instant::now();
+            let state = SolverEngineState::new();
+            {
+                let mut guard = state.session.lock().unwrap();
+                *guard = Some(session);
+            }
+            kill_solver_engine(&state);
+            assert!(
+                started.elapsed() < EXIT_REAP_TIMEOUT + Duration::from_secs(2),
+                "kill must reap within exit deadline"
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn late_reply_from_launch_a_does_not_settle_launch_b() {
+            let session_a = spawn_supervised_test_sidecar("late-a");
+            let io_a = Arc::clone(&session_a.io);
+            rpc_shared(&io_a, "ready", Value::Null, None, READY_TIMEOUT)
+                .await
+                .expect("ready a");
+            // Hold values on A (withheld).
+            let values_a = {
+                let io = Arc::clone(&io_a);
+                tokio::spawn(async move {
+                    rpc_shared(
+                        &io,
+                        "values",
+                        json!({ "node_index": 0 }),
+                        None,
+                        Duration::from_secs(30),
+                    )
+                    .await
+                })
+            };
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // Install B and prove it is live while A's values are still pending.
+            let session_b = spawn_supervised_test_sidecar("late-b");
+            let io_b = Arc::clone(&session_b.io);
+            rpc_shared(&io_b, "ready", Value::Null, None, READY_TIMEOUT)
+                .await
+                .expect("ready b");
+            let status_b = rpc_shared(&io_b, "status", Value::Null, None, STATUS_RPC_TIMEOUT)
+                .await
+                .expect("status on B while A pending");
+            assert!(status_b.get("ok").is_some() || status_b.get("body").is_some());
+
+            // Fail A once — must not mark B closed.
+            fail_connection_once(
+                &io_a,
+                IpcError::connection_loss("test close A", "late-a", None),
+            );
+            assert!(io_a.connection_closed.load(Ordering::SeqCst));
+            assert!(!io_b.connection_closed.load(Ordering::SeqCst));
+            let status_b2 = rpc_shared(&io_b, "status", Value::Null, None, STATUS_RPC_TIMEOUT)
+                .await
+                .expect("B still live after A close");
+            assert!(status_b2.get("body").is_some());
+
+            let values_result = values_a.await.expect("join");
+            assert!(values_result.is_err());
+
+            let state = SolverEngineState::new();
+            {
+                let mut guard = state.session.lock().unwrap();
+                *guard = Some(session_a);
+            }
+            kill_solver_engine(&state);
+            {
+                let mut guard = state.session.lock().unwrap();
+                *guard = Some(session_b);
+            }
+            kill_solver_engine(&state);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn diagnostics_record_queue_write_and_reply_timings() {
+            let session = spawn_supervised_test_sidecar("accept-diag");
+            let io = Arc::clone(&session.io);
+            rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT)
+                .await
+                .expect("ready");
+            rpc_shared(&io, "status", Value::Null, None, STATUS_RPC_TIMEOUT)
+                .await
+                .expect("status");
+            let snap = io.diag.snapshot();
+            assert!(
+                snap.iter().any(|s| s.op.as_deref() == Some("status") || s.op.as_deref() == Some("ready")),
+                "expected diag samples, got {snap:?}"
+            );
+            assert!(
+                snap.iter().any(|s| s.queue_wait_ms.is_some() || s.write_duration_ms.is_some() || s.reply_wait_ms.is_some()),
+                "expected timing fields, got {snap:?}"
+            );
+            assert!(snap.iter().all(|s| s.launch_id == "accept-diag"));
 
             let state = SolverEngineState::new();
             {
