@@ -487,6 +487,31 @@ export function hasWithinHandActionMixing(cell: HandCell): boolean {
   return false;
 }
 
+/** Prefer Zig `cell_ev` aggregates for the requested display basis. */
+function zigCellEv(
+  values: ActionValuesPayload,
+  basis: EvDisplayBasis,
+  cell: HandCell,
+): GroupEv | null | undefined {
+  const list =
+    basis === "root_centered"
+      ? values.root_centered?.cell_ev
+      : values.cell_ev;
+  // undefined → caller falls back to client join; null → empty cell.
+  if (!list) {
+    return undefined;
+  }
+  for (const entry of list) {
+    if (entry.row === cell.row && entry.col === cell.col) {
+      return {
+        mixed: Number(entry.mixed),
+        action: (entry.action || []).map((v) => Number(v)),
+      };
+    }
+  }
+  return null;
+}
+
 /** Posterior-weighted. Zero-mass groups stay null even when CF values exist. */
 export function groupEv(
   node: NodePayload | null | undefined,
@@ -494,11 +519,21 @@ export function groupEv(
   cell: HandCell | null | undefined,
   basis: EvDisplayBasis = "local",
 ): GroupEv | null {
-  const displayed = withEvBasis(values, basis, node?.actions);
-  if (!node || !node.reach_defined || !displayed || displayed.pending || !cell) {
+  if (!node || !node.reach_defined || !values || values.pending || !cell) {
     return null;
   }
-  if (displayed.node_id && node.node_id && displayed.node_id !== node.node_id) {
+  if (values.node_id && node.node_id && values.node_id !== node.node_id) {
+    return null;
+  }
+
+  // Zig 169-cell aggregates kill the per-cell findIndex hotspot on matrix paint.
+  const fromZig = zigCellEv(values, basis, cell);
+  if (fromZig !== undefined) {
+    return fromZig;
+  }
+
+  const displayed = withEvBasis(values, basis, node?.actions);
+  if (!displayed || displayed.pending) {
     return null;
   }
   const combos = displayed.combos || node.combos || [];

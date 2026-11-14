@@ -334,6 +334,55 @@ describe("browse strategy grouping", () => {
     expect(global?.mixed).toBeCloseTo(0, 12);
   });
 
+  it("prefers Zig cell_ev aggregates over client groupEv joins", () => {
+    const node = {
+      reach_defined: true,
+      actions: ["Check", "Bet 50"],
+      combos: ["AsAc", "AhKh"],
+      reach: [1, 1],
+      marginal: [0.5, 0.5],
+      strategy: [
+        [0.5, 0.5],
+        [1, 0],
+      ],
+      node_id: "flop-root",
+    };
+    const values = {
+      node_id: "flop-root",
+      utility_basis: "local",
+      local_offset: 50,
+      actions: ["Check", "Bet 50"],
+      combos: ["AsAc", "AhKh"],
+      ev_defined: [true, true],
+      // Deliberately wrong per-hand numbers — cell_ev must win.
+      value: [999, 999],
+      action_ev: [
+        [999, 999],
+        [999, 999],
+      ],
+      cell_ev: [
+        { row: 0, col: 0, text: "AA", mixed: 50, action: [40, 60] },
+        { row: 0, col: 1, text: "AKs", mixed: 10, action: [10, 0] },
+      ],
+      root_centered: {
+        cell_ev: [
+          { row: 0, col: 0, text: "AA", mixed: 0, action: [-10, 10] },
+          { row: 0, col: 1, text: "AKs", mixed: -40, action: [-40, -50] },
+        ],
+      },
+    };
+    const aa = cellOf(node, "AA");
+    const aks = cellOf(node, "AKs");
+    expect(groupEv(node, values, aa, "local")?.mixed).toBeCloseTo(50, 12);
+    expect(groupEv(node, values, aa, "local")?.action[0]).toBeCloseTo(40, 12);
+    expect(groupEv(node, values, aks, "local")?.mixed).toBeCloseTo(10, 12);
+    expect(groupEv(node, values, aa, "root_centered")?.mixed).toBeCloseTo(0, 12);
+    expect(groupEv(node, values, aa, "root_centered")?.action[1]).toBeCloseTo(
+      10,
+      12,
+    );
+  });
+
   it("flags excluded, partial range weight, and action mixing visually", () => {
     const node = {
       reach_defined: true,

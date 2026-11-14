@@ -586,6 +586,15 @@ export function strategyFrequencies(node: NodePayload): number[] {
   if (!labels.length) {
     return [];
   }
+  // Prefer Zig node action_frequencies when present and aligned.
+  const zig = node.action_frequencies;
+  if (
+    Array.isArray(zig) &&
+    zig.length === labels.length &&
+    zig.every((v) => typeof v === "number" && Number.isFinite(v))
+  ) {
+    return zig.map((v) => Number(v));
+  }
   const cells = groupHands(node);
   const totals = labels.map(() => 0);
   let mass = 0;
