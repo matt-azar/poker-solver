@@ -102,8 +102,8 @@ describe("parseStreetConfigTextToSolutionConfig", () => {
     expect(parsed.oop_range).toBe("AcAd:1");
     expect(parsed.ip_range).toBe("2c3d:1");
     expect(parsed.max_raises).toBe(0);
-    expect(parsed.allow_all_in).toBeUndefined();
     expect(parsed.allow_three_bet).toBe(1);
+    expect(parsed.all_in_threshold).toBe(0.5);
     expect(parsed.memory_mib).toBe(64);
     expect(parsed.threads).toBe(1);
     expect(parsed.street_config_text).toBe(text);

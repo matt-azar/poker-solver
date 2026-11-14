@@ -297,7 +297,6 @@ test "plan_preview over-budget still reports fits_budget false" {
         \\ip-range 2c3d:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -325,7 +324,6 @@ test "tree_preview JSON root Check compact and force edit echo" {
         \\ip-range 2c3d:1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

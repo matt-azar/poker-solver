@@ -1,6 +1,6 @@
 //! Public-tree arity / label pins for Study betting trees.
 //! Fixtures that list raises larger than remaining stack expect those sizes
-//! re-interpreted as all-in (DS-26 / Pio), even when `allow-all-in 0`.
+//! re-interpreted as all-in (DS-26 / Pio). List `a` for an explicit all-in.
 const std = @import("std");
 const street_config = @import("street_config.zig");
 const compile = @import("compile.zig");
@@ -146,7 +146,6 @@ test "tree shape force root check edit with oversized raises as all-in" {
         \\ip-range 2c3d:1
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

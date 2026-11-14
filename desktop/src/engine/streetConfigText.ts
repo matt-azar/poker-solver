@@ -243,9 +243,6 @@ export function parseStreetConfigTextToSolutionConfig(
       case "first-to-act":
         out[key.replace(/-/g, "_")] = Number(value);
         break;
-      case "allow-all-in":
-        // Legacy: ignored. List `a` for explicit all-in.
-        break;
       case "oop-range":
         out.oop_range = value;
         break;

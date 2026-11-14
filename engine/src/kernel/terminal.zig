@@ -139,7 +139,6 @@ test "compiled river terminal via kernel" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

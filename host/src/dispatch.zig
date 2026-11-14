@@ -2503,7 +2503,6 @@ test "node flop root reach uses range-weight scale not 1/n deal mass" {
         \\ip-range 2s2h:1,3s3h:1,4s4h:1,5s5h:1,6s6h:1,8s8h:1,9s9h:1,TsTh:1,JsJh:1,QsQh:1,KsKh:1,AsAc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -2567,7 +2566,6 @@ test "node accepts Study node_id and returns strategy tables" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -2656,7 +2654,6 @@ test "node chance after check-check returns cards for river deal" {
         \\ip-river-bets 0.5
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -2745,7 +2742,6 @@ test "pause cancel and status-shaped open reply" {
         \\ip-river-bets 
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -2982,7 +2978,6 @@ test "tree_preview refuses while train running (ZR-158)" {
         \\ip-range 2c3d:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3035,7 +3030,6 @@ test "tree_preview and plan_memory leave begun session unchanged" {
         \\ip-range 2c3d:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3167,7 +3161,6 @@ test "budget reject preserves prior published solution" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3230,7 +3223,6 @@ test "equity at non-root decision uses reach-weighted node board" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3273,7 +3265,6 @@ test "values accepts Study node_id and returns hand×action tables" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3331,7 +3322,6 @@ test "equity dispatch river smoke Study shape" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3382,7 +3372,6 @@ test "locks list put delete Study CRUD" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3466,7 +3455,6 @@ test "resolve_locked stamps baseline, mints solution id, trains under lock" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3534,7 +3522,6 @@ test "status body exposes iterations and requested target" {
         \\ip-river-bets 
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3570,7 +3557,6 @@ test "status body publishes progress metrics after trainGated (ZR-171)" {
         \\ip-river-bets 
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3618,7 +3604,6 @@ test "status copies last_error; iterations use committed count" {
         \\ip-river-bets 
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3701,7 +3686,6 @@ test "admit rejects while begin compiling" {
         \\ip-river-bets 
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3751,7 +3735,6 @@ test "short-admit body shape and continue iterations_requested target" {
         \\ip-river-bets 
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3817,7 +3800,6 @@ test "forced train failure surfaces sticky last_error on status" {
         \\ip-river-bets 
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3865,7 +3847,6 @@ test "cadence publish OOM soft-skips without sticky last_error (ZR-164)" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3906,7 +3887,6 @@ test "publish failure keeps can_continue; mid-pass clears it" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -3959,7 +3939,6 @@ test "strategy edits list put delete Study CRUD" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -4107,7 +4086,6 @@ test "categories dispatch river made-hand Study shape" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -4171,7 +4149,6 @@ test "ZR-116 dig: node equity root vs navigated differs on reach fixture" {
         \\ip-river-bets 0.5
         \\first-to-act 0
         \\max-raises 1
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -4272,7 +4249,6 @@ test "ZR-116 dig: categories river ok; flop/turn available=false" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -4310,7 +4286,6 @@ test "ZR-116 dig: categories river ok; flop/turn available=false" {
         \\ip-flop-bets 0.5
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -4349,7 +4324,6 @@ test "ZR-116 dig: categories river ok; flop/turn available=false" {
         \\ip-bets 0.5
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0

@@ -104,7 +104,6 @@ test "cfr+ river pot-bet trains and publishes" {
         \\ip-river-bets 1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -146,7 +145,6 @@ test "one-action infosets stay implicit" {
         \\ip-range 2c2d:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 1
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
@@ -180,7 +178,6 @@ test "incentive path-fill affects published evaluation" {
         \\ip-range KsKc:1
         \\first-to-act 0
         \\max-raises 0
-        \\allow-all-in 0
         \\allow-three-bet 1
         \\all-in-threshold 0
         \\pot-cap 0
