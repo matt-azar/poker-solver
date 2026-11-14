@@ -1086,7 +1086,6 @@ function buildSetupPatch(args: {
       }
     }
     if (tree.potCap !== undefined) explicit.potCap = tree.potCap;
-    if (tree.noThreeBet !== undefined) explicit.noThreeBet = tree.noThreeBet;
     if (tree.maxRaises !== undefined) explicit.maxRaises = tree.maxRaises;
   }
   if (intent.board) {
@@ -1108,9 +1107,13 @@ function buildSetupPatch(args: {
   }
   if (args.proposal.fieldEdits) {
     for (const [key, value] of Object.entries(args.proposal.fieldEdits)) {
-      if (value !== undefined) {
-        (explicit as Record<string, unknown>)[key] = value;
+      if (value === undefined) continue;
+      // Assistant uses percent; SpotDraft stores the engine fraction.
+      if (key === "allInThresholdPct" && typeof value === "number") {
+        explicit.allInThreshold = value / 100;
+        continue;
       }
+      (explicit as Record<string, unknown>)[key] = value;
     }
   }
 

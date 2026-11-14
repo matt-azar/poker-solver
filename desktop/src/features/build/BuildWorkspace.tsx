@@ -541,13 +541,21 @@ export function BuildWorkspace() {
                 }
               />
             </label>
-            <label className="check">
+            <label>
+              All-in threshold (%)
               <input
-                type="checkbox"
-                checked={draft.noThreeBet}
-                onChange={(event) => updateDraft({ noThreeBet: event.target.checked })}
+                type="number"
+                value={
+                  Number.isFinite(draft.allInThreshold)
+                    ? draft.allInThreshold * 100
+                    : 0
+                }
+                onChange={(event) =>
+                  updateDraft({
+                    allInThreshold: Number(event.target.value) / 100,
+                  })
+                }
               />
-              No 3-bet
             </label>
           </div>
 

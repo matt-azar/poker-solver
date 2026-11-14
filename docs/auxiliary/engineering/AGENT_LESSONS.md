@@ -97,6 +97,7 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 | Analysis supersession detaches | Orphan workers UAF HostState on teardown; clear shared `analysis_running` / WorkerBudget while newer work is live | Park prior analysis threads on a bounded orphan list and **join all** on teardown (never `detach`) (#375/#378). Gen-scope `finishAnalysisSlot` / budget return. Release publish lease before the blocking stdout write once the reply body is owned. |
 | Fake node equity | Equity looks like root on every node | Study node equity must **replay reach weights** (own actions × card removal) then check-down on the node board (#293). Calculator jobs (`start_equity_job`…) are a **different** IPC surface (#297). |
 | Wide-range flop EV/equity “never loads” | Solve OK; Study EV + bottom equity tabs spin for minutes (then maybe appear) | Root cause is compute/serialization, not IPC timeouts: (1) frozen root `values` must use **threaded** first-card `response_walk` via `WorkerBudget` analysis borrow — do not force `initEval`+`serial_chance=true` after train; (2) equity preflight must count pair-runouts in **O(n0·n1)** (closed-form completions), never nest the runout list; evaluate runout-outer with cached ranks; (3) do **not** prefetch non-root flop/turn child `/values` (deal-by-deal saturates the single analysis worker). Prefer these over raising RPC timeouts. |
+| Post-#384 EV/equity still slow on big trees | Solve OK; root values/equity still take a long time on wide flops | After train, Session already has warm `FrozenCtx` ranks — do **not** `initEval` a private ctx per values (rebuilds the whole flop/turn rank cache). Hold `acquireFrozenCtxForAnalysis` and `actionValuesFrozenOnCtx` / `checkdownEquityAtNodeOnCtx` (O(hands·runouts) prefix/block showdown, C++ StreetBatch checkdown_equity). Mid-train → Busy → pair-enumeration / private eval fallback. Prefer this over timeout bumps. |
 | Starting-board equity gate (fixed) | Historical desktop 501 / `node_equity_unsupported` on non-root equity | Reach-aware host equity shipped (#291→#293); do not reintroduce the 501 gate |
 | Tree-edit path tokens | Soft-unapplied edits / wrong AddSize | Match compact↔display labels (Bet/Raise/all-in); Apply AddSize with pot-cap / all-in / min-raise rules; report unapplied edits (#296) |
 | `parseConfig` over host | Library Apply template 501 | Street-config parse may stay **local TS** (no host op, no session mutation) (#294) |
@@ -178,16 +179,19 @@ The retired C++ explorer accept loop handled **one client at a time**. Open/save
 
 Explorer used to have a **single-slot** ValueWorker. Overlapping `/equity` + `/values` (and status polls that re-enqueued) cancelled each other → blinking footers, stuck “Calculating…”, lost overlays (#181–#190).
 
+Zig IPC host still has **one analysis worker** with gen supersession for `node` / `values` / `equity` / `categories`. After async Tauri IPC (#380), Study can overlap those admits: a late `values`/`categories`/LineCard call supersedes navigateTo `node` or live EV → blank strategy/EV/eq until manual navigate-away (DS-28). Cache keys that ignore host `policy_revision` can also keep a stale uniform strategy after final publish.
+
 **Do:**
 
 - Prefer `POST/GET …/nodes/{id}/analysis` (multi-metric) or **lookup-first** enqueue so status reads never replace sibling work.
 - Client: serialize ValueWorker-bound jobs; `pollAnalysis` must await the full ready/failed lifecycle (do not release the queue on the first `202`).
-- Cache pages by solution / node / `analysis_revision` (profile epoch); restore on navigate instead of recomputing.
+- Transport: serialize worker-bound IPC admits; let `node` preempt so navigate cannot lose to a late worker admit. Retry transient `superseded` / `nothing_published` while the analysis token is current.
+- Cache pages by solution / node / `policy_revision` (profile epoch; also `analysis_revision` alias); restore on navigate instead of recomputing. Soft re-inspect when status `policy_revision` advances past the painted node.
 - Settled permanent failures (e.g. work-limit) must not thrash auto-resubmit; transient/settled errors must not stick forever when the node/revision changed.
 
-**Don't:** Fire equity and values in parallel against a single analysis worker. Don't clear a failed payload to `null` in a way that creates an infinite auto-retry loop.
+**Don't:** Fire equity and values in parallel against a single analysis worker. Don't clear a failed payload to `null` in a way that creates an infinite auto-retry loop. Don't mask `SolverIpcError` as a generic `"Analysis request failed"` — keep host `error_code` visible for recovery.
 
-**Pointers:** PRs #181, #182, #184, #188, #190; `docs/EXPLORER.md`.
+**Pointers:** PRs #181, #182, #184, #188, #190; `docs/EXPLORER.md`; `desktop/src/engine/transport.ts` analysis IPC serial; `studySessionController.pollAnalysis`.
 
 ### Local EV vs Global / root-centered
 
@@ -211,7 +215,7 @@ At a flop root, `t-1.r-1` is both the node id and the line key — **do not infe
 ### Study equity path vs Equity Calculator
 
 - **Historical C++:** Study node `/equity` used `StreetBatchSolver::checkdown_equity` (cached rank tables) — same check-down math, much faster than pair enumeration (#191).
-- **Zig Study:** host `equity` must use **reach-weighted** `replayReachWeights` → `checkdownEquityAtNode` on the node board (#293). Returning starting-board / starting-range check-down at every node is a regression.
+- **Zig Study:** host `equity` must use **reach-weighted** `replayReachWeights` on the node board (#293). When Session ranks are warm, prefer `checkdownEquityAtNodeOnCtx` (FrozenCtx RunoutRanks); otherwise `checkdownEquityAtNode` pair enumeration. Returning starting-board / starting-range check-down at every node is a regression.
 - **Equity Calculator** is a separate IPC job surface (`start_equity_job` / `get_equity_job` / `cancel_equity_job`) — multiway Auto/Exact/Monte Carlo — not Study node equity (#297).
 - Work limits: never silently sample when over the pair-runout ceiling. Study packaging ceilings and calculator defaults differ; keep host constants aligned with what Tauri/Study expect.
 - Warm the **current** decision (queue + identity-keyed cache). Do **not** full-tree frontload EV/equity into the save (#184, #190, #191).
@@ -376,7 +380,7 @@ Made-hand **categories** (when present) are category mass on a **five-card** boa
 
 ### Betting semantics (street)
 
-Sizes are pot fractions unless negative / `Nc` chip form, or a Pio sentinel (`e`, `Ne`, `a`, `Nx`, `-`). Street-specific lists replace shared lists on that street. Empty raise list with non-empty raise-multiples does not fall back to bet sizes. Geometric = equal pot fractions over streets left at that node (river = all-in fraction). `2e` is two equal bets from the current pot and stack, not twice the root fraction — TS encoding must match the engine size rules; do not revive helpers that multiply the geometric fraction or a global geometric flag. Donk sizes only after IP aggression previous street; explicit-empty donk checks. `--no-three-bet` removes the re-raise. All-in threshold snaps large commitments to all-in when allowed. Blank list does not invent an all-in; list `a` explicitly.
+Sizes are pot fractions unless negative / `Nc` chip form, or a Pio sentinel (`e`, `Ne`, `a`, `Nx`, `-`). Street-specific lists replace shared lists on that street. Empty raise list with non-empty raise-multiples does not fall back to bet sizes. Geometric = equal pot fractions over streets left at that node (river = all-in fraction). `2e` is two equal bets from the current pot and stack, not twice the root fraction — TS encoding must match the engine size rules; do not revive helpers that multiply the geometric fraction or a global geometric flag. Donk sizes only after IP aggression previous street; explicit-empty donk checks. `--no-three-bet` removes the re-raise (Study uses **Max raises** instead; no Build "No 3-bet" toggle). All-in threshold (Pio: fraction of starting stack) snaps large commitments to all-in without needing `allow_all_in`. A listed size above remaining stack is always re-interpreted as all-in — Study's hardcoded `allow_all_in: 0` must not drop that shove (DS-26). Blank list does not invent an extra all-in; list `a` explicitly.
 
 **Pointers:** `docs/STREETS.md`, Zig `street_config` under `engine/`.
 

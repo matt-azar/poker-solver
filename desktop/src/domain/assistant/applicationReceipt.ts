@@ -50,6 +50,8 @@ const FIELD_LABELS: Partial<Record<keyof SpotDraft, string>> = {
   samples: "Samples",
   maxRaises: "Max raises",
   potCap: "Pot cap",
+  mergeThresholdPct: "Merge threshold (%)",
+  allInThreshold: "All-in threshold (%)",
   rakeRate: "Solve rake rate",
   rakeCap: "Solve rake cap",
   oopBets: "OOP bets",

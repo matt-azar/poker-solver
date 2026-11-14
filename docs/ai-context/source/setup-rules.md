@@ -40,11 +40,11 @@ Surface conflicts — never silent override. Solve is not started by the assista
 
 When the player names a draft field without asking for a new study, emit `update_study` with `fieldEdits` containing only those keys. Do not invent pot type, ranges, or stakes. Do not set solve rake from a 100NL/cEV range request.
 
-`fieldEdits` keys the app accepts: `pot`, `stack`, `iterations`, `accuracy`, `timeLimit`, `threads`, `memoryMib`, `algorithm` (`cfr_plus` | `cfr` | `dcfr` on the draft; the engine trains CFR+ either way), `samples`, `maxRaises`, `mergeThresholdPct`, `potCap`, `rakeRate`, `rakeCap`, `noThreeBet`, `donkFlop`, `donkTurn`, `donkRiver`, `incentives`, `edgeTags`. Reject negative pot/stack/memory, zero threads, and fractional iterations. Geometric and all-in are size tokens (`e`, `a`) on each street, not field toggles.
+`fieldEdits` keys the app accepts: `pot`, `stack`, `iterations`, `accuracy`, `timeLimit`, `threads`, `memoryMib`, `algorithm` (`cfr_plus` | `cfr` | `dcfr`), `samples`, `maxRaises`, `mergeThresholdPct`, `allInThresholdPct`, `potCap`, `rakeRate`, `rakeCap`, `donkFlop`, `donkTurn`, `donkRiver`, `incentives`, `edgeTags`. Reject negative pot/stack/memory, zero threads, and fractional iterations. Geometric and explicit all-in are size tokens (`e`, `a`) on each street. `allInThresholdPct` is Pio's all-in threshold as percent of starting stack (0 = off; draft stores the fraction). Max raises covers no-3-bet; there is no Build "No 3-bet" toggle.
 
 Where players see those controls:
 
-- Build form: pot, stack, maxRaises, mergeThresholdPct, potCap, noThreeBet, iterations, accuracy, timeLimit
+- Build form: pot, stack, maxRaises, mergeThresholdPct, potCap, allInThreshold (%), iterations, accuracy, timeLimit
 - Settings → Solve: algorithm, samples, threads, memoryMib, incentives, edgeTags
 - No dedicated control: rakeRate / rakeCap (assistant-only when explicitly requested); donkFlop/donkTurn/donkRiver booleans (prefer Turn/River donk **size** text on Build — flop has no donk size control)
 

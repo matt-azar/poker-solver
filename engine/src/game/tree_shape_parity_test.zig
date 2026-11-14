@@ -1,5 +1,6 @@
-//! Public-tree arity / label pins vs tip C++ plan-only dumps (parity dig 2026-11-12).
-//! Decision lines match C++ `public_tree()` display labels exactly on these fixtures.
+//! Public-tree arity / label pins for Study betting trees.
+//! Fixtures that list raises larger than remaining stack expect those sizes
+//! re-interpreted as all-in (DS-26 / Pio), even when `allow-all-in 0`.
 const std = @import("std");
 const street_config = @import("street_config.zig");
 const compile = @import("compile.zig");
@@ -76,23 +77,36 @@ test "tree shape river_gate_smoke matches C++ public_tree" {
     try expectFingerprint("benchmarks/study/configs/river_gate_smoke.txt", expected, 4);
 }
 
-test "tree shape turn-probe matches C++ public_tree" {
+test "tree shape turn-probe oversized raise becomes all-in" {
+    // pot=stack=100, bets 50%, raises 100% → facing raise re-interprets as all-in (DS-26).
     const expected =
         \\D path=- player=0 street=0 n=2 |Check |Bet 50
         \\D path=Check player=1 street=0 n=2 |Check |Bet 50
         \\D path=Check/Check player=0 street=1 n=2 |Check |Bet 50
         \\D path=Check/Check/Check player=1 street=1 n=2 |Check |Bet 50
-        \\D path=Check/Check/Check/Bet 50 player=0 street=1 n=2 |Fold |Call
-        \\D path=Check/Check/Bet 50 player=1 street=1 n=2 |Fold |Call
-        \\D path=Check/Bet 50 player=0 street=0 n=2 |Fold |Call
-        \\D path=Check/Bet 50/Call player=0 street=1 n=1 |Check
-        \\D path=Check/Bet 50/Call/Check player=1 street=1 n=1 |Check
-        \\D path=Bet 50 player=1 street=0 n=2 |Fold |Call
-        \\D path=Bet 50/Call player=0 street=1 n=1 |Check
-        \\D path=Bet 50/Call/Check player=1 street=1 n=1 |Check
+        \\D path=Check/Check/Check/Bet 50 player=0 street=1 n=3 |Fold |Call |Raise to 100 all-in
+        \\D path=Check/Check/Check/Bet 50/Raise to 100 all-in player=1 street=1 n=2 |Fold |Call all-in
+        \\D path=Check/Check/Bet 50 player=1 street=1 n=3 |Fold |Call |Raise to 100 all-in
+        \\D path=Check/Check/Bet 50/Raise to 100 all-in player=0 street=1 n=2 |Fold |Call all-in
+        \\D path=Check/Bet 50 player=0 street=0 n=3 |Fold |Call |Raise to 100 all-in
+        \\D path=Check/Bet 50/Call player=0 street=1 n=2 |Check |Bet 50 all-in
+        \\D path=Check/Bet 50/Call/Check player=1 street=1 n=2 |Check |Bet 50 all-in
+        \\D path=Check/Bet 50/Call/Check/Bet 50 all-in player=0 street=1 n=2 |Fold |Call all-in
+        \\D path=Check/Bet 50/Call/Bet 50 all-in player=1 street=1 n=2 |Fold |Call all-in
+        \\D path=Check/Bet 50/Raise to 100 all-in player=1 street=0 n=2 |Fold |Call all-in
+        \\D path=Check/Bet 50/Raise to 100 all-in/Call all-in player=0 street=1 n=1 |Check
+        \\D path=Check/Bet 50/Raise to 100 all-in/Call all-in/Check player=1 street=1 n=1 |Check
+        \\D path=Bet 50 player=1 street=0 n=3 |Fold |Call |Raise to 100 all-in
+        \\D path=Bet 50/Call player=0 street=1 n=2 |Check |Bet 50 all-in
+        \\D path=Bet 50/Call/Check player=1 street=1 n=2 |Check |Bet 50 all-in
+        \\D path=Bet 50/Call/Check/Bet 50 all-in player=0 street=1 n=2 |Fold |Call all-in
+        \\D path=Bet 50/Call/Bet 50 all-in player=1 street=1 n=2 |Fold |Call all-in
+        \\D path=Bet 50/Raise to 100 all-in player=0 street=0 n=2 |Fold |Call all-in
+        \\D path=Bet 50/Raise to 100 all-in/Call all-in player=0 street=1 n=1 |Check
+        \\D path=Bet 50/Raise to 100 all-in/Call all-in/Check player=1 street=1 n=1 |Check
         \\
     ;
-    try expectFingerprint("configs/templates/turn-probe.txt", expected, 12);
+    try expectFingerprint("configs/templates/turn-probe.txt", expected, 24);
 }
 
 test "tree shape flop-small-bet root arity + decision count" {
@@ -111,8 +125,9 @@ test "tree shape flop-small-bet root arity + decision count" {
     for (game.nodes) |node| {
         if (node.kind == .decision) decisions += 1;
     }
-    try std.testing.expectEqual(@as(usize, 44), decisions);
-    try std.testing.expectEqual(@as(usize, 93), game.nodes.len);
+    // Oversized listed raises become all-in (DS-26); tree grows vs historical drop.
+    try std.testing.expectEqual(@as(usize, 90), decisions);
+    try std.testing.expectEqual(@as(usize, 201), game.nodes.len);
     const root = game.nodes[0];
     try std.testing.expect(root.kind == .decision);
     try std.testing.expectEqual(@as(u8, 2), root.n_actions);
@@ -120,8 +135,8 @@ test "tree shape flop-small-bet root arity + decision count" {
     try std.testing.expectEqualStrings("Bet 33", root.action_labels[1]);
 }
 
-test "tree shape force root check edit matches C++" {
-    // Same body as flop-small-bet + tree-edit force - c (C++ dig matched 31 decisions).
+test "tree shape force root check edit with oversized raises as all-in" {
+    // Same body as flop-small-bet + tree-edit force - c.
     const text =
         \\street-config 1
         \\board Ah Kd 7c
@@ -155,8 +170,8 @@ test "tree shape force root check edit matches C++" {
     for (game.nodes) |node| {
         if (node.kind == .decision) decisions += 1;
     }
-    try std.testing.expectEqual(@as(usize, 31), decisions);
-    try std.testing.expectEqual(@as(usize, 66), game.nodes.len);
+    try std.testing.expectEqual(@as(usize, 60), decisions);
+    try std.testing.expectEqual(@as(usize, 135), game.nodes.len);
     const root = game.nodes[0];
     try std.testing.expectEqual(@as(u8, 1), root.n_actions);
     try std.testing.expectEqualStrings("Check", root.action_labels[0]);

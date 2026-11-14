@@ -144,6 +144,10 @@ export interface StatusPayload {
   baseline_solution_id?: string | null;
   root_node_id?: string | null;
   status_generation?: number;
+  /** Host published-average epoch (bumps on cadence / final publish). */
+  policy_revision?: number;
+  /** Alias some analysis replies use for policy_revision. */
+  analysis_revision?: number;
   iterations?: number | null;
   iterations_requested?: number | null;
   runtime_seconds?: number | null;
@@ -195,6 +199,9 @@ export interface NodePayload {
   solution_id?: string;
   job_id?: string;
   status_generation?: number;
+  /** Host published-average epoch at inspect time. */
+  policy_revision?: number;
+  analysis_revision?: number;
   node_id: string;
   kind?: string;
   player?: number | null;
@@ -315,11 +322,17 @@ export interface SpotDraft {
   /** Merge near bet sizes within this percent of chip amount (0 = off). */
   mergeThresholdPct: number;
   potCap: number;
+  /** Legacy draft flag; Build no longer exposes No 3-bet — use maxRaises. */
   noThreeBet: boolean;
+  /**
+   * Pio all-in threshold as a fraction of starting stack (0 = off).
+   * Build shows percent; engine `all-in-threshold` is this fraction.
+   */
   allInThreshold: number;
   /**
    * Draft mirror of engine `allow_all_in`. Study solve/preview hardcode 0 —
-   * list `a` per street for all-in; this flag does not invent it.
+   * list `a` per street for an *extra* all-in. Oversized listed sizes and
+   * all-in-threshold shove-ups still become all-in without this flag.
    */
   allowAllIn: boolean;
   frozen: boolean;

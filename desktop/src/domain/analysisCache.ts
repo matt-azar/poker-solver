@@ -7,6 +7,11 @@
  *   3. Requires each job's run() to await the full poll lifecycle (not the first 202).
  * Full-tree frontload after solve is intentionally not done — large trees make
  * that too expensive; we warm the live node and optionally its children.
+ *
+ * Host analysis gen-supersession: `desktop/src/engine/transport.ts` also serializes
+ * IPC admits for values/equity/categories and lets `node` preempt so navigateTo
+ * cannot lose to a late worker admit. Keep both layers — queue = Study priority /
+ * coalesce; transport = wire-level single-flight against the host worker.
  */
 
 export type WorkerAnalysisKind = "values" | "equity";

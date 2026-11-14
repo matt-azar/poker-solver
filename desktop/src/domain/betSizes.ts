@@ -626,8 +626,8 @@ export function validateBettingLists(draft: BettingDraftFields): string[] {
 /**
  * Size fields for a solve or tree-preview job.
  * Geometric and all-in are per-list tokens (`e`, `a`). Study callers send
- * `allow_all_in: 0` — list `a` explicitly; the engine's `force_all_in` path
- * still offers that token when the auto all-in switch is off.
+ * `allow_all_in: 0` — list `a` for an *extra* all-in; oversized listed sizes
+ * and all-in-threshold shove-ups still become all-in without that switch.
  * Invalid tokens throw — validate with {@link validateBettingLists} first.
  */
 export function encodeBettingJob(draft: BettingDraftInput) {

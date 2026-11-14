@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SolverIpcError } from "../engine/transport";
 import {
+  analysisErrorMessage,
   analysisRequestIsCurrent,
+  analysisRevision,
   beginAnalysisRequest,
   invalidateAllAnalysisRequests,
+  isTransientAnalysisError,
   pollAnalysis,
+  policyRevisionOf,
   resetAnalysisCacheForTests,
   resetStatusPollingForTests,
   startStatusPolling,
@@ -59,5 +64,59 @@ describe("studySessionController", () => {
     expect(analysisRequestIsCurrent("equity", first.token)).toBe(false);
     expect(analysisRequestIsCurrent("equity", second.token)).toBe(true);
     expect(second.identity.revision).toBe(2);
+  });
+
+  it("prefers host policy_revision for analysis cache identity", () => {
+    expect(
+      analysisRevision(
+        { node_id: "root", policy_revision: 3, status_generation: 9 },
+        { policy_revision: 7, status_generation: 9 },
+      ),
+    ).toBe(7);
+    expect(policyRevisionOf({ policy_revision: 4 })).toBe(4);
+  });
+
+  it("retries superseded analysis then paints the ready body", async () => {
+    const { token } = beginAnalysisRequest("values", "s1", "root", 1);
+    let fetches = 0;
+    const onReady = vi.fn();
+    const onError = vi.fn();
+    await pollAnalysis(
+      "values",
+      token,
+      async () => {
+        fetches += 1;
+        if (fetches === 1) {
+          throw new SolverIpcError({
+            class: "engine_rejection",
+            message: "analysis superseded by a newer node request",
+            errorCode: "superseded",
+            op: "values",
+          });
+        }
+        return { pending: false, node_id: "root" };
+      },
+      onReady,
+      onError,
+    );
+    expect(fetches).toBe(2);
+    expect(onReady).toHaveBeenCalledWith({ pending: false, node_id: "root" });
+    expect(onError).not.toHaveBeenCalled();
+    expect(isTransientAnalysisError(
+      new SolverIpcError({
+        class: "engine_rejection",
+        message: "nothing published",
+        errorCode: "nothing_published",
+        op: "values",
+      }),
+    )).toBe(true);
+    expect(analysisErrorMessage(
+      new SolverIpcError({
+        class: "engine_rejection",
+        message: "analysis superseded by a newer node request",
+        errorCode: "superseded",
+        op: "values",
+      }),
+    )).toContain("superseded");
   });
 });

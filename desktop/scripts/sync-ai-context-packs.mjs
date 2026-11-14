@@ -93,7 +93,7 @@ const BUILD_LABELS_CLAIMED = [
   "River donk",
   "Pot cap",
   "Merge threshold",
-  "No 3-bet",
+  "All-in threshold",
   "Iterations",
   "Accuracy",
   "Time limit",

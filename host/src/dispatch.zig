@@ -835,15 +835,9 @@ fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     };
     defer state.allocator.free(node_id_text);
     const t0 = std.time.nanoTimestamp();
-    var page = poker_engine.analysis.equity.checkdownEquityAtNode(
-        state.session.allocator,
-        lease.game,
-        lease.published,
-        located.node_index,
-        located.turn,
-        located.river,
-        poker_engine.analysis.equity.study_explorer_max_pair_runouts,
-    ) catch |err| {
+    var held_ctx = false;
+    var page = computeStudyEquity(state, &lease, located, &held_ctx) catch |err| {
+        if (held_ctx) state.session.releaseFrozenCtxForAnalysis();
         const code: []const u8 = switch (err) {
             error.WorkLimit => "work_limit",
             error.InvalidEquity => "invalid_equity",
@@ -852,7 +846,10 @@ fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         };
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
     };
-    defer page.deinit();
+    defer {
+        page.deinit();
+        if (held_ctx) state.session.releaseFrozenCtxForAnalysis();
+    }
     const elapsed_ns = std.time.nanoTimestamp() - t0;
     const elapsed_ms: i64 = @intCast(@divTrunc(elapsed_ns, 1_000_000));
     const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
@@ -871,6 +868,38 @@ fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     };
     defer state.allocator.free(body);
     return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+}
+
+fn computeStudyEquity(
+    state: *HostState,
+    lease: *poker_app.PublishedLease,
+    located: poker_engine.analysis.node_id.ParsedNodeId,
+    held_ctx: *bool,
+) poker_engine.analysis.equity.EquityError!poker_engine.analysis.equity.ShowdownEquity {
+    held_ctx.* = false;
+    if (state.session.acquireFrozenCtxForAnalysis()) |ctx| {
+        held_ctx.* = true;
+        return poker_engine.analysis.equity.checkdownEquityAtNodeOnCtx(
+            state.session.allocator,
+            ctx,
+            lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
+            poker_engine.analysis.equity.study_explorer_max_pair_runouts,
+        );
+    } else |_| {
+        return poker_engine.analysis.equity.checkdownEquityAtNode(
+            state.session.allocator,
+            lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
+            poker_engine.analysis.equity.study_explorer_max_pair_runouts,
+        );
+    }
 }
 
 /// ZR-137: fat `categories` body extracted from `handle` (op discriminator stays in parent).
@@ -1395,40 +1424,14 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
         defer lease.deinit();
-        const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
-        };
-        const t0 = std.time.nanoTimestamp();
-        var page = poker_engine.analysis.action_ev.actionValuesWithThreads(
-            state.session.allocator,
-            lease.game,
-            lease.published,
-            located.node_index,
-            located.turn,
-            located.river,
-            threads,
-        ) catch |err| {
-            const code: []const u8 = if (err == error.OutOfMemory and state.session.budget.limit() > 0)
-                "budget_exceeded"
-            else
-                "values_failed";
+        return buildValuesReply(state, req.request_id, req.job_id, req.body_json, &lease, threads) catch |err| {
+            const code: []const u8 = switch (err) {
+                error.UnknownNode => "unknown_node",
+                error.OutOfMemory => if (state.session.budget.limit() > 0) "budget_exceeded" else "oom",
+                else => "values_failed",
+            };
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };
-        defer page.deinit();
-        const elapsed_ns = std.time.nanoTimestamp() - t0;
-        const elapsed_ms = @divTrunc(elapsed_ns, 1_000_000);
-        const body = format_study_bodies.formatValuesBody(
-            state.allocator,
-            &page,
-            located,
-            lease.solution_id,
-            elapsed_ms,
-            state.train_running.load(.acquire),
-        ) catch |err| {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "values_failed", @errorName(err));
-        };
-        defer state.allocator.free(body);
-        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     }
 
     if (std.mem.eql(u8, req.op, "prioritize_analysis")) {
@@ -2030,16 +2033,51 @@ fn buildValuesReply(
 ) !ipc.Envelope {
     const located = try resolveLocatedNode(lease.game, body_json);
     const t0 = std.time.nanoTimestamp();
-    var page = try poker_engine.analysis.action_ev.actionValuesWithThreads(
-        state.session.allocator,
-        lease.game,
-        lease.published,
-        located.node_index,
-        located.turn,
-        located.river,
-        threads,
-    );
-    defer page.deinit();
+    // Post-solve: reuse Session FrozenCtx ranks (avoid rebuilding flop/turn tables).
+    // Mid-train / no warm ctx: fall back to a private eval ctx (#384 threaded walk).
+    var page: poker_engine.analysis.action_ev.ActionValues = undefined;
+    var held_ctx = false;
+    if (located.node_index == 0 and located.turn < 0 and located.river < 0) {
+        if (state.session.acquireFrozenCtxForAnalysis()) |ctx| {
+            held_ctx = true;
+            const serial_chance = ctx.threads <= 1;
+            page = poker_engine.analysis.action_ev.actionValuesFrozenOnCtx(
+                state.session.allocator,
+                ctx,
+                lease.game,
+                lease.published,
+                0,
+                serial_chance,
+            ) catch |err| {
+                state.session.releaseFrozenCtxForAnalysis();
+                return err;
+            };
+        } else |_| {
+            page = try poker_engine.analysis.action_ev.actionValuesWithThreads(
+                state.session.allocator,
+                lease.game,
+                lease.published,
+                located.node_index,
+                located.turn,
+                located.river,
+                threads,
+            );
+        }
+    } else {
+        page = try poker_engine.analysis.action_ev.actionValuesWithThreads(
+            state.session.allocator,
+            lease.game,
+            lease.published,
+            located.node_index,
+            located.turn,
+            located.river,
+            threads,
+        );
+    }
+    defer {
+        page.deinit();
+        if (held_ctx) state.session.releaseFrozenCtxForAnalysis();
+    }
     const elapsed_ns = std.time.nanoTimestamp() - t0;
     const elapsed_ms = @divTrunc(elapsed_ns, 1_000_000);
     const body = try format_study_bodies.formatValuesBody(
@@ -2077,15 +2115,9 @@ fn buildEquityReply(
     );
     defer state.allocator.free(node_id_text);
     const t0 = std.time.nanoTimestamp();
-    var page = poker_engine.analysis.equity.checkdownEquityAtNode(
-        state.session.allocator,
-        lease.game,
-        lease.published,
-        located.node_index,
-        located.turn,
-        located.river,
-        poker_engine.analysis.equity.study_explorer_max_pair_runouts,
-    ) catch |err| {
+    var held_ctx = false;
+    var page = computeStudyEquity(state, lease, located, &held_ctx) catch |err| {
+        if (held_ctx) state.session.releaseFrozenCtxForAnalysis();
         const code: []const u8 = switch (err) {
             error.WorkLimit => "work_limit",
             error.InvalidEquity => "invalid_equity",
@@ -2094,7 +2126,10 @@ fn buildEquityReply(
         };
         return ipc.makeErrorReply(state.allocator, request_id, job_id, "equity", code, @errorName(err));
     };
-    defer page.deinit();
+    defer {
+        page.deinit();
+        if (held_ctx) state.session.releaseFrozenCtxForAnalysis();
+    }
     const elapsed_ns = std.time.nanoTimestamp() - t0;
     const elapsed_ms: i64 = @intCast(@divTrunc(elapsed_ns, 1_000_000));
     const query_seconds: f64 = @as(f64, @floatFromInt(elapsed_ns)) / 1e9;
