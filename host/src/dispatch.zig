@@ -195,24 +195,22 @@ pub const HostState = struct {
         return self.analysis_gen.load(.acquire) == gen;
     }
 
-    /// Cap superseded backlog so rapid node navigation cannot unbounded-grow
-    /// join handles. Joining the oldest may briefly stall the stdin loop under
-    /// extreme churn; that beats detach + HostState UAF on teardown.
-    const max_analysis_orphans: usize = 2;
-
-    /// Park the prior analysis join handle without detach. Bounded: join oldest
-    /// when the orphan list is full so teardown always has a finite set.
+    /// Park the prior analysis join handle without detach and **without joining
+    /// on the stdin/admission path** in the common case. Joining here would stall
+    /// cancel/status while EV finishes (ZR-151 / stop-close smoke).
+    /// `joinAnalysis` / teardown joins the full orphan set. Gen checks make
+    /// obsolete workers exit promptly.
     pub fn retireAnalysisThread(self: *HostState) void {
         if (self.analysis_thread) |old_t| {
-            self.analysis_thread = null;
-            while (self.analysis_orphans.items.len >= max_analysis_orphans) {
-                const oldest = self.analysis_orphans.orderedRemove(0);
-                oldest.join();
-            }
-            self.analysis_orphans.append(old_t) catch {
-                // OOM on the handle list: join synchronously rather than detach.
+            self.analysis_orphans.ensureUnusedCapacity(1) catch {
+                // Extreme OOM only: join so the handle is not leaked. May briefly
+                // stall Stop; never detach (HostState UAF on teardown).
                 old_t.join();
+                self.analysis_thread = null;
+                return;
             };
+            self.analysis_thread = null;
+            self.analysis_orphans.appendAssumeCapacity(old_t);
         }
     }
 
