@@ -99,6 +99,14 @@ def main() -> int:
             body = {"cancelled": True, "reason": "test-sidecar-ack"}
         elif op == "pause":
             body = {"paused": True}
+        elif op in ("solve", "resolve_locked"):
+            # ZR-106 short-admit — reply immediately; Study polls status.
+            body = {
+                "accepted": True,
+                "running": True,
+                "solution_id": 1,
+                "threads": 1,
+            }
         elif op in ("values", "equity"):
             if not withheld_values:
                 withheld_values = True

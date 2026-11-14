@@ -126,6 +126,13 @@ fn main() {
                 "reason": "test-sidecar-ack",
             }),
             "pause" => json!({ "paused": true }),
+            // ZR-106 short-admit shape — reply immediately; Study polls status.
+            "solve" | "resolve_locked" => json!({
+                "accepted": true,
+                "running": true,
+                "solution_id": 1,
+                "threads": 1,
+            }),
             "values" | "equity" => {
                 if !withheld_values {
                     withheld_values = true;

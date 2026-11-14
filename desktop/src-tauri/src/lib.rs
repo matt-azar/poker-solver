@@ -4,6 +4,7 @@
 mod assistant_secrets;
 mod diagnostics;
 mod library;
+mod solver_admission;
 mod solver_engine;
 
 use serde::Deserialize;
