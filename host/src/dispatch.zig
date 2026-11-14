@@ -78,7 +78,7 @@ pub const HostState = struct {
     /// ZR-151: Save/Open off the stdin loop (large PSOL must not starve control).
     io_thread: ?std.Thread = null,
     io_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    /// Active train job id (owned); null when idle.
+    /// Active begin/train job id (owned); null when idle. Stop/Pause match this only.
     active_job_id: ?[]u8 = null,
     job_mu: std.Thread.Mutex = .{},
     status_generation: u64 = 1,
@@ -222,10 +222,16 @@ pub const HostState = struct {
     }
 
     pub fn cancelJob(self: *HostState, job_id: []const u8) !void {
-        const owned = try self.allocator.dupe(u8, job_id);
-        errdefer self.allocator.free(owned);
         self.cancelled_mu.lock();
         defer self.cancelled_mu.unlock();
+        // Idempotent: re-Stop of the live id must not leak duplicate key allocations.
+        if (self.cancelled_jobs.contains(job_id)) {
+            self.last_cancelled = true;
+            self.status_generation += 1;
+            return;
+        }
+        const owned = try self.allocator.dupe(u8, job_id);
+        errdefer self.allocator.free(owned);
         try self.cancelled_jobs.put(owned, {});
         self.last_cancelled = true;
         self.status_generation += 1;
@@ -251,6 +257,26 @@ pub const HostState = struct {
         defer self.job_mu.unlock();
         if (self.active_job_id) |old| self.allocator.free(old);
         self.active_job_id = if (job_id) |j| try self.allocator.dupe(u8, j) else null;
+        self.status_generation += 1;
+    }
+
+    /// True when `job_id` is the live begin/train identity (under `job_mu`).
+    pub fn matchesActiveJob(self: *HostState, job_id: []const u8) bool {
+        self.job_mu.lock();
+        defer self.job_mu.unlock();
+        const active = self.active_job_id orelse return false;
+        return std.mem.eql(u8, active, job_id);
+    }
+
+    /// Clear active identity only when it still names `job_id` (terminal transition).
+    pub fn clearActiveJobIfMatch(self: *HostState, job_id: ?[]const u8) void {
+        const want = job_id orelse return;
+        self.job_mu.lock();
+        defer self.job_mu.unlock();
+        const active = self.active_job_id orelse return;
+        if (!std.mem.eql(u8, active, want)) return;
+        self.allocator.free(active);
+        self.active_job_id = null;
         self.status_generation += 1;
     }
 };
@@ -1117,7 +1143,12 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     try state.track(req.request_id);
     defer state.untrack(req.request_id);
 
-    if (state.isCancelled(req.job_id)) {
+    // Job-control ops (cancel/pause) must stay reachable for idempotent Stop/Pause
+    // of the live id; other ops still reject a sticky cancelled job_id.
+    if (state.isCancelled(req.job_id) and
+        !std.mem.eql(u8, req.op, "cancel") and
+        !std.mem.eql(u8, req.op, "pause"))
+    {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "cancelled", "job cancelled");
     }
 
@@ -1155,9 +1186,14 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "cancel")) {
+        // Job-scoped Stop: only the live begin/train identity may requestStop.
+        // Stale cancel for a finished/unknown job must not kill train-current.
         if (req.job_id) |jid| {
+            if (!state.matchesActiveJob(jid)) {
+                return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, "{\"cancelled\":false,\"reason\":\"not_running\"}");
+            }
             try state.cancelJob(jid);
-            // Cooperative stop at the next iteration boundary (ZR-90).
+            // Cooperative stop at the next iteration / compile boundary (ZR-90).
             state.session.requestStop();
             return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, "{\"cancelled\":true}");
         }
@@ -1249,6 +1285,14 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "pause")) {
+        // Same job scope as cancel: a stale Pause must not latch pause on train-current.
+        if (req.job_id) |jid| {
+            if (!state.matchesActiveJob(jid)) {
+                return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, "{\"paused\":false,\"reason\":\"not_running\"}");
+            }
+        } else if (state.beginOrTrainBusy()) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, null, req.op, "invalid_request", "pause requires job_id while begin/train is active");
+        }
         state.session.pause() catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "pause_failed", @errorName(err));
         };
@@ -1475,6 +1519,7 @@ fn trainWorker(task: *TrainTask) void {
         if (task.job_id) |j| {
             // Allow a fresh job id after stop; sticky cancel only while in-flight.
             state.clearCancelled(j);
+            state.clearActiveJobIfMatch(j);
             state.allocator.free(j);
         }
         state.allocator.free(task.op);
@@ -1613,6 +1658,7 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
     state.train_running.store(true, .release);
     state.train_thread = std.Thread.spawn(.{}, trainWorker, .{task}) catch |err| {
         state.train_running.store(false, .release);
+        state.clearActiveJobIfMatch(req.job_id);
         state.allocator.free(task.request_id);
         if (task.job_id) |j| state.allocator.free(j);
         state.allocator.free(task.op);
@@ -1633,7 +1679,11 @@ fn beginWorker(task: *BeginTask) void {
         state.begin_running.store(false, .release);
         state.status_generation += 1;
         state.allocator.free(task.request_id);
-        if (task.job_id) |j| state.allocator.free(j);
+        if (task.job_id) |j| {
+            state.clearCancelled(j);
+            state.clearActiveJobIfMatch(j);
+            state.allocator.free(j);
+        }
         state.allocator.free(task.config);
         state.allocator.destroy(task);
     }
@@ -1730,10 +1780,14 @@ pub fn startBeginConfig(state: *HostState, req: ipc.Envelope) !void {
         state.allocator.destroy(task);
     };
 
+    // Register compile identity before dispatch so Stop can cancel this begin.
+    try state.setActiveJob(req.job_id);
+    state.last_cancelled = false;
     state.begin_running.store(true, .release);
     state.status_generation += 1;
     state.begin_thread = std.Thread.spawn(.{}, beginWorker, .{task}) catch |err| {
         state.begin_running.store(false, .release);
+        state.clearActiveJobIfMatch(req.job_id);
         state.allocator.free(task.request_id);
         if (task.job_id) |j| state.allocator.free(j);
         state.allocator.free(task.config);
@@ -2561,6 +2615,7 @@ test "pause cancel and status-shaped open reply" {
     try std.testing.expect(state.session.has_training);
     try std.testing.expect(state.session.training != null);
 
+    // No active begin/train job after sync train — cancel must not requestStop.
     var cancel_req: ipc.Envelope = .{
         .allocator = std.testing.allocator,
         .kind = .request,
@@ -2573,7 +2628,9 @@ test "pause cancel and status-shaped open reply" {
     var cancel_reply = try handle(&state, cancel_req);
     defer cancel_reply.deinit();
     try std.testing.expect(cancel_reply.ok);
-    try std.testing.expect(std.mem.indexOf(u8, cancel_reply.body_json, "\"cancelled\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cancel_reply.body_json, "\"cancelled\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cancel_reply.body_json, "\"reason\":\"not_running\"") != null);
+    try std.testing.expect(!state.session.stop_requested.load(.acquire));
 
     // Save + open round-trip for status-shaped open body (portable tmpDir — Windows CI has no /tmp).
     var tmp = std.testing.tmpDir(.{});
@@ -2629,6 +2686,130 @@ test "pause cancel and status-shaped open reply" {
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"has_training\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"status_generation\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"solution_id\":\"s") != null);
+}
+
+test "stale cancel does not requestStop on train-current" {
+    // Audit finding #2: cancel must match active_job_id; a finished job's Stop
+    // must never latch stop_requested against a newer live train.
+    var state = try HostState.init(std.testing.allocator, "job-scoped-stop");
+    defer state.deinit();
+
+    try state.setActiveJob("train-current");
+    state.train_running.store(true, .release);
+    defer state.train_running.store(false, .release);
+    state.session.clearControlFlags();
+
+    var stale: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "stop-stale"),
+        .job_id = try std.testing.allocator.dupe(u8, "job-finished"),
+        .op = try std.testing.allocator.dupe(u8, "cancel"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer stale.deinit();
+    var stale_reply = try handle(&state, stale);
+    defer stale_reply.deinit();
+    try std.testing.expect(stale_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, stale_reply.body_json, "\"cancelled\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, stale_reply.body_json, "\"reason\":\"not_running\"") != null);
+    try std.testing.expect(!state.session.stop_requested.load(.acquire));
+    try std.testing.expect(!state.isCancelled("job-finished"));
+    try std.testing.expect(state.matchesActiveJob("train-current"));
+
+    var live: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "stop-live"),
+        .job_id = try std.testing.allocator.dupe(u8, "train-current"),
+        .op = try std.testing.allocator.dupe(u8, "cancel"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer live.deinit();
+    var live_reply = try handle(&state, live);
+    defer live_reply.deinit();
+    try std.testing.expect(live_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, live_reply.body_json, "\"cancelled\":true") != null);
+    try std.testing.expect(state.session.stop_requested.load(.acquire));
+    try std.testing.expect(state.isCancelled("train-current"));
+
+    // Idempotent while the same job is still active.
+    var again: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "stop-again"),
+        .job_id = try std.testing.allocator.dupe(u8, "train-current"),
+        .op = try std.testing.allocator.dupe(u8, "cancel"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer again.deinit();
+    var again_reply = try handle(&state, again);
+    defer again_reply.deinit();
+    try std.testing.expect(again_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, again_reply.body_json, "\"cancelled\":true") != null);
+
+    // Terminal clear: completed id becomes not_running and must not re-stop.
+    state.clearActiveJobIfMatch("train-current");
+    state.session.clearControlFlags();
+    var done: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "stop-done"),
+        .job_id = try std.testing.allocator.dupe(u8, "train-current"),
+        .op = try std.testing.allocator.dupe(u8, "cancel"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer done.deinit();
+    var done_reply = try handle(&state, done);
+    defer done_reply.deinit();
+    try std.testing.expect(done_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, done_reply.body_json, "\"reason\":\"not_running\"") != null);
+    try std.testing.expect(!state.session.stop_requested.load(.acquire));
+}
+
+test "stale pause does not latch pause on train-current" {
+    var state = try HostState.init(std.testing.allocator, "job-scoped-pause");
+    defer state.deinit();
+
+    try state.setActiveJob("train-current");
+    state.train_running.store(true, .release);
+    defer state.train_running.store(false, .release);
+    // Pretend mid-train so Session.pause latches without needing a full begin.
+    state.session.mu.lock();
+    state.session.phase = .training;
+    state.session.mu.unlock();
+    state.session.clearControlFlags();
+
+    var stale: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "pause-stale"),
+        .job_id = try std.testing.allocator.dupe(u8, "job-finished"),
+        .op = try std.testing.allocator.dupe(u8, "pause"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer stale.deinit();
+    var stale_reply = try handle(&state, stale);
+    defer stale_reply.deinit();
+    try std.testing.expect(stale_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, stale_reply.body_json, "\"paused\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, stale_reply.body_json, "\"reason\":\"not_running\"") != null);
+    try std.testing.expect(!state.session.pause_requested.load(.acquire));
+
+    var live: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "pause-live"),
+        .job_id = try std.testing.allocator.dupe(u8, "train-current"),
+        .op = try std.testing.allocator.dupe(u8, "pause"),
+        .body_json = try std.testing.allocator.dupe(u8, "null"),
+    };
+    defer live.deinit();
+    var live_reply = try handle(&state, live);
+    defer live_reply.deinit();
+    try std.testing.expect(live_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, live_reply.body_json, "\"phase\":\"paused\"") != null);
+    try std.testing.expect(state.session.pause_requested.load(.acquire));
 }
 
 test "tree_preview refuses while train running (ZR-158)" {
