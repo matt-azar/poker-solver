@@ -201,6 +201,13 @@ describe("draftPartialFromStatus", () => {
     } as StatusPayload);
     expect(partial.timeLimit).toBe("");
   });
+
+  it("maps engine Accuracy pot fraction into Build percent-of-pot", () => {
+    const partial = draftPartialFromStatus({
+      accuracy: 0.005,
+    } as StatusPayload);
+    expect(partial.accuracy).toBe("0.5");
+  });
 });
 
 describe("openDraftBase / draftFromOpenedSolution", () => {

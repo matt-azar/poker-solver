@@ -292,9 +292,11 @@ export function draftPartialFromStatus(status: StatusPayload): Partial<SpotDraft
   }
   if ("accuracy" in status) {
     const accuracy = asFiniteNumber(status.accuracy);
-    // Engine uses -1 for "unset"; keep Build blank in that case.
+    // Engine uses -1 for "unset"; Build stores percent-of-pot (0.5 → 0.5%).
     partial.accuracy =
-      accuracy === undefined || accuracy < 0 ? "" : String(accuracy);
+      accuracy === undefined || accuracy < 0
+        ? ""
+        : String(Number((accuracy * 100).toPrecision(12)));
   }
   if ("time_limit" in status) {
     const timeLimit = asFiniteNumber(status.time_limit);
@@ -608,8 +610,11 @@ export function draftPartialFromSolutionConfig(
   }
   if ("accuracy" in config) {
     const accuracy = asFiniteNumber(config.accuracy);
+    // Config Accuracy is pot fraction; Build field is percent of pot.
     partial.accuracy =
-      accuracy === undefined || accuracy < 0 ? "" : String(accuracy);
+      accuracy === undefined || accuracy < 0
+        ? ""
+        : String(Number((accuracy * 100).toPrecision(12)));
   }
   if ("time_limit" in config) {
     const timeLimit = asFiniteNumber(config.time_limit);

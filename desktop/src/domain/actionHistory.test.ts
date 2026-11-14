@@ -6,6 +6,7 @@ import {
   canNavForward,
   abbreviateActionLine,
   abbreviatePathAction,
+  potFacingAfterPath,
   compactActionLabel,
   displayPathStepLabel,
   formatAbbreviatedPath,
@@ -68,6 +69,15 @@ describe("actionHistory helpers", () => {
     expect(compactActionLabel("Bet 50", 100)).not.toMatch(/Bet 50%/i);
     expect(compactActionLabel("Check", 100)).toBe("Check");
     expect(compactActionLabel("As", 100)).toBe("As");
+  });
+
+  it("walks pot/facing along an engine path for Preview tags", () => {
+    expect(potFacingAfterPath("", 5)).toEqual({ pot: 5, toCall: 0 });
+    expect(potFacingAfterPath("Bet 2.5", 5)).toEqual({ pot: 7.5, toCall: 2.5 });
+    expect(potFacingAfterPath("Check/Bet 10", 50)).toEqual({
+      pot: 60,
+      toCall: 10,
+    });
   });
 
   it("abbreviates a multi-street line as x / pot-fraction / c", () => {

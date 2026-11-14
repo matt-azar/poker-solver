@@ -335,6 +335,38 @@ export function formatAbbreviatedPath(
 }
 
 /**
+ * Pot and facing amount after walking an engine action path from `rootPot`.
+ * Used so Preview / line tags size each bet against the pot **before** that bet.
+ */
+export function potFacingAfterPath(
+  path: string | null | undefined,
+  rootPot = 0,
+): { pot: number; toCall: number } {
+  const parts = splitActionLine(path);
+  let pot = rootPot > 0 ? rootPot : 0;
+  let toCall = 0;
+  for (const label of parts) {
+    const parsed = parseSizedAction(label);
+    if (parsed?.kind === "call") {
+      pot += parsed.chips > 0 ? parsed.chips : Math.max(0, toCall);
+      toCall = 0;
+      continue;
+    }
+    if (parsed) {
+      const chips = Math.max(0, sizeChipsForPotTag(parsed, toCall));
+      pot += chips;
+      toCall = chips;
+      continue;
+    }
+    if (/^call$/i.test(label)) {
+      pot += Math.max(0, toCall);
+      toCall = 0;
+    }
+  }
+  return { pot, toCall };
+}
+
+/**
  * Abbreviate an engine `line` (`Check/Bet 10/Call`) by walking the pot.
  * Each bet uses the pot before that bet. Streets are not split here — the
  * trail knows where a street ends; {@link studyLineLabel} inserts ` - `.

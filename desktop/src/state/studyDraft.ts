@@ -42,6 +42,30 @@ export function joinRaiseDraft(fractions: unknown, multiples: unknown): string {
 
 export { formatEdgeTagsDraft, formatIncentivesDraft };
 
+/**
+ * Build Accuracy field is **percent of pot** (enter `0.5` for 0.5% pot).
+ * Engine / status / config use pot fraction (`0.005`).
+ */
+export function accuracyFieldToEngine(field: string): number {
+  const trimmed = field.trim();
+  if (trimmed === "") {
+    return -1;
+  }
+  const pct = Number(trimmed);
+  if (!Number.isFinite(pct) || pct < 0) {
+    return -1;
+  }
+  return pct / 100;
+}
+
+/** Convert engine pot-fraction Accuracy into the Build % field string. */
+export function accuracyEngineToField(fraction: number): string {
+  if (!Number.isFinite(fraction) || fraction < 0) {
+    return "";
+  }
+  return String(Number((fraction * 100).toPrecision(12)));
+}
+
 function finiteOrZero(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -281,7 +305,7 @@ export function buildJob(draft: SpotDraft): SolveJobRequest {
     allow_all_in: 0,
     // Desktop always uses the frozen pass (required for multi-thread / CFR+).
     frozen: 1,
-    accuracy: draft.accuracy.trim() === "" ? -1 : Number(draft.accuracy),
+    accuracy: accuracyFieldToEngine(draft.accuracy),
     max_raises: draft.maxRaises,
     iterations: draft.iterations,
     memory_mib: draft.memoryMib,

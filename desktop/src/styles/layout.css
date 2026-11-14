@@ -2991,7 +2991,7 @@
   color: var(--danger, #b33);
 }
 
-/* Estimated memory / plan readout for a build. */
+/* Estimated memory / plan readout — sits above Preview tree divider. */
 .memory-plan {
   display: flex;
   flex-wrap: wrap;
@@ -2999,6 +2999,7 @@
   font-size: 12px;
   color: var(--text);
   padding: 6px 8px;
+  margin-bottom: 8px;
   background: var(--secondary);
   border-radius: var(--radius-sm);
 }
@@ -3010,17 +3011,14 @@
 }
 
 /* List of pending tree line edits. — bullet list. */
-.tree-edits-list ul,
-.tree-preview,
-.tree-actions {
+.tree-edits-list ul {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
 /* List of pending tree line edits. — list item. */
-.tree-edits-list li,
-.tree-actions li {
+.tree-edits-list li {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -3030,57 +3028,100 @@
   border-bottom: 1px solid var(--border);
 }
 
-/* Scrollable preview of the public tree. */
-.tree-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* Nested betting-tree diagram (click a node for Force / Remove). */
+.tree-diagram {
   max-height: 420px;
   overflow: auto;
+  padding: 4px 0 8px;
+  font-size: 13px;
 }
 
-/* One node block in the tree preview. */
-.tree-node {
-  border: 1px solid var(--border);
+.tree-diagram-decision {
+  position: relative;
+}
+
+.tree-diagram-decision-head {
+  margin: 2px 0 4px;
+}
+
+.tree-diagram-children {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;
+  border-left: 1px solid var(--border);
+}
+
+.tree-diagram-branch {
+  position: relative;
+  margin: 0;
+  padding: 2px 0 2px 12px;
+}
+
+.tree-diagram-edge {
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.tree-diagram-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.tree-diagram-action-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  padding: 2px 6px 2px 2px;
   border-radius: var(--radius-sm);
-  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tree-diagram-action-btn:hover {
+  border-color: var(--border);
   background: var(--secondary);
 }
 
-/* Header row for a tree preview node. */
-.tree-node-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: space-between;
-  margin-bottom: 6px;
+.tree-diagram-action[data-selected="true"] .tree-diagram-action-btn {
+  border-color: var(--accent);
+  background: var(--secondary);
 }
 
-/* Public path label for a tree node. */
-.tree-path {
-  font-size: 12px;
+.tree-diagram-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.tree-diagram-action[data-selected="true"] .tree-diagram-dot {
+  background: var(--accent);
+}
+
+.tree-diagram-label {
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Action label/code in the tree editor. — inline code / id text. */
-.tree-action-label code {
-  margin-left: 6px;
-  color: var(--muted);
-}
-
-/* Add/remove action buttons on a tree node. */
+/* Force / Remove / Add size revealed on the selected node. */
 .tree-action-btns,
-.tree-add-size,
 .tree-add-dialog {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-}
-
-/* Control to add a bet size on a node. */
-.tree-add-size {
-  margin-top: 6px;
 }
 
 /* Inline dialog for entering a new size. */

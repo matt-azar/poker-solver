@@ -13,7 +13,7 @@ describe("solveActivity", () => {
     expect(phaseLabel("complete")).toBe("Complete");
   });
 
-  it("builds a solving activity line with iters and Pio Accuracy", () => {
+  it("keeps mid-footer solving copy short (metrics own iters / Acc)", () => {
     const message = engineActivityMessage(
       "solving",
       {
@@ -26,10 +26,8 @@ describe("solveActivity", () => {
       },
       "",
     );
-    expect(message).toContain("Solving");
-    expect(message).toContain("40 / 200 iters");
-    expect(message).toContain("0.75% pot");
-    expect(message).toContain("10.0 it/s");
+    expect(message).toBe("Solving…");
+    expect(message).not.toMatch(/iters|Acc|it\/s/i);
   });
 
   it("prefers Building copy over a stale Solving fallback while compiling", () => {
@@ -90,7 +88,7 @@ describe("solveActivity", () => {
     expect(message).not.toMatch(/complete/i);
   });
 
-  it("includes job id on live Solving copy", () => {
+  it("omits job id from mid-footer Solving copy (metrics show Job)", () => {
     const message = engineActivityMessage(
       "solving",
       {
@@ -102,7 +100,8 @@ describe("solveActivity", () => {
       },
       "",
     );
-    expect(message).toContain("j-study-9");
+    expect(message).toBe("Solving…");
+    expect(message).not.toContain("j-study-9");
   });
 
   it("exposes job id in tabular metrics", () => {
