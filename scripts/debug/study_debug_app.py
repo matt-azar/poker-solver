@@ -81,6 +81,17 @@ class StudyDebugApp(tk.Tk):
         self._path_row(paths, "Diagnostics zip", self.zip_var, self._browse_zip)
         self._path_row(paths, "solver-engine.exe", self.exe_var, self._browse_exe)
 
+        diary = ttk.LabelFrame(root, text="Repro diary (attached on Collect / Send)", padding=8)
+        diary.pack(fill=tk.X, **pad)
+        self.diary_symptom = tk.StringVar(value="")
+        self.diary_clicked = tk.StringVar(value="")
+        self.diary_street = tk.StringVar(value="")
+        self.diary_notes = tk.StringVar(value="")
+        self._diary_row(diary, "Symptom", self.diary_symptom)
+        self._diary_row(diary, "What clicked", self.diary_clicked)
+        self._diary_row(diary, "Street / solve", self.diary_street)
+        self._diary_row(diary, "Notes", self.diary_notes)
+
         actions = ttk.LabelFrame(root, text="Actions", padding=8)
         actions.pack(fill=tk.X, **pad)
 
@@ -89,6 +100,7 @@ class StudyDebugApp(tk.Tk):
             ("Analyze diagnostics", self._on_analyze),
             ("Send report to GitHub", self._on_send),
             ("Find crash dumps", self._on_dumps),
+            ("Enable LocalDumps (once)", self._on_enable_dumps),
             ("Sidecar PE check", self._on_sidecar),
             ("IPC probe", self._on_probe),
             ("Watch hang (60s)", self._on_watch),
@@ -128,6 +140,24 @@ class StudyDebugApp(tk.Tk):
         ttk.Label(row, text=label, width=18).pack(side=tk.LEFT)
         ttk.Entry(row, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
         ttk.Button(row, text="Browse…", command=browse, width=10).pack(side=tk.RIGHT)
+
+    def _diary_row(self, parent: ttk.LabelFrame, label: str, var: tk.StringVar) -> None:
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X, pady=2)
+        ttk.Label(row, text=label, width=14).pack(side=tk.LEFT)
+        ttk.Entry(row, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+
+    def _diary_args(self) -> list[str]:
+        args: list[str] = []
+        if self.diary_symptom.get().strip():
+            args.extend(["--diary-symptom", self.diary_symptom.get().strip()])
+        if self.diary_clicked.get().strip():
+            args.extend(["--diary-clicked", self.diary_clicked.get().strip()])
+        if self.diary_street.get().strip():
+            args.extend(["--diary-street", self.diary_street.get().strip()])
+        if self.diary_notes.get().strip():
+            args.extend(["--diary-notes", self.diary_notes.get().strip()])
+        return args
 
     def _browse_diag_dir(self) -> None:
         path = filedialog.askdirectory(title="Diagnostics folder")
@@ -231,7 +261,8 @@ class StudyDebugApp(tk.Tk):
             self.status_var.set("Nothing to stop")
 
     def _on_collect(self) -> None:
-        self._run("Collect bundle", ["collect", "--zip", "--stacks"])
+        args = ["collect", "--zip", "--stacks", *self._diary_args()]
+        self._run("Collect bundle", args)
 
     def _on_analyze(self) -> None:
         zip_path = self.zip_var.get().strip()
@@ -277,15 +308,34 @@ class StudyDebugApp(tk.Tk):
             )
         if not messagebox.askyesno("Send report", prompt):
             return
-        args = ["send", "--yes"]
+        args = ["send", "--yes", *self._diary_args()]
         if zip_path:
             args.extend(["--zip", zip_path])
         elif diag and not diag.startswith("%"):
             args.extend(["--dir", diag])
+        # Map diary notes into --notes when present.
+        notes = self.diary_notes.get().strip()
+        if notes:
+            args.extend(["--notes", notes])
         self._run("Send report to GitHub", args)
 
     def _on_dumps(self) -> None:
         self._run("Find crash dumps", ["dumps", "--since-hours", "48"])
+
+    def _on_enable_dumps(self) -> None:
+        if sys.platform != "win32":
+            messagebox.showinfo(
+                "LocalDumps",
+                "LocalDumps is Windows-only. See enable_local_dumps.ps1.",
+            )
+            return
+        if not messagebox.askyesno(
+            "Enable LocalDumps",
+            "This writes HKLM LocalDumps for Holdem Study.exe and "
+            "solver-engine.exe (needs Administrator once).\n\nContinue?",
+        ):
+            return
+        self._run("Enable LocalDumps", ["enable-dumps"])
 
     def _on_sidecar(self) -> None:
         args = ["sidecar"]

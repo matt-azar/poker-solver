@@ -61,6 +61,11 @@ _ALIASES: dict[str, str] = {
     "local-receiver": "local-debug",
     "debug-local": "local-debug",
     "receiver": "local-debug",
+    "enable-dumps": "enable-dumps",
+    "localdumps": "enable-dumps",
+    "dumps-enable": "enable-dumps",
+    "diary": "diary",
+    "repro-diary": "diary",
 }
 
 
@@ -107,6 +112,27 @@ def _cmd_gui(_argv: Sequence[str]) -> int:
     return int(subprocess.call([_python(), str(gui)]))
 
 
+def _cmd_enable_dumps(argv: Sequence[str]) -> int:
+    ps1 = _HERE / "enable_local_dumps.ps1"
+    if not ps1.is_file():
+        _eprint(f"error: missing {ps1}")
+        return 2
+    if sys.platform != "win32":
+        _eprint("enable-dumps is Windows-only (LocalDumps registry).")
+        _eprint(f"See script comments in {ps1}")
+        return 2
+    cmd = [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(ps1),
+        *argv,
+    ]
+    return int(subprocess.call(cmd))
+
+
 def _print_front_door() -> None:
     diag = os.environ.get("HOLDEM_STUDY_DIAGNOSTICS_DIR") or (
         r"%LOCALAPPDATA%\Holdem Study\diagnostics"
@@ -135,8 +161,9 @@ Or:
 
 Diagnostics folder: {diag}
 
-Subcommands: collect, analyze, send, local-debug, dumps, sidecar, probe, freeze,
-             watch, snapshot, stacks, smoke, gui, windows-collect
+Subcommands: collect, analyze, send, local-debug, enable-dumps, diary, dumps,
+             sidecar, probe, freeze, watch, snapshot, stacks, smoke, gui,
+             windows-collect
 """.format(
             diag=diag
         ).strip()
@@ -165,8 +192,9 @@ examples (Windows installed Study):
     ap.add_argument(
         "command",
         nargs="?",
-        help="collect | analyze | send | local-debug | dumps | sidecar | probe | "
-        "freeze | watch | snapshot | stacks | smoke | gui | windows-collect",
+        help="collect | analyze | send | local-debug | enable-dumps | diary | "
+        "dumps | sidecar | probe | freeze | watch | snapshot | stacks | smoke | "
+        "gui | windows-collect",
     )
     ap.add_argument(
         "args",
@@ -201,6 +229,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _cmd_gui(rest)
     if command in ("local-debug", "local_debug"):
         return _run_script("start_local_debug.py", rest)
+    if command in ("enable-dumps", "enable_dumps"):
+        return _cmd_enable_dumps(rest)
+    if command == "diary":
+        return _run_script("repro_diary.py", rest)
     if command in ("windows-collect", "win-collect", "wcollect"):
         return _cmd_windows_collect(rest)
     if command == "help":

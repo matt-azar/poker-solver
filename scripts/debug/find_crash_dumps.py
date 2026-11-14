@@ -88,14 +88,16 @@ def _iter_candidates(roots: list[Path], since: float | None) -> list[dict]:
 
 def windows_localdumps_help() -> str:
     return """
-Enable Windows LocalDumps (admin PowerShell), then reproduce the crash:
+Enable Windows LocalDumps once (elevated), then reproduce the crash:
 
-  New-Item -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\LocalDumps' -Force
-  Set-ItemProperty ... LocalDumps -Name DumpFolder -Value \"$env:LOCALAPPDATA\\CrashDumps\"
-  Set-ItemProperty ... LocalDumps -Name DumpType -Value 2
-  Set-ItemProperty ... LocalDumps -Name DumpCount -Value 10
+  scripts\\debug\\study-debug.cmd enable-dumps
+  # or: powershell -ExecutionPolicy Bypass -File scripts\\debug\\enable_local_dumps.ps1
 
-Or per-exe keys under LocalDumps\\Holdem Study.exe and LocalDumps\\solver-engine.exe.
+That configures per-exe keys under
+  HKLM\\...\\LocalDumps\\Holdem Study.exe
+  HKLM\\...\\LocalDumps\\solver-engine.exe
+Dump folder: %LOCALAPPDATA%\\CrashDumps (DumpType=2 full, DumpCount=10).
+
 Packaged Study uses GUI subsystem — crashes will not show a console; dumps are
 the primary evidence. Illegal-instruction (0xc000001d) often means AVX-512 build
 on an older CPU — rebuild with -Dcpu=x86_64_v2.
