@@ -1,6 +1,6 @@
 # Project history
 
-Holdem Study is a desktop application for solving and studying heads-up no-limit Hold’em postflop. Matt Azar led the project and used Cursor for implementation. This history covers October 26 through November 11, 2026. Dates are in US Eastern time.
+Holdem Study is a desktop application for solving and studying heads-up no-limit Hold’em postflop. Matt Azar led the project and used Cursor for implementation. This history covers October 26 through November 13, 2026. Dates are in US Eastern time.
 
 ## Timeline
 
@@ -41,6 +41,14 @@ timeline
     Nov 9 : EV and equity queue : Rank-table equity : Same-line card comparison : Parallel action EV
     Nov 10 : Windows 0.1.1 : Board-specific locks : Assistant answers questions : Betting tree catalogue
     Nov 11 : Windows 0.1.2 : Assistant runout filters : Sized all-in labels : Save and rename fixes
+```
+
+### November 12–13
+
+```mermaid
+timeline
+    Nov 12 : Zig Windows 0.1.3–0.1.4 : Crash reopen : Local crash diagnostics
+    Nov 13 : Zig Windows 0.1.5 : Debug capture suite : IPC hang fixes : Async Rust IPC stack
 ```
 
 ## The first Hold’em solver
@@ -165,6 +173,20 @@ On November 9, the project began generating the assistant’s reference material
 The unsigned Windows releases `v0.1.1-windows` and `v0.1.2-windows` were published on November 10 and 11. Runout filtering, sized all-in labels, the save fixes, library staging, native dialogs, and the packaged-engine handshake merged after 0.1.2 was published. [Windows 0.1.1](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.1-windows) · [Windows 0.1.2](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.2-windows) · [Sized all-in labels](https://github.com/matt-azar/poker-solver/pull/225)
 
 By November 11, the roadmap still listed compact saves, a persistent batch queue, training drills, preflop solving, and signed installers as future work. Matched benchmarks with PioSolver were still outstanding. [Roadmap](../planning/ROADMAP.md)
+
+## Zig cutover releases and crash recovery
+
+On November 12, the product tip cut Windows releases on the Zig `solver-engine` path: `v0.1.3-windows`, then `v0.1.4-windows`. Study gained a way to reopen the last checkpoint after an engine crash, and the packaged shell began writing richer local crash diagnostics so a Windows session could leave evidence without a developer machine attached. [Windows 0.1.3](https://github.com/matt-azar/poker-solver/pull/329) · [Windows 0.1.4](https://github.com/matt-azar/poker-solver/pull/347) · [Reopen last checkpoint](https://github.com/matt-azar/poker-solver/pull/344) · [Local crash diagnostics](https://github.com/matt-azar/poker-solver/pull/346)
+
+November 13 opened with `v0.1.5-windows` and further Study reliability work: live footer progress during solves, sticky train errors on status, and refusing Build preview while training owned the session. The same day the project stood up an external Windows debug suite so Matt could capture hangs from an installed Study without editing the install folder: a script suite and CLI, a mini-app front door, GitHub Issue attach for report zips, a disk-backed local receiver, LocalDumps registration, a repro diary, a hang watcher, and an automated capture session. [Windows 0.1.5](https://github.com/matt-azar/poker-solver/pull/351) · [Debug script suite](https://github.com/matt-azar/poker-solver/pull/364) · [Debug CLI](https://github.com/matt-azar/poker-solver/pull/365) · [Report send](https://github.com/matt-azar/poker-solver/pull/366) · [Report webhook](https://github.com/matt-azar/poker-solver/pull/367) · [Local launcher](https://github.com/matt-azar/poker-solver/pull/368) · [Capture loop](https://github.com/matt-azar/poker-solver/pull/369) · [Capture session](https://github.com/matt-azar/poker-solver/pull/371)
+
+## Windows Study hang investigation
+
+Packaged Windows captures from the evening of November 13 showed a familiar sequence that looked like a crash but was not one. A flop Solve pegged the sidecar CPU and grew RSS while Study’s status polls timed out. The UI classified `status-poll-hung` / `session-dead` and killed a healthy train. The first evidence-backed fix was IPC starvation under multi-thread train: leave WorkerBudget headroom for the stdin reader, prefer IPC thread priority on Windows, and never free a GiB tree under `session.mu`. Soft status timeouts during Building or Solving were told not to hung-kill a hot sidecar. Raising poll timeouts was explicitly rejected as the fix. [IPC starvation root cause](https://github.com/matt-azar/poker-solver/pull/372)
+
+Follow-up host and desktop fixes closed the audit’s lost-solution paths. Stop and Pause became job-scoped so a stale cancel could not kill `train-current`. Hung kill became launch-scoped so a watchdog after Reconnect could not tear down the new engine. Analysis supersession stopped detaching workers and instead parked orphans for join on teardown. A separate Windows startup bug flashed several brief consoles on every launch; that was LocalDumps `reg.exe` without `CREATE_NO_WINDOW`, not `solver-engine`. [Job-scoped Stop/Pause](https://github.com/matt-azar/poker-solver/pull/373) · [Launch-scoped kill and analysis join](https://github.com/matt-azar/poker-solver/pull/375) · [Join hygiene follow-up](https://github.com/matt-azar/poker-solver/pull/378) · [LocalDumps console flashes](https://github.com/matt-azar/poker-solver/pull/377)
+
+Late on November 13, a three-PR Rust stack moved connection ownership off the Tauri UI thread. The first made ensure/request/kill asynchronous with a supervised stdin writer and stdout reader per launch. The second bounded IPC admission with deadlines and control priority so status floods could not starve Stop. The third added typed IPC replies and fail-once recovery so soft status timeouts no longer looked like pipe death. Matt reported that the async ownership and bounded admission work largely resolved the Windows installed-Study hangs. [Async connection supervisor](https://github.com/matt-azar/poker-solver/pull/380) · [Bounded admission](https://github.com/matt-azar/poker-solver/pull/381) · [Typed fail-once recovery](https://github.com/matt-azar/poker-solver/pull/382)
 
 ## Current documentation
 
