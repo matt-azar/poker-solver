@@ -76,12 +76,58 @@ def main() -> int:
     )
     ap.add_argument("--diagnostics-dir", type=Path)
     ap.add_argument("--since-hours", type=float, default=168.0)
+    ap.add_argument(
+        "--diary",
+        type=Path,
+        help="Path to repro-diary.md (copied into the bundle)",
+    )
+    ap.add_argument(
+        "--prompt-diary",
+        action="store_true",
+        help="Interactively prompt for a short repro diary (TTY)",
+    )
+    ap.add_argument("--diary-clicked", default="", help="Diary: what you clicked")
+    ap.add_argument("--diary-street", default="", help="Diary: street/solve state")
+    ap.add_argument("--diary-notes", default="", help="Diary: free-text notes")
+    ap.add_argument("--diary-symptom", default="", help="Diary: crash/hang/…")
     args = ap.parse_args()
 
     out: Path = args.out
     out.mkdir(parents=True, exist_ok=True)
     meta = BundleMeta()
     write_json(out / "meta.json", meta.__dict__)
+
+    # 0) repro diary (optional)
+    from repro_diary import (  # noqa: WPS433 — local optional import
+        copy_diary_into,
+        prompt_diary,
+        resolve_diary_file,
+        write_diary_pair,
+    )
+
+    diary_fields = None
+    if args.prompt_diary:
+        diary_fields = prompt_diary()
+    elif any(
+        (args.diary_clicked, args.diary_street, args.diary_notes, args.diary_symptom)
+    ):
+        diary_fields = {
+            "clicked": args.diary_clicked,
+            "street_state": args.diary_street,
+            "notes": args.diary_notes,
+            "symptom": args.diary_symptom,
+            "build": "",
+        }
+    if diary_fields:
+        write_diary_pair(out, diary_fields)
+    elif args.diary:
+        try:
+            src = resolve_diary_file(args.diary)
+        except FileNotFoundError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        assert src is not None
+        copy_diary_into(out, src)
 
     # 1) live snapshot
     snap = build_snapshot(0.5)

@@ -137,6 +137,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Also create GitHub Issues when GITHUB_TOKEN / "
         "HOLDEM_STUDY_GITHUB_TOKEN is set in this environment",
     )
+    ap.add_argument(
+        "--watch",
+        action="store_true",
+        default=True,
+        help="Start always-on hang watcher alongside the receiver (default)",
+    )
+    ap.add_argument(
+        "--no-watch",
+        action="store_true",
+        help="Do not start watch_hang.py",
+    )
+    ap.add_argument(
+        "--check-dumps",
+        action="store_true",
+        help="On Windows, print LocalDumps status (enable via enable-dumps)",
+    )
     args = ap.parse_args(list(argv) if argv is not None else None)
 
     if not _RECEIVER.is_file():
@@ -237,6 +253,51 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except OSError as exc:
             _eprint(f"note: could not open folder: {exc}")
 
+    if args.check_dumps and sys.platform == "win32":
+        dumps_ps1 = _HERE / "enable_local_dumps.ps1"
+        if dumps_ps1.is_file():
+            subprocess.call(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(dumps_ps1),
+                    "-StatusOnly",
+                ]
+            )
+        _eprint(
+            "Once: scripts\\debug\\study-debug.cmd enable-dumps  "
+            "(elevated; enables LocalDumps for Study + solver-engine)"
+        )
+
+    watch_proc: Optional[subprocess.Popen[bytes]] = None
+    do_watch = args.watch and not args.no_watch
+    if do_watch:
+        watch_script = _HERE / "watch_hang.py"
+        if watch_script.is_file():
+            watch_dir = save_dir / "hang-watch"
+            watch_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                watch_proc = subprocess.Popen(
+                    [
+                        sys.executable,
+                        str(watch_script),
+                        "--always",
+                        "--quiet",
+                        "--interval",
+                        "2",
+                        "--out-dir",
+                        str(watch_dir),
+                    ],
+                    env=env,
+                    cwd=str(_HERE.parents[1]),
+                )
+                _eprint(f"hang watcher → {watch_dir / 'hang-watch-events.jsonl'}")
+            except OSError as exc:
+                _eprint(f"note: could not start hang watcher: {exc}")
+
     gui_proc: Optional[subprocess.Popen[bytes]] = None
     if not args.no_gui and _STUDY_DEBUG.is_file():
         try:
@@ -250,8 +311,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             _eprint(f"note: could not open GUI: {exc}")
 
     code = proc.wait()
-    if gui_proc and gui_proc.poll() is None:
-        gui_proc.terminate()
+    for child in (watch_proc, gui_proc):
+        if child and child.poll() is None:
+            child.terminate()
     return int(code or 0)
 
 

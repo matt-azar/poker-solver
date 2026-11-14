@@ -357,8 +357,64 @@ def main() -> int:
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
                             )
-                            if help_rc != 0:
-                                failures.append("start_local_debug --help")
+                        if help_rc != 0:
+                            failures.append("start_local_debug --help")
+                        diary_script = _HERE / "repro_diary.py"
+                        if not diary_script.is_file():
+                            failures.append("missing repro_diary.py")
+                        else:
+                            d_out = Path(tmp_send) / "diary.md"
+                            d_rc = subprocess.call(
+                                [
+                                    sys.executable,
+                                    str(diary_script),
+                                    "--symptom",
+                                    "hang",
+                                    "--clicked",
+                                    "Solve",
+                                    "--street-state",
+                                    "river",
+                                    "--notes",
+                                    "smoke",
+                                    "--out",
+                                    str(d_out),
+                                ],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
+                            if d_rc != 0 or not d_out.is_file():
+                                failures.append("repro_diary write")
+                            elif "Study repro diary" not in d_out.read_text(
+                                encoding="utf-8"
+                            ):
+                                failures.append("repro_diary content")
+                        if not (_HERE / "enable_local_dumps.ps1").is_file():
+                            failures.append("missing enable_local_dumps.ps1")
+                        if not (_HERE / "repro_diary_template.md").is_file():
+                            failures.append("missing repro_diary_template.md")
+                        watch_script = _HERE / "watch_hang.py"
+                        wh_dir = Path(tmp_send) / "hang-watch"
+                        wh_rc = subprocess.call(
+                            [
+                                sys.executable,
+                                str(watch_script),
+                                "--duration",
+                                "0.2",
+                                "--interval",
+                                "0.1",
+                                "--out-dir",
+                                str(wh_dir),
+                                "--quiet",
+                            ],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        if wh_rc != 0:
+                            failures.append("watch_hang short run")
+                        elif not (wh_dir / "hang-watch-events.jsonl").exists():
+                            # empty file may not exist if no events — create ok if dir exists
+                            if not wh_dir.is_dir():
+                                failures.append("watch_hang out-dir")
                 finally:
                     proc2.terminate()
                     try:
