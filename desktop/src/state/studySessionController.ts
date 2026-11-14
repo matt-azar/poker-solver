@@ -13,11 +13,17 @@ import {
   type WorkerAnalysisKind,
 } from "../domain/analysisCache";
 import { EngineError } from "../engine/client";
+import { SolverIpcError } from "../engine/transport";
 import {
   type AnalysisIdentity,
   type AnalysisKind,
 } from "../domain/setup";
 import type { ActionValuesPayload, NodePayload, StatusPayload } from "../domain/types";
+
+/** Host gen-supersession / mid-publish misses — safe to re-admit for the live token. */
+const TRANSIENT_ANALYSIS_CODES = new Set(["superseded", "nothing_published"]);
+/** Cap transient retries so a wedged host cannot spin forever. */
+const TRANSIENT_ANALYSIS_RETRIES = 8;
 
 const ANALYSIS_KINDS: AnalysisKind[] = ["values", "equity", "categories"];
 
@@ -217,10 +223,35 @@ function sleepAnalysis(ms: number): Promise<void> {
   });
 }
 
+/** Surface EngineError / SolverIpcError messages; never hide host error_code text. */
+export function analysisErrorMessage(error: unknown): string {
+  if (error instanceof EngineError || error instanceof SolverIpcError) {
+    return error.message;
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return "Analysis request failed";
+}
+
+/** True when the host rejection is expected under overlap / mid-publish. */
+export function isTransientAnalysisError(error: unknown): boolean {
+  if (error instanceof SolverIpcError) {
+    const code = (error.errorCode ?? "").trim().toLowerCase();
+    if (code && TRANSIENT_ANALYSIS_CODES.has(code)) {
+      return true;
+    }
+  }
+  const message = analysisErrorMessage(error);
+  return /superseded|nothing_published/i.test(message);
+}
+
 /**
  * Poll async analysis endpoints that may return `{ pending: true }` / HTTP 202.
  * The returned promise represents the full lifecycle through ready/failed/abort —
  * the request queue must not release its slot on the first 202.
+ * Transient host codes (`superseded`, `nothing_published`) re-admit while the
+ * token is still current instead of settling a blank EV/equity failure.
  */
 export async function pollAnalysis<T extends { pending?: boolean }>(
   kind: AnalysisKind,
@@ -230,6 +261,7 @@ export async function pollAnalysis<T extends { pending?: boolean }>(
   onError: (message: string) => void,
 ): Promise<void> {
   clearAnalysisPoll(kind);
+  let transientFailures = 0;
   // At most one outstanding request: await each tick before the next.
   while (analysisRequestIsCurrent(kind, token)) {
     try {
@@ -247,7 +279,15 @@ export async function pollAnalysis<T extends { pending?: boolean }>(
       if (!analysisRequestIsCurrent(kind, token)) {
         return;
       }
-      onError(error instanceof EngineError ? error.message : "Analysis request failed");
+      if (
+        isTransientAnalysisError(error) &&
+        transientFailures < TRANSIENT_ANALYSIS_RETRIES
+      ) {
+        transientFailures += 1;
+        await sleepAnalysis(50 * transientFailures);
+        continue;
+      }
+      onError(analysisErrorMessage(error));
       return;
     }
   }
@@ -259,13 +299,22 @@ export function analysisRevision(
 ): number {
   // Prefer the published profile revision so continue / strategy edits invalidate
   // cached EV/equity under the same solution id without waiting on generation.
+  // Host status emits `policy_revision`; equity replies also mirror it as
+  // `analysis_revision`. Falling back to status_generation alone misses publish
+  // bumps that keep the same solution id (stale strategy / blank EV cache).
   if (typeof status?.analysis_revision === "number") {
     return status.analysis_revision;
   }
-  const nodeRevision = (node as { analysis_revision?: number } | null | undefined)
+  if (typeof status?.policy_revision === "number") {
+    return status.policy_revision;
+  }
+  const nodeAnalysis = (node as { analysis_revision?: number } | null | undefined)
     ?.analysis_revision;
-  if (typeof nodeRevision === "number") {
-    return nodeRevision;
+  if (typeof nodeAnalysis === "number") {
+    return nodeAnalysis;
+  }
+  if (typeof node?.policy_revision === "number") {
+    return node.policy_revision;
   }
   if (typeof node?.status_generation === "number") {
     return node.status_generation;
@@ -279,6 +328,25 @@ export function analysisRevision(
 /** Work-limit failures stay settled for the current inputs; no auto-resubmit. */
 export function analysisErrorIsPermanent(message: string | undefined | null): boolean {
   return Boolean(message && /work limit/i.test(message));
+}
+
+/** Read host publish epoch from status or a painted node (0 when unknown). */
+export function policyRevisionOf(
+  source:
+    | { policy_revision?: number; analysis_revision?: number }
+    | null
+    | undefined,
+): number {
+  if (!source) {
+    return 0;
+  }
+  if (typeof source.policy_revision === "number") {
+    return source.policy_revision;
+  }
+  if (typeof source.analysis_revision === "number") {
+    return source.analysis_revision;
+  }
+  return 0;
 }
 
 export function cachedAnalysisForNode(

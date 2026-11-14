@@ -164,6 +164,7 @@ import { useThemeStore } from "./themeStore";
 import { useLayoutStore } from "./layoutStore";
 import {
   analysisErrorIsPermanent,
+  analysisErrorMessage,
   analysisRequestIsCurrent,
   analysisRevision,
   beginAnalysisRequest,
@@ -187,6 +188,7 @@ import {
   isStatusPollActive,
   isStatusRefreshQueued,
   pollAnalysis,
+  policyRevisionOf,
   resetAnalysisCacheForTests,
   resetStatusPollingForTests,
   scheduleStatusPoll,
@@ -2264,6 +2266,26 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               solutionId: normalized.solution_id,
             });
             await get().navigateTo(reloadTarget, { history: "replace" });
+          } else {
+            // Same solution id can still bump policy_revision on final publish.
+            // Re-inspect the live node so strategy/EV/eq do not stick on a stale
+            // uniform snapshot until the user manually navigates away and back.
+            const live = get();
+            const statusRev = policyRevisionOf(normalized);
+            const nodeRev = policyRevisionOf(live.currentNode);
+            if (
+              statusRev > 0 &&
+              nodeRev > 0 &&
+              statusRev > nodeRev &&
+              live.solutionId &&
+              live.currentNode?.node_id &&
+              !normalized.running
+            ) {
+              await get().navigateTo(live.currentNode.node_id, {
+                history: "none",
+                preserveStudySelection: true,
+              });
+            }
           }
         } catch (error) {
           const classified = classifyStatusPollError(error, {
@@ -2772,7 +2794,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         return;
       }
       set({
-        message: error instanceof EngineError ? error.message : "Node load failed",
+        message: analysisErrorMessage(error) || "Node load failed",
       });
     }
   },
