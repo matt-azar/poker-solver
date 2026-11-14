@@ -251,9 +251,15 @@ export interface ActionValuesPayload {
   status_generation?: number;
   node_id?: string;
   units?: string;
-  /** Engine values are root_centered; UI defaults to local via withEvBasis. */
+  /**
+   * Zig `values` primary columns are local decision EV (`"local"`, Fold≈0).
+   * Legacy / dual-root payloads may still say `"root_centered"`.
+   */
   utility_basis?: string;
-  /** Add to root-centered chips for local decision EV (fold → 0 under chip/ICM). */
+  /**
+   * `-U_actor(fold-now)`. Still published for diagnostics and legacy clients;
+   * Study prefers primary local columns (or dual `root_centered`) over shifting.
+   */
   local_offset?: number | null;
   actions?: string[];
   combos?: string[];
@@ -262,6 +268,12 @@ export interface ActionValuesPayload {
   ev_defined?: boolean[];
   node_ev?: number | null;
   node_ev_defined?: boolean;
+  /** Dual root-centered columns when primary `utility_basis` is `"local"`. */
+  root_centered?: {
+    action_ev?: Array<Array<number | null>>;
+    value?: Array<number | null>;
+    node_ev?: number | null;
+  };
   [key: string]: unknown;
 }
 

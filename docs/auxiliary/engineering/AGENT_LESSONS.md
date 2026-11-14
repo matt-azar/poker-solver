@@ -195,14 +195,14 @@ Zig IPC host still has **one analysis worker** with gen supersession for `node` 
 
 ### Local EV vs Global / root-centered
 
-`/values` utilities are **root-centered chips**. Study defaults to **local decision EV**: Fold → 0 for the acting seat by adding `local_offset` (= `-U_i(fold-now)`).
+Zig `values` primary columns are **local decision EV** (`utility_basis: "local"`, Fold≈0). Dual `root_centered.{action_ev,value,node_ev}` keeps Settings Global refetch-free. `local_offset` (= `-U_i(fold-now)`) stays on the payload for diagnostics and legacy root-only clients; Study must not re-derive local via a fragile client shift when Zig already sent local.
 
 - Decision and chance nodes must store `state.contrib` so `local_offset` includes chips already invested on prior streets — half the starting pot alone is wrong after bet/call (#184).
-- **Fold column:** index Fold from `values.actions` (same order as `action_ev`), then `+ local_offset`. Indexing Fold from `node.actions` or using `row[foldIdx] ?? 0` turns a miss into baseline 0 and makes Local conversion a **silent no-op** (Settings say Local, UI still looks Global) (#182).
+- **Fold baseline (host + legacy TS):** index Fold from `values.actions` (same order as `action_ev`). Indexing Fold from `node.actions` or using `row[foldIdx] ?? 0` turns a miss into baseline 0 and makes Local conversion a **silent no-op** (#182).
 - Prefer the Settings store for `evDisplayBasis` over a stale study-store copy.
 - Fixtures that only face a bet with actor `contrib = 0` can mask a zero-contrib bug (offset looks like “half pot” and tests still pass).
 
-**Pointers:** PRs #182, #184; `desktop/src/domain/browse.ts`; `docs/EXPLORER.md`.
+**Pointers:** PRs #182, #184; `host/src/format_study_bodies.zig`; `desktop/src/domain/browse.ts`.
 
 ### Node lock vs line lock
 

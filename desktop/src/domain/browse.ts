@@ -58,21 +58,75 @@ function localEvBaseline(
 }
 
 /**
- * Map root-centered action values onto the requested display basis.
- * Local EV treats chips already invested as sunk: EV(fold) = 0 when Fold is legal
- * (or when the engine local_offset matches the fold terminal).
+ * Map action values onto the requested display basis.
+ *
+ * Zig `values` ships local decision EV as primary (`utility_basis: "local"`,
+ * Fold≈0) plus dual `root_centered` columns for Settings Global without refetch.
+ * Legacy root-only payloads still shift via local_offset / Fold baseline.
  */
 export function withEvBasis(
   values: ActionValuesPayload | null | undefined,
   basis: EvDisplayBasis = "local",
   actionLabels?: string[] | null,
 ): ActionValuesPayload | null | undefined {
-  if (!values || values.pending || basis === "root_centered") {
+  if (!values || values.pending) {
     return values;
   }
-  if (values.utility_basis === "local") {
+  const engineBasis =
+    values.utility_basis === "local" ? "local" : "root_centered";
+  if (basis === engineBasis) {
     return values;
   }
+
+  // Zig dual columns: flip to root without reverse-shifting local numbers.
+  if (basis === "root_centered" && engineBasis === "local") {
+    const root = values.root_centered;
+    if (root && (root.action_ev || root.value || root.node_ev !== undefined)) {
+      return {
+        ...values,
+        utility_basis: "root_centered",
+        action_ev: root.action_ev ?? values.action_ev,
+        value: root.value ?? values.value,
+        node_ev: root.node_ev ?? values.node_ev ?? null,
+      };
+    }
+    // Fallback: reverse local_offset when dual columns are absent.
+    const offset = Number(values.local_offset ?? 0);
+    const shift = Number.isFinite(offset) ? offset : 0;
+    const actionEv = (values.action_ev || []).map((row, hand) => {
+      if (!row || !values.ev_defined?.[hand]) {
+        return row;
+      }
+      return row.map((entry) =>
+        entry == null || Number.isNaN(Number(entry))
+          ? entry
+          : Number(entry) - shift,
+      );
+    });
+    const mixed = (values.value || []).map((entry, hand) => {
+      if (
+        !values.ev_defined?.[hand] ||
+        entry == null ||
+        Number.isNaN(Number(entry))
+      ) {
+        return entry;
+      }
+      return Number(entry) - shift;
+    });
+    const nodeEv =
+      values.node_ev == null || Number.isNaN(Number(values.node_ev))
+        ? values.node_ev
+        : Number(values.node_ev) - shift;
+    return {
+      ...values,
+      utility_basis: "root_centered",
+      action_ev: actionEv,
+      value: mixed,
+      node_ev: nodeEv ?? null,
+    };
+  }
+
+  // Legacy root_centered primary → local via Fold baseline / local_offset.
   const offset = Number(values.local_offset ?? 0);
   const shift = Number.isFinite(offset) ? offset : 0;
   const actionEv = (values.action_ev || []).map((row, hand) => {

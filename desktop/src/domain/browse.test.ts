@@ -266,6 +266,74 @@ describe("browse strategy grouping", () => {
     expect(localized?.node_ev).toBeCloseTo(0, 12);
   });
 
+  it("uses Zig local primary columns without client shift", () => {
+    const values = {
+      node_id: "facing",
+      utility_basis: "local",
+      local_offset: 50,
+      actions: ["Fold", "Call"],
+      combos: ["AhAd"],
+      ev_defined: [true],
+      value: [0],
+      action_ev: [[0, 25]],
+      node_ev: 0,
+      root_centered: {
+        action_ev: [[-50, -25]],
+        value: [-50],
+        node_ev: -50,
+      },
+    };
+    const local = withEvBasis(values, "local");
+    expect(local).toBe(values);
+    expect(local?.action_ev?.[0]?.[0]).toBeCloseTo(0, 12);
+    expect(local?.action_ev?.[0]?.[1]).toBeCloseTo(25, 12);
+
+    const global = withEvBasis(values, "root_centered");
+    expect(global?.utility_basis).toBe("root_centered");
+    expect(global?.action_ev?.[0]?.[0]).toBeCloseTo(-50, 12);
+    expect(global?.action_ev?.[0]?.[1]).toBeCloseTo(-25, 12);
+    expect(global?.value?.[0]).toBeCloseTo(-50, 12);
+    expect(global?.node_ev).toBeCloseTo(-50, 12);
+  });
+
+  it("selects dual root columns for flop Check/Bet Zig local payloads", () => {
+    // Flop roots have no Fold; Zig already applied local_offset on primary columns.
+    const node = {
+      reach_defined: true,
+      actions: ["Check", "Bet 50"],
+      combos: ["AsAc"],
+      reach: [1],
+      marginal: [1],
+      strategy: [[0.5, 0.5]],
+      node_id: "flop-root",
+    };
+    const values = {
+      node_id: "flop-root",
+      utility_basis: "local",
+      local_offset: 50,
+      actions: ["Check", "Bet 50"],
+      combos: ["AsAc"],
+      ev_defined: [true],
+      value: [50],
+      action_ev: [[40, 60]],
+      node_ev: 50,
+      root_centered: {
+        action_ev: [[-10, 10]],
+        value: [0],
+        node_ev: 0,
+      },
+    };
+    const aa = cellOf(node, "AA");
+    const local = groupEv(node, values, aa, "local");
+    expect(local?.action[0]).toBeCloseTo(40, 12);
+    expect(local?.action[1]).toBeCloseTo(60, 12);
+    expect(local?.mixed).toBeCloseTo(50, 12);
+    const global = groupEv(node, values, aa, "root_centered");
+    expect(global?.action[0]).toBeCloseTo(-10, 12);
+    expect(global?.action[1]).toBeCloseTo(10, 12);
+    expect(global?.mixed).toBeCloseTo(0, 12);
+  });
+
   it("flags excluded, partial range weight, and action mixing visually", () => {
     const node = {
       reach_defined: true,

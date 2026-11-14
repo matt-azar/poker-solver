@@ -62,7 +62,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/
 ## Numerical labels (do not relabel without math)
 
 - Chip EV (engine / status root EV): root-centered, units `chips`
-- Action EV display: local decision EV by default (Fold = 0; `local_offset` from `values`); Global toggle keeps root-centered
+- Action EV display: local decision EV by default (Fold = 0). Zig `values` ships `utility_basis: "local"` primary columns plus dual `root_centered` for Settings Global without refetch; `local_offset` remains for diagnostics / legacy shift
 - Accuracy: Pio exploitability (average of BR gains = NashConv/2); targets are Accuracy/pot by default (not a cutover Acc wall)
 - Equity: fraction of pot — not chip EV
 - Equity histograms: ten fixed buckets on [0,1]; weights are raw input masses (`equity_distribution` OOP, `ip_equity_distribution` IP); Study filters bands client-side using `oop_hands`/`ip_hands`
