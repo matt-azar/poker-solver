@@ -481,6 +481,7 @@ def format_issue_body(
     notes: str = "",
     attachment_line: str = ATTACHMENT_PLACEHOLDER,
     extra_meta: Optional[dict[str, Any]] = None,
+    diary_md: str = "",
 ) -> str:
     c = analysis.get("classification") or {}
     primary = c.get("primary", "unknown")
@@ -508,6 +509,9 @@ def format_issue_body(
     ) or "| (empty)"
 
     notes_block = redact_sensitive(notes.strip()) if notes.strip() else "_(none)_"
+    diary_block = (
+        redact_sensitive(diary_md.strip()) if diary_md.strip() else "_(no diary)_"
+    )
 
     body = f"""<!-- study-debug-report -->
 ## Study crash / hang debug report
@@ -531,6 +535,10 @@ def format_issue_body(
 ### Evidence
 
 {evidence_md}
+
+### Repro diary
+
+{diary_block}
 
 ### Reporter notes
 
@@ -808,6 +816,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--title", help="Issue title (default derived from classification)")
     ap.add_argument("--notes", default="", help="Extra reporter notes for the issue body")
     ap.add_argument(
+        "--diary",
+        type=Path,
+        help="Path to repro-diary.md (included in issue body + webhook payload)",
+    )
+    ap.add_argument(
+        "--prompt-diary",
+        action="store_true",
+        help="Interactively prompt for a short repro diary before send (TTY)",
+    )
+    ap.add_argument("--diary-clicked", default="", help="Diary: what you clicked")
+    ap.add_argument("--diary-street", default="", help="Diary: street/solve state")
+    ap.add_argument("--diary-symptom", default="", help="Diary: crash/hang/…")
+    ap.add_argument("--diary-notes", default="", help="Diary: free-text notes")
+    ap.add_argument(
         "--repo",
         default=None,
         help=f"owner/name (default: git remote or {DEFAULT_REPO})",
@@ -952,6 +974,43 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         eprint(f"zip: {zip_path} ({size_kib:.1f} KiB)")
         eprint(f"primary: {(analysis.get('classification') or {}).get('primary')}")
 
+        from repro_diary import (  # noqa: WPS433
+            format_diary_for_issue,
+            prompt_diary,
+            resolve_diary_file,
+            write_diary_pair,
+        )
+
+        diary_fields: Optional[dict[str, str]] = None
+        diary_path: Optional[Path] = None
+        if args.prompt_diary:
+            diary_fields = prompt_diary()
+        elif any(
+            (
+                args.diary_clicked,
+                args.diary_street,
+                args.diary_symptom,
+                args.diary_notes,
+            )
+        ):
+            diary_fields = {
+                "clicked": args.diary_clicked,
+                "street_state": args.diary_street,
+                "notes": args.diary_notes or args.notes,
+                "symptom": args.diary_symptom,
+                "build": "",
+            }
+        elif args.diary:
+            try:
+                diary_path = resolve_diary_file(args.diary)
+            except FileNotFoundError as exc:
+                eprint(f"error: {exc}")
+                return 1
+        if diary_fields:
+            md_path, _js = write_diary_pair(work, diary_fields)
+            diary_path = md_path
+        diary_md = format_diary_for_issue(diary_path, diary_fields)
+
         attachment_line = "(dry-run — not uploaded)"
         attachment_url = ""
         issue: dict[str, Any] = {}
@@ -970,6 +1029,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             notes=args.notes,
             attachment_line=attachment_line,
             extra_meta=collect_meta,
+            diary_md=diary_md,
         )
         if args.out_body:
             args.out_body.parent.mkdir(parents=True, exist_ok=True)
@@ -1036,6 +1096,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     notes=args.notes,
                     attachment_line=ATTACHMENT_PLACEHOLDER,
                     extra_meta=collect_meta,
+                    diary_md=diary_md,
                 )
                 if args.out_body:
                     args.out_body.write_text(body, encoding="utf-8")
@@ -1144,6 +1205,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     notes=args.notes,
                     attachment_line=attachment_line,
                     extra_meta=collect_meta,
+                    diary_md=diary_md,
                 )
                 if args.out_body:
                     args.out_body.write_text(body, encoding="utf-8")
