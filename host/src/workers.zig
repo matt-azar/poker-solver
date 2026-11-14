@@ -62,7 +62,7 @@ test "analysis priority borrows from training" {
 }
 
 test "initFromCpus training below total when multi-core" {
-    var budget = WorkerBudget.initFromCpus();
+    const budget = WorkerBudget.initFromCpus();
     try std.testing.expect(budget.total >= 1);
     try std.testing.expect(budget.training >= 1);
     try std.testing.expect(budget.training <= budget.total);
