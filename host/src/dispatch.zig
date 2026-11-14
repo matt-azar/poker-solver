@@ -3291,6 +3291,8 @@ test "values accepts Study node_id and returns hand×action tables" {
     defer reply.deinit();
     try std.testing.expect(reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"node_id\":\"p0.t-1.r-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"utility_basis\":\"local\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"root_centered\":{") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"action_ev\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"combos\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"value\":[") != null);
@@ -3309,6 +3311,55 @@ test "values accepts Study node_id and returns hand×action tables" {
     try std.testing.expect(!bad_reply.ok);
     try std.testing.expect(std.mem.eql(u8, bad_reply.error_code orelse "", "unknown_node"));
 }
+
+test "values flop solve returns local utility_basis and dual root_centered" {
+    // Matt: stack verification must include flop solves, not river-only dumps.
+    // Flop root is Check/Bet (no Fold); local columns use local_offset shift.
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range 2s2h:1,3s3h:1,4s4h:1,5s5h:1,6s6h:1,8s8h:1,9s9h:1,TsTh:1,JsJh:1,QsQh:1,KsKh:1,AsAc:1
+        \\ip-range 2s2h:1,3s3h:1,4s4h:1,5s5h:1,6s6h:1,8s8h:1,9s9h:1,TsTh:1,JsJh:1,QsQh:1,KsKh:1,AsAc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "values-flop-local");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "v-flop"),
+        .op = try std.testing.allocator.dupe(u8, "values"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"utility_basis\":\"local\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"root_centered\":{") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"engine\":\"frozen_response_walk\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"Check\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"local_offset\":") != null);
+    // Primary action_ev present; dual block also carries action_ev for Global.
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"action_ev\":[") != null);
+}
+
 
 test "equity dispatch river smoke Study shape" {
     const text =
