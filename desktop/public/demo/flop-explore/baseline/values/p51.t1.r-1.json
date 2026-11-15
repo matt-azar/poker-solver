@@ -1,0 +1,170 @@
+{
+  "action_ev": [
+    [
+      0.0,
+      229.545454
+    ],
+    [
+      0.0,
+      229.545454
+    ],
+    [
+      0.0,
+      250.0
+    ],
+    [
+      0.0,
+      250.0
+    ]
+  ],
+  "actions": [
+    "Fold",
+    "Call all-in"
+  ],
+  "cell_ev": [
+    {
+      "action": [
+        0.0,
+        250.0
+      ],
+      "col": 0,
+      "mixed": 236.111107,
+      "row": 0,
+      "text": "AA"
+    },
+    {
+      "action": [
+        0.0,
+        250.0
+      ],
+      "col": 1,
+      "mixed": 236.111107,
+      "row": 1,
+      "text": "KK"
+    },
+    {
+      "action": [
+        0.0,
+        229.545454
+      ],
+      "col": 2,
+      "mixed": 218.257002,
+      "row": 2,
+      "text": "QQ"
+    },
+    {
+      "action": [
+        0.0,
+        229.545454
+      ],
+      "col": 3,
+      "mixed": 218.438414,
+      "row": 3,
+      "text": "JJ"
+    }
+  ],
+  "combos": [
+    "JdJc",
+    "QdQc",
+    "KhKc",
+    "AdAc"
+  ],
+  "elapsed_ms": 1,
+  "engine": "deal_by_deal",
+  "ev_defined": [
+    true,
+    true,
+    true,
+    true
+  ],
+  "live_under_train": false,
+  "local_offset": 100.0,
+  "n_actions": 2,
+  "n_hands": 4,
+  "node_ev": 227.229408,
+  "node_ev_defined": true,
+  "node_id": "p51.t1.r-1",
+  "node_index": 51,
+  "pending": false,
+  "player": 0,
+  "policy_revision": 5,
+  "reach_defined": true,
+  "root_centered": {
+    "action_ev": [
+      [
+        -100.0,
+        129.545454
+      ],
+      [
+        -100.0,
+        129.545454
+      ],
+      [
+        -100.0,
+        150.0
+      ],
+      [
+        -100.0,
+        150.0
+      ]
+    ],
+    "cell_ev": [
+      {
+        "action": [
+          -100.0,
+          150.0
+        ],
+        "col": 0,
+        "mixed": 136.111107,
+        "row": 0,
+        "text": "AA"
+      },
+      {
+        "action": [
+          -100.0,
+          150.0
+        ],
+        "col": 1,
+        "mixed": 136.111107,
+        "row": 1,
+        "text": "KK"
+      },
+      {
+        "action": [
+          -100.0,
+          129.545454
+        ],
+        "col": 2,
+        "mixed": 118.257002,
+        "row": 2,
+        "text": "QQ"
+      },
+      {
+        "action": [
+          -100.0,
+          129.545454
+        ],
+        "col": 3,
+        "mixed": 118.438414,
+        "row": 3,
+        "text": "JJ"
+      }
+    ],
+    "node_ev": 127.229408,
+    "value": [
+      118.438414,
+      118.257002,
+      136.111107,
+      136.111107
+    ]
+  },
+  "solution_id": "s1",
+  "units": "chips",
+  "utility_basis": "local",
+  "value": [
+    218.438414,
+    218.257002,
+    236.111107,
+    236.111107
+  ]
+}

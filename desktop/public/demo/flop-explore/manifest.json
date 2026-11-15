@@ -1,0 +1,59 @@
+{
+  "action_labels": "host Study labels (Check, Bet N, Raise N, Fold, Call, all-in)",
+  "bet_sizes": {
+    "ip-bets": "0.5",
+    "ip-raises": "1",
+    "max-raises": "1",
+    "oop-bets": "0.5",
+    "oop-raises": "1"
+  },
+  "board": [
+    "Ah",
+    "Kd",
+    "7c"
+  ],
+  "chunk_layout": {
+    "equity": "baseline/equity/<node_id>.json \u2014 decision nodes only",
+    "initial_view": [
+      "catalog.json",
+      "flop-explore/manifest.json",
+      "flop-explore/baseline/status.json",
+      "flop-explore/baseline/index.json",
+      "flop-explore/baseline/nodes/p0.t-1.r-1.json",
+      "flop-explore/baseline/values/p0.t-1.r-1.json",
+      "flop-explore/baseline/equity/p0.t-1.r-1.json"
+    ],
+    "nodes": "baseline/nodes/<node_id>.json \u2014 one public node per file",
+    "values": "baseline/values/<node_id>.json \u2014 decision nodes only"
+  },
+  "combo_weights": "reach / marginal from host node body (acting-seat)",
+  "config_path": "scripts/public-demo/configs/flop-explore.txt",
+  "default_variant": "baseline",
+  "description": "Tiny flop tree for browsing branches, combos, EV, and equity. Chance (turn/river) fan-out is sampled so the pack stays small; each chance node still lists every card link.",
+  "engine_build_sha": "bc1dacdefc506ef0ce62a76e9864c62c2fffdc8f",
+  "equity_units": "fraction of the pot",
+  "ev_units": "chips",
+  "export_command": "zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2 && python3 scripts/public-demo/export_solutions.py",
+  "id": "flop-explore",
+  "ip_range": "2c3d:1,Ts9s:1,8s7s:1,5c5d:1",
+  "iterations": 40,
+  "label": "Precomputed",
+  "max_chance_children": 2,
+  "node_count": 393,
+  "oop_range": "AcAd:1,KcKh:1,QcQd:1,JcJd:1",
+  "pot": 100.0,
+  "root_node_id": "p0.t-1.r-1",
+  "schema": "public-demo-manifest/v1",
+  "stack": 100.0,
+  "street": "flop",
+  "title": "Flop explore",
+  "utility_basis": "local",
+  "variants": [
+    {
+      "description": "Solved equilibrium (no locks).",
+      "id": "baseline",
+      "pack": "baseline",
+      "title": "Baseline"
+    }
+  ]
+}

@@ -1,0 +1,10414 @@
+{
+  "nodes": {
+    "p0.t-1.r-1": {
+      "action_ev": [
+        [
+          96.060534,
+          100.167559
+        ],
+        [
+          95.97137,
+          100.166416
+        ],
+        [
+          99.864594,
+          100.207625
+        ],
+        [
+          99.864594,
+          100.207625
+        ]
+      ],
+      "action_frequencies": [
+        0.157596,
+        0.842404
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 100.119007,
+      "value": [
+        100.136263,
+        100.135626,
+        100.10207,
+        100.10207
+      ]
+    },
+    "p1.t-1.r-1": {
+      "action_ev": [
+        [
+          0.552143,
+          -71.853136
+        ],
+        [
+          -0.424628,
+          -73.820303
+        ],
+        [
+          -0.513405,
+          -73.608441
+        ],
+        [
+          1.471108,
+          -67.295376
+        ]
+      ],
+      "action_frequencies": [
+        0.99938,
+        0.00062
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.226722,
+      "value": [
+        0.507146,
+        -0.470325,
+        -0.558693,
+        1.428758
+      ]
+    },
+    "p10.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p10.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p10.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p10.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p100.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p100.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p100.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p100.t1.r2": {
+      "action_ev": [
+        [
+          100.000007,
+          150.000005
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 59.375001,
+      "value": [
+        125.000006,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p101.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p101.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p101.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p101.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p102.t0.r1": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p102.t0.r2": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p102.t1.r0": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p102.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          175.0
+        ],
+        [
+          0.0,
+          175.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 106.25,
+      "value": [
+        87.5,
+        87.5,
+        125.0,
+        125.0
+      ]
+    },
+    "p103.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p103.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p103.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p103.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p104.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p104.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p104.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p104.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p105.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p105.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p105.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p105.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          96.169749
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -6.728781,
+      "value": [
+        48.084874,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p106.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p106.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p106.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p106.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p107.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p107.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p107.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p107.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p108.t0.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          234.090909
+        ],
+        [
+          0.0,
+          234.090909
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000772,
+        0.999228
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 241.85829,
+      "value": [
+        233.915966,
+        233.916011,
+        249.800592,
+        249.800592
+      ]
+    },
+    "p108.t1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          229.545455
+        ],
+        [
+          0.0,
+          229.545455
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000818,
+        0.999182
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 239.576682,
+      "value": [
+        229.352744,
+        229.352799,
+        249.800592,
+        249.800592
+      ]
+    },
+    "p109.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p109.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p11.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p11.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p11.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p11.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p110.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p110.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p111.t0.r1": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p111.t0.r2": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p111.t1.r0": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p111.t1.r2": {
+      "action_ev": [
+        [
+          225.0
+        ],
+        [
+          225.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 262.5,
+      "value": [
+        225.0,
+        225.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p112.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p112.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p112.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p112.t1.r2": {
+      "action_ev": [
+        [
+          146.169749
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 36.542437,
+      "value": [
+        146.169749,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p113.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p113.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p113.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p113.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p114.t0.r-1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -41.662746
+        ],
+        [
+          0.0,
+          -29.156865
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -20.136602,
+      "value": [
+        null,
+        -20.831373,
+        -14.578432,
+        -25.0
+      ]
+    },
+    "p114.t1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          -28.930672
+        ],
+        [
+          0.0,
+          -41.572269
+        ],
+        [
+          0.0,
+          -28.930672
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -18.679201,
+      "value": [
+        -14.465336,
+        -20.786134,
+        -14.465336,
+        -25.0
+      ]
+    },
+    "p115.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p115.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p116.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p116.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p117.t0.r1": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p117.t0.r2": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p117.t1.r0": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p117.t1.r2": {
+      "action_ev": [
+        [
+          225.0
+        ],
+        [
+          225.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 262.5,
+      "value": [
+        225.0,
+        225.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p118.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        -0.0,
+        -0.0,
+        -0.0
+      ]
+    },
+    "p118.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        -0.0,
+        -0.0,
+        -0.0
+      ]
+    },
+    "p118.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        -0.0,
+        -0.0,
+        -0.0
+      ]
+    },
+    "p118.t1.r2": {
+      "action_ev": [
+        [
+          185.41009
+        ],
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 46.352523,
+      "value": [
+        185.41009,
+        -0.0,
+        -0.0,
+        -0.0
+      ]
+    },
+    "p119.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p119.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p119.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p119.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p12.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p12.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p12.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p12.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          -41.250982
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -23.906373,
+      "value": [
+        -20.625491,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p120.t-1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          224.015152
+        ],
+        [
+          0.0,
+          223.409091
+        ],
+        [
+          0.0,
+          245.0
+        ],
+        [
+          0.0,
+          245.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000362,
+        0.999638
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 234.267751,
+      "value": [
+        223.946332,
+        223.340473,
+        244.8921,
+        244.8921
+      ]
+    },
+    "p121.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p122.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p123.t0.r-1": {
+      "action_ev": [
+        [
+          284.090909
+        ],
+        [
+          284.090909
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 292.045455,
+      "value": [
+        284.090909,
+        284.090909,
+        300.0,
+        300.0
+      ]
+    },
+    "p123.t1.r-1": {
+      "action_ev": [
+        [
+          279.545455
+        ],
+        [
+          279.545455
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 289.772727,
+      "value": [
+        279.545455,
+        279.545455,
+        300.0,
+        300.0
+      ]
+    },
+    "p124.t0.r-1": {
+      "action_ev": [
+        null,
+        [
+          8.033621
+        ],
+        [
+          20.084052
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 9.372558,
+      "value": [
+        null,
+        8.033621,
+        20.084052,
+        0.0
+      ]
+    },
+    "p124.t1.r-1": {
+      "action_ev": [
+        [
+          20.084052
+        ],
+        [
+          8.033621
+        ],
+        [
+          20.084052
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 12.050431,
+      "value": [
+        20.084052,
+        8.033621,
+        20.084052,
+        0.0
+      ]
+    },
+    "p125.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p125.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p126.t0.r1": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p126.t0.r2": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p126.t1.r0": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p126.t1.r2": {
+      "action_ev": [
+        [
+          225.0
+        ],
+        [
+          225.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 262.5,
+      "value": [
+        225.0,
+        225.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p127.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p127.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p127.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p127.t1.r2": {
+      "action_ev": [
+        [
+          176.739658
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 44.184914,
+      "value": [
+        176.739658,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p128.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p128.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p128.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p128.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p13.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p13.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p13.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p13.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p14.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p14.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p14.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p14.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p15.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0,
+          21.508861
+        ],
+        [
+          0.0,
+          -50.0,
+          21.508861
+        ],
+        [
+          0.0,
+          -50.0,
+          21.508861
+        ]
+      ],
+      "action_frequencies": [
+        0.998982,
+        0.000509,
+        0.000509
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.014507,
+      "value": [
+        null,
+        -0.014508,
+        -0.014507,
+        -0.014507
+      ]
+    },
+    "p15.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0,
+          21.508861
+        ],
+        [
+          0.0,
+          -50.0,
+          21.508861
+        ],
+        [
+          0.0,
+          -50.0,
+          21.508861
+        ]
+      ],
+      "action_frequencies": [
+        0.998982,
+        0.000509,
+        0.000509
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.014507,
+      "value": [
+        null,
+        -0.014508,
+        -0.014507,
+        -0.014507
+      ]
+    },
+    "p15.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0,
+          21.509018
+        ],
+        [
+          0.0,
+          -50.0,
+          21.509018
+        ],
+        [
+          0.0,
+          -50.0,
+          21.509018
+        ]
+      ],
+      "action_frequencies": [
+        0.998982,
+        0.000509,
+        0.000509
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.014507,
+      "value": [
+        null,
+        -0.014507,
+        -0.014507,
+        -0.014507
+      ]
+    },
+    "p15.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          -48.743673,
+          -98.067645
+        ],
+        [
+          0.0,
+          -50.0,
+          -99.689912
+        ],
+        [
+          0.0,
+          -50.0,
+          -99.689912
+        ],
+        [
+          0.0,
+          -50.0,
+          -99.689912
+        ]
+      ],
+      "action_frequencies": [
+        0.991149,
+        0.005892,
+        0.002959
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.578462,
+      "value": [
+        -2.085174,
+        -0.076225,
+        -0.076224,
+        -0.076224
+      ]
+    },
+    "p16.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p16.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p16.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p16.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p17.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p17.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p17.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p17.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p18.t0.r1": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.486035,
+        0.513965
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 128.439147,
+      "value": [
+        125.997946,
+        125.85333,
+        130.952656,
+        130.952656
+      ]
+    },
+    "p18.t0.r2": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.486035,
+        0.513965
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 128.439147,
+      "value": [
+        125.997946,
+        125.85333,
+        130.952656,
+        130.952656
+      ]
+    },
+    "p18.t1.r0": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.486036,
+        0.513964
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 128.438983,
+      "value": [
+        125.997591,
+        125.853029,
+        130.952656,
+        130.952656
+      ]
+    },
+    "p18.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          -11.274056
+        ],
+        [
+          0.0,
+          -11.274056
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.00124,
+        0.99876
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 120.100634,
+      "value": [
+        -9.673245,
+        -9.739925,
+        249.907852,
+        249.907852
+      ]
+    },
+    "p19.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p19.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p19.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p19.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p2.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p20.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p20.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p20.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p20.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p21.t0.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          164.953647,
+          167.045455
+        ],
+        [
+          0.0,
+          164.838013,
+          167.045455
+        ],
+        [
+          0.0,
+          174.970491,
+          175.0
+        ],
+        [
+          0.0,
+          174.970491,
+          175.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000657,
+        0.352751,
+        0.646592
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 168.703265,
+      "value": [
+        162.597976,
+        162.35255,
+        174.931268,
+        174.931268
+      ]
+    },
+    "p21.t1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          162.611843,
+          164.772727
+        ],
+        [
+          0.0,
+          162.494866,
+          164.772727
+        ],
+        [
+          0.0,
+          174.970491,
+          175.0
+        ],
+        [
+          0.0,
+          174.970491,
+          175.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000657,
+        0.352708,
+        0.646635
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 167.553304,
+      "value": [
+        160.296376,
+        160.054305,
+        174.931268,
+        174.931268
+      ]
+    },
+    "p22.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p22.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p23.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p23.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p24.t0.r1": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000931,
+        0.999069
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 223.932758,
+      "value": [
+        222.951642,
+        222.83841,
+        224.970491,
+        224.970491
+      ]
+    },
+    "p24.t0.r2": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000931,
+        0.999069
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 223.932758,
+      "value": [
+        222.951642,
+        222.83841,
+        224.970491,
+        224.970491
+      ]
+    },
+    "p24.t1.r0": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000931,
+        0.999068
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 223.905019,
+      "value": [
+        222.896484,
+        222.782612,
+        224.970491,
+        224.970491
+      ]
+    },
+    "p24.t1.r2": {
+      "action_ev": [
+        [
+          118.75,
+          187.5
+        ],
+        [
+          118.75,
+          187.5
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000931,
+        0.999068
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 205.046997,
+      "value": [
+        185.186133,
+        185.060875,
+        224.970491,
+        224.970491
+      ]
+    },
+    "p25.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p25.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p25.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p25.t1.r2": {
+      "action_ev": [
+        [
+          100.000007,
+          150.000005
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 59.375001,
+      "value": [
+        125.000006,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p26.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p26.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p26.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p26.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p27.t0.r1": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p27.t0.r2": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p27.t1.r0": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p27.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          175.0
+        ],
+        [
+          0.0,
+          175.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 106.25,
+      "value": [
+        87.5,
+        87.5,
+        125.0,
+        125.0
+      ]
+    },
+    "p28.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p28.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p28.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p28.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p29.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p29.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p29.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p29.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p3.t0.r-1": {
+      "action_ev": [
+        [
+          97.229593,
+          100.027734
+        ],
+        [
+          97.174188,
+          100.027692
+        ],
+        [
+          100.563479,
+          100.032061
+        ],
+        [
+          100.563479,
+          100.032061
+        ]
+      ],
+      "action_frequencies": [
+        0.981609,
+        0.018391
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 99.457133,
+      "value": [
+        98.358312,
+        98.35274,
+        100.55874,
+        100.55874
+      ]
+    },
+    "p3.t1.r-1": {
+      "action_ev": [
+        [
+          95.560298,
+          100.026461
+        ],
+        [
+          95.511468,
+          100.026414
+        ],
+        [
+          100.530372,
+          100.032061
+        ],
+        [
+          100.530372,
+          100.032061
+        ]
+      ],
+      "action_frequencies": [
+        0.98138,
+        0.01862
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 98.969199,
+      "value": [
+        97.406775,
+        97.418162,
+        100.525929,
+        100.525929
+      ]
+    },
+    "p30.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p30.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p30.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p30.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          -46.091206
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -24.511401,
+      "value": [
+        -23.045603,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p31.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p31.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p31.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p31.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p32.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p32.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p32.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p32.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p33.t0.r-1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -49.808055
+        ],
+        [
+          0.0,
+          -49.520138
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -24.888032,
+      "value": [
+        null,
+        -24.904028,
+        -24.760069,
+        -25.0
+      ]
+    },
+    "p33.t1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          -49.525782
+        ],
+        [
+          0.0,
+          -49.810313
+        ],
+        [
+          0.0,
+          -49.525782
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -24.857735,
+      "value": [
+        -24.762891,
+        -24.905156,
+        -24.762891,
+        -25.0
+      ]
+    },
+    "p34.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p34.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p35.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p35.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p36.t0.r1": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p36.t0.r2": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p36.t1.r0": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p36.t1.r2": {
+      "action_ev": [
+        [
+          225.0
+        ],
+        [
+          225.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 262.5,
+      "value": [
+        225.0,
+        225.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p37.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p37.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p37.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p37.t1.r2": {
+      "action_ev": [
+        [
+          4.173121
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 1.04328,
+      "value": [
+        4.173121,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p38.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p38.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p38.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p38.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p39.t0.r-1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -68.092164,
+          -80.028201
+        ],
+        [
+          0.0,
+          -62.661292,
+          -69.794023
+        ],
+        [
+          0.0,
+          -71.712745,
+          -86.850986
+        ]
+      ],
+      "action_frequencies": [
+        0.999593,
+        0.000203,
+        0.000203
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.029771,
+      "value": [
+        null,
+        -0.030125,
+        -0.026939,
+        -0.032249
+      ]
+    },
+    "p39.t1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          -62.603232,
+          -69.746101
+        ],
+        [
+          0.0,
+          -68.09327,
+          -80.106353
+        ],
+        [
+          0.0,
+          -62.603232,
+          -69.746101
+        ],
+        [
+          0.0,
+          -71.753296,
+          -87.013188
+        ]
+      ],
+      "action_frequencies": [
+        0.999593,
+        0.000203,
+        0.000203
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.029067,
+      "value": [
+        -0.026918,
+        -0.030141,
+        -0.026918,
+        -0.03229
+      ]
+    },
+    "p4.t0.r-1": {
+      "action_ev": [
+        null,
+        [
+          -0.391717,
+          -74.768992
+        ],
+        [
+          -0.483042,
+          -74.625721
+        ],
+        [
+          -0.331169,
+          -74.864505
+        ]
+      ],
+      "action_frequencies": [
+        0.998475,
+        0.001525
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.515386,
+      "value": [
+        null,
+        -0.505168,
+        -0.596134,
+        -0.444857
+      ]
+    },
+    "p4.t1.r-1": {
+      "action_ev": [
+        [
+          -0.363095,
+          -74.629623
+        ],
+        [
+          -0.338247,
+          -74.770533
+        ],
+        [
+          -0.363192,
+          -74.629623
+        ],
+        [
+          -0.321924,
+          -74.864473
+        ]
+      ],
+      "action_frequencies": [
+        0.998475,
+        0.001525
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.460064,
+      "value": [
+        -0.476376,
+        -0.451782,
+        -0.476472,
+        -0.435625
+      ]
+    },
+    "p40.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p40.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p41.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p41.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p42.t0.r1": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.052596,
+        0.947404
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 221.703316,
+      "value": [
+        221.90042,
+        221.857293,
+        221.527774,
+        221.527774
+      ]
+    },
+    "p42.t0.r2": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.052596,
+        0.947404
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 221.703316,
+      "value": [
+        221.90042,
+        221.857293,
+        221.527774,
+        221.527774
+      ]
+    },
+    "p42.t1.r0": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.051947,
+        0.948053
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 221.739442,
+      "value": [
+        221.975805,
+        221.926413,
+        221.527774,
+        221.527774
+      ]
+    },
+    "p42.t1.r2": {
+      "action_ev": [
+        [
+          118.750001,
+          187.500001
+        ],
+        [
+          118.750001,
+          187.500001
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.051947,
+        0.948053
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 202.836997,
+      "value": [
+        184.173387,
+        184.119054,
+        221.527774,
+        221.527774
+      ]
+    },
+    "p43.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p43.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p43.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p43.t1.r2": {
+      "action_ev": [
+        [
+          100.000002,
+          150.000002
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 59.375001,
+      "value": [
+        125.000002,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p44.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p44.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p44.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p44.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p45.t0.r1": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p45.t0.r2": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p45.t1.r0": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p45.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          175.000001
+        ],
+        [
+          0.0,
+          175.000001
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 106.25,
+      "value": [
+        87.500001,
+        87.500001,
+        125.0,
+        125.0
+      ]
+    },
+    "p46.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p46.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p46.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p46.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p47.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p47.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p47.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p47.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p48.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p48.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p48.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p48.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          110.276273
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -4.965466,
+      "value": [
+        55.138137,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p49.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p49.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p49.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p49.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p5.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p5.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p50.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p50.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p50.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p50.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p51.t0.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          234.090909
+        ],
+        [
+          0.0,
+          234.090909
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.052596,
+        0.947404
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 229.255958,
+      "value": [
+        222.481576,
+        222.320042,
+        236.111107,
+        236.111107
+      ]
+    },
+    "p51.t1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          229.545454
+        ],
+        [
+          0.0,
+          229.545454
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.051947,
+        0.948053
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 227.229408,
+      "value": [
+        218.438414,
+        218.257002,
+        236.111107,
+        236.111107
+      ]
+    },
+    "p52.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p52.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p53.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p53.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p54.t0.r1": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p54.t0.r2": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p54.t1.r0": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p54.t1.r2": {
+      "action_ev": [
+        [
+          225.000001
+        ],
+        [
+          225.000001
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 262.500001,
+      "value": [
+        225.000001,
+        225.000001,
+        300.0,
+        300.0
+      ]
+    },
+    "p55.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p55.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p55.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p55.t1.r2": {
+      "action_ev": [
+        [
+          160.276273
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 40.069068,
+      "value": [
+        160.276273,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p56.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p56.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p56.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p56.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p57.t-1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          159.01538,
+          161.811545
+        ],
+        [
+          0.0,
+          158.610869,
+          161.513462
+        ],
+        [
+          0.0,
+          172.153412,
+          172.132674
+        ],
+        [
+          0.0,
+          172.153412,
+          172.132674
+        ]
+      ],
+      "action_frequencies": [
+        0.00129,
+        0.341793,
+        0.656918
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 164.177848,
+      "value": [
+        156.573884,
+        156.085372,
+        172.026069,
+        172.026069
+      ]
+    },
+    "p58.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p59.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p6.t0.r1": {
+      "action_ev": [
+        [
+          100.366085,
+          100.013238
+        ],
+        [
+          100.365419,
+          100.013164
+        ],
+        [
+          100.37757,
+          100.015761
+        ],
+        [
+          100.37757,
+          100.015761
+        ]
+      ],
+      "action_frequencies": [
+        0.998986,
+        0.001014
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 100.365449,
+      "value": [
+        100.35416,
+        100.352871,
+        100.377381,
+        100.377381
+      ]
+    },
+    "p6.t0.r2": {
+      "action_ev": [
+        [
+          100.366085,
+          100.013238
+        ],
+        [
+          100.365419,
+          100.013164
+        ],
+        [
+          100.37757,
+          100.015761
+        ],
+        [
+          100.37757,
+          100.015761
+        ]
+      ],
+      "action_frequencies": [
+        0.998986,
+        0.001014
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 100.365449,
+      "value": [
+        100.35416,
+        100.352871,
+        100.377381,
+        100.377381
+      ]
+    },
+    "p6.t1.r0": {
+      "action_ev": [
+        [
+          100.365879,
+          100.013238
+        ],
+        [
+          100.365214,
+          100.013164
+        ],
+        [
+          100.37757,
+          100.015761
+        ],
+        [
+          100.37757,
+          100.015761
+        ]
+      ],
+      "action_frequencies": [
+        0.998986,
+        0.001014
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 100.365247,
+      "value": [
+        100.353754,
+        100.352471,
+        100.377381,
+        100.377381
+      ]
+    },
+    "p6.t1.r2": {
+      "action_ev": [
+        [
+          75.300424,
+          98.720109
+        ],
+        [
+          75.299806,
+          98.719912
+        ],
+        [
+          100.377196,
+          100.590209
+        ],
+        [
+          100.377196,
+          100.590209
+        ]
+      ],
+      "action_frequencies": [
+        0.327248,
+        0.672752
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 91.424602,
+      "value": [
+        82.414833,
+        82.240307,
+        100.521634,
+        100.521634
+      ]
+    },
+    "p60.t0.r-1": {
+      "action_ev": [
+        [
+          154.524462,
+          216.781635
+        ],
+        [
+          154.318752,
+          216.781635
+        ],
+        [
+          224.962172,
+          224.613064
+        ],
+        [
+          224.962172,
+          224.613064
+        ]
+      ],
+      "action_frequencies": [
+        0.006866,
+        0.993134
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 219.351442,
+      "value": [
+        214.140086,
+        214.035356,
+        224.615164,
+        224.615164
+      ]
+    },
+    "p60.t1.r-1": {
+      "action_ev": [
+        [
+          151.779868,
+          214.531554
+        ],
+        [
+          151.595694,
+          214.531554
+        ],
+        [
+          225.518703,
+          224.59186
+        ],
+        [
+          225.518703,
+          224.59186
+        ]
+      ],
+      "action_frequencies": [
+        0.007134,
+        0.992866
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 218.213329,
+      "value": [
+        211.881377,
+        211.77655,
+        224.597695,
+        224.597695
+      ]
+    },
+    "p61.t0.r-1": {
+      "action_ev": [
+        null,
+        [
+          -15.353771,
+          -14.625909
+        ],
+        [
+          -13.765345,
+          -13.088447
+        ],
+        [
+          -16.412722,
+          -15.650884
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -14.81618,
+      "value": [
+        null,
+        -14.98984,
+        -13.426896,
+        -16.031803
+      ]
+    },
+    "p61.t1.r-1": {
+      "action_ev": [
+        [
+          -14.198921,
+          -14.499313
+        ],
+        [
+          -15.721173,
+          -15.966145
+        ],
+        [
+          -14.198921,
+          -14.499313
+        ],
+        [
+          -16.736007,
+          -16.944033
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -15.345478,
+      "value": [
+        -14.349117,
+        -15.843659,
+        -14.349117,
+        -16.84002
+      ]
+    },
+    "p62.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p62.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p63.t0.r1": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.137396,
+        0.862604
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 207.56974,
+      "value": [
+        195.197769,
+        195.111454,
+        219.984869,
+        219.984869
+      ]
+    },
+    "p63.t0.r2": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.137396,
+        0.862604
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 207.56974,
+      "value": [
+        195.197769,
+        195.111454,
+        219.984869,
+        219.984869
+      ]
+    },
+    "p63.t1.r0": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.132224,
+        0.867776
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 207.613566,
+      "value": [
+        195.058843,
+        194.980462,
+        220.20748,
+        220.20748
+      ]
+    },
+    "p63.t1.r2": {
+      "action_ev": [
+        [
+          118.636942,
+          187.403093
+        ],
+        [
+          118.636942,
+          187.403093
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.132224,
+        0.867776
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 187.312222,
+      "value": [
+        154.460084,
+        154.373845,
+        220.20748,
+        220.20748
+      ]
+    },
+    "p64.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p64.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p64.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 37.5,
+      "value": [
+        null,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p64.t1.r2": {
+      "action_ev": [
+        [
+          100.000007,
+          150.000005
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ],
+        [
+          0.0,
+          75.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 59.375002,
+      "value": [
+        125.000006,
+        37.5,
+        37.5,
+        37.5
+      ]
+    },
+    "p65.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p65.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p65.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p65.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p66.t0.r1": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p66.t0.r2": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p66.t1.r0": {
+      "action_ev": [
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 125.0,
+      "value": [
+        125.0,
+        125.0,
+        125.0,
+        125.0
+      ]
+    },
+    "p66.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          174.806186
+        ],
+        [
+          0.0,
+          174.806186
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 106.201547,
+      "value": [
+        87.403093,
+        87.403093,
+        125.0,
+        125.0
+      ]
+    },
+    "p67.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p67.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p67.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p67.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p68.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p68.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p68.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p68.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p69.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p69.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p69.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -25.0,
+      "value": [
+        null,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p69.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          -25.208425
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -21.901053,
+      "value": [
+        -12.604212,
+        -25.0,
+        -25.0,
+        -25.0
+      ]
+    },
+    "p7.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -74.934238
+        ],
+        [
+          0.0,
+          -74.934238
+        ],
+        [
+          0.0,
+          -74.934238
+        ]
+      ],
+      "action_frequencies": [
+        0.994964,
+        0.005036
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.377407,
+      "value": [
+        null,
+        -0.377286,
+        -0.377397,
+        -0.377537
+      ]
+    },
+    "p7.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -74.934238
+        ],
+        [
+          0.0,
+          -74.934238
+        ],
+        [
+          0.0,
+          -74.934238
+        ]
+      ],
+      "action_frequencies": [
+        0.994964,
+        0.005036
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.377407,
+      "value": [
+        null,
+        -0.377286,
+        -0.377397,
+        -0.377537
+      ]
+    },
+    "p7.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -74.934222
+        ],
+        [
+          0.0,
+          -74.934222
+        ],
+        [
+          0.0,
+          -74.934222
+        ]
+      ],
+      "action_frequencies": [
+        0.994964,
+        0.005036
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.377406,
+      "value": [
+        null,
+        -0.377286,
+        -0.377397,
+        -0.377537
+      ]
+    },
+    "p7.t1.r2": {
+      "action_ev": [
+        [
+          3.010879,
+          -70.333091
+        ],
+        [
+          0.0,
+          -74.799212
+        ],
+        [
+          0.0,
+          -74.799212
+        ],
+        [
+          0.0,
+          -74.799212
+        ]
+      ],
+      "action_frequencies": [
+        0.994964,
+        0.005036
+      ],
+      "actions": [
+        "Check",
+        "Bet 50"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.377846,
+      "value": [
+        2.641562,
+        -0.376606,
+        -0.376717,
+        -0.376857
+      ]
+    },
+    "p70.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p70.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p70.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p70.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p71.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p71.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p71.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p71.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p72.t0.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          234.062544
+        ],
+        [
+          0.0,
+          234.062544
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.137396,
+        0.862604
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 176.115509,
+      "value": [
+        122.453178,
+        122.129908,
+        229.939475,
+        229.939475
+      ]
+    },
+    "p72.t1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          229.512453
+        ],
+        [
+          0.0,
+          229.512453
+        ],
+        [
+          0.0,
+          250.0
+        ],
+        [
+          0.0,
+          250.0
+        ]
+      ],
+      "action_frequencies": [
+        0.132224,
+        0.867776
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 175.124287,
+      "value": [
+        119.562561,
+        119.274736,
+        230.829926,
+        230.829926
+      ]
+    },
+    "p73.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p73.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p74.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p74.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p75.t0.r1": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p75.t0.r2": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p75.t1.r0": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p75.t1.r2": {
+      "action_ev": [
+        [
+          224.806186
+        ],
+        [
+          224.806186
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 262.403093,
+      "value": [
+        224.806186,
+        224.806186,
+        300.0,
+        300.0
+      ]
+    },
+    "p76.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        -0.0,
+        -0.0,
+        -0.0
+      ]
+    },
+    "p76.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ],
+        [
+          -0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        -0.0,
+        -0.0,
+        -0.0
+      ]
+    },
+    "p76.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p76.t1.r2": {
+      "action_ev": [
+        [
+          24.791575
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 6.197894,
+      "value": [
+        24.791575,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p77.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p77.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p77.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p77.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p78.t0.r-1": {
+      "action_ev": [
+        null,
+        [
+          0.0,
+          -49.699501
+        ],
+        [
+          0.0,
+          -49.248752
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.507739,
+        0.492261
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -24.441281,
+      "value": [
+        null,
+        -24.337405,
+        -24.233638,
+        -24.7528
+      ]
+    },
+    "p78.t1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          -49.248396
+        ],
+        [
+          0.0,
+          -49.699358
+        ],
+        [
+          0.0,
+          -49.248396
+        ],
+        [
+          0.0,
+          -50.0
+        ]
+      ],
+      "action_frequencies": [
+        0.508163,
+        0.491837
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -24.370838,
+      "value": [
+        -24.159755,
+        -24.337335,
+        -24.233463,
+        -24.7528
+      ]
+    },
+    "p79.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p79.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p8.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p8.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p8.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p8.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p80.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p80.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p81.t0.r1": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p81.t0.r2": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p81.t1.r0": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p81.t1.r2": {
+      "action_ev": [
+        [
+          225.000007
+        ],
+        [
+          225.000007
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 262.500003,
+      "value": [
+        225.000007,
+        225.000007,
+        300.0,
+        300.0
+      ]
+    },
+    "p82.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p82.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p82.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p82.t1.r2": {
+      "action_ev": [
+        [
+          6.614114
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 1.653528,
+      "value": [
+        6.614114,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p83.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p83.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p83.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p83.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p84.t-1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          -45.045863
+        ],
+        [
+          0.0,
+          -49.119405
+        ],
+        [
+          0.0,
+          -48.4221
+        ],
+        [
+          0.0,
+          -35.433957
+        ]
+      ],
+      "action_frequencies": [
+        0.508163,
+        0.491837
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -21.880031,
+      "value": [
+        -22.098121,
+        -24.053337,
+        -23.82687,
+        -17.541794
+      ]
+    },
+    "p85.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p86.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p87.t0.r-1": {
+      "action_ev": [
+        [
+          284.090909
+        ],
+        [
+          284.090909
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 292.045455,
+      "value": [
+        284.090909,
+        284.090909,
+        300.0,
+        300.0
+      ]
+    },
+    "p87.t1.r-1": {
+      "action_ev": [
+        [
+          279.545455
+        ],
+        [
+          279.545455
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 289.772728,
+      "value": [
+        279.545455,
+        279.545455,
+        300.0,
+        300.0
+      ]
+    },
+    "p88.t0.r-1": {
+      "action_ev": [
+        null,
+        [
+          0.316956
+        ],
+        [
+          0.792391
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.369783,
+      "value": [
+        null,
+        0.316956,
+        0.792391,
+        0.0
+      ]
+    },
+    "p88.t1.r-1": {
+      "action_ev": [
+        [
+          0.792391
+        ],
+        [
+          0.316956
+        ],
+        [
+          0.792391
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 0.475435,
+      "value": [
+        0.792391,
+        0.316956,
+        0.792391,
+        0.0
+      ]
+    },
+    "p89.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p89.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p9.t0.r1": {
+      "action_ev": [
+        [
+          0.0,
+          150.0,
+          175.0
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000329,
+        0.000329,
+        0.999342
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 173.793464,
+      "value": [
+        172.686415,
+        172.554129,
+        174.966657,
+        174.966657
+      ]
+    },
+    "p9.t0.r2": {
+      "action_ev": [
+        [
+          0.0,
+          150.0,
+          175.0
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000329,
+        0.000329,
+        0.999342
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 173.793464,
+      "value": [
+        172.686415,
+        172.554129,
+        174.966657,
+        174.966657
+      ]
+    },
+    "p9.t1.r0": {
+      "action_ev": [
+        [
+          0.0,
+          150.0,
+          175.0
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000329,
+        0.000329,
+        0.999342
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 173.772998,
+      "value": [
+        172.645349,
+        172.51333,
+        174.966657,
+        174.966657
+      ]
+    },
+    "p9.t1.r2": {
+      "action_ev": [
+        [
+          0.0,
+          100.007971,
+          137.505978
+        ],
+        [
+          0.0,
+          100.007971,
+          137.505978
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ],
+        [
+          0.0,
+          150.0,
+          175.0
+        ]
+      ],
+      "action_frequencies": [
+        0.001004,
+        0.001004,
+        0.997992
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 154.741744,
+      "value": [
+        134.64836,
+        134.525634,
+        174.896491,
+        174.896491
+      ]
+    },
+    "p90.t0.r1": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p90.t0.r2": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p90.t1.r0": {
+      "action_ev": [
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 300.0,
+      "value": [
+        300.0,
+        300.0,
+        300.0,
+        300.0
+      ]
+    },
+    "p90.t1.r2": {
+      "action_ev": [
+        [
+          225.000007
+        ],
+        [
+          225.000007
+        ],
+        [
+          300.0
+        ],
+        [
+          300.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 262.500003,
+      "value": [
+        225.000007,
+        225.000007,
+        300.0,
+        300.0
+      ]
+    },
+    "p91.t0.r1": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p91.t0.r2": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p91.t1.r0": {
+      "action_ev": [
+        null,
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.0,
+      "value": [
+        null,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p91.t1.r2": {
+      "action_ev": [
+        [
+          6.973042
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ],
+      "action_frequencies": [
+        1.0
+      ],
+      "actions": [
+        "Check"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": 1.743261,
+      "value": [
+        6.973042,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "p92.t0.r1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p92.t0.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p92.t1.r0": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p92.t1.r2": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p93.t-1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          -73.421044,
+          -92.385886
+        ],
+        [
+          0.0,
+          -69.743648,
+          -84.972855
+        ],
+        [
+          0.0,
+          -60.518083,
+          -67.305286
+        ],
+        [
+          0.0,
+          -69.307515,
+          -84.833848
+        ]
+      ],
+      "action_frequencies": [
+        0.997561,
+        0.00122,
+        0.00122
+      ],
+      "actions": [
+        "Fold",
+        "Call",
+        "Raise to 100 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -0.183686,
+      "value": [
+        -0.202204,
+        -0.188679,
+        -0.155882,
+        -0.187977
+      ]
+    },
+    "p94.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p95.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p96.t0.r-1": {
+      "action_ev": [
+        [
+          225.456862,
+          217.045455
+        ],
+        [
+          225.456889,
+          217.045455
+        ],
+        [
+          237.37537,
+          225.0
+        ],
+        [
+          237.37537,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.234518,
+        0.765482
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 223.595351,
+      "value": [
+        218.774365,
+        218.774372,
+        228.416335,
+        228.416335
+      ]
+    },
+    "p96.t1.r-1": {
+      "action_ev": [
+        [
+          222.035785,
+          214.772727
+        ],
+        [
+          222.03582,
+          214.772727
+        ],
+        [
+          237.37537,
+          225.0
+        ],
+        [
+          237.37537,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.221221,
+        0.778779
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 222.259001,
+      "value": [
+        216.10166,
+        216.101667,
+        228.416339,
+        228.416339
+      ]
+    },
+    "p97.t0.r-1": {
+      "action_ev": [
+        null,
+        [
+          -21.431002,
+          -42.77169
+        ],
+        [
+          -16.149843,
+          -32.218578
+        ],
+        [
+          -24.951775,
+          -49.807097
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -31.221664,
+      "value": [
+        null,
+        -32.101346,
+        -24.18421,
+        -37.379436
+      ]
+    },
+    "p97.t1.r-1": {
+      "action_ev": [
+        [
+          -16.642437,
+          -33.198891
+        ],
+        [
+          -21.6263,
+          -43.156858
+        ],
+        [
+          -16.642437,
+          -33.198891
+        ],
+        [
+          -24.948876,
+          -49.795503
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "3d2c",
+        "5d5c",
+        "8s7s",
+        "Ts9s"
+      ],
+      "kind": "decision",
+      "node_ev": -29.901274,
+      "value": [
+        -24.920664,
+        -32.391579,
+        -24.920664,
+        -37.372189
+      ]
+    },
+    "p98.t0.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p98.t1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "chance",
+      "node_ev": null,
+      "value": null
+    },
+    "p99.t0.r1": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000772,
+        0.999228
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 224.951723,
+      "value": [
+        224.953293,
+        224.953302,
+        224.950149,
+        224.950149
+      ]
+    },
+    "p99.t0.r2": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000772,
+        0.999228
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 224.951723,
+      "value": [
+        224.953293,
+        224.953302,
+        224.950149,
+        224.950149
+      ]
+    },
+    "p99.t1.r0": {
+      "action_ev": [
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000818,
+        0.999182
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 224.948843,
+      "value": [
+        224.947529,
+        224.947544,
+        224.950149,
+        224.950149
+      ]
+    },
+    "p99.t1.r2": {
+      "action_ev": [
+        [
+          118.75,
+          187.5
+        ],
+        [
+          118.75,
+          187.5
+        ],
+        [
+          162.5,
+          225.0
+        ],
+        [
+          162.5,
+          225.0
+        ]
+      ],
+      "action_frequencies": [
+        0.000818,
+        0.999182
+      ],
+      "actions": [
+        "Check",
+        "Bet 50 all-in"
+      ],
+      "combos": [
+        "JdJc",
+        "QdQc",
+        "KhKc",
+        "AdAc"
+      ],
+      "kind": "decision",
+      "node_ev": 206.19622,
+      "value": [
+        187.442282,
+        187.442299,
+        224.950149,
+        224.950149
+      ]
+    }
+  }
+}

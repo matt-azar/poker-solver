@@ -1,0 +1,312 @@
+{
+  "actions": [],
+  "board": [
+    "Ah",
+    "Kd",
+    "7c",
+    "2c"
+  ],
+  "cards": [
+    {
+      "card": "2d",
+      "child_id": "p54.t0.r1",
+      "weight": 0.020833
+    },
+    {
+      "card": "2h",
+      "child_id": "p54.t0.r2",
+      "weight": 0.020833
+    },
+    {
+      "card": "2s",
+      "child_id": "p54.t0.r3",
+      "weight": 0.020833
+    },
+    {
+      "card": "3c",
+      "child_id": "p54.t0.r4",
+      "weight": 0.020833
+    },
+    {
+      "card": "3d",
+      "child_id": "p54.t0.r5",
+      "weight": 0.020833
+    },
+    {
+      "card": "3h",
+      "child_id": "p54.t0.r6",
+      "weight": 0.020833
+    },
+    {
+      "card": "3s",
+      "child_id": "p54.t0.r7",
+      "weight": 0.020833
+    },
+    {
+      "card": "4c",
+      "child_id": "p54.t0.r8",
+      "weight": 0.020833
+    },
+    {
+      "card": "4d",
+      "child_id": "p54.t0.r9",
+      "weight": 0.020833
+    },
+    {
+      "card": "4h",
+      "child_id": "p54.t0.r10",
+      "weight": 0.020833
+    },
+    {
+      "card": "4s",
+      "child_id": "p54.t0.r11",
+      "weight": 0.020833
+    },
+    {
+      "card": "5c",
+      "child_id": "p54.t0.r12",
+      "weight": 0.020833
+    },
+    {
+      "card": "5d",
+      "child_id": "p54.t0.r13",
+      "weight": 0.020833
+    },
+    {
+      "card": "5h",
+      "child_id": "p54.t0.r14",
+      "weight": 0.020833
+    },
+    {
+      "card": "5s",
+      "child_id": "p54.t0.r15",
+      "weight": 0.020833
+    },
+    {
+      "card": "6c",
+      "child_id": "p54.t0.r16",
+      "weight": 0.020833
+    },
+    {
+      "card": "6d",
+      "child_id": "p54.t0.r17",
+      "weight": 0.020833
+    },
+    {
+      "card": "6h",
+      "child_id": "p54.t0.r18",
+      "weight": 0.020833
+    },
+    {
+      "card": "6s",
+      "child_id": "p54.t0.r19",
+      "weight": 0.020833
+    },
+    {
+      "card": "7d",
+      "child_id": "p54.t0.r21",
+      "weight": 0.020833
+    },
+    {
+      "card": "7h",
+      "child_id": "p54.t0.r22",
+      "weight": 0.020833
+    },
+    {
+      "card": "7s",
+      "child_id": "p54.t0.r23",
+      "weight": 0.020833
+    },
+    {
+      "card": "8c",
+      "child_id": "p54.t0.r24",
+      "weight": 0.020833
+    },
+    {
+      "card": "8d",
+      "child_id": "p54.t0.r25",
+      "weight": 0.020833
+    },
+    {
+      "card": "8h",
+      "child_id": "p54.t0.r26",
+      "weight": 0.020833
+    },
+    {
+      "card": "8s",
+      "child_id": "p54.t0.r27",
+      "weight": 0.020833
+    },
+    {
+      "card": "9c",
+      "child_id": "p54.t0.r28",
+      "weight": 0.020833
+    },
+    {
+      "card": "9d",
+      "child_id": "p54.t0.r29",
+      "weight": 0.020833
+    },
+    {
+      "card": "9h",
+      "child_id": "p54.t0.r30",
+      "weight": 0.020833
+    },
+    {
+      "card": "9s",
+      "child_id": "p54.t0.r31",
+      "weight": 0.020833
+    },
+    {
+      "card": "Tc",
+      "child_id": "p54.t0.r32",
+      "weight": 0.020833
+    },
+    {
+      "card": "Td",
+      "child_id": "p54.t0.r33",
+      "weight": 0.020833
+    },
+    {
+      "card": "Th",
+      "child_id": "p54.t0.r34",
+      "weight": 0.020833
+    },
+    {
+      "card": "Ts",
+      "child_id": "p54.t0.r35",
+      "weight": 0.020833
+    },
+    {
+      "card": "Jc",
+      "child_id": "p54.t0.r36",
+      "weight": 0.020833
+    },
+    {
+      "card": "Jd",
+      "child_id": "p54.t0.r37",
+      "weight": 0.020833
+    },
+    {
+      "card": "Jh",
+      "child_id": "p54.t0.r38",
+      "weight": 0.020833
+    },
+    {
+      "card": "Js",
+      "child_id": "p54.t0.r39",
+      "weight": 0.020833
+    },
+    {
+      "card": "Qc",
+      "child_id": "p54.t0.r40",
+      "weight": 0.020833
+    },
+    {
+      "card": "Qd",
+      "child_id": "p54.t0.r41",
+      "weight": 0.020833
+    },
+    {
+      "card": "Qh",
+      "child_id": "p54.t0.r42",
+      "weight": 0.020833
+    },
+    {
+      "card": "Qs",
+      "child_id": "p54.t0.r43",
+      "weight": 0.020833
+    },
+    {
+      "card": "Kc",
+      "child_id": "p54.t0.r44",
+      "weight": 0.020833
+    },
+    {
+      "card": "Kh",
+      "child_id": "p54.t0.r46",
+      "weight": 0.020833
+    },
+    {
+      "card": "Ks",
+      "child_id": "p54.t0.r47",
+      "weight": 0.020833
+    },
+    {
+      "card": "Ac",
+      "child_id": "p54.t0.r48",
+      "weight": 0.020833
+    },
+    {
+      "card": "Ad",
+      "child_id": "p54.t0.r49",
+      "weight": 0.020833
+    },
+    {
+      "card": "As",
+      "child_id": "p54.t0.r51",
+      "weight": 0.020833
+    }
+  ],
+  "children": [],
+  "combos": [
+    "JdJc",
+    "QdQc",
+    "KhKc",
+    "AdAc"
+  ],
+  "contrib": [
+    100.0,
+    100.0
+  ],
+  "joint": 0.010983,
+  "kind": "chance",
+  "marginal": [
+    0.265977,
+    0.262137,
+    0.235943,
+    0.235943
+  ],
+  "n_actions": 0,
+  "n_hands": 4,
+  "node_id": "p53.t0.r-1",
+  "node_index": 53,
+  "opponent_combos": [
+    "3d2c",
+    "5d5c",
+    "8s7s",
+    "Ts9s"
+  ],
+  "opponent_marginal": [
+    0.0,
+    0.333333,
+    0.333333,
+    0.333333
+  ],
+  "opponent_player": 1,
+  "opponent_reach": [
+    0.0,
+    0.000203,
+    0.000203,
+    0.000203
+  ],
+  "parent_id": "p51.t0.r-1",
+  "player": null,
+  "policy_revision": 5,
+  "pot": 300.0,
+  "reach": [
+    0.002921,
+    0.002879,
+    0.002591,
+    0.002591
+  ],
+  "reach_defined": true,
+  "solution_id": "s1",
+  "stack": 0.0,
+  "stacks": [
+    0.0,
+    0.0
+  ],
+  "strategy": null,
+  "to_call": 0.0
+}

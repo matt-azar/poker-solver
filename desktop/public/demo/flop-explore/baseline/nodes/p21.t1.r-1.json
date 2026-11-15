@@ -1,0 +1,105 @@
+{
+  "action_frequencies": [
+    0.000657,
+    0.352708,
+    0.646635
+  ],
+  "actions": [
+    "Fold",
+    "Call",
+    "Raise to 100 all-in"
+  ],
+  "board": [
+    "Ah",
+    "Kd",
+    "7c",
+    "2d"
+  ],
+  "cards": [],
+  "children": [
+    "p22.t1.r-1",
+    "p23.t1.r-1",
+    "p33.t1.r-1"
+  ],
+  "combos": [
+    "JdJc",
+    "QdQc",
+    "KhKc",
+    "AdAc"
+  ],
+  "contrib": [
+    0.0,
+    50.0
+  ],
+  "joint": 0.618647,
+  "kind": "decision",
+  "marginal": [
+    0.007225,
+    0.006854,
+    0.49296,
+    0.49296
+  ],
+  "n_actions": 3,
+  "n_hands": 4,
+  "node_id": "p21.t1.r-1",
+  "node_index": 21,
+  "opponent_combos": [
+    "3d2c",
+    "5d5c",
+    "8s7s",
+    "Ts9s"
+  ],
+  "opponent_marginal": [
+    0.25,
+    0.25,
+    0.25,
+    0.25
+  ],
+  "opponent_player": 1,
+  "opponent_reach": [
+    0.001524,
+    0.001524,
+    0.001524,
+    0.001524
+  ],
+  "parent_id": "p4.t1.r-1",
+  "player": 0,
+  "policy_revision": 5,
+  "pot": 150.0,
+  "reach": [
+    0.00447,
+    0.00424,
+    0.304969,
+    0.304969
+  ],
+  "reach_defined": true,
+  "solution_id": "s1",
+  "stack": 50.0,
+  "stacks": [
+    100.0,
+    50.0
+  ],
+  "strategy": [
+    [
+      0.022737,
+      0.337783,
+      0.63948
+    ],
+    [
+      0.023967,
+      0.337765,
+      0.638268
+    ],
+    [
+      0.000333,
+      0.352922,
+      0.646745
+    ],
+    [
+      0.000333,
+      0.352922,
+      0.646745
+    ]
+  ],
+  "to_call": 0.0
+}

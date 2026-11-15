@@ -1,0 +1,36 @@
+{
+  "description": "Locks the OOP root decision to 100% Check, then re-solves with resolve_locked (warm_start=0).",
+  "id": "oop-always-check",
+  "list_locks_after_put": {
+    "locks": [
+      {
+        "hand_indices": [],
+        "infoset_id": 0,
+        "kind": "full",
+        "node_id": "p0.t-1.r-1",
+        "probs": [
+          1,
+          0
+        ],
+        "scope": "node"
+      }
+    ]
+  },
+  "put_lock": {
+    "kind": "full",
+    "node_id": "p0.t-1.r-1",
+    "probs": [
+      1.0,
+      0.0
+    ],
+    "scope": "node"
+  },
+  "resolve_iterations": 40,
+  "status_after_resolve": {
+    "baseline_solution_id": "s2",
+    "iterations": 40,
+    "policy_revision": 10,
+    "solution_id": "s3"
+  },
+  "title": "OOP always Check"
+}

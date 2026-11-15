@@ -1,0 +1,163 @@
+{
+  "analysis_revision": 5,
+  "defined": true,
+  "elapsed_ms": 0,
+  "engine": "checkdown_equity",
+  "equity_distribution": [
+    {
+      "hi": 0.1,
+      "lo": 0,
+      "weight": 0
+    },
+    {
+      "hi": 0.2,
+      "lo": 0.1,
+      "weight": 0
+    },
+    {
+      "hi": 0.3,
+      "lo": 0.2,
+      "weight": 0
+    },
+    {
+      "hi": 0.4,
+      "lo": 0.3,
+      "weight": 0
+    },
+    {
+      "hi": 0.5,
+      "lo": 0.4,
+      "weight": 0
+    },
+    {
+      "hi": 0.6,
+      "lo": 0.5,
+      "weight": 0
+    },
+    {
+      "hi": 0.7,
+      "lo": 0.6,
+      "weight": 0
+    },
+    {
+      "hi": 0.8,
+      "lo": 0.7,
+      "weight": 0
+    },
+    {
+      "hi": 0.9,
+      "lo": 0.8,
+      "weight": 0
+    },
+    {
+      "hi": 1,
+      "lo": 0.9,
+      "weight": 0.0006097560872430091
+    }
+  ],
+  "ip_equity": 0,
+  "ip_equity_distribution": [
+    {
+      "hi": 0.1,
+      "lo": 0,
+      "weight": 0.0006097561358478351
+    },
+    {
+      "hi": 0.2,
+      "lo": 0.1,
+      "weight": 0
+    },
+    {
+      "hi": 0.3,
+      "lo": 0.2,
+      "weight": 0
+    },
+    {
+      "hi": 0.4,
+      "lo": 0.3,
+      "weight": 0
+    },
+    {
+      "hi": 0.5,
+      "lo": 0.4,
+      "weight": 0
+    },
+    {
+      "hi": 0.6,
+      "lo": 0.5,
+      "weight": 0
+    },
+    {
+      "hi": 0.7,
+      "lo": 0.6,
+      "weight": 0
+    },
+    {
+      "hi": 0.8,
+      "lo": 0.7,
+      "weight": 0
+    },
+    {
+      "hi": 0.9,
+      "lo": 0.8,
+      "weight": 0
+    },
+    {
+      "hi": 1,
+      "lo": 0.9,
+      "weight": 0
+    }
+  ],
+  "ip_hands": [
+    {
+      "combo": "5d5c",
+      "equity": 0,
+      "weight": 0.00020325204106912218
+    },
+    {
+      "combo": "8s7s",
+      "equity": 0,
+      "weight": 0.00020325205092589817
+    },
+    {
+      "combo": "Ts9s",
+      "equity": 0,
+      "weight": 0.00020325204385281473
+    }
+  ],
+  "kind": "equity",
+  "live_under_train": false,
+  "model": "check-down",
+  "node_id": "p43.t0.r1",
+  "node_index": 43,
+  "oop_equity": 1,
+  "oop_hands": [
+    {
+      "combo": "JdJc",
+      "equity": 1,
+      "weight": 0.0001524390385901107
+    },
+    {
+      "combo": "QdQc",
+      "equity": 1,
+      "weight": 0.00015243902753241218
+    },
+    {
+      "combo": "KhKc",
+      "equity": 1,
+      "weight": 0.00015243901056024306
+    },
+    {
+      "combo": "AdAc",
+      "equity": 1,
+      "weight": 0.00015243901056024306
+    }
+  ],
+  "pair_runouts": 12,
+  "pending": false,
+  "policy_revision": 5,
+  "query_seconds": 2.5652e-05,
+  "solution_id": "s1",
+  "status_generation": 6,
+  "units": "fraction of the pot"
+}

@@ -1,0 +1,144 @@
+{
+  "action_ev": [
+    null,
+    [
+      -0.391717,
+      -74.768992
+    ],
+    [
+      -0.483042,
+      -74.625721
+    ],
+    [
+      -0.331169,
+      -74.864505
+    ]
+  ],
+  "actions": [
+    "Check",
+    "Bet 50"
+  ],
+  "cell_ev": [
+    {
+      "action": [
+        -0.331169,
+        -74.864505
+      ],
+      "col": 5,
+      "mixed": -0.444857,
+      "row": 4,
+      "text": "T9s"
+    },
+    {
+      "action": [
+        -0.483042,
+        -74.625721
+      ],
+      "col": 7,
+      "mixed": -0.596134,
+      "row": 6,
+      "text": "87s"
+    },
+    {
+      "action": [
+        -0.391717,
+        -74.768992
+      ],
+      "col": 9,
+      "mixed": -0.505168,
+      "row": 9,
+      "text": "55"
+    }
+  ],
+  "combos": [
+    "3d2c",
+    "5d5c",
+    "8s7s",
+    "Ts9s"
+  ],
+  "elapsed_ms": 4,
+  "engine": "deal_by_deal",
+  "ev_defined": [
+    false,
+    true,
+    true,
+    true
+  ],
+  "live_under_train": false,
+  "local_offset": 50.0,
+  "n_actions": 2,
+  "n_hands": 4,
+  "node_ev": -0.515386,
+  "node_ev_defined": true,
+  "node_id": "p4.t0.r-1",
+  "node_index": 4,
+  "pending": false,
+  "player": 1,
+  "policy_revision": 5,
+  "reach_defined": true,
+  "root_centered": {
+    "action_ev": [
+      null,
+      [
+        -50.391717,
+        -124.768992
+      ],
+      [
+        -50.483042,
+        -124.625721
+      ],
+      [
+        -50.331169,
+        -124.864505
+      ]
+    ],
+    "cell_ev": [
+      {
+        "action": [
+          -50.331169,
+          -124.864505
+        ],
+        "col": 5,
+        "mixed": -50.444857,
+        "row": 4,
+        "text": "T9s"
+      },
+      {
+        "action": [
+          -50.483042,
+          -124.625721
+        ],
+        "col": 7,
+        "mixed": -50.596134,
+        "row": 6,
+        "text": "87s"
+      },
+      {
+        "action": [
+          -50.391717,
+          -124.768992
+        ],
+        "col": 9,
+        "mixed": -50.505168,
+        "row": 9,
+        "text": "55"
+      }
+    ],
+    "node_ev": -50.515386,
+    "value": [
+      null,
+      -50.505168,
+      -50.596134,
+      -50.444857
+    ]
+  },
+  "solution_id": "s1",
+  "units": "chips",
+  "utility_basis": "local",
+  "value": [
+    null,
+    -0.505168,
+    -0.596134,
+    -0.444857
+  ]
+}

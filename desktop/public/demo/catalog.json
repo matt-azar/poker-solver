@@ -1,0 +1,27 @@
+{
+  "default_example": "flop-explore",
+  "download_windows_url": "https://github.com/matt-azar/poker-solver/releases/latest/download/Holdem-Study-windows-x64-setup.exe",
+  "engine_build_sha": "bc1dacdefc506ef0ce62a76e9864c62c2fffdc8f",
+  "examples": [
+    {
+      "description": "Tiny flop tree for browsing branches, combos, EV, and equity. Chance (turn/river) fan-out is sampled so the pack stays small; each chance node still lists every card link.",
+      "id": "flop-explore",
+      "path": "flop-explore/manifest.json",
+      "street": "flop",
+      "title": "Flop explore"
+    },
+    {
+      "description": "River solution with a baseline equilibrium and one named lock preset (OOP always Check) produced by put_lock + resolve_locked.",
+      "id": "river-lock",
+      "path": "river-lock/manifest.json",
+      "street": "river",
+      "title": "River node locking"
+    }
+  ],
+  "export_command": "zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2 && python3 scripts/public-demo/export_solutions.py",
+  "follow_up": "Live browser solving is out of scope for this demo; desktop Tauri + solver-engine remains the live path.",
+  "label": "Precomputed",
+  "schema": "public-demo-catalog/v1",
+  "schema_path": "desktop/public-demo/schema/manifest.v1.schema.json",
+  "version": 1
+}

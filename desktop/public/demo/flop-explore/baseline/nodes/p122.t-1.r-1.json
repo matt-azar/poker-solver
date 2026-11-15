@@ -1,0 +1,316 @@
+{
+  "actions": [],
+  "board": [
+    "Ah",
+    "Kd",
+    "7c"
+  ],
+  "cards": [
+    {
+      "card": "2c",
+      "child_id": "p123.t0.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "2d",
+      "child_id": "p123.t1.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "2h",
+      "child_id": "p123.t2.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "2s",
+      "child_id": "p123.t3.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "3c",
+      "child_id": "p123.t4.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "3d",
+      "child_id": "p123.t5.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "3h",
+      "child_id": "p123.t6.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "3s",
+      "child_id": "p123.t7.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "4c",
+      "child_id": "p123.t8.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "4d",
+      "child_id": "p123.t9.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "4h",
+      "child_id": "p123.t10.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "4s",
+      "child_id": "p123.t11.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "5c",
+      "child_id": "p123.t12.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "5d",
+      "child_id": "p123.t13.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "5h",
+      "child_id": "p123.t14.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "5s",
+      "child_id": "p123.t15.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "6c",
+      "child_id": "p123.t16.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "6d",
+      "child_id": "p123.t17.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "6h",
+      "child_id": "p123.t18.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "6s",
+      "child_id": "p123.t19.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "7d",
+      "child_id": "p123.t21.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "7h",
+      "child_id": "p123.t22.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "7s",
+      "child_id": "p123.t23.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "8c",
+      "child_id": "p123.t24.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "8d",
+      "child_id": "p123.t25.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "8h",
+      "child_id": "p123.t26.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "8s",
+      "child_id": "p123.t27.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "9c",
+      "child_id": "p123.t28.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "9d",
+      "child_id": "p123.t29.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "9h",
+      "child_id": "p123.t30.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "9s",
+      "child_id": "p123.t31.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Tc",
+      "child_id": "p123.t32.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Td",
+      "child_id": "p123.t33.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Th",
+      "child_id": "p123.t34.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Ts",
+      "child_id": "p123.t35.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Jc",
+      "child_id": "p123.t36.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Jd",
+      "child_id": "p123.t37.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Jh",
+      "child_id": "p123.t38.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Js",
+      "child_id": "p123.t39.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Qc",
+      "child_id": "p123.t40.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Qd",
+      "child_id": "p123.t41.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Qh",
+      "child_id": "p123.t42.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Qs",
+      "child_id": "p123.t43.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Kc",
+      "child_id": "p123.t44.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Kh",
+      "child_id": "p123.t46.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Ks",
+      "child_id": "p123.t47.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Ac",
+      "child_id": "p123.t48.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "Ad",
+      "child_id": "p123.t49.r-1",
+      "weight": 0.020408
+    },
+    {
+      "card": "As",
+      "child_id": "p123.t51.r-1",
+      "weight": 0.020408
+    }
+  ],
+  "children": [],
+  "combos": [
+    "JdJc",
+    "QdQc",
+    "KhKc",
+    "AdAc"
+  ],
+  "contrib": [
+    100.0,
+    100.0
+  ],
+  "joint": 3.368395,
+  "kind": "chance",
+  "marginal": [
+    0.294525,
+    0.294608,
+    0.205434,
+    0.205434
+  ],
+  "n_actions": 0,
+  "n_hands": 4,
+  "node_id": "p122.t-1.r-1",
+  "node_index": 122,
+  "opponent_combos": [
+    "3d2c",
+    "5d5c",
+    "8s7s",
+    "Ts9s"
+  ],
+  "opponent_marginal": [
+    0.25,
+    0.25,
+    0.25,
+    0.25
+  ],
+  "opponent_player": 1,
+  "opponent_reach": [
+    0.00122,
+    0.00122,
+    0.00122,
+    0.00122
+  ],
+  "parent_id": "p120.t-1.r-1",
+  "player": null,
+  "policy_revision": 5,
+  "pot": 300.0,
+  "reach": [
+    0.992075,
+    0.992355,
+    0.691983,
+    0.691983
+  ],
+  "reach_defined": true,
+  "solution_id": "s1",
+  "stack": 0.0,
+  "stacks": [
+    0.0,
+    0.0
+  ],
+  "strategy": null,
+  "to_call": 0.0
+}
