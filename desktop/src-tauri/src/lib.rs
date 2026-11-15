@@ -184,6 +184,8 @@ pub fn run() {
             solver_engine::solver_engine_ipc_diagnostics,
             solver_engine::kill_solver_engine_cmd,
             solver_engine::ipc_acceptance_enabled,
+            solver_engine::installer_e2e_stage,
+            solver_engine::installer_e2e_stage_b_enabled,
             solver_engine::exit_with_code,
             open_diagnostics_folder,
             copy_diagnostics_bundle,

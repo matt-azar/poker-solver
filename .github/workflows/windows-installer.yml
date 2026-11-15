@@ -33,6 +33,8 @@ on:
       - "host/**"
       - "cli/**"
       - "scripts/zig/**"
+      - "scripts/desktop/windows-installer-e2e.ps1"
+      - "scripts/debug/**"
       - ".github/workflows/windows-installer.yml"
       - ".github/workflows/windows-installer-release.yml"
   pull_request:
@@ -47,6 +49,8 @@ on:
       - "host/**"
       - "cli/**"
       - "scripts/zig/**"
+      - "scripts/desktop/windows-installer-e2e.ps1"
+      - "scripts/debug/**"
       - ".github/workflows/windows-installer.yml"
       - ".github/workflows/windows-installer-release.yml"
 
@@ -271,3 +275,75 @@ jobs:
         run: |
           Get-ChildItem -Recurse desktop/src-tauri/target/release/bundle -ErrorAction SilentlyContinue |
             Select-Object FullName, Length
+
+  # Stage A only (prove the runner). Uses the exact NSIS artifact from the
+  # preceding job (PR installer when this workflow runs on a PR). Stage B is
+  # scaffolded in scripts/desktop/windows-installer-e2e.ps1 + installerE2e.ts
+  # but gated until Stage A is proven green — do not claim full E2E yet.
+  windows-installer-e2e:
+    needs: windows-installer
+    if: github.ref_type != 'tag'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download NSIS installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: holdem-study-windows-installer
+          path: installer-artifact
+
+      - name: Resolve installer exe
+        id: resolve
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $nsis = Get-ChildItem -Recurse installer-artifact -Filter "*.exe" |
+            Where-Object { $_.Name -like "*setup*.exe" -or $_.Name -like "*Holdem*" } |
+            Select-Object -First 1
+          if (-not $nsis) {
+            $nsis = Get-ChildItem -Recurse installer-artifact -Filter "*.exe" |
+              Select-Object -First 1
+          }
+          if (-not $nsis) {
+            Get-ChildItem -Recurse installer-artifact | Format-Table FullName, Length
+            throw "No NSIS exe in holdem-study-windows-installer artifact"
+          }
+          Write-Host "Using exact PR/workflow installer artifact: $($nsis.FullName)"
+          "installer=$($nsis.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Installer E2E Stage A (install → interactive Study → WebView drive)
+        shell: pwsh
+        env:
+          HOLDEM_STUDY_DIAGNOSTICS_DIR: ${{ runner.temp }}\holdem-study-e2e-diagnostics
+        run: |
+          $ErrorActionPreference = "Stop"
+          $out = Join-Path $env:RUNNER_TEMP "windows-installer-e2e"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:HOLDEM_STUDY_DIAGNOSTICS_DIR | Out-Null
+          & "$env:GITHUB_WORKSPACE\scripts\desktop\windows-installer-e2e.ps1" `
+            -InstallerExe "${{ steps.resolve.outputs.installer }}" `
+            -Stage A `
+            -OutDir $out
+          if ($LASTEXITCODE -ne 0) {
+            $stepFile = Join-Path $out "last-completed-step.txt"
+            if (Test-Path $stepFile) {
+              Write-Host "FAIL lastCompletedStep=$(Get-Content $stepFile -Raw)"
+            }
+            throw "windows-installer-e2e.ps1 Stage A failed (exit $LASTEXITCODE)"
+          }
+
+      - name: Upload installer E2E logs / diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-e2e-diagnostics
+          path: |
+            ${{ runner.temp }}/windows-installer-e2e/**
+            ${{ runner.temp }}/holdem-study-e2e-diagnostics/**
+          if-no-files-found: warn
