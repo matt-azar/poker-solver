@@ -23,6 +23,8 @@ Start with architecture, then streets + mathematics for how a solve runs.
 | [EXPLORER.md](EXPLORER.md) | Retired C++ HTTP explorer (historical) |
 | [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md) | Floating Study assistant |
 | [ai-context/](ai-context/README.md) | Model-facing context packs (imported by the desktop app) |
+| [../desktop/src/demo/README.md](../desktop/src/demo/README.md) | Precomputed public Study demo |
+| [../services/river-beta/README.md](../services/river-beta/README.md) | Limited live river browser beta |
 
 Product entry: Zig `solver-engine` + `desktop/`. Installer and packaging notes are in DESKTOP_UI. The C++ HTTP explorer doc is historical only.
 

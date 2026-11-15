@@ -54,6 +54,8 @@ When recording store scoreboard rows (optional; not required for cutover):
 | `.github/workflows/windows-installer.yml` | Shipping NSIS; `externalBin` is Zig `solver-engine` only (no `holdem-explorer`). `windows-installer-e2e` Stage A (install + WebView drive) then Stage B (river clear-then-reopen PSOL). |
 | `.github/workflows/windows-installer-release.yml` | Tag-triggered release wrapper that reuses `windows-installer.yml` |
 | `.github/workflows/ci.yml` | Desktop Vitest / `tsc` / build (no C++ explorer matrix) |
+| `.github/workflows/public-demo-pages.yml` | Precomputed public Study demo build, Playwright (desktop + phone), deploy `desktop/dist-public-demo` |
+| `.github/workflows/ipc-race-probes.yml` | Hold-EV probe: Status + Cancel while values are withheld |
 
 The labeled Zig tech-preview installer workflow was removed with the C++ strip
 (#287). Stable Study ships Zig typed IPC only after owner GO (2026-11-12).

@@ -1,6 +1,6 @@
 # ICM equities
 
-Malmuth-Harville ICM calculator, heads-up chip→ICM payoff adapter, and optional wiring through street/river solve terminals. Chip EV stays on `ChipPayoff` ([RAKE.md](RAKE.md)). Opponent incentives are separate ([INCENTIVES.md](INCENTIVES.md)).
+Malmuth-Harville ICM calculator, heads-up chip→ICM payoff adapter, and optional wiring through the street solve terminal. Chip EV stays on `chipTerminal` in `engine/src/poker/payoff.zig` ([RAKE.md](RAKE.md)). Opponent incentives are separate ([INCENTIVES.md](INCENTIVES.md)).
 
 ## Algorithm
 
@@ -41,7 +41,7 @@ for `i ∈ {0,1}`. That is an ICM utility, not chip EV. Example: stacks
 `1000/1000`, WTA prize `100`, chip delta `(+100, -100)` → ICM delta
 `(+5, -5)`.
 
-Zero-ICM / plain-chip mode is unchanged: keep calling `ChipPayoff::terminal`.
+Empty ICM keeps the chip/rake terminal from `chipTerminal` in `engine/src/poker/payoff.zig`.
 
 ## Config
 

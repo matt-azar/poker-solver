@@ -44,7 +44,7 @@ const poker::holdem::ShowdownEquity equity =
 
 `measure_showdown_work` counts legal pairs and pair-runouts and does not evaluate showdowns. `showdown_equity_json` writes undefined numbers as null.
 
-The default work limit is `kDefaultMaxPairRunouts` (1,100,000 pair-runouts). A full off-board random-vs-random river is `kFullRangeRiverPairRunouts` (1,070,190) and succeeds at the default. A request above the limit throws before showdown evaluation and reports required and allowed counts. A full-range turn is about 51M pair-runouts (`As Kd Qc Jh` measures 51,369,120) and still rejects at the library default. Packaged Study passes `--max-pair-runouts` with `kStudyExplorerMaxPairRunouts` (= `kFullRangeTurnPairRunouts`, 51,369,120) so on-demand Study equity admits a full-range turn without raising the library default. Dense flop check-downs can still exceed that ceiling. Manual explorer or `equity_calculator` can use the same flag. The caller can also raise or lower the limit through `ShowdownEquityOptions::max_pair_runouts` or `POKER_EQUITY_MAX_PAIR_RUNOUTS`. The calculator does not sample or drop runouts. Cancellation uses `ShowdownEquityOptions::cancel_poll`. One deterministic thread performs the enumeration.
+Pair-showdown constants are in `engine/src/analysis/equity.zig`. `default_max_pair_runouts` is 1,100,000. A full off-board random-vs-random river is 1,070,190 pair-runouts and fits that default. A full-range turn (`As Kd Qc Jh`, 51,369,120 pair-runouts) does not. Study node equity passes `study_explorer_max_pair_runouts` (51,369,120) from the host. `solver-engine` takes `--launch-id` only. Dense flop check-downs can still exceed the Study ceiling and return `error.WorkLimit` before evaluation. The function does not sample or drop runouts. After a solve, warm Study equity uses a separate hand×runout ceiling, `study_warm_max_hand_runouts`. The removed C++ tools took `--max-pair-runouts` and `POKER_EQUITY_MAX_PAIR_RUNOUTS`. Those switches are listed under the historical CLI below.
 
 ## Historical CLI (removed)
 
@@ -80,21 +80,23 @@ These are single runs on this machine. They are not a comparison with Pio or wit
 
 The preflight stores at most 1,326 hand descriptors per player. Showdown evaluation then allocates two 1,326-bin accumulators, about 220 KiB, plus a 49-card stack buffer. There is no all-deals table and no global cache. A rejected limit does not allocate the bins and does not call the evaluator. The unit test measures the full off-board river `As Kd Qc Jh 9c` at 1,070,190 pair-runouts under the default 1,100,000 ceiling, rejects it when the caller sets 1,070,189 or the legacy 1,000,000 ceiling, and rejects a full-range turn at the default before evaluation.
 
-This module does not use `BudgetResource` or the street solver's 1024 MiB engine budget. Its bound is the explicit pair-runout limit plus the fixed buffers above.
+Pair showdown equity sits outside the `memory_mib` engine budget (`app/src/budget_allocator.zig`). Its bound is the explicit pair-runout limit plus the fixed buffers above.
 
 ## Numerical limits
 
-Enumeration is complete. Pair outcomes use integer win, tie, and loss counts. Compatible mass is the direct sum of compatible opponent input weights, never a blocked-total subtraction and never a scaled mass multiplied back by the range maximum. Reported `input_weight` and `compatible_mass` stay in the original unnormalized units.
+`showdownEquity` uses `f64`. Errors are `InvalidEquity`, `InvalidWeight`, `WorkLimit`, and `OutOfMemory`. Compatible mass is the direct sum of opponent input weights.
 
-Conditional win, tie, loss, and equity normalize each hand by its own largest compatible opponent. That opponent's unit weight is 1, so its fraction is stored unchanged. Dividing every opponent by the heaviest weight in the whole range is not used for those fractions: a blocked `9c2c` at `1e123` would otherwise turn `9c9d`'s only opponent, `AhAc` at `1e-200`, into a subnormal, and the subnormal times `2/44` is a different positive number. On `Kh Kd 7c 4s`, OOP `AhAd,9c9d`, IP `9c2c:1e121,AhAc:1e-200` and the same spot at `1e123`, `9c9d` equity is `2/44`.
+The multiway Equity Calculator is `engine/src/analysis/equity_calculator.zig`. It takes 2–6 players, boards of length 0, 3, 4, or 5, dead cards, and methods `auto`, `exact`, and `monte_carlo`. `auto` enumerates exactly when the deal estimate is at or below `auto_exact_threshold` (2,000,000). Exact requests above `default_max_exact_deals` (5,000,000) return `WorkLimit`. `NumericalRange` is a calculator error for a non-finite scaled weight. Per-combo and next-card panes are not mounted. Study calls this through `start_equity_job` / `get_equity_job` / `cancel_equity_job`.
 
-Marginals use one scale per player, the largest participating weight. A uniform factor such as `1e-200` or `1e200` cancels in those ratios, so the result matches the unit-weight calculation. There is no absolute cutoff on a small weight: scaling both ranges together does not change the meaning, and a blocker can leave a small hand as the only compatible opponent. That opponent still sets the conditional fraction above.
+Enumeration in `showdownEquity` is complete. Pair outcomes use integer win, tie, and loss counts. Compatible mass is the direct sum of compatible opponent input weights. Reported `input_weight` and `compatible_mass` stay in the original unnormalized units.
 
-The supported joint is one whose largest contribution is a normal double. A smaller contribution may be subnormal when a normal contribution is present. If every contribution on a side underflows below the normal range, the relative weights are no longer represented and the input is rejected. On `Kh Kd 7c 4s 2h`, OOP `AhAd:1e123,9c9d:8e-201` against IP `AhAc:1e123,2c3d:1e-200` is that case, as is the swapped assignment. The two surviving products are in a 5:4 ratio, but dividing by the two range maxima makes both contributions subnormal. Keeping that ratio for inputs this far apart is later hardening, not part of the supported domain.
+Per combo, `showdownEquity` divides that combo's win, tie, and loss sums by `compatible_mass` (the sum of compatible opponent input weights). Range win, tie, loss, and equity divide by the joint mass (sum of `w0 * w1` over legal pairs). A combo with `compatible_mass <= 0` stays undefined. The function does not rescale by the heaviest weight in the range.
 
-`EquityFailure::InvalidWeight` is only a malformed or nonfinite input weight. `EquityFailure::NumericalRange` (CLI exit 5) means the inputs are finite and at least one legal pair exists, but a scaled weight, the direct compatible mass, or a joint contribution is not a supported finite value. That includes the product of three `1e308` opponent weights, which cannot be stored as one compatible mass, a participating weight that would become zero when divided by its range's largest weight, and a joint whose contributions are all below the normal range. The failure is an error. It does not return `joint_defined: false` or a partial JSON result.
+The removed C++ calculator normalized each hand by its largest compatible opponent and rejected an all-subnormal joint (`EquityFailure::NumericalRange`). Those rules are not in `showdownEquity`. The table below is from that C++ review.
 
-A single opponent weight of `1e308` is representable and is accepted. `long double` is not used to widen the product: on this MSVC toolchain it has the same width as `double`.
+The old C++ names were `EquityFailure::InvalidWeight` and `EquityFailure::NumericalRange` (CLI exit 5). On Zig, a bad pair-showdown weight is `InvalidWeight`. The multiway calculator returns `InvalidWeight` or `NumericalRange` when a scaled weight or a finished equity is not a finite `f64`. `showdownEquity` does not implement the old all-subnormal rejection.
+
+A single opponent weight of `1e308` is representable and is accepted. Zig stores these products as `f64`.
 
 Rounding `1 + 1e-18` to `1` is ordinary double-precision behavior. Losing `AhAd`'s only compatible opponent because `AhAc` has weight 1 is a different defect: subtracting the blocked weight from a total that has already rounded `1 + epsilon` to `1` yields zero and drops the hand. This calculator does not do that subtraction. On `Kh Kd 7c 4s`, OOP `AhAd,9c9d`, IP `AhAc:1,2c3d:epsilon`:
 
@@ -105,7 +107,7 @@ Rounding `1 + 1e-18` to `1` is ordinary double-precision behavior. Losing `AhAd`
 
 `AhAc` stays in the result because it is compatible with `9c9d`. `2c3d` has compatible mass 2. For `1e-18`, `9c9d`'s own mass prints as 1 because `1 + 1e-18` rounds to 1. For `1e-12`, that mass prints as `1.0000000000010001`.
 
-The oracle in `tests/equity/test_equity.cpp` stores each pair's runout results, then accumulates in descending combo order with `long double`. It shares `compare_showdown` and does not call the production accumulators. Agreement on the small fixtures, including a seeded 5-combo flop, is within `1e-12`. On this MSVC toolchain `long double` is the same width as `double`, so that bound is justified by compensated summation of a few dozen nonnegative terms of size at most 1, not by extra significand bits.
+The old oracle in `tests/equity/test_equity.cpp` is gone. It stored each pair's runout results, then accumulated in descending combo order with `long double`. Agreement on the small fixtures, including a seeded 5-combo flop, was within `1e-12`. On that MSVC toolchain `long double` had the same width as `double`.
 
 ## Tests
 
@@ -136,4 +138,4 @@ The desktop **Equity** workspace is independent of any solution. On `main`, pack
 | `POST` | `/api/equity/jobs/{id}/cancel` |
 | `GET` | `/api/equity/jobs/{id}/result` |
 
-Numerical entry point: `poker::holdem::calculate_equity` in `include/poker/equity_calculator.hpp`. Supports 2–6 players; boards of length 0/3/4/5; explicit dead cards; methods `auto`, `exact`, and `monte_carlo`. Equity is expected fractional pot ownership (k-way ties share `1/k`). Win/Tie/Loss are exclusive event probabilities. Auto selects exact when the bounded deal estimate is at or below `kEquityCalculatorAutoExactThreshold` (2,000,000); otherwise Monte Carlo. Exact requests that exceed `max_exact_deals` (default 5,000,000) fail with a work-limit error rather than returning a partial ratio. Monte Carlo uses an unbiased reject-entire-tuple sampler with a dedicated seeded RNG; approximate 95% intervals come from sample variance of pot-share outcomes. Per-combo / next-card analysis panes are follow-on work and are not mounted yet.
+Current entry point: `engine/src/analysis/equity_calculator.zig` (limits in the numerical section above). The removed C++ entry was `poker::holdem::calculate_equity` in `include/poker/equity_calculator.hpp`, with the same player count, board lengths, methods, and deal caps (`kEquityCalculatorAutoExactThreshold` 2,000,000, `max_exact_deals` 5,000,000).
