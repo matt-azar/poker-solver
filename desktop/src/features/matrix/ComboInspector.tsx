@@ -96,8 +96,17 @@ function squareMass(square: ComboBreakdownSquare): number | null {
   return square.present ? 1 : null;
 }
 
+type ComboInspectorProps = {
+  /**
+   * Phone demo bottom sheet: always surface freqs + action EV (weights stay
+   * in the paint fill). Desktop detail rail keeps Overlay-driven metrics.
+   */
+  variant?: "panel" | "sheet";
+};
+
 /** Hands list for the hovered/selected 169-cell in the Study detail panel. */
-export function ComboInspector() {
+export function ComboInspector({ variant = "panel" }: ComboInspectorProps = {}) {
+  const sheet = variant === "sheet";
   const currentNode = useStudyStore((s) => s.currentNode);
   const solutionId = useStudyStore((s) => s.solutionId);
   const nodeValues = useStudyStore((s) => s.nodeValues);
@@ -176,13 +185,14 @@ export function ComboInspector() {
   );
   const toCall = Number(currentNode?.to_call ?? 0);
   const overlay = displayPrefs.cellOverlay;
-  const showEv = overlay === "ev" || overlay === "both";
-  const showEq = overlay === "equity" || overlay === "both";
-  const showFreq = overlay === "none" || overlay === "equity";
+  const showEv = sheet || overlay === "ev" || overlay === "both";
+  const showEq = !sheet && (overlay === "equity" || overlay === "both");
+  const showFreq = sheet || overlay === "none" || overlay === "equity";
   const shape = cell ? cellShape(cell.row, cell.col) : "pair";
   const cols = shapeColumns(shape);
   // Action rows show EV or frequency; equity always has its own labeled row.
-  const metricLabel = showEv ? "EV" : "Freq";
+  // Phone sheet shows both freq + EV in one compact value.
+  const metricLabel = sheet ? "Freq · EV" : showEv ? "EV" : "Freq";
 
   // Hands EV rows need /values; Study always-on warm usually provides them.
   // Retry only when a settled failure is left for this node.
@@ -336,7 +346,14 @@ export function ComboInspector() {
                           );
                           const freq = freqByLabel.get(label) ?? 0;
                           let valueText = "—";
-                          if (showEv) {
+                          if (sheet) {
+                            const freqText =
+                              formatFrequencyPct(freq, 0) ?? "—";
+                            const evText = formatEvChip(
+                              actionEvs?.[index] ?? null,
+                            );
+                            valueText = `${freqText} · ${evText}`;
+                          } else if (showEv) {
                             valueText = formatEvChip(actionEvs?.[index] ?? null);
                           } else if (showFreq) {
                             valueText = formatFrequencyPct(freq, 0) ?? "—";
@@ -370,7 +387,7 @@ export function ComboInspector() {
               );
             })}
           </div>
-          {pinned ? (
+          {pinned && !sheet ? (
             <div className="combo-inspector__unpin">
               <button
                 type="button"

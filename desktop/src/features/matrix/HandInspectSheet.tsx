@@ -102,7 +102,7 @@ export function HandInspectSheet() {
           </button>
         </div>
         <div className="hand-inspect-sheet__body">
-          <ComboInspector />
+          <ComboInspector variant="sheet" />
         </div>
       </div>
     </div>,
