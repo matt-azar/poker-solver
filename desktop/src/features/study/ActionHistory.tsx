@@ -21,6 +21,7 @@ import {
   type PathStep,
   type PathStreetGroup,
 } from "../../domain/actionHistory";
+import { usePhoneDemoLayout } from "../../demo/phoneLayout";
 import { useStudyStore } from "../../state/studyStore";
 import "../../styles/path-nav.css";
 
@@ -146,6 +147,7 @@ export function ActionHistory() {
   const takeTrailAlternative = useStudyStore((s) => s.takeTrailAlternative);
   const layout = useStudyStore((s) => s.layout);
   const setLayout = useStudyStore((s) => s.setLayout);
+  const phoneDemo = usePhoneDemoLayout();
 
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
   const [openAlts, setOpenAlts] = useState<number | null>(null);
@@ -506,13 +508,15 @@ export function ActionHistory() {
         ) : null}
       </div>
 
-      <div
-        className="resize-handle"
-        onPointerDown={onPointerDown}
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize action history"
-      />
+      {phoneDemo ? null : (
+        <div
+          className="resize-handle"
+          onPointerDown={onPointerDown}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize action history"
+        />
+      )}
     </section>
   );
 }

@@ -9,9 +9,11 @@
  * Structure of the right rail: matrix/StudyDetailPanel.tsx (Actions + Hands).
  */
 import { useEffect } from "react";
+import { usePhoneDemoLayout } from "../../demo/phoneLayout";
 import { LowerDock } from "../analysis/LowerDock";
 import { LockDrawer } from "../locks/LockDrawer";
 import { ActionNavBar } from "../matrix/ActionNavBar";
+import { HandInspectSheet } from "../matrix/HandInspectSheet";
 import { MatrixDisplayControls } from "../matrix/MatrixDisplayControls";
 import { OpponentRangePanel } from "../matrix/OpponentRangePanel";
 import { RangeMatrix } from "../matrix/RangeMatrix";
@@ -102,9 +104,13 @@ export function StudyWorkspace() {
   const dualRange = useStudyStore((s) => s.layout.dualRange);
   const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
   const strategyEditDrawerOpen = useStudyStore((s) => s.strategyEditDrawerOpen);
+  const phoneDemo = usePhoneDemoLayout();
 
   return (
-    <div className="study-workspace">
+    <div
+      className="study-workspace"
+      data-phone-demo={phoneDemo ? "true" : "false"}
+    >
       <AlwaysOnNodeAnalysis />
       <ContextStrip />
       <ActionHistory />
@@ -128,9 +134,10 @@ export function StudyWorkspace() {
           </div>
         </section>
       </div>
-      <LowerDock />
+      {phoneDemo ? null : <LowerDock />}
       {lockDrawerOpen ? <LockDrawer /> : null}
       {strategyEditDrawerOpen ? <StrategyEditDrawer /> : null}
+      <HandInspectSheet />
     </div>
   );
 }

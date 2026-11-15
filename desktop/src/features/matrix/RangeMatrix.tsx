@@ -39,6 +39,7 @@ import {
   type MatrixMode,
   type NodePayload,
 } from "../../domain/types";
+import { usePhoneDemoLayout } from "../../demo/phoneLayout";
 import { clampDockHeight } from "../../state/layoutStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
@@ -190,13 +191,19 @@ export function RangeMatrix() {
   const lowerDockOpen = useStudyStore((s) => s.layout.lowerDock);
   const lowerDockHeight = useStudyStore((s) => s.layout.lowerDockHeight);
   const setLayout = useStudyStore((s) => s.setLayout);
+  const phoneDemo = usePhoneDemoLayout();
   const userWidth =
-    typeof matrixWidth === "number" && matrixWidth > 0 ? matrixWidth : null;
+    !phoneDemo && typeof matrixWidth === "number" && matrixWidth > 0
+      ? matrixWidth
+      : null;
   const stageRef = useRef<HTMLDivElement>(null);
-  const size = useMeasuredAspectSize(
-    stageRef,
-    dualRange ? 1 : SINGLE_MATRIX_WIDTH_OVER_HEIGHT,
-  );
+  // Phone public demo: keep the 13×13 square and full-width.
+  const aspectRatio = phoneDemo
+    ? 1
+    : dualRange
+      ? 1
+      : SINGLE_MATRIX_WIDTH_OVER_HEIGHT;
+  const size = useMeasuredAspectSize(stageRef, aspectRatio);
 
   const onResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -306,19 +313,21 @@ export function RangeMatrix() {
           ))}
         </div>
       </div>
-      <div
-        className="resize-handle resize-handle--vertical range-matrix__resize"
-        style={
-          lowerDockOpen
-            ? { bottom: clampDockHeight(lowerDockHeight) }
-            : undefined
-        }
-        onPointerDown={onResizePointerDown}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize range matrix"
-        title="Drag to resize the range grid"
-      />
+      {phoneDemo ? null : (
+        <div
+          className="resize-handle resize-handle--vertical range-matrix__resize"
+          style={
+            lowerDockOpen
+              ? { bottom: clampDockHeight(lowerDockHeight) }
+              : undefined
+          }
+          onPointerDown={onResizePointerDown}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize range matrix"
+          title="Drag to resize the range grid"
+        />
+      )}
     </div>
   );
 }

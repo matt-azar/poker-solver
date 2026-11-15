@@ -71,6 +71,11 @@ npm run build:public-demo
 npm run test:e2e:public-demo
 ```
 
+Phone layout (public demo ≤540px / short landscape): stacked column, square
+full-width matrix, hand inspect bottom sheet, no resize handles. Live
+`?river-beta=` is a separate entry and is unchanged by this layout.
+Mobile Playwright projects are owned by the phone Playwright suite (not this layout change).
+
 ## Download for Windows
 
 Banner link →  
