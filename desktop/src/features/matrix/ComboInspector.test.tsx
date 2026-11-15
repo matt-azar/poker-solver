@@ -80,6 +80,37 @@ describe("ComboInspector", () => {
     expect(useStudyStore.getState().lockDrawerOpen).toBe(false);
   });
 
+  it("phone sheet surfaces freq + EV and hides Clear selection", () => {
+    useStudyStore.setState({
+      nodeValues: {
+        node_id: "p0",
+        pending: false,
+        combos: ["AhAd", "AhAs", "AhAc"],
+        ev_defined: [true, true, true],
+        value: [1.5, 1.2, 0.9],
+        action_ev: [
+          [0.5, 2.5],
+          [0.4, 2.0],
+          [0.3, 1.5],
+        ],
+        utility_basis: "local",
+      },
+    });
+    render(<ComboInspector variant="sheet" />);
+    expect(
+      document.querySelectorAll(".hands-combo__metric-tag"),
+    ).not.toHaveLength(0);
+    expect(
+      [...document.querySelectorAll(".hands-combo__metric-tag")].every(
+        (el) => el.textContent === "Freq · EV",
+      ),
+    ).toBe(true);
+    expect(screen.queryByRole("button", { name: "Clear selection" })).toBeNull();
+    // Compact value includes a frequency percent and an EV chip.
+    const metrics = [...document.querySelectorAll(".hands-combo__metric-value")];
+    expect(metrics.some((el) => /% · /.test(el.textContent ?? ""))).toBe(true);
+  });
+
   it("shows Hands empty hint when nothing is hovered or selected", () => {
     useStudyStore.setState({ selectedCell: null, hoverCell: null });
     render(<ComboInspector />);
