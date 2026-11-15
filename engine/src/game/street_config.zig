@@ -236,6 +236,10 @@ fn assignUniqueField(
         config.first_to_act = parseInt(value) catch return error.InvalidStreetConfig;
     } else if (std.mem.eql(u8, key, "max-raises")) {
         config.max_raises = parseInt(value) catch return error.InvalidStreetConfig;
+    } else if (std.mem.eql(u8, key, "allow-all-in")) {
+        // Legacy Study 0.1.6 wire key. Honor for tree rebuild on reopen
+        // (oversize drop vs modern oversize→all-in). Never emit on format.
+        config.legacy_allow_all_in = parseFlag(value) catch return error.InvalidStreetConfig;
     } else if (std.mem.eql(u8, key, "allow-three-bet")) {
         config.allow_three_bet = parseFlag(value) catch return error.InvalidStreetConfig;
     } else if (std.mem.eql(u8, key, "geometric")) {
@@ -568,6 +572,41 @@ test "reject unknown scalar key" {
         \\
     ;
     try std.testing.expectError(error.InvalidStreetConfig, parseStreetConfig(std.testing.allocator, text));
+}
+
+test "legacy allow-all-in is honored and not re-emitted" {
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 82.2
+        \\stack 61.4
+        \\oop-range AhAd:1
+        \\ip-range KcKd:1
+        \\first-to-act 0
+        \\max-raises 1
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\oop-river-bets 1
+        \\
+    ;
+    var config = try parseStreetConfig(std.testing.allocator, text);
+    defer config.deinit();
+    try std.testing.expect(config.legacy_allow_all_in != null);
+    try std.testing.expect(!config.legacy_allow_all_in.?);
+
+    const formatted = try formatStreetConfig(std.testing.allocator, config);
+    defer std.testing.allocator.free(formatted);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, "allow-all-in") == null);
+
+    var again = try parseStreetConfig(std.testing.allocator, formatted);
+    defer again.deinit();
+    try std.testing.expect(again.legacy_allow_all_in == null);
 }
 
 test "reject bad version" {

@@ -144,10 +144,13 @@ fn expandAndConsider(
 /// Returns null when the amount is illegal after clamps. `force_all_in` is for size-list
 /// `a` tokens only; AddSize always passes false.
 ///
-/// A listed size above remaining stack is always re-interpreted as all-in (NLHE shove).
-/// Pio all-in threshold (fraction of starting stack) likewise converts a regular size
-/// to all-in. Short-of-min-raise shoves are kept only for `a` / oversize / threshold —
-/// list `a` for an explicit extra all-in.
+/// Modern (`legacy_allow_all_in == null`): a listed size above remaining stack is
+/// re-interpreted as all-in (DS-26). Pio all-in threshold likewise converts a regular
+/// size to all-in. Short-of-min-raise shoves are kept for `a` / oversize / threshold.
+///
+/// Legacy Study 0.1.6 (`legacy_allow_all_in == Some`): oversized sizes are dropped when
+/// the flag is false (Matt's river b100 → check-only), threshold applies only when the
+/// flag is true, and `true` may invent an extra all-in offer (see fillAggressiveAmounts).
 fn resolveAggressiveAdd(
     config: street_spec.StreetSpec,
     state: BetState,
@@ -165,10 +168,18 @@ fn resolveAggressiveAdd(
     if (add < 1) return null;
     if (facing and !config.allow_three_bet and state.num_raises >= 1) return null;
     if (add > max_add) {
-        add = max_add;
-        treat_as_all_in = true;
+        if (config.legacy_allow_all_in) |allow| {
+            // 0.1.6: drop oversized unless Add-all-in or explicit `a`.
+            if (!allow and !force_all_in) return null;
+            add = max_add;
+            treat_as_all_in = true;
+        } else {
+            add = max_add;
+            treat_as_all_in = true;
+        }
     }
-    if (config.all_in_threshold > 0.0) {
+    const apply_threshold = if (config.legacy_allow_all_in) |allow| allow else true;
+    if (apply_threshold and config.all_in_threshold > 0.0) {
         const committed_after = @as(f64, @floatFromInt(state.contrib[@intCast(player)] + add));
         const limit = config.all_in_threshold * @as(f64, @floatFromInt(config.stack));
         if (committed_after > limit and add < max_add) {
@@ -187,7 +198,9 @@ fn resolveAggressiveAdd(
     const min_increment: chips.Chip = if (state.last_raise == 0) 1 else state.last_raise;
     const full = raise_by >= min_increment;
     const shove = state.contrib[@intCast(player)] + add == config.stack;
-    if (!full and !(shove and treat_as_all_in)) return null;
+    // Legacy short-shove rule used the wire flag directly; modern uses treat_as_all_in.
+    const short_ok = if (config.legacy_allow_all_in) |allow| (allow or force_all_in) else treat_as_all_in;
+    if (!full and !(shove and short_ok)) return null;
     return add;
 }
 
@@ -256,27 +269,43 @@ fn fillAggressiveAmountsImpl(
     const multiples = if (player == 0) config.oop_raise_multiples else config.ip_raise_multiples;
     const only_multiples = facing and multiples.len != 0 and streetRaiseList(config, player, kind).len == 0 and (if (player == 0) config.oop_raise_sizes else config.ip_raise_sizes).len == 0;
 
+    // Legacy allow-all-in 1 invents an extra all-in when any size list was offered.
+    var offers = false;
     if (donk_spot) {
         const donk = selectDonk(config, kind);
         if (!donk.use_normal) {
+            offers = sizeListOffers(donk.specs);
             try expandAndConsider(config, state, ctx, donk.specs, amounts, n_amounts, aggressive_limit);
         } else {
-            try expandAndConsider(config, state, ctx, selectBets(config, player, kind), amounts, n_amounts, aggressive_limit);
+            const list = selectBets(config, player, kind);
+            offers = sizeListOffers(list);
+            try expandAndConsider(config, state, ctx, list, amounts, n_amounts, aggressive_limit);
         }
     } else if (!only_multiples) {
         const list = if (facing) selectRaises(config, player, kind) else selectBets(config, player, kind);
+        offers = sizeListOffers(list);
         try expandAndConsider(config, state, ctx, list, amounts, n_amounts, aggressive_limit);
     }
     if (facing) {
+        if (multiples.len != 0) offers = true;
         for (multiples) |multiple| {
             if (multiple <= 0.0 or state.committed <= 0) continue;
             const street_total: chips.Chip = @intFromFloat(@round(multiple * @as(f64, @floatFromInt(state.committed))));
             try considerAmount(config, state, player, to_call, facing, max_add, street_total - state.contrib[@intCast(player)], false, amounts, n_amounts, aggressive_limit);
         }
     }
+    if (config.legacy_allow_all_in) |allow| {
+        if (allow and offers) {
+            try considerAmount(config, state, player, to_call, facing, max_add, max_add, false, amounts, n_amounts, aggressive_limit);
+        }
+    }
     if (config.merge_threshold > 0.0) {
         size_spec.mergeCloseAmounts(amounts, n_amounts, config.merge_threshold);
     }
+}
+
+fn sizeListOffers(specs: []const f64) bool {
+    return specs.len != 0 and !size_spec.isExplicitEmptyList(specs);
 }
 
 pub fn legalActions(config: street_spec.StreetSpec, state: BetState) BettingError!Legal {
@@ -652,7 +681,7 @@ test "check-only root has Check" {
 }
 
 test "oversized listed bet becomes all-in" {
-    // b100 with stack < pot must shove (DS-26).
+    // Modern: b100 with stack < pot must shove (DS-26).
     var config = street_spec.StreetSpec.init(std.testing.allocator);
     defer config.deinit();
     const ah = try @import("../poker/card.zig").parseCard("Ah");
@@ -676,6 +705,33 @@ test "oversized listed bet becomes all-in" {
     try std.testing.expectEqual(@as(i32, 0), legal.add[0]);
     try std.testing.expectEqual(@as(i32, 2), legal.code[1]); // Bet
     try std.testing.expectEqual(config.stack, legal.add[1]); // all-in
+}
+
+test "legacy allow-all-in 0 drops oversized river bet (0.1.6 check-only)" {
+    // Faithful 0.1.6 Study semantics: allow-all-in 0 + b100 with stack 61.4 / pot 82.2
+    // dropped the size → Check only (not Check / All-in).
+    var config = street_spec.StreetSpec.init(std.testing.allocator);
+    defer config.deinit();
+    const ah = try @import("../poker/card.zig").parseCard("Ah");
+    const kd = try @import("../poker/card.zig").parseCard("Kd");
+    const c7 = try @import("../poker/card.zig").parseCard("7c");
+    const s2 = try @import("../poker/card.zig").parseCard("2s");
+    const h2 = try @import("../poker/card.zig").parseCard("2h");
+    config.board = try std.testing.allocator.dupe(i32, &[_]i32{ ah, kd, c7, s2, h2 });
+    config.pot = try chips.chipsToTenths(82.2);
+    config.stack = try chips.chipsToTenths(61.4);
+    config.max_raises = 1;
+    config.legacy_allow_all_in = false;
+    config.all_in_threshold = 0;
+    config.oop_river_bets = try std.testing.allocator.dupe(f64, &[_]f64{1.0});
+
+    var state = BetState{};
+    state.pot = config.pot;
+    state.acting = config.first_to_act;
+    const legal = try legalActions(config, state);
+    try std.testing.expectEqual(@as(i32, 1), legal.count);
+    try std.testing.expectEqual(@as(i32, 1), legal.code[0]); // Check only
+    try std.testing.expectEqual(@as(i32, 0), legal.add[0]);
 }
 
 test "default half-stack all-in threshold shoves 60pct pot" {
