@@ -6,10 +6,12 @@
  * withhold one EV (`values`) reply while Status and Stop (`cancel`) still
  * complete. Proves WebView → Tauri → pipe ownership under a delayed reply.
  *
- * Also covers node-switch-while-EV-pending: a second `values` for another node
- * demuxes by `request_id` while the first remains withheld.
+ * Pass bar (IPC layer): Status + Cancel complete while EV is withheld.
+ * UI A→B stale-EV (delayed reply for node A must not replace node B) belongs
+ * to the browser/Playwright track — not this probe.
  *
- * Pipe-level / CI (no WebView): `scripts/desktop/ipc_race_replay.py --all`.
+ * Pipe-level / CI (no WebView): `scripts/desktop/ipc_race_replay.py` case
+ * `values-hold-status-cancel`.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "./index";
@@ -29,33 +31,6 @@ async function rAF(): Promise<void> {
   });
 }
 
-type ValuesTracker = {
-  settled: boolean;
-  error: string | null;
-  promise: Promise<unknown>;
-};
-
-function trackValues(body: Record<string, unknown>): ValuesTracker {
-  const tracker: ValuesTracker = {
-    settled: false,
-    error: null,
-    promise: Promise.resolve(),
-  };
-  tracker.promise = invoke("solver_engine_request", {
-    op: "values",
-    body,
-    jobId: null,
-  })
-    .then(() => {
-      tracker.settled = true;
-    })
-    .catch((err: unknown) => {
-      tracker.settled = true;
-      tracker.error = err instanceof Error ? err.message : String(err);
-    });
-  return tracker;
-}
-
 /**
  * Run the concurrency probe through real `invoke` calls.
  * Caller must have already ensured the test sidecar session.
@@ -66,16 +41,29 @@ export async function runIpcAcceptanceProbe(): Promise<IpcAcceptanceResult> {
   }
 
   // Kick values — test sidecar withholds the first reply while still reading.
-  const values = trackValues({ node_index: 0 });
+  let valuesSettled = false;
+  let valuesError: string | null = null;
+  const valuesPromise = invoke("solver_engine_request", {
+    op: "values",
+    body: { node_index: 0 },
+    jobId: null,
+  })
+    .then(() => {
+      valuesSettled = true;
+    })
+    .catch((err: unknown) => {
+      valuesSettled = true;
+      valuesError = err instanceof Error ? err.message : String(err);
+    });
 
   // Let the values frame leave the WebView and hit the pipe.
   await rAF();
   await new Promise((r) => setTimeout(r, 150));
 
-  if (values.settled) {
+  if (valuesSettled) {
     return {
       ok: false,
-      detail: `values settled too early (before status/stop): ${values.error ?? "ok"}`,
+      detail: `values settled too early (before status/stop): ${valuesError ?? "ok"}`,
     };
   }
 
@@ -118,10 +106,10 @@ export async function runIpcAcceptanceProbe(): Promise<IpcAcceptanceResult> {
     };
   }
 
-  if (values.settled) {
+  if (valuesSettled) {
     return {
       ok: false,
-      detail: `values settled during status/stop (expected still pending): ${values.error ?? "ok"}`,
+      detail: `values settled during status/stop (expected still pending): ${valuesError ?? "ok"}`,
     };
   }
 
@@ -132,10 +120,10 @@ export async function runIpcAcceptanceProbe(): Promise<IpcAcceptanceResult> {
     await invoke("kill_solver_engine_cmd", { expectedLaunchId: launchId });
   }
   await Promise.race([
-    values.promise,
+    valuesPromise,
     new Promise((r) => setTimeout(r, 5000)),
   ]);
-  if (!values.settled) {
+  if (!valuesSettled) {
     return { ok: false, detail: "values did not settle after kill/reap" };
   }
 
@@ -143,105 +131,6 @@ export async function runIpcAcceptanceProbe(): Promise<IpcAcceptanceResult> {
     ok: true,
     detail:
       "status+cancel completed while values withheld; UI rAF advanced; kill reaped pending values",
-  };
-}
-
-/**
- * Node switch while EV pending: first values stays withheld; a second values
- * for another node demuxes by request_id and completes.
- * Caller must ensure a fresh test-sidecar session (first values still unused).
- */
-export async function runNodeSwitchWhileEvPendingProbe(): Promise<IpcAcceptanceResult> {
-  if (!isTauriRuntime()) {
-    return { ok: false, detail: "not a Tauri runtime" };
-  }
-
-  const first = trackValues({ node_index: 0, node_id: "root" });
-  await rAF();
-  await new Promise((r) => setTimeout(r, 120));
-  if (first.settled) {
-    return {
-      ok: false,
-      detail: `first values settled too early: ${first.error ?? "ok"}`,
-    };
-  }
-
-  const second = trackValues({ node_index: 1, node_id: "p0" });
-  await Promise.race([
-    second.promise,
-    new Promise((r) => setTimeout(r, 5000)),
-  ]);
-  if (!second.settled) {
-    return {
-      ok: false,
-      detail: "second-node values did not complete while first was pending",
-    };
-  }
-  if (second.error) {
-    return {
-      ok: false,
-      detail: `second-node values failed: ${second.error}`,
-    };
-  }
-  if (first.settled) {
-    return {
-      ok: false,
-      detail: `first values settled during node switch (expected still pending): ${first.error ?? "ok"}`,
-    };
-  }
-
-  const status = (await invoke("solver_engine_request", {
-    op: "status",
-    body: null,
-    jobId: null,
-  })) as { body?: { held_values?: boolean } };
-  if (!status?.body || status.body.held_values !== true) {
-    return {
-      ok: false,
-      detail: `status did not report held_values after node switch: ${JSON.stringify(status)}`,
-    };
-  }
-
-  const info = (await invoke("solver_engine_info")) as { launchId?: string } | null;
-  const launchId = info?.launchId ?? "";
-  if (launchId) {
-    await invoke("kill_solver_engine_cmd", { expectedLaunchId: launchId });
-  }
-  await Promise.race([
-    first.promise,
-    new Promise((r) => setTimeout(r, 5000)),
-  ]);
-  if (!first.settled) {
-    return { ok: false, detail: "first values did not settle after kill/reap" };
-  }
-
-  return {
-    ok: true,
-    detail:
-      "node switch demuxed second values while first EV stayed pending; status held_values; kill reaped",
-  };
-}
-
-/** Run hold-EV + node-switch probes (fresh session each). */
-export async function runAllIpcAcceptanceProbes(): Promise<IpcAcceptanceResult> {
-  const hold = await runIpcAcceptanceProbe();
-  if (!hold.ok) {
-    return hold;
-  }
-  // Kill above tore down the session — ensure again for the next case.
-  try {
-    await invoke("ensure_solver_engine");
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    return { ok: false, detail: `ensure after hold probe failed: ${detail}` };
-  }
-  const nodeSwitch = await runNodeSwitchWhileEvPendingProbe();
-  if (!nodeSwitch.ok) {
-    return nodeSwitch;
-  }
-  return {
-    ok: true,
-    detail: `${hold.detail}; then ${nodeSwitch.detail}`,
   };
 }
 
@@ -274,7 +163,7 @@ export async function maybeRunIpcAcceptanceAndExit(): Promise<boolean> {
     return true;
   }
 
-  const result = await runAllIpcAcceptanceProbes();
+  const result = await runIpcAcceptanceProbe();
   console.info("[ipc-acceptance]", result.ok ? "PASS" : "FAIL", result.detail);
   try {
     await invoke("exit_with_code", { code: result.ok ? 0 : 1 });

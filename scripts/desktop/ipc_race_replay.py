@@ -3,19 +3,20 @@
 """One-command IPC race / bug-case replay.
 
 Runs small, declarative cases against either:
-  - the controllable ``ipc-test-sidecar`` (quick demux / withhold races), or
+  - the controllable ``ipc-test-sidecar`` (quick withhold / control-path races), or
   - a real ``solver-engine`` binary (engine failures with fixture + actions).
 
 Each case file keeps **input**, **action sequence**, **expected result**, and
 an optional **build_sha** together so reproduction is one command::
 
   python scripts/desktop/ipc_race_replay.py \\
-    scripts/desktop/ipc-race-cases/node-switch-while-ev-pending.json
+    scripts/desktop/ipc-race-cases/values-hold-status-cancel.json
 
-  python scripts/desktop/ipc_race_replay.py --all
+  python scripts/desktop/ipc_race_replay.py --all --filter-sidecar test
   python scripts/desktop/ipc_race_replay.py case.json --require-sha
 
-Windows CI builds the Rust test sidecar and runs ``--all --sidecar test``.
+**Pass bar (Windows CI):** Status and Cancel complete while EV is withheld
+(``values-hold-status-cancel``). UI A→B stale-EV is the browser track, not here.
 Longer flop / memory benchmarks stay in their own jobs — do not fold them here.
 """
 from __future__ import annotations

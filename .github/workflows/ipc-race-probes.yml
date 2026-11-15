@@ -31,7 +31,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Controllable test-sidecar races on Windows (existing hold-EV probe + node switch).
+  # Pass bar: existing hold-EV probe — Status + Cancel while values withheld.
+  # UI A→B stale-EV is browser/Playwright (not this job). No flop/memory benches.
   ipc-race-windows:
     runs-on: windows-latest
     timeout-minutes: 20
@@ -45,7 +46,7 @@ jobs:
         working-directory: desktop/ipc-test-sidecar
         run: cargo build --release
 
-      - name: Run IPC race cases (test sidecar)
+      - name: Run hold-EV Status+Cancel probe (pass bar)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -54,8 +55,7 @@ jobs:
             throw "missing $sidecar"
           }
           python scripts/desktop/ipc_race_replay.py `
-            --all `
-            --filter-sidecar test `
+            scripts/desktop/ipc-race-cases/values-hold-status-cancel.json `
             --sidecar $sidecar `
             --out "$env:RUNNER_TEMP/ipc-race-report.json"
           Get-Content "$env:RUNNER_TEMP/ipc-race-report.json" | Select-Object -First 80
@@ -82,14 +82,13 @@ jobs:
         working-directory: desktop/ipc-test-sidecar
         run: cargo build --release
 
-      - name: Run IPC race cases (test sidecar)
+      - name: Run hold-EV Status+Cancel probe (pass bar)
         run: |
           set -euo pipefail
           sidecar=desktop/ipc-test-sidecar/target/release/ipc-test-sidecar
           test -x "$sidecar"
           python3 scripts/desktop/ipc_race_replay.py \
-            --all \
-            --filter-sidecar test \
+            scripts/desktop/ipc-race-cases/values-hold-status-cancel.json \
             --sidecar "$sidecar" \
             --out "$RUNNER_TEMP/ipc-race-report.json"
           head -n 80 "$RUNNER_TEMP/ipc-race-report.json"

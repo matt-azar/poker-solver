@@ -5,7 +5,8 @@
 
 .DESCRIPTION
   Builds desktop/ipc-test-sidecar when needed, then runs ipc_race_replay.py.
-  Quick test-sidecar cases only by default — not flop/memory benches.
+  Default -All runs test-sidecar cases (pass bar: values-hold-status-cancel).
+  Not flop/memory benches; not UI A→B stale-EV.
 
 .PARAMETER Case
   Path to one case JSON (repeatable via remaining args not needed — pass -All).

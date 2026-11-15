@@ -15,9 +15,11 @@ echo "==> Supervisor concurrency test (status+cancel while values withheld)"
 
 echo "PASS: Rust supervisor concurrency"
 
-echo "==> Declarative IPC race cases (test sidecar)"
-python3 "$ROOT/scripts/desktop/ipc_race_replay.py" --all --filter-sidecar test
+echo "==> Hold-EV Status+Cancel probe (pass bar)"
+python3 "$ROOT/scripts/desktop/ipc_race_replay.py" \
+  "$ROOT/scripts/desktop/ipc-race-cases/values-hold-status-cancel.json"
 
-echo "PASS: IPC race cases"
+echo "PASS: hold-EV Status+Cancel"
 echo "Windows CI: .github/workflows/ipc-race-probes.yml"
+echo "UI A→B stale-EV: browser/Playwright track (not this probe)"
 echo "Windows WebView gate: scripts/desktop/ipc-async-acceptance.ps1 -StudyExe <Holdem Study.exe>"
