@@ -1089,6 +1089,122 @@ test "two-size flop streamed save open continue roundtrip" {
     try std.testing.expect(other.peakAllocatedBytes() <= other.memory_budget_bytes);
 }
 
+test "0.1.6 allow-all-in 0 oversized river opens and Continues" {
+    // Faithful 0.1.6 Study wire: allow-all-in 0 + pot-fraction 1 with stack < pot
+    // → check-only tree. Must reopen with matching strategy (Continue OK).
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 82.2
+        \\stack 61.4
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 1
+        \\allow-all-in 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\oop-river-bets 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(2);
+    try std.testing.expect(sess.canContinue());
+    const trained_before = sess.training.?.trained;
+
+    // Root must be check-only under legacy semantics (not Check / All-in).
+    const root = sess.game.?.nodes[0];
+    try std.testing.expect(root.kind == .decision);
+    try std.testing.expectEqual(@as(u8, 1), root.n_actions);
+    try std.testing.expectEqualStrings("Check", root.action_labels[0]);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "legacy_river.psol" });
+    defer std.testing.allocator.free(path);
+    try sess.save(path);
+
+    // Saved config still carries allow-all-in (original text).
+    var saved = try poker_formats.readFile(std.testing.allocator, path);
+    defer saved.deinit();
+    try std.testing.expect(std.mem.indexOf(u8, saved.config_text, "allow-all-in 0") != null);
+
+    var other = try Session.init(std.testing.allocator);
+    defer other.deinit();
+    try other.open(path);
+    try std.testing.expect(other.canContinue());
+    try std.testing.expectEqual(trained_before, other.training.?.trained);
+    const opened_root = other.game.?.nodes[0];
+    try std.testing.expectEqual(@as(u8, 1), opened_root.n_actions);
+    try other.train(3);
+    try std.testing.expectEqual(trained_before + 3, other.training.?.trained);
+    try std.testing.expect(other.canContinue());
+}
+
+test "modern oversize tree mismatches legacy allow-all-in 0 → IncompatibleSave" {
+    // Build with modern DS-26 (no allow-all-in key) → Check / All-in, then splice
+    // allow-all-in 0 into the checkpoint config. Open must not silently ignore:
+    // tree diverges → explicit IncompatibleSave.
+    const modern =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 82.2
+        \\stack 61.4
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 1
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\oop-river-bets 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(modern);
+    try sess.train(1);
+    const root = sess.game.?.nodes[0];
+    try std.testing.expectEqual(@as(u8, 2), root.n_actions);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "mismatched.psol" });
+    defer std.testing.allocator.free(path);
+    try sess.save(path);
+
+    var doc = try poker_formats.readFile(std.testing.allocator, path);
+    defer doc.deinit();
+    const spliced = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "street-config 1\nallow-all-in 0\n{s}",
+        .{doc.config_text["street-config 1\n".len..]},
+    );
+    defer std.testing.allocator.free(spliced);
+    std.testing.allocator.free(doc.config_text);
+    doc.config_text = try std.testing.allocator.dupe(u8, spliced);
+    try poker_formats.writeFile(std.testing.allocator, path, doc);
+
+    var other = try Session.init(std.testing.allocator);
+    defer other.deinit();
+    try std.testing.expectError(error.IncompatibleSave, other.open(path));
+}
+
 test {
     _ = session;
     _ = plan_preview;

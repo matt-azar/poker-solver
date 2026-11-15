@@ -70,6 +70,11 @@ pub const StreetSpec = struct {
     all_in_threshold: f64 = 0.5,
     pot_cap: f64 = 0,
     merge_threshold: f64 = 0,
+    /// Present only when street-config still carries legacy `allow-all-in`
+    /// (Study 0.1.6 / pre-DS-26). `null` = modern oversize→all-in. Never
+    /// emitted by `formatStreetConfig`. Honor the wire value on reopen so
+    /// tree+strategy match; do not silently ignore.
+    legacy_allow_all_in: ?bool = null,
     allow_three_bet: bool = true,
     max_raises: i32 = 1,
     first_to_act: i32 = 0,

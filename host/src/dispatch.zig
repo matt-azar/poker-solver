@@ -1374,9 +1374,14 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
                 error.InvalidStrategy => "invalid_strategy",
                 error.Busy => "busy",
                 error.BudgetExceeded => "budget_exceeded",
+                error.IncompatibleSave => "incompatible_save",
                 else => "open_failed",
             };
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+            const message: []const u8 = switch (err) {
+                error.IncompatibleSave => "Incompatible save: reopened tree/strategy does not match this checkpoint. Rebuild the tree in Study (0.1.6 allow-all-in / oversize rules diverged from current DS-26).",
+                else => @errorName(err),
+            };
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, message);
         };
         state.last_cancelled.store(false, .release);
         try state.setActiveJob(null);
@@ -2437,9 +2442,14 @@ fn ioWorker(task: *IoTask) void {
                     error.InvalidStrategy => "invalid_strategy",
                     error.Busy => "busy",
                     error.BudgetExceeded => "budget_exceeded",
+                    error.IncompatibleSave => "incompatible_save",
                     else => "open_failed",
                 };
-                var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+                const message: []const u8 = switch (err) {
+                    error.IncompatibleSave => "Incompatible save: reopened tree/strategy does not match this checkpoint. Rebuild the tree in Study (0.1.6 allow-all-in / oversize rules diverged from current DS-26).",
+                    else => @errorName(err),
+                };
+                var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, message) catch return;
                 defer err_reply.deinit();
                 state.writeReply(err_reply) catch {};
                 return;

@@ -13,6 +13,9 @@ pub const SessionError = error{
     OutOfMemory,
     BudgetExceeded,
     InvalidStrategy,
+    /// Reopened street-config compiles, but tree/strategy layout does not match
+    /// the checkpoint (e.g. betting-rule divergence). Explicit — never silent.
+    IncompatibleSave,
     /// Cooperative Stop during begin/compile (ZR-151). Prior solution kept.
     Cancelled,
     /// Average install failed after a committed CFR+ iteration (ZR-145).
@@ -1738,18 +1741,19 @@ pub const Session = struct {
         errdefer game.deinit();
 
         // Logical index must match compile (combo order + PSOL hand-major slot arities).
-        if (doc.oop_combos.len != game.hands.combos[0].len) return error.InvalidPsol;
-        if (doc.ip_combos.len != game.hands.combos[1].len) return error.InvalidPsol;
-        if (!std.mem.eql(i32, doc.oop_combos, game.hands.combos[0])) return error.InvalidPsol;
-        if (!std.mem.eql(i32, doc.ip_combos, game.hands.combos[1])) return error.InvalidPsol;
+        // Tree/strategy mismatch → IncompatibleSave (guided), not bare InvalidPsol.
+        if (doc.oop_combos.len != game.hands.combos[0].len) return error.IncompatibleSave;
+        if (doc.ip_combos.len != game.hands.combos[1].len) return error.IncompatibleSave;
+        if (!std.mem.eql(i32, doc.oop_combos, game.hands.combos[0])) return error.IncompatibleSave;
+        if (!std.mem.eql(i32, doc.ip_combos, game.hands.combos[1])) return error.IncompatibleSave;
         var layout = poker_engine.game.compile.buildPsolLayoutMap(self.allocator, game) catch |err| {
             if (err == error.OutOfMemory) return error.BudgetExceeded;
-            return error.InvalidPsol;
+            return error.IncompatibleSave;
         };
         defer layout.deinit();
-        if (doc.slot_actions.len != layout.psol_actions.len) return error.InvalidPsol;
-        if (!std.mem.eql(u16, doc.slot_actions, layout.psol_actions)) return error.InvalidPsol;
-        if (doc.average.len != @as(usize, @intCast(layout.psol_table_entries))) return error.InvalidPsol;
+        if (doc.slot_actions.len != layout.psol_actions.len) return error.IncompatibleSave;
+        if (!std.mem.eql(u16, doc.slot_actions, layout.psol_actions)) return error.IncompatibleSave;
+        if (doc.average.len != @as(usize, @intCast(layout.psol_table_entries))) return error.IncompatibleSave;
 
         const estimated = estimateSolutionBytes(game);
         if (estimated > budget_bytes) return error.BudgetExceeded;
