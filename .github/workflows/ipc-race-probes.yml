@@ -1,0 +1,105 @@
+# Quick IPC race / bug-case probes (test sidecar).
+# Separate from zig.yml flop/memory benches and windows-installer.yml E2E.
+name: IPC Race Probes
+
+on:
+  push:
+    branches: [main, zig-rewrite]
+    paths:
+      - "desktop/ipc-test-sidecar/**"
+      - "desktop/src/platform/ipcAcceptance.*"
+      - "scripts/desktop/ipc_race_replay.py"
+      - "scripts/desktop/ipc-race-replay.ps1"
+      - "scripts/desktop/ipc-race-cases/**"
+      - "scripts/desktop/ipc_test_sidecar.py"
+      - "scripts/desktop/ipc-async-acceptance.*"
+      - ".github/workflows/ipc-race-probes.yml"
+  pull_request:
+    paths:
+      - "desktop/ipc-test-sidecar/**"
+      - "desktop/src/platform/ipcAcceptance.*"
+      - "scripts/desktop/ipc_race_replay.py"
+      - "scripts/desktop/ipc-race-replay.ps1"
+      - "scripts/desktop/ipc-race-cases/**"
+      - "scripts/desktop/ipc_test_sidecar.py"
+      - "scripts/desktop/ipc-async-acceptance.*"
+      - ".github/workflows/ipc-race-probes.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ipc-race-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Pass bar: existing hold-EV probe — Status + Cancel while values withheld.
+  # UI A→B stale-EV is browser/Playwright (not this job). No flop/memory benches.
+  ipc-race-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build ipc-test-sidecar
+        working-directory: desktop/ipc-test-sidecar
+        run: cargo build --release
+
+      - name: Run hold-EV Status+Cancel probe (pass bar)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sidecar = "desktop/ipc-test-sidecar/target/release/ipc-test-sidecar.exe"
+          if (-not (Test-Path $sidecar)) {
+            throw "missing $sidecar"
+          }
+          python scripts/desktop/ipc_race_replay.py `
+            scripts/desktop/ipc-race-cases/values-hold-status-cancel.json `
+            --sidecar $sidecar `
+            --out "$env:RUNNER_TEMP/ipc-race-report.json"
+          Get-Content "$env:RUNNER_TEMP/ipc-race-report.json" | Select-Object -First 80
+
+      - name: Upload race report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipc-race-report-windows
+          path: ${{ runner.temp }}/ipc-race-report.json
+          if-no-files-found: ignore
+
+  # Same quick probes on Linux for faster PR signal (still not flop/memory benches).
+  ipc-race-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build ipc-test-sidecar
+        working-directory: desktop/ipc-test-sidecar
+        run: cargo build --release
+
+      - name: Run hold-EV Status+Cancel probe (pass bar)
+        run: |
+          set -euo pipefail
+          sidecar=desktop/ipc-test-sidecar/target/release/ipc-test-sidecar
+          test -x "$sidecar"
+          python3 scripts/desktop/ipc_race_replay.py \
+            scripts/desktop/ipc-race-cases/values-hold-status-cancel.json \
+            --sidecar "$sidecar" \
+            --out "$RUNNER_TEMP/ipc-race-report.json"
+          head -n 80 "$RUNNER_TEMP/ipc-race-report.json"
+
+  ipc-race-gate:
+    needs: [ipc-race-windows, ipc-race-linux]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both OS jobs
+        run: |
+          set -euo pipefail
+          [[ "${{ needs.ipc-race-windows.result }}" == "success" ]]
+          [[ "${{ needs.ipc-race-linux.result }}" == "success" ]]

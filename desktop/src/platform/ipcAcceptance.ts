@@ -5,6 +5,13 @@
  * controllable `ipc-test-sidecar`, the WebView drives concurrent Tauri invokes:
  * withhold one EV (`values`) reply while Status and Stop (`cancel`) still
  * complete. Proves WebView → Tauri → pipe ownership under a delayed reply.
+ *
+ * Pass bar (IPC layer): Status + Cancel complete while EV is withheld.
+ * UI A→B stale-EV (delayed reply for node A must not replace node B) belongs
+ * to the browser/Playwright track — not this probe.
+ *
+ * Pipe-level / CI (no WebView): `scripts/desktop/ipc_race_replay.py` case
+ * `values-hold-status-cancel`.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "./index";
