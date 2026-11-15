@@ -6,11 +6,6 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 /**
  * Public precomputed demo gate — serves the static `dist-public-demo` build
  * (separate from private `preview:scenario` / `?preview=`).
- *
- * Projects:
- *   - chromium (desktop) — existing gate
- *   - mobile-chrome-360 / mobile-chrome-390 — touch Chromium, Android-like
- *   - mobile-webkit-360 / mobile-webkit-390 — touch WebKit, iPhone Safari-like
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -35,46 +30,6 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-    },
-    {
-      name: "mobile-chrome-360",
-      use: {
-        ...devices["Pixel 5"],
-        defaultBrowserType: "chromium",
-        viewport: { width: 360, height: 740 },
-        hasTouch: true,
-        isMobile: true,
-      },
-    },
-    {
-      name: "mobile-chrome-390",
-      use: {
-        ...devices["Pixel 5"],
-        defaultBrowserType: "chromium",
-        viewport: { width: 390, height: 844 },
-        hasTouch: true,
-        isMobile: true,
-      },
-    },
-    {
-      name: "mobile-webkit-360",
-      use: {
-        ...devices["iPhone 13"],
-        defaultBrowserType: "webkit",
-        viewport: { width: 360, height: 740 },
-        hasTouch: true,
-        isMobile: true,
-      },
-    },
-    {
-      name: "mobile-webkit-390",
-      use: {
-        ...devices["iPhone 13"],
-        defaultBrowserType: "webkit",
-        viewport: { width: 390, height: 664 },
-        hasTouch: true,
-        isMobile: true,
-      },
     },
   ],
   webServer: {
