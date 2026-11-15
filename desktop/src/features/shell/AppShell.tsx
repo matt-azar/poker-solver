@@ -15,6 +15,7 @@ import { LibraryWorkspace } from "../library/LibraryWorkspace";
 import { SolutionsCatalogue } from "../study/SolutionsCatalogue";
 import { StudyWorkspace } from "../study/StudyWorkspace";
 import { StudyAssistantWindow } from "../assistant/StudyAssistantWindow";
+import { PreviewBanner } from "../../preview/PreviewBanner";
 import { HelpOverlay, MenuBar } from "./MenuBar";
 import { SettingsDialog } from "./SettingsDialog";
 import { StatusBar } from "./StatusBar";
@@ -94,6 +95,7 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
+      <PreviewBanner />
       <MenuBar
         workspace={workspace}
         onWorkspace={(id: WorkspaceId) => setWorkspace(id)}

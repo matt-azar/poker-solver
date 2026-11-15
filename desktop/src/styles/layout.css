@@ -12,14 +12,59 @@
  * Hands combo tiles (.hands-combo*) and the Study detail rail live in this file.
  */
 
-/* Root desktop chrome: menubar / body / status bar rows. */
+/* Root desktop chrome: optional preview banner / menubar / body / status bar. */
 .app-shell {
-  display: grid;
-  grid-template-rows: var(--menubar-h) 1fr var(--statusbar-h);
+  display: flex;
+  flex-direction: column;
   height: 100%;
   width: 100%;
   background: var(--app-bg);
   color: var(--text);
+}
+
+.app-shell > .menu-bar {
+  flex: 0 0 var(--menubar-h);
+}
+
+.app-shell > .app-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.app-shell > .status-bar {
+  flex: 0 0 var(--statusbar-h);
+}
+
+/* Browser-preview chrome (recorded fixture IPC) — not used in Tauri. */
+.preview-banner {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.preview-banner__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+}
+
+.preview-banner__title {
+  font-weight: 600;
+}
+
+.preview-banner__states {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 /* Top application menu bar (File/Edit/… + workspace switcher). */

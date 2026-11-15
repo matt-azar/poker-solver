@@ -11,7 +11,9 @@ vi.mock("../platform", () => ({
 }));
 
 import {
+  clearFixtureIpcHandlerForTests,
   getActiveTransport,
+  installFixtureIpcHandler,
   ipcCancel,
   ipcDeleteLock,
   ipcDeleteStrategyEdit,
@@ -481,6 +483,32 @@ describe("solverEngineRequest honest errors", () => {
     expect(err.ipcClass).toBe("connection_loss");
     expect(err.launchId).toBe("zig-abc");
     expect(err.message).toMatch(/pipe closed/i);
+  });
+});
+
+describe("recorded fixture IPC boundary", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    clearFixtureIpcHandlerForTests();
+    setNoEngineTransport();
+  });
+
+  it("serves installFixtureIpcHandler without Tauri invoke", async () => {
+    installFixtureIpcHandler(async (op) => ({
+      v: 2,
+      kind: "reply",
+      request_id: "f1",
+      op,
+      ok: true,
+      body: { fixture: true },
+    }));
+    try {
+      const env = await solverEngineRequest("status");
+      expect(env.body).toEqual({ fixture: true });
+      expect(invoke).not.toHaveBeenCalled();
+    } finally {
+      clearFixtureIpcHandlerForTests();
+    }
   });
 });
 
