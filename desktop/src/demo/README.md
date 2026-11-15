@@ -42,11 +42,25 @@ npm run preview:public-demo
 # http://127.0.0.1:4173/?demo=flop-explore
 ```
 
-Sample URLs:
+Sample URLs (local preview):
 
 - `/?demo=flop-explore`
 - `/?demo=flop-explore&node=p1.t-1.r-1`
 - `/?demo=river-lock&variant=oop-always-check`
+
+### GitHub Pages
+
+Workflow: `.github/workflows/public-demo-pages.yml`  
+Builds with `PUBLIC_DEMO_BASE=/poker-solver/` and deploys `dist-public-demo` on push to `main` (and `workflow_dispatch`).
+
+**One-time repo setting (Matt):** Settings → Pages → Build and deployment → Source: **GitHub Actions**.
+
+Public URL (after that setting + first green deploy):
+
+- https://matt-azar.github.io/poker-solver/?demo=flop-explore
+- https://matt-azar.github.io/poker-solver/?demo=river-lock&variant=oop-always-check
+
+Pack fetches use Vite `BASE_URL` so `/demo/…` resolves under the project path.
 
 ## Playwright
 

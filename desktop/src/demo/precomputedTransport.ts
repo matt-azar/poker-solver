@@ -11,6 +11,17 @@ import type { DemoCatalog, DemoExpected, DemoManifest } from "./types";
 
 const DEMO_ROOT = "/demo";
 
+/**
+ * Prefix a site-absolute path with Vite `BASE_URL` so GitHub Pages project
+ * hosting (`/poker-solver/`) and local `/` preview share one fetch path.
+ */
+export function withBase(path: string): string {
+  const base = import.meta.env.BASE_URL || "/";
+  const baseNorm = base.endsWith("/") ? base.slice(0, -1) : base;
+  const pathNorm = path.startsWith("/") ? path : `/${path}`;
+  return `${baseNorm}${pathNorm}`;
+}
+
 export type PrecomputedSession = {
   exampleId: string;
   variantId: string;
@@ -72,7 +83,8 @@ async function fetchJson<T>(
   fetched: string[],
   opts?: { optional?: boolean },
 ): Promise<T | null> {
-  const url = path.startsWith("/") ? path : `/${path}`;
+  const sitePath = path.startsWith("/") ? path : `/${path}`;
+  const url = withBase(sitePath);
   fetched.push(url);
   const res = await fetch(url, { cache: "no-cache" });
   if (!res.ok) {

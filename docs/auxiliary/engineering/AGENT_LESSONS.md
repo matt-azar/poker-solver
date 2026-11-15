@@ -74,6 +74,7 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 | Trap | Symptom | Do / Don't |
 | --- | --- | --- |
 | HTTP fallthrough while IPC is active | `Engine unreachable: Failed to fetch` after a healthy sidecar spawn (#288) | **Don't** `fetch("")` or hit `:8765` from Library/Study when IPC transport is selected. Block HTTP fallthrough. |
+| Public demo on GitHub Pages | Blank shell or `/demo/…` 404 under `matt-azar.github.io/poker-solver/` | Deploy `dist-public-demo` with `PUBLIC_DEMO_BASE=/poker-solver/`; pack fetches must honor Vite `BASE_URL` (`withBase`). Private `?preview=` QA stays a separate entry. One-time: Pages source = GitHub Actions. |
 | Library needs live pipes | Templates/ranges fail until solve works | Serve templates/ranges via **Tauri FS** (`library_*`) without requiring a healthy engine session (#288, #289) |
 | Console PE under GUI shell | Blank console; closing it kills the sidecar and bricks Study (#290) | Link `solver-engine` with Windows **GUI subsystem**; pass `CREATE_NO_WINDOW` on spawn as defense in depth. Keep CLI tools Console. |
 | `reg.exe` LocalDumps on setup | Several brief console flashes on every Windows Study start (not the sidecar) | `diagnostics::register_local_dumps` spawns Console-subsystem `reg add` — pass `CREATE_NO_WINDOW` (and null stdio) (#377). Sidecar already has the flag; do not blame or strip `solver-engine` GUI/`CREATE_NO_WINDOW` for these flashes. |

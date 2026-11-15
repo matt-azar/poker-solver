@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPrecomputedSession } from "./precomputedTransport";
+import {
+  createPrecomputedSession,
+  withBase,
+} from "./precomputedTransport";
 
 const catalog = {
   version: 1,
@@ -42,6 +45,12 @@ const rootNode = {
   action_frequencies: [0.62, 0.38],
   children: [{ action: "Check", node_id: "p1.t-1.r-1" }],
 };
+
+describe("withBase", () => {
+  it("leaves site-absolute paths alone when BASE_URL is /", () => {
+    expect(withBase("/demo/catalog.json")).toBe("/demo/catalog.json");
+  });
+});
 
 describe("createPrecomputedSession", () => {
   it("lazy-fetches only requested node packs", async () => {

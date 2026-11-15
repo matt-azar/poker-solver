@@ -18,10 +18,25 @@ function previewCommitSha(): string {
   }
 }
 
+function normalizeBase(raw: string | undefined): string {
+  const value = (raw || "/").trim() || "/";
+  if (value === "/") {
+    return "/";
+  }
+  const withLeading = value.startsWith("/") ? value : `/${value}`;
+  return withLeading.endsWith("/") ? withLeading : `${withLeading}/`;
+}
+
 export default defineConfig(({ mode }) => {
   const publicDemo = mode === "public-demo";
+  // GitHub Pages project site needs `/poker-solver/`; local preview keeps `/`.
+  // Set PUBLIC_DEMO_BASE (or VITE_BASE) in the deploy workflow only.
+  const base = publicDemo
+    ? normalizeBase(process.env.PUBLIC_DEMO_BASE || process.env.VITE_BASE)
+    : "/";
   return {
     plugins: [react()],
+    base,
     define: {
       "import.meta.env.VITE_PREVIEW_COMMIT_SHA": JSON.stringify(previewCommitSha()),
       // Public static build always boots precomputed demo; private QA uses
