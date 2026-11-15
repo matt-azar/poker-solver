@@ -36,6 +36,12 @@ cd desktop && npm ci && npm run tauri dev
 
 Browser-only `npm run dev` does **not** start an engine (no HTTP explorer fallback).
 
+Limited **river** live browser beta (isolated sessions over typed IPC): see
+[`services/river-beta/README.md`](services/river-beta/README.md) and open
+`http://127.0.0.1:5173/?river-beta=1` with the service running. Turn/flop live
+solving is out of scope until per-session CPU/RSS metrics from that beta are
+reviewed. Precomputed public demo and private QA preview remain separate entries.
+
 ## Requirements
 
 - Zig **0.14.1** (pinned in `.github/workflows/zig.yml`)

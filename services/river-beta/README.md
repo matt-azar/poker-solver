@@ -4,8 +4,9 @@ HTTPS-capable service that gives each visitor an **isolated** Zig
 `solver-engine` session over **typed IPC** (protocol 2). River boards only.
 
 This is **not** the precomputed public demo (`?demo=…` / `build:public-demo`)
-and **not** the private QA preview (`?preview=…`). Windows desktop Study
-stays on Tauri inherited-pipe IPC.
+and **not** the private QA preview (`?preview=…`). The thin browser client is
+`desktop/src/river-beta/` (`?river-beta=1`). Windows desktop Study stays on
+Tauri inherited-pipe IPC.
 
 ## Requirements
 

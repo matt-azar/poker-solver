@@ -9,6 +9,7 @@ import {
   setNoEngineTransport,
 } from "../engine/transport";
 import { clearBrowserPreviewForTests } from "../preview/previewMode";
+import { clearBrowserRiverBetaForTests } from "../river-beta/riverBetaMode";
 import { ensureEngine } from "./engine";
 
 function stubDemoFetch(): void {
@@ -35,6 +36,7 @@ function stubDemoFetch(): void {
 describe("ensureEngine", () => {
   afterEach(() => {
     clearBrowserDemoForTests();
+    clearBrowserRiverBetaForTests();
     clearBrowserPreviewForTests();
     clearFixtureIpcHandlerForTests();
     setNoEngineTransport();
@@ -70,6 +72,74 @@ describe("ensureEngine", () => {
     expect(getActiveTransport().kind === "ipc" && getActiveTransport().sidecar).toBe(
       "precomputed-pack",
     );
+  });
+
+  it("installs river-beta IPC proxy for ?river-beta=1", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = (init?.method || "GET").toUpperCase();
+        if (url.includes("/v1/sessions") && method === "POST") {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              session: { session_id: "rb-test", metrics: { peak_rss_bytes: 1 } },
+            }),
+            {
+              status: 200,
+              headers: {
+                "content-type": "application/json",
+                "X-River-Beta-Session": "rb-test",
+              },
+            },
+          );
+        }
+        if (url.includes("/solve")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              begin: { ok: true },
+              solve: { ok: true },
+              metrics: { peak_rss_bytes: 1, solve_count: 1 },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (url.includes("/ipc")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              envelope: {
+                v: 2,
+                kind: "reply",
+                op: "status",
+                ok: true,
+                body: { running: false },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (url.includes("/sessions/me") && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              session: { session_id: "rb-test", metrics: { peak_rss_bytes: 1 } },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response("nope", { status: 404 });
+      }),
+    );
+    window.history.replaceState({}, "", "/?river-beta=1");
+    const result = await ensureEngine();
+    expect(result.ok).toBe(true);
+    expect(getActiveTransport().kind).toBe("ipc");
+    expect(
+      getActiveTransport().kind === "ipc" && getActiveTransport().sidecar,
+    ).toBe("river-beta-service");
   });
 });
 

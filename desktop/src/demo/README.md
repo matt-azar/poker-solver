@@ -1,7 +1,8 @@
 # Public Hold’em Study demo (precomputed)
 
 Browse-only Study UI over static packs under `public/demo/`. Live solving stays
-on the Windows Tauri + `solver-engine` path. Private QA
+on the Windows Tauri + `solver-engine` path (or the limited river browser beta
+at `?river-beta=1` — see `desktop/src/river-beta/`). Private QA
 (`?preview=node-locking` / `npm run preview:scenario`) is a **separate** entry.
 
 ## Pack layout
