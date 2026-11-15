@@ -20,6 +20,11 @@ import {
   isBrowserPreviewMode,
   rearmBrowserPreviewTransport,
 } from "../preview/previewMode";
+import {
+  getActiveRiverBetaConfig,
+  installBrowserRiverBetaTransport,
+  isBrowserRiverBetaMode,
+} from "../river-beta/riverBetaMode";
 import { isTauriRuntime } from "./index";
 
 export type EnsureEngineResult =
@@ -33,11 +38,12 @@ export type EnsureEngineResult =
 /**
  * Packaged Study uses Zig `solver-engine` typed IPC only.
  * Browser / Vite-dev without Tauri cannot reach the engine — unless a
- * public precomputed demo (`?demo=…` / `VITE_PUBLIC_DEMO`) or a private
- * recorded-fixture preview (`?preview=…`) is selected.
+ * public precomputed demo (`?demo=…` / `VITE_PUBLIC_DEMO`), the limited
+ * river live-solving beta (`?river-beta=1`), or a private recorded-fixture
+ * preview (`?preview=…`) is selected.
  *
- * Public demo and private QA stay separate entry points: the public build
- * never arms preview failure-simulation states.
+ * Public demo, river beta, and private QA stay separate entry points: the
+ * public build never arms preview failure-simulation or live river beta.
  */
 export async function ensureEngine(): Promise<EnsureEngineResult> {
   if (!isTauriRuntime()) {
@@ -51,6 +57,36 @@ export async function ensureEngine(): Promise<EnsureEngineResult> {
         return {
           ok: true,
           status: transport.kind === "ipc" ? transport.label : demo.exampleId,
+          transport,
+        };
+      }
+    }
+    // Limited river live beta (HTTPS → isolated solver-engine IPC). Not in
+    // the public precomputed demo build; turn/flop remain out of scope.
+    if (!isPublicDemoBuild() && isBrowserRiverBetaMode()) {
+      try {
+        const beta =
+          getActiveRiverBetaConfig() ??
+          (await installBrowserRiverBetaTransport());
+        if (beta) {
+          engineClient.setBaseUrl(null);
+          const transport = getActiveTransport();
+          return {
+            ok: true,
+            status:
+              transport.kind === "ipc"
+                ? transport.label
+                : `river-beta ${beta.sessionId.slice(0, 8)}`,
+            transport,
+          };
+        }
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        const transport = setNoEngineTransport(`river-beta unavailable: ${error}`);
+        return {
+          ok: false,
+          status: "river-beta unavailable",
+          error,
           transport,
         };
       }

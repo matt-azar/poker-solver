@@ -125,6 +125,74 @@
   text-decoration: none;
 }
 
+/* Limited river live-solving beta — separate from ?demo= and ?preview=. */
+.river-beta-banner {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.river-beta-banner__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+}
+
+.river-beta-banner__title {
+  font-weight: 600;
+}
+
+.river-beta-banner__badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.river-beta-banner__hint {
+  opacity: 0.8;
+}
+
+.river-beta-banner__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.river-beta-banner__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.river-beta-banner__btn {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--border);
+  background: var(--surface, var(--panel));
+  color: inherit;
+  cursor: pointer;
+}
+
+.river-beta-banner__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Top application menu bar (File/Edit/… + workspace switcher). */
 .menu-bar {
   display: grid;

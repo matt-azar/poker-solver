@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "preview:public-demo": "vite preview --outDir dist-public-demo --host 127.0.0.1 --port 4173 --strictPort",
     "preview:scenario": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "river-beta": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

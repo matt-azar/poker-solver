@@ -17,6 +17,7 @@ import { StudyWorkspace } from "../study/StudyWorkspace";
 import { StudyAssistantWindow } from "../assistant/StudyAssistantWindow";
 import { DemoBanner } from "../../demo/DemoBanner";
 import { PreviewBanner } from "../../preview/PreviewBanner";
+import { RiverBetaBanner } from "../../river-beta/RiverBetaBanner";
 import { HelpOverlay, MenuBar } from "./MenuBar";
 import { SettingsDialog } from "./SettingsDialog";
 import { StatusBar } from "./StatusBar";
@@ -97,6 +98,7 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <DemoBanner />
+      <RiverBetaBanner />
       <PreviewBanner />
       <MenuBar
         workspace={workspace}
