@@ -257,11 +257,12 @@ test "text round trip node line selected unlocked legacy" {
     var round = try node_lock.parseLockSet(allocator, text);
     defer round.deinit();
     try std.testing.expectEqual(@as(usize, 3), round.size());
-    try std.testing.expect(round.find(42) != null);
-    try std.testing.expect(round.find(9) != null);
+    // Node-scoped flop-root entries live at makeLockKey (not lineLockKey).
+    try std.testing.expect(round.findExact(42, -1, -1) != null);
+    try std.testing.expect(round.findExact(9, -1, -1) != null);
     try std.testing.expect(round.findExact(12, -1, 7) != null);
-    try std.testing.expectEqual(@as(f64, 0.5), node_lock.lockedProbability(round.find(9).?.*, 4, 2).?);
-    try std.testing.expect(node_lock.lockedProbability(round.find(9).?.*, 1, 2) == null);
+    try std.testing.expectEqual(@as(f64, 0.5), node_lock.lockedProbability(round.findExact(9, -1, -1).?.*, 4, 2).?);
+    try std.testing.expect(node_lock.lockedProbability(round.findExact(9, -1, -1).?.*, 1, 2) == null);
 }
 
 test "per-combo combo_probs roundtrips in lock text" {

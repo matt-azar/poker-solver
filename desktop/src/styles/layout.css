@@ -3615,7 +3615,7 @@
 
 /* Slider + number + pct for Pio-style frequency editing. */
 .lock-prob-row--slider {
-  grid-template-columns: minmax(56px, 0.7fr) minmax(80px, 1.4fr) 64px auto;
+  grid-template-columns: minmax(72px, 0.85fr) minmax(80px, 1.4fr) 64px auto;
 }
 
 .lock-prob-slider {
@@ -3623,9 +3623,27 @@
   accent-color: var(--accent);
 }
 
+/* Protect checkbox + action label (Pio: disable adjustment of this action). */
+.lock-prob-protect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lock-prob-protect input {
+  margin: 0;
+}
+
 /* Action label on a lock probability row. */
 .lock-prob-row__label {
   font-family: var(--font-mono);
+}
+
+.lock-freq-hint {
+  font-size: 11px;
+  margin: 0 0 6px;
+  line-height: 1.35;
 }
 
 /* Numeric probability input for a lock action. */

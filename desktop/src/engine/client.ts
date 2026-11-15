@@ -844,6 +844,7 @@ export class EngineClient {
       scope?: "node" | "line";
       hand_indices?: number[];
       probs: number[];
+      combo_probs?: number[][];
     },
   ): Promise<unknown> {
     if (isIpcTransport()) {
@@ -863,10 +864,11 @@ export class EngineClient {
     solutionId: string,
     nodeId?: string,
     handIndex?: number,
+    scope?: "node" | "line",
   ): Promise<unknown> {
     if (isIpcTransport()) {
       void solutionId;
-      return ipcDeleteLock({ nodeId, handIndex });
+      return ipcDeleteLock({ nodeId, handIndex, scope });
     }
     const query = new URLSearchParams();
     if (nodeId) {
@@ -874,6 +876,9 @@ export class EngineClient {
     }
     if (handIndex !== undefined) {
       query.set("hand_index", String(handIndex));
+    }
+    if (scope) {
+      query.set("scope", scope);
     }
     const suffix = query.toString() ? `?${query}` : "";
     const { response, data } = await this.request(

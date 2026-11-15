@@ -101,14 +101,48 @@ describe("Node Locking workspace", () => {
 
   it("links frequency sliders so action probs stay normalized", async () => {
     const user = userEvent.setup();
+    useStudyStore.setState({
+      lockDraft: {
+        kind: "selected",
+        handIndices: [0, 1, 2],
+        probs: [0.6, 0.4],
+        comboProbs: [
+          [0.5, 0.5],
+          [0.6, 0.4],
+          [0.7, 0.3],
+        ],
+      },
+      nodeValues: {
+        node_id: "p0",
+        solution_id: "sol-test",
+        actions: ["Check", "Bet 50"],
+        action_ev: [
+          [1.0, 0.8],
+          [0.9, 0.85],
+          [0.7, 0.95],
+        ],
+      },
+    });
     render(<LockDrawer />);
     const slider = screen.getByRole("slider", { name: "Check frequency" });
     await user.click(slider);
-    // Direct store path covers linked redistribution used by the slider.
+    // Direct store path covers EV cross-combo redistribution used by the slider.
     useStudyStore.getState().setLockProbLinked(0, 0.8);
     const probs = useStudyStore.getState().lockDraft.probs;
-    expect(probs[0]).toBeCloseTo(0.8, 12);
-    expect(probs[1]).toBeCloseTo(0.2, 12);
+    expect(probs[0]).toBeCloseTo(0.8, 5);
+    expect(probs[1]).toBeCloseTo(0.2, 5);
+    expect(probs[0] + probs[1]).toBeCloseTo(1, 8);
+    // Per-combo rows stay intact (not collapsed to one shared mix).
+    const comboProbs = useStudyStore.getState().lockDraft.comboProbs;
+    expect(comboProbs).toHaveLength(3);
+    const checks = comboProbs!.map((row) => row[0]);
+    expect(new Set(checks.map((value) => value.toFixed(4))).size).toBeGreaterThan(1);
+  });
+
+  it("shows protect checkboxes beside frequency sliders", () => {
+    render(<LockDrawer />);
+    expect(screen.getByRole("checkbox", { name: "Protect Check" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Protect Bet 50" })).toBeTruthy();
   });
 
   it("closes after a successful Save & Close", async () => {
