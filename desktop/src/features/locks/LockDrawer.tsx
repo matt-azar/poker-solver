@@ -85,7 +85,6 @@ export function LockDrawer() {
   const locks = useStudyStore((s) => s.locks);
   const lockDraft = useStudyStore((s) => s.lockDraft);
   const setLockKind = useStudyStore((s) => s.setLockKind);
-  const setLockProbAt = useStudyStore((s) => s.setLockProbAt);
   const setLockProbLinked = useStudyStore((s) => s.setLockProbLinked);
   const seedLockFromStrategy = useStudyStore((s) => s.seedLockFromStrategy);
   const revertLockDraft = useStudyStore((s) => s.revertLockDraft);
@@ -109,6 +108,8 @@ export function LockDrawer() {
     col: number;
     text: string;
   } | null>(null);
+  /** Pio: checkbox beside slider — protected actions are not donors/recipients. */
+  const [protectedActions, setProtectedActions] = useState<boolean[]>([]);
 
   const actions = currentNode?.actions ?? [];
   const combos = currentNode?.combos;
@@ -117,6 +118,13 @@ export function LockDrawer() {
     () => (currentNode ? lockForNode(locks, currentNode.node_id) : null),
     [locks, currentNode],
   );
+
+  const protectedFlags = useMemo(() => {
+    if (protectedActions.length === actions.length) {
+      return protectedActions;
+    }
+    return actions.map((_, index) => Boolean(protectedActions[index]));
+  }, [protectedActions, actions]);
 
   const normalized = useMemo(() => normalizeProbs(lockDraft.probs), [lockDraft.probs]);
   const rawSum = normalized.sum;
@@ -161,11 +169,34 @@ export function LockDrawer() {
   ]);
 
   const draftMix = useMemo(() => {
+    const handIndices =
+      lockDraft.kind === "full" && combos?.length
+        ? combos.map((_, index) => index)
+        : lockDraft.handIndices;
+    if (
+      Array.isArray(lockDraft.comboProbs) &&
+      lockDraft.comboProbs.length === handIndices.length &&
+      actions.length > 0
+    ) {
+      return weightedStrategyMix(
+        lockDraft.comboProbs,
+        handIndices.map((_, index) => index),
+        actions.length,
+        null,
+      );
+    }
     if (!normalized.valid) {
       return null;
     }
     return normalized.probs;
-  }, [normalized]);
+  }, [
+    lockDraft.comboProbs,
+    lockDraft.handIndices,
+    lockDraft.kind,
+    combos,
+    actions.length,
+    normalized,
+  ]);
 
   const focusCombos = useMemo(() => {
     if (!focus || !currentNode) {
@@ -364,6 +395,10 @@ export function LockDrawer() {
 
             <section className="lock-drawer__section" aria-label="Probability row">
               <div className="lock-drawer__section-title">Action frequencies</div>
+              <p className="muted lock-freq-hint">
+                Sliders reallocate across selected combos by EV (near-ties mix). Protect
+                an action to keep its mass when adjusting others.
+              </p>
               {actions.length === 0 ? (
                 <p className="empty-hint">No actions at this node.</p>
               ) : (
@@ -372,9 +407,29 @@ export function LockDrawer() {
                     const value = Number.isFinite(lockDraft.probs[index])
                       ? lockDraft.probs[index]!
                       : 0;
+                    const isProtected = Boolean(protectedFlags[index]);
                     return (
-                      <label key={`${label}-${index}`} className="lock-prob-row lock-prob-row--slider">
-                        <span className="lock-prob-row__label">{label}</span>
+                      <div
+                        key={`${label}-${index}`}
+                        className="lock-prob-row lock-prob-row--slider"
+                      >
+                        <label className="lock-prob-protect">
+                          <input
+                            type="checkbox"
+                            checked={isProtected}
+                            aria-label={`Protect ${label}`}
+                            onChange={(event) => {
+                              setProtectedActions((prev) => {
+                                const next = actions.map((_, actionIndex) =>
+                                  Boolean(prev[actionIndex]),
+                                );
+                                next[index] = event.target.checked;
+                                return next;
+                              });
+                            }}
+                          />
+                          <span className="lock-prob-row__label">{label}</span>
+                        </label>
                         <input
                           type="range"
                           min={0}
@@ -384,7 +439,9 @@ export function LockDrawer() {
                           value={value}
                           aria-label={`${label} frequency`}
                           onChange={(event) => {
-                            setLockProbLinked(index, Number(event.target.value));
+                            setLockProbLinked(index, Number(event.target.value), {
+                              protectedActions: protectedFlags,
+                            });
                           }}
                         />
                         <input
@@ -396,11 +453,15 @@ export function LockDrawer() {
                           value={value}
                           onChange={(event) => {
                             const next = Number(event.target.value);
-                            setLockProbAt(index, Number.isFinite(next) ? next : 0);
+                            setLockProbLinked(
+                              index,
+                              Number.isFinite(next) ? next : 0,
+                              { protectedActions: protectedFlags },
+                            );
                           }}
                         />
                         <span className="muted tabular">{formatProbPct(value)}</span>
-                      </label>
+                      </div>
                     );
                   })}
                 </div>

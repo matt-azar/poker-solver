@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyFrequencySliderEdit,
   isHandLocked,
   lineLockNodeId,
   lockForNode,
   lockMutationCompletion,
   normalizeProbs,
+  reallocateComboStrategiesByEv,
   seedComboProbsFromStrategy,
   seedProbsFromStrategy,
   setLinkedActionProb,
@@ -141,6 +143,97 @@ describe("lock helpers", () => {
     expect(linked[0]).toBeCloseTo(0.7, 12);
     expect(linked[1]).toBeCloseTo(0.3, 12);
     expect(linked[0] + linked[1]).toBeCloseTo(1, 12);
+    const protectedLinked = setLinkedActionProb([0.5, 0.3, 0.2], 0, 0.7, [
+      false,
+      true,
+      false,
+    ]);
+    expect(protectedLinked[0]).toBeCloseTo(0.7, 12);
+    expect(protectedLinked[1]).toBeCloseTo(0.3, 12);
+    expect(protectedLinked[2]).toBeCloseTo(0.0, 12);
+  });
+
+  it("reallocates across combos by EV preference and mixes near-ties (Pio example)", () => {
+    // Raise / Call / Fold — pot-fraction EV from Pio Viewer manual.
+    const comboProbs = [
+      [1, 0, 0], // AA
+      [0.6, 0.4, 0], // KK
+      [0, 1, 0], // JJ (already 100% call — no capacity)
+      [0, 0, 1], // 77
+      [0, 0, 1], // 22
+    ];
+    const actionEv = [
+      [99.9, 100, 0],
+      [80, 79.5, 0],
+      [55, 66, 0],
+      [-80, -0.1, 0],
+      [-120, -60, 0],
+    ];
+    // Initial call mass: 0+0.4+1+0+0 = 1.4 / 5 = 0.28. Add 0.5 combo → 1.9/5 = 0.38.
+    // Threshold 1 matches Pio's "1% of pot" when EV is expressed in % of pot.
+    const toward = reallocateComboStrategiesByEv({
+      comboProbs,
+      actionEv,
+      targetAction: 1,
+      targetFreq: 1.9 / 5,
+      nearTieThreshold: 1,
+    });
+    expect(toward.aggregate[1]).toBeCloseTo(1.9 / 5, 5);
+    // AA has the best call preference; JJ has no capacity; 22 is far outside the band.
+    expect(toward.comboProbs[0][1]).toBeGreaterThan(0);
+    expect(toward.comboProbs[2][1]).toBeCloseTo(1, 8);
+    expect(toward.comboProbs[4][1]).toBeLessThan(0.05);
+    // Near-tie hands AA/KK/77 should share some of the added call (not dump all on AA).
+    const addedOnAa = toward.comboProbs[0][1] - comboProbs[0][1];
+    const addedOnKk = toward.comboProbs[1][1] - comboProbs[1][1];
+    const addedOn77 = toward.comboProbs[3][1] - comboProbs[3][1];
+    expect(addedOnAa + addedOnKk + addedOn77).toBeCloseTo(0.5, 4);
+    expect(addedOnAa).toBeLessThan(0.5);
+    expect(addedOnAa).toBeGreaterThan(0);
+  });
+
+  it("respects protected actions when reallocating by EV", () => {
+    const comboProbs = [
+      [0.5, 0.5, 0],
+      [0.5, 0.5, 0],
+    ];
+    const actionEv = [
+      [1, 0.9, 0],
+      [1, 0.9, 0],
+    ];
+    const result = reallocateComboStrategiesByEv({
+      comboProbs,
+      actionEv,
+      targetAction: 1,
+      targetFreq: 0.75,
+      protectedActions: [true, false, false],
+      nearTieThreshold: 0.01,
+    });
+    // Raise is protected — must stay 0.5 on each row; call can only grow from Fold (0).
+    expect(result.comboProbs[0][0]).toBeCloseTo(0.5, 8);
+    expect(result.comboProbs[1][0]).toBeCloseTo(0.5, 8);
+    // No unprotected donor mass → aggregate Call unchanged.
+    expect(result.aggregate[1]).toBeCloseTo(0.5, 8);
+  });
+
+  it("moves mass across combos toward an aggregate target without flattening rows", () => {
+    const edited = applyFrequencySliderEdit({
+      comboProbs: [
+        [1, 0],
+        [0, 1],
+      ],
+      actionEv: [
+        [1, 0],
+        [0, 1],
+      ],
+      targetAction: 0,
+      targetFreq: 0.5,
+      nearTieThreshold: 0.01,
+    });
+    expect(edited.aggregate[0]).toBeCloseTo(0.5, 5);
+    // Prefer increasing Check on the hand that already likes Check (row 0),
+    // and/or reducing Check only on the hand that hates it — rows stay distinct.
+    expect(edited.comboProbs[0][0]).not.toBeCloseTo(edited.comboProbs[1][0], 2);
   });
 
   it("discards draft writes when the live node diverges after await", () => {

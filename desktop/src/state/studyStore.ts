@@ -52,6 +52,7 @@ import {
   solutionNeedsReload,
 } from "../domain/browse";
 import {
+  applyFrequencySliderEdit,
   handIndexForCombo,
   isHandLocked,
   lockForNode,
@@ -430,8 +431,16 @@ interface StudyState {
   setLockKind: (kind: LockDraft["kind"]) => void;
   setLockProbs: (probs: number[]) => void;
   setLockProbAt: (index: number, value: number) => void;
-  /** Linked slider: set one action and redistribute the rest to sum to 1. */
-  setLockProbLinked: (index: number, value: number) => void;
+  /**
+   * Pio-style frequency slider: reallocate across selected combo rows using
+   * action EV (near-ties + protected actions). Falls back to proportional
+   * shared-row edit only when no combo selection / strategy rows exist.
+   */
+  setLockProbLinked: (
+    index: number,
+    value: number,
+    options?: { protectedActions?: boolean[]; nearTieThreshold?: number },
+  ) => void;
   toggleLockHand: (handIndex: number) => void;
   selectCombosForLock: (combos: string[]) => void;
   clearLockSelection: () => void;
@@ -1307,6 +1316,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       lockDraftBaseline: structuredClone(draft),
     });
     void get().refreshLocks();
+    // Frequency sliders need per-combo action EV; kick calculation if missing.
+    void get().calculateEv();
   },
   locks: [],
   lockDraft: defaultLockDraft(0),
@@ -1315,17 +1326,75 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     set({ lockDraft: { ...get().lockDraft, kind } });
   },
   setLockProbs(probs) {
-    // Shared-row edits drop per-combo freeze (slider path; rewrite deferred).
+    // Manual shared-row replace clears per-combo rows (rare; prefer sliders).
     set({ lockDraft: { ...get().lockDraft, probs: probs.slice(), comboProbs: undefined } });
   },
   setLockProbAt(index, value) {
-    const probs = get().lockDraft.probs.slice();
-    probs[index] = value;
-    set({ lockDraft: { ...get().lockDraft, probs, comboProbs: undefined } });
+    // Number box: same cross-combo EV path as the linked slider.
+    get().setLockProbLinked(index, value);
   },
-  setLockProbLinked(index, value) {
-    const probs = setLinkedActionProb(get().lockDraft.probs, index, value);
-    set({ lockDraft: { ...get().lockDraft, probs, comboProbs: undefined } });
+  setLockProbLinked(index, value, options) {
+    const draft = get().lockDraft;
+    const node = get().currentNode;
+    const actions = node?.actions?.length ?? draft.probs.length;
+    const handIndices =
+      draft.kind === "full" && node?.combos?.length
+        ? node.combos.map((_, handIndex) => handIndex)
+        : draft.handIndices.slice();
+    const comboProbs =
+      Array.isArray(draft.comboProbs) &&
+      draft.comboProbs.length === handIndices.length &&
+      draft.comboProbs.every((row) => row.length === actions)
+        ? draft.comboProbs.map((row) => row.slice())
+        : seedComboProbsFromStrategy(node?.strategy ?? null, handIndices, actions);
+
+    if (!comboProbs || comboProbs.length === 0 || handIndices.length === 0) {
+      const probs = setLinkedActionProb(
+        draft.probs,
+        index,
+        value,
+        options?.protectedActions,
+      );
+      set({ lockDraft: { ...draft, probs, comboProbs: undefined } });
+      return;
+    }
+
+    const values = get().nodeValues;
+    const actionEvRows =
+      values &&
+      !values.pending &&
+      !values.error &&
+      Array.isArray(values.action_ev)
+        ? handIndices.map((handIndex) => values.action_ev?.[handIndex] ?? [])
+        : null;
+    const marginal = Array.isArray(node?.marginal)
+      ? (node!.marginal as number[])
+      : null;
+    const weights = handIndices.map((handIndex) => {
+      if (marginal && Number.isFinite(marginal[handIndex])) {
+        return Math.max(0, Number(marginal[handIndex]));
+      }
+      return 1;
+    });
+
+    const edited = applyFrequencySliderEdit({
+      comboProbs,
+      actionEv: actionEvRows,
+      targetAction: index,
+      targetFreq: value,
+      protectedActions: options?.protectedActions,
+      weights,
+      nearTieThreshold: options?.nearTieThreshold,
+    });
+    set({
+      lockDraft: {
+        ...draft,
+        handIndices,
+        kind: draft.kind === "full" ? "full" : "selected",
+        probs: edited.aggregate,
+        comboProbs: edited.comboProbs,
+      },
+    });
   },
   toggleLockHand(handIndex) {
     const handIndices = toggleHandIndex(get().lockDraft.handIndices, handIndex);
