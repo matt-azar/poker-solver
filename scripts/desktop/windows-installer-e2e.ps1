@@ -210,13 +210,9 @@ function Find-StudyInstallDir([string]$Preferred) {
   foreach ($cand in $candidates) {
     if (-not (Test-Path -LiteralPath $cand)) { continue }
     $ui = Resolve-StudyUiExe $cand
-    $sidecar = Join-Path $cand "solver-engine.exe"
-    # Prefer dirs that have the UI; accept sidecar-only only for diagnostics below.
     if ($ui) {
       return [pscustomobject]@{ InstallDir = $cand; StudyExe = $ui }
     }
-    # Sidecar-only: keep scanning other candidates; failure diag lists contents.
-    void $sidecar
   }
 
   # Last-resort: find either known UI name under LocalAppData.
