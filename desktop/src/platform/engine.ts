@@ -1,6 +1,12 @@
 /** Tauri engine sidecar helpers — no-ops / soft-fail in the browser. */
 
 import { invoke } from "@tauri-apps/api/core";
+import {
+  getActiveDemoConfig,
+  installBrowserDemoTransport,
+  isBrowserDemoMode,
+  isPublicDemoBuild,
+} from "../demo/demoMode";
 import { engineClient } from "../engine/client";
 import {
   ensureSolverEngineIpc,
@@ -27,11 +33,29 @@ export type EnsureEngineResult =
 /**
  * Packaged Study uses Zig `solver-engine` typed IPC only.
  * Browser / Vite-dev without Tauri cannot reach the engine — unless a
- * recorded-fixture preview scenario is selected via `?preview=…`.
+ * public precomputed demo (`?demo=…` / `VITE_PUBLIC_DEMO`) or a private
+ * recorded-fixture preview (`?preview=…`) is selected.
+ *
+ * Public demo and private QA stay separate entry points: the public build
+ * never arms preview failure-simulation states.
  */
 export async function ensureEngine(): Promise<EnsureEngineResult> {
   if (!isTauriRuntime()) {
-    if (isBrowserPreviewMode()) {
+    // Public demo first — never mix private QA failure simulation into it.
+    if (isBrowserDemoMode()) {
+      const demo =
+        getActiveDemoConfig() ?? (await installBrowserDemoTransport());
+      if (demo) {
+        engineClient.setBaseUrl(null);
+        const transport = getActiveTransport();
+        return {
+          ok: true,
+          status: transport.kind === "ipc" ? transport.label : demo.exampleId,
+          transport,
+        };
+      }
+    }
+    if (!isPublicDemoBuild() && isBrowserPreviewMode()) {
       // First boot installs; Reconnect re-arms (clears dropped-connection).
       const preview = getActivePreviewConfig()
         ? rearmBrowserPreviewTransport()

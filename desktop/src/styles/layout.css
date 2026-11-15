@@ -67,6 +67,64 @@
   gap: var(--space-2);
 }
 
+
+/* Public precomputed demo chrome — separate from private ?preview= QA. */
+.demo-banner {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.demo-banner__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+}
+
+.demo-banner__title {
+  font-weight: 600;
+}
+
+.demo-banner__badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.demo-banner__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.demo-banner__field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.demo-banner__field select {
+  min-width: 10rem;
+  max-width: 16rem;
+}
+
+.demo-banner__download {
+  text-decoration: none;
+}
+
 /* Top application menu bar (File/Edit/… + workspace switcher). */
 .menu-bar {
   display: grid;
