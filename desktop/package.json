@@ -12,8 +12,11 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "preview:scenario": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:preview": "playwright test e2e/node-locking-preview.spec.ts",
     "sync:ai-context": "node ./scripts/sync-ai-context-packs.mjs",
     "check:ai-context": "node ./scripts/sync-ai-context-packs.mjs --check",
     "check:library-assets": "node ./scripts/validate-library-assets.mjs",
@@ -31,6 +34,7 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@tauri-apps/cli": "2.5.0",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

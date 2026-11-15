@@ -451,6 +451,7 @@ export function LockDrawer() {
                           step={0.01}
                           className="lock-prob-input tabular"
                           value={value}
+                          aria-label={`${label} frequency value`}
                           onChange={(event) => {
                             const next = Number(event.target.value);
                             setLockProbLinked(

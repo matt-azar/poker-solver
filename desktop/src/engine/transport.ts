@@ -50,16 +50,47 @@ export function setNoEngineTransport(reason?: string): NoEngineTransportInfo {
   return active;
 }
 
-export function setIpcTransport(info: Omit<IpcTransportInfo, "kind" | "label">): IpcTransportInfo {
+export function setIpcTransport(
+  info: Omit<IpcTransportInfo, "kind" | "label"> & { label?: string },
+): IpcTransportInfo {
   active = {
     kind: "ipc",
-    label: `solver-engine IPC (protocol ${info.protocol})`,
+    label: info.label?.trim()
+      ? info.label.trim()
+      : `solver-engine IPC (protocol ${info.protocol})`,
     protocol: info.protocol,
     launchId: info.launchId,
     sidecar: info.sidecar,
     workers: info.workers,
   };
   return active;
+}
+
+/**
+ * Browser-preview / Vitest recorded replies at the IPC boundary.
+ * When set, {@link solverEngineRequest} serves this handler instead of Tauri
+ * invoke — EngineClient still uses the typed IPC branches via `isIpcTransport()`.
+ */
+export type FixtureIpcHandler = (
+  op: string,
+  body: unknown,
+  jobId?: string | null,
+) => Promise<IpcRequestEnvelope>;
+
+let fixtureHandler: FixtureIpcHandler | null = null;
+
+/** Install or clear the recorded-fixture IPC handler (browser preview). */
+export function installFixtureIpcHandler(handler: FixtureIpcHandler | null): void {
+  fixtureHandler = handler;
+}
+
+export function hasFixtureIpcHandler(): boolean {
+  return fixtureHandler != null;
+}
+
+/** Test helper — drop fixture handler between cases. */
+export function clearFixtureIpcHandlerForTests(): void {
+  fixtureHandler = null;
 }
 
 type SolverEngineInfoRaw = {
@@ -258,6 +289,28 @@ export async function solverEngineRequest(
   body: unknown = null,
   jobId?: string | null,
 ): Promise<IpcRequestEnvelope> {
+  // Recorded browser-preview replies sit at the same IPC boundary as Tauri.
+  if (fixtureHandler) {
+    const env = await fixtureHandler(op, body, jobId);
+    if (env.ok === false) {
+      const code =
+        typeof env.error_code === "string" && env.error_code.trim()
+          ? env.error_code.trim()
+          : null;
+      const detail =
+        (typeof env.error_message === "string" && env.error_message.trim()) ||
+        code ||
+        `${op} failed`;
+      throw new SolverIpcError({
+        class: "engine_rejection",
+        message: detail,
+        errorCode: code,
+        op: typeof env.op === "string" ? env.op : op,
+        requestId: typeof env.request_id === "string" ? env.request_id : null,
+      });
+    }
+    return env;
+  }
   if (!isTauriRuntime()) {
     throw new Error("solverEngineRequest requires the Tauri shell");
   }

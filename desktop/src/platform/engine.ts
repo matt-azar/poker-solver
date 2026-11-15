@@ -8,6 +8,12 @@ import {
   setNoEngineTransport,
   type ActiveTransport,
 } from "../engine/transport";
+import {
+  getActivePreviewConfig,
+  installBrowserPreviewTransport,
+  isBrowserPreviewMode,
+  rearmBrowserPreviewTransport,
+} from "../preview/previewMode";
 import { isTauriRuntime } from "./index";
 
 export type EnsureEngineResult =
@@ -20,10 +26,26 @@ export type EnsureEngineResult =
 
 /**
  * Packaged Study uses Zig `solver-engine` typed IPC only.
- * Browser / Vite-dev without Tauri cannot reach the engine.
+ * Browser / Vite-dev without Tauri cannot reach the engine — unless a
+ * recorded-fixture preview scenario is selected via `?preview=…`.
  */
 export async function ensureEngine(): Promise<EnsureEngineResult> {
   if (!isTauriRuntime()) {
+    if (isBrowserPreviewMode()) {
+      // First boot installs; Reconnect re-arms (clears dropped-connection).
+      const preview = getActivePreviewConfig()
+        ? rearmBrowserPreviewTransport()
+        : installBrowserPreviewTransport();
+      if (preview) {
+        engineClient.setBaseUrl(null);
+        const transport = getActiveTransport();
+        return {
+          ok: true,
+          status: transport.kind === "ipc" ? transport.label : preview.scenario,
+          transport,
+        };
+      }
+    }
     const transport = setNoEngineTransport(
       "browser — Study engine requires the Tauri shell + solver-engine",
     );
