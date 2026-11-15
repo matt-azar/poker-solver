@@ -38,6 +38,7 @@ Windows: use `python` and `zig-out/bin/solver-engine.exe` the same way. Prefer `
 | Study overlap actions smoke | `scripts/zig/study-overlap-actions-smoke.py` | Alternating Solve/Stop/Continue/Open/nav with analysis in flight; late reply must not overwrite solution; memory settles; stdin EOF exits engine (ZR-152). Linux CI; Windows packaged suite → ZR-147/ma1pc. |
 | Async IPC supervisor (Rust) | `scripts/desktop/ipc-async-acceptance.sh` | Controllable `ipc-test-sidecar` withholds `values` while status/cancel complete; kill reaps. Proves dedicated writer/reader ownership (not Zig-only). Also covers admission saturation, status coalesce, short solve-admit (`cargo test --lib solver_engine::`). |
 | Async IPC WebView (Windows) | `scripts/desktop/ipc-async-acceptance.ps1 -StudyExe …` | Packaged/dev Study with `STUDY_IPC_ACCEPTANCE=1` + `STUDY_SOLVER_ENGINE` → WebView concurrent invokes; exit 0 on pass. |
+| IPC race / bug-case replay | `python scripts/desktop/ipc_race_replay.py --all --filter-sidecar test` | Declarative cases (input + actions + expected + optional `build_sha`). Ships `values-hold-status-cancel` (existing probe) and `node-switch-while-ev-pending`. One-command engine repros via `sidecar: engine` + `--require-sha`. **Not** flop/memory benches. |
 | Desktop Vitest | `cd desktop && npm test` | `EngineClient` IPC branches, Study store/lifecycle, locks/strategy-edits soft gates, analysis helpers, UI domain |
 | Desktop typecheck | `cd desktop && npx tsc -b` | Store/client nullability that vitest can miss |
 | AI context packs | `cd desktop && npm run check:ai-context` | Generated packs match `docs/ai-context/source/` |
@@ -50,6 +51,7 @@ Do **not** claim coverage from deleted C++ HTTP suites (`test_explorer_http.cpp`
 | --- | --- |
 | `.github/workflows/zig.yml` | `zig build` / `zig build test` + ready smoke + Study contract smoke (Linux + Windows; Windows pins `-Dcpu=x86_64_v2`) |
 | `.github/workflows/ci.yml` | Desktop Vitest / `tsc` / build (C++ explorer matrices removed) |
+| `.github/workflows/ipc-race-probes.yml` | Quick test-sidecar race cases on Windows (+ Linux). Separate from flop/memory benches and installer E2E. |
 | `.github/workflows/windows-installer.yml` | NSIS packs Zig `solver-engine` only; rejects leftover `holdem-explorer*.exe` |
 
 Packaged Tauri webview lifecycle and the Windows installer remain a release gate (Actions → **Windows Installer**). See [DESKTOP_UI.md](../../DESKTOP_UI.md).

@@ -1,0 +1,41 @@
+{
+  "id": "values-hold-status-cancel",
+  "title": "Status and Cancel complete while first EV (values) reply is withheld",
+  "sidecar": "test",
+  "build_sha": null,
+  "input": {},
+  "actions": [
+    {
+      "op": "ready",
+      "id": "ready",
+      "expect": { "ok": true, "body.protocol": 2 }
+    },
+    {
+      "op": "values",
+      "id": "values-0",
+      "body": { "node_index": 0 },
+      "expect": "pending",
+      "settle_ms": 120
+    },
+    { "sleep_ms": 50 },
+    {
+      "op": "status",
+      "id": "status",
+      "expect": { "ok": true, "body.held_values": true }
+    },
+    {
+      "op": "cancel",
+      "id": "cancel",
+      "job_id": "j-accept",
+      "expect": { "ok": true, "body.cancelled": true }
+    },
+    { "assert_pending": ["values-0"], "settle_ms": 80 }
+  ],
+  "expected": {
+    "pending": ["values-0"],
+    "replies": {
+      "status": { "ok": true, "body.held_values": true },
+      "cancel": { "ok": true, "body.cancelled": true }
+    }
+  }
+}
