@@ -48,9 +48,13 @@ test.describe("browser preview: node locking", () => {
     await checkValue.blur();
 
     await page.getByRole("button", { name: "Lock all hands" }).click();
-    await expect(page.getByText(/Full node lock applied|Locked .* combo/i)).toBeVisible({
-      timeout: 10_000,
-    });
+    // Scope to the drawer status — after a full-range lock the paint grid also
+    // contains "Locked"/"combo" text and a page-wide regex is strict-mode unsafe.
+    await expect(
+      page
+        .getByRole("dialog", { name: "Node locking" })
+        .locator(".lock-drawer__message"),
+    ).toHaveText(/Full node lock applied|Locked .* combo/i, { timeout: 10_000 });
 
     const lastLock = await page.evaluate(() => window.__STUDY_PREVIEW_FIXTURE__?.getLastPutLock());
     expect(lastLock?.node_id).toBe("p0.t-1.r-1");
