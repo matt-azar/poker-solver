@@ -52,7 +52,7 @@ Do **not** claim coverage from deleted C++ HTTP suites (`test_explorer_http.cpp`
 | `.github/workflows/zig.yml` | `zig build` / `zig build test` + ready smoke + Study contract smoke (Linux + Windows; Windows pins `-Dcpu=x86_64_v2`) |
 | `.github/workflows/ci.yml` | Desktop Vitest / `tsc` / build (C++ explorer matrices removed) |
 | `.github/workflows/ipc-race-probes.yml` | Windows (+ Linux) hold-EV probe: Status + Cancel while values withheld. Separate from flop/memory benches, installer E2E, and UI stale-EV. |
-| `.github/workflows/windows-installer.yml` | NSIS packs Zig `solver-engine` only; rejects leftover `holdem-explorer*.exe` |
+| `.github/workflows/windows-installer.yml` | NSIS packs Zig `solver-engine` only; rejects leftover `holdem-explorer*.exe`. Frontend Vite build is owned solely by Tauri `beforeBuildCommand` (no duplicate `npm run build` step). |
 
 Packaged Tauri webview lifecycle and the Windows installer remain a release gate (Actions → **Windows Installer**). See [DESKTOP_UI.md](../../DESKTOP_UI.md).
 
