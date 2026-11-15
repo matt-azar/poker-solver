@@ -18,27 +18,29 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
-const pickOpenPath = vi.fn(async () => null as string | null);
-const pickSavePath = vi.fn(async () => null as string | null);
+const openCatalogue = vi.fn();
 
-vi.mock("../../platform/browser", () => ({
-  getPlatform: () => ({
-    kind: "browser" as const,
-    pickOpenPath,
-    pickSavePath,
-    revealInFolder: async () => undefined,
-  }),
+vi.mock("../../state/solutionsCatalogueUi", () => ({
+  useSolutionsCatalogueUi: (
+    selector: (state: {
+      openCatalogue: typeof openCatalogue;
+      closeCatalogue: () => void;
+      mode: null;
+    }) => unknown,
+  ) =>
+    selector({
+      openCatalogue,
+      closeCatalogue: () => undefined,
+      mode: null,
+    }),
 }));
 
 const { useStudyStore } = await import("../../state/studyStore");
 const { SolveControls } = await import("./SolveControls");
 
-describe("SolveControls open/save pickers (R14)", () => {
+describe("SolveControls open/save catalogue (in-app)", () => {
   beforeEach(() => {
-    pickOpenPath.mockReset();
-    pickSavePath.mockReset();
-    pickOpenPath.mockResolvedValue(null);
-    pickSavePath.mockResolvedValue(null);
+    openCatalogue.mockReset();
     useStudyStore.setState({
       phase: "complete",
       solutionId: "sol-1",
@@ -71,33 +73,23 @@ describe("SolveControls open/save pickers (R14)", () => {
     }
   });
 
-  it("Open uses the platform picker and skips open on cancel", async () => {
+  it("Open opens the in-app catalogue (not an OS picker)", async () => {
     const user = userEvent.setup();
     render(<SolveControls />);
     await user.click(screen.getByRole("button", { name: "Open" }));
-    expect(pickOpenPath).toHaveBeenCalled();
+    expect(openCatalogue).toHaveBeenCalledWith("open");
     expect(useStudyStore.getState().openSolution).not.toHaveBeenCalled();
   });
 
-  it("Open loads the picked path", async () => {
-    pickOpenPath.mockResolvedValueOnce("/tmp/from-toolbar.psol");
-    const user = userEvent.setup();
-    render(<SolveControls />);
-    await user.click(screen.getByRole("button", { name: "Open" }));
-    expect(useStudyStore.getState().openSolution).toHaveBeenCalledWith(
-      "/tmp/from-toolbar.psol",
-    );
-  });
-
-  it("Save prompts Save As when no path is set; cancel leaves study alone", async () => {
+  it("Save without a path opens the catalogue save mode", async () => {
     const user = userEvent.setup();
     render(<SolveControls />);
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(pickSavePath).toHaveBeenCalled();
+    expect(openCatalogue).toHaveBeenCalledWith("save");
     expect(useStudyStore.getState().saveSolution).not.toHaveBeenCalled();
   });
 
-  it("Save reuses an existing path without prompting", async () => {
+  it("Save reuses an existing path without opening the catalogue", async () => {
     useStudyStore.setState({
       draft: {
         ...useStudyStore.getState().draft,
@@ -107,7 +99,7 @@ describe("SolveControls open/save pickers (R14)", () => {
     const user = userEvent.setup();
     render(<SolveControls />);
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(pickSavePath).not.toHaveBeenCalled();
+    expect(openCatalogue).not.toHaveBeenCalled();
     expect(useStudyStore.getState().saveSolution).toHaveBeenCalledWith(
       "/tmp/existing.psol",
     );

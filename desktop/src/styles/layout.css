@@ -4759,6 +4759,36 @@
   font-size: 12px;
 }
 
+.solutions-catalogue .seat-tree__browser {
+  max-height: min(42vh, 420px);
+  margin-bottom: 0.75rem;
+}
+
+.solutions-catalogue .seat-tree__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.solutions-catalogue .seat-tree__row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.solutions-catalogue .tree-catalogue__save-form select {
+  min-width: 10rem;
+}
+
 .tree-catalogue__footer {
   justify-content: flex-end;
 }

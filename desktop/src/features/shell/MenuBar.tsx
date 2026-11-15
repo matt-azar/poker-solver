@@ -1,8 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  openSolutionFile,
-  saveSolutionFileAs,
-} from "../../commands/solutionFiles";
 import { matchShortcut, SHORTCUTS } from "../../commands/shortcuts";
 import {
   canExecuteCalculateEv,
@@ -22,7 +18,6 @@ import {
   executeOpenStrategyEditor,
   executePause,
   executeResolveLocked,
-  executeSave,
   executeSolve,
   executeStop,
   studyCommandContextFromStore,
@@ -36,6 +31,7 @@ import {
 } from "../../platform/diagnostics";
 import { isTauriRuntime } from "../../platform";
 import { useSettingsStore } from "../../state/settingsStore";
+import { useSolutionsCatalogueUi } from "../../state/solutionsCatalogueUi";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
@@ -65,11 +61,9 @@ export function MenuBar({
   const continueSolve = useStudyStore((s) => s.continueSolve);
   const pause = useStudyStore((s) => s.pause);
   const stop = useStudyStore((s) => s.stop);
-  const saveSolution = useStudyStore((s) => s.saveSolution);
-  const openSolution = useStudyStore((s) => s.openSolution);
   const reopenLastCheckpoint = useStudyStore((s) => s.reopenLastCheckpoint);
   const lastCheckpointPath = useStudyStore((s) => s.lastCheckpointPath);
-  const updateDraft = useStudyStore((s) => s.updateDraft);
+  const openCatalogue = useSolutionsCatalogueUi((s) => s.openCatalogue);
   const toggleTheme = useStudyStore((s) => s.toggleTheme);
   const resetLayout = useStudyStore((s) => s.resetLayout);
   const layout = useStudyStore((s) => s.layout);
@@ -213,12 +207,7 @@ export function MenuBar({
             {
               label: "Open solution…",
               onClick: () => {
-                void openSolutionFile({
-                  getSolutionPath: () => useStudyStore.getState().draft.solutionPath,
-                  updateDraft,
-                  openSolution,
-                  saveSolution,
-                });
+                openCatalogue("open");
               },
             },
             {
@@ -226,21 +215,7 @@ export function MenuBar({
               disabled: !saveGate.ok,
               title: saveGate.reason,
               onClick: () => {
-                void executeSave({
-                  ...commandDeps(),
-                  save: async () =>
-                    saveSolutionFileAs({
-                      getSolutionPath: () =>
-                        useStudyStore.getState().draft.solutionPath,
-                      updateDraft,
-                      openSolution,
-                      saveSolution,
-                      confirmReplace: (path) =>
-                        window.confirm(
-                          `Save over "${path}"? An existing file at that path will be replaced.`,
-                        ),
-                    }),
-                });
+                openCatalogue("save");
               },
             },
             {

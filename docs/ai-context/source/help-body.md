@@ -9,7 +9,7 @@
 2. **Solve** (menu or `S`) — when the engine is connected and the draft is valid.
 3. **Study** — action history, range matrix, combo inspector, lower analysis dock.
 4. **Pause / Continue / Stop** — chunk-boundary pause; Continue resumes; Stop ends.
-5. **File → Save / Open** — PSOL solutions; Library lists recent solutions and templates.
+5. **File → Save / Open** — in-app solutions catalogue (folders allowed; Browse disk optional); Library lists recent solutions and templates.
 6. **Equity** — standalone equity calculator; Build can open current ranges there.
 
 ## Range catalogue (high level)

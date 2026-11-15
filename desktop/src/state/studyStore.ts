@@ -136,6 +136,7 @@ import {
 } from "../domain/setup";
 import { draftFromFullTemplate } from "../domain/setup/templateApply";
 import { getRangeProfileCatalogue } from "../domain/profiles";
+import { getSolutionsCatalogue } from "../domain/solutionsCatalogue";
 import { EngineError, engineClient } from "../engine/client";
 import {
   studyIpcFeatureAvailable,
@@ -3845,12 +3846,29 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     set({
       libraryLists: { ...get().libraryLists, loading: true },
     });
+    // In-app solutions catalogue is the primary recent source (OS picker is
+    // secondary). Merge any engine/Tauri recent list without dropping catalogue.
+    const fromCatalogue: LibraryRecentEntry[] = getSolutionsCatalogue()
+      .list()
+      .map((entry) => ({
+        path: entry.path,
+        name: entry.folder
+          ? `${entry.folder}/${entry.displayName}`
+          : entry.displayName,
+        mtime: 0,
+      }));
     try {
       const data = await engineClient.recentSolutions();
+      const fromEngine = asRecentList(data);
+      const seen = new Set(fromCatalogue.map((entry) => entry.path));
+      const merged = [
+        ...fromCatalogue,
+        ...fromEngine.filter((entry) => !seen.has(entry.path)),
+      ];
       set({
         libraryLists: {
           ...get().libraryLists,
-          recent: asRecentList(data),
+          recent: merged,
           loading: false,
         },
         connection: "connected",
@@ -3858,6 +3876,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     } catch (error) {
       // Library catalogue failures must not paint "Engine unreachable" over a
       // healthy solver-engine IPC session (post-#286 Zig-only packaging).
+      // Catalogue entries still populate Recent when the engine list fails.
       const detail =
         error instanceof EngineError
           ? error.message
@@ -3865,8 +3884,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
             ? error.message
             : "Failed to load recent solutions";
       set({
-        libraryLists: { ...get().libraryLists, recent: [], loading: false },
-        message: `Library recent list unavailable: ${detail}`,
+        libraryLists: {
+          ...get().libraryLists,
+          recent: fromCatalogue,
+          loading: false,
+        },
+        message:
+          fromCatalogue.length > 0
+            ? get().message
+            : `Library recent list unavailable: ${detail}`,
       });
     }
   },
