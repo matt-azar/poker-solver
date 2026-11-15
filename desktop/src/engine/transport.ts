@@ -495,6 +495,7 @@ export async function ipcPutLock(body: {
   scope?: "node" | "line";
   hand_indices?: number[];
   probs: number[];
+  combo_probs?: number[][];
 }): Promise<unknown> {
   const env = await solverEngineRequest("put_lock", body);
   return env.body;

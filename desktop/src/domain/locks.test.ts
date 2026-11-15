@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   applyFrequencySliderEdit,
+  buildFullRangeLockDraft,
+  comboProbsRowsForHands,
   isHandLocked,
   lineLockNodeId,
   lockForNode,
   lockMutationCompletion,
   normalizeProbs,
   reallocateComboStrategiesByEv,
+  rematerializeComboProbsByHand,
   seedComboProbsFromStrategy,
   seedProbsFromStrategy,
   setLinkedActionProb,
@@ -61,6 +64,53 @@ describe("lock helpers", () => {
       [1, 0],
       [0, 1],
     ]);
+  });
+
+  it("keys draft rows by combo identity across selection changes", () => {
+    const strategy = [
+      [1, 0],
+      [0, 1],
+      [0.5, 0.5],
+    ];
+    const afterEdit = rematerializeComboProbsByHand({
+      previous: { 0: [0.8, 0.2] },
+      nextHandIndices: [0, 1],
+      strategy,
+      actionCount: 2,
+    });
+    expect(afterEdit?.[0]).toEqual([0.8, 0.2]);
+    expect(afterEdit?.[1]).toEqual([0, 1]);
+
+    // Deselect 0, select 2 — combo 0's edit must not attach to combo 2.
+    const afterToggle = rematerializeComboProbsByHand({
+      previous: afterEdit,
+      nextHandIndices: [1, 2],
+      strategy,
+      actionCount: 2,
+    });
+    expect(afterToggle?.[0]).toBeUndefined();
+    expect(afterToggle?.[1]).toEqual([0, 1]);
+    expect(afterToggle?.[2]).toEqual([0.5, 0.5]);
+    expect(comboProbsRowsForHands(afterToggle, [1, 2])).toEqual([
+      [0, 1],
+      [0.5, 0.5],
+    ]);
+  });
+
+  it("builds an explicit full-range freeze from each combo's mix", () => {
+    const draft = buildFullRangeLockDraft({
+      strategy: [
+        [1, 0],
+        [0, 1],
+      ],
+      actionCount: 2,
+      handCount: 2,
+      existingByHand: { 0: [0.75, 0.25] },
+    });
+    expect(draft?.kind).toBe("selected");
+    expect(draft?.handIndices).toEqual([0, 1]);
+    expect(draft?.comboProbsByHand?.[0]).toEqual([0.75, 0.25]);
+    expect(draft?.comboProbsByHand?.[1]).toEqual([0, 1]);
   });
 
   it("marks full-node locks as locking every hand", () => {
