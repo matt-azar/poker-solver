@@ -53,7 +53,7 @@ Do **not** claim coverage from deleted C++ HTTP suites (`test_explorer_http.cpp`
 | --- | --- |
 | `.github/workflows/zig.yml` | `zig build` / `zig build test` + ready smoke + Study contract smoke (Linux + Windows; Windows pins `-Dcpu=x86_64_v2`) |
 | `.github/workflows/ci.yml` | Desktop Vitest / `tsc` / build (C++ explorer matrices removed) |
-| `.github/workflows/public-demo-pages.yml` | Precomputed public Study demo: `npm run build:public-demo` + Playwright, then deploy `desktop/dist-public-demo` to GitHub Pages (`PUBLIC_DEMO_BASE=/poker-solver/`). One-time: repo Pages source = GitHub Actions. Not live solving; Windows download stays on GitHub Releases. |
+| `.github/workflows/public-demo-pages.yml` | Precomputed public Study demo: `npm run build:public-demo` + Playwright (desktop Chromium + touch Chromium/WebKit @ 360/390), then deploy `desktop/dist-public-demo` to GitHub Pages (`PUBLIC_DEMO_BASE=/poker-solver/`). One-time: repo Pages source = GitHub Actions. Not live solving; Windows download stays on GitHub Releases. |
 | `.github/workflows/ipc-race-probes.yml` | Windows (+ Linux) hold-EV probe: Status + Cancel while values withheld. Separate from flop/memory benches, installer E2E, and UI stale-EV. |
 | `.github/workflows/windows-installer.yml` | NSIS packs Zig `solver-engine` only; rejects leftover `holdem-explorer*.exe`. Frontend Vite build is owned solely by Tauri `beforeBuildCommand` (no duplicate `npm run build` step). Follow-on `windows-installer-e2e` runs **Stage A then Stage B** against that artifact. |
 

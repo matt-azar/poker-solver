@@ -6,6 +6,17 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 /**
  * Public precomputed demo gate — serves the static `dist-public-demo` build
  * (separate from private `preview:scenario` / `?preview=`).
+ *
+ * Projects:
+ *   - chromium (desktop) — existing gate
+ *   - mobile-chrome-360 / mobile-chrome-390 — touch Chromium (Android Chrome–like)
+ *   - mobile-webkit-360 / mobile-webkit-390 — touch WebKit (iPhone Safari–like)
+ *
+ * Portrait (360×740, 390×844/664) is the primary phone layout under
+ * `data-phone-demo` (max-width 540px). Landscape coverage asserts no horizontal
+ * scroll after rotating those viewports (short height + coarse pointer also
+ * matches the phone MQ). Real device chrome (iOS Safari / Android Chrome) may
+ * still differ slightly from Playwright's WebKit/Chromium shells.
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -30,6 +41,46 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "mobile-chrome-360",
+      use: {
+        ...devices["Pixel 5"],
+        defaultBrowserType: "chromium",
+        viewport: { width: 360, height: 740 },
+        hasTouch: true,
+        isMobile: true,
+      },
+    },
+    {
+      name: "mobile-chrome-390",
+      use: {
+        ...devices["Pixel 5"],
+        defaultBrowserType: "chromium",
+        viewport: { width: 390, height: 844 },
+        hasTouch: true,
+        isMobile: true,
+      },
+    },
+    {
+      name: "mobile-webkit-360",
+      use: {
+        ...devices["iPhone 13"],
+        defaultBrowserType: "webkit",
+        viewport: { width: 360, height: 740 },
+        hasTouch: true,
+        isMobile: true,
+      },
+    },
+    {
+      name: "mobile-webkit-390",
+      use: {
+        ...devices["iPhone 13"],
+        defaultBrowserType: "webkit",
+        viewport: { width: 390, height: 664 },
+        hasTouch: true,
+        isMobile: true,
+      },
     },
   ],
   webServer: {

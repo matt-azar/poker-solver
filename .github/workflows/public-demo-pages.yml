@@ -41,8 +41,9 @@ jobs:
         run: npm ci
       - name: Build public demo (local base)
         run: npm run build:public-demo
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright Chromium + WebKit
+        # Desktop chromium + mobile-chrome-* / mobile-webkit-* projects.
+        run: npx playwright install --with-deps chromium webkit
       - name: Public demo Playwright
         run: npm run test:e2e:public-demo
       - name: Upload Playwright report on failure

@@ -69,12 +69,19 @@ Pack fetches use Vite `BASE_URL` so `/demo/…` resolves under the project path.
 cd desktop
 npm run build:public-demo
 npm run test:e2e:public-demo
+# optional focus:
+# npx playwright test -c playwright.public-demo.config.ts --project=mobile-webkit-390
 ```
+
+Projects: desktop Chromium + touch Chromium/WebKit at 360 and 390 portrait.
+Mobile suites cover flop child → hand sheet → dismiss → continue, river
+baseline → OOP always Check + URL restore, and no horizontal overflow
+(portrait + rotated landscape). Expectation notes live in
+`playwright.public-demo.config.ts` (iPhone Safari / Android Chrome shells).
 
 Phone layout (public demo ≤540px / short landscape): stacked column, square
 full-width matrix, hand inspect bottom sheet, no resize handles. Live
 `?river-beta=` is a separate entry and is unchanged by this layout.
-Mobile Playwright projects are owned by the phone Playwright suite (not this layout change).
 
 ## Download for Windows
 
