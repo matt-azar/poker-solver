@@ -16,7 +16,7 @@ For the full unified role (Q&A + mutating setup), see `unified.md`.
 2. **Solve** (menu or `S`) — when the engine is connected and the draft is valid.
 3. **Study** — action history, range matrix, combo inspector, lower analysis dock.
 4. **Pause / Continue / Stop** — chunk-boundary pause; Continue resumes; Stop ends.
-5. **File → Save / Open** — PSOL solutions; Library lists recent solutions and templates.
+5. **File → Save / Open** — in-app solutions catalogue (folders allowed; Browse disk optional); Library lists recent solutions and templates.
 6. **Equity** — standalone equity calculator; Build can open current ranges there.
 
 ## Range catalogue (high level)
@@ -105,7 +105,7 @@ Settings dialog (menu **Settings → Open settings…**): algorithm draft (`cfr_
 - **Value / Bluffs** lists betting candidates; equity mode includes node equity and **After call** (panel-only; assistant bluff candidates use node equity).
 - The floating Study assistant reads the **current** Study decision (path, seat, strategy, selected hand) and lists Value / Bluffs-style **bluff candidates** for IP/OOP via bounded read-only tools. Those Q&A tools reuse the analysis scheduler and do **not** change Study selection. `compare_runouts` is the exception that opens Compare runouts with filters. The assistant never starts Solve.
 - Solve / Pause / Continue / Stop from Solve menu or shortcuts (`S` solve when connected + draft valid).
-- File → Save / Open — PSOL solutions; Library lists recent solutions and templates.
+- File → Save / Open — in-app solutions catalogue with user folders (OS file picker is secondary Browse disk); Library lists recent solutions and templates.
 - Locks: Tree → Node locking… . Strategy edits: separate drawer.
 - Equity workspace: standalone 2–6 player calculator (no solution required).
 

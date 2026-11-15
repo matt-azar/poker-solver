@@ -3,7 +3,7 @@ import {
   executeSave,
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
-import { openSolutionFile, saveSolutionFile } from "../../commands/solutionFiles";
+import { useSolutionsCatalogueUi } from "../../state/solutionsCatalogueUi";
 import { useStudyStore } from "../../state/studyStore";
 
 export function SolveControls() {
@@ -15,8 +15,7 @@ export function SolveControls() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
   const saveSolution = useStudyStore((s) => s.saveSolution);
-  const openSolution = useStudyStore((s) => s.openSolution);
-  const updateDraft = useStudyStore((s) => s.updateDraft);
+  const openCatalogue = useSolutionsCatalogueUi((s) => s.openCatalogue);
 
   const ctx = studyCommandContextFromStore({
     phase,
@@ -35,15 +34,6 @@ export function SolveControls() {
     };
   }
 
-  function solutionFileDeps() {
-    return {
-      getSolutionPath: () => useStudyStore.getState().draft.solutionPath,
-      updateDraft,
-      openSolution,
-      saveSolution,
-    };
-  }
-
   return (
     <div className="solve-controls" role="group" aria-label="Solution files">
       <button
@@ -51,19 +41,25 @@ export function SolveControls() {
         className="toolbar-btn"
         disabled={!saveGate.ok}
         title={saveGate.reason}
-        onClick={() =>
-          void executeSave({
-            ...commandDeps(),
-            save: async () => saveSolutionFile(solutionFileDeps()),
-          })
-        }
+        onClick={() => {
+          const path = useStudyStore.getState().draft.solutionPath.trim();
+          if (path) {
+            void executeSave({
+              ...commandDeps(),
+              save: async () => saveSolution(path),
+            });
+            return;
+          }
+          // No path yet — in-app catalogue (not OS picker).
+          openCatalogue("save");
+        }}
       >
         Save
       </button>
       <button
         type="button"
         className="toolbar-btn"
-        onClick={() => void openSolutionFile(solutionFileDeps())}
+        onClick={() => openCatalogue("open")}
       >
         Open
       </button>

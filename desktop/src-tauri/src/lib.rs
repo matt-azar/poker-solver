@@ -4,6 +4,7 @@
 mod assistant_secrets;
 mod diagnostics;
 mod library;
+mod solutions;
 mod solver_admission;
 mod solver_engine;
 mod solver_ipc;
@@ -195,6 +196,8 @@ pub fn run() {
             library::library_list_recent,
             library::library_read_template,
             library::library_read_range,
+            solutions::solutions_root,
+            solutions::solutions_ensure_parent,
             assistant_secret_get,
             assistant_secret_set,
             assistant_secret_clear,

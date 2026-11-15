@@ -4,6 +4,7 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { useSettingsStore } from "../../state/settingsStore";
+import { useSolutionsCatalogueUi } from "../../state/solutionsCatalogueUi";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { applyDocumentTheme, useThemeStore } from "../../state/themeStore";
 import { useHelpChatStore } from "../../state/assistantWindowStore";
@@ -11,6 +12,7 @@ import { BuildWorkspace } from "../build/BuildWorkspace";
 import { CompareWorkspace } from "../compare/CompareWorkspace";
 import { EquityWorkspace } from "../equity/EquityWorkspace";
 import { LibraryWorkspace } from "../library/LibraryWorkspace";
+import { SolutionsCatalogue } from "../study/SolutionsCatalogue";
 import { StudyWorkspace } from "../study/StudyWorkspace";
 import { StudyAssistantWindow } from "../assistant/StudyAssistantWindow";
 import { HelpOverlay, MenuBar } from "./MenuBar";
@@ -34,6 +36,8 @@ export function AppShell() {
   const reopenLastCheckpoint = useStudyStore((s) => s.reopenLastCheckpoint);
   const assistantOpen = useHelpChatStore((s) => s.layout.visible);
   const toggleAssistant = useHelpChatStore((s) => s.toggleVisible);
+  const catalogueMode = useSolutionsCatalogueUi((s) => s.mode);
+  const closeCatalogue = useSolutionsCatalogueUi((s) => s.closeCatalogue);
   const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
@@ -114,6 +118,43 @@ export function AppShell() {
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
       <SettingsDialog />
       <StudyAssistantWindow />
+      {catalogueMode ? (
+        <div
+          className="catalogue-modal-overlay"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeCatalogue();
+            }
+          }}
+        >
+          <div
+            className="catalogue-modal catalogue-modal--tree"
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              catalogueMode === "save" ? "Save solution" : "Open solution"
+            }
+          >
+            <div className="range-editor__head">
+              <h2>
+                {catalogueMode === "save" ? "Save solution" : "Open solution"}
+              </h2>
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={() => closeCatalogue()}
+              >
+                Close
+              </button>
+            </div>
+            <SolutionsCatalogue
+              mode={catalogueMode}
+              onClose={() => closeCatalogue()}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
