@@ -133,12 +133,9 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      # Unit suite lives in CI's path-gated `desktop` job (ci.yml), not here —
-      # this workflow already pays for Zig + Tauri NSIS and keeps the
-      # installer path focused on packaging.
-      - name: Build desktop UI
-        working-directory: desktop
-        run: npm run build
+      # Frontend build is owned by Tauri (`beforeBuildCommand`: `npm run build`
+      # in desktop/src-tauri/tauri.conf.json). Do not run `npm run build` here —
+      # a second Vite pass only lengthens the NSIS job.
 
       - name: Prepare solver-engine sidecar
         shell: pwsh
