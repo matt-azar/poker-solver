@@ -192,13 +192,21 @@ test.describe("public demo (precomputed packs)", () => {
         return;
       }
       await expect(sheet).toBeVisible();
-      // Combo freqs / action EV tiles from ComboInspector.
+      // Sheet variant: ComboInspector shows Freq · EV compact metrics.
       const comboTile = sheet.locator(".hands-combo[data-present='true']").first();
       await expect(comboTile).toBeVisible();
-      await expect(comboTile.locator(".hands-combo__metric-value").first()).toBeVisible();
+      await expect(comboTile.locator(".hands-combo__metric-tag").first()).toHaveText(
+        "Freq · EV",
+      );
+      await expect(comboTile.locator(".hands-combo__metric-value").first()).toHaveText(
+        /% · /,
+      );
       await expect(
         page.getByRole("button", { name: "Close hand inspector" }),
       ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Clear selection" }),
+      ).toHaveCount(0);
 
       // Child node freqs/EV still match export while sheet is open.
       await expect
