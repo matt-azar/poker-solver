@@ -8,6 +8,7 @@ const node_id = poker_engine.analysis.node_id;
 const equity = poker_engine.analysis.equity;
 const compile = poker_engine.game.compile;
 const training_state = poker_engine.solve.training_state;
+const frozen_walk = poker_engine.solve.frozen_walk;
 
 pub const ReportError = error{
     UnknownNode,
@@ -393,6 +394,7 @@ fn comboKey(combo: []const u8, buf: *[4]u8) []const u8 {
 }
 
 /// After-call equity join for Value/Bluffs Mode B (caller frees body).
+/// When `ctx` is set, reuses warm FrozenCtx checkdown (same path as Study equity).
 pub fn buildValueBluffsPostCallBody(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
@@ -400,14 +402,7 @@ pub fn buildValueBluffsPostCallBody(
     located: node_id.ParsedNodeId,
     solution_id: u64,
     min_bet_freq: f64,
-    equity_fn: *const fn (
-        allocator: std.mem.Allocator,
-        game: compile.CompiledGame,
-        published: training_state.PublishedPolicy,
-        node_index: u32,
-        turn: i32,
-        river: i32,
-    ) equity.EquityError!equity.ShowdownEquity,
+    ctx: ?*frozen_walk.FrozenCtx,
 ) ReportError![]u8 {
     var hero = inspect.inspectNode(
         allocator,
@@ -499,14 +494,27 @@ pub fn buildValueBluffsPostCallBody(
             missing += 1;
             continue;
         };
-        var page = equity_fn(
-            allocator,
-            game,
-            published,
-            call_loc.node_index,
-            call_loc.turn,
-            call_loc.river,
-        ) catch |err| {
+        var page = (if (ctx) |warm|
+            equity.checkdownEquityAtNodeOnCtx(
+                allocator,
+                warm,
+                game,
+                published,
+                call_loc.node_index,
+                call_loc.turn,
+                call_loc.river,
+                equity.study_warm_max_hand_runouts,
+            )
+        else
+            equity.checkdownEquityAtNode(
+                allocator,
+                game,
+                published,
+                call_loc.node_index,
+                call_loc.turn,
+                call_loc.river,
+                equity.study_explorer_max_pair_runouts,
+            )) catch |err| {
             return switch (err) {
                 error.OutOfMemory => error.OutOfMemory,
                 error.WorkLimit => error.WorkLimit,
