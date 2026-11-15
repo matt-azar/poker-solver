@@ -51,7 +51,7 @@ When recording store scoreboard rows (optional; not required for cutover):
 | Workflow | Role |
 | --- | --- |
 | `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke + Study contract smoke (`scripts/zig/study-contract-smoke.py`, river fixture, ≤60s) + Linux overlap-actions smoke (`scripts/zig/study-overlap-actions-smoke.py`, ZR-152); Windows pins `-Dcpu=x86_64_v2`. Windows packaged Study overlap waits for ma1pc (ZR-147). |
-| `.github/workflows/windows-installer.yml` | Shipping NSIS; `externalBin` is Zig `solver-engine` only (no `holdem-explorer`). `windows-installer-e2e` Stage A: install exact artifact + interactive WebView drive; Stage B gated. |
+| `.github/workflows/windows-installer.yml` | Shipping NSIS; `externalBin` is Zig `solver-engine` only (no `holdem-explorer`). `windows-installer-e2e` Stage A (install + WebView drive) then Stage B (river clear-then-reopen PSOL). |
 | `.github/workflows/windows-installer-release.yml` | Tag-triggered release wrapper that reuses `windows-installer.yml` |
 | `.github/workflows/ci.yml` | Desktop Vitest / `tsc` / build (no C++ explorer matrix) |
 
