@@ -136,6 +136,7 @@ class RiverBetaHandler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path.rstrip("/") or "/"
             if path in ("/", "/health"):
+                b = self.bounds
                 self._send_json(
                     {
                         "ok": True,
@@ -143,6 +144,9 @@ class RiverBetaHandler(BaseHTTPRequestHandler):
                         "street": "river",
                         "engine": "solver-engine",
                         "transport": "typed-ipc",
+                        "active_sessions": self.manager.active_count(),
+                        "max_concurrent_sessions": b.max_concurrent_sessions,
+                        "max_session_idle_sec": b.max_session_idle_sec,
                         "out_of_scope": ["turn", "flop"],
                     }
                 )
@@ -166,6 +170,14 @@ class RiverBetaHandler(BaseHTTPRequestHandler):
                         "max_river_bet_sizes": b.max_river_bet_sizes,
                         "max_raises": b.max_raises,
                         "max_plan_memory_bytes": b.max_plan_memory_bytes,
+                        # Human-facing summary for Study chrome / ops dashboards.
+                        "summary": (
+                            f"river-only · ≤{b.max_iterations} iters · "
+                            f"≤{b.max_time_limit_sec:g}s · ≤{b.max_memory_mib} MiB · "
+                            f"≤{b.max_weighted_combos_per_player} combos/player · "
+                            f"{b.max_concurrent_sessions} sessions · "
+                            f"idle {b.max_session_idle_sec:g}s"
+                        ),
                     }
                 )
                 return

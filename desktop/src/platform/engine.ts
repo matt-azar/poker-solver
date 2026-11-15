@@ -24,6 +24,7 @@ import {
   getActiveRiverBetaConfig,
   installBrowserRiverBetaTransport,
   isBrowserRiverBetaMode,
+  reconnectRiverBeta,
 } from "../river-beta/riverBetaMode";
 import { isTauriRuntime } from "./index";
 
@@ -65,10 +66,14 @@ export async function ensureEngine(): Promise<EnsureEngineResult> {
     // the public precomputed demo build; turn/flop remain out of scope.
     if (!isPublicDemoBuild() && isBrowserRiverBetaMode()) {
       try {
+        const existing = getActiveRiverBetaConfig();
         const beta =
-          getActiveRiverBetaConfig() ??
-          (await installBrowserRiverBetaTransport());
-        if (beta) {
+          existing?.connectionState === "connected"
+            ? existing
+            : existing
+              ? await reconnectRiverBeta({ autoSolve: true })
+              : await installBrowserRiverBetaTransport();
+        if (beta?.connectionState === "connected") {
           engineClient.setBaseUrl(null);
           const transport = getActiveTransport();
           return {
@@ -80,6 +85,15 @@ export async function ensureEngine(): Promise<EnsureEngineResult> {
             transport,
           };
         }
+        const error =
+          beta?.lastError || "river-beta session not connected";
+        const transport = setNoEngineTransport(`river-beta unavailable: ${error}`);
+        return {
+          ok: false,
+          status: "river-beta unavailable",
+          error,
+          transport,
+        };
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         const transport = setNoEngineTransport(`river-beta unavailable: ${error}`);

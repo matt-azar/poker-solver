@@ -80,11 +80,37 @@ describe("ensureEngine", () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const method = (init?.method || "GET").toUpperCase();
+        if (url.includes("/health")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              service: "river-beta",
+              active_sessions: 0,
+              max_concurrent_sessions: 4,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (url.includes("/v1/bounds")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              max_iterations: 200,
+              max_time_limit_sec: 30,
+              summary: "river-only · ≤200 iters",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
         if (url.includes("/v1/sessions") && method === "POST") {
           return new Response(
             JSON.stringify({
               ok: true,
-              session: { session_id: "rb-test", metrics: { peak_rss_bytes: 1 } },
+              session: {
+                session_id: "rb-test",
+                idle_remaining_sec: 300,
+                metrics: { peak_rss_bytes: 1 },
+              },
             }),
             {
               status: 200,
@@ -125,7 +151,11 @@ describe("ensureEngine", () => {
           return new Response(
             JSON.stringify({
               ok: true,
-              session: { session_id: "rb-test", metrics: { peak_rss_bytes: 1 } },
+              session: {
+                session_id: "rb-test",
+                idle_remaining_sec: 280,
+                metrics: { peak_rss_bytes: 1 },
+              },
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           );

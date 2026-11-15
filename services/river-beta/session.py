@@ -75,22 +75,47 @@ class RiverSession:
 
     def info(self) -> dict[str, Any]:
         self.metrics.sample_pid(self._sidecar.pid)
+        now = time.time()
+        idle_remaining = max(
+            0.0, self.bounds.max_session_idle_sec - (now - self.last_used_at)
+        )
         return {
             "session_id": self.session_id,
             "created_at": self.created_at,
             "last_used_at": self.last_used_at,
+            "idle_remaining_sec": round(idle_remaining, 1),
             "alive": self._sidecar.alive,
             "pid": self._sidecar.pid,
             "launch_id": self._sidecar.launch_id,
             "active_job_id": self.active_job_id,
             "metrics": self.metrics.to_dict(),
             "street": "river",
-            "bounds": {
-                "max_memory_mib": self.bounds.max_memory_mib,
-                "max_iterations": self.bounds.max_iterations,
-                "max_time_limit_sec": self.bounds.max_time_limit_sec,
-                "max_threads": self.bounds.max_threads,
-            },
+            "bounds": self._bounds_snapshot(),
+        }
+
+    def _bounds_snapshot(self) -> dict[str, Any]:
+        b = self.bounds
+        return {
+            "max_concurrent_sessions": b.max_concurrent_sessions,
+            "max_session_idle_sec": b.max_session_idle_sec,
+            "max_memory_mib": b.max_memory_mib,
+            "default_memory_mib": b.default_memory_mib,
+            "max_iterations": b.max_iterations,
+            "default_iterations": b.default_iterations,
+            "max_time_limit_sec": b.max_time_limit_sec,
+            "default_time_limit_sec": b.default_time_limit_sec,
+            "max_threads": b.max_threads,
+            "max_weighted_combos_per_player": b.max_weighted_combos_per_player,
+            "max_river_bet_sizes": b.max_river_bet_sizes,
+            "max_raises": b.max_raises,
+            "max_plan_memory_bytes": b.max_plan_memory_bytes,
+            "summary": (
+                f"river-only · ≤{b.max_iterations} iters · "
+                f"≤{b.max_time_limit_sec:g}s · ≤{b.max_memory_mib} MiB · "
+                f"≤{b.max_weighted_combos_per_player} combos/player · "
+                f"{b.max_concurrent_sessions} sessions · "
+                f"idle {b.max_session_idle_sec:g}s"
+            ),
         }
 
     def ipc(
@@ -300,6 +325,11 @@ class SessionManager:
             return False
         session.close()
         return True
+
+    def active_count(self) -> int:
+        with self._mu:
+            self._reap_locked()
+            return len(self._sessions)
 
     def list_metrics(self) -> list[dict[str, Any]]:
         with self._mu:
