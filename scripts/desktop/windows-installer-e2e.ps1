@@ -127,6 +127,59 @@ function Invoke-FailureDiagnostics([string]$InstallDirPath) {
   }
 }
 
+# Tauri MAINBINARYNAME follows Cargo package name (poker-solver-study), while
+# productName / install folder is "Holdem Study". diagnostics.rs already covers both.
+$script:StudyUiExeNames = @(
+  "Holdem Study.exe",
+  "poker-solver-study.exe"
+)
+
+function Get-StudyUiExeNamesFromRegistry {
+  $names = New-Object System.Collections.Generic.List[string]
+  foreach ($rootKey in @("HKCU:", "HKLM:")) {
+    $uninst = Join-Path $rootKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\Holdem Study"
+    try {
+      $props = Get-ItemProperty -LiteralPath $uninst -ErrorAction Stop
+      foreach ($field in @("MainBinaryName", "DisplayIcon")) {
+        $raw = [string]$props.$field
+        if (-not $raw) { continue }
+        # DisplayIcon is often `"C:\...\foo.exe",0`
+        if ($raw -match '(?i)([^\\/]+\.exe)') {
+          $n = $Matches[1]
+          if ($n -and -not ($names -contains $n)) { [void]$names.Add($n) }
+        }
+      }
+    } catch {}
+  }
+  return @($names)
+}
+
+function Resolve-StudyUiExe([string]$InstallDirPath) {
+  $ordered = New-Object System.Collections.Generic.List[string]
+  foreach ($n in @(Get-StudyUiExeNamesFromRegistry) + $script:StudyUiExeNames) {
+    if ($n -and -not ($ordered -contains $n)) { [void]$ordered.Add($n) }
+  }
+  foreach ($name in $ordered) {
+    $path = Join-Path $InstallDirPath $name
+    if (Test-Path -LiteralPath $path) {
+      return $path
+    }
+  }
+  # Any non-sidecar / non-uninstaller exe beside solver-engine.
+  $sidecar = "solver-engine.exe"
+  $hit = Get-ChildItem -LiteralPath $InstallDirPath -Filter "*.exe" -File -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Name -ine $sidecar -and
+      $_.Name -notlike "uninstall*" -and
+      $_.Name -ine "holdem-explorer.exe"
+    } |
+    Select-Object -First 1
+  if ($hit) {
+    return $hit.FullName
+  }
+  return $null
+}
+
 function Find-StudyInstallDir([string]$Preferred) {
   $candidates = New-Object System.Collections.Generic.List[string]
   if ($Preferred) { [void]$candidates.Add($Preferred) }
@@ -155,31 +208,45 @@ function Find-StudyInstallDir([string]$Preferred) {
   }
 
   foreach ($cand in $candidates) {
-    $exe = Join-Path $cand "Holdem Study.exe"
-    if (Test-Path -LiteralPath $exe) {
-      return $cand
+    if (-not (Test-Path -LiteralPath $cand)) { continue }
+    $ui = Resolve-StudyUiExe $cand
+    if ($ui) {
+      return [pscustomobject]@{ InstallDir = $cand; StudyExe = $ui }
     }
   }
 
-  # Last-resort: find the UI exe under LocalAppData (covers unexpected layouts).
-  $hit = Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Recurse -Filter "Holdem Study.exe" `
-    -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($hit) {
-    return $hit.Directory.FullName
+  # Last-resort: find either known UI name under LocalAppData.
+  foreach ($name in $script:StudyUiExeNames) {
+    $hit = Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Recurse -Filter $name `
+      -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($hit) {
+      return [pscustomobject]@{
+        InstallDir = $hit.Directory.FullName
+        StudyExe   = $hit.FullName
+      }
+    }
   }
 
-  # Diagnose Tauri relative placeholder InstallDir resolving against cwd.
-  $placeholder = Join-Path $Root "placeholder\Holdem Study\Holdem Study.exe"
+  # Diagnose: list actual contents when /D= landed but UI name mismatched.
   $diag = @()
   foreach ($cand in $candidates) {
-    $diag += "missing=$cand"
+    if (Test-Path -LiteralPath $cand) {
+      $listing = @(Get-ChildItem -LiteralPath $cand -Force -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.Name }) -join ","
+      $diag += "present=$cand contents=[$listing]"
+    } else {
+      $diag += "missing=$cand"
+    }
   }
-  if (Test-Path -LiteralPath $placeholder) {
-    $diag += "FOUND_cwd_placeholder=$placeholder (NSIS relative InstallDir leak)"
+  $placeholderDir = Join-Path $Root "placeholder\Holdem Study"
+  if (Test-Path -LiteralPath $placeholderDir) {
+    $listing = @(Get-ChildItem -LiteralPath $placeholderDir -Force -ErrorAction SilentlyContinue |
+      ForEach-Object { $_.Name }) -join ","
+    $diag += "FOUND_cwd_placeholder=$placeholderDir contents=[$listing]"
   } else {
-    $diag += "no_cwd_placeholder=$placeholder"
+    $diag += "no_cwd_placeholder=$placeholderDir"
   }
-  throw "Holdem Study.exe not found after silent install. $($diag -join '; ')"
+  throw "Study UI exe not found after silent install (tried $($script:StudyUiExeNames -join ', ')). $($diag -join '; ')"
 }
 
 $result = [ordered]@{
@@ -189,6 +256,7 @@ $result = [ordered]@{
   installer          = $InstallerExe
   installDir         = $null
   preferredInstallDir = $InstallDir
+  studyExe           = $null
   studyPid           = $null
   studyExitCode      = $null
   sidecarPids        = @()
@@ -236,12 +304,15 @@ try {
   }
   Set-LastStep "silent-install" $result
 
-  $resolvedInstallDir = Find-StudyInstallDir $InstallDir
+  $layout = Find-StudyInstallDir $InstallDir
+  $resolvedInstallDir = $layout.InstallDir
+  $studyExe = $layout.StudyExe
   $result.installDir = $resolvedInstallDir
+  $result.studyExe = $studyExe
   Write-E2E "Install dir: $resolvedInstallDir"
+  Write-E2E "Study UI exe: $studyExe"
   Set-LastStep "install-layout-found" $result
 
-  $studyExe = Join-Path $resolvedInstallDir "Holdem Study.exe"
   $sidecarExe = Join-Path $resolvedInstallDir "solver-engine.exe"
   foreach ($path in @($studyExe, $sidecarExe)) {
     if (-not (Test-Path -LiteralPath $path)) {
