@@ -215,6 +215,8 @@ At a flop root, `t-1.r-1` is both the node id and the line key — **do not infe
 
 **Per-combo freeze (Pio):** Locking must store each combo’s own action mix (`combo_actions` / `combo_probs`), not average rows into one shared mix. Publish must re-apply the effective lock (warm-start pre-lock mass and zero-reach uniform fallback otherwise leak). BR / Accuracy must use the locked mix for locked combos (constrained Nash gap). Unlocking a combo on one river must target that board’s `node_id` so a line lock is overridden locally — do not erase the shared line record. Regression: `engine/src/solve/lock_per_combo_correctness_test.zig`.
 
+**Board-local mask ops:** `LockKey` includes `scope` so flop-root node (`at -1 -1`) ≠ line. Selected put merges into the effective mask (A then B keeps A). Selected put on one river materializes the line onto that board first so other line-covered combos stay locked. Unlock-selected converts full-node shared rows with `n_hands`. Unlock-node on a board inserts an unlock-all sentinel when only a line exists — never deletes the line via UI fallback. Regressions: `lock_scope_mask_test.zig`.
+
 **Don't:** Strip turn/river from lock keys “for infoset convenience.”
 
 ### Study equity path vs Equity Calculator

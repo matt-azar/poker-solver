@@ -1541,7 +1541,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     try {
       for (const handIndex of targets) {
-        await engineClient.deleteLock(solutionId, requestNodeId, handIndex);
+        await engineClient.deleteLock(solutionId, requestNodeId, handIndex, "node");
       }
       if (get().solutionId !== solutionId) {
         return;
@@ -1575,11 +1575,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return;
     }
     const requestNodeId = node.node_id;
-    // Prefer deleting the active lock record (exact runout or line fallback).
-    const active = lockForNode(get().locks, requestNodeId);
-    const deleteNodeId = active?.node_id ?? requestNodeId;
+    // Board-local clear only — never delete a shared line via UI fallback.
     try {
-      await engineClient.deleteLock(solutionId, deleteNodeId);
+      await engineClient.deleteLock(solutionId, requestNodeId, undefined, "node");
       if (get().solutionId !== solutionId) {
         return;
       }
@@ -1587,7 +1585,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (get().currentNode?.node_id !== requestNodeId) {
         return;
       }
-      set({ message: `Cleared locks at ${deleteNodeId}` });
+      set({ message: `Cleared locks at ${requestNodeId}` });
     } catch (error) {
       if (get().solutionId !== solutionId) {
         return;

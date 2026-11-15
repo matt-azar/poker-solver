@@ -451,10 +451,13 @@ export async function ipcPutLock(body: {
 export async function ipcDeleteLock(opts?: {
   nodeId?: string;
   handIndex?: number;
+  /** Default node = board-local; line deletes the shared line record only. */
+  scope?: "node" | "line";
 }): Promise<unknown> {
   const body: Record<string, unknown> = {};
   if (opts?.nodeId) body.node_id = opts.nodeId;
   if (opts?.handIndex !== undefined) body.hand_index = opts.handIndex;
+  if (opts?.scope) body.scope = opts.scope;
   const env = await solverEngineRequest(
     "delete_lock",
     Object.keys(body).length > 0 ? body : null,

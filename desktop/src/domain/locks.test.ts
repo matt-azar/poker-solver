@@ -95,6 +95,36 @@ describe("lock helpers", () => {
     expect(lockForNode(locks, "p12.t-1.r9")?.node_id).toBe("p12.t-1.r-1");
   });
 
+  it("distinguishes flop-root node scope from line at the same node_id", () => {
+    const locks = [
+      {
+        node_id: "p0.t-1.r-1",
+        scope: "line" as const,
+        kind: "full" as const,
+        hand_indices: [],
+        probs: [0, 1],
+      },
+      {
+        node_id: "p0.t-1.r-1",
+        scope: "node" as const,
+        kind: "full" as const,
+        hand_indices: [],
+        probs: [1, 0],
+      },
+    ];
+    expect(lockForNode(locks, "p0.t-1.r-1")?.scope).toBe("node");
+    expect(lockForNode(locks, "p0.t-1.r-1")?.probs).toEqual([1, 0]);
+  });
+
+  it("treats unlock-all full sentinel as unlocked", () => {
+    expect(
+      isHandLocked(
+        { node_id: "p0.t-1.r7", scope: "node", kind: "full", hand_indices: [], probs: [] },
+        0,
+      ),
+    ).toBe(false);
+  });
+
   it("weights strategy mixes by marginal and links slider edits", () => {
     const mix = weightedStrategyMix(
       [

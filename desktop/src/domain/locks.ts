@@ -117,25 +117,58 @@ export function lineLockNodeId(nodeId: string): string | null {
   return formatPublicNodeId({ index: parts.index, turn: -1, river: -1 });
 }
 
+function lockScope(entry: LockRecord): LockScope {
+  if (entry.scope === "line" || entry.scope === "node") {
+    return entry.scope;
+  }
+  // Legacy payloads without scope: t-1.r-1 ids were line-wide.
+  const parts = parsePublicNodeId(entry.node_id);
+  if (parts && parts.turn < 0 && parts.river < 0) {
+    return "line";
+  }
+  return "node";
+}
+
 /**
- * Active lock for a browsed node: exact runout first, then line lock for the
- * same public index (engine find_for_runout semantics).
+ * Active lock for a browsed node: exact node-scope board first, then line.
+ * Scope distinguishes flop-root node (`at -1 -1`) from line (`line`).
  */
 export function lockForNode(locks: LockRecord[], nodeId: string): LockRecord | null {
-  const exact = locks.find((entry) => entry.node_id === nodeId);
+  const exact = locks.find(
+    (entry) => entry.node_id === nodeId && lockScope(entry) === "node",
+  );
   if (exact) {
     return exact;
   }
-  const lineId = lineLockNodeId(nodeId);
-  if (!lineId || lineId === nodeId) {
+  const parts = parsePublicNodeId(nodeId);
+  if (!parts) {
     return null;
   }
-  return locks.find((entry) => entry.node_id === lineId) ?? null;
+  return (
+    locks.find((entry) => {
+      if (lockScope(entry) !== "line") {
+        return false;
+      }
+      const lineParts = parsePublicNodeId(entry.node_id);
+      return lineParts?.index === parts.index;
+    }) ?? null
+  );
 }
 
 export function isHandLocked(lock: LockRecord | null, handIndex: number): boolean {
   if (!lock) {
     return false;
+  }
+  // Unlock-all sentinel: full kind with no probs.
+  if (
+    lock.kind === "full" &&
+    (!lock.probs || lock.probs.length === 0) &&
+    (!lock.combo_probs || lock.combo_probs.length === 0)
+  ) {
+    return false;
+  }
+  if (lock.combo_probs && lock.combo_probs.length > 0) {
+    return lock.hand_indices.includes(handIndex);
   }
   if (lock.kind === "full") {
     return true;

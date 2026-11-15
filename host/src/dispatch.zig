@@ -636,7 +636,32 @@ fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
     };
     defer locks.deinit();
-    locks.upsert(lock) catch |err| {
+
+    // Board-local selected put must not shadow a line lock: materialize the line
+    // mask onto this board first, then merge the patch (A then B keeps A).
+    const patch_merges = lock.kind == .selected_combos or lock.hasPerComboActions();
+    if (lock.scope == .node and patch_merges) {
+        const node_key = lock.key();
+        if (locks.findExactKey(node_key) == null) {
+            if (locks.find(lock.infoset_id)) |line| {
+                var base = node_lock.materializeNodeFromLine(
+                    state.allocator,
+                    line.*,
+                    lock.turn,
+                    lock.river,
+                    n_hands,
+                ) catch |err| {
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+                };
+                locks.upsert(base) catch |err| {
+                    base.deinit(state.allocator);
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+                };
+            }
+        }
+    }
+
+    locks.mergeUpsert(lock) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
     };
     // LockSet now owns the NodeLock storage; neutralize errdefer.
@@ -664,105 +689,98 @@ fn handleDeleteLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         const parsed = poker_engine.analysis.node_id.parseNodeId(node_id_text) catch {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad node_id");
         };
-        const key = node_lock.makeLockKey(parsed.node_index, parsed.turn, parsed.river);
+        const scope_text = bodyStringField(req.body_json, "scope") orelse "node";
+        if (!std.mem.eql(u8, scope_text, "node") and !std.mem.eql(u8, scope_text, "line")) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "scope must be node or line");
+        }
+        const key = if (std.mem.eql(u8, scope_text, "line"))
+            node_lock.lineLockKey(parsed.node_index)
+        else
+            node_lock.makeLockKey(parsed.node_index, parsed.turn, parsed.river);
+
+        // Resolve hand count for full-node → selected conversion (unlock selected).
+        var n_hands: usize = 0;
+        if (state.session.borrowPublished()) |lease_val| {
+            var lease = lease_val;
+            defer lease.deinit();
+            if (poker_engine.analysis.inspect.inspectNode(
+                state.allocator,
+                lease.game,
+                lease.published,
+                @intCast(parsed.node_index),
+                if (key.scope == .line) @as(i32, -1) else parsed.turn,
+                if (key.scope == .line) @as(i32, -1) else parsed.river,
+            )) |page_val| {
+                var page = page_val;
+                defer page.deinit();
+                n_hands = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
+            } else |_| {}
+        } else |_| {}
+
         if (bodyIntField(req.body_json, "hand_index")) |hand_i32| {
             if (hand_i32 < 0) {
                 return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_index");
             }
             const hand_index: usize = @intCast(hand_i32);
-            if (locks.findExactKey(key)) |existing| {
-                if (existing.kind == .full_node and !existing.hasPerComboActions()) {
+
+            if (locks.findExactKey(key) != null) {
+                if (!locks.eraseComboKey(key, hand_index, n_hands)) {
                     return ipc.makeErrorReply(
                         state.allocator,
                         req.request_id,
                         req.job_id,
                         req.op,
                         "invalid_request",
-                        "full-node locks unlock with node_id only; omit hand_index",
+                        "combo not locked at this scope",
                     );
                 }
-                _ = locks.eraseComboKey(key, hand_index);
-            } else if (key.turn >= 0 or key.river >= 0) {
-                // Board-local unlock against a line lock: materialize a node
-                // override with the remaining locked combos (do not mutate line).
-                const line = locks.findExactKey(node_lock.lineLockKey(parsed.node_index)) orelse {
+            } else if (key.scope == .node) {
+                // Board-local unlock against a line lock: materialize, then erase.
+                const line = locks.find(parsed.node_index) orelse {
                     return replyLocksBody(state, req, &locks);
                 };
                 if (!node_lock.comboIsLocked(line.*, hand_index)) {
                     return replyLocksBody(state, req, &locks);
                 }
-                var override = node_lock.NodeLock{
-                    .infoset_id = parsed.node_index,
-                    .turn = @intCast(parsed.turn),
-                    .river = @intCast(parsed.river),
-                    .scope = .node,
-                    .kind = .selected_combos,
+                var override = node_lock.materializeNodeFromLine(
+                    state.allocator,
+                    line.*,
+                    parsed.turn,
+                    parsed.river,
+                    n_hands,
+                ) catch |err| {
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
                 };
-                errdefer override.deinit(state.allocator);
-                if (line.hasPerComboActions()) {
-                    var keep_idx = std.ArrayList(usize).init(state.allocator);
-                    defer keep_idx.deinit();
-                    var keep_rows = std.ArrayList([]const f64).init(state.allocator);
-                    defer keep_rows.deinit();
-                    for (line.combo_indices, 0..) |c, i| {
-                        if (c == hand_index) continue;
-                        try keep_idx.append(c);
-                        try keep_rows.append(line.combo_actions[i].probs);
-                    }
-                    if (keep_idx.items.len == 0) {
-                        // Unlocked full-node exact key shadows the line (all free).
-                        override.kind = .full_node;
-                        try locks.upsert(override);
-                        override = .{};
-                    } else {
-                        const indices = try state.allocator.dupe(usize, keep_idx.items);
-                        errdefer state.allocator.free(indices);
-                        override.combo_indices = indices;
-                        override.combo_actions = try node_lock.makeComboActionRows(
-                            state.allocator,
-                            indices,
-                            keep_rows.items,
-                            @intCast(keep_rows.items[0].len),
-                        );
-                        try locks.upsert(override);
-                        override = .{};
-                    }
-                } else if (!line.actions.unlocked() and line.kind == .selected_combos) {
-                    var keep = std.ArrayList(usize).init(state.allocator);
-                    defer keep.deinit();
-                    for (line.combo_indices) |c| {
-                        if (c == hand_index) continue;
-                        try keep.append(c);
-                    }
-                    if (keep.items.len == 0) {
-                        override.kind = .full_node;
-                        try locks.upsert(override);
-                        override = .{};
-                    } else {
-                        override.combo_indices = try state.allocator.dupe(usize, keep.items);
-                        override.actions = try node_lock.makeActionLockRow(
-                            state.allocator,
-                            line.actions.probs,
-                            @intCast(line.actions.probs.len),
-                        );
-                        try locks.upsert(override);
-                        override = .{};
-                    }
-                } else if (!line.actions.unlocked() and line.kind == .full_node) {
-                    // Shared full line lock without per-combo rows: cannot unlock
-                    // one combo without knowing hand count — reject.
-                    return ipc.makeErrorReply(
-                        state.allocator,
-                        req.request_id,
-                        req.job_id,
-                        req.op,
-                        "invalid_request",
-                        "full-node line locks unlock with node_id only; omit hand_index",
-                    );
-                }
+                locks.upsert(override) catch |err| {
+                    override.deinit(state.allocator);
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+                };
+                _ = locks.eraseComboKey(key, hand_index, n_hands);
+            } else {
+                return replyLocksBody(state, req, &locks);
             }
         } else {
-            _ = locks.eraseKey(key);
+            // Unlock whole record at this scope. Node ops stay board-local:
+            // never delete a line lock when clearing a browsed board.
+            if (key.scope == .node) {
+                if (locks.findExactKey(key) != null) {
+                    _ = locks.eraseKey(key);
+                } else if (locks.find(parsed.node_index) != null) {
+                    // Line covers this board — insert unlock-all sentinel.
+                    const sentinel = node_lock.NodeLock{
+                        .infoset_id = parsed.node_index,
+                        .turn = @intCast(parsed.turn),
+                        .river = @intCast(parsed.river),
+                        .scope = .node,
+                        .kind = .full_node,
+                    };
+                    locks.upsert(sentinel) catch |err| {
+                        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+                    };
+                }
+            } else {
+                _ = locks.eraseKey(key);
+            }
         }
     } else {
         locks.clear();
