@@ -1,0 +1,81 @@
+name: Public demo Pages
+
+# Static Hold'em Study precomputed demo → GitHub Pages.
+# Build: desktop/dist-public-demo via `npm run build:public-demo`.
+# Live solving stays on the Windows installer; this site is browse-only.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/public-demo-pages.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/public-demo-pages.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: public-demo-pages-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build public demo (local base)
+        run: npm run build:public-demo
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Public demo Playwright
+        run: npm run test:e2e:public-demo
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-public-demo
+          path: |
+            desktop/test-results/**
+            desktop/playwright-report-public-demo/**
+          if-no-files-found: ignore
+      - name: Build public demo (GitHub Pages base)
+        # Project Pages URL: https://matt-azar.github.io/poker-solver/
+        env:
+          PUBLIC_DEMO_BASE: /poker-solver/
+        run: npm run build:public-demo
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: desktop/dist-public-demo
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
