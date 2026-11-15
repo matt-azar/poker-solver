@@ -14,6 +14,12 @@ pub const full_range_turn_pair_runouts: u64 = 51_369_120;
 pub const default_max_pair_runouts: u64 = 1_100_000;
 /// C++ `kStudyExplorerMaxPairRunouts` (= full-range turn).
 pub const study_explorer_max_pair_runouts: u64 = full_range_turn_pair_runouts;
+/// Warm FrozenCtx checkdown walks board-dead runouts only: flop C(49,2)=1176.
+pub const warm_flop_enumerated_runouts: u64 = 49 * 48 / 2;
+/// Full dual-range flop warm units: (1326+1326)×C(49,2).
+pub const full_range_flop_warm_hand_runouts: u64 = 2 * 1326 * warm_flop_enumerated_runouts;
+/// Study warm-path ceiling — admits full-range flop; not the pair-runout gate.
+pub const study_warm_max_hand_runouts: u64 = full_range_flop_warm_hand_runouts;
 pub const equity_distribution_buckets: usize = 10;
 
 pub const EquityDistributionBucket = struct {
@@ -115,6 +121,21 @@ fn countCompatiblePairRunouts(
         }
     }
     return legal;
+}
+
+/// Boards the warm FrozenCtx checkdown enumerates (board cards dead; holes live).
+pub fn warmEnumeratedRunouts(board_len: usize) u64 {
+    if (board_len == 5) return 1;
+    if (board_len == 4) return 52 - 4;
+    if (board_len == 3) return warm_flop_enumerated_runouts;
+    return 0;
+}
+
+/// Warm-path work units: (n0+n1)×enumerated runouts (prefix/block, not pair walks).
+pub fn countWarmHandRunouts(n0: usize, n1: usize, board_len: usize) u64 {
+    const runouts = warmEnumeratedRunouts(board_len);
+    if (runouts == 0) return 0;
+    return (@as(u64, @intCast(n0)) + @as(u64, @intCast(n1))) * runouts;
 }
 
 /// Check-down showdown equity for a fixed board (Phase 4: river first; flop/turn via enumeration).
@@ -711,6 +732,7 @@ fn allocHandRowsFromGame(
 /// Study node check-down on a warm FrozenCtx (Session ranks after train).
 /// Same reach + board semantics as `checkdownEquityAtNode`, but O(hands·runouts)
 /// via RunoutRanks prefix/block cuts instead of O(n0·n1·runouts) pair walks.
+/// WorkLimit uses warm hand×runout units (`max_hand_runouts`), not pair-runouts.
 pub fn checkdownEquityAtNodeOnCtx(
     allocator: std.mem.Allocator,
     ctx: *frozen_walk.FrozenCtx,
@@ -719,7 +741,7 @@ pub fn checkdownEquityAtNodeOnCtx(
     node_index: u32,
     turn: i32,
     river: i32,
-    max_pair_runouts: u64,
+    max_hand_runouts: u64,
 ) EquityError!ShowdownEquity {
     if (ctx.game.hands.combos[0].len != game.hands.combos[0].len) return error.InvalidEquity;
     if (ctx.game.hands.combos[1].len != game.hands.combos[1].len) return error.InvalidEquity;
@@ -738,7 +760,7 @@ pub fn checkdownEquityAtNodeOnCtx(
     var board_buf: [5]card.Card = undefined;
     const board = try boardThroughNode(game, turn, river, &board_buf);
 
-    // Work preflight (same ceiling as pair-enumeration path).
+    // Packaging still reports pair-runouts; gate on warm O(hands·runouts) work.
     var combos0 = std.ArrayList(i32).init(allocator);
     defer combos0.deinit();
     var combos1 = std.ArrayList(i32).init(allocator);
@@ -749,11 +771,12 @@ pub fn checkdownEquityAtNodeOnCtx(
         if (ranges.r1.weights[@intCast(index)] > 0) combos1.append(index) catch return error.OutOfMemory;
     }
     const legal = countCompatiblePairRunouts(board, combos0.items, combos1.items);
+    const warm_work = countWarmHandRunouts(combos0.items.len, combos1.items.len, board.len);
 
     var result = ShowdownEquity{ .allocator = allocator };
     errdefer result.deinit();
     result.pair_runouts = legal;
-    if (legal > max_pair_runouts) return error.WorkLimit;
+    if (warm_work > max_hand_runouts) return error.WorkLimit;
 
     result.player0.combos = try allocHandRowsFromGame(allocator, game, 0, reach.q0);
     result.player1.combos = try allocHandRowsFromGame(allocator, game, 1, reach.q1);

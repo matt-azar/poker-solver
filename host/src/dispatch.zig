@@ -888,7 +888,7 @@ fn computeStudyEquity(
             located.node_index,
             located.turn,
             located.river,
-            poker_engine.analysis.equity.study_explorer_max_pair_runouts,
+            poker_engine.analysis.equity.study_warm_max_hand_runouts,
         );
     } else |_| {
         return poker_engine.analysis.equity.checkdownEquityAtNode(
@@ -2365,25 +2365,6 @@ fn buildLineCardReportReply(
     return ipc.makeReply(state.allocator, request_id, job_id, "line_card_report", body);
 }
 
-fn equityAtLocatedNoCtx(
-    allocator: std.mem.Allocator,
-    game: poker_engine.game.CompiledGame,
-    published: poker_engine.solve.training_state.PublishedPolicy,
-    node_index: u32,
-    turn: i32,
-    river: i32,
-) poker_engine.analysis.equity.EquityError!poker_engine.analysis.equity.ShowdownEquity {
-    return poker_engine.analysis.equity.checkdownEquityAtNode(
-        allocator,
-        game,
-        published,
-        node_index,
-        turn,
-        river,
-        poker_engine.analysis.equity.study_explorer_max_pair_runouts,
-    );
-}
-
 fn buildValueBluffsPostCallReply(
     state: *HostState,
     request_id: []const u8,
@@ -2393,6 +2374,15 @@ fn buildValueBluffsPostCallReply(
 ) !ipc.Envelope {
     const located = try resolveLocatedNode(lease.game, body_json);
     const min_bet = bodyFloatField(body_json, "min_bet_freq") orelse 0.01;
+    // Prefer warm FrozenCtx (same as Study equity); cold pair path mid-train.
+    var held_ctx = false;
+    const warm_ctx: ?*poker_engine.solve.frozen_walk.FrozenCtx = blk: {
+        if (state.session.acquireFrozenCtxForAnalysis()) |ctx| {
+            held_ctx = true;
+            break :blk ctx;
+        } else |_| break :blk null;
+    };
+    defer if (held_ctx) state.session.releaseFrozenCtxForAnalysis();
     const body = try study_reports.buildValueBluffsPostCallBody(
         state.allocator,
         lease.game,
@@ -2400,7 +2390,7 @@ fn buildValueBluffsPostCallReply(
         located,
         lease.solution_id,
         min_bet,
-        &equityAtLocatedNoCtx,
+        warm_ctx,
     );
     defer state.allocator.free(body);
     return ipc.makeReply(state.allocator, request_id, job_id, "value_bluffs_post_call", body);
@@ -4926,4 +4916,70 @@ test "value_bluffs_post_call flop bet returns hands shape" {
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"kind\":\"value_bluffs_post_call\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"hands\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"call_node_ids\":[") != null);
+}
+
+test "wide flop equity and value_bluffs_post_call return numbers" {
+    // Same ~496-combo fixture: warm equity + After Call must both succeed.
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range 22+,A2s+,K2s+,Q2s+,J2s+,T6s+,96s+,86s+,75s+,65s,54s,A2o+,K8o+,Q9o+,J9o,T8o,98o,87o
+        \\ip-range 22+,A2s+,K2s+,Q2s+,J2s+,T6s+,96s+,86s+,75s+,65s,54s,A2o+,K8o+,Q9o+,J9o,T8o,98o,87o
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 3072
+        \\threads 1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\
+    ;
+
+    var state = try HostState.init(std.testing.allocator, "wide-flop-eq-vb");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    const game = state.session.game orelse return error.TestUnexpectedResult;
+    const n0 = game.hands.combos[0].len;
+    const n1 = game.hands.combos[1].len;
+    try std.testing.expect(n0 >= 470 and n0 <= 520);
+    try std.testing.expect(n1 >= 470 and n1 <= 520);
+
+    var eq_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "wide-eq"),
+        .op = try std.testing.allocator.dupe(u8, "equity"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\"}"),
+    };
+    defer eq_req.deinit();
+    var eq_reply = try handle(&state, eq_req);
+    defer eq_reply.deinit();
+    try std.testing.expect(eq_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, eq_reply.body_json, "work_limit") == null);
+    try std.testing.expect(std.mem.indexOf(u8, eq_reply.body_json, "\"equity\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, eq_reply.body_json, "\"oop_hands\":[") != null);
+
+    var vb_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "wide-vb"),
+        .op = try std.testing.allocator.dupe(u8, "value_bluffs_post_call"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\",\"min_bet_freq\":0.01}"),
+    };
+    defer vb_req.deinit();
+    var vb_reply = try handle(&state, vb_req);
+    defer vb_reply.deinit();
+    try std.testing.expect(vb_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, vb_reply.body_json, "work_limit") == null);
+    try std.testing.expect(std.mem.indexOf(u8, vb_reply.body_json, "\"kind\":\"value_bluffs_post_call\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, vb_reply.body_json, "\"hands\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, vb_reply.body_json, "\"equity\":") != null);
 }

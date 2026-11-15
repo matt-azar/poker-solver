@@ -38,6 +38,9 @@ test "study pair-runout packaging constants match C++" {
     try std.testing.expectEqual(@as(u64, 51_369_120), equity.full_range_turn_pair_runouts);
     try std.testing.expectEqual(equity.full_range_turn_pair_runouts, equity.study_explorer_max_pair_runouts);
     try std.testing.expect(equity.study_explorer_max_pair_runouts > equity.default_max_pair_runouts);
+    try std.testing.expectEqual(@as(u64, 1176), equity.warm_flop_enumerated_runouts);
+    try std.testing.expectEqual(@as(u64, 3_118_752), equity.full_range_flop_warm_hand_runouts);
+    try std.testing.expectEqual(equity.full_range_flop_warm_hand_runouts, equity.study_warm_max_hand_runouts);
 }
 
 test "wide flop work-limit rejects without O(n2*runouts) preflight" {
@@ -491,7 +494,7 @@ test "frozen OnCtx checkdown matches pair-enumeration at flop root" {
         0,
         -1,
         -1,
-        equity.study_explorer_max_pair_runouts,
+        equity.study_warm_max_hand_runouts,
     );
     defer frozen.deinit();
 
@@ -504,4 +507,80 @@ test "frozen OnCtx checkdown matches pair-enumeration at flop root" {
     const aa_frozen = findCombo(frozen.player0.combos, "AcAd").?;
     try std.testing.expect(aa_pair.defined and aa_frozen.defined);
     try std.testing.expectApproxEqAbs(aa_pair.equity, aa_frozen.equity, 1e-9);
+}
+
+test "wide flop warm equity admits under hand-runout limit" {
+    // ~496 combos/player: pair-runouts exceed Study's 51M ceiling, but warm
+    // O(hands·runouts) work stays under study_warm_max_hand_runouts.
+    const compile = @import("../game/compile.zig");
+    const street_config = @import("../game/street_config.zig");
+    const training_state = @import("../solve/training_state.zig");
+    const frozen_walk = @import("../solve/frozen_walk.zig");
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range 22+,A2s+,K2s+,Q2s+,J2s+,T6s+,96s+,86s+,75s+,65s,54s,A2o+,K8o+,Q9o+,J9o,T8o,98o,87o
+        \\ip-range 22+,A2s+,K2s+,Q2s+,J2s+,T6s+,96s+,86s+,75s+,65s,54s,A2o+,K8o+,Q9o+,J9o,T8o,98o,87o
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 512
+        \\threads 1
+        \\
+    ;
+    var cfg = try street_config.parseStreetConfig(std.testing.allocator, text);
+    defer cfg.deinit();
+    var game = try compile.compile(std.testing.allocator, cfg);
+    defer game.deinit();
+
+    // Compiled after AhKd7c blockers ≈496 (raw range expands wider).
+    const n0 = game.hands.combos[0].len;
+    const n1 = game.hands.combos[1].len;
+    try std.testing.expect(n0 >= 470 and n0 <= 520);
+    try std.testing.expect(n1 >= 470 and n1 <= 520);
+
+    const empty_pub = training_state.PublishedPolicy{ .allocator = std.testing.allocator };
+    const cold = equity.checkdownEquityAtNode(
+        std.testing.allocator,
+        game,
+        empty_pub,
+        0,
+        -1,
+        -1,
+        equity.study_explorer_max_pair_runouts,
+    );
+    try std.testing.expectError(error.WorkLimit, cold);
+
+    const warm_work = equity.countWarmHandRunouts(n0, n1, game.board.len);
+    try std.testing.expect(warm_work <= equity.study_warm_max_hand_runouts);
+
+    var ctx = try frozen_walk.FrozenCtx.initEval(std.testing.allocator, game);
+    defer ctx.deinit();
+    try ctx.ensureAllRanksReady();
+    var frozen = try equity.checkdownEquityAtNodeOnCtx(
+        std.testing.allocator,
+        &ctx,
+        game,
+        empty_pub,
+        0,
+        -1,
+        -1,
+        equity.study_warm_max_hand_runouts,
+    );
+    defer frozen.deinit();
+    try std.testing.expect(frozen.joint_defined);
+    try std.testing.expect(frozen.player0.combos.len == n0);
+    try std.testing.expect(frozen.player1.combos.len == n1);
+    try std.testing.expect(frozen.player0.equity > 0 and frozen.player0.equity < 1);
+    try std.testing.expectApproxEqAbs(
+        @as(f64, 1.0),
+        frozen.player0.equity + frozen.player1.equity,
+        1e-9,
+    );
 }
