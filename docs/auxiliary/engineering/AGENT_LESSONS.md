@@ -213,6 +213,8 @@ Default lock scope is **`node`** (Pio `lock_node`): keep turn/river cards from `
 
 At a flop root, `t-1.r-1` is both the node id and the line key — **do not infer scope from cards alone**; keep an explicit `LockScope` / `scope` field. A node lock must not overwrite a line lock for the same infoset.
 
+**Per-combo freeze (Pio):** Locking must store each combo’s own action mix (`combo_actions` / `combo_probs`), not average rows into one shared mix. Publish must re-apply the effective lock (warm-start pre-lock mass and zero-reach uniform fallback otherwise leak). BR / Accuracy must use the locked mix for locked combos (constrained Nash gap). Unlocking a combo on one river must target that board’s `node_id` so a line lock is overridden locally — do not erase the shared line record. Regression: `engine/src/solve/lock_per_combo_correctness_test.zig`.
+
 **Don't:** Strip turn/river from lock keys “for infoset convenience.”
 
 ### Study equity path vs Equity Calculator

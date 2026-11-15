@@ -11,7 +11,10 @@ export interface LockRecord {
   scope?: LockScope;
   kind: "full" | "selected";
   hand_indices: number[];
+  /** Legacy shared mix (every locked combo gets the same row). */
   probs: number[];
+  /** Per-combo mixes parallel to `hand_indices` (Pio-style freeze). */
+  combo_probs?: number[][];
 }
 
 export interface LocksPayload {
@@ -45,6 +48,8 @@ export interface LockDraft {
   kind: "full" | "selected";
   handIndices: number[];
   probs: number[];
+  /** When set, applyLock sends per-combo rows instead of a shared mix. */
+  comboProbs?: number[][];
 }
 
 export function emptyProbs(actionCount: number): number[] {
@@ -169,6 +174,33 @@ export function seedProbsFromStrategy(
     return uniformProbs(actionCount);
   }
   return totals.map((value) => value / mass);
+}
+
+/**
+ * Per-combo locked mixes from the browsed strategy (Pio freeze).
+ * Returns null when no usable rows exist for the listed hands.
+ */
+export function seedComboProbsFromStrategy(
+  strategy: number[][] | null | undefined,
+  handIndices: number[],
+  actionCount: number,
+): number[][] | null {
+  if (!strategy || handIndices.length === 0 || actionCount <= 0) {
+    return null;
+  }
+  const rows: number[][] = [];
+  for (const handIndex of handIndices) {
+    const row = strategy[handIndex];
+    if (!row || row.length !== actionCount) {
+      return null;
+    }
+    const normalized = normalizeProbs(row);
+    if (!normalized.valid) {
+      return null;
+    }
+    rows.push(normalized.probs);
+  }
+  return rows;
 }
 
 /**
