@@ -12,6 +12,7 @@ import {
   subscribeDemoMode,
   writeDemoUrlState,
 } from "./demoMode";
+import { usePhoneDemoLayout } from "./phoneLayout";
 import type { DemoBootConfig } from "./types";
 
 const WINDOWS_INSTALLER_FALLBACK =
@@ -23,6 +24,7 @@ function useDemoConfig(): DemoBootConfig | null {
 
 export function DemoBanner() {
   const config = useDemoConfig();
+  const phoneDemo = usePhoneDemoLayout();
   const currentNode = useStudyStore((s) => s.currentNode);
   const nodeValues = useStudyStore((s) => s.nodeValues);
   const navigateTo = useStudyStore((s) => s.navigateTo);
@@ -103,7 +105,12 @@ export function DemoBanner() {
   }
 
   return (
-    <div className="demo-banner" role="region" aria-label="Public demo">
+    <div
+      className="demo-banner"
+      role="region"
+      aria-label="Public demo"
+      data-phone={phoneDemo ? "true" : "false"}
+    >
       <div className="demo-banner__meta">
         <strong className="demo-banner__title">Hold’em Study</strong>
         <span className="demo-banner__badge" aria-label="Precomputed">
@@ -145,15 +152,29 @@ export function DemoBanner() {
             </select>
           </label>
         ) : null}
-        <a
-          className="toolbar-btn primary demo-banner__download"
-          href={downloadUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Download for Windows
-        </a>
+        {phoneDemo ? null : (
+          <a
+            className="toolbar-btn primary demo-banner__download"
+            href={downloadUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Download for Windows
+          </a>
+        )}
       </div>
+      {phoneDemo ? (
+        <div className="demo-banner__secondary">
+          <a
+            className="demo-banner__download-secondary"
+            href={downloadUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Download for Windows
+          </a>
+        </div>
+      ) : null}
     </div>
   );
 }

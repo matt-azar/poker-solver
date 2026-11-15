@@ -3,21 +3,26 @@
  * Global colors/type: styles/tokens.css. Shell grid: styles/layout.css (.app-shell*).
  */
 import { useEffect, useState, type ReactNode } from "react";
+import { DemoBanner } from "../../demo/DemoBanner";
+import {
+  syncPublicDemoDocumentAttrs,
+  usePhoneDemoLayout,
+  usePublicDemoActive,
+} from "../../demo/phoneLayout";
+import { useHelpChatStore } from "../../state/assistantWindowStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useSolutionsCatalogueUi } from "../../state/solutionsCatalogueUi";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
 import { applyDocumentTheme, useThemeStore } from "../../state/themeStore";
-import { useHelpChatStore } from "../../state/assistantWindowStore";
+import { StudyAssistantWindow } from "../assistant/StudyAssistantWindow";
 import { BuildWorkspace } from "../build/BuildWorkspace";
 import { CompareWorkspace } from "../compare/CompareWorkspace";
 import { EquityWorkspace } from "../equity/EquityWorkspace";
 import { LibraryWorkspace } from "../library/LibraryWorkspace";
-import { SolutionsCatalogue } from "../study/SolutionsCatalogue";
-import { StudyWorkspace } from "../study/StudyWorkspace";
-import { StudyAssistantWindow } from "../assistant/StudyAssistantWindow";
-import { DemoBanner } from "../../demo/DemoBanner";
 import { PreviewBanner } from "../../preview/PreviewBanner";
 import { RiverBetaBanner } from "../../river-beta/RiverBetaBanner";
+import { SolutionsCatalogue } from "../study/SolutionsCatalogue";
+import { StudyWorkspace } from "../study/StudyWorkspace";
 import { HelpOverlay, MenuBar } from "./MenuBar";
 import { SettingsDialog } from "./SettingsDialog";
 import { StatusBar } from "./StatusBar";
@@ -42,10 +47,22 @@ export function AppShell() {
   const catalogueMode = useSolutionsCatalogueUi((s) => s.mode);
   const closeCatalogue = useSolutionsCatalogueUi((s) => s.closeCatalogue);
   const [helpOpen, setHelpOpen] = useState(false);
+  const demoActive = usePublicDemoActive();
+  const phoneDemo = usePhoneDemoLayout();
 
   useEffect(() => {
     applyDocumentTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    syncPublicDemoDocumentAttrs({
+      demoActive,
+      phoneLayout: phoneDemo,
+    });
+    return () => {
+      syncPublicDemoDocumentAttrs({ demoActive: false, phoneLayout: false });
+    };
+  }, [demoActive, phoneDemo]);
 
   // Sync non-theme settings into the study store only — do not push
   // settings.themePreference into themeStore (that wiped Theme-button choices).
@@ -96,34 +113,42 @@ export function AppShell() {
   }
 
   return (
-    <div className="app-shell">
+    <div
+      className="app-shell"
+      data-public-demo={demoActive ? "true" : "false"}
+      data-phone-demo={phoneDemo ? "true" : "false"}
+    >
       <DemoBanner />
       <RiverBetaBanner />
       <PreviewBanner />
-      <MenuBar
-        workspace={workspace}
-        onWorkspace={(id: WorkspaceId) => setWorkspace(id)}
-        helpOpen={helpOpen}
-        onHelpOpen={setHelpOpen}
-        assistantOpen={assistantOpen}
-        onAssistantToggle={toggleAssistant}
-      />
+      {phoneDemo ? null : (
+        <MenuBar
+          workspace={workspace}
+          onWorkspace={(id: WorkspaceId) => setWorkspace(id)}
+          helpOpen={helpOpen}
+          onHelpOpen={setHelpOpen}
+          assistantOpen={assistantOpen}
+          onAssistantToggle={toggleAssistant}
+        />
+      )}
       <div className="app-body">{body}</div>
-      <StatusBar
-        message={message}
-        connection={connection}
-        phase={phase}
-        status={status}
-        onReconnect={() => {
-          void reconnectEngine();
-        }}
-        onReopenLastCheckpoint={() => {
-          void reopenCheckpoint();
-        }}
-      />
+      {phoneDemo ? null : (
+        <StatusBar
+          message={message}
+          connection={connection}
+          phase={phase}
+          status={status}
+          onReconnect={() => {
+            void reconnectEngine();
+          }}
+          onReopenLastCheckpoint={() => {
+            void reopenCheckpoint();
+          }}
+        />
+      )}
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
       <SettingsDialog />
-      <StudyAssistantWindow />
+      {phoneDemo ? null : <StudyAssistantWindow />}
       {catalogueMode ? (
         <div
           className="catalogue-modal-overlay"
