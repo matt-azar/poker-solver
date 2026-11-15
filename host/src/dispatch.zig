@@ -447,6 +447,29 @@ fn parseUsizeArray(allocator: std.mem.Allocator, text: []const u8) ![]usize {
     return try list.toOwnedSlice();
 }
 
+/// Parse `[[a,b],[c,d]]` inner text (without outer brackets) into owned rows.
+fn parseF64Array2D(allocator: std.mem.Allocator, text: []const u8) ![][]f64 {
+    var rows = std.ArrayList([]f64).init(allocator);
+    errdefer {
+        for (rows.items) |row| allocator.free(row);
+        rows.deinit();
+    }
+    var i: usize = 0;
+    while (i < text.len) {
+        while (i < text.len and (text[i] == ' ' or text[i] == '\t' or text[i] == ',' or text[i] == '\n' or text[i] == '\r')) : (i += 1) {}
+        if (i >= text.len) break;
+        if (text[i] != '[') return error.InvalidLockText;
+        i += 1;
+        const from = i;
+        while (i < text.len and text[i] != ']') : (i += 1) {}
+        if (i >= text.len) return error.InvalidLockText;
+        const row = try parseF64Array(allocator, text[from..i]);
+        try rows.append(row);
+        i += 1;
+    }
+    return try rows.toOwnedSlice();
+}
+
 fn persistLocksText(state: *HostState, locks: *const node_lock.LockSet) !void {
     const text = try node_lock.formatLockSet(state.allocator, locks);
     defer state.allocator.free(text);
@@ -521,14 +544,10 @@ fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     if (!std.mem.eql(u8, scope_text, "node") and !std.mem.eql(u8, scope_text, "line")) {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "scope must be node or line");
     }
-    const probs_slice = bodyArraySlice(req.body_json, "probs") orelse
-        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs required");
-    const probs = parseF64Array(state.allocator, probs_slice) catch {
-        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad probs");
-    };
-    defer state.allocator.free(probs);
-    if (probs.len != page.n_actions) {
-        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs length must match action arity");
+    const combo_probs_slice = bodyArraySlice(req.body_json, "combo_probs");
+    const probs_slice = bodyArraySlice(req.body_json, "probs");
+    if (combo_probs_slice == null and probs_slice == null) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs or combo_probs required");
     }
 
     var lock = node_lock.NodeLock{
@@ -548,25 +567,70 @@ fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         lock.kind = .full_node;
     } else if (std.mem.eql(u8, kind_text, "selected")) {
         lock.kind = .selected_combos;
-        const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse "";
-        const hands = parseUsizeArray(state.allocator, hands_slice) catch {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_indices");
-        };
-        const n_hands: usize = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
-        for (hands) |hand| {
-            if (hand >= n_hands) {
-                state.allocator.free(hands);
-                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
-            }
-        }
-        // Ownership transfers to lock (and then LockSet); do not free `hands` separately.
-        lock.combo_indices = hands;
     } else {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "kind must be full or selected");
     }
-    lock.actions = node_lock.makeActionLockRow(state.allocator, probs, @intCast(page.n_actions)) catch {
-        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid lock row");
-    };
+
+    const n_hands: usize = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
+    if (combo_probs_slice) |cps| {
+        // Per-combo mixes: hand_indices parallel to combo_probs rows.
+        const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand_indices required with combo_probs");
+        const hands = parseUsizeArray(state.allocator, hands_slice) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_indices");
+        };
+        errdefer state.allocator.free(hands);
+        for (hands) |hand| {
+            if (hand >= n_hands) {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
+            }
+        }
+        const rows = parseF64Array2D(state.allocator, cps) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad combo_probs");
+        };
+        defer {
+            for (rows) |row| state.allocator.free(row);
+            state.allocator.free(rows);
+        }
+        if (rows.len != hands.len) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "combo_probs length must match hand_indices");
+        }
+        for (rows) |row| {
+            if (row.len != page.n_actions) {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "combo_probs row length must match action arity");
+            }
+        }
+        lock.combo_actions = node_lock.makeComboActionRows(state.allocator, hands, rows, @intCast(page.n_actions)) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid combo_probs rows");
+        };
+        lock.combo_indices = hands;
+        // Per-combo list is the lock mask (even when kind was full).
+        if (lock.kind == .full_node) lock.kind = .selected_combos;
+    } else {
+        const probs = parseF64Array(state.allocator, probs_slice.?) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad probs");
+        };
+        defer state.allocator.free(probs);
+        if (probs.len != page.n_actions) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs length must match action arity");
+        }
+        if (lock.kind == .selected_combos) {
+            const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse "";
+            const hands = parseUsizeArray(state.allocator, hands_slice) catch {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_indices");
+            };
+            for (hands) |hand| {
+                if (hand >= n_hands) {
+                    state.allocator.free(hands);
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
+                }
+            }
+            lock.combo_indices = hands;
+        }
+        lock.actions = node_lock.makeActionLockRow(state.allocator, probs, @intCast(page.n_actions)) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "invalid lock row");
+        };
+    }
 
     var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
@@ -607,7 +671,7 @@ fn handleDeleteLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             }
             const hand_index: usize = @intCast(hand_i32);
             if (locks.findExactKey(key)) |existing| {
-                if (existing.kind == .full_node) {
+                if (existing.kind == .full_node and !existing.hasPerComboActions()) {
                     return ipc.makeErrorReply(
                         state.allocator,
                         req.request_id,
@@ -617,8 +681,86 @@ fn handleDeleteLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
                         "full-node locks unlock with node_id only; omit hand_index",
                     );
                 }
+                _ = locks.eraseComboKey(key, hand_index);
+            } else if (key.turn >= 0 or key.river >= 0) {
+                // Board-local unlock against a line lock: materialize a node
+                // override with the remaining locked combos (do not mutate line).
+                const line = locks.findExactKey(node_lock.lineLockKey(parsed.node_index)) orelse {
+                    return replyLocksBody(state, req, &locks);
+                };
+                if (!node_lock.comboIsLocked(line.*, hand_index)) {
+                    return replyLocksBody(state, req, &locks);
+                }
+                var override = node_lock.NodeLock{
+                    .infoset_id = parsed.node_index,
+                    .turn = @intCast(parsed.turn),
+                    .river = @intCast(parsed.river),
+                    .scope = .node,
+                    .kind = .selected_combos,
+                };
+                errdefer override.deinit(state.allocator);
+                if (line.hasPerComboActions()) {
+                    var keep_idx = std.ArrayList(usize).init(state.allocator);
+                    defer keep_idx.deinit();
+                    var keep_rows = std.ArrayList([]const f64).init(state.allocator);
+                    defer keep_rows.deinit();
+                    for (line.combo_indices, 0..) |c, i| {
+                        if (c == hand_index) continue;
+                        try keep_idx.append(c);
+                        try keep_rows.append(line.combo_actions[i].probs);
+                    }
+                    if (keep_idx.items.len == 0) {
+                        // Unlocked full-node exact key shadows the line (all free).
+                        override.kind = .full_node;
+                        try locks.upsert(override);
+                        override = .{};
+                    } else {
+                        const indices = try state.allocator.dupe(usize, keep_idx.items);
+                        errdefer state.allocator.free(indices);
+                        override.combo_indices = indices;
+                        override.combo_actions = try node_lock.makeComboActionRows(
+                            state.allocator,
+                            indices,
+                            keep_rows.items,
+                            @intCast(keep_rows.items[0].len),
+                        );
+                        try locks.upsert(override);
+                        override = .{};
+                    }
+                } else if (!line.actions.unlocked() and line.kind == .selected_combos) {
+                    var keep = std.ArrayList(usize).init(state.allocator);
+                    defer keep.deinit();
+                    for (line.combo_indices) |c| {
+                        if (c == hand_index) continue;
+                        try keep.append(c);
+                    }
+                    if (keep.items.len == 0) {
+                        override.kind = .full_node;
+                        try locks.upsert(override);
+                        override = .{};
+                    } else {
+                        override.combo_indices = try state.allocator.dupe(usize, keep.items);
+                        override.actions = try node_lock.makeActionLockRow(
+                            state.allocator,
+                            line.actions.probs,
+                            @intCast(line.actions.probs.len),
+                        );
+                        try locks.upsert(override);
+                        override = .{};
+                    }
+                } else if (!line.actions.unlocked() and line.kind == .full_node) {
+                    // Shared full line lock without per-combo rows: cannot unlock
+                    // one combo without knowing hand count — reject.
+                    return ipc.makeErrorReply(
+                        state.allocator,
+                        req.request_id,
+                        req.job_id,
+                        req.op,
+                        "invalid_request",
+                        "full-node line locks unlock with node_id only; omit hand_index",
+                    );
+                }
             }
-            _ = locks.eraseComboKey(key, hand_index);
         } else {
             _ = locks.eraseKey(key);
         }

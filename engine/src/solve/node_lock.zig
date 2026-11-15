@@ -2,6 +2,10 @@
 //! Study overlay persistence uses this text in `.psol` v4. Row helpers
 //! (`applyLockToStrategy` / `applyLockToStrategyF32`) overwrite regret-matched
 //! σ; frozen CFR freeze/floorAndFreeze call the f32 helper (C++ `apply_freeze_range`).
+//!
+//! Pio-style locks freeze each combo's own action mix. Prefer
+//! `combo_indices` + `combo_actions` (parallel per-combo rows). Legacy shared
+//! `actions` still forces one mix onto every locked combo.
 const std = @import("std");
 
 pub const lock_prob_sum_tolerance: f64 = 1e-12;
@@ -29,7 +33,11 @@ pub const NodeLock = struct {
     scope: LockScope = .node,
     kind: LockKind = .full_node,
     combo_indices: []usize = &.{},
+    /// Legacy shared mix applied to every locked combo when `combo_actions` is empty.
     actions: ActionLockRow = .{},
+    /// Per-combo mixes parallel to `combo_indices`. When non-empty, length must
+    /// equal `combo_indices.len`; listed combos use their own row.
+    combo_actions: []ActionLockRow = &.{},
 
     pub fn isLine(self: NodeLock) bool {
         return self.scope == .line;
@@ -39,10 +47,19 @@ pub const NodeLock = struct {
         return makeLockKey(self.infoset_id, self.turn, self.river);
     }
 
+    pub fn hasPerComboActions(self: NodeLock) bool {
+        return self.combo_actions.len != 0;
+    }
+
     pub fn deinit(self: *NodeLock, allocator: std.mem.Allocator) void {
         if (self.combo_indices.len != 0) allocator.free(self.combo_indices);
         self.combo_indices = &.{};
         self.actions.deinit(allocator);
+        if (self.combo_actions.len != 0) {
+            for (self.combo_actions) |*row| row.deinit(allocator);
+            allocator.free(self.combo_actions);
+            self.combo_actions = &.{};
+        }
     }
 };
 
@@ -90,6 +107,28 @@ pub fn makeActionLockRow(allocator: std.mem.Allocator, probs: []const f64, actio
     return .{ .probs = owned };
 }
 
+/// Build parallel per-combo action rows. `rows[i]` belongs to `combo_indices[i]`.
+pub fn makeComboActionRows(
+    allocator: std.mem.Allocator,
+    combo_indices: []const usize,
+    rows: []const []const f64,
+    action_count: i32,
+) ![]ActionLockRow {
+    if (combo_indices.len != rows.len) return error.InvalidLockRow;
+    if (combo_indices.len == 0) return &.{};
+    var out = try allocator.alloc(ActionLockRow, rows.len);
+    errdefer {
+        for (out[0..]) |*row| row.deinit(allocator);
+        allocator.free(out);
+    }
+    var i: usize = 0;
+    while (i < rows.len) : (i += 1) {
+        out[i] = try makeActionLockRow(allocator, rows[i], action_count);
+        if (out[i].unlocked()) return error.InvalidLockRow;
+    }
+    return out;
+}
+
 pub fn comboIsSelected(lock: NodeLock, combo_index: usize) bool {
     for (lock.combo_indices) |index| {
         if (index == combo_index) return true;
@@ -97,31 +136,62 @@ pub fn comboIsSelected(lock: NodeLock, combo_index: usize) bool {
     return false;
 }
 
+fn comboRowIndex(lock: NodeLock, combo_index: usize) ?usize {
+    for (lock.combo_indices, 0..) |index, i| {
+        if (index == combo_index) return i;
+    }
+    return null;
+}
+
+/// True when this lock constrains `combo_index` (mask only; ignores empty rows).
+pub fn comboIsLocked(lock: NodeLock, combo_index: usize) bool {
+    if (lock.hasPerComboActions()) {
+        const idx = comboRowIndex(lock, combo_index) orelse {
+            // Per-combo list is the lock mask; unlisted stay free even for full_node.
+            return false;
+        };
+        return !lock.combo_actions[idx].unlocked();
+    }
+    if (lock.actions.unlocked()) return false;
+    if (lock.kind == .selected_combos and !comboIsSelected(lock, combo_index)) return false;
+    return true;
+}
+
+/// Locked probability row for a combo, or null when free.
+pub fn lockedActionRow(lock: NodeLock, combo_index: usize) ?[]const f64 {
+    if (lock.hasPerComboActions()) {
+        const idx = comboRowIndex(lock, combo_index) orelse return null;
+        const row = lock.combo_actions[idx];
+        if (row.unlocked()) return null;
+        return row.probs;
+    }
+    if (lock.actions.unlocked()) return null;
+    if (lock.kind == .selected_combos and !comboIsSelected(lock, combo_index)) return null;
+    return lock.actions.probs;
+}
+
 /// Locked probability for (combo, action), or null when free.
 pub fn lockedProbability(lock: NodeLock, combo_index: usize, action: usize) ?f64 {
-    if (lock.actions.unlocked()) return null;
-    if (action >= lock.actions.probs.len) return null;
-    if (lock.kind == .selected_combos and !comboIsSelected(lock, combo_index)) return null;
-    return lock.actions.probs[action];
+    const row = lockedActionRow(lock, combo_index) orelse return null;
+    if (action >= row.len) return null;
+    return row[action];
 }
 
 /// Overwrite `probs` from a lock when it applies. Returns true when applied.
 pub fn applyLockToStrategy(probs: []f64, lock: ?*const NodeLock, combo_index: usize) !bool {
     const L = lock orelse return false;
-    if (L.actions.unlocked()) return false;
-    if (L.kind == .selected_combos and !comboIsSelected(L.*, combo_index)) return false;
-    if (probs.len != L.actions.probs.len) return error.LockActionCountMismatch;
-    @memcpy(probs, L.actions.probs);
+    const row = lockedActionRow(L.*, combo_index) orelse return false;
+    if (probs.len != row.len) return error.LockActionCountMismatch;
+    @memcpy(probs, row);
     return true;
 }
 
 /// f32 σ tables (TrainingState / StreetBatch). Same contract as C++ float overload.
 pub fn applyLockToStrategyF32(probs: []f32, lock: ?*const NodeLock, combo_index: usize) !bool {
     const L = lock orelse return false;
-    if (L.actions.unlocked()) return false;
-    if (L.kind == .selected_combos and !comboIsSelected(L.*, combo_index)) return false;
-    if (probs.len != L.actions.probs.len) return error.LockActionCountMismatch;
-    for (probs, L.actions.probs) |*dst, src| {
+    const row = lockedActionRow(L.*, combo_index) orelse return false;
+    if (probs.len != row.len) return error.LockActionCountMismatch;
+    for (probs, row) |*dst, src| {
         dst.* = @floatCast(src);
     }
     return true;
@@ -156,6 +226,9 @@ pub const LockSet = struct {
     }
 
     pub fn upsert(self: *LockSet, lock: NodeLock) !void {
+        if (lock.hasPerComboActions() and lock.combo_actions.len != lock.combo_indices.len) {
+            return error.InvalidLockRow;
+        }
         const key = lock.key();
         if (self.findIndex(key)) |idx| {
             self.entries.items[idx].deinit(self.allocator);
@@ -183,6 +256,39 @@ pub const LockSet = struct {
     pub fn eraseComboKey(self: *LockSet, key: LockKey, combo_index: usize) bool {
         const idx = self.findIndex(key) orelse return false;
         const lock = &self.entries.items[idx];
+        // Per-combo rows: remove that combo from the parallel arrays.
+        if (lock.hasPerComboActions()) {
+            const at = comboRowIndex(lock.*, combo_index) orelse return false;
+            const old_idx = lock.combo_indices;
+            const old_rows = lock.combo_actions;
+            if (old_idx.len == 1) {
+                lock.deinit(self.allocator);
+                _ = self.entries.swapRemove(idx);
+                return true;
+            }
+            var next_idx = self.allocator.alloc(usize, old_idx.len - 1) catch return false;
+            errdefer self.allocator.free(next_idx);
+            var next_rows = self.allocator.alloc(ActionLockRow, old_rows.len - 1) catch {
+                self.allocator.free(next_idx);
+                return false;
+            };
+            var w: usize = 0;
+            for (old_idx, 0..) |c, i| {
+                if (i == at) {
+                    old_rows[i].deinit(self.allocator);
+                    continue;
+                }
+                next_idx[w] = c;
+                next_rows[w] = old_rows[i];
+                w += 1;
+            }
+            self.allocator.free(old_idx);
+            self.allocator.free(old_rows);
+            lock.combo_indices = next_idx;
+            lock.combo_actions = next_rows;
+            if (lock.kind == .full_node) lock.kind = .selected_combos;
+            return true;
+        }
         if (lock.kind != .selected_combos) return false;
         var found: ?usize = null;
         for (lock.combo_indices, 0..) |c, i| {
@@ -249,19 +355,39 @@ pub fn formatNodeLock(allocator: std.mem.Allocator, lock: NodeLock) ![]u8 {
         try out.writer().print(" at {d} {d}", .{ lock.turn, lock.river });
     }
     try out.append(' ');
-    if (lock.kind == .full_node) {
+    if (lock.hasPerComboActions()) {
+        // Per-combo always encodes the locked combo list + rows.
+        try out.appendSlice("combos ");
+        for (lock.combo_indices, 0..) |c, i| {
+            if (i > 0) try out.append(',');
+            try out.writer().print("{d}", .{c});
+        }
+        try out.appendSlice(" combo_probs");
+        for (lock.combo_actions, 0..) |row, ri| {
+            if (ri > 0) try out.appendSlice(" ;");
+            for (row.probs) |p| {
+                try out.writer().print(" {d}", .{p});
+            }
+        }
+    } else if (lock.kind == .full_node) {
         try out.appendSlice("full");
+        if (!lock.actions.unlocked()) {
+            try out.appendSlice(" probs");
+            for (lock.actions.probs) |p| {
+                try out.writer().print(" {d}", .{p});
+            }
+        }
     } else {
         try out.appendSlice("combos ");
         for (lock.combo_indices, 0..) |c, i| {
             if (i > 0) try out.append(',');
             try out.writer().print("{d}", .{c});
         }
-    }
-    if (!lock.actions.unlocked()) {
-        try out.appendSlice(" probs");
-        for (lock.actions.probs) |p| {
-            try out.writer().print(" {d}", .{p});
+        if (!lock.actions.unlocked()) {
+            try out.appendSlice(" probs");
+            for (lock.actions.probs) |p| {
+                try out.writer().print(" {d}", .{p});
+            }
         }
     }
     return try out.toOwnedSlice();
@@ -380,27 +506,58 @@ pub fn parseNodeLock(allocator: std.mem.Allocator, line: []const u8) !NodeLock {
         lock.kind = .selected_combos;
         index += 1;
         if (index >= parts.len) return error.InvalidLockText;
-        if (!std.mem.eql(u8, parts[index], "probs")) {
+        if (!std.mem.eql(u8, parts[index], "probs") and !std.mem.eql(u8, parts[index], "combo_probs")) {
             lock.combo_indices = try parseComboList(allocator, parts[index]);
             index += 1;
         }
     } else return error.InvalidLockText;
 
     if (index < parts.len) {
-        if (!std.mem.eql(u8, parts[index], "probs")) return error.InvalidLockText;
-        index += 1;
-        const n = parts.len - index;
-        var probs = try allocator.alloc(f64, n);
-        errdefer allocator.free(probs);
-        var p: usize = 0;
-        while (index < parts.len) : ({
+        if (std.mem.eql(u8, parts[index], "combo_probs")) {
             index += 1;
-            p += 1;
-        }) {
-            probs[p] = try parseProb(parts[index]);
-        }
-        lock.actions = try makeActionLockRow(allocator, probs, @intCast(probs.len));
-        allocator.free(probs);
+            if (lock.combo_indices.len == 0) return error.InvalidLockText;
+            // Groups separated by `;` tokens: combo_probs 1 0 ; 0 1
+            var groups = std.ArrayList([]f64).init(allocator);
+            defer {
+                for (groups.items) |g| allocator.free(g);
+                groups.deinit();
+            }
+            var cur = std.ArrayList(f64).init(allocator);
+            defer cur.deinit();
+            while (index < parts.len) : (index += 1) {
+                if (std.mem.eql(u8, parts[index], ";")) {
+                    if (cur.items.len == 0) return error.InvalidLockText;
+                    try groups.append(try allocator.dupe(f64, cur.items));
+                    cur.clearRetainingCapacity();
+                    continue;
+                }
+                try cur.append(try parseProb(parts[index]));
+            }
+            if (cur.items.len == 0) return error.InvalidLockText;
+            try groups.append(try allocator.dupe(f64, cur.items));
+            if (groups.items.len != lock.combo_indices.len) return error.InvalidLockText;
+            const n_actions: i32 = @intCast(groups.items[0].len);
+            for (groups.items) |g| {
+                if (g.len != @as(usize, @intCast(n_actions))) return error.InvalidLockText;
+            }
+            lock.combo_actions = try makeComboActionRows(allocator, lock.combo_indices, groups.items, n_actions);
+            // Per-combo encoding is the mask; kind stays selected unless caller said full
+            // before combos (full + combo_probs is not a text form — combos path only).
+        } else if (std.mem.eql(u8, parts[index], "probs")) {
+            index += 1;
+            const n = parts.len - index;
+            var probs = try allocator.alloc(f64, n);
+            errdefer allocator.free(probs);
+            var p: usize = 0;
+            while (index < parts.len) : ({
+                index += 1;
+                p += 1;
+            }) {
+                probs[p] = try parseProb(parts[index]);
+            }
+            lock.actions = try makeActionLockRow(allocator, probs, @intCast(probs.len));
+            allocator.free(probs);
+        } else return error.InvalidLockText;
     }
     return lock;
 }

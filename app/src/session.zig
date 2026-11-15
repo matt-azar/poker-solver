@@ -783,10 +783,31 @@ pub const Session = struct {
             self.mu.unlock();
             return error.BudgetExceeded;
         }
+        // Snapshot locks so publish can stamp locked rows (warm-start / zero-reach).
+        const locks_snapshot: []u8 = if (self.locks_text.len != 0)
+            (self.allocator.dupe(u8, self.locks_text) catch {
+                self.mu.unlock();
+                return error.OutOfMemory;
+            })
+        else
+            &.{};
         // Wait until quiet — required for in-place rewrite and for a stable swap.
         while (self.readers != 0 or self.publishing_in_place) {
             self.quiet.wait(&self.mu);
         }
+
+        var locks_owned: ?poker_engine.solve.node_lock.LockSet = null;
+        defer {
+            if (locks_owned) |*owned| owned.deinit();
+            if (locks_snapshot.len != 0) self.allocator.free(locks_snapshot);
+        }
+        if (locks_snapshot.len != 0) {
+            locks_owned = poker_engine.solve.node_lock.parseLockSet(self.allocator, locks_snapshot) catch {
+                self.mu.unlock();
+                return error.InvalidSession;
+            };
+        }
+        const locks_ptr: ?*const poker_engine.solve.node_lock.LockSet = if (locks_owned) |*owned| owned else null;
 
         // Prefer in-place rewrite: no second `table_entries` f32 buffer (flop cadence).
         if (self.published) |*pub_policy| {
@@ -803,6 +824,7 @@ pub const Session = struct {
                     state,
                     buf,
                     threads,
+                    locks_ptr,
                 );
 
                 self.mu.lock();
@@ -846,6 +868,7 @@ pub const Session = struct {
             state,
             buf,
             threads,
+            locks_ptr,
         ) catch |err| {
             if (err == error.OutOfMemory) return self.mapAllocErr(err);
             return error.InvalidSession;
@@ -886,11 +909,20 @@ pub const Session = struct {
                     const owned = self.allocator.alloc(f32, published.average.len) catch return error.OutOfMemory;
                     errdefer self.allocator.free(owned);
                     @memcpy(owned, published.average);
+                    var locks_owned: ?poker_engine.solve.node_lock.LockSet = null;
+                    defer if (locks_owned) |*owned_locks| owned_locks.deinit();
+                    if (self.locks_text.len != 0) {
+                        locks_owned = poker_engine.solve.node_lock.parseLockSet(self.allocator, self.locks_text) catch {
+                            self.allocator.free(owned);
+                            return error.InvalidSession;
+                        };
+                    }
                     poker_engine.solve.training_state.republishAverageInto(
                         self.allocator,
                         game,
                         state,
                         owned,
+                        if (locks_owned) |*owned_locks| owned_locks else null,
                     ) catch {
                         self.allocator.free(owned);
                         return error.InvalidSession;
@@ -913,11 +945,19 @@ pub const Session = struct {
         if (self.has_training) {
             if (self.training) |*state| {
                 if (self.game) |game| {
+                    var locks_owned: ?poker_engine.solve.node_lock.LockSet = null;
+                    defer if (locks_owned) |*owned_locks| owned_locks.deinit();
+                    if (self.locks_text.len != 0) {
+                        locks_owned = poker_engine.solve.node_lock.parseLockSet(self.allocator, self.locks_text) catch {
+                            return error.InvalidSession;
+                        };
+                    }
                     poker_engine.solve.training_state.republishAverageInto(
                         self.allocator,
                         game,
                         state,
                         published.average,
+                        if (locks_owned) |*owned_locks| owned_locks else null,
                     ) catch return error.InvalidSession;
                     published.revision += 1;
                     self.published_cv.broadcast();
@@ -1421,11 +1461,29 @@ pub const Session = struct {
     }
 
     /// Frozen NashConv / Accuracy on the Session-owned engine (reuses ranks).
+    /// When locks are present, BR respects locked mixes (constrained Accuracy).
     pub fn evaluateFrozen(
         self: *Session,
         average: []const f32,
     ) SessionError!poker_engine.solve.frozen_walk.FrozenEval {
         const ctx = try self.ensureFrozenCtx();
+        const locks_snapshot: []u8 = blk: {
+            self.mu.lock();
+            defer self.mu.unlock();
+            if (self.locks_text.len == 0) break :blk &.{};
+            break :blk (self.allocator.dupe(u8, self.locks_text) catch return error.OutOfMemory);
+        };
+        defer if (locks_snapshot.len != 0) self.allocator.free(locks_snapshot);
+        var locks_owned: ?poker_engine.solve.node_lock.LockSet = null;
+        defer if (locks_owned) |*owned| owned.deinit();
+        if (locks_snapshot.len != 0) {
+            locks_owned = poker_engine.solve.node_lock.parseLockSet(self.allocator, locks_snapshot) catch {
+                return error.InvalidSession;
+            };
+        }
+        const prev_locks = ctx.locks;
+        ctx.locks = if (locks_owned) |*owned| owned else null;
+        defer ctx.locks = prev_locks;
         return poker_engine.solve.frozen_walk.evaluatePublishedFrozenOnCtx(ctx, average);
     }
 

@@ -150,6 +150,15 @@ fn applySlotRange(
                     state.strategy_sum[base .. base + n],
                     out[base .. base + n],
                 );
+                // Pio-style: published rows for locked combos must match the lock
+                // (warm-start pre-lock mass and zero-reach uniform fallback).
+                const set = locks orelse continue;
+                const lock = set.findForRunout(@intCast(slot.node), slot.turn, slot.river);
+                _ = node_lock.applyLockToStrategyF32(out[base .. base + n], lock, slot.hand) catch |err| {
+                    return switch (err) {
+                        error.LockActionCountMismatch => error.LockActionCountMismatch,
+                    };
+                };
             },
         }
     }
@@ -296,7 +305,7 @@ pub fn floorAndFreezeThreaded(
 
 /// After a completed iteration: materialize stable average-policy revision (D2).
 pub fn publishAverage(allocator: std.mem.Allocator, game: compile.CompiledGame, state: *TrainingState) TrainError!PublishedPolicy {
-    return publishAverageThreaded(allocator, game, state, 1);
+    return publishAverageThreaded(allocator, game, state, 1, null);
 }
 
 pub fn publishAverageThreaded(
@@ -304,6 +313,7 @@ pub fn publishAverageThreaded(
     game: compile.CompiledGame,
     state: *TrainingState,
     threads: u32,
+    locks: ?*const node_lock.LockSet,
 ) TrainError!PublishedPolicy {
     state.policy_revision += 1;
     var published = PublishedPolicy{
@@ -317,7 +327,7 @@ pub fn publishAverageThreaded(
     }
     published.average = allocator.alloc(f32, state.strategy_sum.len) catch return error.OutOfMemory;
     @memset(published.average, 0);
-    try runSlotPassThreaded(allocator, game, state, .publish, -1, threads, published.average, null);
+    try runSlotPassThreaded(allocator, game, state, .publish, -1, threads, published.average, locks);
     return published;
 }
 
@@ -328,11 +338,12 @@ pub fn republishAverageInto(
     game: compile.CompiledGame,
     state: *TrainingState,
     average: []f32,
+    locks: ?*const node_lock.LockSet,
 ) TrainError!void {
     if (state.strategy_sum.len == 0) return;
     if (average.len != state.strategy_sum.len) return error.InvalidTrain;
     @memset(average, 0);
-    try runSlotPassThreaded(allocator, game, state, .publish, -1, 1, average, null);
+    try runSlotPassThreaded(allocator, game, state, .publish, -1, 1, average, locks);
 }
 
 /// Normalize `strategy_sum` into a caller-owned buffer and bump `policy_revision`.
@@ -343,12 +354,13 @@ pub fn publishAverageIntoThreaded(
     state: *TrainingState,
     average: []f32,
     threads: u32,
+    locks: ?*const node_lock.LockSet,
 ) TrainError!void {
     state.policy_revision += 1;
     if (state.strategy_sum.len == 0) return;
     if (average.len != state.strategy_sum.len) return error.InvalidTrain;
     @memset(average, 0);
-    try runSlotPassThreaded(allocator, game, state, .publish, -1, threads, average, null);
+    try runSlotPassThreaded(allocator, game, state, .publish, -1, threads, average, locks);
 }
 
 test "slot passes: 4-thread matches serial" {
@@ -419,7 +431,7 @@ test "slot passes: 4-thread matches serial" {
     }
     var pub1 = try publishAverage(std.testing.allocator, game, &serial);
     defer pub1.deinit();
-    var pub4 = try publishAverageThreaded(std.testing.allocator, game, &threaded, 4);
+    var pub4 = try publishAverageThreaded(std.testing.allocator, game, &threaded, 4, null);
     defer pub4.deinit();
     try std.testing.expectEqual(pub1.average.len, pub4.average.len);
     for (pub1.average, pub4.average) |a, b| {

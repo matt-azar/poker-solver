@@ -85,9 +85,37 @@ pub fn packStudyLocksBody(allocator: std.mem.Allocator, locks: *const node_lock.
             list.appendSlice(hand_text) catch return error.OutOfMemory;
         }
         list.appendSlice("],\"probs\":[") catch return error.OutOfMemory;
-        for (lock.actions.probs, 0..) |p, a| {
-            if (a > 0) list.append(',') catch return error.OutOfMemory;
-            try appendF64(&list, p);
+        if (lock.hasPerComboActions()) {
+            // Display average of per-combo rows for legacy single-row UI consumers.
+            if (lock.combo_actions.len > 0 and lock.combo_actions[0].probs.len > 0) {
+                const n_act = lock.combo_actions[0].probs.len;
+                var a: usize = 0;
+                while (a < n_act) : (a += 1) {
+                    if (a > 0) list.append(',') catch return error.OutOfMemory;
+                    var sum: f64 = 0;
+                    for (lock.combo_actions) |row| {
+                        if (a < row.probs.len) sum += row.probs[a];
+                    }
+                    try appendF64(&list, sum / @as(f64, @floatFromInt(lock.combo_actions.len)));
+                }
+            }
+        } else {
+            for (lock.actions.probs, 0..) |p, a| {
+                if (a > 0) list.append(',') catch return error.OutOfMemory;
+                try appendF64(&list, p);
+            }
+        }
+        if (lock.hasPerComboActions()) {
+            list.appendSlice("],\"combo_probs\":[") catch return error.OutOfMemory;
+            for (lock.combo_actions, 0..) |row, ri| {
+                if (ri > 0) list.append(',') catch return error.OutOfMemory;
+                list.append('[') catch return error.OutOfMemory;
+                for (row.probs, 0..) |p, a| {
+                    if (a > 0) list.append(',') catch return error.OutOfMemory;
+                    try appendF64(&list, p);
+                }
+                list.append(']') catch return error.OutOfMemory;
+            }
         }
         list.appendSlice("]}") catch return error.OutOfMemory;
     }

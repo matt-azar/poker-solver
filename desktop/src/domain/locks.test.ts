@@ -5,6 +5,7 @@ import {
   lockForNode,
   lockMutationCompletion,
   normalizeProbs,
+  seedComboProbsFromStrategy,
   seedProbsFromStrategy,
   setLinkedActionProb,
   toggleHandIndex,
@@ -43,6 +44,21 @@ describe("lock helpers", () => {
     expect(seeded[0]).toBeCloseTo(0.35, 12);
     expect(seeded[1]).toBeCloseTo(0.65, 12);
     expect(uniformProbs(4).reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+  });
+
+  it("seeds per-combo lock rows without averaging opposite pure actions", () => {
+    const rows = seedComboProbsFromStrategy(
+      [
+        [1, 0],
+        [0, 1],
+      ],
+      [0, 1],
+      2,
+    );
+    expect(rows).toEqual([
+      [1, 0],
+      [0, 1],
+    ]);
   });
 
   it("marks full-node locks as locking every hand", () => {

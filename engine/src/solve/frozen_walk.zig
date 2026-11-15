@@ -1605,6 +1605,10 @@ pub const FrozenCtx = struct {
         try self.fillActorSlotBases(w, here, node, turn, river);
         const n_act: usize = node.n_actions;
         const choosing = node.player == responding;
+        const active_lock: ?*const node_lock.NodeLock = if (self.locks) |set|
+            set.findForRunout(@intCast(node_index), turn, river)
+        else
+            null;
 
         var action: usize = 0;
         while (action < n_act) : (action += 1) {
@@ -1617,6 +1621,7 @@ pub const FrozenCtx = struct {
                         continue;
                     }
                     if (choosing) {
+                        // CF explore: full own-reach into every action (lock applied at mix).
                         child.pi0[h0] = here.pi0[h0];
                     } else {
                         const b: usize = @intCast(base);
@@ -1665,6 +1670,17 @@ pub const FrozenCtx = struct {
                     continue;
                 }
                 if (node.player == 0 and responding == 0) {
+                    if (active_lock) |lock| {
+                        if (node_lock.lockedActionRow(lock.*, h0)) |row| {
+                            var mix: f64 = 0;
+                            action = 0;
+                            while (action < n_act) : (action += 1) {
+                                mix += row[action] * here.aev0[action * self.n0 + h0];
+                            }
+                            here.ev0[h0] = mix;
+                            continue;
+                        }
+                    }
                     var best: usize = 0;
                     action = 1;
                     while (action < n_act) : (action += 1) {
@@ -1707,6 +1723,17 @@ pub const FrozenCtx = struct {
                     continue;
                 }
                 if (node.player == 1 and responding == 1) {
+                    if (active_lock) |lock| {
+                        if (node_lock.lockedActionRow(lock.*, h1)) |row| {
+                            var mix: f64 = 0;
+                            action = 0;
+                            while (action < n_act) : (action += 1) {
+                                mix += row[action] * here.aev1[action * self.n1 + h1];
+                            }
+                            here.ev1[h1] = mix;
+                            continue;
+                        }
+                    }
                     var best: usize = 0;
                     action = 1;
                     while (action < n_act) : (action += 1) {
@@ -2408,7 +2435,7 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
                         .trained = state.trained,
                     };
                 } else {
-                    const next = training_state.publishAverageThreaded(allocator, game, state, slot_threads) catch |err| {
+                    const next = training_state.publishAverageThreaded(allocator, game, state, slot_threads, ctx.locks) catch |err| {
                         return switch (err) {
                             error.OutOfMemory => error.OutOfMemory,
                             else => error.StrategyPublishFailed,
@@ -2436,7 +2463,7 @@ pub fn trainFrozenCfrPlusOnCtxStaged(
             std.debug.assert(published.trained == state.trained);
         } else {
             // Standalone / rematch path: publish every completed iteration.
-            const next = training_state.publishAverageThreaded(allocator, game, state, slot_threads) catch |err| {
+            const next = training_state.publishAverageThreaded(allocator, game, state, slot_threads, ctx.locks) catch |err| {
                 return switch (err) {
                     error.OutOfMemory => error.OutOfMemory,
                     else => error.StrategyPublishFailed,

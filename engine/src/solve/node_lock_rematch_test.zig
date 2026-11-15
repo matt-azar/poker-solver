@@ -264,6 +264,34 @@ test "text round trip node line selected unlocked legacy" {
     try std.testing.expect(node_lock.lockedProbability(round.find(9).?.*, 1, 2) == null);
 }
 
+test "per-combo combo_probs roundtrips in lock text" {
+    const allocator = std.testing.allocator;
+    var set = node_lock.LockSet.init(allocator);
+    defer set.deinit();
+    const indices = try allocator.dupe(usize, &.{ 0, 2 });
+    const lock = node_lock.NodeLock{
+        .infoset_id = 3,
+        .scope = .line,
+        .kind = .selected_combos,
+        .combo_indices = indices,
+        .combo_actions = try node_lock.makeComboActionRows(
+            allocator,
+            indices,
+            &.{ &.{ 1.0, 0.0 }, &.{ 0.25, 0.75 } },
+            2,
+        ),
+    };
+    try set.upsert(lock);
+    const text = try node_lock.formatLockSet(allocator, &set);
+    defer allocator.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, "combo_probs") != null);
+    var round = try node_lock.parseLockSet(allocator, text);
+    defer round.deinit();
+    try std.testing.expectEqual(@as(f64, 1.0), node_lock.lockedProbability(round.find(3).?.*, 0, 0).?);
+    try std.testing.expectEqual(@as(f64, 0.75), node_lock.lockedProbability(round.find(3).?.*, 2, 1).?);
+    try std.testing.expect(node_lock.lockedProbability(round.find(3).?.*, 1, 0) == null);
+}
+
 test "erase combo shrinks then removes selected lock" {
     var set = node_lock.LockSet.init(std.testing.allocator);
     defer set.deinit();

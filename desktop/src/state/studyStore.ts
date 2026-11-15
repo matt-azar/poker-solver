@@ -57,6 +57,7 @@ import {
   lockForNode,
   lockMutationCompletion,
   normalizeProbs,
+  seedComboProbsFromStrategy,
   seedProbsFromStrategy,
   setLinkedActionProb,
   toggleHandIndex,
@@ -1314,16 +1315,17 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     set({ lockDraft: { ...get().lockDraft, kind } });
   },
   setLockProbs(probs) {
-    set({ lockDraft: { ...get().lockDraft, probs: probs.slice() } });
+    // Shared-row edits drop per-combo freeze (slider path; rewrite deferred).
+    set({ lockDraft: { ...get().lockDraft, probs: probs.slice(), comboProbs: undefined } });
   },
   setLockProbAt(index, value) {
     const probs = get().lockDraft.probs.slice();
     probs[index] = value;
-    set({ lockDraft: { ...get().lockDraft, probs } });
+    set({ lockDraft: { ...get().lockDraft, probs, comboProbs: undefined } });
   },
   setLockProbLinked(index, value) {
     const probs = setLinkedActionProb(get().lockDraft.probs, index, value);
-    set({ lockDraft: { ...get().lockDraft, probs } });
+    set({ lockDraft: { ...get().lockDraft, probs, comboProbs: undefined } });
   },
   toggleLockHand(handIndex) {
     const handIndices = toggleHandIndex(get().lockDraft.handIndices, handIndex);
@@ -1339,8 +1341,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       .filter((index) => index >= 0);
     const unique = [...new Set(handIndices)].sort((a, b) => a - b);
     const actions = node.actions?.length ?? 0;
-    const probs = seedProbsFromStrategy(node.strategy ?? null, unique, actions);
-    const draft: LockDraft = { kind: "selected", handIndices: unique, probs };
+    const strategy = node.strategy ?? null;
+    const comboProbs = seedComboProbsFromStrategy(strategy, unique, actions) ?? undefined;
+    const probs = seedProbsFromStrategy(strategy, unique, actions);
+    const draft: LockDraft = { kind: "selected", handIndices: unique, probs, comboProbs };
     set({
       lockDraft: draft,
       lockDraftBaseline: structuredClone(draft),
@@ -1355,6 +1359,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         ...get().lockDraft,
         kind: "selected",
         handIndices: [],
+        comboProbs: undefined,
       },
     });
   },
@@ -1365,24 +1370,26 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const handIndices = node.combos.map((_, index) => index);
     const actions = node.actions?.length ?? 0;
-    const probs = seedProbsFromStrategy(node.strategy ?? null, handIndices, actions);
+    const strategy = node.strategy ?? null;
+    const comboProbs = seedComboProbsFromStrategy(strategy, handIndices, actions) ?? undefined;
+    const probs = seedProbsFromStrategy(strategy, handIndices, actions);
     set({
       lockDraft: {
         kind: "selected",
         handIndices,
         probs,
+        comboProbs,
       },
     });
   },
   seedLockFromStrategy() {
     const node = get().currentNode;
     const actions = node?.actions?.length ?? 0;
-    const probs = seedProbsFromStrategy(
-      node?.strategy ?? null,
-      get().lockDraft.handIndices,
-      actions,
-    );
-    set({ lockDraft: { ...get().lockDraft, probs } });
+    const handIndices = get().lockDraft.handIndices;
+    const strategy = node?.strategy ?? null;
+    const comboProbs = seedComboProbsFromStrategy(strategy, handIndices, actions) ?? undefined;
+    const probs = seedProbsFromStrategy(strategy, handIndices, actions);
+    set({ lockDraft: { ...get().lockDraft, probs, comboProbs } });
   },
   revertLockDraft() {
     const baseline = get().lockDraftBaseline;
@@ -1432,16 +1439,39 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       set({ message: "Select at least one combo, or switch to full-node lock." });
       return false;
     }
+    const useComboProbs =
+      Array.isArray(draft.comboProbs) &&
+      draft.comboProbs.length === draft.handIndices.length &&
+      draft.handIndices.length > 0;
+    if (useComboProbs) {
+      for (const row of draft.comboProbs!) {
+        const normalizedRow = normalizeProbs(row);
+        if (!normalizedRow.valid) {
+          set({
+            message: normalizedRow.reason || "Lock probabilities are invalid.",
+          });
+          return false;
+        }
+      }
+    }
     const normalized = normalizeProbs(draft.probs);
-    if (!normalized.valid) {
+    if (!useComboProbs && !normalized.valid) {
       set({
         message: normalized.reason || "Lock probabilities are invalid.",
       });
       return false;
     }
     try {
-      const body =
-        draft.kind === "full"
+      const body = useComboProbs
+        ? {
+            node_id: node.node_id,
+            kind: "selected" as const,
+            scope,
+            hand_indices: draft.handIndices,
+            probs: normalized.valid ? normalized.probs : draft.probs,
+            combo_probs: draft.comboProbs,
+          }
+        : draft.kind === "full"
           ? {
               node_id: node.node_id,
               kind: "full" as const,
@@ -1502,8 +1532,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return;
     }
     const requestNodeId = node.node_id;
-    const active = lockForNode(get().locks, requestNodeId);
-    const deleteNodeId = active?.node_id ?? requestNodeId;
+    // Always target the browsed board so line locks get a node override (not
+    // a shared-line erase that frees the combo on every runout).
     const targets = handIndices ?? get().lockDraft.handIndices;
     if (!targets.length) {
       set({ message: "No combo selected to unlock." });
@@ -1511,7 +1541,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     try {
       for (const handIndex of targets) {
-        await engineClient.deleteLock(solutionId, deleteNodeId, handIndex);
+        await engineClient.deleteLock(solutionId, requestNodeId, handIndex);
       }
       if (get().solutionId !== solutionId) {
         return;
