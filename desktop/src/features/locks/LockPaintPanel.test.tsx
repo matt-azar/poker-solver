@@ -106,11 +106,11 @@ describe("Node Locking workspace", () => {
         kind: "selected",
         handIndices: [0, 1, 2],
         probs: [0.6, 0.4],
-        comboProbs: [
-          [0.5, 0.5],
-          [0.6, 0.4],
-          [0.7, 0.3],
-        ],
+        comboProbsByHand: {
+          0: [0.5, 0.5],
+          1: [0.6, 0.4],
+          2: [0.7, 0.3],
+        },
       },
       nodeValues: {
         node_id: "p0",
@@ -133,9 +133,10 @@ describe("Node Locking workspace", () => {
     expect(probs[1]).toBeCloseTo(0.2, 5);
     expect(probs[0] + probs[1]).toBeCloseTo(1, 8);
     // Per-combo rows stay intact (not collapsed to one shared mix).
-    const comboProbs = useStudyStore.getState().lockDraft.comboProbs;
-    expect(comboProbs).toHaveLength(3);
-    const checks = comboProbs!.map((row) => row[0]);
+    const byHand = useStudyStore.getState().lockDraft.comboProbsByHand;
+    expect(byHand).toBeTruthy();
+    expect(Object.keys(byHand!).length).toBe(3);
+    const checks = [0, 1, 2].map((hand) => byHand![hand][0]);
     expect(new Set(checks.map((value) => value.toFixed(4))).size).toBeGreaterThan(1);
   });
 

@@ -53,12 +53,17 @@ import {
 } from "../domain/browse";
 import {
   applyFrequencySliderEdit,
+  buildComboLockPutBody,
+  buildFullRangeLockDraft,
+  comboProbsByHandFromRows,
+  comboProbsRowsForHands,
   handIndexForCombo,
   isHandLocked,
   lockForNode,
   lockMutationCompletion,
   normalizeProbs,
-  seedComboProbsFromStrategy,
+  rematerializeComboProbsByHand,
+  seedComboProbsByHandFromStrategy,
   seedProbsFromStrategy,
   setLinkedActionProb,
   toggleHandIndex,
@@ -449,6 +454,8 @@ interface StudyState {
   revertLockDraft: () => void;
   refreshLocks: () => Promise<void>;
   applyLock: (scope?: "node" | "line") => Promise<boolean>;
+  /** Freeze every combo's current mix on this board (or line); ignores selection subset. */
+  lockAllHands: (scope?: "node" | "line") => Promise<boolean>;
   unlockHands: (handIndices?: number[]) => Promise<void>;
   unlockNode: () => Promise<void>;
   clearAllLocks: () => Promise<void>;
@@ -1327,7 +1334,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
   setLockProbs(probs) {
     // Manual shared-row replace clears per-combo rows (rare; prefer sliders).
-    set({ lockDraft: { ...get().lockDraft, probs: probs.slice(), comboProbs: undefined } });
+    set({
+      lockDraft: { ...get().lockDraft, probs: probs.slice(), comboProbsByHand: undefined },
+    });
   },
   setLockProbAt(index, value) {
     // Number box: same cross-combo EV path as the linked slider.
@@ -1341,12 +1350,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       draft.kind === "full" && node?.combos?.length
         ? node.combos.map((_, handIndex) => handIndex)
         : draft.handIndices.slice();
-    const comboProbs =
-      Array.isArray(draft.comboProbs) &&
-      draft.comboProbs.length === handIndices.length &&
-      draft.comboProbs.every((row) => row.length === actions)
-        ? draft.comboProbs.map((row) => row.slice())
-        : seedComboProbsFromStrategy(node?.strategy ?? null, handIndices, actions);
+    const byHand =
+      rematerializeComboProbsByHand({
+        previous: draft.comboProbsByHand,
+        nextHandIndices: handIndices,
+        strategy: node?.strategy ?? null,
+        actionCount: actions,
+      }) ?? undefined;
+    const comboProbs = comboProbsRowsForHands(byHand, handIndices);
 
     if (!comboProbs || comboProbs.length === 0 || handIndices.length === 0) {
       const probs = setLinkedActionProb(
@@ -1355,7 +1366,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         value,
         options?.protectedActions,
       );
-      set({ lockDraft: { ...draft, probs, comboProbs: undefined } });
+      set({ lockDraft: { ...draft, probs, comboProbsByHand: undefined } });
       return;
     }
 
@@ -1392,13 +1403,34 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         handIndices,
         kind: draft.kind === "full" ? "full" : "selected",
         probs: edited.aggregate,
-        comboProbs: edited.comboProbs,
+        comboProbsByHand: comboProbsByHandFromRows(handIndices, edited.comboProbs),
       },
     });
   },
   toggleLockHand(handIndex) {
-    const handIndices = toggleHandIndex(get().lockDraft.handIndices, handIndex);
-    set({ lockDraft: { ...get().lockDraft, handIndices, kind: "selected" } });
+    const draft = get().lockDraft;
+    const handIndices = toggleHandIndex(draft.handIndices, handIndex);
+    const node = get().currentNode;
+    const actions = node?.actions?.length ?? draft.probs.length;
+    const comboProbsByHand = rematerializeComboProbsByHand({
+      previous: draft.comboProbsByHand,
+      nextHandIndices: handIndices,
+      strategy: node?.strategy ?? null,
+      actionCount: actions,
+    });
+    const probs =
+      handIndices.length > 0
+        ? seedProbsFromStrategy(node?.strategy ?? null, handIndices, actions)
+        : draft.probs;
+    set({
+      lockDraft: {
+        ...draft,
+        handIndices,
+        kind: "selected",
+        probs,
+        comboProbsByHand,
+      },
+    });
   },
   selectCombosForLock(combos) {
     const node = get().currentNode;
@@ -1411,9 +1443,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const unique = [...new Set(handIndices)].sort((a, b) => a - b);
     const actions = node.actions?.length ?? 0;
     const strategy = node.strategy ?? null;
-    const comboProbs = seedComboProbsFromStrategy(strategy, unique, actions) ?? undefined;
+    const comboProbsByHand =
+      seedComboProbsByHandFromStrategy(strategy, unique, actions) ?? undefined;
     const probs = seedProbsFromStrategy(strategy, unique, actions);
-    const draft: LockDraft = { kind: "selected", handIndices: unique, probs, comboProbs };
+    const draft: LockDraft = {
+      kind: "selected",
+      handIndices: unique,
+      probs,
+      comboProbsByHand,
+    };
     set({
       lockDraft: draft,
       lockDraftBaseline: structuredClone(draft),
@@ -1428,7 +1466,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         ...get().lockDraft,
         kind: "selected",
         handIndices: [],
-        comboProbs: undefined,
+        comboProbsByHand: undefined,
       },
     });
   },
@@ -1440,14 +1478,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const handIndices = node.combos.map((_, index) => index);
     const actions = node.actions?.length ?? 0;
     const strategy = node.strategy ?? null;
-    const comboProbs = seedComboProbsFromStrategy(strategy, handIndices, actions) ?? undefined;
+    const comboProbsByHand =
+      seedComboProbsByHandFromStrategy(strategy, handIndices, actions) ?? undefined;
     const probs = seedProbsFromStrategy(strategy, handIndices, actions);
     set({
       lockDraft: {
         kind: "selected",
         handIndices,
         probs,
-        comboProbs,
+        comboProbsByHand,
       },
     });
   },
@@ -1456,9 +1495,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const actions = node?.actions?.length ?? 0;
     const handIndices = get().lockDraft.handIndices;
     const strategy = node?.strategy ?? null;
-    const comboProbs = seedComboProbsFromStrategy(strategy, handIndices, actions) ?? undefined;
+    const comboProbsByHand =
+      seedComboProbsByHandFromStrategy(strategy, handIndices, actions) ?? undefined;
     const probs = seedProbsFromStrategy(strategy, handIndices, actions);
-    set({ lockDraft: { ...get().lockDraft, probs, comboProbs } });
+    set({ lockDraft: { ...get().lockDraft, probs, comboProbsByHand } });
   },
   revertLockDraft() {
     const baseline = get().lockDraftBaseline;
@@ -1504,56 +1544,120 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       return false;
     }
     const draft = structuredClone(get().lockDraft);
-    if (draft.kind === "selected" && draft.handIndices.length === 0) {
-      set({ message: "Select at least one combo, or switch to full-node lock." });
+    // kind "full" always expands to an explicit full-range per-combo freeze.
+    if (draft.kind === "full") {
+      return get().lockAllHands(scope);
+    }
+    if (draft.handIndices.length === 0) {
+      set({ message: "Select at least one combo, or use Lock all hands." });
       return false;
     }
-    const useComboProbs =
-      Array.isArray(draft.comboProbs) &&
-      draft.comboProbs.length === draft.handIndices.length &&
-      draft.handIndices.length > 0;
-    if (useComboProbs) {
-      for (const row of draft.comboProbs!) {
-        const normalizedRow = normalizeProbs(row);
-        if (!normalizedRow.valid) {
-          set({
-            message: normalizedRow.reason || "Lock probabilities are invalid.",
-          });
-          return false;
-        }
-      }
-    }
+    const comboBody = draft.comboProbsByHand
+      ? buildComboLockPutBody({
+          nodeId: node.node_id,
+          scope,
+          handIndices: draft.handIndices,
+          comboProbsByHand: draft.comboProbsByHand,
+          aggregateProbs: draft.probs,
+        })
+      : null;
     const normalized = normalizeProbs(draft.probs);
-    if (!useComboProbs && !normalized.valid) {
+    if (!comboBody && !normalized.valid) {
       set({
         message: normalized.reason || "Lock probabilities are invalid.",
       });
       return false;
     }
+    if (draft.comboProbsByHand && !comboBody) {
+      set({ message: "Lock probabilities are invalid." });
+      return false;
+    }
     try {
-      const body = useComboProbs
-        ? {
-            node_id: node.node_id,
-            kind: "selected" as const,
-            scope,
-            hand_indices: draft.handIndices,
-            probs: normalized.valid ? normalized.probs : draft.probs,
-            combo_probs: draft.comboProbs,
-          }
-        : draft.kind === "full"
-          ? {
-              node_id: node.node_id,
-              kind: "full" as const,
-              scope,
-              probs: normalized.probs,
-            }
-          : {
-              node_id: node.node_id,
-              kind: "selected" as const,
-              scope,
-              hand_indices: draft.handIndices,
-              probs: normalized.probs,
-            };
+      const body = comboBody ?? {
+        node_id: node.node_id,
+        kind: "selected" as const,
+        scope,
+        hand_indices: draft.handIndices,
+        probs: normalized.probs,
+      };
+      const payload = (await engineClient.putLock(solutionId, body)) as LocksPayload;
+      const live = get();
+      const completion = lockMutationCompletion({
+        requestSolutionId: solutionId,
+        requestNodeId: node.node_id,
+        liveSolutionId: live.solutionId,
+        liveNodeId: live.currentNode?.node_id,
+      });
+      if (!completion.applyLocksList) {
+        return false;
+      }
+      const scopeLabel = scope === "line" ? "line (all runouts)" : "node";
+      if (completion.applyDraft) {
+        const nextDraft: LockDraft = {
+          ...draft,
+          probs: comboBody?.probs ?? normalized.probs,
+          comboProbsByHand: comboBody
+            ? comboProbsByHandFromRows(comboBody.hand_indices, comboBody.combo_probs)
+            : draft.comboProbsByHand,
+        };
+        set({
+          locks: payload.locks || [],
+          lockDraft: nextDraft,
+          lockDraftBaseline: structuredClone(nextDraft),
+          message: `Locked ${draft.handIndices.length} combo(s) on ${scopeLabel} at ${node.node_id}`,
+        });
+      } else {
+        // Same solution, different node — keep locks list, discard draft write.
+        set({
+          locks: payload.locks || [],
+          message: `Lock applied at ${node.node_id} (draft not restored; node changed).`,
+        });
+      }
+      return true;
+    } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return false;
+      }
+      set({
+        message: error instanceof EngineError ? error.message : "Lock failed",
+      });
+      return false;
+    }
+  },
+  async lockAllHands(scope: "node" | "line" = "node") {
+    const solutionId = get().solutionId;
+    const node = get().currentNode;
+    if (!solutionId || !node || node.kind !== "decision") {
+      set({ message: "Locks require a published decision node." });
+      return false;
+    }
+    const actions = node.actions?.length ?? 0;
+    const handCount = node.combos?.length ?? 0;
+    const fullDraft = buildFullRangeLockDraft({
+      strategy: node.strategy ?? null,
+      actionCount: actions,
+      handCount,
+      existingByHand: get().lockDraft.comboProbsByHand,
+    });
+    if (!fullDraft?.comboProbsByHand) {
+      set({
+        message:
+          "Cannot lock all hands: node strategy rows are missing or invalid.",
+      });
+      return false;
+    }
+    const body = buildComboLockPutBody({
+      nodeId: node.node_id,
+      scope,
+      handIndices: fullDraft.handIndices,
+      comboProbsByHand: fullDraft.comboProbsByHand,
+      aggregateProbs: fullDraft.probs,
+    });
+    if (!body) {
+      set({ message: "Lock probabilities are invalid." });
+      return false;
+    }
+    try {
       const payload = (await engineClient.putLock(solutionId, body)) as LocksPayload;
       const live = get();
       const completion = lockMutationCompletion({
@@ -1569,15 +1673,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (completion.applyDraft) {
         set({
           locks: payload.locks || [],
-          lockDraft: { ...draft, probs: normalized.probs },
-          lockDraftBaseline: structuredClone({ ...draft, probs: normalized.probs }),
-          message:
-            draft.kind === "full"
-              ? `Full ${scopeLabel} lock applied at ${node.node_id}`
-              : `Locked ${draft.handIndices.length} combo(s) on ${scopeLabel} at ${node.node_id}`,
+          lockDraft: fullDraft,
+          lockDraftBaseline: structuredClone(fullDraft),
+          message: `Full ${scopeLabel} lock applied at ${node.node_id}`,
         });
       } else {
-        // Same solution, different node — keep locks list, discard draft write.
         set({
           locks: payload.locks || [],
           message: `Lock applied at ${node.node_id} (draft not restored; node changed).`,

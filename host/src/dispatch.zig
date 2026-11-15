@@ -509,6 +509,150 @@ fn reapplyStrategyEdits(state: *HostState, edits: *const strategy_edit.StrategyE
     try state.session.bumpPolicyRevision();
 }
 
+const LineLockExpandError = error{
+    InvalidLockRow,
+    OutOfMemory,
+    InvalidAnalysis,
+};
+
+/// Build a board-local per-combo lock from the published strategy at one runout.
+/// Pio line lock: each legal runout keeps the mix already stored there.
+fn nodeLockFromPublishedRunout(
+    allocator: std.mem.Allocator,
+    game: poker_engine.game.compile.CompiledGame,
+    published: poker_engine.solve.training_state.PublishedPolicy,
+    infoset_id: usize,
+    turn: i32,
+    river: i32,
+    hands: []const usize,
+) LineLockExpandError!?node_lock.NodeLock {
+    var page = try poker_engine.analysis.inspect.inspectNode(
+        allocator,
+        game,
+        published,
+        @intCast(infoset_id),
+        turn,
+        river,
+    );
+    defer page.deinit();
+    if (page.player < 0 or page.n_actions == 0) return null;
+    const n_actions: usize = page.n_actions;
+    const n_hands: usize = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
+
+    // Keep only hands with a usable published mix at this runout (skip card-blocked /
+    // zero rows). Returns null when nothing applies on this board.
+    var kept_hands = std.ArrayList(usize).init(allocator);
+    defer kept_hands.deinit();
+    var kept_rows = std.ArrayList([]f64).init(allocator);
+    defer {
+        for (kept_rows.items) |row| allocator.free(row);
+        kept_rows.deinit();
+    }
+
+    for (hands) |hand| {
+        if (hand >= n_hands) continue;
+        if (page.strategy.len < (hand + 1) * n_actions) continue;
+        const src = page.strategy[hand * n_actions ..][0..n_actions];
+        var sum: f64 = 0;
+        for (src) |p| {
+            if (std.math.isFinite(p) and p >= 0) sum += @floatCast(p);
+        }
+        if (!(sum > 0)) continue;
+        var row = try allocator.alloc(f64, n_actions);
+        errdefer allocator.free(row);
+        for (src, 0..) |p, ai| {
+            const v: f64 = if (std.math.isFinite(p) and p >= 0) @floatCast(p) else 0;
+            row[ai] = v / sum;
+        }
+        try kept_hands.append(hand);
+        try kept_rows.append(row);
+    }
+    if (kept_hands.items.len == 0) return null;
+
+    const owned_hands = try allocator.dupe(usize, kept_hands.items);
+    errdefer allocator.free(owned_hands);
+    const combo_actions = try node_lock.makeComboActionRows(
+        allocator,
+        owned_hands,
+        kept_rows.items,
+        @intCast(n_actions),
+    );
+
+    return .{
+        .infoset_id = infoset_id,
+        .scope = .node,
+        .turn = @intCast(turn),
+        .river = @intCast(river),
+        .kind = .selected_combos,
+        .combo_indices = owned_hands,
+        .combo_actions = combo_actions,
+    };
+}
+
+fn upsertOneLineRunout(
+    state: *HostState,
+    locks: *node_lock.LockSet,
+    game: poker_engine.game.compile.CompiledGame,
+    published: poker_engine.solve.training_state.PublishedPolicy,
+    infoset_id: usize,
+    turn: i32,
+    river: i32,
+    hands: []const usize,
+) LineLockExpandError!void {
+    const maybe = try nodeLockFromPublishedRunout(
+        state.allocator,
+        game,
+        published,
+        infoset_id,
+        turn,
+        river,
+        hands,
+    );
+    var lock = maybe orelse return;
+    errdefer lock.deinit(state.allocator);
+    try locks.mergeUpsert(lock);
+}
+
+fn upsertLineLockRunouts(
+    state: *HostState,
+    locks: *node_lock.LockSet,
+    game: poker_engine.game.compile.CompiledGame,
+    published: poker_engine.solve.training_state.PublishedPolicy,
+    infoset_id: usize,
+    hands: []const usize,
+) LineLockExpandError!void {
+    const node = game.nodes[infoset_id];
+    // Drop any prior shared line record so findForRunout cannot reuse one mix.
+    _ = locks.eraseKey(node_lock.lineLockKey(infoset_id));
+
+    if (node.card_mode == 0) {
+        try upsertOneLineRunout(state, locks, game, published, infoset_id, -1, -1, hands);
+        return;
+    }
+    if (node.card_mode == 1) {
+        for (game.runouts.mode1_cards) |c| {
+            const turn: i32 = if (node.mode1_is_turn) c else -1;
+            const river: i32 = if (node.mode1_is_turn) -1 else c;
+            try upsertOneLineRunout(state, locks, game, published, infoset_id, turn, river, hands);
+        }
+        return;
+    }
+    // card_mode 2: every legal turn/river pair.
+    var i: usize = 0;
+    while (i < game.runouts.mode2_turn.len) : (i += 1) {
+        try upsertOneLineRunout(
+            state,
+            locks,
+            game,
+            published,
+            infoset_id,
+            game.runouts.mode2_turn[i],
+            game.runouts.mode2_river[i],
+            hands,
+        );
+    }
+}
+
 /// ZR-136: fat `put_lock` body extracted from `handle` (op discriminator stays in parent).
 fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     if (state.train_running.load(.acquire) or state.session.phase == .training) {
@@ -549,29 +693,63 @@ fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     if (combo_probs_slice == null and probs_slice == null) {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "probs or combo_probs required");
     }
-
-    var lock = node_lock.NodeLock{
-        .infoset_id = located.node_index,
-    };
-    errdefer lock.deinit(state.allocator);
-    if (std.mem.eql(u8, scope_text, "line")) {
-        lock.scope = .line;
-        lock.turn = -1;
-        lock.river = -1;
-    } else {
-        lock.scope = .node;
-        lock.turn = @intCast(located.turn);
-        lock.river = @intCast(located.river);
-    }
-    if (std.mem.eql(u8, kind_text, "full")) {
-        lock.kind = .full_node;
-    } else if (std.mem.eql(u8, kind_text, "selected")) {
-        lock.kind = .selected_combos;
-    } else {
+    if (!std.mem.eql(u8, kind_text, "full") and !std.mem.eql(u8, kind_text, "selected")) {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "kind must be full or selected");
     }
 
     const n_hands: usize = if (page.n_hands > 0) @intCast(page.n_hands) else page.combos.len;
+
+    // Line lock: expand into per-runout node locks from each runout's published
+    // strategy. Never copy the browsed board's mix under a shared line key.
+    if (std.mem.eql(u8, scope_text, "line")) {
+        var hands: []usize = &.{};
+        defer if (hands.len != 0) state.allocator.free(hands);
+        if (combo_probs_slice != null or std.mem.eql(u8, kind_text, "selected")) {
+            const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand_indices required for line lock mask");
+            hands = parseUsizeArray(state.allocator, hands_slice) catch {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "bad hand_indices");
+            };
+            if (hands.len == 0) {
+                return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand_indices required for line lock mask");
+            }
+            for (hands) |hand| {
+                if (hand >= n_hands) {
+                    return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "hand index out of range");
+                }
+            }
+        } else {
+            // Full line lock: every combo.
+            hands = try state.allocator.alloc(usize, n_hands);
+            for (hands, 0..) |*h, i| h.* = i;
+        }
+
+        var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
+        };
+        defer locks.deinit();
+        upsertLineLockRunouts(state, &locks, lease.game, lease.published, located.node_index, hands) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+        };
+        persistLocksText(state, &locks) catch |err| {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
+        };
+        return replyLocksBody(state, req, &locks);
+    }
+
+    var lock = node_lock.NodeLock{
+        .infoset_id = located.node_index,
+        .scope = .node,
+        .turn = @intCast(located.turn),
+        .river = @intCast(located.river),
+    };
+    errdefer lock.deinit(state.allocator);
+    if (std.mem.eql(u8, kind_text, "full")) {
+        lock.kind = .full_node;
+    } else {
+        lock.kind = .selected_combos;
+    }
+
     if (combo_probs_slice) |cps| {
         // Per-combo mixes: hand_indices parallel to combo_probs rows.
         const hands_slice = bodyArraySlice(req.body_json, "hand_indices") orelse
@@ -3710,6 +3888,96 @@ test "equity dispatch river smoke Study shape" {
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"ip_hands\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"engine\":\"checkdown_equity\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "AsQs") != null);
+}
+
+test "line lock expands per runout without copying browsed mix" {
+    // Turn board; river decisions. Same combo opposite pure actions on two rivers.
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    const river_a: i32 = 20; // 7c
+    const river_b: i32 = 21; // 7d
+    var state = try HostState.init(std.testing.allocator, "line-lock-runouts");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    const game = state.session.game orelse return error.TestUnexpectedResult;
+    var infoset: usize = 0;
+    for (game.nodes, 0..) |node, i| {
+        if (node.kind == .decision and node.player == 0 and node.n_actions >= 2) {
+            infoset = i;
+            break;
+        }
+    }
+    const node = game.nodes[infoset];
+    try std.testing.expect(node.card_mode == 1);
+
+    // Force opposite pure actions for combo 0 on the two rivers.
+    const avg = try state.session.publishedAverageMut();
+    {
+        const key = try game.cardKey(node, 0, -1, river_a);
+        const slot_i = node.slot_of[@intCast(key)];
+        try std.testing.expect(slot_i >= 0);
+        const base: usize = @intCast(game.slots[@intCast(slot_i)].base);
+        avg[base] = 1;
+        avg[base + 1] = 0;
+    }
+    {
+        const key = try game.cardKey(node, 0, -1, river_b);
+        const slot_i = node.slot_of[@intCast(key)];
+        try std.testing.expect(slot_i >= 0);
+        const base: usize = @intCast(game.slots[@intCast(slot_i)].base);
+        avg[base] = 0;
+        avg[base + 1] = 1;
+    }
+
+    // Request carries river_a's mix for both combos — must not overwrite river_b.
+    var node_id_buf: [64]u8 = undefined;
+    const node_id = try std.fmt.bufPrint(&node_id_buf, "p{d}.t-1.r{d}", .{ infoset, river_a });
+    var body_buf: [256]u8 = undefined;
+    const body = try std.fmt.bufPrint(
+        &body_buf,
+        "{{\"node_id\":\"{s}\",\"kind\":\"selected\",\"scope\":\"line\",\"hand_indices\":[0],\"probs\":[1,0],\"combo_probs\":[[1,0]]}}",
+        .{node_id},
+    );
+    var put_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "ll-put"),
+        .op = try std.testing.allocator.dupe(u8, "put_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, body),
+    };
+    defer put_req.deinit();
+    var put_reply = try handle(&state, put_req);
+    defer put_reply.deinit();
+    try std.testing.expect(put_reply.ok);
+
+    var locks = try locks_json.parseSessionLocks(std.testing.allocator, state.session.locks_text);
+    defer locks.deinit();
+    try std.testing.expect(locks.find(infoset) == null); // no shared line mix
+    const lock_a = locks.findExact(infoset, -1, river_a).?;
+    const lock_b = locks.findExact(infoset, -1, river_b).?;
+    try std.testing.expectEqual(@as(f64, 1.0), node_lock.lockedProbability(lock_a.*, 0, 0).?);
+    try std.testing.expectEqual(@as(f64, 0.0), node_lock.lockedProbability(lock_a.*, 0, 1).?);
+    try std.testing.expectEqual(@as(f64, 0.0), node_lock.lockedProbability(lock_b.*, 0, 0).?);
+    try std.testing.expectEqual(@as(f64, 1.0), node_lock.lockedProbability(lock_b.*, 0, 1).?);
 }
 
 test "locks list put delete Study CRUD" {

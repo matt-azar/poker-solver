@@ -5,6 +5,7 @@ import {
 } from "../../engine/ipcCapabilities";
 import { mapActionColors } from "../../domain/actionColors";
 import {
+  comboProbsRowsForHands,
   formatProbPct,
   isHandLocked,
   lockForNode,
@@ -91,6 +92,7 @@ export function LockDrawer() {
   const clearLockSelection = useStudyStore((s) => s.clearLockSelection);
   const selectAllCombosForLock = useStudyStore((s) => s.selectAllCombosForLock);
   const applyLock = useStudyStore((s) => s.applyLock);
+  const lockAllHands = useStudyStore((s) => s.lockAllHands);
   const unlockHands = useStudyStore((s) => s.unlockHands);
   const unlockNode = useStudyStore((s) => s.unlockNode);
   const clearAllLocks = useStudyStore((s) => s.clearAllLocks);
@@ -173,13 +175,10 @@ export function LockDrawer() {
       lockDraft.kind === "full" && combos?.length
         ? combos.map((_, index) => index)
         : lockDraft.handIndices;
-    if (
-      Array.isArray(lockDraft.comboProbs) &&
-      lockDraft.comboProbs.length === handIndices.length &&
-      actions.length > 0
-    ) {
+    const rows = comboProbsRowsForHands(lockDraft.comboProbsByHand, handIndices);
+    if (rows && actions.length > 0) {
       return weightedStrategyMix(
-        lockDraft.comboProbs,
+        rows,
         handIndices.map((_, index) => index),
         actions.length,
         null,
@@ -190,7 +189,7 @@ export function LockDrawer() {
     }
     return normalized.probs;
   }, [
-    lockDraft.comboProbs,
+    lockDraft.comboProbsByHand,
     lockDraft.handIndices,
     lockDraft.kind,
     combos,
@@ -538,11 +537,10 @@ export function LockDrawer() {
                   type="button"
                   className="toolbar-btn"
                   onClick={() => {
-                    setLockKind("full");
-                    void applyLock("node");
+                    void lockAllHands("node");
                   }}
-                  disabled={!currentNode || currentNode.kind !== "decision" || !normalized.valid}
-                  title="Lock only the selected board (this runout)"
+                  disabled={!currentNode || currentNode.kind !== "decision"}
+                  title="Freeze every combo's current mix on this board only"
                 >
                   Lock all hands
                 </button>
@@ -550,11 +548,10 @@ export function LockDrawer() {
                   type="button"
                   className="toolbar-btn"
                   onClick={() => {
-                    setLockKind("full");
-                    void applyLock("line");
+                    void lockAllHands("line");
                   }}
-                  disabled={!currentNode || currentNode.kind !== "decision" || !normalized.valid}
-                  title="Lock this betting line on every runout (Pio lock_line)"
+                  disabled={!currentNode || currentNode.kind !== "decision"}
+                  title="Freeze each runout's own mix across this betting line (Pio lock_line)"
                 >
                   Lock line across runouts
                 </button>

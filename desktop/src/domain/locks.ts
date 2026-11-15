@@ -44,12 +44,18 @@ export interface ComparePayload {
   utility_basis?: string;
 }
 
+/** Per-combo mixes keyed by hand index so selection changes cannot attach the wrong row. */
+export type ComboProbsByHand = Record<number, number[]>;
+
 export interface LockDraft {
   kind: "full" | "selected";
   handIndices: number[];
   probs: number[];
-  /** When set, applyLock sends per-combo rows instead of a shared mix. */
-  comboProbs?: number[][];
+  /**
+   * Per-combo mixes keyed by combo identity (hand index).
+   * Prefer this over parallel arrays — toggle/select must not reuse rows by position.
+   */
+  comboProbsByHand?: ComboProbsByHand;
 }
 
 export function emptyProbs(actionCount: number): number[] {
@@ -218,10 +224,23 @@ export function seedComboProbsFromStrategy(
   handIndices: number[],
   actionCount: number,
 ): number[][] | null {
+  const byHand = seedComboProbsByHandFromStrategy(strategy, handIndices, actionCount);
+  if (!byHand) {
+    return null;
+  }
+  return comboProbsRowsForHands(byHand, handIndices);
+}
+
+/** Seed per-combo mixes keyed by hand index from the browsed strategy. */
+export function seedComboProbsByHandFromStrategy(
+  strategy: number[][] | null | undefined,
+  handIndices: number[],
+  actionCount: number,
+): ComboProbsByHand | null {
   if (!strategy || handIndices.length === 0 || actionCount <= 0) {
     return null;
   }
-  const rows: number[][] = [];
+  const byHand: ComboProbsByHand = {};
   for (const handIndex of handIndices) {
     const row = strategy[handIndex];
     if (!row || row.length !== actionCount) {
@@ -231,9 +250,153 @@ export function seedComboProbsFromStrategy(
     if (!normalized.valid) {
       return null;
     }
-    rows.push(normalized.probs);
+    byHand[handIndex] = normalized.probs;
+  }
+  return byHand;
+}
+
+/** Parallel rows for `handIndices` from an identity-keyed map (missing → null). */
+export function comboProbsRowsForHands(
+  byHand: ComboProbsByHand | null | undefined,
+  handIndices: number[],
+): number[][] | null {
+  if (!byHand || handIndices.length === 0) {
+    return null;
+  }
+  const rows: number[][] = [];
+  for (const handIndex of handIndices) {
+    const row = byHand[handIndex];
+    if (!row) {
+      return null;
+    }
+    rows.push(row.slice());
   }
   return rows;
+}
+
+/** Build an identity-keyed map from parallel handIndices + comboProbs rows. */
+export function comboProbsByHandFromRows(
+  handIndices: number[],
+  rows: number[][] | null | undefined,
+): ComboProbsByHand | undefined {
+  if (!rows || rows.length !== handIndices.length || handIndices.length === 0) {
+    return undefined;
+  }
+  const byHand: ComboProbsByHand = {};
+  for (let i = 0; i < handIndices.length; i++) {
+    byHand[handIndices[i]] = rows[i].slice();
+  }
+  return byHand;
+}
+
+/**
+ * Keep edited mixes for still-selected combos; seed newly selected from strategy.
+ * Drops rows for deselected combos so they cannot attach to a later selection.
+ */
+export function rematerializeComboProbsByHand(args: {
+  previous?: ComboProbsByHand | null;
+  nextHandIndices: number[];
+  strategy: number[][] | null | undefined;
+  actionCount: number;
+}): ComboProbsByHand | undefined {
+  const { previous, nextHandIndices, strategy, actionCount } = args;
+  if (nextHandIndices.length === 0 || actionCount <= 0) {
+    return undefined;
+  }
+  const next: ComboProbsByHand = {};
+  for (const handIndex of nextHandIndices) {
+    const kept = previous?.[handIndex];
+    if (
+      kept &&
+      kept.length === actionCount &&
+      normalizeProbs(kept).valid
+    ) {
+      next[handIndex] = kept.slice();
+      continue;
+    }
+    const row = strategy?.[handIndex];
+    if (!row || row.length !== actionCount) {
+      return undefined;
+    }
+    const normalized = normalizeProbs(row);
+    if (!normalized.valid) {
+      return undefined;
+    }
+    next[handIndex] = normalized.probs;
+  }
+  return next;
+}
+
+/**
+ * Explicit full-range freeze payload: every combo keeps its own mix
+ * (draft edits by identity win; otherwise published strategy).
+ * Never a shared default 100%-first-action row or a selected subset.
+ */
+export function buildFullRangeLockDraft(args: {
+  strategy: number[][] | null | undefined;
+  actionCount: number;
+  handCount: number;
+  existingByHand?: ComboProbsByHand | null;
+}): LockDraft | null {
+  const { strategy, actionCount, handCount, existingByHand } = args;
+  if (handCount <= 0 || actionCount <= 0) {
+    return null;
+  }
+  const handIndices = Array.from({ length: handCount }, (_, index) => index);
+  const byHand = rematerializeComboProbsByHand({
+    previous: existingByHand,
+    nextHandIndices: handIndices,
+    strategy,
+    actionCount,
+  });
+  if (!byHand) {
+    return null;
+  }
+  const rows = comboProbsRowsForHands(byHand, handIndices);
+  if (!rows) {
+    return null;
+  }
+  const probs = seedProbsFromStrategy(rows, handIndices.map((_, i) => i), actionCount);
+  return {
+    kind: "selected",
+    handIndices,
+    probs,
+    comboProbsByHand: byHand,
+  };
+}
+
+/** Apply-body shape for put_lock when freezing per-combo mixes. */
+export function buildComboLockPutBody(args: {
+  nodeId: string;
+  scope: LockScope;
+  handIndices: number[];
+  comboProbsByHand: ComboProbsByHand;
+  aggregateProbs: number[];
+}): {
+  node_id: string;
+  kind: "selected";
+  scope: LockScope;
+  hand_indices: number[];
+  probs: number[];
+  combo_probs: number[][];
+} | null {
+  const rows = comboProbsRowsForHands(args.comboProbsByHand, args.handIndices);
+  if (!rows || rows.length === 0) {
+    return null;
+  }
+  for (const row of rows) {
+    if (!normalizeProbs(row).valid) {
+      return null;
+    }
+  }
+  return {
+    node_id: args.nodeId,
+    kind: "selected",
+    scope: args.scope,
+    hand_indices: args.handIndices.slice(),
+    probs: args.aggregateProbs.slice(),
+    combo_probs: rows,
+  };
 }
 
 /**
