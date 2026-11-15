@@ -18,26 +18,34 @@ function previewCommitSha(): string {
   }
 }
 
-export default defineConfig({
-  plugins: [react()],
-  define: {
-    "import.meta.env.VITE_PREVIEW_COMMIT_SHA": JSON.stringify(previewCommitSha()),
-  },
-  server: {
-    port: 5173,
-    fs: {
-      // Allow importing model context packs from docs/ai-context/*.md
-      allow: [".."],
+export default defineConfig(({ mode }) => {
+  const publicDemo = mode === "public-demo";
+  return {
+    plugins: [react()],
+    define: {
+      "import.meta.env.VITE_PREVIEW_COMMIT_SHA": JSON.stringify(previewCommitSha()),
+      // Public static build always boots precomputed demo; private QA uses
+      // `preview:scenario` / `?preview=` on the default Vite entry instead.
+      "import.meta.env.VITE_PUBLIC_DEMO": JSON.stringify(
+        publicDemo || process.env.VITE_PUBLIC_DEMO === "true" ? "true" : "",
+      ),
     },
-    // No HTTP explorer proxy — packaged and Tauri-dev Study use solver-engine IPC.
-  },
-  build: {
-    outDir: "dist",
-    emptyOutDir: true,
-    sourcemap: true,
-  },
-  test: {
-    environment: "jsdom",
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-  },
+    server: {
+      port: 5173,
+      fs: {
+        // Allow importing model context packs from docs/ai-context/*.md
+        allow: [".."],
+      },
+      // No HTTP explorer proxy — packaged and Tauri-dev Study use solver-engine IPC.
+    },
+    build: {
+      outDir: publicDemo ? "dist-public-demo" : "dist",
+      emptyOutDir: true,
+      sourcemap: !publicDemo,
+    },
+    test: {
+      environment: "jsdom",
+      include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    },
+  };
 });

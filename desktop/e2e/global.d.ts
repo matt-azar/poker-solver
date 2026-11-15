@@ -11,5 +11,13 @@ declare global {
       nodeEv: number | null;
       valuesPending: boolean;
     };
+    __STUDY_DEMO_DEBUG__?: {
+      exampleId: string;
+      variantId: string;
+      nodeId: string | null;
+      nodeEv: number | null;
+      actionFrequencies: number[] | null;
+      fetchedPaths: string[];
+    };
   }
 }
