@@ -14,4 +14,12 @@ echo "==> Supervisor concurrency test (status+cancel while values withheld)"
 (cd "$TAURI" && cargo test --lib status_and_cancel_complete_while_values_held -- --nocapture)
 
 echo "PASS: Rust supervisor concurrency"
+
+echo "==> Hold-EV Status+Cancel probe (pass bar)"
+python3 "$ROOT/scripts/desktop/ipc_race_replay.py" \
+  "$ROOT/scripts/desktop/ipc-race-cases/values-hold-status-cancel.json"
+
+echo "PASS: hold-EV Status+Cancel"
+echo "Windows CI: .github/workflows/ipc-race-probes.yml"
+echo "UI A→B stale-EV: browser/Playwright track (not this probe)"
 echo "Windows WebView gate: scripts/desktop/ipc-async-acceptance.ps1 -StudyExe <Holdem Study.exe>"

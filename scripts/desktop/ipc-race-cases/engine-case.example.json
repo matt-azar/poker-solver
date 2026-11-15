@@ -1,0 +1,32 @@
+{
+  "id": "engine-example-river-gate",
+  "title": "Example real-engine case template (not run by --filter-sidecar test)",
+  "sidecar": "engine",
+  "build_sha": "REPLACE_WITH_FAILING_COMMIT_SHA",
+  "input": {
+    "config": "benchmarks/study/configs/river_gate_smoke.txt",
+    "begin_job_id": "j-race-begin",
+    "begin_timeout_s": 30
+  },
+  "actions": [
+    {
+      "op": "solve",
+      "id": "solve",
+      "body": { "iterations": 2 },
+      "job_id": "j-race-solve",
+      "timeout_s": 10,
+      "expect": { "ok": true }
+    },
+    {
+      "op": "status",
+      "id": "status",
+      "timeout_s": 5,
+      "expect": { "ok": true }
+    }
+  ],
+  "expected": {
+    "replies": {
+      "solve": { "ok": true }
+    }
+  }
+}
