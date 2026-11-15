@@ -1361,6 +1361,26 @@ pub fn ipc_acceptance_enabled() -> bool {
     )
 }
 
+/// Installer E2E stage from `STUDY_INSTALLER_E2E` (`stage-a` / `stage-b`), or null.
+#[tauri::command]
+pub fn installer_e2e_stage() -> Option<String> {
+    let raw = std::env::var("STUDY_INSTALLER_E2E").ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+/// Stage B hard gate: `STUDY_INSTALLER_E2E_STAGE_B=1` (off until Stage A is proven).
+#[tauri::command]
+pub fn installer_e2e_stage_b_enabled() -> bool {
+    matches!(
+        std::env::var("STUDY_INSTALLER_E2E_STAGE_B").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
 /// Exit the process with a code (acceptance harness).
 #[tauri::command]
 pub fn exit_with_code(code: i32) {

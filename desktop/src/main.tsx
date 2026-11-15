@@ -8,6 +8,7 @@ import { detectAndInstallPlatform } from "./platform";
 import { startUiHangMonitor } from "./platform/diagnostics";
 import { ensureEngine } from "./platform/engine";
 import { maybeRunIpcAcceptanceAndExit } from "./platform/ipcAcceptance";
+import { maybeRunInstallerE2eAndExit } from "./platform/installerE2e";
 import { useStudyStore } from "./state/studyStore";
 
 applyDocumentTheme(resolveTheme(useThemeStore.getState().preference));
@@ -18,6 +19,10 @@ startUiHangMonitor();
 async function bootEngineThenRender(): Promise<void> {
   // Packaged Windows acceptance: WebView → Tauri → test sidecar (exits process).
   if (await maybeRunIpcAcceptanceAndExit()) {
+    return;
+  }
+  // Installer E2E Stage A/B: WebView → Tauri → installed sidecar (exits process).
+  if (await maybeRunInstallerE2eAndExit()) {
     return;
   }
 
