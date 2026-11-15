@@ -1,0 +1,16 @@
+{
+  "chance_children_exported": {},
+  "max_chance_children": null,
+  "nodes": [
+    "p0.t-1.r-1",
+    "p1.t-1.r-1",
+    "p6.t-1.r-1",
+    "p2.t-1.r-1",
+    "p3.t-1.r-1",
+    "p7.t-1.r-1",
+    "p8.t-1.r-1",
+    "p4.t-1.r-1",
+    "p5.t-1.r-1"
+  ],
+  "root_node_id": "p0.t-1.r-1"
+}

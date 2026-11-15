@@ -1,0 +1,99 @@
+{
+  "action_frequencies": [
+    0.132224,
+    0.867776
+  ],
+  "actions": [
+    "Check",
+    "Bet 50 all-in"
+  ],
+  "board": [
+    "Ah",
+    "Kd",
+    "7c",
+    "2d",
+    "2h"
+  ],
+  "cards": [],
+  "children": [
+    "p64.t1.r2",
+    "p69.t1.r2"
+  ],
+  "combos": [
+    "JdJc",
+    "QdQc",
+    "KhKc",
+    "AdAc"
+  ],
+  "contrib": [
+    50.0,
+    50.0
+  ],
+  "joint": 0.001537,
+  "kind": "decision",
+  "marginal": [
+    0.069002,
+    0.068822,
+    0.431088,
+    0.431088
+  ],
+  "n_actions": 2,
+  "n_hands": 4,
+  "node_id": "p63.t1.r2",
+  "node_index": 63,
+  "opponent_combos": [
+    "3d2c",
+    "5d5c",
+    "8s7s",
+    "Ts9s"
+  ],
+  "opponent_marginal": [
+    0.250646,
+    0.251096,
+    0.249884,
+    0.248375
+  ],
+  "opponent_player": 1,
+  "opponent_reach": [
+    0.000311,
+    0.000311,
+    0.00031,
+    0.000308
+  ],
+  "parent_id": "p62.t1.r-1",
+  "player": 0,
+  "policy_revision": 5,
+  "pot": 200.0,
+  "reach": [
+    0.000106,
+    0.000106,
+    0.000663,
+    0.000663
+  ],
+  "reach_defined": true,
+  "solution_id": "s1",
+  "stack": 50.0,
+  "stacks": [
+    50.0,
+    50.0
+  ],
+  "strategy": [
+    [
+      0.479059,
+      0.520941
+    ],
+    [
+      0.480313,
+      0.519687
+    ],
+    [
+      0.07668,
+      0.92332
+    ],
+    [
+      0.07668,
+      0.92332
+    ]
+  ],
+  "to_call": 0.0
+}

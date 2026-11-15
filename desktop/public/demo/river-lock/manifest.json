@@ -1,0 +1,67 @@
+{
+  "action_labels": "host Study labels (Check, Bet N, Raise N, Fold, Call, all-in)",
+  "bet_sizes": {
+    "ip-river-bets": "1",
+    "max-raises": "0",
+    "oop-river-bets": "1"
+  },
+  "board": [
+    "Ah",
+    "Kh",
+    "Qh",
+    "Jh",
+    "2c"
+  ],
+  "chunk_layout": {
+    "equity": "<variant>/equity/<node_id>.json \u2014 decision nodes only",
+    "initial_view": [
+      "catalog.json",
+      "river-lock/manifest.json",
+      "river-lock/baseline/status.json",
+      "river-lock/baseline/index.json",
+      "river-lock/baseline/nodes/p0.t-1.r-1.json",
+      "river-lock/baseline/values/p0.t-1.r-1.json",
+      "river-lock/baseline/equity/p0.t-1.r-1.json"
+    ],
+    "lock_preset": "oop-always-check/lock_preset.json",
+    "nodes": "<variant>/nodes/<node_id>.json",
+    "values": "<variant>/values/<node_id>.json \u2014 decision nodes only"
+  },
+  "combo_weights": "reach / marginal from host node body (acting-seat)",
+  "config_path": "scripts/public-demo/configs/river-lock.txt",
+  "default_variant": "baseline",
+  "description": "River solution with a baseline equilibrium and one named lock preset (OOP always Check) produced by put_lock + resolve_locked.",
+  "engine_build_sha": "bc1dacdefc506ef0ce62a76e9864c62c2fffdc8f",
+  "equity_units": "fraction of the pot",
+  "ev_units": "chips",
+  "export_command": "zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2 && python3 scripts/public-demo/export_solutions.py",
+  "id": "river-lock",
+  "ip_range": "AsQs:1,2d2h:1",
+  "iterations": 40,
+  "label": "Precomputed",
+  "node_count_baseline": 9,
+  "node_count_locked": 9,
+  "oop_range": "AsQs:1,2d2h:1",
+  "pot": 100.0,
+  "resolve_iterations": 40,
+  "root_node_id": "p0.t-1.r-1",
+  "schema": "public-demo-manifest/v1",
+  "stack": 100.0,
+  "street": "river",
+  "title": "River node locking",
+  "utility_basis": "local",
+  "variants": [
+    {
+      "description": "Solved equilibrium before locking.",
+      "id": "baseline",
+      "pack": "baseline",
+      "title": "Baseline"
+    },
+    {
+      "description": "Root locked to 100% Check; IP re-solved against the lock.",
+      "id": "oop-always-check",
+      "pack": "oop-always-check",
+      "title": "OOP always Check"
+    }
+  ]
+}

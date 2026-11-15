@@ -1,0 +1,170 @@
+{
+  "action_ev": [
+    [
+      0.0,
+      96.169749
+    ],
+    [
+      0.0,
+      -50.0
+    ],
+    [
+      0.0,
+      -50.0
+    ],
+    [
+      0.0,
+      -50.0
+    ]
+  ],
+  "actions": [
+    "Fold",
+    "Call all-in"
+  ],
+  "cell_ev": [
+    {
+      "action": [
+        0.0,
+        -50.0
+      ],
+      "col": 5,
+      "mixed": -25.0,
+      "row": 4,
+      "text": "T9s"
+    },
+    {
+      "action": [
+        0.0,
+        -50.0
+      ],
+      "col": 7,
+      "mixed": -25.0,
+      "row": 6,
+      "text": "87s"
+    },
+    {
+      "action": [
+        0.0,
+        -50.0
+      ],
+      "col": 9,
+      "mixed": -25.0,
+      "row": 9,
+      "text": "55"
+    },
+    {
+      "action": [
+        0.0,
+        96.169749
+      ],
+      "col": 11,
+      "mixed": 48.084874,
+      "row": 12,
+      "text": "32o"
+    }
+  ],
+  "combos": [
+    "3d2c",
+    "5d5c",
+    "8s7s",
+    "Ts9s"
+  ],
+  "elapsed_ms": 0,
+  "engine": "deal_by_deal",
+  "ev_defined": [
+    true,
+    true,
+    true,
+    true
+  ],
+  "live_under_train": false,
+  "local_offset": 100.0,
+  "n_actions": 2,
+  "n_hands": 4,
+  "node_ev": -6.728781,
+  "node_ev_defined": true,
+  "node_id": "p105.t1.r2",
+  "node_index": 105,
+  "pending": false,
+  "player": 1,
+  "policy_revision": 5,
+  "reach_defined": true,
+  "root_centered": {
+    "action_ev": [
+      [
+        -100.0,
+        -3.830251
+      ],
+      [
+        -100.0,
+        -150.0
+      ],
+      [
+        -100.0,
+        -150.0
+      ],
+      [
+        -100.0,
+        -150.0
+      ]
+    ],
+    "cell_ev": [
+      {
+        "action": [
+          -100.0,
+          -150.0
+        ],
+        "col": 5,
+        "mixed": -125.0,
+        "row": 4,
+        "text": "T9s"
+      },
+      {
+        "action": [
+          -100.0,
+          -150.0
+        ],
+        "col": 7,
+        "mixed": -125.0,
+        "row": 6,
+        "text": "87s"
+      },
+      {
+        "action": [
+          -100.0,
+          -150.0
+        ],
+        "col": 9,
+        "mixed": -125.0,
+        "row": 9,
+        "text": "55"
+      },
+      {
+        "action": [
+          -100.0,
+          -3.830251
+        ],
+        "col": 11,
+        "mixed": -51.915126,
+        "row": 12,
+        "text": "32o"
+      }
+    ],
+    "node_ev": -106.728781,
+    "value": [
+      -51.915126,
+      -125.0,
+      -125.0,
+      -125.0
+    ]
+  },
+  "solution_id": "s1",
+  "units": "chips",
+  "utility_basis": "local",
+  "value": [
+    48.084874,
+    -25.0,
+    -25.0,
+    -25.0
+  ]
+}

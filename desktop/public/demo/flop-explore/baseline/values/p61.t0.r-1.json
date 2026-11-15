@@ -1,0 +1,144 @@
+{
+  "action_ev": [
+    null,
+    [
+      -15.353771,
+      -14.625909
+    ],
+    [
+      -13.765345,
+      -13.088447
+    ],
+    [
+      -16.412722,
+      -15.650884
+    ]
+  ],
+  "actions": [
+    "Check",
+    "Bet 50 all-in"
+  ],
+  "cell_ev": [
+    {
+      "action": [
+        -16.412722,
+        -15.650884
+      ],
+      "col": 5,
+      "mixed": -16.031803,
+      "row": 4,
+      "text": "T9s"
+    },
+    {
+      "action": [
+        -13.765345,
+        -13.088447
+      ],
+      "col": 7,
+      "mixed": -13.426896,
+      "row": 6,
+      "text": "87s"
+    },
+    {
+      "action": [
+        -15.353771,
+        -14.625909
+      ],
+      "col": 9,
+      "mixed": -14.98984,
+      "row": 9,
+      "text": "55"
+    }
+  ],
+  "combos": [
+    "3d2c",
+    "5d5c",
+    "8s7s",
+    "Ts9s"
+  ],
+  "elapsed_ms": 3,
+  "engine": "deal_by_deal",
+  "ev_defined": [
+    false,
+    true,
+    true,
+    true
+  ],
+  "live_under_train": false,
+  "local_offset": 100.0,
+  "n_actions": 2,
+  "n_hands": 4,
+  "node_ev": -14.81618,
+  "node_ev_defined": true,
+  "node_id": "p61.t0.r-1",
+  "node_index": 61,
+  "pending": false,
+  "player": 1,
+  "policy_revision": 5,
+  "reach_defined": true,
+  "root_centered": {
+    "action_ev": [
+      null,
+      [
+        -115.353771,
+        -114.625909
+      ],
+      [
+        -113.765345,
+        -113.088447
+      ],
+      [
+        -116.412722,
+        -115.650884
+      ]
+    ],
+    "cell_ev": [
+      {
+        "action": [
+          -116.412722,
+          -115.650884
+        ],
+        "col": 5,
+        "mixed": -116.031803,
+        "row": 4,
+        "text": "T9s"
+      },
+      {
+        "action": [
+          -113.765345,
+          -113.088447
+        ],
+        "col": 7,
+        "mixed": -113.426896,
+        "row": 6,
+        "text": "87s"
+      },
+      {
+        "action": [
+          -115.353771,
+          -114.625909
+        ],
+        "col": 9,
+        "mixed": -114.98984,
+        "row": 9,
+        "text": "55"
+      }
+    ],
+    "node_ev": -114.81618,
+    "value": [
+      null,
+      -114.98984,
+      -113.426896,
+      -116.031803
+    ]
+  },
+  "solution_id": "s1",
+  "units": "chips",
+  "utility_basis": "local",
+  "value": [
+    null,
+    -14.98984,
+    -13.426896,
+    -16.031803
+  ]
+}

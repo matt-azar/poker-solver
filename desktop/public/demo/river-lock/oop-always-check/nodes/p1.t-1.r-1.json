@@ -1,0 +1,79 @@
+{
+  "action_frequencies": [
+    0.749695,
+    0.250305
+  ],
+  "actions": [
+    "Check",
+    "Bet 100 all-in"
+  ],
+  "board": [
+    "Ah",
+    "Kh",
+    "Qh",
+    "Jh",
+    "2c"
+  ],
+  "cards": [],
+  "children": [
+    "p2.t-1.r-1",
+    "p3.t-1.r-1"
+  ],
+  "combos": [
+    "AsQs",
+    "2h2d"
+  ],
+  "contrib": [
+    0.0,
+    0.0
+  ],
+  "joint": 2.0,
+  "kind": "decision",
+  "marginal": [
+    0.5,
+    0.5
+  ],
+  "n_actions": 2,
+  "n_hands": 2,
+  "node_id": "p1.t-1.r-1",
+  "node_index": 1,
+  "opponent_combos": [
+    "2h2d",
+    "AsQs"
+  ],
+  "opponent_marginal": [
+    0.5,
+    0.5
+  ],
+  "opponent_player": 0,
+  "opponent_reach": [
+    1.0,
+    1.0
+  ],
+  "parent_id": "p0.t-1.r-1",
+  "player": 1,
+  "policy_revision": 10,
+  "pot": 100.0,
+  "reach": [
+    1.0,
+    1.0
+  ],
+  "reach_defined": true,
+  "solution_id": "s3",
+  "stack": 100.0,
+  "stacks": [
+    100.0,
+    100.0
+  ],
+  "strategy": [
+    [
+      0.99939,
+      0.00061
+    ],
+    [
+      0.5,
+      0.5
+    ]
+  ],
+  "to_call": 0.0
+}

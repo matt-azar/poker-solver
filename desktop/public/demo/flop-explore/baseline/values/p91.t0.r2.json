@@ -1,0 +1,131 @@
+{
+  "action_ev": [
+    null,
+    [
+      0.0
+    ],
+    [
+      0.0
+    ],
+    [
+      0.0
+    ]
+  ],
+  "actions": [
+    "Check"
+  ],
+  "cell_ev": [
+    {
+      "action": [
+        0.0
+      ],
+      "col": 5,
+      "mixed": 0.0,
+      "row": 4,
+      "text": "T9s"
+    },
+    {
+      "action": [
+        0.0
+      ],
+      "col": 7,
+      "mixed": 0.0,
+      "row": 6,
+      "text": "87s"
+    },
+    {
+      "action": [
+        0.0
+      ],
+      "col": 9,
+      "mixed": 0.0,
+      "row": 9,
+      "text": "55"
+    }
+  ],
+  "combos": [
+    "3d2c",
+    "5d5c",
+    "8s7s",
+    "Ts9s"
+  ],
+  "elapsed_ms": 0,
+  "engine": "deal_by_deal",
+  "ev_defined": [
+    false,
+    true,
+    true,
+    true
+  ],
+  "live_under_train": false,
+  "local_offset": 150.0,
+  "n_actions": 1,
+  "n_hands": 4,
+  "node_ev": -0.0,
+  "node_ev_defined": true,
+  "node_id": "p91.t0.r2",
+  "node_index": 91,
+  "pending": false,
+  "player": 1,
+  "policy_revision": 5,
+  "reach_defined": true,
+  "root_centered": {
+    "action_ev": [
+      null,
+      [
+        -150.0
+      ],
+      [
+        -150.0
+      ],
+      [
+        -150.0
+      ]
+    ],
+    "cell_ev": [
+      {
+        "action": [
+          -150.0
+        ],
+        "col": 5,
+        "mixed": -150.0,
+        "row": 4,
+        "text": "T9s"
+      },
+      {
+        "action": [
+          -150.0
+        ],
+        "col": 7,
+        "mixed": -150.0,
+        "row": 6,
+        "text": "87s"
+      },
+      {
+        "action": [
+          -150.0
+        ],
+        "col": 9,
+        "mixed": -150.0,
+        "row": 9,
+        "text": "55"
+      }
+    ],
+    "node_ev": -150.0,
+    "value": [
+      null,
+      -150.0,
+      -150.0,
+      -150.0
+    ]
+  },
+  "solution_id": "s1",
+  "units": "chips",
+  "utility_basis": "local",
+  "value": [
+    null,
+    0.0,
+    0.0,
+    0.0
+  ]
+}

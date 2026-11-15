@@ -1,0 +1,92 @@
+{
+  "action_frequencies": [
+    1.0
+  ],
+  "actions": [
+    "Check"
+  ],
+  "board": [
+    "Ah",
+    "Kd",
+    "7c",
+    "2c",
+    "2h"
+  ],
+  "cards": [],
+  "children": [
+    "p127.t0.r2"
+  ],
+  "combos": [
+    "JdJc",
+    "QdQc",
+    "KhKc",
+    "AdAc"
+  ],
+  "contrib": [
+    100.0,
+    100.0
+  ],
+  "joint": 3.368395,
+  "kind": "decision",
+  "marginal": [
+    0.294525,
+    0.294608,
+    0.205434,
+    0.205434
+  ],
+  "n_actions": 1,
+  "n_hands": 4,
+  "node_id": "p126.t0.r2",
+  "node_index": 126,
+  "opponent_combos": [
+    "3d2c",
+    "5d5c",
+    "8s7s",
+    "Ts9s"
+  ],
+  "opponent_marginal": [
+    0.0,
+    0.333333,
+    0.333333,
+    0.333333
+  ],
+  "opponent_player": 1,
+  "opponent_reach": [
+    0.0,
+    0.00122,
+    0.00122,
+    0.00122
+  ],
+  "parent_id": "p125.t0.r-1",
+  "player": 0,
+  "policy_revision": 5,
+  "pot": 300.0,
+  "reach": [
+    0.992075,
+    0.992355,
+    0.691983,
+    0.691983
+  ],
+  "reach_defined": true,
+  "solution_id": "s1",
+  "stack": 0.0,
+  "stacks": [
+    0.0,
+    0.0
+  ],
+  "strategy": [
+    [
+      1.0
+    ],
+    [
+      1.0
+    ],
+    [
+      1.0
+    ],
+    [
+      1.0
+    ]
+  ],
+  "to_call": 0.0
+}

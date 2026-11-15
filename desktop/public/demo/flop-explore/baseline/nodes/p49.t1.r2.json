@@ -1,0 +1,72 @@
+{
+  "actions": [],
+  "board": [
+    "Ah",
+    "Kd",
+    "7c",
+    "2d",
+    "2h"
+  ],
+  "cards": [],
+  "children": [],
+  "combos": [
+    "JdJc",
+    "QdQc",
+    "KhKc",
+    "AdAc"
+  ],
+  "contrib": [
+    100.0,
+    50.0
+  ],
+  "joint": 0.011128,
+  "kind": "terminal",
+  "marginal": [
+    0.269402,
+    0.264852,
+    0.232873,
+    0.232873
+  ],
+  "n_actions": 0,
+  "n_hands": 4,
+  "node_id": "p49.t1.r2",
+  "node_index": 49,
+  "opponent_combos": [
+    "3d2c",
+    "5d5c",
+    "8s7s",
+    "Ts9s"
+  ],
+  "opponent_marginal": [
+    0.25,
+    0.25,
+    0.25,
+    0.25
+  ],
+  "opponent_player": 1,
+  "opponent_reach": [
+    0.000102,
+    0.000102,
+    0.000102,
+    0.000102
+  ],
+  "parent_id": "p48.t1.r2",
+  "player": null,
+  "policy_revision": 5,
+  "pot": 250.0,
+  "reach": [
+    0.002998,
+    0.002947,
+    0.002591,
+    0.002591
+  ],
+  "reach_defined": true,
+  "solution_id": "s1",
+  "stack": 0.0,
+  "stacks": [
+    0.0,
+    50.0
+  ],
+  "strategy": null,
+  "to_call": 0.0
+}

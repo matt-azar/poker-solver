@@ -1,0 +1,184 @@
+{
+  "nodes": {
+    "p0.t-1.r-1": {
+      "action_ev": [
+        [
+          100.182759,
+          100.060976
+        ],
+        [
+          -0.015296,
+          -99.878049
+        ]
+      ],
+      "action_frequencies": [
+        0.830691,
+        0.169309
+      ],
+      "actions": [
+        "Check",
+        "Bet 100 all-in"
+      ],
+      "combos": [
+        "2h2d",
+        "AsQs"
+      ],
+      "kind": "decision",
+      "node_ev": 49.890796,
+      "value": [
+        100.141943,
+        -0.360351
+      ]
+    },
+    "p1.t-1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          -99.908282
+        ],
+        [
+          100.0,
+          100.030593
+        ]
+      ],
+      "action_frequencies": [
+        0.749085,
+        0.250915
+      ],
+      "actions": [
+        "Check",
+        "Bet 100 all-in"
+      ],
+      "combos": [
+        "AsQs",
+        "2h2d"
+      ],
+      "kind": "decision",
+      "node_ev": 59.918912,
+      "value": [
+        -0.182759,
+        100.015296
+      ]
+    },
+    "p2.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "2h2d",
+        "AsQs"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p3.t-1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          200.0
+        ],
+        [
+          0.0,
+          -100.0
+        ]
+      ],
+      "action_frequencies": [
+        0.599829,
+        0.400171
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "2h2d",
+        "AsQs"
+      ],
+      "kind": "decision",
+      "node_ev": 0.698225,
+      "value": [
+        199.908282,
+        -0.030593
+      ]
+    },
+    "p4.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "2h2d",
+        "AsQs"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p5.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "2h2d",
+        "AsQs"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p6.t-1.r-1": {
+      "action_ev": [
+        [
+          0.0,
+          -100.0
+        ],
+        [
+          0.0,
+          200.0
+        ]
+      ],
+      "action_frequencies": [
+        0.5,
+        0.5
+      ],
+      "actions": [
+        "Fold",
+        "Call all-in"
+      ],
+      "combos": [
+        "AsQs",
+        "2h2d"
+      ],
+      "kind": "decision",
+      "node_ev": 1.979218,
+      "value": [
+        -0.060976,
+        199.878049
+      ]
+    },
+    "p7.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "2h2d",
+        "AsQs"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    },
+    "p8.t-1.r-1": {
+      "action_ev": null,
+      "action_frequencies": null,
+      "actions": [],
+      "combos": [
+        "2h2d",
+        "AsQs"
+      ],
+      "kind": "terminal",
+      "node_ev": null,
+      "value": null
+    }
+  }
+}

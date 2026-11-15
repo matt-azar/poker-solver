@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/matt-azar/poker-solver/desktop/public-demo/schema/manifest.v1.schema.json",
+  "title": "Public Study demo solution manifest",
+  "description": "Versioned manifest for one precomputed Hold'em Study demo example (flop-explore or river-lock). Artifacts live under desktop/public/demo/<id>/ and are fetched by URL path (/demo/...).",
+  "type": "object",
+  "required": [
+    "schema",
+    "id",
+    "title",
+    "label",
+    "street",
+    "engine_build_sha",
+    "root_node_id",
+    "default_variant",
+    "variants",
+    "board",
+    "oop_range",
+    "ip_range",
+    "ev_units",
+    "equity_units",
+    "utility_basis",
+    "combo_weights",
+    "action_labels",
+    "chunk_layout",
+    "export_command"
+  ],
+  "properties": {
+    "schema": {
+      "const": "public-demo-manifest/v1"
+    },
+    "id": {
+      "type": "string",
+      "description": "Stable example id (URL ?demo=<id>)."
+    },
+    "title": { "type": "string" },
+    "label": {
+      "type": "string",
+      "description": "UI badge text; always Precomputed for this pack."
+    },
+    "street": { "enum": ["flop", "turn", "river"] },
+    "description": { "type": "string" },
+    "config_path": {
+      "type": "string",
+      "description": "Repo-relative street-config 1 input used for this export."
+    },
+    "engine_build_sha": {
+      "type": "string",
+      "description": "git rev-parse HEAD at export time (solver-engine source tip)."
+    },
+    "iterations": { "type": "integer", "minimum": 1 },
+    "resolve_iterations": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Iterations for resolve_locked (river lock preset only)."
+    },
+    "max_chance_children": {
+      "type": ["integer", "null"],
+      "description": "Flop: max card children materialized under each chance node. null = unlimited (river)."
+    },
+    "root_node_id": {
+      "type": "string",
+      "description": "Study public node id; root is always p0.t-1.r-1 after publish."
+    },
+    "board": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 3,
+      "maxItems": 5
+    },
+    "pot": { "type": "number" },
+    "stack": { "type": "number" },
+    "oop_range": { "type": "string" },
+    "ip_range": { "type": "string" },
+    "bet_sizes": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "street-config bet/raise keys as written (e.g. oop-bets, ip-river-bets)."
+    },
+    "ev_units": {
+      "const": "chips",
+      "description": "Host values.units — chip EV (not pot fraction)."
+    },
+    "equity_units": {
+      "const": "fraction of the pot",
+      "description": "Host equity.units — check-down pot fraction, not chip EV."
+    },
+    "utility_basis": {
+      "const": "local",
+      "description": "Primary values columns are local decision EV (Fold≈0)."
+    },
+    "combo_weights": {
+      "type": "string",
+      "description": "How combo mass is weighted for matrix mix / expected.json."
+    },
+    "action_labels": {
+      "type": "string",
+      "description": "Source of action label strings (must match Study / host)."
+    },
+    "chunk_layout": {
+      "type": "object",
+      "description": "Per-node/branch file layout for lazy fetch.",
+      "required": ["nodes", "values", "equity", "initial_view"],
+      "properties": {
+        "nodes": { "type": "string" },
+        "values": { "type": "string" },
+        "equity": { "type": "string" },
+        "lock_preset": { "type": "string" },
+        "initial_view": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Minimal URL paths for first paint (catalog + root pack)."
+        }
+      }
+    },
+    "default_variant": { "type": "string" },
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "pack"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "pack": {
+            "type": "string",
+            "description": "Directory under the example containing status/index/nodes/…"
+          }
+        }
+      }
+    },
+    "node_count": { "type": "integer" },
+    "node_count_baseline": { "type": "integer" },
+    "node_count_locked": { "type": "integer" },
+    "export_command": { "type": "string" }
+  },
+  "additionalProperties": true
+}

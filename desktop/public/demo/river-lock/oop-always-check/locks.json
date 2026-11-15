@@ -1,0 +1,15 @@
+{
+  "locks": [
+    {
+      "hand_indices": [],
+      "infoset_id": 0,
+      "kind": "full",
+      "node_id": "p0.t-1.r-1",
+      "probs": [
+        1,
+        0
+      ],
+      "scope": "node"
+    }
+  ]
+}
