@@ -276,15 +276,13 @@ jobs:
           Get-ChildItem -Recurse desktop/src-tauri/target/release/bundle -ErrorAction SilentlyContinue |
             Select-Object FullName, Length
 
-  # Stage A only (prove the runner). Uses the exact NSIS artifact from the
-  # preceding job (PR installer when this workflow runs on a PR). Stage B is
-  # scaffolded in scripts/desktop/windows-installer-e2e.ps1 + installerE2e.ts
-  # but gated until Stage A is proven green — do not claim full E2E yet.
+  # Stage A + Stage B against the exact NSIS artifact from the preceding job
+  # (PR installer when available; else the same-commit workflow artifact).
   windows-installer-e2e:
     needs: windows-installer
     if: github.ref_type != 'tag'
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
 
@@ -323,7 +321,7 @@ jobs:
           HOLDEM_STUDY_DIAGNOSTICS_DIR: ${{ runner.temp }}\holdem-study-e2e-diagnostics
         run: |
           $ErrorActionPreference = "Stop"
-          $out = Join-Path $env:RUNNER_TEMP "windows-installer-e2e"
+          $out = Join-Path $env:RUNNER_TEMP "windows-installer-e2e-a"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           New-Item -ItemType Directory -Force -Path $env:HOLDEM_STUDY_DIAGNOSTICS_DIR | Out-Null
           & "$env:GITHUB_WORKSPACE\scripts\desktop\windows-installer-e2e.ps1" `
@@ -338,12 +336,35 @@ jobs:
             throw "windows-installer-e2e.ps1 Stage A failed (exit $LASTEXITCODE)"
           }
 
+      - name: Installer E2E Stage B (river solve → clear → reopen PSOL → sidecar exit)
+        shell: pwsh
+        env:
+          HOLDEM_STUDY_DIAGNOSTICS_DIR: ${{ runner.temp }}\holdem-study-e2e-diagnostics-b
+        run: |
+          $ErrorActionPreference = "Stop"
+          $out = Join-Path $env:RUNNER_TEMP "windows-installer-e2e-b"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:HOLDEM_STUDY_DIAGNOSTICS_DIR | Out-Null
+          & "$env:GITHUB_WORKSPACE\scripts\desktop\windows-installer-e2e.ps1" `
+            -InstallerExe "${{ steps.resolve.outputs.installer }}" `
+            -Stage B `
+            -OutDir $out
+          if ($LASTEXITCODE -ne 0) {
+            $stepFile = Join-Path $out "last-completed-step.txt"
+            if (Test-Path $stepFile) {
+              Write-Host "FAIL lastCompletedStep=$(Get-Content $stepFile -Raw)"
+            }
+            throw "windows-installer-e2e.ps1 Stage B failed (exit $LASTEXITCODE)"
+          }
+
       - name: Upload installer E2E logs / diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer-e2e-diagnostics
           path: |
-            ${{ runner.temp }}/windows-installer-e2e/**
+            ${{ runner.temp }}/windows-installer-e2e-a/**
+            ${{ runner.temp }}/windows-installer-e2e-b/**
             ${{ runner.temp }}/holdem-study-e2e-diagnostics/**
+            ${{ runner.temp }}/holdem-study-e2e-diagnostics-b/**
           if-no-files-found: warn

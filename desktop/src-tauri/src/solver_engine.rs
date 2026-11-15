@@ -1372,13 +1372,26 @@ pub fn installer_e2e_stage() -> Option<String> {
     Some(trimmed.to_string())
 }
 
-/// Stage B hard gate: `STUDY_INSTALLER_E2E_STAGE_B=1` (off until Stage A is proven).
+/// Stage B hard gate: `STUDY_INSTALLER_E2E_STAGE_B=1`.
 #[tauri::command]
 pub fn installer_e2e_stage_b_enabled() -> bool {
     matches!(
         std::env::var("STUDY_INSTALLER_E2E_STAGE_B").as_deref(),
         Ok("1") | Ok("true") | Ok("TRUE")
     )
+}
+
+/// Absolute `.psol` path for Stage B save/reopen (`STUDY_INSTALLER_E2E_PSOL` or temp).
+#[tauri::command]
+pub fn installer_e2e_psol_path() -> Option<String> {
+    if let Ok(raw) = std::env::var("STUDY_INSTALLER_E2E_PSOL") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    let path = std::env::temp_dir().join("holdem-study-installer-e2e-stage-b.psol");
+    Some(path.to_string_lossy().into_owned())
 }
 
 /// Exit the process with a code (acceptance harness).

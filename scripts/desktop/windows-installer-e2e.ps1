@@ -1,24 +1,25 @@
 # Copyright (c) Matt Azar. UNLICENSED — no license is granted.
 <#
 .SYNOPSIS
-  Windows installer E2E — Stage A (prove the runner) first; Stage B gated.
+  Windows installer E2E — Stage A (WebView drive) + Stage B (river PSOL round-trip).
 
 .DESCRIPTION
   Smokes the exact NSIS artifact under test (PR installer when this job runs
   after windows-installer on the same workflow; else pass -InstallerExe for a
   post-merge artifact of the same commit).
 
-  Stage A (default; CI pass bar):
-    1. Silent-install the artifact
+  Stage A (default):
+    1. Silent-install the artifact with an explicit /D= install dir
+       (avoids Tauri NSIS relative placeholder\PRODUCTNAME resolving against cwd)
     2. Launch Study in an interactive Windows session with
        STUDY_INSTALLER_E2E=stage-a so the WebView boot hook drives
        ensure_solver_engine + status (proves WebView control)
     3. Explicit timeouts; on failure report lastCompletedStep + diagnostics
 
-  Stage B (-Stage B, also requires STUDY_INSTALLER_E2E_STAGE_B=1 in the app):
-    Scaffold only until Stage A is proven green. Intended: tiny river solve →
-    browse node → clear active solution → reopen PSOL → assert strategy
-    restored → close; sidecar exits. Same last-step + diagnostics rules.
+  Stage B (-Stage B; requires STUDY_INSTALLER_E2E_STAGE_B=1):
+    Tiny river solve → browse node → save PSOL → clear active solution
+    (kill+re-ensure sidecar) → reopen PSOL → assert strategy restored →
+    close; sidecar exits. Same last-step + diagnostics rules.
 
 .PARAMETER InstallerExe
   Path to the NSIS setup exe (artifact from windows-installer job).
@@ -30,10 +31,13 @@
   Logs + failure diagnostic bundle directory.
 
 .PARAMETER StudyReadySec
-  Max seconds for Study + Stage A WebView probe to exit (default 120).
+  Max seconds for Study + WebView probe to exit (default 120 Stage A / 180 Stage B).
 
 .PARAMETER SidecarExitSec
   Max seconds to wait for solver-engine after Study exits (default 45).
+
+.PARAMETER InstallDir
+  Explicit NSIS /D= target (default %LOCALAPPDATA%\Holdem Study).
 #>
 param(
   [Parameter(Mandatory = $true)]
@@ -41,8 +45,9 @@ param(
   [ValidateSet("A", "B")]
   [string]$Stage = "A",
   [string]$OutDir = "",
-  [int]$StudyReadySec = 120,
-  [int]$SidecarExitSec = 45
+  [int]$StudyReadySec = 0,
+  [int]$SidecarExitSec = 45,
+  [string]$InstallDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -62,6 +67,14 @@ $LogPath = Join-Path $OutDir "e2e-log.txt"
 $ResultPath = Join-Path $OutDir "e2e-result.json"
 $LastStepPath = Join-Path $OutDir "last-completed-step.txt"
 
+if ($StudyReadySec -le 0) {
+  if ($Stage -eq "B") { $StudyReadySec = 180 } else { $StudyReadySec = 120 }
+}
+
+if (-not $InstallDir) {
+  $InstallDir = Join-Path $env:LOCALAPPDATA "Holdem Study"
+}
+
 function Write-E2E([string]$Message) {
   $line = "[{0}] {1}" -f (Get-Date -Format "o"), $Message
   Write-Host $line
@@ -74,8 +87,8 @@ function Set-LastStep([string]$Step, $ResultObj) {
   Write-E2E "lastCompletedStep=$Step"
 }
 
-function Get-SidecarProcesses([string]$InstallDir) {
-  $target = [System.IO.Path]::GetFullPath((Join-Path $InstallDir "solver-engine.exe"))
+function Get-SidecarProcesses([string]$InstallDirPath) {
+  $target = [System.IO.Path]::GetFullPath((Join-Path $InstallDirPath "solver-engine.exe"))
   $hits = @()
   Get-CimInstance Win32_Process -Filter "Name='solver-engine.exe'" -ErrorAction SilentlyContinue |
     ForEach-Object {
@@ -94,14 +107,14 @@ function Get-SidecarProcesses([string]$InstallDir) {
   return $hits
 }
 
-function Invoke-FailureDiagnostics([string]$InstallDir) {
+function Invoke-FailureDiagnostics([string]$InstallDirPath) {
   Write-E2E "Collecting diagnostic bundle on failure..."
   $bundleDir = Join-Path $OutDir "diagnostics-bundle"
   $collect = Join-Path $Root "scripts\debug\windows_collect.ps1"
   try {
     & powershell -NoProfile -ExecutionPolicy Bypass -File $collect `
       -OutDir $bundleDir `
-      -InstallDir $InstallDir `
+      -InstallDir $InstallDirPath `
       -SkipStacks
   } catch {
     Write-E2E "windows_collect.ps1 failed: $_"
@@ -114,12 +127,68 @@ function Invoke-FailureDiagnostics([string]$InstallDir) {
   }
 }
 
+function Find-StudyInstallDir([string]$Preferred) {
+  $candidates = New-Object System.Collections.Generic.List[string]
+  if ($Preferred) { [void]$candidates.Add($Preferred) }
+  foreach ($extra in @(
+      (Join-Path $env:LOCALAPPDATA "Holdem Study"),
+      (Join-Path $env:LOCALAPPDATA "Programs\Holdem Study"),
+      (Join-Path ${env:ProgramFiles} "Holdem Study")
+    )) {
+    if ($extra -and -not ($candidates -contains $extra)) {
+      [void]$candidates.Add($extra)
+    }
+  }
+
+  # Registry InstallLocation written by Tauri NSIS (currentUser → HKCU).
+  foreach ($rootKey in @("HKCU:", "HKLM:")) {
+    $uninst = Join-Path $rootKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\Holdem Study"
+    try {
+      $loc = (Get-ItemProperty -LiteralPath $uninst -ErrorAction Stop).InstallLocation
+      if ($loc) {
+        $loc = $loc.Trim().Trim('"')
+        if ($loc -and -not ($candidates -contains $loc)) {
+          [void]$candidates.Insert(0, $loc)
+        }
+      }
+    } catch {}
+  }
+
+  foreach ($cand in $candidates) {
+    $exe = Join-Path $cand "Holdem Study.exe"
+    if (Test-Path -LiteralPath $exe) {
+      return $cand
+    }
+  }
+
+  # Last-resort: find the UI exe under LocalAppData (covers unexpected layouts).
+  $hit = Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Recurse -Filter "Holdem Study.exe" `
+    -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($hit) {
+    return $hit.Directory.FullName
+  }
+
+  # Diagnose Tauri relative placeholder InstallDir resolving against cwd.
+  $placeholder = Join-Path $Root "placeholder\Holdem Study\Holdem Study.exe"
+  $diag = @()
+  foreach ($cand in $candidates) {
+    $diag += "missing=$cand"
+  }
+  if (Test-Path -LiteralPath $placeholder) {
+    $diag += "FOUND_cwd_placeholder=$placeholder (NSIS relative InstallDir leak)"
+  } else {
+    $diag += "no_cwd_placeholder=$placeholder"
+  }
+  throw "Holdem Study.exe not found after silent install. $($diag -join '; ')"
+}
+
 $result = [ordered]@{
   ok                 = $false
   stageRequested     = $Stage
   lastCompletedStep  = "init"
   installer          = $InstallerExe
   installDir         = $null
+  preferredInstallDir = $InstallDir
   studyPid           = $null
   studyExitCode      = $null
   sidecarPids        = @()
@@ -129,7 +198,7 @@ $result = [ordered]@{
 }
 
 $studyProc = $null
-$installDir = $null
+$resolvedInstallDir = $null
 
 try {
   $result.interactiveSession = [ordered]@{
@@ -152,41 +221,35 @@ try {
   Unblock-File -LiteralPath $InstallerExe -ErrorAction SilentlyContinue
   Set-LastStep "artifact-resolved" $result
 
-  Write-E2E "Silent install (/S)..."
-  $setup = Start-Process -FilePath $InstallerExe -ArgumentList "/S" -PassThru -Wait
-  if ($setup.ExitCode -ne 0 -and $null -ne $setup.ExitCode) {
-    throw "NSIS silent install exited $($setup.ExitCode)"
+  # Tauri NSIS InstallDir starts as relative "placeholder\PRODUCTNAME" and only
+  # rewrites to %LOCALAPPDATA%\PRODUCTNAME when $INSTDIR still equals that
+  # placeholder string. Running from a repo cwd can make NSIS resolve the
+  # relative path first, so the rewrite never fires and files land under
+  # <cwd>\placeholder\Holdem Study. Always pass absolute /D= (last arg, unquoted).
+  New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+  Write-E2E "Silent install (/S /D=$InstallDir)..."
+  $setup = Start-Process -FilePath $InstallerExe -ArgumentList @("/S", "/D=$InstallDir") -PassThru -Wait
+  $setupCode = $setup.ExitCode
+  Write-E2E "NSIS ExitCode=$setupCode"
+  if ($null -eq $setupCode -or $setupCode -ne 0) {
+    throw "NSIS silent install exited $setupCode (expected 0)"
   }
   Set-LastStep "silent-install" $result
 
-  $candidates = @(
-    (Join-Path $env:LOCALAPPDATA "Programs\Holdem Study"),
-    (Join-Path $env:LOCALAPPDATA "Holdem Study"),
-    (Join-Path ${env:ProgramFiles} "Holdem Study")
-  )
-  foreach ($cand in $candidates) {
-    $exe = Join-Path $cand "Holdem Study.exe"
-    if (Test-Path -LiteralPath $exe) {
-      $installDir = $cand
-      break
-    }
-  }
-  if (-not $installDir) {
-    throw "Holdem Study.exe not found after silent install. Tried: $($candidates -join '; ')"
-  }
-  $result.installDir = $installDir
-  Write-E2E "Install dir: $installDir"
+  $resolvedInstallDir = Find-StudyInstallDir $InstallDir
+  $result.installDir = $resolvedInstallDir
+  Write-E2E "Install dir: $resolvedInstallDir"
   Set-LastStep "install-layout-found" $result
 
-  $studyExe = Join-Path $installDir "Holdem Study.exe"
-  $sidecarExe = Join-Path $installDir "solver-engine.exe"
+  $studyExe = Join-Path $resolvedInstallDir "Holdem Study.exe"
+  $sidecarExe = Join-Path $resolvedInstallDir "solver-engine.exe"
   foreach ($path in @($studyExe, $sidecarExe)) {
     if (-not (Test-Path -LiteralPath $path)) {
       throw "Missing installed file: $path"
     }
     Write-E2E "Present: $path ($((Get-Item -LiteralPath $path).Length) bytes)"
   }
-  $legacy = Join-Path $installDir "holdem-explorer.exe"
+  $legacy = Join-Path $resolvedInstallDir "holdem-explorer.exe"
   if (Test-Path -LiteralPath $legacy) {
     throw "Legacy holdem-explorer.exe must not ship: $legacy"
   }
@@ -199,30 +262,29 @@ try {
   & $py.Source (Join-Path $Root "scripts\zig\check-no-avx512.py") $sidecarExe
   Set-LastStep "pe-checks" $result
 
-  Get-SidecarProcesses $installDir | ForEach-Object {
+  Get-SidecarProcesses $resolvedInstallDir | ForEach-Object {
     Write-E2E "Killing leftover sidecar PID $($_.ProcessId)"
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
   }
   Start-Sleep -Seconds 1
 
-  if ($Stage -eq "B") {
-    $result.remaining = @(
-      "Stage B: WebView river solve → browse node → clear active solution → reopen PSOL → assert strategy restored → close + sidecar exit"
-    )
-    Set-LastStep "stage-b-gated" $result
-    throw "Stage B is scaffold-only until Stage A is proven green in CI. Do not pass -Stage B yet (set STUDY_INSTALLER_E2E_STAGE_B=1 only after Stage A passes)."
-  }
+  $stageEnv = if ($Stage -eq "B") { "stage-b" } else { "stage-a" }
+  $stageBGate = if ($Stage -eq "B") { "1" } else { "0" }
+  $psolPath = Join-Path $OutDir "stage-b-roundtrip.psol"
 
-  Write-E2E "Launching Study for Stage A WebView drive: $studyExe"
+  Write-E2E "Launching Study for Stage $Stage WebView drive: $studyExe"
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $studyExe
   $psi.UseShellExecute = $false
-  $psi.WorkingDirectory = $installDir
+  $psi.WorkingDirectory = $resolvedInstallDir
   foreach ($entry in [System.Environment]::GetEnvironmentVariables().GetEnumerator()) {
     try { $psi.Environment[$entry.Key] = [string]$entry.Value } catch {}
   }
-  $psi.Environment["STUDY_INSTALLER_E2E"] = "stage-a"
-  $psi.Environment["STUDY_INSTALLER_E2E_STAGE_B"] = "0"
+  $psi.Environment["STUDY_INSTALLER_E2E"] = $stageEnv
+  $psi.Environment["STUDY_INSTALLER_E2E_STAGE_B"] = $stageBGate
+  if ($Stage -eq "B") {
+    $psi.Environment["STUDY_INSTALLER_E2E_PSOL"] = $psolPath
+  }
   if ($env:HOLDEM_STUDY_DIAGNOSTICS_DIR) {
     $psi.Environment["HOLDEM_STUDY_DIAGNOSTICS_DIR"] = $env:HOLDEM_STUDY_DIAGNOSTICS_DIR
   }
@@ -234,38 +296,40 @@ try {
   }
   $result.studyPid = $studyProc.Id
   Set-LastStep "study-launched" $result
-  Write-E2E "Study PID=$($studyProc.Id); waiting up to ${StudyReadySec}s for WebView Stage A exit"
+  Write-E2E "Study PID=$($studyProc.Id); waiting up to ${StudyReadySec}s for WebView Stage $Stage exit"
 
   if (-not $studyProc.WaitForExit($StudyReadySec * 1000)) {
     try { $studyProc.Kill() } catch {}
-    throw "Stage A timed out after ${StudyReadySec}s (Study did not exit; WebView hook may not have run — is this build's installer missing STUDY_INSTALLER_E2E?)"
+    throw "Stage $Stage timed out after ${StudyReadySec}s (Study did not exit; WebView hook may not have run — is this build's installer missing STUDY_INSTALLER_E2E?)"
   }
   $result.studyExitCode = $studyProc.ExitCode
   Write-E2E "Study exited code=$($studyProc.ExitCode)"
   if ($studyProc.ExitCode -ne 0) {
-    throw "Stage A WebView probe FAILED (Study exit $($studyProc.ExitCode)); see engine.log / diagnostics (lastCompletedStep=study-launched until WebView reports)"
+    throw "Stage $Stage WebView probe FAILED (Study exit $($studyProc.ExitCode)); see engine.log / diagnostics (lastCompletedStep=study-launched until WebView reports)"
   }
-  Set-LastStep "webview-control-proven" $result
+  if ($Stage -eq "B") {
+    Set-LastStep "stage-b-webview-pass" $result
+  } else {
+    Set-LastStep "webview-control-proven" $result
+  }
   $studyProc = $null
 
   $exitDeadline = (Get-Date).AddSeconds($SidecarExitSec)
   while ((Get-Date) -lt $exitDeadline) {
-    $left = @(Get-SidecarProcesses $installDir)
+    $left = @(Get-SidecarProcesses $resolvedInstallDir)
     if ($left.Count -eq 0) { break }
     Start-Sleep -Milliseconds 500
   }
-  $left = @(Get-SidecarProcesses $installDir)
+  $left = @(Get-SidecarProcesses $resolvedInstallDir)
   if ($left.Count -gt 0) {
     $pids = ($left | ForEach-Object { $_.ProcessId }) -join ", "
-    throw "solver-engine still running after Stage A Study exit (PIDs $pids)"
+    throw "solver-engine still running after Stage $Stage Study exit (PIDs $pids)"
   }
   Set-LastStep "sidecar-exited" $result
 
   $result.ok = $true
-  $result.remaining = @(
-    "Stage B (gated): river solve → browse → clear solution → reopen PSOL → strategy restore → close + sidecar exit"
-  )
-  Write-E2E "STAGE A PASS"
+  $result.remaining = @()
+  Write-E2E "STAGE $Stage PASS"
 }
 catch {
   $result.ok = $false
@@ -274,18 +338,16 @@ catch {
   if ($studyProc -and -not $studyProc.HasExited) {
     try { $studyProc.Kill() } catch {}
   }
-  if ($installDir) {
-    Invoke-FailureDiagnostics $installDir
-  } else {
-    Invoke-FailureDiagnostics (Join-Path $env:LOCALAPPDATA "Programs\Holdem Study")
-  }
+  $diagDir = if ($resolvedInstallDir) { $resolvedInstallDir } else { $InstallDir }
+  Invoke-FailureDiagnostics $diagDir
   ($result | ConvertTo-Json -Depth 6) | Set-Content -Path $ResultPath -Encoding utf8
   Write-E2E "Result written: $ResultPath (lastCompletedStep=$($result.lastCompletedStep))"
   exit 1
 }
 finally {
-  if ($installDir) {
-    $uninst = Get-ChildItem -LiteralPath $installDir -Filter "uninstall*.exe" -ErrorAction SilentlyContinue |
+  $dirForUninstall = if ($resolvedInstallDir) { $resolvedInstallDir } else { $InstallDir }
+  if ($dirForUninstall -and (Test-Path -LiteralPath $dirForUninstall)) {
+    $uninst = Get-ChildItem -LiteralPath $dirForUninstall -Filter "uninstall*.exe" -ErrorAction SilentlyContinue |
       Select-Object -First 1
     if ($uninst) {
       Write-E2E "Silent uninstall: $($uninst.FullName)"
