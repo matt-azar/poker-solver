@@ -1,6 +1,7 @@
 //! hand-history 1 → river holdem-study-job/1 (street boundary: 5-card board).
 //! Range provenance uses seat labels / holes — not stakes or rake labels.
 const std = @import("std");
+const line_validate = @import("line_validate.zig");
 
 pub const HhError = error{
     InvalidHeader,
@@ -169,7 +170,7 @@ fn betChips(label: []const u8) ?f64 {
 
 /// Emit holdem-study-job/1 JSON for a river HH.
 /// Positions default to BB (OOP) / BTN (IP) for SRP-shaped spot notes — no stakes label.
-pub fn riverJobJson(allocator: std.mem.Allocator, record: Record, iterations: i32) HhError![]u8 {
+pub fn riverJobJson(allocator: std.mem.Allocator, record: Record, iterations: i32) anyerror![]u8 {
     const oop_src = try rangeFor(record.oop_hole, record.oop_label);
     const ip_src = try rangeFor(record.ip_hole, record.ip_label);
     const oop_range = if (record.oop_hole != null)
@@ -220,7 +221,14 @@ pub fn riverJobJson(allocator: std.mem.Allocator, record: Record, iterations: i3
 
     var missing = std.ArrayList([]const u8).init(allocator);
     defer missing.deinit();
-    // With played sizes included, missing stays empty unless pot is zero.
+
+    // Authoritative missing_sizes: walk the compiled tree (not fraction lists alone).
+    var action_labels = try allocator.alloc([]const u8, record.actions.len);
+    defer allocator.free(action_labels);
+    for (record.actions, 0..) |a, i| action_labels[i] = a.label;
+    var walk = try line_validate.validateConfigLine(allocator, config.items, action_labels);
+    defer walk.deinit(allocator);
+    for (walk.missing) |m| try missing.append(m);
 
     var out = std.ArrayList(u8).init(allocator);
     errdefer out.deinit();
@@ -263,13 +271,21 @@ pub fn riverJobJson(allocator: std.mem.Allocator, record: Record, iterations: i3
         try appendJsonString(&out, m);
     }
     try w.writeAll("],\n    \"street_boundary\": \"river\"\n  },\n  \"decision\": {\n    \"actions\": [");
-    var first_dec = true;
-    for (record.actions) |a| {
-        if (std.mem.eql(u8, a.label, "Fold")) continue;
-        if (!first_dec) try w.writeAll(", ");
-        first_dec = false;
-        try appendJsonString(&out, a.label);
+    for (walk.decision_actions, 0..) |label, di| {
+        if (di > 0) try w.writeAll(", ");
+        try appendJsonString(&out, label);
     }
-    try w.writeAll("]\n  }\n}\n");
+    try w.writeAll("],\n    \"path\": ");
+    {
+        var path = std.ArrayList(u8).init(allocator);
+        defer path.deinit();
+        for (walk.decision_actions, 0..) |label, di| {
+            if (di > 0) try path.append('/');
+            try path.appendSlice(label);
+        }
+        try appendJsonString(&out, path.items);
+    }
+    try w.writeAll("\n  }\n}\n");
+    // Always return reviewable JSON; callers must treat non-empty missing_sizes as failure.
     return try out.toOwnedSlice();
 }

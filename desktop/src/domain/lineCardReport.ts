@@ -374,9 +374,79 @@ export function actionLabelPotFraction(label: string): number | null {
 }
 
 /**
+ * Engine chip rounding (`poker.chips.roundChips`): sizes are tenths of a chip.
+ * 75% of a 5-chip pot → 3.8 chips (round(0.75 × 50) = 38 tenths).
+ */
+export function engineRoundSizeChips(fraction: number, basisChips: number): number {
+  if (!(basisChips > 0) || !Number.isFinite(fraction) || !Number.isFinite(basisChips)) {
+    return NaN;
+  }
+  const basisTenths = Math.round(basisChips * 10);
+  return Math.round(fraction * basisTenths) / 10;
+}
+
+/**
+ * Engine sizing basis: pot when first to act; pot+to_call when facing a bet
+ * (`betting.zig` / `size_spec.zig`).
+ */
+export function engineSizingBasis(pot: number, toCall = 0): number {
+  if (!(pot > 0) || !Number.isFinite(pot)) {
+    return NaN;
+  }
+  const facing = Number.isFinite(toCall) && toCall > 0 ? toCall : 0;
+  return facing > 0 ? pot + facing : pot;
+}
+
+/**
+ * Recover facing amount when the node payload left `to_call` at 0.
+ * Prefer an explicit Call label (`Call 50`); else max(contrib) − acting contrib.
+ */
+export function inferFacingToCall(
+  actionLabels: readonly string[],
+  options: {
+    toCall?: number | null;
+    contrib?: readonly number[] | null;
+    player?: number | null;
+  } = {},
+): number {
+  const reported = Number(options.toCall ?? 0);
+  if (Number.isFinite(reported) && reported > 0) {
+    return reported;
+  }
+  for (const label of actionLabels) {
+    const parsed = parseSizedAction(label);
+    if (parsed?.kind === "call" && parsed.chips > 0) {
+      return Math.abs(parsed.chips);
+    }
+  }
+  const contrib = options.contrib;
+  const player = options.player;
+  if (
+    Array.isArray(contrib) &&
+    contrib.length >= 2 &&
+    typeof player === "number" &&
+    player >= 0 &&
+    player < contrib.length
+  ) {
+    const c0 = Number(contrib[0]);
+    const c1 = Number(contrib[1]);
+    if (Number.isFinite(c0) && Number.isFinite(c1)) {
+      const committed = Math.max(c0, c1);
+      const own = Number(contrib[player]);
+      if (Number.isFinite(own)) {
+        return Math.max(0, committed - own);
+      }
+    }
+  }
+  // Action set looks facing (Fold/Call/Raise, no Check) but amount unknown.
+  return 0;
+}
+
+/**
  * Pot fraction from node pot + actual chip amount on the action label.
- * Raise-to uses the raise increment (`N - to_call`) over the current pot —
- * same basis as Study pot tags when facing a bet.
+ * Raise-to uses the raise increment over the **engine** basis (pot+call when
+ * facing). Prefer {@link labelMatchesPotFraction} for matching — rounding
+ * matters on small pots.
  */
 export function actionLabelChipPotFraction(
   label: string,
@@ -394,7 +464,41 @@ export function actionLabelChipPotFraction(
   if (!(sizeChips > 0) || !Number.isFinite(sizeChips)) {
     return null;
   }
-  return sizeChips / pot;
+  const basis = engineSizingBasis(pot, toCall);
+  if (!(basis > 0)) {
+    return null;
+  }
+  return sizeChips / basis;
+}
+
+/**
+ * True when the engine would emit `label` for `queryFraction` of pot
+ * (rounding + pot+call raise basis).
+ */
+export function labelMatchesPotFraction(
+  label: string,
+  queryFraction: number,
+  pot: number,
+  toCall = 0,
+): boolean {
+  if (!(pot > 0) || !Number.isFinite(queryFraction)) {
+    return false;
+  }
+  const parsed = parseSizedAction(label);
+  if (!parsed || parsed.kind === "call") {
+    // Explicit display labels like `Bet 75% pot`.
+    const explicit = actionLabelPotFraction(label);
+    return explicit != null && Math.abs(explicit - queryFraction) < 1e-6;
+  }
+  const facing = toCall > 0 ? toCall : 0;
+  const basis = engineSizingBasis(pot, facing);
+  const expectedSize = engineRoundSizeChips(queryFraction, basis);
+  if (!Number.isFinite(expectedSize) || !(expectedSize > 0)) {
+    return false;
+  }
+  const sizeChips = sizeChipsForPotTag(parsed, facing);
+  // Tenths equality (labels may be "3.8").
+  return Math.round(sizeChips * 10) === Math.round(expectedSize * 10);
 }
 
 function normalizeActionQuery(query: string): string {
@@ -404,14 +508,19 @@ function normalizeActionQuery(query: string): string {
 export interface ResolveLineCardActionOptions {
   /** Node pot in chips (required for %→chip matching). */
   pot?: number | null;
-  /** Facing amount at the decision; used for raise-to sizing basis. */
+  /** Facing amount at the decision; used for raise sizing basis (pot+call). */
   toCall?: number | null;
+  /** Street contrib [OOP, IP] — used to recover to_call when the payload left 0. */
+  contrib?: readonly number[] | null;
+  /** Acting seat 0/1 — with contrib, recovers facing amount. */
+  player?: number | null;
 }
 
 /**
  * Resolve a size/label query against the source decision's action set.
- * Exact label wins; otherwise pot-fraction match from node pot + chip amounts
- * (e.g. pot 80, Bet 60 / Bet 75, "75% pot" → Bet 60).
+ * Exact label wins; otherwise pot-fraction match via engine rounding +
+ * pot(+call) basis (e.g. pot 80, Bet 60 / Bet 75, "75% pot" → Bet 60;
+ * pot 5 → Bet 3.8).
  */
 export function resolveLineCardAction(
   actionLabels: readonly string[],
@@ -472,16 +581,24 @@ export function resolveLineCardAction(
   }
   if (queryFraction != null && Number.isFinite(queryFraction)) {
     const pot = Number(options.pot ?? NaN);
-    const toCall = Number(options.toCall ?? 0);
+    const toCall = inferFacingToCall(supported, {
+      toCall: options.toCall,
+      contrib: options.contrib,
+      player: options.player,
+    });
     const matches: number[] = [];
     for (let index = 0; index < supported.length; index += 1) {
       const label = supported[index]!;
-      // Prefer chip/pot when node pot is known (engine labels are chips).
-      const fromChips =
-        pot > 0 ? actionLabelChipPotFraction(label, pot, toCall) : null;
+      if (pot > 0 && labelMatchesPotFraction(label, queryFraction, pot, toCall)) {
+        matches.push(index);
+        continue;
+      }
+      // Fallback: explicit % labels without a usable pot.
       const fromExplicitPct = actionLabelPotFraction(label);
-      const fraction = fromChips ?? fromExplicitPct;
-      if (fraction != null && Math.abs(fraction - queryFraction) < 1e-6) {
+      if (
+        fromExplicitPct != null &&
+        Math.abs(fromExplicitPct - queryFraction) < 1e-6
+      ) {
         matches.push(index);
       }
     }

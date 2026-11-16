@@ -3,14 +3,19 @@ import { formatSolveJobStreetConfig } from "../../engine/streetConfigText";
 import { buildJob } from "../../state/studyDraft";
 import { DEFAULT_SPOT } from "../types";
 import {
+  assertJobRepresentableInBuild,
+  decisionActionsForStudy,
   draftFromPortableJob,
+  JobNotRepresentableError,
   parseHandHistory,
   parsePortableJobJson,
   portableJobFromDraft,
   riverJobFromHandHistoryText,
   stringifyPortableJob,
+  walkDecisionActions,
   walkPreviewActions,
 } from "./index";
+import type { NodePayload } from "../types";
 
 const RIVER_HH = `hand-history 1
 board Ah Kd 7c 4s 2h
@@ -92,7 +97,9 @@ describe("hand-history → river job", () => {
     expect(job.review?.effective_stack).toBe(200);
     expect(job.review?.action_line).toEqual(["Check", "Bet 50", "Call"]);
     expect(job.review?.range_sources?.oop).toContain("AcAd");
-    expect(job.decision?.actions).toEqual(["Check", "Bet 50", "Call"]);
+    // Study opens on the decision facing Call — not the terminal after Call.
+    expect(job.decision?.actions).toEqual(["Check", "Bet 50"]);
+    expect(job.decision?.path).toBe("Check/Bet 50");
     expect(job.street_config).toContain("street-config 1");
     expect(job.street_config).toContain("board Ah Kd 7c 4s 2h");
     expect(job.review?.missing_sizes ?? []).toEqual([]);
@@ -217,5 +224,96 @@ describe("walkPreviewActions", () => {
       expect(hit.nodeIndex).toBe(4);
       expect(hit.legal).toEqual(["Fold", "Call"]);
     }
+
+    const study = decisionActionsForStudy(nodes, ["Check", "Bet 50", "Call"]);
+    expect(study.ok).toBe(true);
+    expect(study.actions).toEqual(["Check", "Bet 50"]);
+    expect(study.legal).toEqual(["Fold", "Call"]);
+    expect(study.missing_sizes).toEqual([]);
+
+    const raiseMissing = decisionActionsForStudy(nodes, [
+      "Check",
+      "Bet 50",
+      "Raise to 137",
+    ]);
+    expect(raiseMissing.ok).toBe(false);
+    expect(raiseMissing.missing_sizes).toContain("Raise to 137");
+    // Path stops on the decision that faced the missing raise.
+    expect(raiseMissing.actions).toEqual(["Check", "Bet 50"]);
+  });
+});
+
+describe("walkDecisionActions (Study reopen)", () => {
+  it("follows children onto the recorded decision when another tree is already open", async () => {
+    const nodes: Record<string, NodePayload> = {
+      n0: {
+        node_id: "n0",
+        solution_id: "s",
+        kind: "decision",
+        player: 0,
+        children: [
+          { label: "Check", node_id: "n1" },
+          { label: "Bet 50", node_id: "n_bet" },
+        ],
+      },
+      n1: {
+        node_id: "n1",
+        solution_id: "s",
+        kind: "decision",
+        player: 1,
+        children: [
+          { label: "Check", node_id: "n_xc" },
+          { label: "Bet 50", node_id: "n2" },
+        ],
+      },
+      n2: {
+        node_id: "n2",
+        solution_id: "s",
+        kind: "decision",
+        player: 0,
+        children: [
+          { label: "Fold", node_id: "n_f" },
+          { label: "Call", node_id: "n_c" },
+        ],
+      },
+    };
+    const walk = await walkDecisionActions(nodes.n0, ["Check", "Bet 50"], async (id) => {
+      const node = nodes[id];
+      if (!node) throw new Error(`missing ${id}`);
+      return node;
+    });
+    expect(walk.ok).toBe(true);
+    if (walk.ok) {
+      expect(walk.node_id).toBe("n2");
+      expect(walk.steps.map((s) => s.label)).toEqual(["Check", "Bet 50"]);
+    }
+  });
+});
+
+describe("Build job representability", () => {
+  it("rejects first-to-act ≠ 0 so Export cannot silently rewrite it", () => {
+    const job = parsePortableJobJson(
+      JSON.stringify({
+        schema: "holdem-study-job/1",
+        street_config:
+          "street-config 1\nboard Ah Kd 7c 4s 2h\npot 100\nstack 200\noop-range AA:1\nip-range KK:1\nfirst-to-act 1\n",
+        run: { iterations: 10 },
+        provenance: { source: "test" },
+      }),
+    );
+    expect(() => assertJobRepresentableInBuild(job)).toThrow(JobNotRepresentableError);
+    expect(() => draftFromPortableJob(job)).toThrow(/first-to-act/);
+  });
+
+  it("accepts first-to-act 0 jobs", () => {
+    const job = portableJobFromDraft({
+      ...DEFAULT_SPOT,
+      boardText: "Ah Kd 7c 4s 2h",
+      oopRange: "AA:1",
+      ipRange: "KK:1",
+      iterations: 10,
+    });
+    expect(() => assertJobRepresentableInBuild(job)).not.toThrow();
+    expect(job.street_config).toMatch(/first-to-act 0/);
   });
 });

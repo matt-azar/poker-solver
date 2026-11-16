@@ -48,7 +48,12 @@ interface ChatLine {
   /** When set, this assistant line carries an applyable setup run. */
   setupRunId?: number;
   /** Compare-runouts target using the same navigation as a manual report click. */
-  openInStudy?: { card: string; resolvedNodeId: string; line?: string | null };
+  openInStudy?: {
+    card: string;
+    resolvedNodeId: string;
+    solutionId: string;
+    line?: string | null;
+  };
 }
 
 function readPrefs(): StudySetupPreferences {
@@ -573,9 +578,18 @@ export function StudyAssistantWindow() {
                       data-testid="assistant-open-in-study"
                       disabled={busy}
                       onClick={() => {
-                        void useStudyStore
-                          .getState()
-                          .openLineCardRow(message.openInStudy!.resolvedNodeId);
+                        const target = message.openInStudy!;
+                        const live = useStudyStore.getState();
+                        if (
+                          !target.solutionId ||
+                          live.solutionId !== target.solutionId
+                        ) {
+                          setError(
+                            "Open in Study is for the solution that was loaded when this answer was generated. Re-open that solution (or ask again) before navigating.",
+                          );
+                          return;
+                        }
+                        void live.openLineCardRow(target.resolvedNodeId);
                       }}
                     >
                       Open in Study ({message.openInStudy.card})

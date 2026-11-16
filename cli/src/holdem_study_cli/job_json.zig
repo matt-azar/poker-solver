@@ -14,11 +14,19 @@ pub const Job = struct {
     iterations: i32,
     accuracy: ?f64 = null,
     time_limit: ?f64 = null,
-    /// Raw JSON array of decision action strings when present (owned).
+    /// Owned decision action labels (Study open path).
+    decision_actions: [][]u8 = &.{},
+    /// Owned missing_sizes from review (may be empty).
+    missing_sizes: [][]u8 = &.{},
+    /// Raw JSON array mirror for solve summary.
     decision_actions_json: ?[]u8 = null,
 
     pub fn deinit(self: *Job, allocator: std.mem.Allocator) void {
         allocator.free(self.street_config);
+        for (self.decision_actions) |a| allocator.free(a);
+        if (self.decision_actions.len != 0) allocator.free(self.decision_actions);
+        for (self.missing_sizes) |m| allocator.free(m);
+        if (self.missing_sizes.len != 0) allocator.free(self.missing_sizes);
         if (self.decision_actions_json) |a| allocator.free(a);
         self.* = undefined;
     }
@@ -34,12 +42,31 @@ const DecisionJson = struct {
     actions: []const []const u8 = &.{},
 };
 
+const ReviewJson = struct {
+    missing_sizes: []const []const u8 = &.{},
+};
+
 const JobJson = struct {
     schema: []const u8,
     street_config: []const u8,
     run: RunJson,
     decision: ?DecisionJson = null,
+    review: ?ReviewJson = null,
 };
+
+fn dupeLabels(allocator: std.mem.Allocator, labels: []const []const u8) JobError![][]u8 {
+    if (labels.len == 0) return &.{};
+    var out = allocator.alloc([]u8, labels.len) catch return error.OutOfMemory;
+    var filled: usize = 0;
+    errdefer {
+        for (out[0..filled]) |s| allocator.free(s);
+        allocator.free(out);
+    }
+    while (filled < labels.len) : (filled += 1) {
+        out[filled] = allocator.dupe(u8, labels[filled]) catch return error.OutOfMemory;
+    }
+    return out;
+}
 
 pub fn loadJob(allocator: std.mem.Allocator, path: []const u8) JobError!Job {
     const text = std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024 * 1024) catch return error.InvalidJob;
@@ -67,9 +94,15 @@ pub fn loadJob(allocator: std.mem.Allocator, path: []const u8) JobError!Job {
     const street_config = allocator.dupe(u8, value.street_config) catch return error.OutOfMemory;
     errdefer allocator.free(street_config);
 
+    var decision_actions: [][]u8 = &.{};
+    errdefer {
+        for (decision_actions) |a| allocator.free(a);
+        if (decision_actions.len != 0) allocator.free(decision_actions);
+    }
     var decision_actions_json: ?[]u8 = null;
     errdefer if (decision_actions_json) |a| allocator.free(a);
     if (value.decision) |dec| {
+        decision_actions = try dupeLabels(allocator, dec.actions);
         if (dec.actions.len > 0) {
             var list = std.ArrayList(u8).init(allocator);
             errdefer list.deinit();
@@ -83,11 +116,22 @@ pub fn loadJob(allocator: std.mem.Allocator, path: []const u8) JobError!Job {
         }
     }
 
+    var missing_sizes: [][]u8 = &.{};
+    errdefer {
+        for (missing_sizes) |m| allocator.free(m);
+        if (missing_sizes.len != 0) allocator.free(missing_sizes);
+    }
+    if (value.review) |rev| {
+        missing_sizes = try dupeLabels(allocator, rev.missing_sizes);
+    }
+
     return .{
         .street_config = street_config,
         .iterations = value.run.iterations,
         .accuracy = value.run.accuracy,
         .time_limit = value.run.time_limit,
+        .decision_actions = decision_actions,
+        .missing_sizes = missing_sizes,
         .decision_actions_json = decision_actions_json,
     };
 }

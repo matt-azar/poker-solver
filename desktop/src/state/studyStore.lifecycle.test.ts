@@ -468,6 +468,47 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     expect(useStudyStore.getState().connection).toBe("connected");
   });
 
+  it("applyPortableJobJson stages pendingDecisionActions for openSolution", () => {
+    const job = {
+      schema: "holdem-study-job/1",
+      street_config:
+        "street-config 1\nboard Ah Kd 7c 4s 2h\npot 100\nstack 200\noop-range AcAd:1\nip-range KsKc:1\nfirst-to-act 0\n",
+      run: { iterations: 20 },
+      provenance: { source: "test" },
+      decision: { actions: ["Check", "Bet 50"], path: "Check/Bet 50" },
+    };
+    const result = useStudyStore
+      .getState()
+      .applyPortableJobJson(JSON.stringify(job));
+    expect(result.ok).toBe(true);
+    expect(useStudyStore.getState().pendingDecisionActions).toEqual([
+      "Check",
+      "Bet 50",
+    ]);
+    expect(useStudyStore.getState().draft.boardText).toMatch(/Ah Kd 7c 4s 2h/);
+    expect(useStudyStore.getState().draft.pot).toBe(100);
+  });
+
+  it("applyPortableJobJson rejects first-to-act ≠ 0", () => {
+    useStudyStore.setState({ pendingDecisionActions: null });
+    const before = useStudyStore.getState().draft.boardText;
+    const job = {
+      schema: "holdem-study-job/1",
+      street_config:
+        "street-config 1\nboard Ah Kd 7c 4s 2h\npot 100\nstack 200\noop-range AA:1\nip-range KK:1\nfirst-to-act 1\n",
+      run: { iterations: 10 },
+      provenance: { source: "test" },
+    };
+    const result = useStudyStore
+      .getState()
+      .applyPortableJobJson(JSON.stringify(job));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/first-to-act/);
+    // Failed import must not stage a decision path or rewrite the draft.
+    expect(useStudyStore.getState().pendingDecisionActions).toBeNull();
+    expect(useStudyStore.getState().draft.boardText).toBe(before);
+  });
+
   it("zero-rake full template resets a 5% rake draft for the next job", async () => {
     expect(useStudyStore.getState().draft.rakeRate).toBe(0.05);
 

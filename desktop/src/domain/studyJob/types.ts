@@ -57,10 +57,12 @@ export interface StudyJobReview {
 
 export interface StudyJobDecision {
   /**
-   * Recorded actions from the street-root decision to the node Study should
-   * open at (exclusive of folds that leave the tree).
+   * Recorded actions from the street-root to the Study decision node
+   * (must land on a decision — not a terminal after Call/Fold).
    */
   actions: string[];
+  /** Slash-joined engine labels for the same path (optional mirror). */
+  path?: string;
 }
 
 export interface StudyJob {
