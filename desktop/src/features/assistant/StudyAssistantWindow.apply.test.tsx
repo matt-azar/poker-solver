@@ -151,17 +151,17 @@ describe("StudyAssistantWindow apply UX", () => {
   });
 
   async function sendPrompt(user: ReturnType<typeof userEvent.setup>, text: string) {
-    const box = screen.getByPlaceholderText(/Type your question or request here/i);
+    const box = screen.getByRole("textbox", { name: "Assistant message" });
     await user.click(box);
     await user.clear(box);
     await user.paste(text);
     await user.click(screen.getByRole("button", { name: /^Send$/i }));
   }
 
-  it("shows a professional compose placeholder with the send shortcut", () => {
+  it("uses an empty compose placeholder without send-shortcut teaching copy", () => {
     render(<StudyAssistantWindow />);
-    const box = screen.getByPlaceholderText(/Type your question or request here/i);
-    expect(box.getAttribute("placeholder")).toMatch(/Press (⌘↩|Ctrl\+Enter) to send\./);
+    const box = screen.getByRole("textbox", { name: "Assistant message" });
+    expect(box.getAttribute("placeholder") ?? "").toBe("");
   });
 
   it("auto-applies a scalar pot edit with Keep and Undo", async () => {
@@ -232,7 +232,10 @@ describe("StudyAssistantWindow apply UX", () => {
       expect(screen.getByTestId("assistant-pending-apply")).toBeTruthy();
     });
     expect(screen.getByTestId("assistant-pending-apply").textContent).toMatch(
-      /Suggestion ready|Keep applies/i,
+      /Suggestion ready/i,
+    );
+    expect(screen.getByTestId("assistant-pending-apply").textContent).not.toMatch(
+      /Keep applies/i,
     );
     expect(useStudyStore.getState().draft.oopRange).toBe("AA");
 

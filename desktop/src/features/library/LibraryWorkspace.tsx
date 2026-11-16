@@ -104,7 +104,7 @@ export function LibraryWorkspace() {
               <span className="library-count tabular">{libraryLists.recent.length}</span>
             </div>
             {libraryLists.recent.length === 0 ? (
-              <p className="library-empty">No recent solutions yet. Save or open a PSOL to populate this list.</p>
+              <p className="library-empty">No recent solutions.</p>
             ) : (
               <ul className="library-list">
                 {libraryLists.recent.map((entry) => (
@@ -138,9 +138,7 @@ export function LibraryWorkspace() {
               <span className="library-count tabular">{libraryLists.templates.length}</span>
             </div>
             {libraryLists.templates.length === 0 ? (
-              <p className="library-empty">
-                No templates found. Place street-config documents under configs/templates.
-              </p>
+              <p className="library-empty">No templates.</p>
             ) : (
               <ul className="library-list">
                 {libraryLists.templates.map((entry) => (
@@ -190,9 +188,7 @@ export function LibraryWorkspace() {
               </label>
             </div>
             {libraryLists.ranges.length === 0 ? (
-              <p className="library-empty">
-                No range presets found. Place range strings under configs/ranges (folders allowed).
-              </p>
+              <p className="library-empty">No range presets.</p>
             ) : (
               <div className="library-range-folders">
                 {rangeGroups.map((group) => (

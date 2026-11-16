@@ -118,11 +118,6 @@ export function BettingTreeCatalogue({
 
   return (
     <div className="tree-catalogue" aria-label="Betting tree catalogue">
-      <p className="tree-catalogue__help">
-        Named trees store sizes, caps, and line edits only. Board, ranges, and stop
-        stay as they are.
-      </p>
-
       <section className="tree-catalogue__list" aria-label="Saved betting trees">
         <h3 className="tree-catalogue__title">Saved trees</h3>
         {entries.length === 0 ? (

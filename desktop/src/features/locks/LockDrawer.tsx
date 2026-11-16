@@ -336,14 +336,12 @@ export function LockDrawer() {
             <LockPaintPanel highlight={highlight} onFocusChange={setFocus} />
             <div className="node-lock-focus" aria-label="Focused hand class">
               <div className="lock-drawer__section-title">
-                {focus ? focus.text : "Hover a hand class"}
+                {focus ? focus.text : ""}
               </div>
               {focusCombos.length === 0 ? (
-                <p className="empty-hint">
-                  {focus
-                    ? "No node combos in this class."
-                    : "Hover the grid to inspect suit combos."}
-                </p>
+                focus ? (
+                  <p className="empty-hint">No node combos in this class.</p>
+                ) : null
               ) : (
                 <ul className="lock-hand-list lock-hand-list--compact">
                   {focusCombos.map((entry) => (
@@ -395,10 +393,6 @@ export function LockDrawer() {
 
             <section className="lock-drawer__section" aria-label="Probability row">
               <div className="lock-drawer__section-title">Action frequencies</div>
-              <p className="muted lock-freq-hint">
-                Sliders reallocate across selected combos by EV (near-ties mix). Protect
-                an action to keep its mass when adjusting others.
-              </p>
               {actions.length === 0 ? (
                 <p className="empty-hint">No actions at this node.</p>
               ) : (
@@ -552,7 +546,7 @@ export function LockDrawer() {
                     void lockAllHands("line");
                   }}
                   disabled={!currentNode || currentNode.kind !== "decision"}
-                  title="Freeze each runout's own mix across this betting line (Pio lock_line)"
+                  title="Freeze each runout's own mix across this betting line"
                 >
                   Lock line across runouts
                 </button>

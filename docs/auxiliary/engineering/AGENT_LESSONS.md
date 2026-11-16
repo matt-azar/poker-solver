@@ -278,6 +278,11 @@ Eligible only at **street-start** turn/river OOP decisions (#193). Copy **raw** 
 
 Matrix, Hands, Node Locking, and the Actions mix bar paint **passive → aggressive** left-to-right through one shared path: `buildStrategyPaintSegments` + `StrategyPaintBars` (order from `orderActionIndicesByAggression`). Do **not** rebuild flex segment markup or reverse paint order in a feature component — that is how Hands and the matrix drifted apart. Frequency sliders and Action filter blocks stay in **engine action order** (index-bound) (#185). Hands metric lists may use `orderActionIndicesAggressiveFirst` (text only).
 
+### Study UI copy (no permanent teaching / no internal jargon)
+
+- Do **not** ship permanently visible how-to lectures (“click to…”, “expand branches…”, empty-state tutorials, tip strips). Assume the user knows the product; keep control labels, field names, errors, status, units that encode meaning (`%`), and help behind explicit Help/Settings.
+- Do **not** put engine/API/debug wording in chrome or tooltips: snake_case field names (`estimated_peak_bytes`), “not RSS” disclaimers, `Pio lock_line`, `street-config`, CLI binary names, `dry-run plan`, etc. Visible memory/plan strips show human labels (Plan peak, Budget, pot, stack) only.
+
 ### AI context packs / Study assistant
 
 - Packs under `docs/ai-context/{help,setup-assistant,unified}.md` are **generated**. Edit `docs/ai-context/source/`, then `cd desktop && npm run sync:ai-context`. CI `npm run check:ai-context` fails on drift or forbidden stale UI phrases (#196).

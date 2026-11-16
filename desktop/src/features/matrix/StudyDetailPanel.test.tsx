@@ -64,10 +64,10 @@ describe("StudyDetailPanel", () => {
     expect(screen.getByLabelText("Action frequency mix")).toBeTruthy();
   });
 
-  it("Hands shows empty hint until a cell is focused", () => {
+  it("Hands has no instructional empty copy until a cell is focused", () => {
     render(<StudyDetailPanel />);
     expect(screen.getByRole("region", { name: "Hands" })).toBeTruthy();
-    expect(screen.getByText("Hover a hand in the grid.")).toBeTruthy();
+    expect(screen.queryByText(/Hover a hand/i)).toBeNull();
   });
 
   it("Hands lists suit slots for a hovered hand class", () => {
@@ -79,6 +79,5 @@ describe("StudyDetailPanel", () => {
     expect(document.querySelectorAll(".hands-combo")).toHaveLength(6);
     expect(document.querySelector('[title="AhAd"]')).toBeTruthy();
     expect(document.querySelector('[title="AsAh"]')).toBeTruthy();
-    expect(screen.queryByText("Hover a hand in the grid.")).toBeNull();
   });
 });

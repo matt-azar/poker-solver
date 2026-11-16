@@ -90,10 +90,6 @@ export function StrategyEditDrawer() {
               "No node loaded"
             )}
           </p>
-          <p className="muted" style={{ margin: "4px 0 0", fontSize: 11 }}>
-            Edits the stored average strategy for browse/EV. Does not lock CFR updates.
-            Session-only — not saved in PSOL.
-          </p>
           {!editsAvailable ? (
             <p className="empty-hint" role="status" style={{ marginTop: 8 }}>
               {editsUnavailableReason}
@@ -142,7 +138,7 @@ export function StrategyEditDrawer() {
             </span>
           </div>
           {draft.kind === "selected" && draft.handIndices.length === 0 ? (
-            <p className="empty-hint">Select combos in the inspector.</p>
+            <p className="empty-hint">No combos selected.</p>
           ) : (
             <ul className="lock-hand-list">
               {selectedHands.map(({ index, combo }) => {

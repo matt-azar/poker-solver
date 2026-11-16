@@ -498,9 +498,7 @@ export function ActionHistory() {
               </div>
             ))}
           </nav>
-        ) : (
-          <span className="empty-hint">Solve a spot to browse the tree.</span>
-        )}
+        ) : null}
         {currentNode ? (
           <span className="path-nav__status tabular" data-terminal={terminalKind}>
             {statusLabel}

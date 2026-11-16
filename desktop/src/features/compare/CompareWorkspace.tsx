@@ -133,19 +133,14 @@ export function CompareWorkspace() {
       {missingBaseline ? (
         <div className="compare-empty" role="status">
           <h2>No baseline</h2>
-          <p>
-            Lock hands in Study, then run <strong>Resolve locked</strong> to create a baseline.
-          </p>
         </div>
       ) : !solutionId ? (
         <div className="compare-empty" role="status">
           <h2>No solution</h2>
-          <p>Solve or open a solution first.</p>
         </div>
       ) : !nodeId ? (
         <div className="compare-empty" role="status">
           <h2>No decision node</h2>
-          <p>Select a decision node in Study, then refresh.</p>
         </div>
       ) : noteValid && compareNote ? (
         <>
@@ -168,7 +163,6 @@ export function CompareWorkspace() {
         <div className="compare-empty" role="status">
           <h2>{busy ? "Loading compare…" : "Compare not loaded"}</h2>
           {message ? <p className="compare-store-message">{message}</p> : null}
-          {!busy ? <p className="muted">Press Refresh compare.</p> : null}
         </div>
       )}
     </div>

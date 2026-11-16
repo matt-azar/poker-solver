@@ -378,10 +378,6 @@ export function LineCardReport() {
             Run report
           </button>
         </div>
-        <p className="empty-hint">
-          From a turn or river decision, compare the same betting line across
-          cards on a suit-and-rank grid.
-        </p>
       </div>
     );
   }

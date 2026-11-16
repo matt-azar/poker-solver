@@ -67,13 +67,8 @@ function readPrefs(): StudySetupPreferences {
   }
 }
 
-/** Apple platforms use ⌘↩; elsewhere Ctrl+Enter (both work in the key handler). */
 function assistantComposePlaceholder(): string {
-  const apple =
-    typeof navigator !== "undefined" &&
-    /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
-  const sendShortcut = apple ? "⌘↩" : "Ctrl+Enter";
-  return `Type your question or request here. Press ${sendShortcut} to send.`;
+  return "";
 }
 
 export function StudyAssistantWindow() {
@@ -361,7 +356,7 @@ export function StudyAssistantWindow() {
             setPendingSetup({ runId: outcome.run.runId, result });
             line = {
               ...line,
-              content: `Review this setup — Keep applies it to Build; Undo discards it.\n\n${line.content}\n\n${renderPendingSetupReview(result)}`,
+              content: `Review this setup.\n\n${line.content}\n\n${renderPendingSetupReview(result)}`,
               setupRunId: outcome.run.runId,
             };
           } else {
@@ -373,7 +368,7 @@ export function StudyAssistantWindow() {
               setPendingSetup({ runId: outcome.run.runId, result });
               line = {
                 ...line,
-                content: `Action needed — Keep applies to Build; Undo discards.\n\n${line.content}\n\n${renderPendingSetupReview(result)}`,
+                content: `Action needed.\n\n${line.content}\n\n${renderPendingSetupReview(result)}`,
                 setupRunId: outcome.run.runId,
               };
             }
@@ -612,9 +607,9 @@ export function StudyAssistantWindow() {
             aria-live="polite"
           >
             <p className="help-chat-window__pending-apply-label">
-              Suggestion ready — Keep applies it to Build; Undo discards it.
+              Suggestion ready
               {setupResultIsBroad(pendingSetup.result)
-                ? " This replaces multiple fields."
+                ? " — replaces multiple fields."
                 : null}
             </p>
             <div className="assistant-compose-actions">
@@ -686,9 +681,7 @@ export function StudyAssistantWindow() {
             aria-live="polite"
           >
             <p className="help-chat-window__pending-apply-label">
-              {appliedSuggestion?.broad
-                ? "Setup applied — Keep to retain, or Undo to revert."
-                : "Change applied — Keep to retain, or Undo to revert."}
+              {appliedSuggestion?.broad ? "Setup applied" : "Change applied"}
             </p>
             <div className="assistant-compose-actions">
               <button
@@ -729,6 +722,7 @@ export function StudyAssistantWindow() {
             rows={2}
             value={draftText}
             placeholder={assistantComposePlaceholder()}
+            aria-label="Assistant message"
             disabled={busy || !credPresent}
             onChange={(event) => setDraftText(event.target.value)}
             onKeyDown={(event) => {

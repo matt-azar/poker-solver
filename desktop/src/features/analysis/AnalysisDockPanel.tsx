@@ -322,9 +322,7 @@ export function AnalysisDockPanel() {
         </div>
         <p className="equity-note muted">Equity (fraction of pot).</p>
         {transferMessage ? <p className="equity-note">{transferMessage}</p> : null}
-        {!equity ? (
-          <p className="empty-hint">Click Refresh to load equity.</p>
-        ) : equity.pending ? (
+        {!equity ? null : equity.pending ? (
           <p className="empty-hint">Loading…</p>
         ) : (
           <>
@@ -353,7 +351,7 @@ export function AnalysisDockPanel() {
             <div className="equity-filter-row">
               <span className="muted">
                 {selectedBands.size === 0
-                  ? "All bands (click histogram to filter)"
+                  ? "All bands"
                   : `${selectedBands.size} band${selectedBands.size === 1 ? "" : "s"} selected`}
               </span>
               {selectedBands.size > 0 ? (
@@ -428,9 +426,7 @@ export function AnalysisDockPanel() {
         <p className="empty-hint" role="status">
           {categoriesUnavailableReason}
         </p>
-      ) : !categories ? (
-        <p className="empty-hint">Click Refresh to load categories.</p>
-      ) : categories.pending ? (
+      ) : !categories ? null : categories.pending ? (
         <p className="empty-hint">Loading…</p>
       ) : categories.available === false ? (
         <p className="empty-hint">{categories.reason || "Not available on this board."}</p>

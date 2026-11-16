@@ -110,7 +110,7 @@ export function ActionSummary() {
               frequencyText={freqText}
               color={colors.byIndex[index]}
               active={filtered}
-              title={`${formatActionTooltip(label, pot, betSizeDisplay, displayOpts)} · click to filter`}
+              title={formatActionTooltip(label, pot, betSizeDisplay, displayOpts)}
               aria-label={`Filter ${display.primary}${freqText ? `, ${freqText}` : ""}`}
               onClick={() => setActionFilter(filtered ? null : index)}
             />
