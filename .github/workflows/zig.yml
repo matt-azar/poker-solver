@@ -87,6 +87,13 @@ jobs:
           set -euo pipefail
           python3 scripts/zig/study-contract-smoke.py ./zig-out/bin/solver-engine
 
+      # Portable study-job CLI: from-hh → plan → solve PSOL (river fixture).
+      - name: Holdem study CLI smoke
+        run: |
+          set -euo pipefail
+          test -x ./zig-out/bin/holdem-study-cli
+          python3 scripts/zig/holdem-study-cli-smoke.py
+
       # ZR-143: kill sidecar mid-session; cold restart ≠ restore unsaved; open ckpt.
       - name: Engine crash recovery smoke
         run: |
@@ -160,6 +167,15 @@ jobs:
         shell: pwsh
         run: |
           python scripts/zig/study-contract-smoke.py zig-out/bin/solver-engine.exe
+
+      # Portable study-job CLI (Windows): exercises getEnvVarOwned + .exe paths.
+      - name: Holdem study CLI smoke
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "zig-out/bin/holdem-study-cli.exe")) {
+            throw "holdem-study-cli.exe missing"
+          }
+          python scripts/zig/holdem-study-cli-smoke.py
 
       - name: Upload solver-engine (Windows)
         uses: actions/upload-artifact@v4

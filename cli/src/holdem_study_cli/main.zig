@@ -39,9 +39,10 @@ fn hasFlag(args: []const []const u8, name: []const u8) bool {
 }
 
 fn defaultEnginePath(allocator: std.mem.Allocator) ![]u8 {
-    if (std.posix.getenv("HOLDEM_STUDY_SOLVER_ENGINE")) |env| {
-        return try allocator.dupe(u8, env);
-    }
+    // Cross-platform (Windows Zig 0.14 has no std.posix.getenv).
+    if (std.process.getEnvVarOwned(allocator, "HOLDEM_STUDY_SOLVER_ENGINE")) |env| {
+        return env;
+    } else |_| {}
     // Prefer zig-out next to cwd (developer layout).
     const candidates = [_][]const u8{
         "zig-out/bin/solver-engine",
