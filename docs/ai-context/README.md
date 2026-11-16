@@ -15,7 +15,7 @@ Markdown packs written **for model consumption**, not for players. The desktop a
 | Fragment | Role |
 | --- | --- |
 | [`source/surface.md`](source/surface.md) | Mounted UI (workspaces, Assistant entry, Build/Settings controls, apply UX) |
-| [`source/setup-rules.md`](source/setup-rules.md) | Pot type / 100NL / fieldEdits / catalogue rules |
+| [`source/setup-rules.md`](source/setup-rules.md) | Pot type / positions×action / fieldEdits / catalogue rules |
 | [`source/help-body.md`](source/help-body.md) | Help-only workflow + numerical labels |
 | [`source/unified-extra.md`](source/unified-extra.md) | Tools, snapshot, out-of-scope |
 

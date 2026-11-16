@@ -44,7 +44,7 @@ const fixture25Nl = parseRangeProfile(
 );
 
 describe("assistant → Build transaction integration", () => {
-  it("CO vs BB SRP with 100NL applies BB OOP / CO IP ranges with derived pot", async () => {
+  it("CO vs BB SRP applies BB OOP / CO IP ranges with derived pot", async () => {
     const catalogue = createRangeProfileCatalogue([fixture25, fixture25Nl]);
     const session = createAssistantSession();
     let revision = 0;
@@ -59,7 +59,7 @@ describe("assistant → Build transaction integration", () => {
       ip: parseRangeText(""),
     };
 
-    const run = await session.run("Set up CO vs BB SRP with 100NL ranges", {
+    const run = await session.run("Set up CO vs BB SRP", {
       provider: createFakeAssistantProvider(),
       catalogue,
       getDraft: () => draft,

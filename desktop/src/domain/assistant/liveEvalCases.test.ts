@@ -36,37 +36,37 @@ function prepare(partial: {
 describe("liveEvalCases scoring (offline)", () => {
   it("exports a representative set covering product rules", () => {
     const ids = new Set(LIVE_EVAL_CASES.map((c) => c.id));
-    expect(ids.has("srp-100nl-explicit")).toBe(true);
+    expect(ids.has("srp-positions-explicit")).toBe(true);
     expect(ids.has("srp-silence-defaults")).toBe(true);
     expect(ids.has("missing-pot-type-clarify")).toBe(true);
-    expect(ids.has("my-100nl-profile-not-personal")).toBe(true);
-    expect(ids.has("100nl-vs-100bb-both-named")).toBe(true);
-    expect(ids.has("3bp-btn-bb-100nl")).toBe(true);
+    expect(ids.has("profile-without-pot-type")).toBe(true);
+    expect(ids.has("srp-with-explicit-stack")).toBe(true);
+    expect(ids.has("3bp-btn-bb")).toBe(true);
     expect(ids.has("cev-chip-ev-wording")).toBe(true);
     expect(LIVE_EVAL_CASES.length).toBeGreaterThanOrEqual(8);
   });
 
-  it("scores a correct 100NL SRP proposal as a full pass", () => {
-    const evalCase = LIVE_EVAL_CASES.find((c) => c.id === "srp-100nl-explicit")!;
+  it("scores a correct position-pair SRP proposal as a full pass", () => {
+    const evalCase = LIVE_EVAL_CASES.find((c) => c.id === "srp-positions-explicit")!;
     const score = scoreLiveEvalCase(
       evalCase,
       prepare({
         potType: "SRP",
-        stakesLabel: "100NL",
         oop: "BB",
         ip: "CO",
-        selectedProfileId: LIVE_EVAL_PROFILE_IDS.nl25,
+        selectedProfileId: LIVE_EVAL_PROFILE_IDS.cev25,
       }),
     );
     expect(score.ok).toBe(true);
   });
 
-  it("accepts silence or explicit cEV / 100 for default path", () => {
+  it("accepts silence or explicit 100bb for default path", () => {
     const evalCase = LIVE_EVAL_CASES.find((c) => c.id === "srp-silence-defaults")!;
     const silent = scoreLiveEvalCase(
       evalCase,
       prepare({
         potType: "SRP",
+        stackBb: 100,
         oop: "BB",
         ip: "CO",
         selectedProfileId: LIVE_EVAL_PROFILE_IDS.cev25,
@@ -78,7 +78,6 @@ describe("liveEvalCases scoring (offline)", () => {
       evalCase,
       prepare({
         potType: "SRP",
-        stakesLabel: "cEV",
         stackBb: 100,
         oop: "BB",
         ip: "CO",
@@ -94,10 +93,9 @@ describe("liveEvalCases scoring (offline)", () => {
       evalCase,
       prepare({
         potType: "SRP",
-        stakesLabel: "100NL",
         oop: "BB",
         ip: "CO",
-        selectedProfileId: LIVE_EVAL_PROFILE_IDS.nl25,
+        selectedProfileId: LIVE_EVAL_PROFILE_IDS.cev25,
       }),
     );
     expect(bad.ok).toBe(false);
@@ -106,7 +104,7 @@ describe("liveEvalCases scoring (offline)", () => {
 
   it("summarizes field accuracy across cases", () => {
     const cases: LiveEvalCase[] = [
-      LIVE_EVAL_CASES.find((c) => c.id === "srp-100nl-explicit")!,
+      LIVE_EVAL_CASES.find((c) => c.id === "srp-positions-explicit")!,
       LIVE_EVAL_CASES.find((c) => c.id === "missing-pot-type-clarify")!,
     ];
     const scores = [
@@ -114,10 +112,9 @@ describe("liveEvalCases scoring (offline)", () => {
         cases[0]!,
         prepare({
           potType: "SRP",
-          stakesLabel: "100NL",
           oop: "BB",
           ip: "CO",
-          selectedProfileId: LIVE_EVAL_PROFILE_IDS.nl25,
+          selectedProfileId: LIVE_EVAL_PROFILE_IDS.cev25,
         }),
       ),
       scoreLiveEvalCase(cases[1]!, {

@@ -17,7 +17,11 @@ import {
   type DealStreet,
 } from "./cards";
 import { strategyFrequencies } from "./actionHistory";
-import { parseSizeToken } from "./betSizes";
+import {
+  parseSizeToken,
+  parseSizedAction,
+  sizeChipsForPotTag,
+} from "./betSizes";
 import { withEvBasis } from "./browse";
 import type { ActionValuesPayload, EvDisplayBasis, NodePayload } from "./types";
 
@@ -344,7 +348,10 @@ export function matchesLineCardPredicate(
   return true;
 }
 
-/** Pot-fraction encoded in a Study action label (`Bet 75`, `Bet 75% pot`, …). */
+/**
+ * Explicit pot-% token on a Study/display label (`Bet 75% pot`).
+ * Engine chip labels like `Bet 75` return null — those need node pot.
+ */
 export function actionLabelPotFraction(label: string): number | null {
   const trimmed = label.trim();
   if (!trimmed) {
@@ -353,7 +360,11 @@ export function actionLabelPotFraction(label: string): number | null {
   if (/^(check|call|fold)\b/i.test(trimmed) || /^all[\s-]*in$/i.test(trimmed)) {
     return null;
   }
-  const match = trimmed.match(/^(?:bet|raise)\s+(.+)$/i);
+  // Only treat as pot-% when the label itself says so (not bare chip amounts).
+  if (!/%/.test(trimmed) && !/\bpot\b/i.test(trimmed)) {
+    return null;
+  }
+  const match = trimmed.match(/^(?:bet|raise(?:\s+to)?)\s+(.+)$/i);
   if (!match?.[1]) {
     return null;
   }
@@ -362,17 +373,50 @@ export function actionLabelPotFraction(label: string): number | null {
   return parseSizeToken(token);
 }
 
+/**
+ * Pot fraction from node pot + actual chip amount on the action label.
+ * Raise-to uses the raise increment (`N - to_call`) over the current pot —
+ * same basis as Study pot tags when facing a bet.
+ */
+export function actionLabelChipPotFraction(
+  label: string,
+  pot: number,
+  toCall = 0,
+): number | null {
+  if (!(pot > 0) || !Number.isFinite(pot)) {
+    return null;
+  }
+  const parsed = parseSizedAction(label);
+  if (!parsed || parsed.kind === "call") {
+    return null;
+  }
+  const sizeChips = sizeChipsForPotTag(parsed, toCall);
+  if (!(sizeChips > 0) || !Number.isFinite(sizeChips)) {
+    return null;
+  }
+  return sizeChips / pot;
+}
+
 function normalizeActionQuery(query: string): string {
   return query.trim().replace(/\s+/g, " ");
 }
 
+export interface ResolveLineCardActionOptions {
+  /** Node pot in chips (required for %→chip matching). */
+  pot?: number | null;
+  /** Facing amount at the decision; used for raise-to sizing basis. */
+  toCall?: number | null;
+}
+
 /**
  * Resolve a size/label query against the source decision's action set.
- * Exact label wins; otherwise pot-fraction match (75% ↔ Bet 75).
+ * Exact label wins; otherwise pot-fraction match from node pot + chip amounts
+ * (e.g. pot 80, Bet 60 / Bet 75, "75% pot" → Bet 60).
  */
 export function resolveLineCardAction(
   actionLabels: readonly string[],
   query: string | null | undefined,
+  options: ResolveLineCardActionOptions = {},
 ):
   | { ok: true; index: number; label: string }
   | { ok: false; reason: string; supported: string[] } {
@@ -415,16 +459,28 @@ export function resolveLineCardAction(
   }
 
   let queryFraction: number | null = null;
-  const betish = normalized.match(/^(?:bet|raise)\s+(.+)$/i);
+  const betish = normalized.match(/^(?:bet|raise(?:\s+to)?)\s+(.+)$/i);
   if (betish?.[1]) {
-    queryFraction = parseSizeToken(betish[1].replace(/\bpot\b.*$/i, "").trim().split(/\s+/)[0] ?? "");
+    queryFraction = parseSizeToken(
+      betish[1].replace(/\bpot\b.*$/i, "").trim().split(/\s+/)[0] ?? "",
+    );
   } else {
-    queryFraction = parseSizeToken(normalized);
+    // Bare "75%" / "75% pot" / "0.75 pot"
+    queryFraction = parseSizeToken(
+      normalized.replace(/\bpot\b.*$/i, "").trim().split(/\s+/)[0] ?? "",
+    );
   }
   if (queryFraction != null && Number.isFinite(queryFraction)) {
+    const pot = Number(options.pot ?? NaN);
+    const toCall = Number(options.toCall ?? 0);
     const matches: number[] = [];
     for (let index = 0; index < supported.length; index += 1) {
-      const fraction = actionLabelPotFraction(supported[index]!);
+      const label = supported[index]!;
+      // Prefer chip/pot when node pot is known (engine labels are chips).
+      const fromChips =
+        pot > 0 ? actionLabelChipPotFraction(label, pot, toCall) : null;
+      const fromExplicitPct = actionLabelPotFraction(label);
+      const fraction = fromChips ?? fromExplicitPct;
       if (fraction != null && Math.abs(fraction - queryFraction) < 1e-6) {
         matches.push(index);
       }

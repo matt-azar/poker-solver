@@ -365,6 +365,12 @@ interface StudyState {
     restoredKeys: string[];
     conflictKeys: string[];
   };
+  /**
+   * Confirm / retain the last assistant apply: drop its Undo entry without
+   * restoring the draft. Keep + Undo are the paired controls in the Study
+   * assistant after a suggestion is applied.
+   */
+  keepSetupTransaction: () => { ok: true; message: string } | { ok: false; reason: "empty" };
   clearSetupMeta: () => void;
   getSetupCatalogue: () => ReturnType<typeof getRangeProfileCatalogue>;
 
@@ -1043,6 +1049,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       restoredKeys: undone.restoredKeys.map(String),
       conflictKeys: undone.conflictKeys.map(String),
     };
+  },
+  keepSetupTransaction() {
+    if (setupHistoryPast.length === 0) {
+      return { ok: false, reason: "empty" };
+    }
+    // Drop the latest undo entry — draft stays as applied.
+    setupHistoryPast.pop();
+    set({ canUndoSetup: setupHistoryPast.length > 0 });
+    return { ok: true, message: "Kept the assistant change." };
   },
   clearSetupMeta() {
     set({ setupMeta: null });

@@ -64,6 +64,8 @@ export interface AssistantContextPublishedSolution {
   present: boolean;
   solutionId: string | null;
   statusGeneration: number | null;
+  /** Host published-average epoch when known. */
+  policyRevision: number | null;
   board: string | null;
   pot: number | null;
   stack: number | null;
@@ -230,6 +232,14 @@ export function buildAssistantContextSnapshot(
       present: true,
       solutionId,
       statusGeneration: input.status?.status_generation ?? null,
+      policyRevision:
+        typeof input.status?.policy_revision === "number"
+          ? input.status.policy_revision
+          : typeof input.status?.analysis_revision === "number"
+            ? input.status.analysis_revision
+            : typeof node?.policy_revision === "number"
+              ? node.policy_revision
+              : null,
       board: publishedBoardLabel(input.status?.board ?? node?.board),
       pot: input.status?.pot ?? null,
       stack: input.status?.stack ?? null,
@@ -246,6 +256,7 @@ export function buildAssistantContextSnapshot(
       present: false,
       solutionId: null,
       statusGeneration: null,
+      policyRevision: null,
       board: null,
       pot: null,
       stack: null,
@@ -498,4 +509,46 @@ export function summarizeContextSnapshot(snapshot: AssistantContextSnapshot): st
     bits.push(`absences=${snapshot.absences.length}`);
   }
   return bits.join(" ");
+}
+
+/**
+ * Provider payload for ordinary help / Q&A — readiness + node identity only.
+ * Omits dual draft-range previews and catalogue profile lists.
+ */
+export function compactHelpContextPayload(
+  snapshot: AssistantContextSnapshot,
+): Record<string, unknown> {
+  return {
+    version: snapshot.version,
+    units: snapshot.units,
+    build: {
+      draftRevision: snapshot.build.draftRevision,
+      board: snapshot.build.board,
+      pot: snapshot.build.pot,
+      stack: snapshot.build.stack,
+    },
+    publishedSolution: {
+      present: snapshot.publishedSolution.present,
+      solutionId: snapshot.publishedSolution.solutionId,
+      statusGeneration: snapshot.publishedSolution.statusGeneration,
+      policyRevision: snapshot.publishedSolution.policyRevision,
+      phase: snapshot.publishedSolution.phase,
+    },
+    studyNode: {
+      present: snapshot.studyNode.present,
+      nodeId: snapshot.studyNode.nodeId,
+      line: snapshot.studyNode.line,
+      seat: snapshot.studyNode.seat,
+      actions: snapshot.studyNode.actions,
+      toCall: snapshot.studyNode.toCall,
+      pot: snapshot.studyNode.pot,
+    },
+    selectedHand: {
+      present: snapshot.selectedHand.present,
+      label: snapshot.selectedHand.label,
+      evBasis: snapshot.selectedHand.evBasis,
+    },
+    readiness: snapshot.readiness,
+    absences: snapshot.absences,
+  };
 }

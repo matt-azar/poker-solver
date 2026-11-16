@@ -16,7 +16,7 @@ export interface ProfileMeta {
   startingStackBb: number;
   openSizeBb?: number;
   format: string;
-  /** Rake / stakes-environment label (e.g. 100NL) — not a personal profile name. */
+  /** Optional legacy stakes tag — not a primary setup field; prefer positions + pot type. */
   stakesLabel?: string;
   potType?: PotType;
   legacyPreset?: boolean;
@@ -63,7 +63,7 @@ export interface StudyFieldEdits {
   potCap?: number;
   /**
    * Engine solve-rake rate for this simulation.
-   * Independent of range-source / catalogue stakesLabel (e.g. 100NL).
+   * Independent of any catalogue stakes tag.
    */
   rakeRate?: number;
   /** Engine solve-rake cap. Cleared with rakeRate when making the sim rake-free. */

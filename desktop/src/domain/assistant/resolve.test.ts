@@ -99,9 +99,9 @@ describe("resolveAssistantProposal", () => {
     expect(result.requestRevision).toBe(3);
   });
 
-  it("100NL SRP path still composes seat×action atoms (pack preferred over synthetic 100NL fixture)", async () => {
+  it("SRP path composes seat×action atoms (pack preferred over synthetic fixture)", async () => {
     const proposal = await provider.interpret({
-      text: "Set up CO vs BB SRP with 100NL ranges",
+      text: "Set up CO vs BB SRP",
       setupSummary: "",
       availableProfiles: catalogueProfileMetas(catalogue),
       capabilities: ["prepare_study"],
@@ -120,9 +120,9 @@ describe("resolveAssistantProposal", () => {
     expect(result.stack).toBeCloseTo(97.5, 10);
   });
 
-  it("100NL alone does not set 100bb without positions/pot type", async () => {
+  it("incomplete create without pot type does not invent stack alone", async () => {
     const clarify = await provider.interpret({
-      text: "100NL",
+      text: "Set up CO vs BB",
       setupSummary: "",
       availableProfiles: catalogueProfileMetas(catalogue),
       capabilities: ["prepare_study"],
@@ -140,7 +140,7 @@ describe("resolveAssistantProposal", () => {
     expect(clarified.canSolve).toBe(false);
     expect(clarified.draftPatch.stack).toBeUndefined();
 
-    // With fixture match, remaining stack comes from profile derivation — not from "100NL"≡100bb.
+    // With positions + pot type, remaining stack comes from profile derivation.
     const prepared = resolveAssistantProposal({
       proposal: {
         kind: "prepare_study",
@@ -149,12 +149,9 @@ describe("resolveAssistantProposal", () => {
           oopPosition: "BB",
           ipPosition: "CO",
           potType: "SRP",
-          stakesLabel: "100NL",
           stackBb: 100,
-          profileQuery: fixture25Nl.id,
         },
-        selectedProfileId: fixture25Nl.id,
-        stakesLabel: "100NL",
+        selectedProfileId: fixture25.id,
         stackBb: 100,
       },
       baseDraft: createBlankSetupDraft("create"),
@@ -163,9 +160,6 @@ describe("resolveAssistantProposal", () => {
       draftRevision: 2,
     });
     expect(prepared.stack).toBeCloseTo(97.5, 10);
-    expect(
-      prepared.summary.some((line) => /does not set stack/i.test(line)),
-    ).toBe(true);
   });
 
   it("board update preserves existing ranges", async () => {
@@ -413,7 +407,7 @@ describe("A03 range-source vs solve rake", () => {
   ]);
   const prefs = emptyStudySetupPreferences();
 
-  it("loading 100NL ranges into a rake-free sim keeps solve rake unchanged", () => {
+  it("loading catalogue ranges into a rake-free sim keeps solve rake unchanged (quiet)", () => {
     const base: SpotDraft = {
       ...DEFAULT_SPOT,
       rakeRate: 0,
@@ -428,11 +422,9 @@ describe("A03 range-source vs solve rake", () => {
           potType: "SRP",
           oopPosition: "BB",
           ipPosition: "CO",
-          stakesLabel: "100NL",
           stackBb: 100,
         },
         selectedProfileId: fixture25Nl.id,
-        stakesLabel: "100NL",
       },
       baseDraft: base,
       catalogue,
@@ -441,15 +433,14 @@ describe("A03 range-source vs solve rake", () => {
     });
     expect(result.draftPatch.rakeRate).toBe(0);
     expect(result.draftPatch.rakeCap).toBe(0);
-    expect(result.summary.some((l) => /Range-source environment:.*100NL/i.test(l))).toBe(
-      true,
-    );
-    expect(result.summary.some((l) => /Solve rake unchanged/i.test(l))).toBe(true);
+    // Stakes/NL chatter stays quiet unless the player asked about solve rake.
+    expect(result.summary.some((l) => /Range-source environment/i.test(l))).toBe(false);
+    expect(result.summary.some((l) => /Solve rake unchanged/i.test(l))).toBe(false);
     // Must not copy profile.rake onto the draft.
     expect(result.draftPatch.rakeRate).not.toBe(fixture25Nl.rake.rate || undefined);
   });
 
-  it("loading cEV ranges into a raked sim preserves solve rake", () => {
+  it("loading catalogue ranges into a raked sim preserves solve rake (quiet)", () => {
     const base: SpotDraft = {
       ...DEFAULT_SPOT,
       rakeRate: 0.05,
@@ -466,11 +457,9 @@ describe("A03 range-source vs solve rake", () => {
           potType: "SRP",
           oopPosition: "BB",
           ipPosition: "CO",
-          stakesLabel: "cEV",
           stackBb: 100,
         },
         selectedProfileId: fixture25.id,
-        stakesLabel: "cEV",
       },
       baseDraft: base,
       catalogue,
@@ -479,9 +468,7 @@ describe("A03 range-source vs solve rake", () => {
     });
     expect(result.draftPatch.rakeRate).toBe(0.05);
     expect(result.draftPatch.rakeCap).toBe(3);
-    expect(result.summary.some((l) => /Solve rake unchanged: rate=0\.05/i.test(l))).toBe(
-      true,
-    );
+    expect(result.summary.some((l) => /Solve rake unchanged/i.test(l))).toBe(false);
   });
 
   it("explicit make-sim-rake-free clears engine rake only", () => {
@@ -510,7 +497,7 @@ describe("A03 range-source vs solve rake", () => {
     expect(result.summary.some((l) => /Solve rake cleared/i.test(l))).toBe(true);
   });
 
-  it("prepareStudyFromProfile preserves live solve rake and reports range-source separately", () => {
+  it("prepareStudyFromProfile preserves live solve rake without NL chatter", () => {
     const live: SpotDraft = { ...DEFAULT_SPOT, rakeRate: 0.065, rakeCap: 2.5 };
     const result = prepareStudyFromProfile(
       fixture25Nl,
@@ -521,9 +508,9 @@ describe("A03 range-source vs solve rake", () => {
     );
     expect(result.draftPatch.rakeRate).toBe(0.065);
     expect(result.draftPatch.rakeCap).toBe(2.5);
-    expect(result.summary.some((l) => /Range-source environment/i.test(l))).toBe(true);
+    expect(result.summary.some((l) => /Range-source environment/i.test(l))).toBe(false);
     expect(result.summary.some((l) => /profile rake was not applied/i.test(l))).toBe(
-      true,
+      false,
     );
   });
 });

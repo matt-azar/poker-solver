@@ -222,21 +222,45 @@ export function resolveAssistantProposal(
         openerPosition: intent.ipPosition,
         openSizeBb: intent.openSizeBb,
         stackBb: intent.stackBb,
+        stakesLabel: intent.stakesLabel,
       });
       if (composed.oopRange && composed.ipRange) {
+        const chartRevs = composed.chartsUsed
+          .filter((c) => c.role === "oop" || c.role === "ip")
+          .map((c) => `${c.id}@${c.dataRevision}`);
+        const altNotes = composed.alternatives.slice(0, 4).map((alt) => {
+          const diff =
+            alt.differences.length > 0
+              ? ` (${alt.differences.join("; ")})`
+              : "";
+          return `Alternative chart ${alt.id}@${alt.dataRevision}${diff}`;
+        });
+        const chartRevisionNumber = (() => {
+          for (const atom of [composed.oopAtom, composed.ipAtom]) {
+            const n = Number(atom?.dataRevision);
+            if (Number.isFinite(n)) return n;
+          }
+          return draftRevision;
+        })();
         rangeSource = {
           oopRange: composed.oopRange,
           ipRange: composed.ipRange,
           provenanceKind: "seat_action_composed",
           profileRef: {
-            id: `seat-action:${composed.oopAtom?.id ?? "oop"}+${composed.ipAtom?.id ?? "ip"}`,
-            revision: draftRevision,
+            // Embed chart ids + data revisions in the profile id (typed revision
+            // stays numeric for SetupProfileRef).
+            id: `seat-action:${composed.oopAtom?.id ?? "oop"}@${composed.oopAtom?.dataRevision ?? "?"}+${composed.ipAtom?.id ?? "ip"}@${composed.ipAtom?.dataRevision ?? "?"}`,
+            revision: chartRevisionNumber,
             displayName: `Composed ${intent.oopPosition}/${intent.ipPosition} ${intent.potType}`,
             classification: "population_estimate",
           },
           summaryExtra: [
             ...composed.summary,
-            "Ranges composed from seat×action pack atoms (user Ranges.zip)",
+            chartRevs.length > 0
+              ? `Charts used: ${chartRevs.join(", ")}`
+              : "",
+            ...altNotes,
+            "Ranges composed from seat×action pack atoms (position × preflop action)",
             selectedIsSynthetic
               ? "Preferred seat×action pack over synthetic paired fixture"
               : "",
@@ -462,18 +486,12 @@ export function resolveAssistantProposal(
   if (mode === "create") {
     const stackWasSilent =
       proposal.stackBb === undefined && proposal.intent.stackBb === undefined;
-    const rangeSourceRakeSilent =
-      !(proposal.stakesLabel ?? proposal.intent.stakesLabel)?.trim();
     if (stackWasSilent && intent.stackBb === DEFAULT_STARTING_STACK_BB) {
       result.summary.push(
         `Assumed ${DEFAULT_STARTING_STACK_BB}bb starting stacks (stack depth not specified)`,
       );
     }
-    if (rangeSourceRakeSilent && intent.stakesLabel === DEFAULT_RAKE_ENVIRONMENT) {
-      result.summary.push(
-        "Assumed range-source environment cEV (chip EV / no rake structure) because none was specified — solve rake unchanged",
-      );
-    }
+    // Do not chat about silent cEV / NL — stakes are not a primary setup field.
     const classification =
       profile?.provenance.classification ??
       rangeSource?.profileRef.classification;
@@ -518,8 +536,9 @@ function collectInvalidProposedFields(
 }
 
 /**
- * A03: range-source environment (catalogue/provenance) is independent of
- * engine solve rake. Never copy profile.rake onto the draft; report both.
+ * A03: engine solve rake is independent of any catalogue stakes tag.
+ * Never copy profile.rake onto the draft. Stay quiet unless the player
+ * explicitly edits solve rake — stakes/NL are not the hero of setup UX.
  */
 function annotateRangeSourceVsSolveRake(args: {
   result: SetupDraftResult;
@@ -533,17 +552,17 @@ function annotateRangeSourceVsSolveRake(args: {
   baseDraft: SpotDraft;
 }): void {
   const { result, intent, profile, rangeSource, proposal, baseDraft } = args;
+  const explicitStakes = Boolean(
+    (proposal.stakesLabel ?? proposal.intent.stakesLabel)?.trim(),
+  );
   const rangeSourceLabel =
     intent.stakesLabel ??
     profile?.labels?.stakes ??
     rangeSource?.profile?.labels?.stakes;
-  if (rangeSourceLabel) {
+  // Record quietly when present; do not chat about NL/rake on ordinary creates.
+  if (rangeSourceLabel && explicitStakes) {
     result.provenance.rangeSourceEnvironment =
-      result.provenance.stakesLabel ??
-      (intent.stakesLabel ? "explicit_request" : "selected_profile");
-    result.summary.push(
-      `Range-source environment: ${rangeSourceLabel} (catalogue matching / provenance only — does not change solve rake)`,
-    );
+      result.provenance.stakesLabel ?? "explicit_request";
   }
 
   const edits = proposal.fieldEdits;
@@ -567,11 +586,11 @@ function annotateRangeSourceVsSolveRake(args: {
     result.summary.push(
       cleared
         ? `Solve rake cleared (engine rate=0, cap=0) — ranges unchanged unless also requested`
-        : `Solve rake set to rate=${nextRate}, cap=${nextCap} (engine; independent of range-source environment)`,
+        : `Solve rake set to rate=${nextRate}, cap=${nextCap}`,
     );
-  } else if (rangeSource || profile || rangeSourceLabel) {
+  } else if (rangeSource || profile) {
     // Pin current engine rake onto the patch for create blanks so loading
-    // ranges cannot wipe a raked sim via DEFAULT_SPOT zeros.
+    // ranges cannot wipe a raked sim via DEFAULT_SPOT zeros. Stay quiet.
     if (result.draftPatch.rakeRate === undefined) {
       result.draftPatch.rakeRate = baseDraft.rakeRate;
       result.provenance.rakeRate = "default";
@@ -580,9 +599,6 @@ function annotateRangeSourceVsSolveRake(args: {
       result.draftPatch.rakeCap = baseDraft.rakeCap;
       result.provenance.rakeCap = "default";
     }
-    result.summary.push(
-      `Solve rake unchanged: rate=${baseDraft.rakeRate}, cap=${baseDraft.rakeCap} (engine; independent of range-source)`,
-    );
   }
 }
 
@@ -708,18 +724,10 @@ export function prepareStudyFromProfile(
     ? createBlankSetupDraft("create", live)
     : createBlankSetupDraft("create");
   const result = mergeSetupPatch(base, patch, prefs);
-  const stakes = profile.labels?.stakes;
-  if (stakes) {
+  // Quiet provenance: record stakes tag when present, but do not chat about it.
+  if (profile.labels?.stakes) {
     result.provenance.rangeSourceEnvironment = "selected_profile";
-    result.summary.push(
-      `Range-source environment: ${stakes} (catalogue matching / provenance only — does not change solve rake)`,
-    );
   }
-  const rate = result.draftPatch.rakeRate ?? live?.rakeRate ?? 0;
-  const cap = result.draftPatch.rakeCap ?? live?.rakeCap ?? 0;
-  result.summary.push(
-    `Solve rake unchanged: rate=${rate}, cap=${cap} (engine; profile rake was not applied)`,
-  );
   if (derived.incompleteReason) {
     result.summary.push(derived.incompleteReason);
     result.missing.push({

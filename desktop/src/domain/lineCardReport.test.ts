@@ -224,24 +224,50 @@ describe("line card predicates and action resolve", () => {
     ).toBe(false);
   });
 
-  it("resolves 75% to Bet 75 and rejects missing sizes", () => {
-    const labels = ["Check", "Bet 33", "Bet 75"];
-    expect(resolveLineCardAction(labels, "75%")).toEqual({
+  it("resolves 75% pot from node pot + chip amounts (not label digits)", () => {
+    const labels = ["Check", "Bet 60", "Bet 75"];
+    // pot 80: Bet 60 = 75% pot; Bet 75 = 93.75% — do not pick Bet 75 from "75%".
+    expect(resolveLineCardAction(labels, "75%", { pot: 80 })).toEqual({
+      ok: true,
+      index: 1,
+      label: "Bet 60",
+    });
+    expect(resolveLineCardAction(labels, "75% pot", { pot: 80 })).toEqual({
+      ok: true,
+      index: 1,
+      label: "Bet 60",
+    });
+    // Exact label lookup still wins.
+    expect(resolveLineCardAction(labels, "Bet 75", { pot: 80 })).toEqual({
       ok: true,
       index: 2,
       label: "Bet 75",
     });
-    expect(resolveLineCardAction(labels, "Bet 75")).toEqual({
-      ok: true,
-      index: 2,
-      label: "Bet 75",
-    });
-    const missing = resolveLineCardAction(labels, "100%");
+    const missing = resolveLineCardAction(labels, "100%", { pot: 80 });
     expect(missing.ok).toBe(false);
     if (!missing.ok) {
       expect(missing.reason).toMatch(/not available/i);
       expect(missing.supported).toEqual(labels);
     }
+  });
+
+  it("uses raise increment / pot when facing a bet", () => {
+    // pot 80, to_call 20: Raise to 80 → increment 60 = 75% pot.
+    const labels = ["Fold", "Call", "Raise to 80", "Raise to 100"];
+    expect(
+      resolveLineCardAction(labels, "75% pot", { pot: 80, toCall: 20 }),
+    ).toEqual({
+      ok: true,
+      index: 2,
+      label: "Raise to 80",
+    });
+    expect(
+      resolveLineCardAction(labels, "Raise to 100", { pot: 80, toCall: 20 }),
+    ).toEqual({
+      ok: true,
+      index: 3,
+      label: "Raise to 100",
+    });
   });
 
   it("filters and ranks rows by action frequency like the manual report order", () => {

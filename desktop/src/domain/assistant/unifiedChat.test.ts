@@ -85,7 +85,7 @@ function emptyDraft(): SpotDraft {
 describe("looksLikeSetupRequest / classifyAssistantTurnIntent", () => {
   it("detects explicit setup phrasing", () => {
     expect(looksLikeSetupRequest("Set up CO vs BB SRP")).toBe(true);
-    expect(looksLikeSetupRequest("Set up CO vs BB SRP with 100NL ranges.")).toBe(true);
+    expect(looksLikeSetupRequest("Set up CO vs BB SRP.")).toBe(true);
     expect(looksLikeSetupRequest("Change the flop to As 7d 2c")).toBe(true);
     expect(looksLikeSetupRequest("Duplicate this setup at 150bb")).toBe(true);
     expect(looksLikeSetupRequest("set iterations to 500")).toBe(true);
@@ -98,16 +98,22 @@ describe("looksLikeSetupRequest / classifyAssistantTurnIntent", () => {
   it("keeps help and Study Q&A off the setup path", () => {
     expect(looksLikeSetupRequest("How do I run a solve?")).toBe(false);
     expect(looksLikeSetupRequest("What does accuracy mean?")).toBe(false);
-    expect(looksLikeSetupRequest("How do I set up CO vs BB SRP with 100NL ranges?")).toBe(
+    expect(looksLikeSetupRequest("How do I set up CO vs BB SRP?")).toBe(
       false,
     );
     expect(looksLikeSetupRequest("How do I set the stack to 150?")).toBe(false);
     expect(looksLikeSetupRequest("At this 3BP node, which hands bluff?")).toBe(false);
     expect(looksLikeSetupRequest("What does IP do facing 75%?")).toBe(false);
     expect(looksLikeSetupRequest("Where can I compare river cards?")).toBe(false);
-    expect(classifyAssistantTurnIntent("How do I set up CO vs BB SRP with 100NL ranges?")).toBe(
+    expect(
+      looksLikeSetupRequest("Can you explain when to use a larger river bet?"),
+    ).toBe(false);
+    expect(classifyAssistantTurnIntent("How do I set up CO vs BB SRP?")).toBe(
       "qa",
     );
+    expect(
+      classifyAssistantTurnIntent("Can you explain when to use a larger river bet?"),
+    ).toBe("qa");
     expect(classifyAssistantTurnIntent("At this 3BP node, which hands bluff?")).toBe("qa");
   });
 
@@ -225,7 +231,7 @@ describe("FakeUnifiedChatClient", () => {
     const draft = emptyDraft();
     const outcome = await client.turn(
       {
-        text: "How do I set up CO vs BB SRP with 100NL ranges?",
+        text: "How do I set up CO vs BB SRP?",
         setupSummary: "test",
         availableProfiles: [],
         draftRevision: 3,
@@ -247,7 +253,7 @@ describe("FakeUnifiedChatClient", () => {
     const catalogue = createRangeProfileCatalogue();
     const outcome = await client.turn(
       {
-        text: "Set up CO vs BB SRP with 100NL ranges.",
+        text: "Set up CO vs BB SRP.",
         setupSummary: "test",
         availableProfiles: [],
         draftRevision: 1,
@@ -281,6 +287,8 @@ describe("FakeUnifiedChatClient", () => {
           to_act: "IP",
           line: "root/Check",
           board: ["Ah", "Kd", "7c", "2s", "3d"],
+          pot: 100,
+          to_call: 0,
           actions: ["Check", "Bet 75"],
           combos: ["7h2d"],
           reach: [1],
@@ -696,7 +704,7 @@ describe("OpenAiUnifiedChatClient", () => {
                     function: {
                       name: "answer_user",
                       arguments: JSON.stringify({
-                        message: "Open Build, choose CO vs BB SRP, then load 100NL ranges.",
+                        message: "Open Build, choose CO vs BB SRP, then load seat×action ranges.",
                       }),
                     },
                   },
@@ -714,7 +722,7 @@ describe("OpenAiUnifiedChatClient", () => {
     });
     const outcome = await client.turn(
       {
-        text: "How do I set up CO vs BB SRP with 100NL ranges?",
+        text: "How do I set up CO vs BB SRP?",
         setupSummary: "test",
         availableProfiles: [],
         draftRevision: 2,
@@ -805,7 +813,6 @@ describe("OpenAiUnifiedChatClient", () => {
                       arguments: JSON.stringify({
                         kind: "prepare_study",
                         intent: { mode: "create", potType: "SRP", oop: "BB", ip: "CO" },
-                        stakesLabel: "100NL",
                       }),
                     },
                   },
@@ -823,7 +830,7 @@ describe("OpenAiUnifiedChatClient", () => {
     });
     const outcome = await client.turn(
       {
-        text: "Set up CO vs BB SRP with 100NL ranges.",
+        text: "Set up CO vs BB SRP.",
         setupSummary: "test",
         availableProfiles: [],
         draftRevision: 1,

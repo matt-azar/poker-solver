@@ -32,7 +32,7 @@ describe("FakeHelpChatClient", () => {
   it("answers how-to setup questions without forcing a Build write", async () => {
     const client = createFakeHelpChatClient();
     const reply = await client.ask({
-      question: "How do I set up CO vs BB SRP with 100NL ranges?",
+      question: "How do I set up CO vs BB SRP?",
     });
     expect(reply.provider).toBe("fake");
     expect(reply.message).toMatch(/Build/i);

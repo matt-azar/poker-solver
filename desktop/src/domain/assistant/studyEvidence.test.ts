@@ -79,6 +79,8 @@ function riverIpNode(partial: Partial<NodePayload> = {}): NodePayload {
     node_id: "ip-river",
     line: "root/Check/As",
     board: ["Ah", "Kd", "7c", "2s", "3d"],
+    // pot 100 → Bet 75 is a true 75% pot size for percent queries.
+    pot: 100,
     actions: ["Check", "Bet 75"],
     strategy: [
       [0.2, 0.8],

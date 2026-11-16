@@ -6,6 +6,7 @@ import {
 } from "../../domain/assistant/unifiedChat";
 import {
   buildAssistantContextSnapshot,
+  captureStudyEvidenceBind,
   catalogueProfileMetas,
   chatContentFromReceipt,
   formatContextIndicator,
@@ -13,6 +14,7 @@ import {
   setupResultHasApplyablePatch,
   setupResultIsBroad,
   summarizeContextSnapshot,
+  type StudyEvidenceBind,
   type StudyEvidenceHost,
   type StudyEvidenceLiveState,
 } from "../../domain/assistant";
@@ -89,15 +91,17 @@ export function StudyAssistantWindow() {
   const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
   const applySetupDraft = useStudyStore((s) => s.applySetupDraft);
   const undoSetupTransaction = useStudyStore((s) => s.undoSetupTransaction);
+  const keepSetupTransaction = useStudyStore((s) => s.keepSetupTransaction);
   const canUndoSetup = useStudyStore((s) => s.canUndoSetup);
   const getSetupCatalogue = useStudyStore((s) => s.getSetupCatalogue);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
 
   const rangeSourceLabel =
+    setupMeta?.profile?.displayName ??
     setupMeta?.summary
-      ?.find((line) => /Range-source environment:/i.test(line))
-      ?.match(/Range-source environment:\s*([^(]+)/i)?.[1]
-      ?.trim() ?? null;
+      ?.find((line) => /Charts used:|seat×action|Composed/i.test(line))
+      ?.trim() ??
+    null;
 
   const contextSnapshot = buildAssistantContextSnapshot({
     draft,
@@ -115,21 +119,24 @@ export function StudyAssistantWindow() {
   });
   const contextIndicator = formatContextIndicator(contextSnapshot);
 
-  function evidenceHost(): StudyEvidenceHost {
+  function readEvidenceLive(): StudyEvidenceLiveState {
+    const state = useStudyStore.getState();
     return {
-      read: (): StudyEvidenceLiveState => {
-        const state = useStudyStore.getState();
-        return {
-          solutionId: state.solutionId,
-          currentNode: state.currentNode,
-          nodeValues: state.nodeValues,
-          equity: (state.equity ?? null) as StudyEvidenceLiveState["equity"],
-          pathTrail: state.pathTrail,
-          selectedCell: state.selectedCell,
-          evDisplayBasis: state.evDisplayBasis,
-          status: state.status,
-        };
-      },
+      solutionId: state.solutionId,
+      currentNode: state.currentNode,
+      nodeValues: state.nodeValues,
+      equity: (state.equity ?? null) as StudyEvidenceLiveState["equity"],
+      pathTrail: state.pathTrail,
+      selectedCell: state.selectedCell,
+      evDisplayBasis: state.evDisplayBasis,
+      status: state.status,
+    };
+  }
+
+  function evidenceHost(bind: StudyEvidenceBind | null = null): StudyEvidenceHost {
+    return {
+      read: readEvidenceLive,
+      bind,
       ensureNodeAnalysis: async () => {
         await useStudyStore.getState().ensureNodeAnalysis();
       },
@@ -151,6 +158,22 @@ export function StudyAssistantWindow() {
         useStudyStore.getState().applyLineCardReportFilter(filter);
       },
       openLineCardRow: async (resolvedNodeId: string) => {
+        const live = readEvidenceLive();
+        // Open in Study stays scoped to the send-time solution when bound.
+        if (bind?.solutionId && live.solutionId !== bind.solutionId) {
+          throw new Error(
+            "Stale context: the published solution changed — Open in Study was cleared.",
+          );
+        }
+        if (
+          bind?.policyRevision != null &&
+          typeof live.status?.policy_revision === "number" &&
+          live.status.policy_revision !== bind.policyRevision
+        ) {
+          throw new Error(
+            "Stale context: the published policy revision advanced — Open in Study was cleared.",
+          );
+        }
         await useStudyStore.getState().openLineCardRow(resolvedNodeId);
       },
       readLineCardReport: () => useStudyStore.getState().lineCardReport,
@@ -168,6 +191,10 @@ export function StudyAssistantWindow() {
   const [pendingSetup, setPendingSetup] = useState<{
     runId: number;
     result: SetupDraftResult;
+  } | null>(null);
+  /** Last applied suggestion still awaiting Keep / Undo. */
+  const [appliedSuggestion, setAppliedSuggestion] = useState<{
+    broad: boolean;
   } | null>(null);
 
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -237,12 +264,35 @@ export function StudyAssistantWindow() {
       return null;
     }
     setPendingSetup(null);
+    setAppliedSuggestion({ broad: setupResultIsBroad(result) });
     setWorkspace("build");
     setError(null);
     return {
       role: "assistant",
       content: chatContentFromReceipt(applied.receipt),
     };
+  }
+
+  function keepAppliedSuggestion() {
+    const kept = keepSetupTransaction();
+    setAppliedSuggestion(null);
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: kept.ok ? kept.message : "Nothing to keep.",
+      },
+    ]);
+  }
+
+  function undoAppliedSuggestion() {
+    const outcome = undoSetupTransaction();
+    setAppliedSuggestion(null);
+    const content =
+      outcome.ok && outcome.message
+        ? outcome.message
+        : "Reverted the last assistant change.";
+    setMessages((prev) => [...prev, { role: "assistant", content }]);
   }
 
   async function send(text: string) {
@@ -262,8 +312,9 @@ export function StudyAssistantWindow() {
     try {
       const catalogue = getSetupCatalogue();
       const client = makeClient();
-      // Freeze snapshot for this request (same revision as draftRevision).
+      // Freeze snapshot + Study bind for this request (send-time identity).
       const requestSnapshot = contextSnapshot;
+      const sendBind = captureStudyEvidenceBind(readEvidenceLive());
       const outcome = await client.turn(
         {
           text: question,
@@ -280,7 +331,7 @@ export function StudyAssistantWindow() {
           getDraft: () => useStudyStore.getState().draft,
           getRevision: () => useStudyStore.getState().draftRevision,
           preferences: readPrefs(),
-          evidenceHost: evidenceHost(),
+          evidenceHost: evidenceHost(sendBind),
         },
       );
       let line = outcomeToLine(outcome);
@@ -299,10 +350,17 @@ export function StudyAssistantWindow() {
               content:
                 `${line.content}\n\nNothing was written to Build — the proposal had no field changes to apply.`,
             };
+          } else if (setupResultIsBroad(result)) {
+            // Full / broad setups stay reviewable — Keep (Apply) + Undo (Dismiss)
+            // with Open in Build, plus draft-revision checks on Apply.
+            setPendingSetup({ runId: outcome.run.runId, result });
+            line = {
+              ...line,
+              content: `Review this setup — Keep applies it to Build; Undo discards it.\n\n${line.content}\n\n${renderPendingSetupReview(result)}`,
+              setupRunId: outcome.run.runId,
+            };
           } else {
-            // Auto-commit scalar and broad setups. A pending Apply control is only
-            // for blocked/conflicted commits — waiting for confirmation on every
-            // create felt like "nothing happened" when Apply sat below the fold.
+            // Narrow scalar edits auto-commit, then surface Keep + Undo.
             const committed = commitPending(result);
             if (committed) {
               line = committed;
@@ -310,7 +368,7 @@ export function StudyAssistantWindow() {
               setPendingSetup({ runId: outcome.run.runId, result });
               line = {
                 ...line,
-                content: `Action needed — Apply to Build below.\n\n${line.content}\n\n${renderPendingSetupReview(result)}`,
+                content: `Action needed — Keep applies to Build; Undo discards.\n\n${line.content}\n\n${renderPendingSetupReview(result)}`,
                 setupRunId: outcome.run.runId,
               };
             }
@@ -540,7 +598,7 @@ export function StudyAssistantWindow() {
             aria-live="polite"
           >
             <p className="help-chat-window__pending-apply-label">
-              Setup ready — apply it to Build, or dismiss.
+              Suggestion ready — Keep applies it to Build; Undo discards it.
               {setupResultIsBroad(pendingSetup.result)
                 ? " This replaces multiple fields."
                 : null}
@@ -549,6 +607,7 @@ export function StudyAssistantWindow() {
               <button
                 type="button"
                 className="toolbar-btn primary"
+                data-testid="assistant-keep"
                 disabled={busy}
                 onClick={() => {
                   const committed = commitPending(pendingSetup.result);
@@ -557,7 +616,7 @@ export function StudyAssistantWindow() {
                   }
                 }}
               >
-                Apply to Build
+                Keep
               </button>
               {pendingSetup.result.conflicts.length > 0 ? (
                 <button
@@ -571,12 +630,13 @@ export function StudyAssistantWindow() {
                     }
                   }}
                 >
-                  Apply anyway
+                  Keep anyway
                 </button>
               ) : null}
               <button
                 type="button"
                 className="toolbar-btn"
+                data-testid="assistant-undo"
                 disabled={busy}
                 onClick={() => {
                   setPendingSetup(null);
@@ -589,29 +649,64 @@ export function StudyAssistantWindow() {
                   ]);
                 }}
               >
-                Dismiss
+                Undo
+              </button>
+              <button
+                type="button"
+                className="toolbar-btn"
+                data-testid="assistant-open-in-build"
+                disabled={busy}
+                onClick={() => setWorkspace("build")}
+              >
+                Open in Build
               </button>
             </div>
           </div>
         ) : null}
 
-        {canUndoSetup ? (
-          <div className="assistant-compose-actions">
-            <button
-              type="button"
-              className="toolbar-btn"
-              disabled={busy}
-              onClick={() => {
-                const outcome = undoSetupTransaction();
-                const content =
-                  outcome.ok && outcome.message
-                    ? outcome.message
-                    : "Reverted the last assistant change.";
-                setMessages((prev) => [...prev, { role: "assistant", content }]);
-              }}
-            >
-              Undo
-            </button>
+        {!pendingSetup && (appliedSuggestion || canUndoSetup) ? (
+          <div
+            className="help-chat-window__pending-apply"
+            data-testid="assistant-keep-undo"
+            role="status"
+            aria-live="polite"
+          >
+            <p className="help-chat-window__pending-apply-label">
+              {appliedSuggestion?.broad
+                ? "Setup applied — Keep to retain, or Undo to revert."
+                : "Change applied — Keep to retain, or Undo to revert."}
+            </p>
+            <div className="assistant-compose-actions">
+              <button
+                type="button"
+                className="toolbar-btn primary"
+                data-testid="assistant-keep"
+                disabled={busy || !canUndoSetup}
+                onClick={() => keepAppliedSuggestion()}
+              >
+                Keep
+              </button>
+              <button
+                type="button"
+                className="toolbar-btn"
+                data-testid="assistant-undo"
+                disabled={busy || !canUndoSetup}
+                onClick={() => undoAppliedSuggestion()}
+              >
+                Undo
+              </button>
+              {appliedSuggestion?.broad ? (
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  data-testid="assistant-open-in-build"
+                  disabled={busy}
+                  onClick={() => setWorkspace("build")}
+                >
+                  Open in Build
+                </button>
+              ) : null}
+            </div>
           </div>
         ) : null}
 
