@@ -458,6 +458,8 @@ interface StudyState {
   lockAllHands: (scope?: "node" | "line") => Promise<boolean>;
   unlockHands: (handIndices?: number[]) => Promise<void>;
   unlockNode: () => Promise<void>;
+  /** Clear expanded line locks for the current betting line (reverse of lockAllHands("line")). */
+  unlockLine: () => Promise<void>;
   clearAllLocks: () => Promise<void>;
   isHandLockedAtCurrentNode: (handIndex: number) => boolean;
 
@@ -1633,6 +1635,74 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     const actions = node.actions?.length ?? 0;
     const handCount = node.combos?.length ?? 0;
+
+    // Line lock: host freezes each runout's own published mix and skips
+    // card-blocked rows per board. Do not send browsed-board combo_probs —
+    // that would both reject zero rows here and copy one board's mix.
+    if (scope === "line") {
+      if (actions <= 0 || handCount <= 0) {
+        set({
+          message:
+            "Cannot lock line: node strategy rows are missing or invalid.",
+        });
+        return false;
+      }
+      // Placeholder probs satisfy the put_lock schema; host ignores them for
+      // scope=line and reads each runout's published strategy instead.
+      const probs = seedProbsFromStrategy(
+        node.strategy ?? null,
+        Array.from({ length: handCount }, (_, i) => i),
+        actions,
+      );
+      try {
+        const payload = (await engineClient.putLock(solutionId, {
+          node_id: node.node_id,
+          kind: "full",
+          scope: "line",
+          probs,
+        })) as LocksPayload;
+        const live = get();
+        const completion = lockMutationCompletion({
+          requestSolutionId: solutionId,
+          requestNodeId: node.node_id,
+          liveSolutionId: live.solutionId,
+          liveNodeId: live.currentNode?.node_id,
+        });
+        if (!completion.applyLocksList) {
+          return false;
+        }
+        // Board-local draft from this browse only (legal slots); host owns runouts.
+        const fullDraft = buildFullRangeLockDraft({
+          strategy: node.strategy ?? null,
+          actionCount: actions,
+          handCount,
+          existingByHand: get().lockDraft.comboProbsByHand,
+        });
+        if (completion.applyDraft && fullDraft) {
+          set({
+            locks: payload.locks || [],
+            lockDraft: fullDraft,
+            lockDraftBaseline: structuredClone(fullDraft),
+            message: `Full line (all runouts) lock applied at ${node.node_id}`,
+          });
+        } else {
+          set({
+            locks: payload.locks || [],
+            message: `Lock applied at ${node.node_id} (draft not restored; node changed).`,
+          });
+        }
+        return true;
+      } catch (error) {
+        if (get().solutionId !== solutionId) {
+          return false;
+        }
+        set({
+          message: error instanceof EngineError ? error.message : "Lock failed",
+        });
+        return false;
+      }
+    }
+
     const fullDraft = buildFullRangeLockDraft({
       strategy: node.strategy ?? null,
       actionCount: actions,
@@ -1642,13 +1712,13 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (!fullDraft?.comboProbsByHand) {
       set({
         message:
-          "Cannot lock all hands: node strategy rows are missing or invalid.",
+          "Cannot lock all hands: no legal combo strategy rows on this board.",
       });
       return false;
     }
     const body = buildComboLockPutBody({
       nodeId: node.node_id,
-      scope,
+      scope: "node",
       handIndices: fullDraft.handIndices,
       comboProbsByHand: fullDraft.comboProbsByHand,
       aggregateProbs: fullDraft.probs,
@@ -1669,13 +1739,12 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (!completion.applyLocksList) {
         return false;
       }
-      const scopeLabel = scope === "line" ? "line (all runouts)" : "node";
       if (completion.applyDraft) {
         set({
           locks: payload.locks || [],
           lockDraft: fullDraft,
           lockDraftBaseline: structuredClone(fullDraft),
-          message: `Full ${scopeLabel} lock applied at ${node.node_id}`,
+          message: `Full node lock applied at ${node.node_id}`,
         });
       } else {
         set({
@@ -1761,6 +1830,34 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       }
       set({
         message: error instanceof EngineError ? error.message : "Unlock node failed",
+      });
+    }
+  },
+  async unlockLine() {
+    const solutionId = get().solutionId;
+    const node = get().currentNode;
+    if (!solutionId || !node) {
+      return;
+    }
+    const requestNodeId = node.node_id;
+    // Line-scope delete must clear the same expanded runout locks that line
+    // lock created (not only a legacy shared line key).
+    try {
+      await engineClient.deleteLock(solutionId, requestNodeId, undefined, "line");
+      if (get().solutionId !== solutionId) {
+        return;
+      }
+      await get().refreshLocks();
+      if (get().currentNode?.node_id !== requestNodeId) {
+        return;
+      }
+      set({ message: `Cleared line locks at ${requestNodeId}` });
+    } catch (error) {
+      if (get().solutionId !== solutionId) {
+        return;
+      }
+      set({
+        message: error instanceof EngineError ? error.message : "Unlock line failed",
       });
     }
   },

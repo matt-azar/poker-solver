@@ -653,6 +653,21 @@ fn upsertLineLockRunouts(
     }
 }
 
+/// Reverse of `upsertLineLockRunouts`: drop the shared line key and every
+/// board-local record for this infoset (expanded runouts + unlock sentinels).
+fn eraseLineLockRunouts(locks: *node_lock.LockSet, infoset_id: usize) void {
+    _ = locks.eraseKey(node_lock.lineLockKey(infoset_id));
+    var i = locks.entries.items.len;
+    while (i > 0) {
+        i -= 1;
+        const lock = locks.entries.items[i];
+        if (lock.infoset_id == infoset_id and lock.scope == .node) {
+            locks.entries.items[i].deinit(locks.allocator);
+            _ = locks.entries.swapRemove(i);
+        }
+    }
+}
+
 /// ZR-136: fat `put_lock` body extracted from `handle` (op discriminator stays in parent).
 fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     if (state.train_running.load(.acquire) or state.session.phase == .training) {
@@ -957,7 +972,9 @@ fn handleDeleteLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
                     };
                 }
             } else {
-                _ = locks.eraseKey(key);
+                // Line unlock must clear the same expanded runout locks that
+                // line lock created — not only a legacy shared line key.
+                eraseLineLockRunouts(&locks, parsed.node_index);
             }
         }
     } else {
@@ -3978,6 +3995,35 @@ test "line lock expands per runout without copying browsed mix" {
     try std.testing.expectEqual(@as(f64, 0.0), node_lock.lockedProbability(lock_a.*, 0, 1).?);
     try std.testing.expectEqual(@as(f64, 0.0), node_lock.lockedProbability(lock_b.*, 0, 0).?);
     try std.testing.expectEqual(@as(f64, 1.0), node_lock.lockedProbability(lock_b.*, 0, 1).?);
+
+    // Line unlock must reverse the expanded runout locks (not only a shared key).
+    var del_body_buf: [128]u8 = undefined;
+    const del_body = try std.fmt.bufPrint(
+        &del_body_buf,
+        "{{\"node_id\":\"{s}\",\"scope\":\"line\"}}",
+        .{node_id},
+    );
+    var del_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "ll-del"),
+        .op = try std.testing.allocator.dupe(u8, "delete_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, del_body),
+    };
+    defer del_req.deinit();
+    var del_reply = try handle(&state, del_req);
+    defer del_reply.deinit();
+    try std.testing.expect(del_reply.ok);
+
+    var after = try locks_json.parseSessionLocks(std.testing.allocator, state.session.locks_text);
+    defer after.deinit();
+    try std.testing.expect(after.find(infoset) == null);
+    try std.testing.expect(after.findExact(infoset, -1, river_a) == null);
+    try std.testing.expect(after.findExact(infoset, -1, river_b) == null);
+    // No leftover board-local records for this infoset.
+    for (after.entries.items) |lock| {
+        try std.testing.expect(lock.infoset_id != infoset);
+    }
 }
 
 test "locks list put delete Study CRUD" {

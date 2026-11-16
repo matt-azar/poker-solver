@@ -95,6 +95,7 @@ export function LockDrawer() {
   const lockAllHands = useStudyStore((s) => s.lockAllHands);
   const unlockHands = useStudyStore((s) => s.unlockHands);
   const unlockNode = useStudyStore((s) => s.unlockNode);
+  const unlockLine = useStudyStore((s) => s.unlockLine);
   const clearAllLocks = useStudyStore((s) => s.clearAllLocks);
   const resolveLocked = useStudyStore((s) => s.resolveLocked);
   const warmStart = useStudyStore((s) => s.warmStart);
@@ -554,6 +555,15 @@ export function LockDrawer() {
                   title="Freeze each runout's own mix across this betting line (Pio lock_line)"
                 >
                   Lock line across runouts
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  onClick={() => void unlockLine()}
+                  disabled={!currentNode || currentNode.kind !== "decision"}
+                  title="Clear every runout lock created by Lock line across runouts"
+                >
+                  Unlock line across runouts
                 </button>
                 <button type="button" className="toolbar-btn" onClick={() => void unlockNode()}>
                   Unlock node
