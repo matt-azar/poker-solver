@@ -19,3 +19,5 @@ zig build
 ```
 
 Build **Export job** / **Import job** round-trip the same JSON. Preview uses the job’s `street_config` text.
+
+`decision.actions` is the Study open path (last decision facing a response — e.g. `Check/Bet 50`, not the terminal after Call). Build import rejects jobs with `first-to-act ≠ 0` (draft always exports `first-to-act 0`).
