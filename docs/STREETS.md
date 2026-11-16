@@ -2,17 +2,15 @@
 
 Heads-up no-limit tree on a 3-card flop, 4-card turn, or 5-card river. Boards differ by cards still to come: two, one, or zero.
 
-**Shipping on `main`:** the production Study engine is Zig (`engine/` Session + `solver-engine` typed IPC). Names like `StreetBatchSolver`, `street_solver`, `include/solver/…`, and Explorer `POST /api/…` below are **historical C++ vocabulary** for the same public-tree algorithms — not a live CMake / HTTP product path. See [ARCHITECTURE.md](ARCHITECTURE.md), [DESKTOP_UI.md](DESKTOP_UI.md).
+The production Study engine is Zig (`engine/` Session and `solver-engine` typed IPC). See [ARCHITECTURE.md](ARCHITECTURE.md) and [DESKTOP_UI.md](DESKTOP_UI.md).
 
 The Zig Session stores one public betting tree and reuses it on every runout. Training is CFR+. A pass freezes regret matching, sums that player's counterfactual regret, then floors only the player who just updated. The average is weighted by the iteration index and by the acting player's reach. A child is reached with the frozen strategy. A hand that meets the board, or that has no compatible opponent left, is structurally unsupported and has no information set. A supported hand with zero strategic reach still has a slot and still receives a counterfactual value. Hands stay unbucketed. Deals are deterministic. Host train threads come from the config `threads` field, clamped to 1–64, then capped by `WorkerBudget` (`host/src/workers.zig`: on 4 or more CPUs the cap is n−2).
 
-The removed C++ tree also ran vanilla CFR, DCFR(α, β, γ) (default 1.5, 0, 2), and PCFR+ on `CfrTrainer` / `StreetBatchSolver`. PCFR+ matched on cumulative regret plus the previous pass's instantaneous CF regret (`m`), then stored that vector as the next `m` (cold-start `m=0`; PSOL v3 could restore `m`, while v1/v2 reloaded cold-start prediction). DCFR kept signed regrets and discounted the updating player's full row once after the pass (`t^α/(t^α+1)` on positives, `t^β/(t^β+1)` on non-positives) with average weight `t^γ`. `--dcfr-alpha/beta/gamma` set the parameters; β=0 yielded the 0.5 negative discount. PSOL v3 stored the DCFR parameters used on Save. Those schedules required `--frozen` on the public tree. `street_solver` used the public tree unless `--reference` was set. Current saves are PSOL v4 and store the CFR+ algorithm byte only.
-
-Historically, `StreetGame` and `StreetBatchSolver` accepted all three board lengths; five-card information-set labels matched `RiverGame`. On `main`, Study and CLI entry points use the Zig Session / `solver-engine` path instead of C++ `explorer` / `river_solver`.
+Saves are PSOL v4 and store the CFR+ algorithm byte only. Study and the host entry points use the Zig Session.
 
 Chance deals an ordered hand pair from the joint distribution on the starting board, then the players bet. When the street ends without a fold, the next card is dealt uniformly from the cards that are not on the board and not in either hand. A turn tree deals the river. A flop tree deals the turn and then the river. A five-card tree has no later public cards. A fold ends the hand. Chips already invested stay in the pot, and the next street starts with no bet to call.
 
-Player 0 is out of position and acts first on every street. Utilities use the same net-chip rule as the river: `pot / 2` is the dead money each player already posted, and investments on these streets are added on top. That sum is the full net-chip result. Optional pot rake (`rake-rate` / `rake-cap` on `street-config 1`) is applied at terminals the same way as on the river; see [RAKE.md](auxiliary/payoffs/RAKE.md). Optional tournament ICM (`icm-stacks` / `icm-payouts`) wraps those chip terminals; see [ICM.md](auxiliary/payoffs/ICM.md). Optional action-label incentives (`incentive` / `edge-tag` lines) are path-attributed at terminals after chip/ICM; see [INCENTIVES.md](auxiliary/payoffs/INCENTIVES.md). A finished solve can also report each combo's conditional action value at one decision: force that action once, then follow the stored average. The definition is in [MATHEMATICS.md](MATHEMATICS.md). Study host `categories` reports made-hand category mass (`HighCard`…`StraightFlush`) on five-card boards and multi-label draw/backdoor tags on flop/turn (historical C++: `StreetBatchSolver::category_composition` / `poker::holdem::category_composition`).
+Player 0 is out of position and acts first on every street. Utilities use the same net-chip rule as the river: `pot / 2` is the dead money each player already posted, and investments on these streets are added on top. That sum is the full net-chip result. Optional pot rake (`rake-rate` / `rake-cap` on `street-config 1`) is applied at terminals the same way as on the river. See [RAKE.md](auxiliary/payoffs/RAKE.md). Optional tournament ICM (`icm-stacks` / `icm-payouts`) wraps those chip terminals. See [ICM.md](auxiliary/payoffs/ICM.md). Optional action-label incentives (`incentive` / `edge-tag` lines) are path-attributed at terminals after chip and ICM. See [INCENTIVES.md](auxiliary/payoffs/INCENTIVES.md). A finished solve can also report each combo's conditional action value at one decision: force that action once, then follow the stored average. The definition is in [MATHEMATICS.md](MATHEMATICS.md). Study host `categories` reports made-hand category mass (`HighCard` through `StraightFlush`) on five-card boards and multi-label draw and backdoor tags on flop and turn.
 
 An information set is the acting player's own hand, the cards already dealt, and the public action line. It does not contain the opponent's hand. A turn decision is one node, shared by every river that can follow it.
 
@@ -63,29 +61,29 @@ An empty size list is omitted. A missing size field means an empty list. A list 
 
 A range is a combo list in combo-index order. A chip size is written `20c`. A pot fraction is a bare number. Geometric, all-in, explicit-empty, and raise-multiple tokens are written `e`, `2e`, `a`, `-`, and `2.5x`. Shared raise multiples stay plain numbers on their own fields. Flags are `0` or `1`. The document ends with a newline and uses LF endings.
 
-An unknown field, a repeated field, extra space, or a version other than 1 is rejected. The parser does not build the tree. Compile rejects a board that is not three, four, or five cards, a nonpositive pot, and a range pair with no legal hands. `street-config-check <file>` parses a document and prints board length, pot, and stack. Iterations, accuracy, and the thread cap used at train time stay off this document. The removed `street_solver --config` flag reader is gone.
+An unknown field, a repeated field, extra space, or a version other than 1 is rejected. The parser does not build the tree. Compile rejects a board that is not three, four, or five cards, a nonpositive pot, and a range pair with no legal hands. `street-config-check <file>` parses a document and prints board length, pot, and stack. Iterations, accuracy, and the thread cap used at train time stay off this document. They go out through host `solve`.
 
-Study accuracy `0.05` stops when Pio Accuracy (NashConv/2) divided by the pot is at or below 0.05. The default unit is a pot fraction. An absolute chip target is a separate unit. Reported `nash_gap` is still NashConv. `time_limit` stops at the next iteration boundary. The removed C++ CLI printed `accuracy`, `accuracy_fraction_of_pot`, and `time_limit_reached`, and defaulted `--eval-every` to 20 when accuracy was set.
+Study accuracy `0.05` stops when Pio Accuracy (NashConv/2) divided by the pot is at or below 0.05. The default unit is a pot fraction. An absolute chip target is a separate unit. Reported `nash_gap` is NashConv. `time_limit` stops at the next iteration boundary. Host status can include `time_limit_reached`. When `eval_every` is omitted, the host derives the sample period from `samples` and caps it at 10 iterations.
 
-At most eight actions are legal at one decision. The Zig node stores eight child slots (`engine/src/game/compile.zig`). The removed `StreetGame` enumerator rejected trees above about 200,000 terminals. The public-tree limit is `memory_mib`, default 1024. One mebibyte is 1,048,576 bytes. Zero is rejected.
+At most eight actions are legal at one decision. The Zig node stores eight child slots (`engine/src/game/compile.zig`). The public-tree limit is `memory_mib`, default 1024. One mebibyte is 1,048,576 bytes. Zero is rejected.
 
-`app/src/budget_allocator.zig` counts live and peak bytes of engine-owned heap against `memory_mib` and refuses growth past that ceiling. It is not process RSS. `memory_mib` of 0 or less is rejected. The removed C++ budget resource charged each allocation before the call, including the old block and the new block while both existed, and rolled the charge back if allocation failed. The solver still keeps every hand and action and deals every card inside the configured budget.
+`app/src/budget_allocator.zig` counts live and peak bytes of engine-owned heap against `memory_mib` and refuses growth past that ceiling. The count is engine heap, separate from process RSS. `memory_mib` of 0 or less is rejected. The solver keeps every hand and action and deals every card inside the configured budget.
 
-Charged storage is the engine object, the public tree and its path and action strings, deal rows, compact slot indexes, the three `TrainingState` `f32` tables (`regret`, `strategy_sum`, `sigma`), support, traversal scratch, showdown and best-response buffers, registration temporaries, the rank-cache buffers, and, when more than one thread is requested, each extra worker context and the card-result buffer. `sigma` stays allocated beside `strategy_sum` for the whole train. Publish writes a separate average buffer. The rank cache is allocated for every legal runout before training, so a pass does not allocate it. `BudgetAllocator` (`app/src/budget_allocator.zig`) counts the bytes it hands out. It does not write a header in front of the user pointer. The old C++ layout used one shared sigma buffer for the frozen strategy and the normalized average, and PCFR+ could allocate an extra prediction table. Those names are gone.
+Charged storage is the engine object, the public tree and its path and action strings, deal rows, compact slot indexes, the three `TrainingState` `f32` tables (`regret`, `strategy_sum`, `sigma`), support, traversal scratch, showdown and best-response buffers, registration temporaries, the rank-cache buffers, and, when more than one thread is requested, each extra worker context and the card-result buffer. `sigma` stays allocated beside `strategy_sum` for the whole train. Publish writes a separate average buffer. The rank cache is allocated for every legal runout before training, so a pass does not allocate it. `BudgetAllocator` (`app/src/budget_allocator.zig`) counts the bytes it hands out. It does not write a header in front of the user pointer. `sigma` and `strategy_sum` stay allocated together. Publish writes a separate average.
 
 Information-set indexing is compact: each public decision owns a `slot_of` map over **legal** public runouts (off-board cards / ordered pairs) times acting-player hands, not a dense `52` or `52×52` grid that includes board cards. Each stored `Slot` is 12 bytes (`node`, table `base`, packed `hand` / `turn` / `river`); action count lives on the public node. Decisions with exactly one legal action are implicit probability 1: they count toward `infoset_count` and strategy export, but allocate no `Slot`, no `slot_of` cells, and no regret / strategy-sum / sigma rows. Locks, average edits, frozen passes, and PSOL reload still apply to stored multi-action slots.
 
-`estimated_peak_bytes` is the labeled plan from `plan_memory` (`app/src/plan_preview.zig`). `allocated_bytes` and `peak_allocated_bytes` are the session's live total and high-water mark. `TrainingState` (`engine/src/solve/training_state.zig`) keeps three `f32` arrays of the same length: `regret`, `strategy_sum`, and `sigma` (12 bytes per hand-action entry while training). Publish writes a separate average buffer. The old C++ names `regret_strategy_sum_bytes`, `sigma_workspace_bytes`, `reserved_bytes`, and `kPersistentTableBytesPerEntry` are gone. The C++ sigma buffer was shared between the frozen strategy and the normalized average. Zig keeps `sigma` and `strategy_sum` at the same time.
+`estimated_peak_bytes` is the labeled plan from `plan_memory` (`app/src/plan_preview.zig`). `allocated_bytes` and `peak_allocated_bytes` are the session's live total and high-water mark. `TrainingState` (`engine/src/solve/training_state.zig`) keeps three `f32` arrays of the same length: `regret`, `strategy_sum`, and `sigma` (12 bytes per hand-action entry while training). Publish writes a separate average buffer. `sigma` and `strategy_sum` stay allocated at the same time.
 
-Study exposes the labeled plan dry-run as host IPC `plan_memory` (and nested `plan` on `tree_preview`). Historical C++ `street_solver --plan-memory` / Explorer `POST /api/plan-memory` did the same via `kPlanOnly` construction. Do not confuse the three figures: **estimated** is the labeled plan; **measured** `allocated_bytes` / `peak_allocated_bytes` come from a full build; **RSS** is whole-process working set when the OS provides it.
+Study exposes the labeled plan dry-run as host IPC `plan_memory` (and nested `plan` on `tree_preview`). **Estimated** is the labeled plan. **Measured** `allocated_bytes` and `peak_allocated_bytes` come from a full build. **RSS** is whole-process working set when the OS provides it.
 
-Process RSS and native thread stacks sit outside `memory_mib`. The removed C++ resource also left its stage table and the caller's config vectors outside the charge.
+Process RSS and native thread stacks sit outside `memory_mib`.
 
 Expanded terminals and expanded decisions are 64-bit counts of histories. The frozen walk visits the public tree with a vector of hands. A terminal value is a blocker-corrected sum over those hands. A full-range check-down on `Ah Kd 7c` has 1,271,256 deals, 2,517,086,880 expanded terminals, 5,151,129,312 expanded decision histories, and 5,197,920 stored information sets.
 
 ## Frozen pass threads
 
-Config `threads` is the frozen-pass worker count, including the caller. The default is 1. The value is clamped to 1–64, then the host caps it again with `WorkerBudget`. One thread uses the serial chance loop. The Zig Session train path is the frozen walk. The removed C++ CLI required `--frozen` before `--threads` above 1, and Explorer rejected threads above 1 when the frozen pass was off.
+Config `threads` is the frozen-pass worker count, including the caller. The default is 1. The value is clamped to 1–64, then the host caps it again with `WorkerBudget`. One thread uses the serial chance loop. The Zig Session train path is the frozen walk.
 
 The first future public card is the split. A turn splits river cards. A flop splits turn cards, and the worker that takes a turn card deals that card's rivers itself. Betting before that chance node stays on the caller. A later chance node, reached by a different line, is another batch after the previous one has joined. Workers do not start further batches.
 
@@ -93,11 +91,11 @@ Scratch, action values, and the showdown reach buffers live in a `WorkerContext`
 
 At one chance node, the next cards have disjoint descendant information sets: a slot stores the public node and the cards already dealt. A worker writes those regret and strategy-sum entries directly. The caller updates the shared ancestors only after every task has joined, and adds the card values in ascending card order with the same chance weight as the serial loop. Own reach may be zero. Chance probabilities use the full card list and stay independent of the thread count.
 
-Rank values are filled on the caller before the first pass. That cost is `cache_init_seconds`. Worker creation is `worker_setup_seconds`. Neither is folded into construction or training. On the full-range flop check-down that fill is about 12 seconds on the Windows run in [BENCHMARKS.md](auxiliary/engineering/BENCHMARKS.md). The warm training loop after the cache exists is a separate number. A worker exception is captured, the other tasks are joined, and later training or evaluation throws. The partial regrets stay in place.
+Rank values are filled on the caller before the first pass. That cost is `cache_init_seconds`. Worker creation is `worker_setup_seconds`. Neither is folded into construction or training. The warm training loop after the cache exists is a separate number. A worker exception is captured, the other tasks are joined, and later training or evaluation throws. The partial regrets stay in place.
 
 ## Checked values
 
-These figures are from the C++ `street_solver` runs recorded in [BENCHMARKS.md](auxiliary/engineering/BENCHMARKS.md).
+Checked spots:
 
 On `Ah Kd 7c 4s`, queens versus jacks, check-only, the solver's value matches an independent average over the 44 rivers. The Nash gap is 0. Two in-position hands that share the out-of-position hand share that player's turn information set and, on a river card in neither hand, the river information set as well.
 
@@ -105,26 +103,4 @@ On `Kh Kd 7c 4s`, `AhAd` versus `2c3d` wins every river. Check-down is worth +50
 
 On the flop `Ah Kd 7c`, queens versus jacks, check-only, the value matches the average over all 1,980 turn-and-river runouts: 41.6161616162. The gap is 0.
 
-## Historical command line (removed)
-
-`street_solver` is not built. The commands below are the old C++ CLI.
-
-```sh
-street_solver
-street_solver --config configs/street_default.txt
-street_solver --config configs/street_default.txt --plan-memory
-street_solver --config configs/street_default.txt --iterations 200
-street_solver --board Ah,Kd,7c --oop-range QcQd --ip-range JcJd --no-all-in --max-raises 0 --iterations 1 --algorithm vanilla
-street_solver --board Ah,Kd,7c --oop-range random --ip-range random --no-all-in --max-raises 0 --iterations 1 --frozen --memory-mib 1024 --threads 4
-street_solver --board Ah,Kd,7c,4s --pot 100 --stack 300 --oop-range QcQd --ip-range JcJd --oop-bets e --ip-bets e --oop-raises e --ip-raises e --iterations 200
-street_solver --board Ah,Kd,7c,4s,2h --oop-range AcAd,5c5d --ip-range KsKc --oop-bets 1 --no-all-in --max-raises 1 --iterations 40
-street_solver --board Ah,Kd,7c --oop-donk 40c --oop-bets 1 --ip-bets 0.5 --no-all-in --max-raises 1 --iterations 1
-street_solver --board Ah,Kd,7c,4s,2h --oop-range AcAd --ip-range KsKc --no-all-in --max-raises 0 --rake-rate 0.05 --iterations 1
-street_solver --config configs/street_default.txt --iterations 40 --report report.txt
-```
-
-The default command was the turn lock above, on the public tree. `configs/street_default.txt` is that same spot as a `street-config 1` document. `--reference` walked `StreetGame`. The printed Nash gap was NashConv.
-
-## Strategy report (removed CLI)
-
-`street_solver --report FILE` wrote a `strategy-report 1` document after the solve (`-` for stdout). Fields were board, pot, stack, algorithm, iterations, nash_gap, weighting, root-player, and one `root-action LABEL P` line per legal root action. On the public tree, root probabilities were the CFR average mixed with reach weights across the acting player's hands at the root. The reference enumerator wrote the same summary fields and omitted root-action lines. `solver-engine` has no `--report` flag. Current saves are PSOL v4. There is no batch queue.
+`configs/street_default.txt` is the turn lock above as a `street-config 1` document. The printed Nash gap is NashConv. Current saves are PSOL v4.

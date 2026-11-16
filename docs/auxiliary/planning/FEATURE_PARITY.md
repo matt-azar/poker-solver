@@ -4,11 +4,11 @@ Comparison target: documented PioSolver 3.11. A hands-on menu audit of a pinned 
 
 States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 
-**Shipping surface on `main`:** Zig `solver-engine` typed IPC + React Study (`desktop/`). Evidence below is Zig / desktop unless marked **historical (C++)**. Do not treat retired explorer HTTP / CMake CI as living ship proof.
+**Shipping surface on `main`:** Zig `solver-engine` typed IPC and React Study (`desktop/`). Evidence below is Zig and desktop.
 
 | Family | Status | Milestone | Evidence in this repository | Limitation |
 | --- | --- | --- | --- | --- |
-| Heads-up postflop CFR, chance, blocker handling, best responses | partial | M0, M6 | Zig frozen CFR+ Session + public-tree walk in `engine/`; `zig build test` rematch/pins; Study contract smoke (`scripts/zig/study-contract-smoke.py`) | No Pio solution-quality comparison. Historical C++ `StreetBatchSolver` / `RiverGame` oracle vocabulary remains in math docs only. |
+| Heads-up postflop CFR, chance, blocker handling, best responses | partial | M0, M6 | Zig frozen CFR+ Session and public-tree walk in `engine/`. `zig build test` rematch and pins. Study contract smoke (`scripts/zig/study-contract-smoke.py`). | No Pio solution-quality comparison. |
 | Conditional combo and action EV | partial | M1 | Host `values` IPC; Study inspector/Analysis; desktop vitest + Zig action-EV rematch tests | Generic export stays strategy-only. Chance nodes reject action EV. |
 | Equity, action ranges, distributions, hand categories | partial | M2 | Host `equity` / `categories` IPC; Study Equity tab + Categories; Calculator via `start_equity_job` / `get_equity_job` / `cancel_equity_job`; desktop equity/analysis tests | Check-down equity is not chip EV. Draw tags are multi-label. Calculator per-combo/next-card analysis is not shipped yet. Categories soft-gate was lifted for made-hand on 5-card boards (ZR-103); compare remains gated. |
 | Weighted range editing and range libraries | partial | M2–M3 | 13×13 paint, weights, text ranges, nested `configs/ranges`, Library via Tauri FS (`library_*`) without requiring a healthy engine session | No bundled production strategic pack (synthetic fixtures are demos only) |
@@ -17,11 +17,11 @@ States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 | Full saves, checkpoints, compact saves, lazy load | partial | M5, M10 | Host `save` / `open` PSOL; Study File menu + toolbar open in-app solutions catalogue with user folders (OS picker secondary Browse disk); browse-only checkpoints disable Continue (ZR-115) | No compact Pio multi-file library. Catalogue indexes managed `.psol` paths |
 | Broad betting-tree scale and competitive convergence | partial | M6 | Zig benches / store digs; study corpus fixtures under `benchmarks/study/` | No matched Pio timing or quality run. Acc scoreboard campaigns are skipped for cutover per owner preference. |
 | Node locking and constrained re-solving | partial | M7 | Host lock CRUD + `resolve_locked`; Study Node Locking workspace; strategy-edit CRUD over IPC (ZR-100/ZR-101); desktop vitest | Compare dual-session baseline still soft-gated over IPC (`compare: false` in `ipcCapabilities`). Strategy edits are session-scoped. |
-| Rake, ICM, opponent incentives | partial | M8 | Pot rake, ICM, and path incentives on Zig terminals (`engine/src/kernel/terminal.zig`, `docs/auxiliary/payoffs/ICM.md`). Settings writes `icm-stacks` / `icm-payouts` when ICM is on. | NashConv with rake, ICM, or incentives on is modeled utility. Historical explorer Job JSON keys are not a Zig shipping surface. |
+| Rake, ICM, opponent incentives | partial | M8 | Pot rake, ICM, and path incentives on Zig terminals (`engine/src/kernel/terminal.zig`, `docs/auxiliary/payoffs/ICM.md`). Settings writes `icm-stacks` / `icm-payouts` when ICM is on. | NashConv with rake, ICM, or incentives on is modeled utility. |
 | Reports, scripting, batch queue | partial | M9 | Study Compare runouts (client orchestration); Create Build spot from street-start decisions; Zig CLI tools under `cli/` | No durable batch queue; midstreet Build extraction still needs initial betting state; host `runouts` op still soft-gated |
 | Trainer, packs, session statistics | missing | M11 | Versioned `hand-history 1` export schema only | No packs, drills, or self-play sampler yet |
 | Preflop solver and chart editor | missing | M12 | — | Deferred |
-| Layouts, shortcuts, themes, localization | partial | M13 | React Study light/dark themes + shortcuts in `desktop/` | No saved layouts; localization absent. Historical `legacy/ui/` shortcuts are retired with the C++ explorer. |
+| Layouts, shortcuts, themes, localization | partial | M13 | React Study light/dark themes + shortcuts in `desktop/` | No saved layouts. Localization is absent. |
 | Delivery, install, upgrade, recovery | partial | M13 | `zig build` + `zig.yml`; desktop `ci.yml`; unsigned Windows NSIS via `windows-installer.yml` shipping Zig `solver-engine` only; current published cut is [v0.1.6-windows](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.6-windows) ([DESKTOP_UI.md](../../DESKTOP_UI.md)) | Not code-signed; no upgrade/migration package story yet. Tech-preview / dual-sidecar installer channel removed (#287). |
 
 Update a row only with the commit that demonstrates it. Historical phase 1–10 notes stay in [ROADMAP.md](ROADMAP.md).

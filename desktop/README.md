@@ -13,7 +13,7 @@ npm ci
 npm run tauri dev
 ```
 
-Browser-only `npm run dev` does not start an engine (HTTP `holdem-explorer` was removed).
+`npm run dev` starts Vite. `npm run tauri dev` starts the shell and `solver-engine`.
 
 ## Test / build
 

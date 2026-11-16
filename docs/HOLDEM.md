@@ -1,6 +1,6 @@
 # Hold'em cards, hands, and ranges
 
-52-card deck, seven-card showdown evaluator, and 1,326-hand ranges in `engine/src/poker/`. This layer does not build a betting tree or run CFR. The card id formula is the same encoding the old `poker::holdem` types used.
+52-card deck, seven-card showdown evaluator, and 1,326-hand ranges in `engine/src/poker/`. This layer does not build a betting tree or run CFR. A card id is `rank * 4 + suit` in `engine/src/poker/card.zig`.
 
 ## Cards
 

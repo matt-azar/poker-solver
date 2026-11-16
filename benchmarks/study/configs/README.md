@@ -2,7 +2,7 @@
 
 Versioned `street-config 1` trees for the street study cases. Each reference or
 diagnostic street case points at one of these files through
-`street_solver --config`. Solve controls stay on the case `argv`.
+the case file. Solve controls for a live run go through host `solve` or `gate-bench`.
 
 | File | Cases |
 | --- | --- |

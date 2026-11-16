@@ -1,12 +1,10 @@
 # Architecture
 
-**Shipping on `main`:** the production Study engine is Zig (`engine/`, `app/`, `host/`, `cli/` → `solver-engine` typed IPC). The C++ `holdem-explorer` / CMake library tree described in older revisions of this doc is **removed**. Algorithmic concepts below (one postflop tree, NashConv, CFR+ schedules) still apply; treat C++ path / `include/` / `src/` names as historical vocabulary unless a Zig module is named explicitly.
+The Study engine is Zig. `zig build` installs `solver-engine`, `street-config-check`, and `gate-bench`. Study talks to `solver-engine` over protocol 2 on inherited pipes. The trainer is CFR+. PSOL files are version 4 and store that algorithm byte (`formats/src/psol_v4.zig`).
 
-Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [DESKTOP_UI.md](DESKTOP_UI.md), [HOLDEM.md](HOLDEM.md). Retired HTTP explorer notes: [EXPLORER.md](EXPLORER.md).
+Index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [DESKTOP_UI.md](DESKTOP_UI.md), [HOLDEM.md](HOLDEM.md), [EXPLORER.md](EXPLORER.md).
 
-## Current layout
-
-`zig build` installs `solver-engine` (Study IPC), `street-config-check` (parse a `street-config 1` file), and `gate-bench` (optional measurement harness). The shipped trainer is CFR+. PSOL files are version 4 and store that algorithm byte (`formats/src/psol_v4.zig`).
+## Layout
 
 | Path | Role |
 | --- | --- |
@@ -14,114 +12,46 @@ Primary docs index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER
 | `engine/src/game/` | `street-config 1`, betting rules, compile |
 | `engine/src/solve/` | CFR+ train, frozen walk, locks, strategy edits |
 | `engine/src/analysis/` | Action values, equity, categories, best response |
-| `engine/src/kernel/terminal.zig` | Chip + rake, then ICM, then path incentives |
+| `engine/src/kernel/terminal.zig` | Chip payoff, then rake, then ICM, then path incentives |
 | `app/src/session.zig` | Session train, pause, save, open |
 | `host/` | `solver-engine` typed IPC |
+| `cli/` | `street-config-check` and `gate-bench` |
 | `desktop/` | React Study UI and Tauri shell |
 
-Study Settings lists CFR+, Vanilla CFR, and DCFR. The host trains with `trainFrozenCfrPlus` either way.
+Study Settings lists CFR+, Vanilla CFR, and DCFR. The host trains with `trainFrozenCfrPlus` for each label.
 
 ## One postflop tree
 
-| Board | Production idea | Reference / oracle idea |
-| --- | --- | --- |
-| 3, 4, or 5 cards | Shared public betting tree (Zig port of StreetBatch) | Exact enumerator / five-card oracle pins |
+Flop, turn, and river share one public betting tree. Board length is 3, 4, or 5. Range catalogues live under `configs/range-profiles/`. The Study client imports those files.
 
-Canonical range catalogue assets live under `configs/range-profiles/`; the Study client imports them directly (no `desktop/` copies).
+## Players and chance
 
-## Modules (historical C++ map)
+Player 0 is out of position. Player 1 is in position. Utilities are net chips. With zero rake they sum to zero. Chance deals ordered hand pairs from the joint range, then later board cards when any remain.
 
-The following CMake targets and `include/` / `src/` layout are **gone** from the tree. Kept here so older rematch notes and store digs remain readable:
+## Storage
 
-### Build libraries (retired)
+Training tables are `engine/src/solve/training_state.zig`. The session keeps `regret`, `strategy_sum`, and `sigma`. Publish writes a separate average. Slot lookup is by public node, legal runout, and supported hand. One-action decisions omit stored rows. The action-count limit is 8. Details: [STREETS.md](STREETS.md).
 
-| Target | Role | Depends on |
-| --- | --- | --- |
-| `poker_primitives` | Cards, hand eval, categories, ranges | — |
-| `poker_solver` | Production postflop engine (`StreetBatchSolver`) + regret matching | primitives |
-| `poker_solver_legacy_river` | `RiverBatchSolver` for PSOL kind=2 / oracle fixtures | solver |
-| `poker_study` | Checkpoint + value worker session services | solver + legacy river |
-| `poker_equity` | Check-down equity | primitives only |
-| `poker_solver_core` | INTERFACE alias → `poker_study` (legacy name) | study |
+Locks are `engine/src/solve/node_lock.zig`. A line lock uses turn and river `-1` and applies on every runout of that line. A node lock keeps the selected cards. Lookup tries the exact runout, then the line lock. A full lock stores one action row. A selected lock stores per-combo rows. An empty probability row is unlocked. A stored 0 is a locked frequency of 0. Publish and best response apply the effective lock after regret matching.
 
-### Production postflop layout (retired C++ sources)
-
-`StreetBatchSolver` was a public facade (`include/solver/street_batch.hpp`, `src/solver/street_batch.cpp`). The private engine was split under `src/solver/postflop/`:
-
-| Path | Responsibility |
-| --- | --- |
-| `engine.hpp` | Private `Engine` declaration (nested types, members, method decls) |
-| `tree.cpp` | Public betting tree, deals, slot planning |
-| `tables.cpp` | Compact indexing, table allocation, training-state I/O |
-| `showdown.cpp` | Rank caches, blockers, terminal values |
-| `traversal.cpp` | Shared fixed-strategy walk (`frozen_walk`, sequential deal CFR) |
-| `algorithms/*.hpp` | Per-algorithm schedules (CFR+, vanilla, DCFR, PCFR+) |
-| `schedules.cpp` | Dispatch into those schedules |
-| `evaluation.cpp` | Profile utility, best response, NashConv helpers |
-| `inspection.cpp` | Node inspect, action values, reaches, runouts |
-| `execution.cpp` | Workers, slot passes (freeze / floor / discount), synchronization |
-
-Read `src/solver/postflop/algorithms/cfr_plus.hpp` for one complete CFR+ iteration without opening DCFR or PCFR+. DCFR math stays in `include/solver/dcfr.hpp`. Predictive notes: `include/solver/pcfr.hpp`.
-
-### Historical runtime modules (removed)
-
-These C++ names are gone. The Zig map is the table under [Current layout](#current-layout).
-
-| Module | Role |
-| --- | --- |
-| `poker::holdem` | Card ids, seven-card hand values, range weights, joint hand distribution |
-| `poker::streets::StreetConfig` | Shared postflop config + sizing/legality rules |
-| `poker::streets::StreetGame` | Reference flop/turn/river enumerator |
-| `poker::solver::StreetBatchSolver` | Same streets on one public betting tree; was the C++ production default |
-| `street_solver` | CLI over `StreetBatchSolver`; `--reference` for `StreetGame`; `--config` for `street-config 1` |
-| `poker::river::RiverConfig` | Shared river config (legacy batch + conversion) |
-| `poker::river::RiverGame` | Five-card oracle enumerator |
-| `poker::solver::RiverBatchSolver` | Legacy/oracle river engine (`poker_solver_legacy_river`) |
-| `river_solver` | Thin five-card CLI: maps river config to `StreetConfig`, solves on the street path |
-| `poker::solver::TreeEditSet` | Force/remove/add-size intents on matching public paths |
-| `poker::solver::CfrTrainer<Game>` | Vanilla CFR, CFR+, linear CFR, DCFR, PCFR+ for any extensive-game type |
-| `regret_matching` | Current strategy from cumulative regret; reach-weighted accumulation |
-| `compute_best_response` | Exact best response, deepest information set first |
-| `explorer` | *(retired)* Local Study HTTP server; Zig Study uses `solver-engine` IPC instead |
-
-## Extensive-game interface (removed C++ trainer)
-
-The C++ `CfrTrainer` required a game type with a small `State` and:
-
-- `root`, `is_chance`, `is_terminal`, `p1_utility`
-- `chance_count`, `chance_probability`, `child_chance`
-- `infoset`, `acting_player`, `action_count`, `child_action`
-
-Player 0/1 utilities are net chips (zero-sum when rake is zero). `acting_player` is 0 or 1. Actions are local indexes. The concept `ExtensiveGame` checks this at compile time.
-
-On the street/river path, player 0 is out of position. Chance deals ordered hand pairs from the joint range distribution, then later board cards when any remain.
-
-## Solver storage
-
-Zig training tables are in `engine/src/solve/training_state.zig`. The next paragraph records the removed C++ `StreetBatchSolver` layout and the Zig tables. The CFR+ floor and the NashConv definition still match the Zig trainer.
-
-`StreetBatchSolver` stored regret, strategy-sum, and one shared sigma workspace as `TableScalar` (`float`) tables. That sigma buffer held the frozen strategy during a pass and the normalized average during evaluation. Zig keeps `regret`, `strategy_sum`, and `sigma` allocated together, and publish writes a separate average (`engine/src/solve/training_state.zig`). Slot lookup is by public node, legal runout, and supported hand. One-action decisions omit stored rows. The action-count limit is 8. Details: [STREETS.md](STREETS.md).
-
-Current locks live in `engine/src/solve/node_lock.zig`. The removed C++ types were `poker::solver::NodeLock` / `LockSet` in `node_lock.hpp`, keyed by public node, turn, and river. A line lock used `turn=river=-1`. A node lock kept the selected cards. Lookup preferred the exact runout, then the line lock. Locks stored a shared action row or per-combo rows. An empty probability row meant unlocked. Publish and best response applied the effective lock. `CfrTrainer`, `StreetBatchSolver`, and `RiverBatchSolver` called `apply_lock_to_strategy` after regret matching when locks were set.
-
-CFR+ floors the updating player's cumulative regrets once after that player's pass. The opponent's table is unchanged. The average strategy is weighted by the iteration index. The removed C++ tree also had Linear CFR (iteration weight on regret and average, regrets left signed) and fixed DCFR(1.5, 0, 2). See [MATHEMATICS.md](MATHEMATICS.md).
+CFR+ floors the updating player's cumulative regrets once after that player's pass. The opponent's table stays unchanged. The average strategy is weighted by the iteration index. See [MATHEMATICS.md](MATHEMATICS.md).
 
 ## Best response and Nash gap
 
-`compute_best_response` walks every information set of the responding player from the deepest public decision back to the root. At each set it keeps the action with the larger opponent-and-chance-weighted continuation. Ties keep the lower action index.
+Best response walks every information set of the responding player from the deepest public decision back to the root. At each set it keeps the action with the larger opponent-and-chance-weighted continuation. Ties keep the lower action index.
 
 The Nash gap is NashConv, the sum of unilateral BR gains
 \((u_0(\mathrm{BR}_0)-u_0(\bar\sigma))+(u_1(\mathrm{BR}_1)-u_1(\bar\sigma))\).
 Under zero-sum chips this equals \(u_0(\mathrm{BR}_0)+u_1(\mathrm{BR}_1)\).
-Zig `FrozenEval` (`engine/src/solve/frozen_walk.zig`) stores `nash_gap` and `accuracy` (`NashConv/2`). Pio **Accuracy** is that average. The stop unit on host `solve` is a pot fraction. The C++ names `StreetBatchSolver::evaluate`, `RiverBatchSolver::evaluate`, and `EvaluationResult` are gone.
+`FrozenEval` in `engine/src/solve/frozen_walk.zig` stores `nash_gap` and `accuracy` (`NashConv/2`). Pio Accuracy is that average. The stop unit on host `solve` is a pot fraction.
 
 ## Stopping
 
-Host `solve` passes `iterations`, `accuracy` (pot fraction of Pio Accuracy), optional `eval_every`, and `time_limit` into `Session.trainGated` (`app/src/session.zig`). `accuracy` ≤ 0 means iteration or time only. A positive `accuracy` stops when Accuracy chips are at or below `accuracy * pot`. Pot is stored in tenths. The fraction is multiplied by chip pot, then compared with Accuracy chips. `eval_every` is the EV/gap sample period. When the field is omitted, the host derives it from `samples` and caps the period at 10 iterations. `time_limit` stops at the next iteration boundary. The `solve` runtime is the regret-update loop, including Accuracy checks that end the run.
+Host `solve` passes `iterations`, `accuracy` (pot fraction of Pio Accuracy), optional `eval_every`, and `time_limit` into `Session.trainGated` (`app/src/session.zig`). `accuracy` at or below 0 leaves the stop on the iteration cap and the time limit. A positive `accuracy` stops when Accuracy chips are at or below `accuracy * pot`. Pot is stored in tenths. The fraction is multiplied by chip pot, then compared with Accuracy chips. `eval_every` is the EV/gap sample period. When the field is omitted, the host derives it from `samples` and caps the period at 10 iterations. `time_limit` stops at the next iteration boundary. The `solve` runtime is the regret-update loop, including Accuracy checks that end the run.
 
 ## Design limits
 
-- Production trees use a fixed list of bet sizes (plus geometric / all-in / pot-cap rules on the street path).
+- Production trees use a fixed list of bet sizes, plus geometric, all-in, and pot-cap rules.
 - Best response is exact on the game that was solved.
-- At most 8 actions per information set until the scratch arrays are widened.
-- Zig tests under `engine/` pin the trainer. There is no `StreetGame` product binary.
+- At most 8 actions per information set.
+- Zig tests under `engine/` pin the trainer.

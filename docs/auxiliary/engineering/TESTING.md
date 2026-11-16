@@ -1,6 +1,6 @@
 # Testing
 
-Product validation on `main` is **Zig engine tests**, **desktop Vitest**, and **real-sidecar IPC contract smokes**. The C++ `ctest` / `poker_http_tests` / spawned-`explorer` matrix is removed (#286–#287).
+Product validation on `main` is Zig engine tests, desktop Vitest, and real-sidecar IPC contract smokes.
 
 ## Quick commands
 
@@ -45,17 +45,17 @@ Windows: use `python` and `zig-out/bin/solver-engine.exe` the same way. Prefer `
 | Desktop typecheck | `cd desktop && npx tsc -b` | Store/client nullability that vitest can miss |
 | AI context packs | `cd desktop && npm run check:ai-context` | Generated packs match `docs/ai-context/source/` |
 
-Do **not** claim coverage from deleted C++ HTTP suites (`test_explorer_http.cpp`, `poker_http_tests`, HTTP 400/404/409 explorer replies). Those strings and binaries are not a shipping surface on this branch. Prefer IPC envelope errors / host `error` replies and the contract smoke above.
+Coverage claims use IPC envelope errors, host `error` replies, and the contract smoke above.
 
 ## CI
 
 | Workflow | Role |
 | --- | --- |
 | `.github/workflows/zig.yml` | `zig build` / `zig build test` + ready smoke + Study contract smoke (Linux + Windows; Windows pins `-Dcpu=x86_64_v2`) |
-| `.github/workflows/ci.yml` | Desktop Vitest / `tsc` / build (C++ explorer matrices removed) |
+| `.github/workflows/ci.yml` | Desktop Vitest, `tsc`, and build |
 | `.github/workflows/public-demo-pages.yml` | Precomputed public Study demo: `npm run build:public-demo` + Playwright (desktop Chromium + touch Chromium/WebKit @ 360/390), then deploy `desktop/dist-public-demo` to GitHub Pages (`PUBLIC_DEMO_BASE=/poker-solver/`). One-time: repo Pages source = GitHub Actions. Not live solving; Windows download stays on GitHub Releases. |
 | `.github/workflows/ipc-race-probes.yml` | Windows (+ Linux) hold-EV probe: Status + Cancel while values withheld. Separate from flop/memory benches, installer E2E, and UI stale-EV. |
-| `.github/workflows/windows-installer.yml` | NSIS packs Zig `solver-engine` only; rejects leftover `holdem-explorer*.exe`. Frontend Vite build is owned solely by Tauri `beforeBuildCommand` (no duplicate `npm run build` step). Follow-on `windows-installer-e2e` runs **Stage A then Stage B** against that artifact. |
+| `.github/workflows/windows-installer.yml` | NSIS packs Zig `solver-engine`. The frontend Vite build is Tauri `beforeBuildCommand`. Follow-on `windows-installer-e2e` runs Stage A then Stage B against that artifact. |
 
 Packaged Tauri webview lifecycle and the Windows installer remain a release gate (Actions → **Windows Installer**). See [DESKTOP_UI.md](../../DESKTOP_UI.md).
 
@@ -63,6 +63,3 @@ Packaged Tauri webview lifecycle and the Windows installer remain a release gate
 
 Bounded flop microbenches / node-EV latency scripts under `scripts/zig/` are agent dig tools. Owner preference: Accuracy / time-to-Accuracy / NashConv walls are **not** cutover blockers and are not required for merge. See [ZIG_RELEASE_GATES.md](ZIG_RELEASE_GATES.md).
 
-## Historical (pre-#287 C++ tree)
-
-Older revisions of this file described CMake/`ctest` targets (`poker_engine_tests`, `poker_study_tests`, `poker_http_tests`, `equity_tests`) and assertion archaeology against `include/` / `src/` / `explorer --port`. That tree is gone. Do not restore cmake how-tos as present-tense product testing. Archaeology: [PROJECT_HISTORY.md](../notes/PROJECT_HISTORY.md), git history before the C++ strip.

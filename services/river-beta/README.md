@@ -133,7 +133,7 @@ sidecar + optional auto-solve). Turn/flop remain out of scope.
 - Precomputed public demo packs / deploy
 - Private QA fixture failure simulation
 - Windows Tauri product path changes
-- HTTP `:8765` / `holdem-explorer` restoration
+- A second engine process beside `solver-engine`
 
 ## Tests
 

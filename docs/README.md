@@ -6,11 +6,11 @@ Primary docs cover the **CFR+ postflop workflow** and the **Study UI**. Everythi
 
 | Doc | Contents |
 | --- | --- |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Zig ship banner + historical public-tree / CFR+ map |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Zig modules, storage, Nash gap, stop rule |
 | [STREETS.md](STREETS.md) | Flop / turn / river public tree, config, frozen passes |
 | [MATHEMATICS.md](MATHEMATICS.md) | Regret matching, NashConv, EV definitions |
 | [HOLDEM.md](HOLDEM.md) | Cards, hand evaluator, ranges |
-| [RIVER.md](RIVER.md) | Five-card river semantics (Zig Session; C++ names historical) |
+| [RIVER.md](RIVER.md) | Five-card river semantics on the Zig Session |
 | [EQUITY.md](EQUITY.md) | Check-down showdown equity (not chip EV) |
 
 Start with architecture, then streets + mathematics for how a solve runs.
@@ -20,13 +20,13 @@ Start with architecture, then streets + mathematics for how a solve runs.
 | Doc | Contents |
 | --- | --- |
 | [DESKTOP_UI.md](DESKTOP_UI.md) | React Study workstation + Windows packaging |
-| [EXPLORER.md](EXPLORER.md) | Retired C++ HTTP explorer (historical) |
+| [EXPLORER.md](EXPLORER.md) | `solver-engine` protocol 2 frames |
 | [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md) | Floating Study assistant |
 | [ai-context/](ai-context/README.md) | Model-facing context packs (imported by the desktop app) |
 | [../desktop/src/demo/README.md](../desktop/src/demo/README.md) | Precomputed public Study demo |
 | [../services/river-beta/README.md](../services/river-beta/README.md) | Limited live river browser beta |
 
-Product entry: Zig `solver-engine` + `desktop/`. Installer and packaging notes are in DESKTOP_UI. The C++ HTTP explorer doc is historical only.
+Product entry: Zig `solver-engine` and `desktop/`. Installer and packaging notes are in DESKTOP_UI.
 
 ## Auxiliary
 

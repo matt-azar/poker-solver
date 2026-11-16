@@ -1,7 +1,9 @@
-# Explorer HTTP API (retired)
+# Engine IPC
 
-**Status on `main`:** the C++ `holdem-explorer` HTTP server (`:8765`) is **removed**. Packaged and Tauri Study use the Zig `solver-engine` sidecar over typed IPC (protocol 2, inherited pipes). There is no dual-sidecar / HTTP fallback shipping path.
+Study calls `solver-engine` over protocol 2. A frame is a little-endian `u32` length plus a UTF-8 JSON object. The process reads stdin and writes stdout. Logs go to stderr. The argument is `--launch-id`.
 
-For the live Study workstation and Windows packaging, see [DESKTOP_UI.md](DESKTOP_UI.md).
+Host code: `host/src/ipc.zig`, `host/src/dispatch.zig`, `host/src/main.zig`.
 
-Historical API detail that lived in this file described the deleted C++ explorer process (`GET /api/ready` protocol 1, `/api/solve`, `/api/values`, static `desktop/dist` / `legacy/ui` serving, etc.). That surface is not a product path on this branch. Archaeology: [auxiliary/notes/PROJECT_HISTORY.md](auxiliary/notes/PROJECT_HISTORY.md).
+The Tauri shell encodes the same frames in `desktop/src-tauri/src/solver_engine.rs`. The web client calls `solver_engine_request` from `desktop/src/engine/client.ts`.
+
+Operations, the desktop map, and Windows packaging are in [DESKTOP_UI.md](DESKTOP_UI.md).

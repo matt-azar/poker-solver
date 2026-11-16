@@ -15,9 +15,8 @@ repository:
 | Phase exit gates | `zig-phase-checklist.md` |
 | Parity / oracle log | `zig-parity-oracle-log.md` |
 
-Owner GO 2026-11-12: stable Windows NSIS ships Zig `solver-engine` only
-(typed IPC). HTTP `holdem-explorer` is not a packaged Study path on
-`main`. Scoreboard/evidence remain in the store docs above.
+Owner GO 2026-11-12: stable Windows NSIS ships Zig `solver-engine`
+typed IPC. Scoreboard notes remain in the store docs above.
 
 **Acc / perf are not cutover blockers** (owner preference 2026-11-12): do not
 block merge or ship on Accuracy/NashConv / time-to-Accuracy walls. Keep real
@@ -30,9 +29,7 @@ stay bounded and store-recorded — they are not a green-check gate in this file
 - `flop_srp_two_sizes` — same tree with both players’ flop opening bets set to
   **⅓ pot** and **¾ pot** only
 
-Fixture assets live under `benchmarks/study/` (and parity harnesses that
-consume them). The in-repo C++ tree is removed on `main`; historical
-C++ `--plan-memory` / tip-C++ rematch notes live in store digs only.
+Fixture assets live under `benchmarks/study/`. Memory plans use host `plan_memory`.
 
 ## Optional measurement procedure (digs only — not a cutover gate)
 
@@ -51,15 +48,14 @@ When recording store scoreboard rows (optional; not required for cutover):
 | Workflow | Role |
 | --- | --- |
 | `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke + Study contract smoke (`scripts/zig/study-contract-smoke.py`, river fixture, ≤60s) + Linux overlap-actions smoke (`scripts/zig/study-overlap-actions-smoke.py`, ZR-152); Windows pins `-Dcpu=x86_64_v2`. Windows packaged Study overlap waits for ma1pc (ZR-147). |
-| `.github/workflows/windows-installer.yml` | Shipping NSIS; `externalBin` is Zig `solver-engine` only (no `holdem-explorer`). `windows-installer-e2e` Stage A (install + WebView drive) then Stage B (river clear-then-reopen PSOL). |
+| `.github/workflows/windows-installer.yml` | Shipping NSIS. `externalBin` is Zig `solver-engine`. `windows-installer-e2e` Stage A (install + WebView drive) then Stage B (river clear-then-reopen PSOL). |
 | `.github/workflows/windows-installer-release.yml` | Tag-triggered release wrapper that reuses `windows-installer.yml` |
-| `.github/workflows/ci.yml` | Desktop Vitest / `tsc` / build (no C++ explorer matrix) |
+| `.github/workflows/ci.yml` | Desktop Vitest, `tsc`, and build |
 | `.github/workflows/public-demo-pages.yml` | Precomputed public Study demo build, Playwright (desktop + phone), deploy `desktop/dist-public-demo` |
 | `.github/workflows/ipc-race-probes.yml` | Hold-EV probe: Status + Cancel while values are withheld |
 
-The labeled Zig tech-preview installer workflow was removed with the C++ strip
-(#287). Stable Study ships Zig typed IPC only after owner GO (2026-11-12).
-There is no dual-sidecar / dormant `holdem-explorer` packaging path.
+Stable Study ships Zig typed IPC after owner GO (2026-11-12).
+The installer packages `solver-engine`.
 
 ## Local toolchain
 

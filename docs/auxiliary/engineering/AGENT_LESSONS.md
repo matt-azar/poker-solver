@@ -4,7 +4,7 @@ Mistakes, friction, and correctness traps observed in this repository’s histor
 
 Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor/rules/licensing.mdc`. Refresh playbook: [`AGENT_LESSONS_REFRESH.md`](AGENT_LESSONS_REFRESH.md).
 
-**`main` product path (owner GO 2026-11-12; Zig cutover):** Study ships Zig `solver-engine` typed IPC only. The C++ `holdem-explorer` / CMake tree, HTTP `:8765` fallbacks, and dual-sidecar packaging are removed. Sections below that mention CMake / `explorer` / `poker_http_tests` are **historical traps** from the C++ era — do not treat them as a mandate to restore those paths.
+**`main` product path:** Study ships Zig `solver-engine` typed IPC. Do not add an HTTP solve server or a second engine binary.
 
 ---
 
@@ -13,7 +13,7 @@ Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor
 ### Hard rules
 
 1. **One writer per tree.** Delegated Task / best-of-n runners may still write into shared `/workspace` even when told to use an isolated worktree. Do not `git checkout`, reset, or commit on `/workspace` while siblings run unless you have confirmed they never touch that path.
-2. **Disjoint file ownership.** Assign path prefixes per agent. Serialize shared manifests (`build.zig`, `desktop/src-tauri/tauri.conf.json`, Tauri `solver_engine.rs` spawn/IPC, `host/src/dispatch.zig`, `desktop/src/engine/client.ts` / `transport.ts`) or let only the parent edit them. Historical CMake / `explorer_main.cpp` ownership rules apply only on pre-cutover trees.
+2. **Disjoint file ownership.** Assign path prefixes per agent. Serialize shared manifests (`build.zig`, `desktop/src-tauri/tauri.conf.json`, Tauri `solver_engine.rs` spawn/IPC, `host/src/dispatch.zig`, `desktop/src/engine/client.ts` / `transport.ts`) or let only the parent edit them.
 3. **Parent owns forge writes.** Subagents often lack `ManagePullRequest` and must not use `gh` to create/update PRs. After a sibling pushes, the parent opens/updates the PR and subscribes CI.
 4. **Snapshot before splitting.** If the tree is interleaved, commit everything onto `cursor/wip-…-<run-suffix>`, then path-checkout onto clean feature branches from the correct base (`main`).
 5. **Re-check `git status` before every commit.** Restore unexpected paths with `git checkout HEAD -- <path>`.
@@ -24,11 +24,11 @@ Related always-on rule: `.cursor/rules/parallel-agents.mdc`. Licensing: `.cursor
 | Failure | Symptom | Fix |
 | --- | --- | --- |
 | Shared-workspace pollution | Files appear mid-turn; missing headers; SKIP/assertion counts flip | Treat `/workspace` as contended; verify worktree paths |
-| Interleaved milestones | One dirty tree mixes M2/M6/M8; CMake lists both `hand_categories.cpp` and `test_payoff.cpp` | WIP snapshot → path-limited feature branches |
+| Interleaved milestones | One dirty tree mixes M2/M6/M8 | WIP snapshot → path-limited feature branches |
 | Parent + agent same branch | Confusing “ahead by 1”, double commits | One owner per branch name |
 | Subagent no PR | Branch on origin, no GitHub PR | Parent `ManagePullRequest` immediately |
 | Wrong docs from WIP | M8 wording on an M2 PR | Edit docs from `origin/main`, apply only this milestone’s rows |
-| Bad stack base | Explorer five-card on plain `main` without StreetBatch five-card | Base on dependency branch or include its commits |
+| Bad stack base | Five-card work based on a tip that lacks the shared public tree | Base on the dependency branch or include its commits |
 
 ### Suggested sibling prompt clauses
 
@@ -69,13 +69,13 @@ Report: tip SHA, files touched, test command + counts, compare URL.
 
 ### Zig `solver-engine` IPC (current product)
 
-Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdout pipes via Tauri). There is no shipping HTTP `:8765` / `holdem-explorer` path on `main` (#286–#287).
+Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdout pipes via Tauri).
 
 | Trap | Symptom | Do / Don't |
 | --- | --- | --- |
-| HTTP fallthrough while IPC is active | `Engine unreachable: Failed to fetch` after a healthy sidecar spawn (#288) | **Don't** `fetch("")` or hit `:8765` from Library/Study when IPC transport is selected. Block HTTP fallthrough. |
+| HTTP fallthrough while IPC is active | `Engine unreachable: Failed to fetch` after a healthy sidecar spawn (#288) | **Don't** `fetch("")` from Library/Study when IPC transport is selected. |
 | Public demo on GitHub Pages | Blank shell or `/demo/…` 404 under `matt-azar.github.io/poker-solver/` | Deploy `dist-public-demo` with `PUBLIC_DEMO_BASE=/poker-solver/`; pack fetches must honor Vite `BASE_URL` (`withBase`). Private `?preview=` QA stays a separate entry. One-time: Pages source = GitHub Actions. |
-| River-beta live browser vs demo/Tauri | Agents wire `?river-beta=1` into public-demo builds or assume Tauri pipes | Keep three entries **separate**: precomputed `?demo=` / Pages, private `?preview=`, and live river-beta (`services/river-beta/` + `?river-beta=1`). Public demo builds must never arm river-beta. Each visitor gets an **isolated** Zig sidecar via the Python service — still typed IPC, not `:8765`. Turn/flop live solving is out of scope (#415/#416/#422). |
+| River-beta live browser vs demo/Tauri | Agents wire `?river-beta=1` into public-demo builds or assume Tauri pipes | Keep three entries **separate**: precomputed `?demo=` / Pages, private `?preview=`, and live river-beta (`services/river-beta/` + `?river-beta=1`). Public demo builds must never arm river-beta. Each visitor gets an **isolated** Zig sidecar via the Python service. The frames are typed IPC. Turn and flop live solving stay out of that service (#415/#416/#422). |
 | River-beta session reaped / degraded | Banner stuck; Solve after idle; `ensureEngine` “succeeds” while disconnected | Treat only `connected` as success; reconnect when degraded. On `no_session`, show Session lost + **Reconnect** (fresh isolated sidecar + auto-solve). Service-down boots still mount the banner for Retry. Surface idle remaining / bounds summary from the service (#422). |
 | Library needs live pipes | Templates/ranges fail until solve works | Serve templates/ranges via **Tauri FS** (`library_*`) without requiring a healthy engine session (#288, #289) |
 | Console PE under GUI shell | Blank console; closing it kills the sidecar and bricks Study (#290) | Link `solver-engine` with Windows **GUI subsystem**; pass `CREATE_NO_WINDOW` on spawn as defense in depth. Keep CLI tools Console. |
@@ -100,7 +100,7 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 | Analysis supersession detaches | Orphan workers UAF HostState on teardown; clear shared `analysis_running` / WorkerBudget while newer work is live | Park prior analysis threads on a bounded orphan list and **join all** on teardown (never `detach`) (#375/#378). Gen-scope `finishAnalysisSlot` / budget return. Release publish lease before the blocking stdout write once the reply body is owned. |
 | Fake node equity | Equity looks like root on every node | Study node equity must **replay reach weights** (own actions × card removal) then check-down on the node board (#293). Calculator jobs (`start_equity_job`…) are a **different** IPC surface (#297). |
 | Wide-range flop EV/equity “never loads” | Solve OK; Study EV + bottom equity tabs spin for minutes (then maybe appear) | Root cause is compute/serialization, not IPC timeouts: (1) frozen root `values` must use **threaded** first-card `response_walk` via `WorkerBudget` analysis borrow — do not force `initEval`+`serial_chance=true` after train; (2) equity preflight must count pair-runouts in **O(n0·n1)** (closed-form completions), never nest the runout list; evaluate runout-outer with cached ranks; (3) do **not** prefetch non-root flop/turn child `/values` (deal-by-deal saturates the single analysis worker). Prefer these over raising RPC timeouts. |
-| Post-#384 EV/equity still slow on big trees | Solve OK; root values/equity still take a long time on wide flops | After train, Session already has warm `FrozenCtx` ranks — do **not** `initEval` a private ctx per values (rebuilds the whole flop/turn rank cache). Hold `acquireFrozenCtxForAnalysis` and `actionValuesFrozenOnCtx` / `checkdownEquityAtNodeOnCtx` (O(hands·runouts) prefix/block showdown, C++ StreetBatch checkdown_equity). Mid-train → Busy → pair-enumeration / private eval fallback. Prefer this over timeout bumps. |
+| Post-#384 EV/equity still slow on big trees | Solve OK. Root values and equity still take a long time on wide flops. | After train, Session already has warm `FrozenCtx` ranks. Do **not** `initEval` a private ctx per values. That rebuilds the whole flop and turn rank cache. Hold `acquireFrozenCtxForAnalysis` and `actionValuesFrozenOnCtx` / `checkdownEquityAtNodeOnCtx` (O(hands·runouts) prefix and block showdown). Mid-train returns Busy, then pair enumeration or a private eval fallback. Prefer the warm context over timeout bumps. |
 | Warm equity / After Call `WorkLimit` on wide flop | ~496 combos/player: Study equity + Value/Bluffs After Call return `work_limit` after a good solve | Warm path must gate on **hand×runout** work (`study_warm_max_hand_runouts`), not the obsolete pair-runout ceiling. `value_bluffs_post_call` must reuse `checkdownEquityAtNodeOnCtx` (same warm Session hold as equity), not cold pair enumeration. |
 | Starting-board equity gate (fixed) | Historical desktop 501 / `node_equity_unsupported` on non-root equity | Reach-aware host equity shipped (#291→#293); do not reintroduce the 501 gate |
 | Tree-edit path tokens | Soft-unapplied edits / wrong AddSize | Match compact↔display labels (Bet/Raise/all-in); Apply AddSize with pot-cap / all-in / min-raise rules; report unapplied edits (#296) |
@@ -117,34 +117,33 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 - Persist chance workers / ranks across Session train/eval when required (#270, #276); don't respawn every chance if the pool is Session-scoped.
 - Persist `FrozenCtx` carefully across Acc-stop cycles; Acc-stop that rebuilds ranks every iter stresses the map (#266).
 
-**Do:** Pin rematches against tip C++ / deal-by-deal twins before claiming Study parity.  
+**Do:** Pin rematches against the deal-by-deal fixtures before claiming Study parity.  
 **Don't:** Treat soft Acc-stop wall-clock scoreboard wins as correctness GO.
 
 ### One production postflop engine (M6)
 
 A flop, turn, and river are **one** betting tree with two, one, or zero cards left. On `main`, production Study uses the Zig Session frozen public-tree path for all three board lengths.
 
-| Board | Current product path | Historical C++ reference |
-| --- | --- | --- |
-| 3, 4, or 5 cards | Zig Session / `solver-engine` IPC | `StreetBatchSolver` vs `StreetGame` + `CfrTrainer` (`--reference`) |
+| Board | Product path |
+| --- | --- |
+| 3, 4, or 5 cards | Zig Session / `solver-engine` IPC |
 
-**Do:** Keep five-card rematch/oracle pins in `zig build test`.  
-**Don't:** Reintroduce C++ `RiverBatchSolver` / `holdem-explorer` as a shipping path.  
+**Do:** Keep five-card rematch pins in `zig build test`.  
+**Don't:** Add a second shipping engine for five-card boards.  
 **Pointers:** `docs/ARCHITECTURE.md`, `docs/auxiliary/planning/ROADMAP.md` M6, `engine/`.
 
-### `*Game` vs `*Batch`
+### Public tree and oracle pins
 
-- Zig Session / frozen public-tree CFR — **current** production default for flop/turn/river Study.
-- Historical C++: `RiverGame` / `StreetGame` (deal enumeration oracle), `StreetBatchSolver` (public tree), `RiverBatchSolver` (oracle/legacy only).
+- Zig Session frozen public-tree CFR is the production path for flop, turn, and river Study.
 
-**Do:** Pin public-tree changes against rematch/oracle fixtures (`zig build test`) before scaling.  
-**Don't:** “Optimize” by changing only the batch/frozen kernel without an oracle gate.
+**Do:** Pin public-tree changes against rematch fixtures (`zig build test`) before scaling.  
+**Don't:** Change only the frozen kernel and skip the oracle fixtures.
 
-### Archive: `include/` must not depend on UI trees (pre-#287)
+### Engine layout
 
-Historical C++ layout: engine/session under `include/game|solver|explorer|poker`; HTTP in `src/cli/explorer_main.cpp` + `src/explorer/`. That tree is removed. Zig keeps engine code under `engine/` / `host/` with no desktop imports.
+Engine code lives under `engine/` and `host/`. Those modules do not import `desktop/`.
 
-**Don't:** reintroduce a C++ `include/` product tree or couple engine modules to `desktop/`.
+**Don't:** Couple engine modules to `desktop/`.
 
 ### Utility sign and player index
 
@@ -155,11 +154,10 @@ Historical C++ layout: engine/session under `include/game|solver|explorer|poker`
 
 ### Frozen pass, threads, CFR+ floor
 
-- `--threads N>1` requires `--frozen`; per-deal walk stays serial.
+- Config `threads` is the frozen-pass worker count. The per-deal walk stays serial.
 - Parallelism splits the **first future public card** only (turn→rivers, flop→turns).
-- Shipped trainer is CFR+ (`trainFrozenCfrPlus`). PSOL v4 stores that algorithm byte and rejects any other. Settings still lists Vanilla CFR and DCFR; those strings are draft fields. The host does not switch trainers from them.
-- CFR+: sum counterfactual regret across the frozen pass, then **floor only the updating player**; leave the opponent table alone.
-- Historical C++ schedules (removed): vanilla CFR, Linear CFR, fixed DCFR(1.5,0,2), and PCFR+. PCFR+ matched on \(R+m\) with \(m=\) last instantaneous CF regret (cold-start zeros \(m\); PSOL v3 could restore \(m\)). DCFR discounted the updating player's signed regret row after the pass (`t^α/(t^α+1)` on positives, `t^β/(t^β+1)` on non-positives; average `t^γ`; defaults α=1.5, β=0, γ=2) and was rejected off the frozen walk. Do not treat those schedules as live Zig code.
+- Shipped trainer is CFR+ (`trainFrozenCfrPlus`). PSOL v4 stores that algorithm byte and rejects any other. Settings still lists Vanilla CFR and DCFR. Those strings are draft fields. The host does not switch trainers from them.
+- CFR+: sum counterfactual regret across the frozen pass, then **floor only the updating player**. Leave the opponent table alone.
 
 **Pointers:** `docs/STREETS.md` (frozen threads), Zig frozen CFR under `engine/`, historical commits `9e0d87d`, `6a597df`, `e2ad8df`.
 
@@ -171,24 +169,20 @@ Historical C++ layout: engine/session under `include/game|solver|explorer|poker`
 
 **Pointers:** ROADMAP M0/M4; Zig host job lifecycle; historical commits `8ab3503`, `27236ac`, `40e81d6`.
 
-### Archive: Explorer HTTP single-threaded open/save (pre-#287)
+### Open and save
 
-The retired C++ explorer accept loop handled **one client at a time**. Open/save were overlay jobs (HTTP **202** + `/api/status` `file_op`). That HTTP surface is gone.
-
-**Still true on Zig IPC Study:** Keep status polling across Open/Save; let `engineClient.open/save` wait until `running` clears. Treat `stopPolling` aborts as shutdown cancel, not unreachable. Never surface raw AbortError text in the status bar. Failed Open must leave the prior `solution_id` intact.
+Keep status polling across Open and Save. Let `engineClient.open` and `save` wait until `running` clears. Treat `stopPolling` aborts as shutdown cancel. Do not surface raw AbortError text in the status bar. A failed Open must leave the prior `solution_id` intact.
 
 **Pointers:** `desktop/src/state/studyStore.ts` (`openSolution` / `saveSolution`), `desktop/src/domain/requestScope.ts`.
 
 ### Study analysis scheduling (EV / equity / runouts)
 
-Explorer used to have a **single-slot** ValueWorker. Overlapping `/equity` + `/values` (and status polls that re-enqueued) cancelled each other → blinking footers, stuck “Calculating…”, lost overlays (#181–#190).
-
-Zig IPC host still has **one analysis worker** with gen supersession for `node` / `values` / `equity` / `categories`. After async Tauri IPC (#380), Study can overlap those admits: a late `values`/`categories`/LineCard call supersedes navigateTo `node` or live EV → blank strategy/EV/eq until manual navigate-away (DS-28). Cache keys that ignore host `policy_revision` can also keep a stale uniform strategy after final publish.
+The host has **one analysis worker** with gen supersession for `node`, `values`, `equity`, and `categories`. Overlapping those ops cancels the earlier job (#181–#190). After async Tauri IPC (#380), Study can overlap admits. A late `values`, `categories`, or line-card call can supersede `node` or live EV and leave a blank strategy until the player navigates again (DS-28). Cache keys that ignore host `policy_revision` can keep a stale uniform strategy after final publish.
 
 **Do:**
 
-- Prefer `POST/GET …/nodes/{id}/analysis` (multi-metric) or **lookup-first** enqueue so status reads never replace sibling work.
-- Client: serialize ValueWorker-bound jobs; `pollAnalysis` must await the full ready/failed lifecycle (do not release the queue on the first `202`).
+- Look up a cached metric before enqueueing another one, so a status read does not replace sibling work.
+- Serialize analysis jobs. `pollAnalysis` must await the full ready or failed lifecycle.
 - Transport: serialize worker-bound IPC admits; let `node` preempt so navigate cannot lose to a late worker admit. Retry transient `superseded` / `nothing_published` while the analysis token is current.
 - Cache pages by solution / node / `policy_revision` (profile epoch; also `analysis_revision` alias); restore on navigate instead of recomputing. Soft re-inspect when status `policy_revision` advances past the painted node.
 - Settled permanent failures (e.g. work-limit) must not thrash auto-resubmit; transient/settled errors must not stick forever when the node/revision changed.
@@ -224,8 +218,7 @@ At a flop root, `t-1.r-1` is both the node id and the line key — **do not infe
 
 ### Study equity path vs Equity Calculator
 
-- **Historical C++:** Study node `/equity` used `StreetBatchSolver::checkdown_equity` (cached rank tables) — same check-down math, much faster than pair enumeration (#191).
-- **Zig Study:** host `equity` must use **reach-weighted** `replayReachWeights` on the node board (#293). When Session ranks are warm, prefer `checkdownEquityAtNodeOnCtx` (FrozenCtx RunoutRanks); otherwise `checkdownEquityAtNode` pair enumeration. Returning starting-board / starting-range check-down at every node is a regression.
+- Host `equity` must use **reach-weighted** `replayReachWeights` on the node board (#293). When Session ranks are warm, prefer `checkdownEquityAtNodeOnCtx` (FrozenCtx RunoutRanks). Otherwise use `checkdownEquityAtNode` pair enumeration. Returning starting-board check-down at every node is a regression.
 - **Equity Calculator** is a separate IPC job surface (`start_equity_job` / `get_equity_job` / `cancel_equity_job`) — multiway Auto/Exact/Monte Carlo — not Study node equity (#297).
 - Work limits: never silently sample when over the pair-runout ceiling. Study packaging ceilings and calculator defaults differ; keep host constants aligned with what Tauri/Study expect.
 - Warm the **current** decision (queue + identity-keyed cache). Do **not** full-tree frontload EV/equity into the save (#184, #190, #191).
@@ -237,7 +230,7 @@ Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via no
 ### Frozen parallel + cold action EV
 
 - Train/BR and cold average-value walks may steal **first future public card** tasks across workers; nested chance stays serial on the claiming worker (#177, #194).
-- Wall-clock “parallel must beat serial” asserts are flaky on cold/shared CI VMs and under sanitizers — pin **numerical parity**; soften or skip timing gates (#201). Avoid `__has_feature` guards that break MSVC.
+- Wall-clock “parallel must beat serial” asserts are flaky on cold or shared CI VMs. Pin numerical parity. Soften or skip timing gates (#201).
 
 ### Solve progress / Accuracy stop
 
@@ -254,17 +247,17 @@ Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via no
 | Kind | Format | Example |
 | --- | --- | --- |
 | Street / PSOL canonical | `street-config 1` text, LF, trailing newline (CRLF accepted on parse) | `configs/street_default.txt` |
-| River explorer JSON | Removed. `configs/river_default.json` is a leftover sample. Nothing parses it. | — |
-| `river-config 1` | Removed. `include/game/river_config_text.hpp` is gone. Five-card spots use `street-config 1`. | — |
+| `configs/river_default.json` | Sample only. The parser reads `street-config 1`. | — |
+| Five-card spots | `street-config 1` | `configs/street_default.txt` |
 
 Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fraction.  
-`street-config-check <file>` only parses and prints board length, pot, and stack. Iterations, accuracy, and the train thread cap stay off the document and go out through host `solve`. The removed `street_solver --config` flag reader is gone.
+`street-config-check <file>` parses a file and prints board length, pot, and stack. Iterations, accuracy, and the train thread cap stay off the document and go out through host `solve`.
 
 **Don't:** Invent JSON street configs, revive `river-config 1`, or put iteration caps inside `street-config 1`.
 
 ### Study / street-config bet arrays
 
-- **Absent** bet lists → defaults `{0.5, 1}` (same empty≠absent rule as historical explorer Job JSON).
+- **Absent** bet lists → defaults `{0.5, 1}`. An empty list is check-only.
 - **Present empty array** → check-only.
 - Raise lists are separate from bets: absent raises copy bets when multiples are also empty; present empty stays empty. The engine does not copy bets into an empty raise list. Study copies a blank raise box into that street's raise list before sending.
 - A zero-length per-street list still falls back to the shared list. A one-element explicit-empty sentinel (`-`, stored as `-4e9`) does not. `e` / `2e` / `3e` / `a` / `Nx` stay sentinels until the decision node. Study Build blank bet = check-only; on import, empty street lists are resolved into shared sizes so rebuild keeps the same tree.
@@ -296,22 +289,22 @@ Matrix, Hands, Node Locking, and the Actions mix bar paint **passive → aggress
 
 **Pointers:** `docs/ai-context/README.md`, `docs/STUDY_SETUP_ASSISTANT.md`.
 
-### Archive: CMake and tests (pre-#287)
+### Tests
 
-Historical C++ targets (`street_solver`, `river_solver`, `explorer`, `poker_*_tests`) and `ctest` are removed. **Current product testing:** `zig build test`, `scripts/zig/study-contract-smoke.py`, `cd desktop && npm test` / `npx tsc -b` — see [TESTING.md](TESTING.md).
+`zig build test`, `scripts/zig/study-contract-smoke.py`, `cd desktop && npm test`, and `npx tsc -b`. See [TESTING.md](TESTING.md).
 
 ### Platform gaps
 
 - **Zig CI:** after engine/host changes run `zig build` + `zig build test` (`.github/workflows/zig.yml`). Prefer `-Dcpu=x86_64_v2` for portable Windows artifacts (#288/#289).
 - **Desktop `tsc -b`:** Study store nullability fails `desktop` / installer CI when vitest is green (#190/#191). After lifecycle/IPC client changes, run `cd desktop && npx tsc -b`.
 - **CI path gate:** `dorny/paths-filter` needs `pull-requests: read` under restricted `GITHUB_TOKEN` scopes; fail the aggregate `ci` job if the path gate itself fails (#200).
-- **NSIS / installer hooks:** wait for **`windows-installer`** green before merge on spawn/NSIS changes (#158/#159/#161). Stable installer must ship `solver-engine.exe` only and fail if `holdem-explorer` reappears (#286).
+- **NSIS / installer hooks:** wait for **`windows-installer`** green before merge on spawn/NSIS changes (#158/#159/#161). The stable installer ships `solver-engine.exe`.
 - **NSIS silent install `/D=`:** Tauri’s template starts `InstallDir` as relative `placeholder\PRODUCTNAME` and only rewrites to `%LOCALAPPDATA%\PRODUCTNAME` when `$INSTDIR` still equals that placeholder string. Running `/S` from a repo cwd can resolve the relative path first so files land under `<cwd>\placeholder\…` while E2E searches LocalAppData (`lastCompletedStep=silent-install`, #404). **Do** pass absolute `/D=%LOCALAPPDATA%\Holdem Study` as the last unquoted arg. **Don’t** rely on `/S` alone or bump Study timeouts to mask a missing install layout.
 - **NSIS UI exe ≠ productName:** install folder / DisplayName is `Holdem Study`, but Tauri `MAINBINARYNAME` follows the Cargo package (`poker-solver-study.exe`). After `/D=` succeeds, E2E that only looks for `Holdem Study.exe` fails while `solver-engine.exe` is present (#410 tip). **Do** resolve UI via registry `MainBinaryName` / both known names (same as `diagnostics.rs`). **Don’t** assume the exe basename equals `productName`.
-- **Tauri sidecar spawn (Zig):** `externalBin` → `binaries/solver-engine`; installed file is `<exe_dir>/solver-engine.exe`. Spawn the absolute path beside the app. Packaged UI must **statically import** `@tauri-apps/api/core`. Own the child via IPC ready + launch id — not “any TCP on 8765.”
-- **NSIS upgrade + sidecar lock:** PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning`), then `taskkill` / delete **both** `solver-engine.exe` and legacy `holdem-explorer.exe`. Never `taskkill` `explorer.exe` (Windows shell).
+- **Tauri sidecar spawn (Zig):** `externalBin` → `binaries/solver-engine`. The installed file is `<exe_dir>/solver-engine.exe`. Spawn the absolute path beside the app. Packaged UI must **statically import** `@tauri-apps/api/core`. Own the child via IPC ready and launch id.
+- **NSIS upgrade + sidecar lock:** PREINSTALL must kill the UI via `nsis_tauri_utils::KillProcessCurrentUser` (do **not** re-insert Tauri 2.5 `CheckIfAppIsRunning`), then `taskkill` / delete `solver-engine.exe`. Never `taskkill` `explorer.exe` (Windows shell).
 - **Packaged security:** production CSP (#242); assistant secrets in OS **keyring** (#243).
-- **Historical C++ HTTP gaps** (pre-cutover trees only): Linux/Windows `poker_http_tests`, MSVC stack, `holdem-explorer` path quirks — do not restore those shipping paths on `main`.
+- **Engine path:** Study uses `solver-engine` typed IPC. Do not add a second engine binary.
 
 ### Licensing
 
@@ -350,7 +343,7 @@ When blocker subtraction cancels the live compatible mass, **sum compatible oppo
 
 ### Chance
 
-Next public cards are **pair-conditional** (remaining deck given both holes + board). At zero joint reach, chance card weights are null. Chance probabilities stay independent of thread count. Action EV is not defined on chance nodes (host rejects; historical explorer returned HTTP 400).
+Next public cards are **pair-conditional** (remaining deck given both holes + board). At zero joint reach, chance card weights are null. Chance probabilities stay independent of thread count. Action EV is not defined on chance nodes. The host rejects those requests.
 
 ### Conditional action EV
 
@@ -387,7 +380,7 @@ Made-hand **categories** (when present) are category mass on a **five-card** boa
 
 - Infosets: `OOP AhAd | <place> | <path>` (five-card street labels may omit place to match river — follow the branch you are on).
 - Actions: `Check`, `Call`, `Bet N`, `Raise to N`, all-in variants via chip labels.
-- Node ids: `p0.t-1.r-1` style; leading zeros OK; overflow/junk / wrong solution → host error reply (historical explorer used HTTP 400/404 — do not cite those as live coverage).
+- Node ids: `p0.t-1.r-1` style. Leading zeros are accepted. Overflow, junk, or the wrong solution returns a host error reply.
 - Solution/job tokens: `sN` / `jN`, whole-token parse.
 
 ### Betting semantics (street)
@@ -400,8 +393,8 @@ Sizes are pot fractions unless negative / `Nc` chip form, or a Pio sentinel (`e`
 
 - `betting_streets = 6 - board_size`; `street_kind = street + (size - 3)` maps onto flop/turn/river size lists.
 - Five-card rank cache: one key `reserve_key(-1, -1)`; no post-street chance.
-- Matching `RiverGame` strategies requires **compatible infoset labels** (place segment policy).
-- Defaults differ: e.g. `RiverConfig::max_raises` historically 2 vs `StreetConfig` default 1 — convert fixtures carefully when pinning.
+- Five-card rematch pins need compatible infoset labels (place segment policy).
+- Five-card fixtures often set `max-raises` to 2. The street-config default is 1. Convert fixtures when pinning.
 
 ---
 
@@ -419,7 +412,7 @@ Release A emphasis: M0→M5 plus **core M6**. Most `FEATURE_PARITY.md` rows are 
 | “As fast as Pio” | Forbidden without matched protocol (`docs/auxiliary/planning/ROADMAP.md` §6); Acc walls ≠ cutover gates |
 
 **Do:** Update ledger rows only with the demonstrating commit.  
-**Don't:** Mark milestones complete from a single happy-path smoke (IPC contract or otherwise). Do not cite deleted C++ HTTP suites as coverage.
+**Don't:** Mark milestones complete from a single happy-path smoke (IPC contract or otherwise).
 
 Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, zero-own-reach counterfactuals, own-reach averaging, pass-level updates, utility signs, immutable published analysis. Faster code that breaks these fails the project contract.
 
@@ -456,7 +449,7 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 | Street tree / budget / frozen | `docs/STREETS.md` |
 | River chips / oracle | `docs/RIVER.md` |
 | Math / EV / NashConv | `docs/MATHEMATICS.md` |
-| Study UI / Zig IPC | `docs/DESKTOP_UI.md` (HTTP explorer notes are historical) |
+| Study UI / Zig IPC | `docs/DESKTOP_UI.md` |
 | River-beta live browser | `desktop/src/river-beta/README.md`, `services/river-beta/README.md` |
 | Equity | `docs/EQUITY.md` |
 | Assistant / AI packs | `docs/STUDY_SETUP_ASSISTANT.md`, `docs/ai-context/README.md` |

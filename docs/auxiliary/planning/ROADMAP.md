@@ -2,7 +2,7 @@
 
 Heads-up NLHE study application with solving, analysis, automation, persistence, training, and interface capabilities comparable to PioSolver/PioViewer — in this project's own design. Target includes postflop and Edge-style preflop. Living ledger: [FEATURE_PARITY.md](FEATURE_PARITY.md).
 
-Finished means a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train through a GUI without a terminal. Study surface today: Zig `solver-engine` typed IPC + React desktop client ([DESKTOP_UI.md](../../DESKTOP_UI.md)). The C++ `explorer` HTTP server is retired. Comparison target: documented PioSolver 3.11 [S1][S2]. Mark unverified details unverified. “All features” means the audited list.
+Finished means a player can configure a tree, solve it, inspect a line, save, resume, lock a scenario, and train through a GUI. Study surface: Zig `solver-engine` typed IPC and the React desktop client ([DESKTOP_UI.md](../../DESKTOP_UI.md)). Comparison target: documented PioSolver 3.11 [S1][S2]. Mark unverified details unverified. “All features” means the audited list.
 
 Separate three releases:
 
@@ -16,9 +16,9 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 ## 2. Starting point and evidence
 
-Foundation in place: one Zig public tree for flop, turn, and river; CFR+ with active-player flooring; blocker-aware showdowns; first-public-card parallelism; engine allocation budget (default 1024 MiB); node-scoped browsing. Train threads default to 1, then `WorkerBudget` caps them. The removed C++ tree also had other CFR schedules and `CfrTrainer` enumerators.
+Foundation in place: one Zig public tree for flop, turn, and river. CFR+ with active-player flooring. Blocker-aware showdowns. First-public-card parallelism. Engine allocation budget (default 1024 MiB). Node-scoped browsing. Train threads default to 1, then `WorkerBudget` caps them.
 
-Flop, turn, and river are one betting tree (two, one, or zero cards left) in the Zig engine Session. Historical C++ names `StreetGame` / `StreetBatchSolver` / `RiverGame` describe the same public-tree idea in older math docs; they are not a shipping binary path on `main`.
+Flop, turn, and river are one betting tree (two, one, or zero cards left) in the Zig Session.
 
 Also landed on the Zig Study path: conditional action EV; stop-and-keep / pause / continue; PSOL v4; check-down equity (+ buckets); made-hand categories; node locks + strategy edits; pot rake; ICM and path incentives on the terminal when configured; Windows NSIS Study installer (Zig sidecar only); flop/turn draw and backdoor tags in Study. The trainer is CFR+. Compact saves, a durable batch queue, trainer packs, preflop, and dual-session Compare are still open. No head-to-head Pio performance or solution-quality equivalence. Acc / time-to-Accuracy walls are not cutover blockers.
 
@@ -87,7 +87,7 @@ Version a canonical game/tree configuration. Include board, initial contribution
 
 Pio's documented builder includes sizing expressions, betting caps, forced lines and line editing [S3]. Turn these into leaf items in our ledger, including less-used spread-limit/limit-style options if required for literal reference coverage. A size restriction and a node lock are separate ledger items.
 
-Add a visual tree preview with add/remove/force line operations, explicit canonical action labels, saved templates, and a pre-build memory plan. Distinguish estimated engine allocation from measured allocation and whole-process memory. Validate before destructive replacement of a useful current solution. Study Build calls host `tree_preview` and `plan_memory`. Those ops compile a temporary tree and do not replace the loaded session. Force/Remove/AddSize round-trip in `street-config 1`. The removed C++ path was `street_solver --plan-memory` and Explorer `POST /api/plan-memory` / `POST /api/tree-preview`.
+Add a visual tree preview with add/remove/force line operations, explicit canonical action labels, saved templates, and a pre-build memory plan. Distinguish estimated engine allocation from measured allocation and whole-process memory. Validate before destructive replacement of a useful current solution. Study Build calls host `tree_preview` and `plan_memory`. Those ops compile a temporary tree and do not replace the loaded session. Force, Remove, and AddSize round-trip in `street-config 1`.
 
 **Gate:** canonical configuration rebuilds the same tree; every displayed sizing rule has legal-edge-case tests; edits invalidate derived results; failed estimates/builds explain the offending configuration. Curated small trees match independent enumerators.
 
@@ -95,7 +95,7 @@ Add a visual tree preview with add/remove/force line operations, explicit canoni
 
 Introduce separate operations: cancel-and-discard, stop-and-keep, pause at a safe boundary, resume, and finish at a target. Existing cancellation must retain its tested semantics. A stop-and-keep publishes a coherent evaluated average at a complete algorithm boundary. Cancellation during construction publishes nothing.
 
-Provide iteration, elapsed-time and measured-gap targets, configurable evaluation cadence, convergence history, and honest progress information. Study `time_limit` stops at an iteration boundary. Eval cadence comes from the job `samples` field, capped so a refresh is at most 10 iterations apart, unless the caller sets `eval_every`. Targets can only be declared achieved at an actual evaluated checkpoint. Continue keeps the open session: regrets, average weights, and iteration numbering stay. The removed C++ CLI flags were `--time-limit` and `--eval-every`.
+Provide iteration, elapsed-time and measured-gap targets, configurable evaluation cadence, convergence history, and honest progress information. Study `time_limit` stops at an iteration boundary. Eval cadence comes from the job `samples` field, capped so a refresh is at most 10 iterations apart, unless the caller sets `eval_every`. Targets can only be declared achieved at an actual evaluated checkpoint. Continue keeps the open session: regrets, average weights, and iteration numbering stay. Host `solve` accepts `time_limit` and `eval_every`.
 
 Design immutable solution revisions and an exclusive training owner. Browsing and training use a snapshot when the budget has room for one. Otherwise suspend browsing and show that state.
 
@@ -119,13 +119,13 @@ Investigate exact suit isomorphisms, compact slot indexing, memory layout, SIMD,
 
 Address stored-index limits with checked wider/segmented representations when required. Keep the small enumerator as an oracle. Scale one batch solver, and publish a hardware profile for each supported tree size, including which trees fit in 1 GiB.
 
-Five-card boards already solve on the shared Zig Session tree. Cards still to come are two, one, or zero. Remaining M6 work is scale and time-to-accuracy. The removed C++ oracle names were `StreetGame`, `RiverGame`, and `RiverBatchSolver`.
+Five-card boards already solve on the shared Zig Session tree. Cards still to come are two, one, or zero. Remaining M6 work is scale and time-to-accuracy.
 
-**Gate:** each optimization passes an appropriate oracle/parity gate and budget failure tests. Five-card public-tree pins against `RiverGame` stay green. Algebra-preserving kernel changes retain pins; algorithm and precision changes compare on solution quality. Publish same-machine paired measurements, including evaluation cost and variance. Multi-size full-range betting trees must converge within a declared hardware envelope before broad practical parity is claimed.
+**Gate:** each optimization passes an appropriate oracle or parity gate and budget failure tests. Five-card public-tree pins stay green. Algebra-preserving kernel changes retain pins. Algorithm and precision changes compare on solution quality. Publish same-machine paired measurements, including evaluation cost and variance. Multi-size full-range betting trees must converge within a declared hardware envelope before broad practical parity is claimed.
 
 ### M7 — Strategy editing, node locking and constrained re-solving
 
-Locks and strategy edits ship over typed IPC (`list_locks` / `put_lock` / `delete_lock`, `resolve_locked`, strategy-edit ops). Default lock scope is the selected board. Compare of two sessions stays soft-gated. The removed C++ model lived in `include/solver/node_lock.hpp` and Explorer `/api/compare` plus `/strategy-edits`. PSOL v4 stores the CFR+ trainer; strategy edits are session overlays.
+Locks and strategy edits ship over typed IPC (`list_locks`, `put_lock`, `delete_lock`, `resolve_locked`, strategy-edit ops). Default lock scope is the selected board. Compare of two sessions stays soft-gated. PSOL v4 stores the CFR+ trainer. Strategy edits are session overlays. Lock code is `engine/src/solve/node_lock.zig`.
 
 Implement immutable scenario forks, manual strategy editing, full-node and selected-combo locks, validated probability rows, lock visualization, copy/paste, presets, undo, unlock and reset. The UI separates editing a stored strategy from locking selected hands against later updates [S5].
 
@@ -147,7 +147,7 @@ Pio exposes rake/ICM configuration and opponent profiling [S6, S7]. State conver
 
 ### M9 — Reports, automation and batch solving
 
-The removed C++ CLIs wrote a `strategy-report 1` summary. Current saves are PSOL v4. Deliver runout aggregation next: turn/river tables of action frequencies, EV/equity and hand-category breakdowns, sorting/filtering, charts and CSV. Extend to multi-flop reports over explicitly weighted board sets with board-texture filters. Pio's 3.9 release specifically adds richer flop aggregation [S8].
+Current saves are PSOL v4. Deliver runout aggregation next: turn/river tables of action frequencies, EV/equity and hand-category breakdowns, sorting/filtering, charts and CSV. Extend to multi-flop reports over explicitly weighted board sets with board-texture filters. Pio's 3.9 release specifically adds richer flop aggregation [S8].
 
 Every report states its weighting measure. Weight each report by compatible-pair mass. Distinguish ex-ante board frequency, frequency conditional on reaching a line, and an intentionally uniform study-board sample.
 
@@ -255,7 +255,7 @@ The phases below were the kernel plan through the baseline reviewed above. They 
 
 | Phase | Status |
 | --- | --- |
-| 1. Repository, CMake, tests | Complete |
+| 1. Repository and tests | Complete |
 | 2. Early CFR trainer fixtures (removed; Hold’em `StreetGame` pins remain) | Complete |
 | 3. Generalized CFR engine + CFR+ | Complete |
 | 4. Early multi-street trainer fixture (removed) | Complete |
