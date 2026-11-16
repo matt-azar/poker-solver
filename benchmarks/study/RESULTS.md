@@ -20,7 +20,7 @@ Raw logs stay in `benchmarks/study/out/` and are gitignored. This file is the co
 ## Main at `dec4a5e` (Linux cloud agent, 2026-11-03 America/New_York)
 
 Post-#133 NashConv gains, #134 compact indexing, #135 bounded PSOL Save/Open.
-x86_64, 4 logical processors, 16,780,574,720 bytes of RAM (~5.0–5.3 GiB available at collection). Linux 6.12.94+, glibc 2.39. g++ 13.3.0, Unix Makefiles Release. Timing label: **quiet**. CFR+ only (default).
+x86_64, 4 logical processors, 16,780,574,720 bytes of RAM (~5.0–5.3 GiB available at collection). Linux 6.12.94+, glibc 2.39. Timing label: **quiet**. CFR+ only (default).
 
 | Case | Outcome | Iterations | Player 0 EV | NashConv | NashConv/pot | Wall | Train | Eval | Threads | Engine peak |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -35,14 +35,14 @@ Notes for this revision:
 - Turn infosets fell from ~940k (Oct 30 dense indexing) to **506,160**; engine peak ~22.8 MiB vs ~48.5 MiB. Wall for 400 iters is ~15.6 s vs ~35 s on the prior Linux host record.
 - Turn reaches the 0.001 target by iteration **600** (~24 s wall), earlier than the prior 720-iteration / ~60 s training record on this class of host.
 - Flop engine peak ~1.74 GiB (was ~4.27 GiB allocated on the Oct 30 finish). Wall for 400 iters at 4 threads ~622 s vs ~2255 s. NashConv/pot at the 400-iter cap is still above 0.001 (0.00469); a dedicated to-target chase remains multi-hour and is not claimed here.
-- River CLI still omits construction/train/eval clocks. Wall ~150 s to target on this host (StreetBatch five-card path); quality matches the prior EV/gap pins.
-- Tiny explorer Save/Open probe (`benchmarks/study/scripts/measure_psol_roundtrip.py`, check-only AA vs KK river, 20 CFR+ iters): idle RSS ~4.4 MiB → after solve ~5.4 MiB → after save ~5.5 MiB → after open ~5.7 MiB; PSOL file 423 bytes. This is not a large-tree RSS envelope.
+- River wall was about 150 s to target on this host. Quality matches the prior EV/gap pins.
+- A Save/Open probe on a check-only AA vs KK river, 20 CFR+ iterations: idle RSS ~4.4 MiB, after solve ~5.4 MiB, after save ~5.5 MiB, after open ~5.7 MiB. PSOL file 423 bytes. This is not a large-tree RSS envelope.
 
 CFR+ remains the default. No DCFR/PCFR+ retune from this matrix.
 
 ## Machine (Linux cloud agent, 2026-10-30 America/New_York)
 
-x86_64, 4 logical processors, 16,780,574,720 bytes of RAM. Linux 6.12.94+, glibc 2.39. g++ 13.3.0, CMake Unix Makefiles, Release. Timing label: quiet for reference cases; contended for smoke.
+x86_64, 4 logical processors, 16,780,574,720 bytes of RAM. Linux 6.12.94+, glibc 2.39. Timing label: quiet for reference cases. Contended for smoke.
 
 Smoke taxonomy on this host: `success`, `invalid-input`, `timeout`, `resource-rejection`. The timeout diagnostic needed a 4096 MiB engine budget; 2048 MiB now rejects the full-range flop during frozen allocation (~2.12 GiB estimated).
 
@@ -58,7 +58,7 @@ Smoke taxonomy on this host: `success`, `invalid-input`, `timeout`, `resource-re
 
 Turn quality at 400 and 720 iterations matches the earlier Windows record (`0.260636` / `0.000996`). Training is still almost the entire clock. On this quieter Linux host the 400-iteration turn is ~35 s wall versus 62–244 s across the older Windows sessions, so those earlier spreads were machine noise, not an engine regression.
 
-Turn allocated ~48.5 MiB (peak equal to allocated); construction and cache init stay under 0.03 s. The river CLI still does not print construction / train / eval / process working set.
+Turn allocated ~48.5 MiB (peak equal to allocated). Construction and cache init stay under 0.03 s. The river row has no construction, train, eval, or process working set.
 
 The completed flop used ~9.5 GiB free at start, a 4096 MiB engine budget (~4.27 GiB allocated, 42,830,564 infosets, 8104 deals), and 4 frozen threads. Wall was overridden to 7200 s for this finish run (case default remains 2400 s). Training ~4.8 s/iter at 4 threads versus ~15 s/iter at 1 thread on the early probe. At the 400-iteration cap NashConv/pot is 0.004182 — above the 0.001 target. An extended to-target chase was started and then stopped: at ~4.8 s/iter, reaching 0.001 would be multi-hour wall on this host and is not a routine measurement.
 
@@ -72,18 +72,18 @@ Executable source `95242db81c021efe4ec6d2792aee936ddb72db77` on `cursor/study-be
 | `turn_srp_river_betting` | target not reached | 400 of 400 | −8.09892287189 | 0.260636275 | 0.002606 | 65.52 s | 61.83 s |
 | `flop_srp_one_size` | timeout | none | unavailable | unavailable | unavailable | 2400 s, killed | unavailable |
 
-The river CLI does not print construction, cache, train, evaluation, or process working set. The flop stdout was empty because that binary reported only at the end. Smoke runs on that binary distinguished success, invalid input, timeout, and resource rejection.
+The river row has no construction, cache, train, evaluation, or process working set. The flop row reported at the end. Smoke runs distinguished success, invalid input, timeout, and resource rejection.
 
 ## Main at `381c9a5`
 
-Executable source `381c9a5ad36247c8d71dd94e005e4ddcd4201591`. Same turn tree as the baseline. Labeled quiet because no other cmake, MSBuild, compiler, or solver process was running. Only 1,764,913,152 bytes of RAM were free when the runner collected the host info. The 400-iteration training clock was 229 s in the reference process and 150 s at iteration 400 inside the extended process, against 62 s on `95242db`. The NashConv at 400 iterations matched the baseline (`0.260636`). These wall times are not a stable speed comparison.
+Executable source `381c9a5ad36247c8d71dd94e005e4ddcd4201591`. Same turn tree as the baseline. Labeled quiet because no other compiler or solver process was running. Only 1,764,913,152 bytes of RAM were free when the runner collected the host info. The 400-iteration training clock was 229 s in the reference process and 150 s at iteration 400 inside the extended process, against 62 s on `95242db`. The NashConv at 400 iterations matched the baseline (`0.260636`). These wall times are not a stable speed comparison.
 
 | Case | Outcome | Iterations | Player 0 EV | NashConv | NashConv/pot | Wall | Train | Eval |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `turn_srp_river_betting` | target not reached | 400 of 400 | −8.09892 | 0.260636 | 0.00260636 | 243.979 s | 229.226 s | 14.471 s |
 | `turn_srp_river_betting_to_target` | success | 720 of 8000 | −8.08496 | 0.0995806 | 0.000995806 | 272.367 s | 259.160 s | 13.059 s |
 
-The extended case is the same spot with an 8000-iteration cap. It stopped at the accuracy check on iteration 720. Construction was 0.044 s and cache init was 0.063 s on that process. Training is the cost. Both processes used about 48,550,294 allocated bytes and a 54,665,216-byte process working set. `memory_bytes_estimate` is null on the street CLI.
+The extended case is the same spot with an 8000-iteration cap. It stopped at the accuracy check on iteration 720. Construction was 0.044 s and cache init was 0.063 s on that process. Training is the cost. Both processes used about 48,550,294 allocated bytes and a 54,665,216-byte process working set. `memory_bytes_estimate` is null on the street row.
 
 Selected checkpoints from the extended process (`nash_gap / 100`):
 
@@ -98,7 +98,7 @@ Selected checkpoints from the extended process (`nash_gap / 100`):
 
 ## Interruption
 
-A 2-second kill of `turn_srp_river_betting` on the `381c9a5` binary flushed `phase: training` and kept construction 0.072 s, cache init 0.085 s, 43,316 deals, and 442,776 information sets. Iterations and NashConv stayed unavailable because the first accuracy check had not finished. That kill was contended and is not a speed result.
+A 2-second kill of `turn_srp_river_betting` on `381c9a5` stopped during training and kept construction 0.072 s, cache init 0.085 s, 43,316 deals, and 442,776 information sets. Iterations and NashConv stayed unavailable because the first accuracy check had not finished. That kill was contended and is not a speed result.
 
 ## Freeze / floor parallelization microbench (`a04eb8c`)
 

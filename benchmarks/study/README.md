@@ -1,6 +1,6 @@
 # Postflop study benchmarks
 
-Reference workloads for river, turn, and flop study. Ranges are study inputs, not solved preflop equilibria. The historical `QQ,JJ,TT,99` flop is not the representative flop; see `docs/auxiliary/engineering/BENCHMARKS.md`.
+Reference workloads for river, turn, and flop study. Ranges are study inputs. The representative flop is `flop_srp_one_size`. See `docs/auxiliary/engineering/BENCHMARKS.md`.
 
 ## What is measured
 
@@ -14,7 +14,7 @@ The runner schema `study-benchmark-results-2` records both
 and sets `stop_criterion` to `accuracy_over_pot`. Case fixtures use
 `quality_target_accuracy_over_pot`.
 
-The removed `street_solver` and `river_solver` printed `accuracy` and `accuracy_fraction_of_pot` (Pio Accuracy). The retired runner preferred those fields and fell back to half of `nash_gap`/`pot` for older logs.
+Pio Accuracy in chips is `accuracy`, which is NashConv/2. `accuracy_fraction_of_pot` is that value divided by the chip pot. Older logs may only have `nash_gap`. Half of `nash_gap` is Accuracy in chips. Divide that by the pot for the pot fraction.
 
 Clocks stay distinct:
 
@@ -55,19 +55,17 @@ Each execution is exactly one of:
 
 ## Cases
 
-Reference cases live in `benchmarks/study/cases/`. Each case's `argv` is a removed C++ `street_solver` or `river_solver` command. The Python runner that executed those commands is not a current how-to. See [How to run](#how-to-run) for the Zig sidecar smoke. The notes below describe those old commands so the committed `RESULTS.md` rows stay readable.
-
-Street cases loaded the tree from a `street-config 1` file under `benchmarks/study/configs/` via `street_solver --config`. Relative `--config` paths were resolved against the repository root. Solve controls (`--iterations`, `--algorithm`, `--accuracy`, `--frozen`) and optional `--memory-mib` / `--threads` overrides stayed on the command line.
+Reference cases live in `benchmarks/study/cases/`. Street cases point at a `street-config 1` file under `benchmarks/study/configs/`. Solve controls for a live run go through host `solve` or `gate-bench`. See [How to run](#how-to-run). The notes below describe the spots behind the committed `RESULTS.md` rows.
 
 ### `river_competing_weights`
 
-Board `Th 9h 6d 4h 2c`, pot 100, effective stack 200. Three hearts, so flushes compete with the 87 straight, sets, and overpairs. OOP is a wider, weighted calling range. IP is more polarized: overpairs and nut flushes are heavier, and offsuit bluff-catchers are lighter. Bets are 0.5 and 1 pot. Raises are explicit and different (`0.75` OOP, `1` IP), so they are not copies of the bet list. All-in is on. `max-raises` is 2. OOP acts first. CFR+, iteration cap 2000. `--gap-threshold 0.1` is 0.1 chips of Pio Accuracy, which is `0.001 * pot` when the pot is 100. `--eval-interval 20` is the river alias of `--eval-every`. This binary has no `--frozen` and no `--threads`.
+Board `Th 9h 6d 4h 2c`, pot 100, effective stack 200. Three hearts, so flushes compete with the 87 straight, sets, and overpairs. OOP is a wider, weighted calling range. IP is more polarized: overpairs and nut flushes are heavier, and offsuit bluff-catchers are lighter. Bets are 0.5 and 1 pot. Raises are explicit and different (`0.75` OOP, `1` IP), so they are not copies of the bet list. All-in is on. `max-raises` is 2. OOP acts first. CFR+, iteration cap 2000. The Accuracy target is 0.1 chips, which is `0.001 * pot` when the pot is 100. The eval cadence is 20.
 
 Useful because a river study is wide in deals rather than in future cards, and this tree is large enough to show betting and raising without being a one-combo lock.
 
 ### `turn_srp_river_betting`
 
-Board `Qc 9d 4h 2c` (two clubs), pot 100, effective stack 400. OOP continues with a wide pair-and-suited range. IP is tighter, and `ATo`, `KJo`, and `QJo` are weighted below 1. One bet size, half pot, is shared by the turn and the river. The raise size is an explicit 0.75 pot, not a copy of the bet. All-in is on. `max-raises` is 2. The opening bet does not count. Two facing raises are allowed. CFR+, frozen pass, 1 thread, engine budget 2048 MiB, iteration cap 400. `--accuracy 0.001` stops when Pio Accuracy (NashConv/2) divided by the pot is at most 0.001. With `--eval-every` omitted, the check cadence is 20.
+Board `Qc 9d 4h 2c` (two clubs), pot 100, effective stack 400. OOP continues with a wide pair-and-suited range. IP is tighter, and `ATo`, `KJo`, and `QJo` are weighted below 1. One bet size, half pot, is shared by the turn and the river. The raise size is an explicit 0.75 pot, not a copy of the bet. All-in is on. `max-raises` is 2. The opening bet does not count. Two facing raises are allowed. CFR+, frozen pass, 1 thread, engine budget 2048 MiB, iteration cap 400. Accuracy 0.001 stops when Pio Accuracy (NashConv/2) divided by the pot is at most 0.001. The check cadence is 20.
 
 A called half-pot turn bet leaves 350 behind and a pot of 200, so the river still has a half-pot bet, a raise, and an all-in. That is the future-river betting this case is for.
 
@@ -83,7 +81,7 @@ Board `Js 8h 3h`, pot 100, effective stack 500. OOP is `JJ+` plus suited broadwa
 
 Useful because flop information sets are stored on later-card runouts. One size plus one raise is the first practical betting abstraction, and the two-tone jack flop makes flush completion part of the later streets.
 
-The flop and turn reference configs set shared bet and raise lists. They do not set per-street bet or raise lists. An empty per-street raise list uses the shared raise list. It does not copy that street's bet list. Per-street raise flags are `--oop-flop-raises`, `--oop-turn-raises`, `--oop-river-raises`, and the IP twins.
+The flop and turn reference configs set shared bet and raise lists. They do not set per-street bet or raise lists. An empty per-street raise list uses the shared raise list. It does not copy that street's bet list. Per-street raise keys are `oop-flop-raises`, `oop-turn-raises`, `oop-river-raises`, and the IP twins.
 
 ## Diagnostics
 
@@ -98,66 +96,17 @@ These do not replace the three reference cases.
 
 ## How to run
 
-**Historical (pre-#287):** this harness drove C++ `street_solver` / `river_solver`
-via CMake `build/Release`. That tree is removed on `main`. Do not treat
-the cmake commands as a live product how-to.
+Zig Study contract smoke:
 
-**Current Zig Study contract smoke** (real sidecar, no Acc wall):
-
-```text
+```sh
 zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2
 python3 scripts/zig/study-contract-smoke.py ./zig-out/bin/solver-engine
 ```
 
-Optional bounded digs: `scripts/zig/run-gate-bounded.sh`, `node-ev-latency.py`
-(see [ZIG_RELEASE_GATES.md](../../docs/auxiliary/engineering/ZIG_RELEASE_GATES.md)).
-Acc / time-to-Accuracy walls are not cutover blockers.
+Optional bounded digs: `scripts/zig/run-gate-bounded.sh` and `node-ev-latency.py`. See [ZIG_RELEASE_GATES.md](../../docs/auxiliary/engineering/ZIG_RELEASE_GATES.md). Accuracy and time-to-Accuracy walls are not merge gates.
 
-Fixture configs under `configs/` (including `river_gate_smoke.txt`) remain useful
-inputs for Zig smokes. The Python study-benchmark runner below is **retired as a
-shipping how-to** until retargeted at Zig binaries; kept for archaeology:
+Fixture configs under `configs/` (including `river_gate_smoke.txt`) are inputs for those smokes. `.github/workflows/zig.yml` runs `scripts/zig/study-contract-smoke.py`. That smoke is a lifecycle check. The committed record of earlier hardware, outcomes, and timings is `benchmarks/study/RESULTS.md`.
 
-```text
-# historical only — requires deleted C++ binaries
-python benchmarks/run_study_benchmarks.py --bin-dir build/Release --cases smoke_success,smoke_invalid,smoke_timeout,smoke_resource --output-dir benchmarks/study/out/smoke --timing-label contended
-python benchmarks/run_study_benchmarks.py --bin-dir build/Release --cases reference --output-dir benchmarks/study/out/reference --timing-label quiet
-```
+`first-to-act` is a `street-config 1` field. The street fixtures list raises explicitly. The Zig engine does not copy omitted raise sizes from the bet list. Street cases are OOP-first because that is the config default. `total_seconds` on a street row is a sum of phases. `runtime_seconds` is the solve-loop timer. Neither is process wall time.
 
-`--timing-label quiet` is honest only when nothing else is compiling or solving. Otherwise pass `contended` or `pending`. Contended wall times are not a performance result. NashConv from a finished deterministic run can still be read as a quality result.
-
-Other runner flags:
-
-- `--iterations N` replaces `--iterations` in every selected command
-- `--threads N` replaces `--threads` on `street_solver` only. A value above 1 still requires `--frozen`, which the reference street cases already pass. The river binary never receives `--threads`
-- `--wall-seconds X` replaces each case's wall limit
-- `--dry-run` writes the argument arrays and does not start a process
-- `--cases` accepts `reference` (the default), `smoke`, `all`, or comma-separated ids
-
-Raw stdout, stderr, `results.json`, and `summary.md` are written to the output directory. `benchmarks/study/out/` is gitignored by `benchmarks/study/.gitignore`. Do not commit those logs. The committed record of hardware, source revision, outcomes, and timings is `benchmarks/study/RESULTS.md`.
-
-Each historical `results.json` recorded provenance: checkout SHA/branch/dirty, SHA-256 digests of the solver binaries and any `--config` files, CMake toolchain fields from the build directory, host CPU/RAM, and per-case argv / thread / memory notes. The removed binaries accepted `--version` (`poker_solver <version> git=<sha|unknown>`). Explorer `GET /api/ready` included `version` and `git_sha`.
-
-CI does not run this Python runner. `.github/workflows/zig.yml` runs `scripts/zig/study-contract-smoke.py` on the Zig `solver-engine`. That smoke is a lifecycle check, not a performance claim.
-
-## Flushed phases (removed CLIs)
-
-`street_solver` wrote `phase:` records to stdout and flushed each one. The records were `start`, `construction`, `cache_init`, `training`, `checkpoint`, and `final`. A checkpoint was one accuracy evaluation. The runner kept the last value of each key, so a killed process still yielded the last flushed phase. `phase: final` was a completed report. Any other phase meant the process was interrupted. A checkpoint's iteration count was the last finished accuracy check. Construction did not print cache, train, or evaluation clocks.
-
-`street_solver --reference` printed `start` and `final` only.
-
-## CLI notes (removed binaries)
-
-These flags belonged to `street_solver` and `river_solver`. `solver-engine` does not take them. `first-to-act` is still a `street-config 1` field. The street fixtures list raises explicitly. The Zig engine does not copy omitted raise sizes from the bet list.
-
-- With `--accuracy` set and `--eval-every` omitted, the check cadence was 20.
-- `river_solver --gap-threshold` was Pio Accuracy in chips. `river_solver --accuracy` was a pot fraction. Both accepted `--eval-every` (alias `--eval-interval`).
-- `river_solver` did not print construction, cache, train, or evaluation splits, engine allocation, process peak working set, or a thread count. It had no `--frozen`, `--threads`, or `--memory-mib`.
-- Street `total_seconds` was a sum of phases. `runtime_seconds` was the solve-loop timer. Neither was process wall time.
-- Per-street raise flags were `--oop-flop-raises`, `--oop-turn-raises`, `--oop-river-raises`, and the IP twins.
-- There was no `--first` flag. Both street cases are OOP-first because that is the config default.
-- River case argv was flags. Those cases did not load a `river-config` document.
-- If raise flags and raise multiples were both omitted, the CLI copied shared bet sizes into shared raise sizes.
-
-## Quiet-machine note
-
-This note is for the retired C++ runner. Run those reference cases when the machine is not compiling, solving, or running another heavy analysis. Simultaneous work contaminates wall time. Label that run `contended` and do not use it as a speed claim. If the full iteration caps cannot be finished, leave the cases unchanged, keep any smaller run under a different output directory or a different case id, and mark the reference timing pending.
+A quiet timing label means nothing else was compiling or solving. A contended label is not a speed claim.

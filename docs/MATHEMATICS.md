@@ -1,6 +1,6 @@
 # Mathematics
 
-Definitions used by the postflop solver. The shipped trainer is CFR+. The vanilla, linear, and DCFR sections record schedules from the removed C++ tree.
+Definitions used by the postflop solver. The shipped trainer is CFR+. The vanilla, linear, and DCFR sections define those schedules. Study Settings lists Vanilla CFR and DCFR. The host trains with CFR+.
 
 ## Hold'em showdown and hand distributions
 
@@ -22,7 +22,7 @@ Player 0's terminal utility is `pot / 2` plus the opponent's river investment wh
 
 An opening fraction `f` bets `round(f * pot)` tenths of a chip (pot stored at scale 10). A raise fraction `f` increases the bet by `round(f * pot_after_the_call)`. The minimum later raise equals the previous full bet or raise; the minimum opening add is 0.1 chip. Reported utilities stay in chips. Details and a solved toy are in [RIVER.md](RIVER.md).
 
-A turn tree adds one chance node after turn betting: the river, uniform over remaining cards. A flop tree adds two. A five-card tree adds none. Range weights enter only through the root hand distribution. The Zig Session solves all three board lengths on one public tree. The chip rule is the river rule with investments summed across the streets still to play. See [STREETS.md](STREETS.md). The old C++ names for the same split were `StreetBatchSolver` and `RiverGame`.
+A turn tree adds one chance node after turn betting: the river, uniform over remaining cards. A flop tree adds two. A five-card tree adds none. Range weights enter only through the root hand distribution. The Zig Session solves all three board lengths on one public tree. The chip rule is the river rule with investments summed across the streets still to play. See [STREETS.md](STREETS.md).
 
 Checked cases:
 
@@ -91,7 +91,7 @@ Linear CFR uses the vanilla schedule: one traversal updates both players. On ite
 
 Fixed DCFR(α=1.5, β=0, γ=2) uses alternating frozen passes like CFR+, keeps signed regrets, discounts the updating player's full row once after the pass with \(t^{1.5}/(t^{1.5}+1)\) on positives and \(0.5\) on non-positives, and averages with weight \(t^2\). DCFR requires the frozen pass on the public tree. See [STREETS.md](STREETS.md).
 
-`RiverBatchSolver` / `StreetBatchSolver` use the same updates on the public tree. Deals visit in joint-distribution order. Own-reach averaging uses the acting player's reach. Because a river information set is exactly one private hand plus one public history, a single bottom-up pass that maximizes player 0's chips and minimizes them for player 1 (ties to the lower action index) matches deepest-first best response.
+The public tree uses the same updates. Deals visit in joint-distribution order. Own-reach averaging uses the acting player's reach. Because a river information set is exactly one private hand plus one public history, a single bottom-up pass that maximizes player 0's chips and minimizes them for player 1 (ties to the lower action index) matches deepest-first best response.
 
 ## Best response and Nash gap
 
@@ -102,7 +102,7 @@ With \(\bar\sigma_{-i}\) frozen, player \(i\)'s best response maximizes that pla
 + \bigl(u_1(\bar\sigma_0,\mathrm{BR}_1)-u_1(\bar\sigma)\bigr).
 \]
 
-Under zero-sum chip EV, \(u_0+u_1=0\), so this equals \(u_0(\mathrm{BR}_0)+u_1(\mathrm{BR}_1)\). With rake, ICM, or incentives the absolute-sum form is wrong; production evaluation uses the shared gains form (historical C++ `EvaluationResult` in `include/solver/evaluation.hpp`; Zig frozen `response_walk` / NashConv helpers under `engine/`). It is zero at Nash when neither seat has a profitable deviation. **Accuracy** (Pio exploitability) is the average of the two unilateral gains, \(\mathrm{NashConv}/2\). Accuracy stopping uses Accuracy / pot by default (optional absolute chips); do not treat every modeled-utility target as a chip-pot percentage when ICM or incentives are active. Acc / time-to-Accuracy walls are not cutover blockers on `main`.
+Under zero-sum chip EV, \(u_0+u_1=0\), so this equals \(u_0(\mathrm{BR}_0)+u_1(\mathrm{BR}_1)\). With rake, ICM, or incentives the absolute-sum form is a different number. Production evaluation uses the shared gains form (`engine/src/analysis/evaluation.zig` and frozen `response_walk`). It is zero at Nash when neither seat has a profitable deviation. **Accuracy** (Pio exploitability) is the average of the two unilateral gains, \(\mathrm{NashConv}/2\). Accuracy stopping uses Accuracy / pot by default. An absolute chip target is a separate unit. When ICM or incentives are active, a modeled-utility target is not a chip-pot percentage. Acc and time-to-Accuracy walls are not merge gates on `main`.
 
 One checked river toy: pot 100, one all-in, aces or fives against kings. Equilibrium value for OOP is +25 (aces always bet, fives bet 1/2, kings call 1/2). CFR+ at 4,000 iterations reached 24.9999102275; Nash gap fell from 2.45089917903 at 40 iterations to 0.196997733488.
 

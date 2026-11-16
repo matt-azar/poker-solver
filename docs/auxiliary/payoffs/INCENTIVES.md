@@ -45,11 +45,7 @@ edge-tag b100 bluff
 edge-tag 1 f give_up
 ```
 
-`street-config 1` lines are the live format. The removed C++ CLIs used:
-
-- `--incentive kind,player,key,delta` (repeatable) on `street_solver` /
-  `river_solver`
-- `--edge-tag [player,]action,tag[,tag...]` (repeatable)
+`street-config 1` lines are the live format.
 
 Preferred ActionLabelMatch keys are the compact tokens also used by tree edits
 (`f`, `c`, `call`, `b100`, `r200`, …); display chip labels (`Fold`, `Bet 100`, …)
@@ -74,9 +70,7 @@ match on the solve path. Combo / draw category auto-tagging remains ahead.
 ## Solve path
 
 After the chip+rake terminal and optional ICM, `engine/src/kernel/terminal.zig`
-adds the path's precomputed `incentive_u0` / `incentive_u1`. The removed C++
-sites did the same add on `StreetGame`, `RiverGame`, `StreetBatch`, and
-`RiverBatchSolver`.
+adds the path's precomputed `incentive_u0` / `incentive_u1`.
 
 Empty incentives reproduce prior chip/ICM terminals bit-identically.
 
@@ -97,9 +91,6 @@ Host status reports `player0_expected_utility`, `p1_best_response` (player 0 bes
 
 ## Config / GUI
 
-Incentives and edge tags round-trip in `street-config 1` text (and historical
-Explorer Job JSON keys `incentives` / `edge_tags` on the retired HTTP surface).
-Omit both (or send empty arrays) for the chip/ICM path. Desktop Study Build
-exposes matching text fields (`;`-separated lines with the same spelling as
-street-config). Do not treat retired `/api/solve` HTTP examples as a live
-shipping contract.
+Incentives and edge tags round-trip in `street-config 1` text.
+Omit both, or send empty arrays, for the chip and ICM path. Desktop Study Build
+exposes matching text fields. Each line uses the same spelling as street-config.

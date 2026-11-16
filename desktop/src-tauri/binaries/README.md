@@ -6,9 +6,8 @@ Tauri `bundle.externalBin` lists:
 | --- | --- |
 | `binaries/solver-engine` | Zig typed-IPC Study sidecar (`solver-engine` / `.exe`) |
 
-Packaged Study uses inherited-pipe IPC to `solver-engine` (protocol 2) only.
-HTTP `holdem-explorer` is not shipped after the Zig cutover (owner GO 2026-11-12).
-Browser / Vite-dev can still talk to a separately started explorer process.
+Packaged Study uses inherited-pipe IPC to `solver-engine` (protocol 2).
+`npm run dev` starts the UI. The Tauri shell starts `solver-engine`.
 
 ## Naming (required by Tauri)
 

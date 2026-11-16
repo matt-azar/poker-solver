@@ -9,8 +9,7 @@ cap means uncapped. Invalid values fail validation.
 
 `street-config 1` always writes `rake-rate` and `rake-cap`. Defaults are zero
 (no rake). Study puts the same numbers on the solve job as `rake_rate` and
-`rake_cap`. Compile rejects an invalid rake. The old `street_solver` /
-`river_solver` flags and Explorer Job JSON used the same field meanings.
+`rake_cap`. Compile rejects an invalid rake.
 
 ## Collection
 

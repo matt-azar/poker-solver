@@ -58,8 +58,7 @@ stacks and writes `icm-stacks` / `icm-payouts` into `street-config 1`. Compile
 validates those arrays (`engine/src/poker/icm.zig`). Empty stacks leave ICM off.
 Do not treat the math pins as a Pio ICM parity claim.
 
-Historical C++ Explorer Job JSON used flat keys `icm_stacks` / `icm_payouts`
-and returned HTTP 400 on invalid values. That HTTP surface is removed.
+Compile rejects invalid `icm-stacks` and `icm-payouts`.
 
 ## Solve path
 
@@ -67,8 +66,7 @@ When ICM stacks are present, chip/rake terminals are wrapped with the
 chip→ICM delta (`applyIcmTerminal` in `engine/src/poker/icm.zig`, called from
 `engine/src/kernel/terminal.zig`). Empty ICM keeps the chip/rake terminal.
 HU WTA fold and check-down pins match the examples above (chip `+50` → ICM
-`+2.5` on equal 1000 stacks with prize 100). The removed C++ sites were
-`StreetGame`, `StreetBatch`, and `RiverBatchSolver`.
+`+2.5` on equal 1000 stacks with prize 100).
 
 Regret uses each seat's own utility. NashConv is the sum of the two
 unilateral gains, `(br0-u0)+(br1-u1)`, including when ICM or rake makes the

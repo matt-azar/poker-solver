@@ -1,6 +1,6 @@
 # Desktop Study workstation
 
-React study client (`desktop/`) over the Zig `solver-engine` typed-IPC host. Doc index: [README.md](README.md). The C++ HTTP explorer is retired: [EXPLORER.md](EXPLORER.md).
+React study client (`desktop/`) over the Zig `solver-engine` typed-IPC host. Doc index: [README.md](README.md). IPC frames: [EXPLORER.md](EXPLORER.md).
 
 ## Stack
 
@@ -8,7 +8,7 @@ React study client (`desktop/`) over the Zig `solver-engine` typed-IPC host. Doc
 | --- | --- |
 | Web client | React 19 + TypeScript + Vite |
 | State | Zustand for study/layout/theme; query identity in the engine client |
-| Engine transport | Zig `solver-engine` typed IPC only (protocol 2, inherited pipes via Tauri). No `holdem-explorer` / `:8765` shipping path. |
+| Engine transport | Zig `solver-engine` typed IPC (protocol 2, inherited pipes via Tauri). |
 | Desktop shell | Tauri 2 + `solver-engine` IPC sidecar |
 | Static UI | Vite `dist` loaded by the Tauri webview |
 
@@ -36,7 +36,7 @@ Browser-only `npm run dev` does not start an engine.
 
 ## Capability map
 
-IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/transport.ts`). Retired C++ HTTP `/api/*` paths are historical only ([EXPLORER.md](EXPLORER.md)). Soft-gated features: `desktop/src/engine/ipcCapabilities.ts`.
+IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/transport.ts`). Frame layout: [EXPLORER.md](EXPLORER.md). Soft-gated features: `desktop/src/engine/ipcCapabilities.ts`.
 
 | Backend operation | IPC op(s) | Study UI destination | Limitations | Tests |
 | --- | --- | --- | --- | --- |
@@ -97,12 +97,12 @@ IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/
 
 | Item | Status |
 | --- | --- |
-| Browser-only Study without Tauri | UI shell only — no engine (C++ `holdem-explorer` / Vite `:8765` proxy removed) |
+| Browser-only Study without Tauri | UI shell only. `npm run dev` does not start `solver-engine`. |
 | Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns installed `solver-engine` beside the app (absolute path; not `binaries/…`) over inherited-pipe IPC (`ensure_solver_engine` / `solver_engine_request`, protocol 2). The webview loads Vite `dist`. |
-| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer` on `main`. Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe`. PREINSTALL stops the UI then force-kills/deletes `solver-engine.exe` (and legacy `holdem-explorer.exe` if present on upgrade); POSTINSTALL requires `solver-engine.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`, registers HKCU LocalDumps for the UI + sidecar, and seeds `%LOCALAPPDATA%\Holdem Study\diagnostics`. Follow-on job `windows-installer-e2e` runs **Stage A** (silent `/S /D=%LOCALAPPDATA%\Holdem Study`, interactive WebView `ensure`+`status`) then **Stage B** (tiny river solve → browse → clear active solution → reopen PSOL → strategy restore → sidecar exit) via `scripts/desktop/windows-installer-e2e.ps1`. |
+| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer` on `main`. Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe`. PREINSTALL stops the UI then force-kills and deletes `solver-engine.exe`. POSTINSTALL requires `solver-engine.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`, registers HKCU LocalDumps for the UI + sidecar, and seeds `%LOCALAPPDATA%\Holdem Study\diagnostics`. Follow-on job `windows-installer-e2e` runs **Stage A** (silent `/S /D=%LOCALAPPDATA%\Holdem Study`, interactive WebView `ensure`+`status`) then **Stage B** (tiny river solve → browse → clear active solution → reopen PSOL → strategy restore → sidecar exit) via `scripts/desktop/windows-installer-e2e.ps1`. |
 | Local crash diagnostics | Help (`?`) shows the diagnostics folder path and offers Open / Copy zip. Sidecar stderr rolls into `engine.log`; **before** Solve/Continue train start a cheap `last-solve.json` + `host-resources.json` (`snapshotKind=pre-solve`) is written; **every** Solve failed / session-dead / kill / ensure-fail / soft solve-RPC fail writes `last-fault.json` and refreshes `host-resources.json` (`snapshotKind=fault`); temporary UI unresponsiveness (status-poll timeout/slow/hung, main-thread stall) appends a ring to `ui-hang-events.json` even when the soft blip recovers; ready handshake writes `session-meta.json`. Packaged path: `%LOCALAPPDATA%\Holdem Study\diagnostics`. No remote Sentry. |
 | Native Open/Save dialogs | Primary Save/Open uses the in-app solutions catalogue (folders). Browse disk remains secondary: browser prompts; Windows Tauri build wires `tauri-plugin-dialog` + `dialog:default` capability; adapter keeps a prompt fallback if the plugin invoke fails |
-| Packaged engine ownership | `solver-engine` with `--launch-id` over inherited pipes (protocol 2). Tauri demuxes stdout by `request_id` so Study can issue mid-train `values` while `solve` is in flight. No HTTP explorer fallback. |
+| Packaged engine ownership | `solver-engine` with `--launch-id` over inherited pipes (protocol 2). Tauri demuxes stdout by `request_id` so Study can issue mid-train `values` while `solve` is in flight. |
 | Production CSP | Packaged webview CSP allows `'self'` / Tauri IPC / assets, loopback (`http://127.0.0.1:*`, `http://localhost:*`), and `https://api.openai.com` for the assistant. `devCsp` stays null so `tauri:dev` / HMR are unconstrained. Spawn remains for the owned `solver-engine` sidecar. |
 | IPC / contract fixtures | `desktop/src/engine/contracts` + IPC protocol helpers; fixtures under `desktop/src/engine/fixtures`. |
 | Code-signed official release | Not yet — CI artifact is unsigned |
@@ -111,8 +111,8 @@ IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/
 
 Prefer the [latest GitHub Release download](https://github.com/matt-azar/poker-solver/releases/latest/download/Holdem-Study-windows-x64-setup.exe), or Actions → **Windows Installer** → artifact `holdem-study-windows-installer`.
 
-1. Run `Holdem-Study-windows-x64-setup.exe` (current-user install; WebView2 may bootstrap if missing). Close Holdem Study if it is open (setup will offer to stop it). Setup stops any leftover `solver-engine` (and legacy `holdem-explorer`), fails loudly if `solver-engine.exe` is missing after copy, and clears Mark-of-the-Web on the installed exes.
-2. Launch **Holdem Study** from the Start menu. The shell starts `solver-engine` with a launch id over inherited pipes and waits for the protocol-2 ready handshake before the Study UI connects. No CMake or npm required.
+1. Run `Holdem-Study-windows-x64-setup.exe`. The install is per user. WebView2 may bootstrap if it is missing. Close Holdem Study if it is open. Setup will offer to stop it. Setup stops any leftover `solver-engine`, fails if `solver-engine.exe` is missing after copy, and clears Mark-of-the-Web on the installed exes.
+2. Launch **Holdem Study** from the Start menu. The shell starts `solver-engine` with a launch id over inherited pipes and waits for the protocol-2 ready handshake before the Study UI connects. The installed app does not need a local compiler.
 
 ### Cutting a Windows Release (maintainers)
 
@@ -155,5 +155,5 @@ npm run tauri:build
 - Engine: `zig build test` (+ `scripts/zig/ready-smoke.py`, `scripts/zig/study-contract-smoke.py`)
 - Live: solve via Tauri + `solver-engine` IPC; Status bar shows EV / NashConv / mem (`gap_series` in status payload, no Graphs UI)
 - Visual targets: 1440×900 dark/light, 1920×1080 dual-range, 1280×800 compact
-- Do not cite deleted C++ HTTP suites or explorer HTTP status codes as current coverage. Re-validate Tauri webview lifecycle, native Open/Save dialogs, and the NSIS packaged install on Windows before a Study release. Full guide: [TESTING.md](auxiliary/engineering/TESTING.md).
+- Re-validate Tauri webview lifecycle, native Open/Save dialogs, and the NSIS packaged install on Windows before a Study release. Full guide: [TESTING.md](auxiliary/engineering/TESTING.md).
 - Changing the flop, and changing an earlier street after a later card is dealt, are unsupported. Turn and river card changes keep the betting line when the deal-chance ancestor is known. See [EQUITY.md](EQUITY.md) for check-down equity limits.

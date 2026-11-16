@@ -1,7 +1,7 @@
 # Browser Study preview (recorded IPC)
 
 Private UI review of the same React Study shell. Live solving stays on desktop
-Tauri + `solver-engine`. This path never opens HTTP `:8765`.
+Tauri + `solver-engine`. This path reads recorded IPC.
 
 ## Run locally
 

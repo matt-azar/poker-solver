@@ -1,8 +1,7 @@
 # Study crash & hang debug suite
 
 Practical scripts for diagnosing **crashes** vs **hangs** in Holdem Study
-(Tauri UI + Zig `solver-engine` typed IPC). They observe from outside the app —
-no HTTP `:8765`, no `holdem-explorer`, no product-code hooks required.
+(Tauri UI + Zig `solver-engine` typed IPC). They observe from outside the app.
 
 **Primary audience:** the **Windows installed** (NSIS) build — persistent
 crashes/hangs have been hard to root-cause there. Linux cloud probes still work
@@ -417,6 +416,6 @@ Root cause for Windows “Solve stuck then Reconnect”: MT train pinning every 
 
 - Prefer **external observation** first; avoid editing `solver_engine.rs`,
   `transport.ts`, or host dispatch unless a dig proves a product bug.
-- Do not reintroduce HTTP fallthrough or `holdem-explorer`.
+- Do not add an HTTP solve server.
 - Scripts are stdlib-first (Python 3.10+); `psutil` optional; mini-app needs tkinter
   (usually bundled with Python on Windows).

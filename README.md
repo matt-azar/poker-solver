@@ -6,7 +6,7 @@ Heads-up no-limit Texas Hold'em GTO solver (**Zig**) with a local Study workstat
 
 Flop, turn, and river share one public betting tree. Convergence is an equilibrium of the configured bet-size tree.
 
-The legacy C++ `holdem-explorer` / CMake shipping path is **removed** on `main` (owner GO 2026-11-12; Zig cutover). Study is Zig typed-IPC only.
+Study is Zig typed IPC.
 
 ## Windows installer
 
@@ -19,7 +19,7 @@ Download the unsigned NSIS setup from the [latest GitHub Release](https://github
 
 Windows SmartScreen may warn because the binary is not code-signed — **More info → Run anyway**.
 
-The installer stops any running Study UI/engine, places `solver-engine.exe` next to the UI, unblocks the binaries, and fails if the engine is missing. On launch the shell starts that Zig sidecar with a launch id over inherited pipes (typed IPC) and waits for ready before the Study UI connects. No CMake or npm required.
+The installer stops any running Study UI and engine, places `solver-engine.exe` next to the UI, unblocks the binaries, and fails if the engine is missing. On launch the shell starts that Zig sidecar with a launch id over inherited pipes and waits for ready before the Study UI connects.
 
 Maintainers: CI rebuilds the artifact on desktop / Zig engine changes (Actions → **Windows Installer**). Publishing a Release is intentional — push a `v*-windows` tag (see packaging notes). Packaging notes: [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#desktop-packaging).
 
@@ -34,7 +34,7 @@ zig build -Doptimize=ReleaseFast
 cd desktop && npm ci && npm run tauri dev
 ```
 
-Browser-only `npm run dev` does **not** start an engine (no HTTP explorer fallback).
+`npm run dev` starts Vite. `npm run tauri dev` starts the shell and `solver-engine`.
 
 Limited **river** live browser beta (isolated sessions over typed IPC): see
 [`services/river-beta/README.md`](services/river-beta/README.md) and open
@@ -93,7 +93,7 @@ Index: [docs/README.md](docs/README.md). Primary docs stay at `docs/`; supportin
 ### Study UI
 
 - [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md) — Study workstation + Windows packaging
-- [docs/EXPLORER.md](docs/EXPLORER.md) — retired C++ HTTP explorer notes (historical)
+- [docs/EXPLORER.md](docs/EXPLORER.md) — `solver-engine` protocol 2 frames
 - [docs/STUDY_SETUP_ASSISTANT.md](docs/STUDY_SETUP_ASSISTANT.md) — Study assistant
 - [docs/ai-context/](docs/ai-context/README.md) — model-facing context packs
 

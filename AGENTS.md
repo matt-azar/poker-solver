@@ -7,7 +7,7 @@ That file is the durable trap list (parallel agents, Study EV/equity lifecycle, 
 Also:
 
 - Do not change `LICENSE` / SPDX (see `.cursor/rules/licensing.mdc`).
-- On `main`, the product engine is Zig (`engine/` / `solver-engine` typed IPC). Do **not** reintroduce `holdem-explorer`, CMake product builds, HTTP `:8765` fallbacks, or `fetch("")` while IPC is active.
+- On `main`, the product engine is Zig (`engine/` / `solver-engine` typed IPC). Study calls that sidecar. Do not add an HTTP solve server or a second engine binary.
 - The shipped trainer is CFR+. PSOL v4 stores that algorithm byte only. Settings labels Vanilla CFR and DCFR are draft strings.
 - After Study UI / analysis changes: desktop tests + `npx tsc -b`; after assistant/UI label moves: `cd desktop && npm run check:ai-context`.
 - After Zig engine/host changes: `zig build` + `zig build test` (prefer `-Dcpu=x86_64_v2` for Windows artifacts).

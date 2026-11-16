@@ -2,7 +2,7 @@
 
 Versioned JSON profiles that pair OOP/IP weighted ranges under shared game assumptions (positions, stack, open size, action history, format, rake metadata).
 
-This catalogue sits **alongside** the flat text presets in `configs/ranges/*.txt`. Those legacy presets remain available via `GET /api/ranges` and can be wrapped for display with unknown assumptions (`legacyPreset: true`); they are never treated as automatic exact matches.
+This catalogue sits alongside the flat text presets in `configs/ranges/*.txt`. Library reads those files through Tauri `library_*`. A wrapped row can set `legacyPreset: true`. Exact match skips those rows.
 
 
 ## Desktop bundling
