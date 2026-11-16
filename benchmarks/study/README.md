@@ -14,7 +14,7 @@ The runner schema `study-benchmark-results-2` records both
 and sets `stop_criterion` to `accuracy_over_pot`. Case fixtures use
 `quality_target_accuracy_over_pot`.
 
-`street_solver` prints `accuracy` and `accuracy_fraction_of_pot` (Pio Accuracy). `river_solver` prints `accuracy` / `accuracy_fraction_of_pot` as well. The runner prefers those fields and falls back to half of `nash_gap`/`pot` for older logs.
+The removed `street_solver` and `river_solver` printed `accuracy` and `accuracy_fraction_of_pot` (Pio Accuracy). The retired runner preferred those fields and fell back to half of `nash_gap`/`pot` for older logs.
 
 Clocks stay distinct:
 
@@ -135,27 +135,29 @@ Other runner flags:
 
 Raw stdout, stderr, `results.json`, and `summary.md` are written to the output directory. `benchmarks/study/out/` is gitignored by `benchmarks/study/.gitignore`. Do not commit those logs. The committed record of hardware, source revision, outcomes, and timings is `benchmarks/study/RESULTS.md`.
 
-Each `results.json` also records provenance: checkout SHA/branch/dirty, SHA-256 digests of the solver binaries and any `--config` files, CMake toolchain fields from the build directory, host CPU/RAM, and per-case argv / thread / memory notes. `street_solver`, `river_solver`, and `explorer` accept `--version` (`poker_solver <version> git=<sha|unknown>`). Explorer `GET /api/ready` includes additive `version` and `git_sha` fields without bumping ready protocol `1`.
+Each historical `results.json` recorded provenance: checkout SHA/branch/dirty, SHA-256 digests of the solver binaries and any `--config` files, CMake toolchain fields from the build directory, host CPU/RAM, and per-case argv / thread / memory notes. The removed binaries accepted `--version` (`poker_solver <version> git=<sha|unknown>`). Explorer `GET /api/ready` included `version` and `git_sha`.
 
 CI does not run this Python runner. `.github/workflows/zig.yml` runs `scripts/zig/study-contract-smoke.py` on the Zig `solver-engine`. That smoke is a lifecycle check, not a performance claim.
 
-## Flushed phases
+## Flushed phases (removed CLIs)
 
-`street_solver` writes `phase:` records to stdout and flushes each one. The records are `start`, `construction`, `cache_init`, `training`, `checkpoint`, and `final`. A checkpoint is one accuracy evaluation. The runner keeps the last value of each key, so a killed process still yields the last flushed phase. `phase: final` is a completed report. Any other phase means the process was interrupted. A checkpoint's iteration count is the last finished accuracy check, not an iteration still in progress. Construction does not print cache, train, or evaluation clocks. Those clocks are zero until their phase has run, and printing them early would look like a measurement.
+`street_solver` wrote `phase:` records to stdout and flushed each one. The records were `start`, `construction`, `cache_init`, `training`, `checkpoint`, and `final`. A checkpoint was one accuracy evaluation. The runner kept the last value of each key, so a killed process still yielded the last flushed phase. `phase: final` was a completed report. Any other phase meant the process was interrupted. A checkpoint's iteration count was the last finished accuracy check. Construction did not print cache, train, or evaluation clocks.
 
-`street_solver --reference` prints `start` and `final` only. The reference walk has no construction or cache split.
+`street_solver --reference` printed `start` and `final` only.
 
-## CLI notes
+## CLI notes (removed binaries)
 
-- When `street_solver --accuracy` is set and `--eval-every` is omitted, the check cadence is 20. `--eval-every N` changes it. `N` must be a positive integer.
-- `river_solver --gap-threshold` is Pio Accuracy in chips. `river_solver --accuracy` defaults to a pot fraction. Both accept `--eval-every` (alias `--eval-interval`).
-- `river_solver` does not print construction, cache, train, or evaluation splits, engine allocation, process peak working set, or a thread count. It has no `--frozen`, `--threads`, or `--memory-mib`.
-- Street `total_seconds` is not process wall time. `runtime_seconds` is not process wall time on either CLI.
-- Per-street raise flags exist: `--oop-flop-raises`, `--oop-turn-raises`, `--oop-river-raises`, and the IP twins. An empty per-street raise list uses the shared raise list. It does not copy that street's bet list.
-- `street_solver` has no `--first` flag. `first-to-act` is a `street-config 1` field. Both street cases are OOP-first because that is the config default.
-- River cases still use flag argv. They do not load a `river-config` document.
-- If `street_solver` raise flags and raise multiples are both omitted, the CLI copies the shared bet sizes into the shared raise sizes. The street-config fixtures list raises explicitly. The engine does not perform that copy.
+These flags belonged to `street_solver` and `river_solver`. `solver-engine` does not take them. `first-to-act` is still a `street-config 1` field. The street fixtures list raises explicitly. The Zig engine does not copy omitted raise sizes from the bet list.
+
+- With `--accuracy` set and `--eval-every` omitted, the check cadence was 20.
+- `river_solver --gap-threshold` was Pio Accuracy in chips. `river_solver --accuracy` was a pot fraction. Both accepted `--eval-every` (alias `--eval-interval`).
+- `river_solver` did not print construction, cache, train, or evaluation splits, engine allocation, process peak working set, or a thread count. It had no `--frozen`, `--threads`, or `--memory-mib`.
+- Street `total_seconds` was a sum of phases. `runtime_seconds` was the solve-loop timer. Neither was process wall time.
+- Per-street raise flags were `--oop-flop-raises`, `--oop-turn-raises`, `--oop-river-raises`, and the IP twins.
+- There was no `--first` flag. Both street cases are OOP-first because that is the config default.
+- River case argv was flags. Those cases did not load a `river-config` document.
+- If raise flags and raise multiples were both omitted, the CLI copied shared bet sizes into shared raise sizes.
 
 ## Quiet-machine note
 
-Run the reference cases when the machine is not compiling, solving, or running another heavy analysis. Simultaneous work contaminates wall time. Label that run `contended` and do not use it as a speed claim. If the full iteration caps cannot be finished, leave the cases unchanged, keep any smaller run under a different output directory or a different case id, and mark the reference timing pending.
+This note is for the retired C++ runner. Run those reference cases when the machine is not compiling, solving, or running another heavy analysis. Simultaneous work contaminates wall time. Label that run `contended` and do not use it as a speed claim. If the full iteration caps cannot be finished, leave the cases unchanged, keep any smaller run under a different output directory or a different case id, and mark the reference timing pending.

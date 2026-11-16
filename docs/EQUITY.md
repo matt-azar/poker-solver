@@ -4,7 +4,7 @@ Exact check-down showdown equity for a flop, turn, or river.
 
 **Shipping on `main`:** Study node equity and the Equity Calculator use Zig host IPC (`equity`, `start_equity_job` / `get_equity_job` / `cancel_equity_job`). C++ `equity_calculator` / `equity_tests` / Explorer `/equity` names below are **historical** — algorithm notes still apply. Not a Pio equity-parity claim.
 
-Does not edit ranges, build a betting tree, or read solver state beyond the requested weights/board. Default work limit admits a full-range river and rejects a full-range turn.
+Does not edit ranges, build a betting tree, or read solver state beyond the requested weights/board. The library default (`default_max_pair_runouts`, 1,100,000) admits a full-range river and rejects a full-range turn. Study node equity uses `study_explorer_max_pair_runouts` (51,369,120).
 
 ## Model
 

@@ -58,7 +58,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/
 | Compare | *(soft-gated)* | Compare workspace | Dual-session baseline not available over Zig IPC yet (`compare: false`) | — |
 | Save / Open | `save`, `open` | File menu / Study toolbar → in-app solutions catalogue | PSOL + locks; folders in localStorage index under managed solutions root; Browse disk secondary; invalid strategy rows rejected before replace | contract smoke; checkpoint + `solutionsCatalogue` vitest |
 | Recent / templates / ranges | Tauri FS `library_*` (not engine HTTP) | Library + File menu | Nested `configs/ranges`; flat `configs/templates`; staged via `bundle.resources` | library IPC vitest; `check:library-assets` |
-| Config parse | local TS (`streetConfigText`) | Build | street/river text only; street echoes `tree_edits`; no host session mutate | `streetConfigText.test.ts` |
+| Config parse | local TS (`streetConfigText`) | Build | `street-config 1` only; echoes `tree_edits`; no host session mutate | `streetConfigText.test.ts` |
 | Memory plan dry-run | `plan_memory` | Collapsible Build preflight shows labeled peak vs budget | Labeled `estimated_peak_bytes`; not RSS; temp compile | TreeLineEditor tests |
 | Tree preview / line edits | `tree_preview` | Mounted collapsible Preview tree; Force/Remove/Add size → draft `tree_edits`; same `buildJob` serializer as Solve | Canonical labels; must not wipe loaded Study; failed preview leaves solution | tree-edit vitest |
 | Betting tree Save / Open | Client JSON (`holdem-study-betting-tree` v1) in localStorage | Build → Betting tree catalogue | Sizes, caps, `tree_edits` only; flat list (no folders) | `bettingTreeCatalogue` |

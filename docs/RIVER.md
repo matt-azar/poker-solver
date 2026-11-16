@@ -61,13 +61,12 @@ river_solver --iterations 100000 --time-limit 5
 river_solver --iterations 200 --report report.txt
 ```
 
-`--time-limit SECONDS` stops at the next iteration boundary once that many wall-clock seconds have elapsed. The solver prints `time_limit_reached: 1` when the wall clock caused the stop. The same flag exists on `street_solver`. `--report FILE` writes a versioned `strategy-report 1` summary after the solve.
+On that CLI, `--time-limit SECONDS` stopped at the next iteration boundary and the process printed `time_limit_reached: 1` when the wall clock caused the stop. `street_solver` had the same flag. `--report FILE` wrote `strategy-report 1`. `--accuracy` was a pot fraction. `--gap-threshold` was Accuracy in chips. `solver-engine` does not take those flags. Host `solve` still accepts `time_limit` and `accuracy` (pot fraction), and status JSON includes `time_limit_reached`.
 
-The reported Nash gap is NashConv, the sum of unilateral BR gains
+The Nash gap is NashConv, the sum of unilateral BR gains
 `(u0(BR0)-u0(σ̄)) + (u1(BR1)-u1(σ̄))`. Under zero-sum chips that equals
 `u0(BR0) + u1(BR1)`. Pio Accuracy (the stop metric) is NashConv/2.
-`--accuracy` defaults to pot fraction; `--gap-threshold` is Accuracy in chips.
-Player 0 is out of position.
+The default unit is a pot fraction. Player 0 is out of position.
 
 ## Historical strategy report
 

@@ -1,5 +1,5 @@
 /**
- * Full-template application: convert a parsed street/river config into a
+ * Full-template application: convert a parsed `street-config 1` document into a
  * complete SpotDraft. Unlike a partial merge, absent utility fields reset to
  * the blank-spot defaults so a prior rake/ICM/incentive setup cannot leak.
  *
