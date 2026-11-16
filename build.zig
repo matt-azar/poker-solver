@@ -52,6 +52,14 @@ pub fn build(b: *std.Build) void {
     });
     cli_mod.addImport("poker_engine", engine_mod);
 
+    const holdem_study_cli_mod = b.createModule(.{
+        .root_source_file = b.path("cli/src/holdem_study_cli/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    holdem_study_cli_mod.addImport("poker_engine", engine_mod);
+    holdem_study_cli_mod.addImport("poker_app", app_mod);
+
     const gate_bench_mod = b.createModule(.{
         .root_source_file = b.path("cli/src/gate_bench.zig"),
         .target = target,
@@ -72,6 +80,13 @@ pub fn build(b: *std.Build) void {
         .root_module = cli_mod,
     });
     b.installArtifact(street_config_cli);
+
+    // Portable study-job plan/solve over isolated solver-engine IPC.
+    const holdem_study_cli = b.addExecutable(.{
+        .name = "holdem-study-cli",
+        .root_module = holdem_study_cli_mod,
+    });
+    b.installArtifact(holdem_study_cli);
 
     // Phase 7 interim measurement harness (not a shipping cutover claim).
     const gate_bench = b.addExecutable(.{

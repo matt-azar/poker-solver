@@ -142,6 +142,13 @@ import {
   type StrategyEditScope,
 } from "../domain/setup";
 import { draftFromFullTemplate } from "../domain/setup/templateApply";
+import {
+  draftFromPortableJob,
+  parsePortableJobJson,
+  portableJobFromDraft,
+  stringifyPortableJob,
+  walkDecisionActions,
+} from "../domain/studyJob";
 import { getRangeProfileCatalogue } from "../domain/profiles";
 import { getSolutionsCatalogue } from "../domain/solutionsCatalogue";
 import { EngineError, engineClient } from "../engine/client";
@@ -563,7 +570,14 @@ interface StudyState {
    */
   ensureNodeAnalysis: () => Promise<void>;
   saveSolution: (path?: string) => Promise<SaveSolutionResult>;
-  openSolution: (path?: string) => Promise<OpenSolutionResult>;
+  openSolution: (
+    path?: string,
+    options?: { decisionActions?: string[] },
+  ) => Promise<OpenSolutionResult>;
+  /** Replace Build draft from a portable holdem-study-job/1 JSON string. */
+  applyPortableJobJson: (text: string) => { ok: true; warnings: string[] } | { ok: false; error: string };
+  /** Emit portable job JSON for the current Build draft (same config CLI uses). */
+  exportPortableJobJson: () => string;
   loadCompare: (nodeId?: string) => Promise<void>;
 
   libraryLists: LibraryLists;
@@ -3933,7 +3947,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     return { ok: true, path: target };
   },
 
-  async openSolution(path) {
+  async openSolution(path, options) {
     const target = (
       path ??
       lastValidCheckpointPath(get().draft.solutionPath, get().lastCheckpointPath)
@@ -3943,6 +3957,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       set({ message: error });
       return { ok: false, error };
     }
+    const decisionActions = options?.decisionActions?.filter(Boolean) ?? [];
     // Stage: show loading only. Do not clear path, undo, or published study
     // until the engine open succeeds — failure must preserve the whole document.
     set({
@@ -4049,7 +4064,62 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       canRedoRange: false,
       message: `Opened ${target}. ${syncNote}${warningSuffix}`,
     });
+
+    // Optional: locate the recorded decision after open (works when another
+    // solution was already loaded — open replaces, then we walk the new tree).
+    if (decisionActions.length > 0 && get().solutionId && get().currentNode) {
+      const openedSolutionId = get().solutionId!;
+      const walk = await walkDecisionActions(
+        get().currentNode!,
+        decisionActions,
+        async (nodeId) => engineClient.getNode(openedSolutionId, nodeId),
+      );
+      if (walk.ok) {
+        await get().navigateTo(walk.node_id, { history: "replace" });
+        set({
+          message: `Opened ${target} at recorded decision (${decisionActions.join(" / ")}). ${syncNote}${warningSuffix}`,
+        });
+      } else {
+        set({
+          message: `Opened ${target}. Could not locate decision (${walk.reason}). ${syncNote}${warningSuffix}`,
+        });
+      }
+    }
     return { ok: true, path: target };
+  },
+
+  applyPortableJobJson(text) {
+    try {
+      const job = parsePortableJobJson(text);
+      const { draft, warnings } = draftFromPortableJob(job);
+      const weights = {
+        oop: parseRangeText(draft.oopRange),
+        ip: parseRangeText(draft.ipRange),
+      };
+      set({
+        draft,
+        weights,
+        draftRevision: bumpRevision(get().draftRevision),
+        setupMeta: null,
+        message:
+          warnings.length > 0
+            ? `Loaded study job. ${warnings.join(" ")}`
+            : "Loaded study job into Build.",
+      });
+      return { ok: true as const, warnings };
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      set({ message: error });
+      return { ok: false as const, error };
+    }
+  },
+
+  exportPortableJobJson() {
+    return stringifyPortableJob(
+      portableJobFromDraft(get().draft, {
+        provenance: { source: "build", created_by: "holdem-study" },
+      }),
+    );
   },
 
   async loadCompare(nodeId) {

@@ -1,0 +1,12 @@
+hand-history 1
+board Ah Kd 7c 4s 2h
+pot 100
+stack 200
+oop-hole AcAd
+ip-hole KsKc
+action 0 Check
+action 1 Bet 50
+action 0 Call
+terminal-pot 200
+outcome showdown
+p0-net 100

@@ -201,10 +201,47 @@ export function BuildWorkspace() {
   const [paintWeightDraft, setPaintWeightDraft] = useState(
     paintWeight.toFixed(2),
   );
+  const [jobMessage, setJobMessage] = useState<string | null>(null);
+  const jobFileInputRef = useRef<HTMLInputElement>(null);
+  const applyPortableJobJson = useStudyStore((s) => s.applyPortableJobJson);
+  const exportPortableJobJson = useStudyStore((s) => s.exportPortableJobJson);
 
   useEffect(() => {
     setPaintWeightDraft(paintWeight.toFixed(2));
   }, [paintWeight]);
+
+  const exportStudyJob = () => {
+    try {
+      const text = exportPortableJobJson();
+      const blob = new Blob([text], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "study-job.json";
+      a.click();
+      URL.revokeObjectURL(url);
+      setJobMessage("Exported study-job.json (same config as holdem-study-cli).");
+    } catch (err) {
+      setJobMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const onJobFileChosen = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const result = applyPortableJobJson(text);
+      setJobMessage(
+        result.ok
+          ? result.warnings.length
+            ? `Loaded job. ${result.warnings.join(" ")}`
+            : "Loaded job into Build."
+          : result.error,
+      );
+    } catch (err) {
+      setJobMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   const commitPaintWeightDraft = (raw: string) => {
     const parsed = Number(raw);
@@ -246,6 +283,33 @@ export function BuildWorkspace() {
           <button
             type="button"
             className="toolbar-btn"
+            title="Export portable study job (street-config + run limits) for holdem-study-cli"
+            onClick={exportStudyJob}
+          >
+            Export job
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
+            title="Import a portable study job into this Build draft"
+            onClick={() => jobFileInputRef.current?.click()}
+          >
+            Import job
+          </button>
+          <input
+            ref={jobFileInputRef}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              event.target.value = "";
+              void onJobFileChosen(file);
+            }}
+          />
+          <button
+            type="button"
+            className="toolbar-btn"
             title="Copy current Build ranges and board into the Equity calculator"
             onClick={() => {
               useEquityStore.getState().importDraft(
@@ -262,6 +326,12 @@ export function BuildWorkspace() {
           </button>
         </div>
       </header>
+
+      {jobMessage ? (
+        <p className="build-profile-note" role="status">
+          {jobMessage}
+        </p>
+      ) : null}
 
       {solveBlocked && solveErrors.length > 0 ? (
         <div className="build-solve-errors" role="alert">

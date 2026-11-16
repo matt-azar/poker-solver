@@ -12,7 +12,7 @@ import type {
   TreePreviewNode,
   TreePreviewPayload,
 } from "../../domain/types";
-import { buildJob } from "../../state/studyDraft";
+import { portableJobFromDraft } from "../../domain/studyJob";
 import { useStudyStore } from "../../state/studyStore";
 
 /** Display labels → compact TreeEdit tokens (no spaces) for street-config text. */
@@ -57,9 +57,12 @@ function addSizeLine(path: string, sizeText: string): string {
   return `add-size ${pathToken(path)} ${sizeText}`;
 }
 
-/** Same serializer Solve uses — preview and solve share board, ranges, sizes, edits, stop. */
-function draftPreviewBody(draft: SpotDraft) {
-  return buildJob(draft);
+/**
+ * Same portable street-config the CLI plan/solve job carries — Build Preview and
+ * holdem-study-cli share one canonical document (not a parallel SolveJob shape).
+ */
+function draftPreviewBody(draft: SpotDraft): { text: string } {
+  return { text: portableJobFromDraft(draft).street_config };
 }
 
 function formatBytes(bytes: number): string {

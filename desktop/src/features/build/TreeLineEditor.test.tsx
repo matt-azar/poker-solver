@@ -122,11 +122,18 @@ describe("TreeLineEditor", () => {
     return user;
   }
 
-  it("previews with the same buildJob body Solve uses", async () => {
+  it("previews with the same portable street-config CLI plan uses", async () => {
+    const { portableJobFromDraft } = await import("../../domain/studyJob");
     render(<TreeLineEditor />);
     await waitFor(() => expect(treePreview).toHaveBeenCalled());
     const body = treePreview.mock.calls[0]?.[0];
-    expect(body).toEqual(buildJob(useStudyStore.getState().draft));
+    const portable = portableJobFromDraft(useStudyStore.getState().draft);
+    expect(body).toEqual({ text: portable.street_config });
+    // Still matches Solve's buildJob → street-config serialization.
+    const { formatSolveJobStreetConfig } = await import("../../engine/streetConfigText");
+    expect(portable.street_config).toBe(
+      formatSolveJobStreetConfig(buildJob(useStudyStore.getState().draft)),
+    );
     expect(screen.queryByText("Check")).toBeNull();
     // Plan memory sits above Preview tree even while collapsed.
     expect(screen.getByText(/Plan peak/i)).toBeTruthy();

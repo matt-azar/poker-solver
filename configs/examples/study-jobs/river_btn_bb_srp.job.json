@@ -1,0 +1,34 @@
+{
+  "schema": "holdem-study-job/1",
+  "street_config": "street-config 1\nboard Ah Kd 7c 4s 2h\npot 100\nstack 200\noop-range AcAd:1\nip-range KsKc:1\nfirst-to-act 0\nmax-raises 2\nallow-three-bet 1\nall-in-threshold 0.5\npot-cap 0\nrake-rate 0\nrake-cap 0\nmemory-mib 256\nthreads 1\noop-river-bets 0.5\nip-river-bets 0.5\n",
+  "run": {
+    "iterations": 20,
+    "accuracy": null,
+    "time_limit": null
+  },
+  "provenance": {
+    "source": "hand-history",
+    "created_by": "holdem-study-cli",
+    "notes": "BTN vs BB SRP river from hand-history",
+    "range_sources": {
+      "oop": "AcAd",
+      "ip": "KsKc"
+    }
+  },
+  "review": {
+    "positions": { "oop": "BB", "ip": "BTN" },
+    "board": ["Ah", "Kd", "7c", "4s", "2h"],
+    "pot": 100,
+    "effective_stack": 200,
+    "action_line": ["Check", "Bet 50", "Call"],
+    "range_sources": {
+      "oop": "AcAd",
+      "ip": "KsKc"
+    },
+    "missing_sizes": [],
+    "street_boundary": "river"
+  },
+  "decision": {
+    "actions": ["Check", "Bet 50", "Call"]
+  }
+}
