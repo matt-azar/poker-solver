@@ -32,6 +32,9 @@ export {
 } from "./handHistory";
 
 export {
+  assertDecisionIsStudyNode,
+  decisionActionsForStudy,
+  heuristicDecisionActions,
   labelsMatch,
   walkDecisionActions,
   walkPreviewActions,
@@ -39,3 +42,8 @@ export {
   type DecisionWalkResult,
   type DecisionWalkStep,
 } from "./decisionPath";
+
+export {
+  assertJobRepresentableInBuild,
+  JobNotRepresentableError,
+} from "./representability";

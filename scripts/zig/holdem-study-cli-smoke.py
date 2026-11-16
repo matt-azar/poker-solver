@@ -119,11 +119,10 @@ def main() -> int:
         assert status.get("terminal_reason") == "completed"
         assert int(status.get("iterations") or 0) >= 1
         assert "accuracy_chips" in status
-        assert solve_body.get("decision_actions") == [
-            "Check",
-            "Bet 50",
-            "Call",
-        ]
+        # Study opens facing Call — decision path must not include the terminal Call.
+        assert job.get("decision", {}).get("actions") == ["Check", "Bet 50"]
+        assert job["review"].get("missing_sizes") == []
+        assert solve_body.get("decision_actions") == ["Check", "Bet 50"]
 
     print(
         json.dumps(

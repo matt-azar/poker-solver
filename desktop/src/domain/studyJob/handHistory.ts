@@ -3,7 +3,11 @@
  * Supported street boundary: five-card board only (river).
  */
 import { formatSolveJobStreetConfig } from "../../engine/streetConfigText";
-import type { SolveJobRequest } from "../types";
+import type { SolveJobRequest, TreePreviewNode } from "../types";
+import {
+  decisionActionsForStudy,
+  heuristicDecisionActions,
+} from "./decisionPath";
 import {
   STUDY_JOB_SCHEMA,
   type StudyJob,
@@ -39,8 +43,10 @@ export interface RiverJobFromHandHistoryOptions {
   memoryMib?: number;
   threads?: number;
   positions?: { oop?: string; ip?: string };
-  /** Actions to open Study at; default = full action_line (last decision). */
+  /** Actions to open Study at; default = path to last decision (not terminal). */
   decisionActions?: string[];
+  /** When provided, validate the line against this compiled preview tree. */
+  previewNodes?: TreePreviewNode[];
   created_at?: string;
 }
 
@@ -265,6 +271,8 @@ export function riverJobFromHandHistory(
     ? uniqueFractions(options.ipRiverBets)
     : defaultBets;
 
+  // Fraction-list preflight (raises/bets). Tree walk below is authoritative when
+  // preview nodes are available — empty missing_sizes without a walk is not success.
   const missing_sizes: string[] = [];
   for (const label of action_line) {
     const frac = potFractionForPlayedSize(label, record.pot);
@@ -316,6 +324,23 @@ export function riverJobFromHandHistory(
     );
   }
 
+  let decisionActions =
+    options.decisionActions ?? heuristicDecisionActions(action_line);
+  let decisionPath = decisionActions.join("/");
+  if (options.previewNodes?.length) {
+    const validated = decisionActionsForStudy(options.previewNodes, action_line);
+    for (const miss of validated.missing_sizes) {
+      if (!missing_sizes.includes(miss)) missing_sizes.push(miss);
+    }
+    decisionActions = options.decisionActions ?? validated.actions;
+    decisionPath = validated.path;
+    if (!validated.ok) {
+      warnings.push(
+        `Played line missing from tree: ${validated.missing_sizes.join(", ")}`,
+      );
+    }
+  }
+
   const review: StudyJobReview = {
     // Default seat labels for SRP-shaped spots (BB OOP / BTN IP) — not stakes.
     positions: options.positions ?? { oop: "BB", ip: "BTN" },
@@ -328,12 +353,6 @@ export function riverJobFromHandHistory(
     street_boundary: "river",
     warnings: warnings.length ? warnings : undefined,
   };
-
-  // Default decision: walk the full played line so Study lands at the terminal
-  // parent / last decision along recorded actions.
-  const decisionActions =
-    options.decisionActions ??
-    action_line.filter((label) => label !== "Fold");
 
   return {
     schema: STUDY_JOB_SCHEMA,
@@ -354,7 +373,7 @@ export function riverJobFromHandHistory(
       notes: `outcome=${record.outcome} terminal-pot=${trimNumber(record.terminalPot)} p0-net=${trimNumber(record.p0Net)}`,
     },
     review,
-    decision: { actions: decisionActions },
+    decision: { actions: decisionActions, path: decisionPath },
   };
 }
 

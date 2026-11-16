@@ -580,6 +580,11 @@ interface StudyState {
     path?: string,
     options?: { decisionActions?: string[] },
   ) => Promise<OpenSolutionResult>;
+  /**
+   * Decision path from the last imported study job. Build open / openSolution
+   * consume this when options.decisionActions is omitted.
+   */
+  pendingDecisionActions: string[] | null;
   /** Replace Build draft from a portable holdem-study-job/1 JSON string. */
   applyPortableJobJson: (text: string) => { ok: true; warnings: string[] } | { ok: false; error: string };
   /** Emit portable job JSON for the current Build draft (same config CLI uses). */
@@ -1220,6 +1225,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   lastCheckpointPath: "",
   solutionId: null,
   baselineSolutionId: null,
+  pendingDecisionActions: null,
   currentNode: null,
   pathTrail: [],
   boardChangeChanceNode: null,
@@ -3972,7 +3978,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       set({ message: error });
       return { ok: false, error };
     }
-    const decisionActions = options?.decisionActions?.filter(Boolean) ?? [];
+    const decisionActions =
+      options?.decisionActions?.filter(Boolean) ??
+      get().pendingDecisionActions?.filter(Boolean) ??
+      [];
     // Stage: show loading only. Do not clear path, undo, or published study
     // until the engine open succeeds — failure must preserve the whole document.
     set({
@@ -4092,13 +4101,21 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (walk.ok) {
         await get().navigateTo(walk.node_id, { history: "replace" });
         set({
+          pendingDecisionActions: null,
           message: `Opened ${target} at recorded decision (${decisionActions.join(" / ")}). ${syncNote}${warningSuffix}`,
         });
       } else {
         set({
+          pendingDecisionActions: null,
           message: `Opened ${target}. Could not locate decision (${walk.reason}). ${syncNote}${warningSuffix}`,
         });
+        return {
+          ok: false,
+          error: `Opened ${target} but recorded decision is missing: ${walk.reason}`,
+        };
       }
+    } else if (decisionActions.length > 0) {
+      set({ pendingDecisionActions: null });
     }
     return { ok: true, path: target };
   },
@@ -4111,11 +4128,16 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         oop: parseRangeText(draft.oopRange),
         ip: parseRangeText(draft.ipRange),
       };
+      const pendingDecisionActions =
+        job.decision?.actions?.filter(Boolean)?.length
+          ? [...job.decision.actions]
+          : null;
       set({
         draft,
         weights,
         draftRevision: bumpRevision(get().draftRevision),
         setupMeta: null,
+        pendingDecisionActions,
         message:
           warnings.length > 0
             ? `Loaded study job. ${warnings.join(" ")}`
@@ -4130,9 +4152,13 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   exportPortableJobJson() {
+    const pending = get().pendingDecisionActions;
     return stringifyPortableJob(
       portableJobFromDraft(get().draft, {
         provenance: { source: "build", created_by: "holdem-study" },
+        decision: pending?.length
+          ? { actions: pending, path: pending.join("/") }
+          : undefined,
       }),
     );
   },

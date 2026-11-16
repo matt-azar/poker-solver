@@ -12,6 +12,7 @@ const poker_engine = @import("poker_engine");
 const ipc_client = @import("ipc_client.zig");
 const job_json = @import("job_json.zig");
 const hand_history = @import("hand_history.zig");
+const line_validate = @import("line_validate.zig");
 
 fn usage() void {
     std.debug.print(
@@ -55,9 +56,49 @@ fn defaultEnginePath(allocator: std.mem.Allocator) ![]u8 {
     return try allocator.dupe(u8, candidates[0]);
 }
 
+fn refuseMissingLine(job: job_json.Job) void {
+    if (job.missing_sizes.len == 0) return;
+    std.debug.print("error: job reports missing_sizes (", .{});
+    for (job.missing_sizes, 0..) |m, i| {
+        if (i > 0) std.debug.print(", ", .{});
+        std.debug.print("{s}", .{m});
+    }
+    std.debug.print(") — refusing success\n", .{});
+    std.process.exit(1);
+}
+
+fn validateDecisionOrExit(allocator: std.mem.Allocator, job: job_json.Job) !void {
+    refuseMissingLine(job);
+    if (job.decision_actions.len == 0) return;
+    var labels = try allocator.alloc([]const u8, job.decision_actions.len);
+    defer allocator.free(labels);
+    for (job.decision_actions, 0..) |a, i| labels[i] = a;
+    var walk = try line_validate.validateConfigLine(allocator, job.street_config, labels);
+    defer walk.deinit(allocator);
+    // decision.actions must already be the Study open path (no trailing Call/Fold).
+    // walkPlayedLine truncates terminal endings — reject any length mismatch.
+    if (!walk.ok or walk.missing.len != 0 or walk.decision_actions.len != labels.len) {
+        std.debug.print("error: decision path not a Study decision in compiled tree", .{});
+        if (walk.missing.len != 0) {
+            std.debug.print(" (missing", .{});
+            for (walk.missing) |m| std.debug.print(" {s}", .{m});
+            std.debug.print(")", .{});
+        } else if (walk.decision_actions.len != labels.len) {
+            std.debug.print(" (path ends on terminal; strip Call/Fold from decision.actions)", .{});
+        }
+        std.debug.print("\n", .{});
+        std.process.exit(1);
+    }
+    if (walk.legal_at_decision.len == 0) {
+        std.debug.print("error: decision path does not land on a Study decision node\n", .{});
+        std.process.exit(1);
+    }
+}
+
 fn cmdPlan(allocator: std.mem.Allocator, job_path: []const u8) !void {
     var job = try job_json.loadJob(allocator, job_path);
     defer job.deinit(allocator);
+    try validateDecisionOrExit(allocator, job);
 
     const preview = try poker_app.plan_preview.treePreviewJson(allocator, job.street_config);
     defer allocator.free(preview);
@@ -95,6 +136,7 @@ fn cmdSolve(allocator: std.mem.Allocator, args: []const []const u8, job_path: []
     var job = try job_json.loadJob(allocator, job_path);
     defer job.deinit(allocator);
     try job_json.validateRunLimits(job);
+    try validateDecisionOrExit(allocator, job);
 
     var client = try ipc_client.SolverClient.spawn(allocator, engine_path, "holdem-study-cli");
     defer client.deinit();
@@ -193,10 +235,26 @@ fn cmdFromHh(allocator: std.mem.Allocator, args: []const []const u8, hh_path: []
     const job_text = try hand_history.riverJobJson(allocator, record, iterations);
     defer allocator.free(job_text);
     try std.fs.cwd().writeFile(.{ .sub_path = out_path, .data = job_text });
-    try std.io.getStdOut().writer().print("{{\"ok\":true,\"out\":{s},\"bytes\":{d}}}\n", .{
+
+    // Re-load and refuse success when the played line is missing from the tree.
+    var job = try job_json.loadJob(allocator, out_path);
+    defer job.deinit(allocator);
+    const ok = job.missing_sizes.len == 0;
+    try std.io.getStdOut().writer().print("{{\"ok\":{},\"out\":{s},\"bytes\":{d},\"missing_sizes\":", .{
+        ok,
         std.json.fmt(out_path, .{}),
         job_text.len,
     });
+    try std.io.getStdOut().writeAll("[");
+    for (job.missing_sizes, 0..) |m, i| {
+        if (i > 0) try std.io.getStdOut().writeAll(",");
+        try std.json.stringify(m, .{}, std.io.getStdOut().writer());
+    }
+    try std.io.getStdOut().writeAll("]}\n");
+    if (!ok) {
+        std.debug.print("error: played line missing from compiled tree — job written for review only\n", .{});
+        std.process.exit(1);
+    }
 }
 
 pub fn main() !void {

@@ -29,6 +29,7 @@
     "street_boundary": "river"
   },
   "decision": {
-    "actions": ["Check", "Bet 50", "Call"]
+    "actions": ["Check", "Bet 50"],
+    "path": "Check/Bet 50"
   }
 }

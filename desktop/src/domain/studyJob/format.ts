@@ -9,6 +9,7 @@ import {
   draftFromParsedConfig,
 } from "../../state/studyDraft";
 import { DEFAULT_SPOT, type SolveJobRequest, type SpotDraft } from "../types";
+import { assertJobRepresentableInBuild } from "./representability";
 import {
   STUDY_JOB_SCHEMA,
   type StudyJob,
@@ -151,6 +152,7 @@ export function draftFromPortableJob(job: StudyJob): {
   warnings: string[];
 } {
   const parsed = parsePortableJobJson(stringifyPortableJob(job));
+  assertJobRepresentableInBuild(parsed);
   const config = parseStreetConfigTextToSolutionConfig(parsed.street_config);
   const partial = draftFromParsedConfig(config);
   const draft: SpotDraft = {
