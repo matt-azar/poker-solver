@@ -98,7 +98,7 @@ On the street/river path, player 0 is out of position. Chance deals ordered hand
 
 ## Solver storage
 
-The layout in this section is the removed C++ `StreetBatchSolver`. Zig training tables are in `engine/src/solve/training_state.zig`. The CFR+ floor and the NashConv definition below still match the Zig trainer.
+Zig training tables are in `engine/src/solve/training_state.zig`. The next paragraph records the removed C++ `StreetBatchSolver` layout and the Zig tables. The CFR+ floor and the NashConv definition still match the Zig trainer.
 
 `StreetBatchSolver` stored regret, strategy-sum, and one shared sigma workspace as `TableScalar` (`float`) tables. That sigma buffer held the frozen strategy during a pass and the normalized average during evaluation. Zig keeps `regret`, `strategy_sum`, and `sigma` allocated together, and publish writes a separate average (`engine/src/solve/training_state.zig`). Slot lookup is by public node, legal runout, and supported hand. One-action decisions omit stored rows. The action-count limit is 8. Details: [STREETS.md](STREETS.md).
 
