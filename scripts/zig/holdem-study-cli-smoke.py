@@ -13,18 +13,35 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CLI = ROOT / "zig-out" / "bin" / "holdem-study-cli"
-ENGINE = ROOT / "zig-out" / "bin" / "solver-engine"
 HH = ROOT / "configs" / "examples" / "study-jobs" / "river_btn_bb_srp.hh.txt"
 
 
+def _first_existing(*candidates: Path) -> Path | None:
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+def resolve_binaries() -> tuple[Path, Path]:
+    """Prefer native exe names; fall back to .exe for Windows CI runners."""
+    cli = _first_existing(
+        ROOT / "zig-out" / "bin" / "holdem-study-cli",
+        ROOT / "zig-out" / "bin" / "holdem-study-cli.exe",
+    )
+    engine = _first_existing(
+        ROOT / "zig-out" / "bin" / "solver-engine",
+        ROOT / "zig-out" / "bin" / "solver-engine.exe",
+    )
+    if cli is None or engine is None:
+        raise SystemExit(
+            "BLOCKER: missing holdem-study-cli / solver-engine under zig-out/bin"
+        )
+    return cli, engine
+
+
 def main() -> int:
-    if not CLI.is_file():
-        print(f"BLOCKER: missing {CLI}", file=sys.stderr)
-        return 2
-    if not ENGINE.is_file():
-        print(f"BLOCKER: missing {ENGINE}", file=sys.stderr)
-        return 2
+    cli, engine = resolve_binaries()
     if not HH.is_file():
         print(f"BLOCKER: missing {HH}", file=sys.stderr)
         return 2
@@ -36,7 +53,7 @@ def main() -> int:
 
         from_hh = subprocess.run(
             [
-                str(CLI),
+                str(cli),
                 "from-hh",
                 str(HH),
                 "--out",
@@ -59,7 +76,7 @@ def main() -> int:
         assert "100NL" not in json.dumps(job)
 
         plan = subprocess.run(
-            [str(CLI), "plan", str(job_path)],
+            [str(cli), "plan", str(job_path)],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -78,13 +95,13 @@ def main() -> int:
 
         solve = subprocess.run(
             [
-                str(CLI),
+                str(cli),
                 "solve",
                 str(job_path),
                 "--out",
                 str(psol_path),
                 "--engine",
-                str(ENGINE),
+                str(engine),
             ],
             cwd=ROOT,
             capture_output=True,
