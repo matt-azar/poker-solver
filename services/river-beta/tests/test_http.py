@@ -80,14 +80,26 @@ class HttpApiSmoke(unittest.TestCase):
         self.assertTrue(health["ok"])
         self.assertEqual(health["street"], "river")
         self.assertEqual(health["out_of_scope"], ["turn", "flop"])
+        self.assertIn("active_sessions", health)
+        self.assertEqual(health["active_sessions"], 0)
+        self.assertEqual(health["max_concurrent_sessions"], 2)
 
         bounds = self._json(opener, "GET", "/v1/bounds")
         self.assertEqual(bounds["max_threads"], 1)
+        self.assertIn("summary", bounds)
+        self.assertIn("river-only", bounds["summary"])
 
         created = self._json(opener, "POST", "/v1/sessions")
         self.assertTrue(created["ok"])
         sid = created["session"]["session_id"]
         self.assertTrue(sid)
+        self.assertIn("idle_remaining_sec", created["session"])
+        self.assertGreater(created["session"]["idle_remaining_sec"], 0)
+        self.assertIn("bounds", created["session"])
+        self.assertEqual(created["session"]["bounds"]["max_iterations"], 200)
+
+        health_busy = self._json(opener, "GET", "/health")
+        self.assertEqual(health_busy["active_sessions"], 1)
 
         solved = self._json(
             opener,

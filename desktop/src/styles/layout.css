@@ -139,6 +139,10 @@
   font-size: 0.85rem;
 }
 
+.river-beta-banner--degraded {
+  border-bottom-color: var(--warning, #b45309);
+}
+
 .river-beta-banner__meta {
   display: flex;
   flex-wrap: wrap;
@@ -164,6 +168,12 @@
   opacity: 0.8;
 }
 
+.river-beta-banner__error {
+  flex: 1 1 100%;
+  color: var(--danger, #b91c1c);
+  font-size: 0.8rem;
+}
+
 .river-beta-banner__metrics {
   display: flex;
   flex-wrap: wrap;
@@ -186,6 +196,11 @@
   background: var(--surface, var(--panel));
   color: inherit;
   cursor: pointer;
+}
+
+.river-beta-banner__btn--primary {
+  border-color: var(--text);
+  font-weight: 600;
 }
 
 .river-beta-banner__btn:disabled {

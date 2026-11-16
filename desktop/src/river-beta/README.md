@@ -26,7 +26,11 @@ Optional: `VITE_RIVER_BETA_URL=http://127.0.0.1:8787` (default).
 ## Behavior
 
 - Boots an isolated service session and auto-solves the default tiny river config.
-- Banner shows CPU / peak RSS metrics, Solve, Cancel, and Re-solve locks.
+- Banner shows published bounds summary, idle remaining, CPU / peak RSS,
+  live iteration progress, Solve / Cancel / Re-solve locks.
+- Detects reaped sessions (`no_session`) and offers **Reconnect** (fresh
+  isolated sidecar + auto-solve). Service-down boots still mount the banner
+  with Retry.
 - Progress / results flow through the existing `EngineClient` IPC path.
 - Public demo builds (`VITE_PUBLIC_DEMO`) never arm this entry.
 

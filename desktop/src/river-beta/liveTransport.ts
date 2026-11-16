@@ -3,7 +3,7 @@
  * EngineClient still uses typed IPC branches via isIpcTransport().
  */
 import type { FixtureIpcHandler, IpcRequestEnvelope } from "../engine/transport";
-import { RiverBetaApi, type RiverBetaEnvelope } from "./api";
+import { RiverBetaApi, RiverBetaApiError, type RiverBetaEnvelope } from "./api";
 
 function toEnvelope(env: RiverBetaEnvelope, fallbackOp: string): IpcRequestEnvelope {
   return {
@@ -20,7 +20,10 @@ function toEnvelope(env: RiverBetaEnvelope, fallbackOp: string): IpcRequestEnvel
   };
 }
 
-export function createRiverBetaIpcHandler(api: RiverBetaApi): FixtureIpcHandler {
+export function createRiverBetaIpcHandler(
+  api: RiverBetaApi,
+  onSessionLost?: (message?: string) => void,
+): FixtureIpcHandler {
   return async (op, body, jobId) => {
     // ready is local — session already started the sidecar.
     if (op === "ready") {
@@ -36,7 +39,25 @@ export function createRiverBetaIpcHandler(api: RiverBetaApi): FixtureIpcHandler 
         body: { launch_id: api.getSessionId(), street: "river" },
       };
     }
-    const env = await api.ipc(op, body, jobId);
-    return toEnvelope(env, op);
+    try {
+      const env = await api.ipc(op, body, jobId);
+      return toEnvelope(env, op);
+    } catch (err) {
+      if (err instanceof RiverBetaApiError && err.code === "no_session") {
+        onSessionLost?.(err.message);
+        return {
+          v: 2,
+          kind: "reply",
+          request_id: "river-beta",
+          job_id: null,
+          op,
+          ok: false,
+          error_code: "no_session",
+          error_message: err.message,
+          body: null,
+        };
+      }
+      throw err;
+    }
   };
 }

@@ -14,6 +14,26 @@ export type RiverBetaMetrics = {
   last_error?: string | null;
 };
 
+/** Published caps from GET /v1/bounds (and session.info.bounds). */
+export type RiverBetaBoundsInfo = {
+  max_concurrent_sessions?: number;
+  max_session_idle_sec?: number;
+  max_memory_mib?: number;
+  default_memory_mib?: number;
+  max_iterations?: number;
+  default_iterations?: number;
+  max_time_limit_sec?: number;
+  default_time_limit_sec?: number;
+  max_threads?: number;
+  max_weighted_combos_per_player?: number;
+  max_river_bet_sizes?: number;
+  max_raises?: number;
+  max_plan_memory_bytes?: number;
+  summary?: string;
+  street?: string;
+  ok?: boolean;
+};
+
 export type RiverBetaEnvelope = {
   v?: number;
   kind?: string;
@@ -31,6 +51,9 @@ export type RiverBetaSessionInfo = {
   metrics?: RiverBetaMetrics;
   active_job_id?: string | null;
   alive?: boolean;
+  idle_remaining_sec?: number;
+  last_used_at?: number;
+  bounds?: RiverBetaBoundsInfo;
 };
 
 function defaultBaseUrl(): string {
@@ -55,6 +78,8 @@ export class RiverBetaApi {
   private sessionId: string | null = null;
   lastMetrics: RiverBetaMetrics | null = null;
   lastActiveJobId: string | null = null;
+  lastBounds: RiverBetaBoundsInfo | null = null;
+  lastIdleRemainingSec: number | null = null;
 
   constructor(baseUrl: string = defaultBaseUrl()) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
@@ -62,6 +87,13 @@ export class RiverBetaApi {
 
   getSessionId(): string | null {
     return this.sessionId;
+  }
+
+  /** Clear local session id without calling DELETE (e.g. after server reap). */
+  clearLocalSession(): void {
+    this.sessionId = null;
+    this.lastActiveJobId = null;
+    this.lastIdleRemainingSec = null;
   }
 
   private headers(json = false): HeadersInit {
@@ -97,6 +129,26 @@ export class RiverBetaApi {
     return data;
   }
 
+  private applySession(session: RiverBetaSessionInfo | undefined): void {
+    if (!session) return;
+    if (session.metrics) this.lastMetrics = session.metrics;
+    if (session.bounds) this.lastBounds = session.bounds;
+    if (typeof session.idle_remaining_sec === "number") {
+      this.lastIdleRemainingSec = session.idle_remaining_sec;
+    }
+    if (typeof session.active_job_id === "string") {
+      this.lastActiveJobId = session.active_job_id;
+    }
+  }
+
+  async health(): Promise<Record<string, unknown>> {
+    const res = await fetch(`${this.baseUrl}/health`, {
+      credentials: "include",
+      headers: this.headers(),
+    });
+    return this.parse(res);
+  }
+
   async createSession(): Promise<RiverBetaSessionInfo> {
     const res = await fetch(`${this.baseUrl}/v1/sessions`, {
       method: "POST",
@@ -111,7 +163,7 @@ export class RiverBetaApi {
     if (!this.sessionId) {
       throw new RiverBetaApiError("no_session", "service did not return a session id");
     }
-    if (session?.metrics) this.lastMetrics = session.metrics;
+    this.applySession(session);
     return session ?? { session_id: this.sessionId };
   }
 
@@ -124,8 +176,7 @@ export class RiverBetaApi {
         headers: this.headers(),
       });
     } finally {
-      this.sessionId = null;
-      this.lastActiveJobId = null;
+      this.clearLocalSession();
     }
   }
 
@@ -142,12 +193,14 @@ export class RiverBetaApi {
     return text;
   }
 
-  async bounds(): Promise<Record<string, unknown>> {
+  async bounds(): Promise<RiverBetaBoundsInfo> {
     const res = await fetch(`${this.baseUrl}/v1/bounds`, {
       credentials: "include",
       headers: this.headers(),
     });
-    return this.parse(res);
+    const data = await this.parse(res);
+    this.lastBounds = data as RiverBetaBoundsInfo;
+    return this.lastBounds;
   }
 
   async ipc(
@@ -232,7 +285,7 @@ export class RiverBetaApi {
     });
     const data = await this.parse(res);
     const session = data.session as RiverBetaSessionInfo;
-    if (session?.metrics) this.lastMetrics = session.metrics;
+    this.applySession(session);
     return session;
   }
 }

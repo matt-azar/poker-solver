@@ -100,6 +100,17 @@ Each session tracks:
 Returned on session info, status, and IPC responses under `metrics`.
 Review these before expanding the beta to turn or flop.
 
+## Session lifecycle (Study chrome)
+
+`GET /v1/sessions/me` includes `idle_remaining_sec` and a full `bounds`
+snapshot so the browser banner can show caps + remaining idle TTL.
+`GET /health` reports `active_sessions` / `max_concurrent_sessions`.
+`GET /v1/bounds` includes a human `summary` string.
+
+When a session is reaped (idle TTL / concurrency), the Study client
+marks the session **lost** and offers **Reconnect** (new isolated
+sidecar + optional auto-solve). Turn/flop remain out of scope.
+
 ## API surface
 
 | Method | Path | Role |
