@@ -57,6 +57,17 @@ describe("TreeLineEditor", () => {
           children: [1, 2],
         },
         {
+          index: 1,
+          terminal: true,
+          chance: false,
+          player: -1,
+          street: 0,
+          path: "Check",
+          chance_child: -1,
+          actions: [],
+          children: [],
+        },
+        {
           index: 2,
           terminal: false,
           chance: false,
@@ -122,6 +133,15 @@ describe("TreeLineEditor", () => {
     return user;
   }
 
+  async function expandRootDecision(user: ReturnType<typeof userEvent.setup>) {
+    const root = await screen.findByRole("button", {
+      name: /Expand OOP · street 0 · root/,
+    });
+    expect(root.getAttribute("aria-expanded")).toBe("false");
+    await user.click(root);
+    return root;
+  }
+
   it("previews with the same portable street-config CLI plan uses", async () => {
     const { portableJobFromDraft } = await import("../../domain/studyJob");
     render(<TreeLineEditor />);
@@ -138,16 +158,49 @@ describe("TreeLineEditor", () => {
     // Plan memory sits above Preview tree even while collapsed.
     expect(screen.getByText(/Plan peak/i)).toBeTruthy();
     expect(screen.getByText(/2\.0 MiB/)).toBeTruthy();
-    await expandPreview();
+    const user = await expandPreview();
+    // Opening the Preview section still keeps decision branches collapsed.
+    expect(screen.queryByText("Check")).toBeNull();
+    await expandRootDecision(user);
     expect(await screen.findByText("Check")).toBeTruthy();
     // Bet 50 into pot 100 → b50 (pot-%), not a chip+tag mashup.
     expect(screen.getByText("b50")).toBeTruthy();
     expect(screen.queryByText(/Bet 50/)).toBeNull();
   });
 
+  it("starts with decision branches collapsed and expands per branch", async () => {
+    render(<TreeLineEditor />);
+    const user = await expandPreview();
+    expect(await screen.findByRole("button", {
+      name: /Expand OOP · street 0 · root/,
+    })).toBeTruthy();
+    expect(screen.queryByText("Check")).toBeNull();
+    expect(screen.queryByText("b50")).toBeNull();
+
+    await expandRootDecision(user);
+    expect(screen.getByText("Check")).toBeTruthy();
+    expect(screen.getByText("b50")).toBeTruthy();
+    // Nested IP decision stays collapsed until expanded.
+    expect(screen.queryByText("Fold")).toBeNull();
+    expect(screen.queryByText("r50")).toBeNull();
+    const nested = screen.getByRole("button", {
+      name: /Expand IP · street 0/,
+    });
+    expect(nested.getAttribute("aria-expanded")).toBe("false");
+    await user.click(nested);
+    expect(await screen.findByText("Fold")).toBeTruthy();
+    expect(screen.getByText("r50")).toBeTruthy();
+    await user.click(screen.getByRole("button", {
+      name: /Collapse IP · street 0/,
+    }));
+    expect(screen.queryByText("Fold")).toBeNull();
+    expect(screen.getByText("b50")).toBeTruthy();
+  });
+
   it("reveals Force / Remove only after clicking a node", async () => {
     render(<TreeLineEditor />);
     const user = await expandPreview();
+    await expandRootDecision(user);
     await screen.findByText("Check");
     expect(screen.queryByRole("button", { name: "Force" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Check" }));
@@ -159,7 +212,11 @@ describe("TreeLineEditor", () => {
 
   it("tags nested raises as pot percent of pot-before-bet", async () => {
     render(<TreeLineEditor />);
-    await expandPreview();
+    const user = await expandPreview();
+    await expandRootDecision(user);
+    await user.click(screen.getByRole("button", {
+      name: /Expand IP · street 0/,
+    }));
     // After Bet 50 into 100, pot=150 facing=50; Raise to 150 → raise-by 100 → r67
     // (100/150). sizePot for raise tags is pot+call = 200 → r50.
     expect(await screen.findByText("r50")).toBeTruthy();
@@ -167,7 +224,8 @@ describe("TreeLineEditor", () => {
 
   it("clears a stale preview when the draft changes", async () => {
     render(<TreeLineEditor />);
-    await expandPreview();
+    const user = await expandPreview();
+    await expandRootDecision(user);
     await screen.findByText("Check");
     treePreview.mockClear();
     treePreview.mockImplementation(

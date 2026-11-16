@@ -246,31 +246,53 @@ function DecisionBranch({
   onRemove: (path: string, compact: string) => void;
   onAddSize: (path: string) => void;
 }) {
+  // Nested decisions start collapsed so the diagram is navigable from the root.
+  const [expanded, setExpanded] = useState(false);
   const seat = node.player === 0 ? "OOP" : node.player === 1 ? "IP" : "—";
+  const headLabel = `${seat} · street ${node.street}${
+    node.path ? ` · ${abbreviatePathForMeta(node.path, rootPot)}` : " · root"
+  }`;
+  const hasChildren = node.actions.length > 0;
+
   return (
-    <div className="tree-diagram-decision" data-street={node.street}>
+    <div
+      className="tree-diagram-decision"
+      data-street={node.street}
+      data-expanded={expanded ? "true" : "false"}
+    >
       <div className="tree-diagram-decision-head">
-        <span className="tree-meta">
-          {seat} · street {node.street}
-          {node.path ? ` · ${abbreviatePathForMeta(node.path, rootPot)}` : " · root"}
-        </span>
+        {hasChildren ? (
+          <button
+            type="button"
+            className="tree-diagram-expand"
+            aria-expanded={expanded}
+            aria-label={expanded ? `Collapse ${headLabel}` : `Expand ${headLabel}`}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <span className="tree-meta">{headLabel}</span>
+          </button>
+        ) : (
+          <span className="tree-meta">{headLabel}</span>
+        )}
       </div>
-      <ul className="tree-diagram-children">
-        {node.actions.map((action) => (
-          <TreeActionBranch
-            key={`${node.index}-${action.compact}`}
-            nodes={nodes}
-            node={node}
-            action={action}
-            rootPot={rootPot}
-            selectedKey={selectedKey}
-            onSelect={onSelect}
-            onForce={onForce}
-            onRemove={onRemove}
-            onAddSize={onAddSize}
-          />
-        ))}
-      </ul>
+      {expanded && hasChildren ? (
+        <ul className="tree-diagram-children" role="group">
+          {node.actions.map((action) => (
+            <TreeActionBranch
+              key={`${node.index}-${action.compact}`}
+              nodes={nodes}
+              node={node}
+              action={action}
+              rootPot={rootPot}
+              selectedKey={selectedKey}
+              onSelect={onSelect}
+              onForce={onForce}
+              onRemove={onRemove}
+              onAddSize={onAddSize}
+            />
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
@@ -468,6 +490,7 @@ export function TreeLineEditor() {
       {open ? (
         <>
           <p className="tree-editor-help">
+            Branches start collapsed — expand from the root to reach a line.
             Click a node for Force / Remove / Add size. Labels are pot-% tags
             (`b50` = 50% of the pot before the bet). Edits write{" "}
             <code>tree-edit</code> lines into the draft; Solve rebuilds from the

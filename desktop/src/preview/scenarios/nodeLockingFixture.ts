@@ -417,9 +417,88 @@ export function createNodeLockingFixtureHandler(
       case "solve":
       case "pause":
       case "cancel":
-      case "tree_preview":
-      case "plan_memory":
         return envelope(op, { ok: true }, requestId);
+      case "tree_preview":
+        // Small recorded public tree so Build → Preview tree can be exercised
+        // in the browser fixture (collapsed-by-default navigation).
+        return envelope(
+          op,
+          {
+            nodes: [
+              {
+                index: 0,
+                terminal: false,
+                chance: false,
+                player: 0,
+                street: 0,
+                path: "",
+                chance_child: -1,
+                actions: [
+                  { label: "Check", compact: "c", child_index: 1 },
+                  { label: "Bet 50", compact: "b50", child_index: 2 },
+                ],
+                children: [1, 2],
+              },
+              {
+                index: 1,
+                terminal: true,
+                chance: false,
+                player: -1,
+                street: 0,
+                path: "Check",
+                chance_child: -1,
+                actions: [],
+                children: [],
+              },
+              {
+                index: 2,
+                terminal: false,
+                chance: false,
+                player: 1,
+                street: 0,
+                path: "Bet 50",
+                chance_child: -1,
+                actions: [
+                  { label: "Fold", compact: "f", child_index: 3 },
+                  { label: "Call", compact: "call", child_index: 4 },
+                  { label: "Raise to 150", compact: "r150", child_index: 5 },
+                ],
+                children: [3, 4, 5],
+              },
+            ],
+            tree_edits: [],
+            plan: {
+              estimated_peak_bytes: 2_097_152,
+              memory_budget_bytes: 67_108_864,
+              deals: 48,
+              infosets: 10,
+              decision_nodes: 20,
+              terminals: 30,
+              public_decisions: 4,
+              threads: 1,
+              fits_budget: true,
+              dry_run: true,
+            },
+          },
+          requestId,
+        );
+      case "plan_memory":
+        return envelope(
+          op,
+          {
+            estimated_peak_bytes: 2_097_152,
+            memory_budget_bytes: 67_108_864,
+            deals: 48,
+            infosets: 10,
+            decision_nodes: 20,
+            terminals: 30,
+            public_decisions: 4,
+            threads: 1,
+            fits_budget: true,
+            dry_run: true,
+          },
+          requestId,
+        );
       default:
         return envelope(op, {}, requestId);
     }
