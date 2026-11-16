@@ -58,6 +58,8 @@ describe("studyStore lock apply (NL-5)", () => {
   beforeEach(() => {
     resetStatusPollingForTests();
     engineMocks.engineClient.putLock.mockClear();
+    engineMocks.engineClient.deleteLock.mockClear();
+    engineMocks.engineClient.listLocks.mockClear();
     engineMocks.setPutLockImpl(async (_solutionId, body) => ({
       locks: [
         {
@@ -131,6 +133,76 @@ describe("studyStore lock apply (NL-5)", () => {
       [1, 0],
       [0, 1],
     ]);
+  });
+
+  it("Lock all hands skips blocked all-zero strategy rows", async () => {
+    useStudyStore.setState({
+      currentNode: {
+        node_id: "p0.t-1.r7",
+        solution_id: "s1",
+        actions: ["Check", "Bet 50"],
+        combos: ["AcAd", "KcKd", "QcQd"],
+        kind: "decision",
+        player: 0,
+        strategy: [
+          [1, 0],
+          [0, 0],
+          [0, 1],
+        ],
+      },
+      lockDraft: {
+        kind: "selected",
+        handIndices: [],
+        probs: [0.5, 0.5],
+      },
+    });
+
+    const ok = await useStudyStore.getState().lockAllHands("node");
+    expect(ok).toBe(true);
+
+    const [, body] = engineMocks.engineClient.putLock.mock.calls[0] as [
+      string,
+      {
+        hand_indices?: number[];
+        combo_probs?: number[][];
+      },
+    ];
+    expect(body.hand_indices).toEqual([0, 2]);
+    expect(body.combo_probs).toEqual([
+      [1, 0],
+      [0, 1],
+    ]);
+  });
+
+  it("Lock line sends full scope so host picks legal combos per runout", async () => {
+    const ok = await useStudyStore.getState().lockAllHands("line");
+    expect(ok).toBe(true);
+
+    const [, body] = engineMocks.engineClient.putLock.mock.calls[0] as [
+      string,
+      {
+        kind: string;
+        scope?: string;
+        hand_indices?: number[];
+        combo_probs?: number[][];
+        probs: number[];
+      },
+    ];
+    expect(body.kind).toBe("full");
+    expect(body.scope).toBe("line");
+    expect(body.combo_probs).toBeUndefined();
+    expect(body.hand_indices).toBeUndefined();
+    expect(body.probs).toHaveLength(2);
+  });
+
+  it("Unlock line deletes with line scope", async () => {
+    await useStudyStore.getState().unlockLine();
+    expect(engineMocks.engineClient.deleteLock).toHaveBeenCalledWith(
+      "s1",
+      "p0.t-1.r7",
+      undefined,
+      "line",
+    );
   });
 
   it("toggleLockHand keeps edited mixes keyed by combo identity", () => {

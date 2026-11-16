@@ -113,6 +113,32 @@ describe("lock helpers", () => {
     expect(draft?.comboProbsByHand?.[1]).toEqual([0, 1]);
   });
 
+  it("skips all-zero / blocked combos when building a full-range freeze", () => {
+    const draft = buildFullRangeLockDraft({
+      strategy: [
+        [1, 0],
+        [0, 0], // blocked — no strategy slot on this board
+        [0.25, 0.75],
+      ],
+      actionCount: 2,
+      handCount: 3,
+    });
+    expect(draft?.handIndices).toEqual([0, 2]);
+    expect(draft?.comboProbsByHand?.[0]).toEqual([1, 0]);
+    expect(draft?.comboProbsByHand?.[1]).toBeUndefined();
+    expect(draft?.comboProbsByHand?.[2]).toEqual([0.25, 0.75]);
+    expect(
+      buildFullRangeLockDraft({
+        strategy: [
+          [0, 0],
+          [0, 0],
+        ],
+        actionCount: 2,
+        handCount: 2,
+      }),
+    ).toBeNull();
+  });
+
   it("marks full-node locks as locking every hand", () => {
     expect(
       isHandLocked({ node_id: "p0", kind: "full", hand_indices: [], probs: [1] }, 4),

@@ -505,7 +505,7 @@ export async function ipcPutLock(body: {
 export async function ipcDeleteLock(opts?: {
   nodeId?: string;
   handIndex?: number;
-  /** Default node = board-local; line deletes the shared line record only. */
+  /** Default node = board-local; line clears expanded runout locks for the betting line. */
   scope?: "node" | "line";
 }): Promise<unknown> {
   const body: Record<string, unknown> = {};

@@ -328,9 +328,11 @@ export function rematerializeComboProbsByHand(args: {
 }
 
 /**
- * Explicit full-range freeze payload: every combo keeps its own mix
+ * Explicit full-range freeze payload: every legal combo keeps its own mix
  * (draft edits by identity win; otherwise published strategy).
- * Never a shared default 100%-first-action row or a selected subset.
+ * Skips card-blocked / all-zero strategy rows so one blocked combo cannot
+ * reject the whole Lock-all payload. Never a shared default 100%-first-action
+ * row or a selected subset of only the current UI selection.
  */
 export function buildFullRangeLockDraft(args: {
   strategy: number[][] | null | undefined;
@@ -342,14 +344,32 @@ export function buildFullRangeLockDraft(args: {
   if (handCount <= 0 || actionCount <= 0) {
     return null;
   }
-  const handIndices = Array.from({ length: handCount }, (_, index) => index);
-  const byHand = rematerializeComboProbsByHand({
-    previous: existingByHand,
-    nextHandIndices: handIndices,
-    strategy,
-    actionCount,
-  });
-  if (!byHand) {
+  const byHand: ComboProbsByHand = {};
+  const handIndices: number[] = [];
+  for (let index = 0; index < handCount; index++) {
+    const kept = existingByHand?.[index];
+    if (
+      kept &&
+      kept.length === actionCount &&
+      normalizeProbs(kept).valid
+    ) {
+      byHand[index] = kept.slice();
+      handIndices.push(index);
+      continue;
+    }
+    const row = strategy?.[index];
+    if (!row || row.length !== actionCount) {
+      continue;
+    }
+    const normalized = normalizeProbs(row);
+    if (!normalized.valid) {
+      // Blocked / no strategy slot on this board — skip, do not fail the node.
+      continue;
+    }
+    byHand[index] = normalized.probs;
+    handIndices.push(index);
+  }
+  if (handIndices.length === 0) {
     return null;
   }
   const rows = comboProbsRowsForHands(byHand, handIndices);
