@@ -75,6 +75,8 @@ Packaged Study talks to Zig over **typed IPC** (protocol 2, inherited stdin/stdo
 | --- | --- | --- |
 | HTTP fallthrough while IPC is active | `Engine unreachable: Failed to fetch` after a healthy sidecar spawn (#288) | **Don't** `fetch("")` or hit `:8765` from Library/Study when IPC transport is selected. Block HTTP fallthrough. |
 | Public demo on GitHub Pages | Blank shell or `/demo/…` 404 under `matt-azar.github.io/poker-solver/` | Deploy `dist-public-demo` with `PUBLIC_DEMO_BASE=/poker-solver/`; pack fetches must honor Vite `BASE_URL` (`withBase`). Private `?preview=` QA stays a separate entry. One-time: Pages source = GitHub Actions. |
+| River-beta live browser vs demo/Tauri | Agents wire `?river-beta=1` into public-demo builds or assume Tauri pipes | Keep three entries **separate**: precomputed `?demo=` / Pages, private `?preview=`, and live river-beta (`services/river-beta/` + `?river-beta=1`). Public demo builds must never arm river-beta. Each visitor gets an **isolated** Zig sidecar via the Python service — still typed IPC, not `:8765`. Turn/flop live solving is out of scope (#415/#416/#422). |
+| River-beta session reaped / degraded | Banner stuck; Solve after idle; `ensureEngine` “succeeds” while disconnected | Treat only `connected` as success; reconnect when degraded. On `no_session`, show Session lost + **Reconnect** (fresh isolated sidecar + auto-solve). Service-down boots still mount the banner for Retry. Surface idle remaining / bounds summary from the service (#422). |
 | Library needs live pipes | Templates/ranges fail until solve works | Serve templates/ranges via **Tauri FS** (`library_*`) without requiring a healthy engine session (#288, #289) |
 | Console PE under GUI shell | Blank console; closing it kills the sidecar and bricks Study (#290) | Link `solver-engine` with Windows **GUI subsystem**; pass `CREATE_NO_WINDOW` on spawn as defense in depth. Keep CLI tools Console. |
 | `reg.exe` LocalDumps on setup | Several brief console flashes on every Windows Study start (not the sidecar) | `diagnostics::register_local_dumps` spawns Console-subsystem `reg add` — pass `CREATE_NO_WINDOW` (and null stdio) (#377). Sidecar already has the flag; do not blame or strip `solver-engine` GUI/`CREATE_NO_WINDOW` for these flashes. |
@@ -455,6 +457,7 @@ Cross-cutting invariants (ROADMAP §5): card removal, pair-conditional chance, z
 | River chips / oracle | `docs/RIVER.md` |
 | Math / EV / NashConv | `docs/MATHEMATICS.md` |
 | Study UI / Zig IPC | `docs/DESKTOP_UI.md` (HTTP explorer notes are historical) |
+| River-beta live browser | `desktop/src/river-beta/README.md`, `services/river-beta/README.md` |
 | Equity | `docs/EQUITY.md` |
 | Assistant / AI packs | `docs/STUDY_SETUP_ASSISTANT.md`, `docs/ai-context/README.md` |
 | Zig release / cutover gates | `docs/auxiliary/engineering/ZIG_RELEASE_GATES.md` |
