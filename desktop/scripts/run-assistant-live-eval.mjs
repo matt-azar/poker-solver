@@ -8,6 +8,13 @@
  * Not part of ordinary CI (`npm test`). Run manually:
  *   cd desktop && npm run test:assistant-live
  *
+ * Note (AF follow-up §5): this harness still drives the standalone setup
+ * `createOpenAiAssistantProvider` / `interpret` path. Product chat uses the
+ * unified client (`createOpenAiUnifiedChatClient`); migrating live cases onto
+ * that surface is preferred when the score harness can consume UnifiedChatOutcome
+ * without losing setup-field assertions. Until then, treat this as setup-adapter
+ * coverage only — help/Q&A + evidence routing are covered by mocked unified tests.
+ *
  * Exit codes:
  *   0 — skipped (no key) or all cases passed
  *   1 — one or more cases failed / adapter error

@@ -302,6 +302,8 @@ describe("compareRunouts", () => {
     expect(evidence.rows.map((row) => row.card)).toEqual(["5h", "9h"]);
     expect(evidence.rows[0]?.frequency).toBeCloseTo(0.8, 8);
     expect(evidence.openInStudy?.card).toBe("5h");
+    expect(evidence.openInStudy?.solutionId).toBe("sol-1");
+    expect(evidence.openInStudy?.resolvedNodeId).toBe("ip-river-5h");
     expect(host.loadLineCardReport).toHaveBeenCalled();
   });
 

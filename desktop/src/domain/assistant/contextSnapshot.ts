@@ -428,11 +428,23 @@ export function formatContextIndicator(snapshot: AssistantContextSnapshot): stri
   return `Context: ${snapshot.indicatorParts.join(" / ")}`;
 }
 
+export interface SummarizeContextSnapshotOptions {
+  /**
+   * When true (ordinary help / Q&A), omit dual draft-range previews so the
+   * complete help request cannot reintroduce full/truncated range strings via
+   * setupSummary.
+   */
+  omitRangePreviews?: boolean;
+}
+
 /**
  * Compact request summary derived from the snapshot (replaces ad-hoc setupSummary).
- * Omits full range weight strings — previews only.
+ * Omits full range weight strings — previews only unless `omitRangePreviews`.
  */
-export function summarizeContextSnapshot(snapshot: AssistantContextSnapshot): string {
+export function summarizeContextSnapshot(
+  snapshot: AssistantContextSnapshot,
+  options: SummarizeContextSnapshotOptions = {},
+): string {
   const bits = [
     `v${snapshot.version}`,
     `units=${snapshot.units}`,
@@ -442,9 +454,11 @@ export function summarizeContextSnapshot(snapshot: AssistantContextSnapshot): st
     `stack=${snapshot.build.stack}`,
     `solveRake=rate:${snapshot.build.solveRake.rate}/cap:${snapshot.build.solveRake.cap}`,
     `rangeSource=${snapshot.build.rangeSourceLabel ?? "n/a"}`,
-    `oop=${snapshot.build.oopRangePreview}`,
-    `ip=${snapshot.build.ipRangePreview}`,
   ];
+  if (!options.omitRangePreviews) {
+    bits.push(`oop=${snapshot.build.oopRangePreview}`);
+    bits.push(`ip=${snapshot.build.ipRangePreview}`);
+  }
   if (snapshot.publishedSolution.present) {
     bits.push(`solution=${snapshot.publishedSolution.solutionId}`);
     if (snapshot.publishedSolution.nashGap != null) {

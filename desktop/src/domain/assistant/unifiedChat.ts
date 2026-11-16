@@ -6,6 +6,7 @@ import {
   compactHelpContextPayload,
   SELECTED_HAND_ANALYSIS_TOOL_SCHEMA,
   STUDY_NODE_EVIDENCE_TOOL_NAMES,
+  summarizeContextSnapshot,
   type AssistantContextSnapshot,
 } from "./contextSnapshot";
 import { createFakeHelpChatClient } from "./help/helpChat";
@@ -69,6 +70,8 @@ export interface UnifiedChatRequest {
 export type UnifiedChatOpenInStudy = {
   card: string;
   resolvedNodeId: string;
+  /** Send-time published solution — Open in Study must not retarget another tree. */
+  solutionId: string;
   line?: string | null;
 };
 
@@ -158,23 +161,18 @@ export function classifyAssistantTurnIntent(text: string): AssistantTurnIntent {
   const lower = text.trim().toLowerCase();
   if (!lower) return "qa";
 
-  // Conceptual help wins over can-you + verb heuristics ("when to use a larger bet").
-  if (CONCEPTUAL_HELP.test(lower) && !EXPLICIT_SETUP_COMMAND.test(lower)) {
+  // Conceptual / how-to framing always stays Q&A — including
+  // "Can you explain how to change the flop?" (must not match EXPLICIT_SETUP_COMMAND).
+  if (CONCEPTUAL_HELP.test(lower) || HELP_QUESTION_START.test(lower)) {
     return "qa";
   }
 
   // "Can you set/change…" is an explicit edit request (not a how-to).
   if (
     /^can you\b/.test(lower) &&
-    (EXPLICIT_MUTATION_VERB.test(lower) || USE_AS_MUTATION.test(lower)) &&
-    !CONCEPTUAL_HELP.test(lower)
+    (EXPLICIT_MUTATION_VERB.test(lower) || USE_AS_MUTATION.test(lower))
   ) {
     return "setup";
-  }
-
-  // Help / question framing stays on the Q&A path even when "set up" appears.
-  if (HELP_QUESTION_START.test(lower)) {
-    return "qa";
   }
 
   // Imperative / clear mutation commands.
@@ -469,14 +467,28 @@ function openInStudyFromEvidence(
     return undefined;
   }
   const evidence = result as CompareRunoutsEvidence;
-  if (!evidence?.openInStudy?.resolvedNodeId) {
+  if (!evidence?.openInStudy?.resolvedNodeId || !evidence.openInStudy.solutionId) {
     return undefined;
   }
   return {
     card: evidence.openInStudy.card,
     resolvedNodeId: evidence.openInStudy.resolvedNodeId,
+    solutionId: evidence.openInStudy.solutionId,
     line: evidence.line,
   };
+}
+
+/** Help/Q&A setupSummary must not reintroduce dual draft-range previews. */
+function helpSetupSummary(request: UnifiedChatRequest): string {
+  if (request.contextSnapshot) {
+    return summarizeContextSnapshot(request.contextSnapshot, {
+      omitRangePreviews: true,
+    });
+  }
+  return request.setupSummary
+    .replace(/(?:^|\s)(?:oop|ip)=[^\s]*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -756,7 +768,8 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
           }
         : {
             text: text.slice(0, ASSISTANT_MAX_TEXT_LENGTH),
-            setupSummary: request.setupSummary,
+            // Rebuild without oop=/ip= so compactHelpContextPayload is not bypassed.
+            setupSummary: helpSetupSummary(request),
             preferencesSummary: request.preferencesSummary,
             draftRevision: requestRevision,
             // Profiles omitted on help — position×action composition is app-side.
