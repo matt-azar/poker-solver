@@ -56,10 +56,19 @@ pub fn loadJob(allocator: std.mem.Allocator, path: []const u8) JobError!Job {
     const trimmed = std.mem.trim(u8, value.street_config, " \t\r\n");
     if (!std.mem.startsWith(u8, trimmed, "street-config 1")) return error.BadStreetConfig;
 
+    // Validate run limits before allocating owned copies (shared plan/solve contract).
+    try validateRunLimits(.{
+        .street_config = @constCast(value.street_config),
+        .iterations = value.run.iterations,
+        .accuracy = value.run.accuracy,
+        .time_limit = value.run.time_limit,
+    });
+
     const street_config = allocator.dupe(u8, value.street_config) catch return error.OutOfMemory;
     errdefer allocator.free(street_config);
 
     var decision_actions_json: ?[]u8 = null;
+    errdefer if (decision_actions_json) |a| allocator.free(a);
     if (value.decision) |dec| {
         if (dec.actions.len > 0) {
             var list = std.ArrayList(u8).init(allocator);
@@ -83,12 +92,31 @@ pub fn loadJob(allocator: std.mem.Allocator, path: []const u8) JobError!Job {
     };
 }
 
+/// Shared between `plan` and `solve` so both reject the same invalid jobs.
 pub fn validateRunLimits(job: Job) JobError!void {
     if (job.iterations < 1) return error.BadIterations;
     if (job.accuracy) |acc| {
-        if (!std.math.isFinite(acc)) return error.InvalidJob;
+        if (!std.math.isFinite(acc) or acc < 0) return error.InvalidJob;
     }
     if (job.time_limit) |tl| {
+        // Match host solve: omit / null means unlimited; explicit values must be > 0.
         if (!std.math.isFinite(tl) or tl <= 0) return error.InvalidJob;
     }
+}
+
+test "validateRunLimits rejects non-positive time_limit" {
+    const job = Job{
+        .street_config = @constCast("street-config 1\n"),
+        .iterations = 10,
+        .time_limit = -1,
+    };
+    try std.testing.expectError(error.InvalidJob, validateRunLimits(job));
+}
+
+test "validateRunLimits accepts omitted time_limit" {
+    const job = Job{
+        .street_config = @constCast("street-config 1\n"),
+        .iterations = 10,
+    };
+    try validateRunLimits(job);
 }

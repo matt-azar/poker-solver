@@ -1668,9 +1668,11 @@ pub const Session = struct {
         }
     }
 
-    fn buildDocument(self: *Session) SessionError!poker_formats.Document {
+    /// Metadata-only Document for streaming Save. Table bodies stay in memory order
+    /// and convert through bounded scratch in `writeFileMemoryOrder` (no full PSOL copies).
+    fn buildDocumentMeta(self: *Session, layout: poker_engine.game.compile.PsolLayoutMap) SessionError!poker_formats.Document {
         const game = self.game orelse return error.InvalidSession;
-        const published = self.published orelse return error.NothingPublished;
+        if (self.published == null) return error.NothingPublished;
 
         var doc = poker_formats.Document{ .allocator = self.allocator };
         errdefer doc.deinit();
@@ -1678,15 +1680,7 @@ pub const Session = struct {
         doc.config_text = self.allocator.dupe(u8, self.config_text) catch return error.OutOfMemory;
         doc.oop_combos = self.allocator.dupe(i32, game.hands.combos[0]) catch return error.OutOfMemory;
         doc.ip_combos = self.allocator.dupe(i32, game.hands.combos[1]) catch return error.OutOfMemory;
-
-        // PSOL wire order stays decision→hand→runout; memory is runout-major.
-        var layout = poker_engine.game.compile.buildPsolLayoutMap(self.allocator, game) catch return error.InvalidSession;
-        defer layout.deinit();
         doc.slot_actions = self.allocator.dupe(u16, layout.psol_actions) catch return error.OutOfMemory;
-        doc.average = self.allocator.alloc(f32, @intCast(layout.psol_table_entries)) catch return error.OutOfMemory;
-        poker_engine.game.compile.copyTableMemoryToPsol(game, layout, published.average, doc.average) catch {
-            return error.InvalidSession;
-        };
 
         // Preserve browse-only: never invent training tables on save (ZR-96).
         // Degenerate check-only trees may have empty tables but still continue.
@@ -1694,14 +1688,6 @@ pub const Session = struct {
             doc.has_training_flag = true;
             if (self.training) |state| {
                 doc.trained = state.trained;
-                doc.regret = self.allocator.alloc(f32, @intCast(layout.psol_table_entries)) catch return error.OutOfMemory;
-                poker_engine.game.compile.copyTableMemoryToPsol(game, layout, state.regret, doc.regret) catch {
-                    return error.InvalidSession;
-                };
-                doc.strategy_sum = self.allocator.alloc(f32, @intCast(layout.psol_table_entries)) catch return error.OutOfMemory;
-                poker_engine.game.compile.copyTableMemoryToPsol(game, layout, state.strategy_sum, doc.strategy_sum) catch {
-                    return error.InvalidSession;
-                };
             }
         }
         if (self.locks_text.len != 0) {
@@ -1731,18 +1717,39 @@ pub const Session = struct {
             // Save claims the last committed iteration when trainer tables exist.
             std.debug.assert(self.last_committed_trained == ts.trained);
         }
-        var doc = self.buildDocument() catch |err| {
+
+        const game = self.game orelse return error.InvalidSession;
+        const published = self.published orelse return error.NothingPublished;
+
+        // Layout lives on the parent allocator so Save scratch is not charged against
+        // the solution memory-mib ceiling (table conversion no longer copies either).
+        var layout = poker_engine.game.compile.buildPsolLayoutMap(self.parent, game) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            return error.InvalidSession;
+        };
+        defer layout.deinit();
+
+        var doc = self.buildDocumentMeta(layout) catch |err| {
             if (err == error.OutOfMemory) return self.mapAllocErr(err);
             return err;
         };
         defer doc.deinit();
-        // Document / encode entry: config present; training lengths match average.
         std.debug.assert(doc.config_text.len > 0);
+
+        var tables = poker_formats.MemoryOrderTables{
+            .game = game,
+            .layout = layout,
+            .average = published.average,
+        };
         if (doc.hasTraining()) {
-            std.debug.assert(doc.regret.len == doc.average.len);
-            std.debug.assert(doc.strategy_sum.len == doc.average.len);
+            const state = self.training orelse return error.InvalidSession;
+            tables.regret = state.regret;
+            tables.strategy_sum = state.strategy_sum;
+            std.debug.assert(tables.regret.len == tables.average.len);
+            std.debug.assert(tables.strategy_sum.len == tables.average.len);
         }
-        poker_formats.writeFile(self.allocator, path, doc) catch |err| {
+
+        poker_formats.writeFileMemoryOrder(path, doc, tables) catch |err| {
             if (err == error.OutOfMemory) return self.mapAllocErr(err);
             return err;
         };

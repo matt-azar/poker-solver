@@ -1,7 +1,9 @@
 //! Side-effect-free tree preview + memory plan (ZR-83).
 //! Temp parse + compile + estimate + deinit only — never mutates Session.
+//! Compiles under a draft-derived memory-mib BudgetAllocator (not the Session heap).
 const std = @import("std");
 const poker_engine = @import("poker_engine");
+const BudgetAllocator = @import("budget_allocator.zig").BudgetAllocator;
 
 const compile = poker_engine.game.compile;
 const tree_edit = poker_engine.game.tree_edit;
@@ -91,6 +93,9 @@ pub fn buildMemoryPlan(game: compile.CompiledGame, memory_mib: i32, threads: i32
 
 pub const PreviewBundle = struct {
     allocator: std.mem.Allocator,
+    /// When non-null, `allocator` is this budget wrapper; destroyed after game free.
+    budget: ?*BudgetAllocator = null,
+    parent: ?std.mem.Allocator = null,
     game: compile.CompiledGame,
     plan: MemoryPlan,
     tree_edit_lines: [][]u8,
@@ -99,6 +104,10 @@ pub const PreviewBundle = struct {
         for (self.tree_edit_lines) |line| self.allocator.free(line);
         if (self.tree_edit_lines.len != 0) self.allocator.free(self.tree_edit_lines);
         self.game.deinit();
+        if (self.budget) |ba| {
+            const parent = self.parent orelse unreachable;
+            parent.destroy(ba);
+        }
         self.* = undefined;
     }
 };
@@ -120,7 +129,22 @@ fn ownTreeEditLines(allocator: std.mem.Allocator, edits: []const tree_edit.LineE
 }
 
 /// Parse + compile without installing into a Session.
-pub fn compilePreview(allocator: std.mem.Allocator, config_text: []const u8) PreviewError!PreviewBundle {
+/// Uses `parent` only for a draft-derived BudgetAllocator so preview cannot
+/// borrow an unlimited Session heap or starve a loaded solution's ceiling.
+pub fn compilePreview(parent: std.mem.Allocator, config_text: []const u8) PreviewError!PreviewBundle {
+    // Peek memory-mib on parent before charging the temp compile.
+    var peek = try poker_engine.game.parseStreetConfig(parent, config_text);
+    const memory_mib = peek.memory_mib;
+    const threads = peek.threads;
+    peek.deinit();
+
+    const budget_bytes: u64 = if (memory_mib <= 0) 0 else @as(u64, @intCast(memory_mib)) * 1024 * 1024;
+    const ba = parent.create(BudgetAllocator) catch return error.OutOfMemory;
+    errdefer parent.destroy(ba);
+    ba.* = BudgetAllocator.init(parent);
+    if (budget_bytes > 0) ba.setLimit(budget_bytes);
+    const allocator = ba.allocator();
+
     var spec = try poker_engine.game.parseStreetConfig(allocator, config_text);
     defer spec.deinit();
 
@@ -133,9 +157,11 @@ pub fn compilePreview(allocator: std.mem.Allocator, config_text: []const u8) Pre
     var game = try compile.compile(allocator, spec);
     errdefer game.deinit();
 
-    const plan = buildMemoryPlan(game, spec.memory_mib, spec.threads);
+    const plan = buildMemoryPlan(game, spec.memory_mib, threads);
     return .{
         .allocator = allocator,
+        .budget = ba,
+        .parent = parent,
         .game = game,
         .plan = plan,
         .tree_edit_lines = edit_lines,

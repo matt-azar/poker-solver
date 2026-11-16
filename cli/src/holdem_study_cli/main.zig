@@ -55,8 +55,70 @@ fn defaultEnginePath(allocator: std.mem.Allocator) ![]u8 {
     return try allocator.dupe(u8, candidates[0]);
 }
 
+fn exitJobError(err: job_json.JobError) noreturn {
+    const msg: []const u8 = switch (err) {
+        error.InvalidJob => "invalid job (check schema / run limits)",
+        error.MissingField => "invalid job (missing field)",
+        error.BadIterations => "invalid job (iterations must be >= 1)",
+        error.BadStreetConfig => "invalid job (street-config 1 required)",
+        error.OutOfMemory => "out of memory",
+    };
+    std.debug.print("{s}\n", .{msg});
+    std.process.exit(2);
+}
+
+const StatusSnapshot = struct {
+    running: bool = false,
+    failed: bool = false,
+    cancelled: bool = false,
+    terminal_reason: []const u8 = "none",
+    last_error: ?[]const u8 = null,
+};
+
+fn parseStatus(allocator: std.mem.Allocator, raw: []const u8) !StatusSnapshot {
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, raw, .{});
+    defer parsed.deinit();
+    const root = parsed.value;
+    if (root != .object) return error.InvalidStatus;
+    var snap: StatusSnapshot = .{};
+    if (root.object.get("running")) |v| {
+        if (v == .bool) snap.running = v.bool;
+    }
+    if (root.object.get("failed")) |v| {
+        if (v == .bool) snap.failed = v.bool;
+    }
+    if (root.object.get("cancelled")) |v| {
+        if (v == .bool) snap.cancelled = v.bool;
+    }
+    if (root.object.get("terminal_reason")) |v| {
+        if (v == .string) snap.terminal_reason = try allocator.dupe(u8, v.string);
+    } else {
+        snap.terminal_reason = try allocator.dupe(u8, "none");
+    }
+    if (root.object.get("last_error")) |v| {
+        if (v == .string) snap.last_error = try allocator.dupe(u8, v.string);
+    }
+    return snap;
+}
+
+fn deinitStatus(allocator: std.mem.Allocator, snap: *StatusSnapshot) void {
+    if (snap.terminal_reason.len != 0) allocator.free(snap.terminal_reason);
+    if (snap.last_error) |e| allocator.free(e);
+    snap.* = .{};
+}
+
+fn solveOutcomeFailed(snap: StatusSnapshot) bool {
+    if (snap.failed) return true;
+    if (snap.cancelled) return true;
+    if (snap.last_error != null) return true;
+    // Host uses TrainTerminal tag names on status.
+    if (std.mem.eql(u8, snap.terminal_reason, "failed")) return true;
+    if (std.mem.eql(u8, snap.terminal_reason, "cancelled")) return true;
+    return false;
+}
+
 fn cmdPlan(allocator: std.mem.Allocator, job_path: []const u8) !void {
-    var job = try job_json.loadJob(allocator, job_path);
+    var job = job_json.loadJob(allocator, job_path) catch |err| exitJobError(err);
     defer job.deinit(allocator);
 
     const preview = try poker_app.plan_preview.treePreviewJson(allocator, job.street_config);
@@ -92,9 +154,8 @@ fn cmdSolve(allocator: std.mem.Allocator, args: []const []const u8, job_path: []
         try defaultEnginePath(allocator);
     defer allocator.free(engine_path);
 
-    var job = try job_json.loadJob(allocator, job_path);
+    var job = job_json.loadJob(allocator, job_path) catch |err| exitJobError(err);
     defer job.deinit(allocator);
-    try job_json.validateRunLimits(job);
 
     var client = try ipc_client.SolverClient.spawn(allocator, engine_path, "holdem-study-cli");
     defer client.deinit();
@@ -106,6 +167,15 @@ fn cmdSolve(allocator: std.mem.Allocator, args: []const []const u8, job_path: []
         try begin_body.writer().print("{{\"config_text\":{s}}}", .{std.json.fmt(job.street_config, .{})});
         const begin = try client.request("begin_config", begin_body.items, null);
         defer allocator.free(begin);
+        if (std.mem.indexOf(u8, begin, "\"ok\":false") != null or
+            (std.mem.indexOf(u8, begin, "\"solution_id\"") == null and std.mem.indexOf(u8, begin, "\"accepted\"") == null))
+        {
+            // begin_config may be async-admit; tolerate accepted / solution_id shapes.
+            if (std.mem.indexOf(u8, begin, "\"error_code\"") != null) {
+                std.debug.print("begin_config failed: {s}\n", .{begin});
+                std.process.exit(1);
+            }
+        }
     }
 
     const job_id = "j-cli-solve";
@@ -123,30 +193,62 @@ fn cmdSolve(allocator: std.mem.Allocator, args: []const []const u8, job_path: []
         try sw.writeAll("}");
         const admit = try client.request("solve", solve_body.items, job_id);
         defer allocator.free(admit);
+        if (std.mem.indexOf(u8, admit, "\"ok\":false") != null) {
+            std.debug.print("solve admit failed: {s}\n", .{admit});
+            std.process.exit(1);
+        }
         if (std.mem.indexOf(u8, admit, "\"accepted\":true") == null and
-            std.mem.indexOf(u8, admit, "\"running\":true") == null)
+            std.mem.indexOf(u8, admit, "\"running\":true") == null and
+            std.mem.indexOf(u8, admit, "\"solution_id\"") == null)
         {
             std.debug.print("solve admit unexpected: {s}\n", .{admit});
             std.process.exit(1);
         }
     }
 
-    // Poll status until idle; print compact progress to stderr.
+    // Poll structured status until idle; distinguish success / failure / timeout.
     var n: usize = 0;
     var last_status: []u8 = try allocator.dupe(u8, "{}");
     defer allocator.free(last_status);
+    var last_snap: StatusSnapshot = .{
+        .terminal_reason = try allocator.dupe(u8, "none"),
+    };
+    defer deinitStatus(allocator, &last_snap);
+
     while (n < 100_000) : (n += 1) {
         const st = try client.request("status", "null", null);
         allocator.free(last_status);
         last_status = st;
-        const running = std.mem.indexOf(u8, st, "\"running\":true") != null;
-        std.debug.print("progress running={s} status_bytes={d}\n", .{
-            if (running) "true" else "false",
+
+        deinitStatus(allocator, &last_snap);
+        last_snap = parseStatus(allocator, st) catch StatusSnapshot{
+            .terminal_reason = try allocator.dupe(u8, "none"),
+            .running = std.mem.indexOf(u8, st, "\"running\":true") != null,
+        };
+
+        std.debug.print("progress running={s} failed={s} terminal={s} status_bytes={d}\n", .{
+            if (last_snap.running) "true" else "false",
+            if (last_snap.failed) "true" else "false",
+            last_snap.terminal_reason,
             st.len,
         });
-        if (!running) break;
+        if (!last_snap.running) break;
         std.Thread.sleep(20 * std.time.ns_per_ms);
     }
+
+    if (last_snap.running) {
+        std.debug.print("solve timed out waiting for idle status\n", .{});
+        std.process.exit(1);
+    }
+    if (solveOutcomeFailed(last_snap)) {
+        std.debug.print(
+            "solve failed terminal={s} last_error={s}\n",
+            .{ last_snap.terminal_reason, last_snap.last_error orelse "" },
+        );
+        std.process.exit(1);
+    }
+    // Successful completion includes completed / accuracy_reached / time_limit_reached.
+    // time_limit_reached still produces a usable checkpoint — save it.
 
     {
         var save_body = std.ArrayList(u8).init(allocator);

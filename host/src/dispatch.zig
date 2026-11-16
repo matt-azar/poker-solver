@@ -55,6 +55,18 @@ const IoTask = struct {
     kind: IoKind,
 };
 
+const PreviewKind = enum { tree_preview, plan_memory };
+
+const PreviewTask = struct {
+    state: *HostState,
+    request_id: []u8,
+    job_id: ?[]u8,
+    op: []u8,
+    config: []u8,
+    kind: PreviewKind,
+    gen: u64,
+};
+
 pub const HostState = struct {
     allocator: std.mem.Allocator,
     session: poker_app.Session,
@@ -81,6 +93,12 @@ pub const HostState = struct {
     /// ZR-151: Save/Open off the stdin loop (large PSOL must not starve control).
     io_thread: ?std.Thread = null,
     io_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// Tree preview / plan_memory off the stdin loop (large draft compile).
+    preview_thread: ?std.Thread = null,
+    preview_orphans: std.ArrayList(std.Thread),
+    preview_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// Bumped on each new preview; older workers reply `superseded`.
+    preview_gen: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     /// Active begin/train job id (owned); null when idle. Stop/Pause match this only.
     active_job_id: ?[]u8 = null,
     job_mu: std.Thread.Mutex = .{},
@@ -109,6 +127,7 @@ pub const HostState = struct {
             .pending = std.ArrayList([]u8).init(allocator),
             .cancelled_jobs = std.StringHashMap(void).init(allocator),
             .analysis_orphans = std.ArrayList(std.Thread).init(allocator),
+            .preview_orphans = std.ArrayList(std.Thread).init(allocator),
             .equity_jobs = equity_jobs.Manager.init(allocator),
         };
     }
@@ -118,6 +137,7 @@ pub const HostState = struct {
         self.joinTrain();
         self.joinAnalysis();
         self.joinIo();
+        self.joinPreview();
         self.equity_jobs.deinit();
         self.clearPending();
         self.session.deinit();
@@ -134,6 +154,7 @@ pub const HostState = struct {
         self.clearLastError();
         self.pending.deinit();
         self.analysis_orphans.deinit();
+        self.preview_orphans.deinit();
     }
 
     /// Clear sticky async-train error (fresh admit / successful train / teardown).
@@ -183,6 +204,39 @@ pub const HostState = struct {
         if (self.io_thread) |t| {
             t.join();
             self.io_thread = null;
+        }
+    }
+
+    pub fn joinPreview(self: *HostState) void {
+        if (self.preview_thread) |t| {
+            t.join();
+            self.preview_thread = null;
+        }
+        for (self.preview_orphans.items) |t| {
+            t.join();
+        }
+        self.preview_orphans.clearRetainingCapacity();
+    }
+
+    pub fn bumpPreviewGen(self: *HostState) u64 {
+        return self.preview_gen.fetchAdd(1, .acq_rel) + 1;
+    }
+
+    pub fn previewGenCurrent(self: *HostState, gen: u64) bool {
+        return self.preview_gen.load(.acquire) == gen;
+    }
+
+    /// Park the prior preview join handle without blocking the stdin loop.
+    pub fn retirePreviewThread(self: *HostState) void {
+        if (self.preview_thread) |old_t| {
+            self.preview_orphans.ensureUnusedCapacity(1) catch {
+                // Bound exceeded: join synchronously so we never detach.
+                old_t.join();
+                self.preview_thread = null;
+                return;
+            };
+            self.preview_orphans.appendAssumeCapacity(old_t);
+            self.preview_thread = null;
         }
     }
 
@@ -599,6 +653,11 @@ fn upsertOneLineRunout(
     river: i32,
     hands: []const usize,
 ) LineLockExpandError!void {
+    // Independent board-local edits stay independent: do not overwrite or merge
+    // into an explicit (non-from_line) record when expanding a line lock.
+    if (locks.findExact(infoset_id, turn, river)) |existing| {
+        if (!existing.from_line) return;
+    }
     const maybe = try nodeLockFromPublishedRunout(
         state.allocator,
         game,
@@ -610,6 +669,7 @@ fn upsertOneLineRunout(
     );
     var lock = maybe orelse return;
     errdefer lock.deinit(state.allocator);
+    lock.from_line = true;
     try locks.mergeUpsert(lock);
 }
 
@@ -654,14 +714,15 @@ fn upsertLineLockRunouts(
 }
 
 /// Reverse of `upsertLineLockRunouts`: drop the shared line key and every
-/// board-local record for this infoset (expanded runouts + unlock sentinels).
+/// line-generated board-local record for this infoset. Explicit board-local
+/// edits (including ones that overlapped a line expansion) are preserved.
 fn eraseLineLockRunouts(locks: *node_lock.LockSet, infoset_id: usize) void {
     _ = locks.eraseKey(node_lock.lineLockKey(infoset_id));
     var i = locks.entries.items.len;
     while (i > 0) {
         i -= 1;
         const lock = locks.entries.items[i];
-        if (lock.infoset_id == infoset_id and lock.scope == .node) {
+        if (lock.infoset_id == infoset_id and lock.scope == .node and lock.from_line) {
             locks.entries.items[i].deinit(locks.allocator);
             _ = locks.entries.swapRemove(i);
         }
@@ -854,11 +915,22 @@ fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         }
     }
 
+    // Explicit board-local put owns the record — never tagged from_line.
+    lock.from_line = false;
     locks.mergeUpsert(lock) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
     };
     // LockSet now owns the NodeLock storage; neutralize errdefer.
     lock = .{};
+    // mergeLockMasks defaults from_line=false; force-clear if an older full replace path kept a tag.
+    for (locks.entries.items) |*entry| {
+        if (entry.infoset_id == located.node_index and entry.scope == .node and
+            entry.turn == @as(i8, @intCast(located.turn)) and entry.river == @as(i8, @intCast(located.river)))
+        {
+            entry.from_line = false;
+            break;
+        }
+    }
     persistLocksText(state, &locks) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_persist_failed", @errorName(err));
     };
@@ -1628,14 +1700,10 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     // ZR-83 / ZR-156: side-effect-free preview/plan — never begin_config /
-    // clearSolution. Compile through the Session budget allocator (shared
-    // memory-mib ceiling); JSON reply body stays on the host IPC allocator.
+    // clearSolution. Sync path for unit tests; product stdin uses startTreePreview /
+    // startPlanMemory. Compile under a draft-derived BudgetAllocator (not Session).
     //
-    // ZR-158: these ops still run on the product stdin loop (sync). A flop
-    // recompile can take seconds and starves `status`/Stop. Build's TreeLineEditor
-    // debounce issues tree_preview while the user stays on Build during Solve —
-    // refuse while begin/train own the Session allocator so Study polling stays live
-    // and we do not race train's heap traffic through the parent GPA.
+    // ZR-158: refuse while begin/train run so preview does not race train's heap.
     if (std.mem.eql(u8, req.op, "tree_preview")) {
         if (state.beginOrTrainBusy()) {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
@@ -1644,14 +1712,12 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
         const config = try unescapeConfig(state.allocator, escaped);
         defer state.allocator.free(config);
-        var bundle = poker_app.plan_preview.compilePreview(state.session.allocator, config) catch |err| {
-            const code: []const u8 = if (err == error.OutOfMemory)
-                (if (state.session.budget.limit() > 0) "budget_exceeded" else "out_of_memory")
-            else
-                "invalid_config";
+        var bundle = poker_app.plan_preview.compilePreview(state.allocator, config) catch |err| {
+            const code: []const u8 = if (err == error.OutOfMemory) "budget_exceeded" else "invalid_config";
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };
         defer bundle.deinit();
+        // One compile yields tree + nested memory plan.
         const body = poker_app.plan_preview.formatTreePreviewJson(state.allocator, &bundle) catch |err| {
             const code: []const u8 = if (err == error.OutOfMemory) "out_of_memory" else "invalid_config";
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
@@ -1668,11 +1734,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
         const config = try unescapeConfig(state.allocator, escaped);
         defer state.allocator.free(config);
-        var bundle = poker_app.plan_preview.compilePreview(state.session.allocator, config) catch |err| {
-            const code: []const u8 = if (err == error.OutOfMemory)
-                (if (state.session.budget.limit() > 0) "budget_exceeded" else "out_of_memory")
-            else
-                "invalid_config";
+        var bundle = poker_app.plan_preview.compilePreview(state.allocator, config) catch |err| {
+            const code: []const u8 = if (err == error.OutOfMemory) "budget_exceeded" else "invalid_config";
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
         };
         defer bundle.deinit();
@@ -2889,6 +2952,184 @@ pub fn startOpen(state: *HostState, req: ipc.Envelope) !void {
     try startIo(state, req, .open, path);
 }
 
+fn previewWorker(task: *PreviewTask) void {
+    const state = task.state;
+    defer {
+        state.untrack(task.request_id);
+        // Only the live generation clears the running flag.
+        if (state.previewGenCurrent(task.gen)) {
+            state.preview_running.store(false, .release);
+        }
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.free(task.config);
+        state.allocator.destroy(task);
+    }
+
+    if (!state.previewGenCurrent(task.gen)) {
+        var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
+        defer err_reply.deinit();
+        state.writeReply(err_reply) catch {};
+        return;
+    }
+
+    var bundle = poker_app.plan_preview.compilePreview(state.allocator, task.config) catch |err| {
+        if (!state.previewGenCurrent(task.gen)) {
+            var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
+            defer err_reply.deinit();
+            state.writeReply(err_reply) catch {};
+            return;
+        }
+        const code: []const u8 = if (err == error.OutOfMemory) "budget_exceeded" else "invalid_config";
+        var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+        defer err_reply.deinit();
+        state.writeReply(err_reply) catch {};
+        return;
+    };
+    defer bundle.deinit();
+
+    if (!state.previewGenCurrent(task.gen)) {
+        var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
+        defer err_reply.deinit();
+        state.writeReply(err_reply) catch {};
+        return;
+    }
+
+    const body = blk: {
+        switch (task.kind) {
+            .tree_preview => {
+                // One compile → tree nodes + nested memory plan.
+                break :blk poker_app.plan_preview.formatTreePreviewJson(state.allocator, &bundle) catch |err| {
+                    const code: []const u8 = if (err == error.OutOfMemory) "out_of_memory" else "invalid_config";
+                    var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+                    defer err_reply.deinit();
+                    state.writeReply(err_reply) catch {};
+                    return;
+                };
+            },
+            .plan_memory => {
+                var list = std.ArrayList(u8).init(state.allocator);
+                errdefer list.deinit();
+                poker_app.plan_preview.formatMemoryPlanJson(&list, bundle.plan) catch |err| {
+                    const code: []const u8 = if (err == error.OutOfMemory) "out_of_memory" else "invalid_config";
+                    var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+                    defer err_reply.deinit();
+                    state.writeReply(err_reply) catch {};
+                    return;
+                };
+                break :blk list.toOwnedSlice() catch |err| {
+                    const code: []const u8 = if (err == error.OutOfMemory) "out_of_memory" else "invalid_config";
+                    var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+                    defer err_reply.deinit();
+                    state.writeReply(err_reply) catch {};
+                    return;
+                };
+            },
+        }
+    };
+    defer state.allocator.free(body);
+
+    if (!state.previewGenCurrent(task.gen)) {
+        var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
+        defer err_reply.deinit();
+        state.writeReply(err_reply) catch {};
+        return;
+    }
+
+    var reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, task.op, body) catch return;
+    defer reply.deinit();
+    state.writeReply(reply) catch {};
+}
+
+fn startPreview(state: *HostState, req: ipc.Envelope, kind: PreviewKind) !void {
+    try state.track(req.request_id);
+    errdefer state.untrack(req.request_id);
+
+    if (state.beginOrTrainBusy()) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    }
+
+    const escaped = bodyStringField(req.body_json, "config_text") orelse {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    };
+    const config = unescapeConfig(state.allocator, escaped) catch |err| {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", @errorName(err));
+        defer err_reply.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(err_reply);
+        return;
+    };
+    var config_owned = true;
+    errdefer if (config_owned) state.allocator.free(config);
+
+    // Supersede any in-flight preview (newer draft wins).
+    state.retirePreviewThread();
+    const gen = state.bumpPreviewGen();
+
+    const task = blk: {
+        const request_id = try state.allocator.dupe(u8, req.request_id);
+        errdefer state.allocator.free(request_id);
+        const job_id: ?[]u8 = if (req.job_id) |j| try state.allocator.dupe(u8, j) else null;
+        errdefer if (job_id) |j| state.allocator.free(j);
+        const op = try state.allocator.dupe(u8, req.op);
+        errdefer state.allocator.free(op);
+        const created = try state.allocator.create(PreviewTask);
+        created.* = .{
+            .state = state,
+            .request_id = request_id,
+            .job_id = job_id,
+            .op = op,
+            .config = config,
+            .kind = kind,
+            .gen = gen,
+        };
+        config_owned = false;
+        break :blk created;
+    };
+    var worker_owns_task = false;
+    errdefer if (!worker_owns_task) {
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.free(task.config);
+        state.allocator.destroy(task);
+    };
+
+    state.preview_running.store(true, .release);
+    state.preview_thread = std.Thread.spawn(.{}, previewWorker, .{task}) catch |err| {
+        state.preview_running.store(false, .release);
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.free(task.config);
+        state.allocator.destroy(task);
+        worker_owns_task = true;
+        state.untrack(req.request_id);
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    };
+    worker_owns_task = true;
+}
+
+pub fn startTreePreview(state: *HostState, req: ipc.Envelope) !void {
+    try startPreview(state, req, .tree_preview);
+}
+
+pub fn startPlanMemory(state: *HostState, req: ipc.Envelope) !void {
+    try startPreview(state, req, .plan_memory);
+}
+
 test "ZR-151 analysis gen coalesce marks older gens stale" {
     var state = try HostState.init(std.testing.allocator, "analysis-gen");
     defer state.deinit();
@@ -2897,6 +3138,16 @@ test "ZR-151 analysis gen coalesce marks older gens stale" {
     const g2 = state.bumpAnalysisGen();
     try std.testing.expect(state.analysisGenCurrent(g2));
     try std.testing.expect(!state.analysisGenCurrent(g1));
+}
+
+test "preview gen supersedes stale drafts" {
+    var state = try HostState.init(std.testing.allocator, "preview-gen");
+    defer state.deinit();
+    const g1 = state.bumpPreviewGen();
+    try std.testing.expect(state.previewGenCurrent(g1));
+    const g2 = state.bumpPreviewGen();
+    try std.testing.expect(state.previewGenCurrent(g2));
+    try std.testing.expect(!state.previewGenCurrent(g1));
 }
 
 test "superseded analysis finish does not clear live slot or train job" {
@@ -4024,6 +4275,144 @@ test "line lock expands per runout without copying browsed mix" {
     for (after.entries.items) |lock| {
         try std.testing.expect(lock.infoset_id != infoset);
     }
+}
+
+test "line unlock preserves independent board-local lock" {
+    // Explicit river lock, then line lock at the same betting node, then line unlock
+    // must leave the original river lock intact (including save/reopen).
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    const river_a: i32 = 20; // 7c
+    const river_b: i32 = 21; // 7d
+    var state = try HostState.init(std.testing.allocator, "line-unlock-keep-local");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    const game = state.session.game orelse return error.TestUnexpectedResult;
+    var infoset: usize = 0;
+    for (game.nodes, 0..) |node, i| {
+        if (node.kind == .decision and node.player == 0 and node.n_actions >= 2) {
+            infoset = i;
+            break;
+        }
+    }
+
+    var node_id_buf: [64]u8 = undefined;
+    const node_id_a = try std.fmt.bufPrint(&node_id_buf, "p{d}.t-1.r{d}", .{ infoset, river_a });
+
+    // Explicit board-local lock on river_a.
+    var body_a: [256]u8 = undefined;
+    const put_a_body = try std.fmt.bufPrint(
+        &body_a,
+        "{{\"node_id\":\"{s}\",\"kind\":\"full\",\"scope\":\"node\",\"probs\":[0.25,0.75]}}",
+        .{node_id_a},
+    );
+    var put_a: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "keep-a"),
+        .op = try std.testing.allocator.dupe(u8, "put_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, put_a_body),
+    };
+    defer put_a.deinit();
+    var put_a_reply = try handle(&state, put_a);
+    defer put_a_reply.deinit();
+    try std.testing.expect(put_a_reply.ok);
+
+    // Line lock across runouts (must not erase the explicit river_a record).
+    var body_line: [256]u8 = undefined;
+    const put_line_body = try std.fmt.bufPrint(
+        &body_line,
+        "{{\"node_id\":\"{s}\",\"kind\":\"selected\",\"scope\":\"line\",\"hand_indices\":[0],\"probs\":[1,0],\"combo_probs\":[[1,0]]}}",
+        .{node_id_a},
+    );
+    var put_line: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "keep-line"),
+        .op = try std.testing.allocator.dupe(u8, "put_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, put_line_body),
+    };
+    defer put_line.deinit();
+    var put_line_reply = try handle(&state, put_line);
+    defer put_line_reply.deinit();
+    try std.testing.expect(put_line_reply.ok);
+
+    {
+        var locks = try locks_json.parseSessionLocks(std.testing.allocator, state.session.locks_text);
+        defer locks.deinit();
+        const lock_a = locks.findExact(infoset, -1, river_a).?;
+        try std.testing.expect(!lock_a.from_line);
+        try std.testing.expectEqual(@as(f64, 0.25), node_lock.lockedProbability(lock_a.*, 0, 0).?);
+        try std.testing.expectEqual(@as(f64, 0.75), node_lock.lockedProbability(lock_a.*, 0, 1).?);
+        const lock_b = locks.findExact(infoset, -1, river_b).?;
+        try std.testing.expect(lock_b.from_line);
+    }
+
+    var del_body_buf: [128]u8 = undefined;
+    const del_body = try std.fmt.bufPrint(
+        &del_body_buf,
+        "{{\"node_id\":\"{s}\",\"scope\":\"line\"}}",
+        .{node_id_a},
+    );
+    var del_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "keep-del"),
+        .op = try std.testing.allocator.dupe(u8, "delete_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, del_body),
+    };
+    defer del_req.deinit();
+    var del_reply = try handle(&state, del_req);
+    defer del_reply.deinit();
+    try std.testing.expect(del_reply.ok);
+
+    {
+        var after = try locks_json.parseSessionLocks(std.testing.allocator, state.session.locks_text);
+        defer after.deinit();
+        try std.testing.expect(after.findExact(infoset, -1, river_b) == null);
+        const lock_a = after.findExact(infoset, -1, river_a).?;
+        try std.testing.expect(!lock_a.from_line);
+        try std.testing.expectEqual(@as(f64, 0.25), node_lock.lockedProbability(lock_a.*, 0, 0).?);
+        try std.testing.expectEqual(@as(f64, 0.75), node_lock.lockedProbability(lock_a.*, 0, 1).?);
+    }
+
+    // Save / reopen must preserve the explicit river lock (from_line round-trips).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "keep_local.psol" });
+    defer std.testing.allocator.free(path);
+    try state.session.save(path);
+
+    var other = try HostState.init(std.testing.allocator, "line-unlock-reopen");
+    defer other.deinit();
+    try other.session.open(path);
+    var reopened = try locks_json.parseSessionLocks(std.testing.allocator, other.session.locks_text);
+    defer reopened.deinit();
+    const re_a = reopened.findExact(infoset, -1, river_a).?;
+    try std.testing.expect(!re_a.from_line);
+    try std.testing.expectEqual(@as(f64, 0.25), node_lock.lockedProbability(re_a.*, 0, 0).?);
+    try std.testing.expectEqual(@as(f64, 0.75), node_lock.lockedProbability(re_a.*, 0, 1).?);
 }
 
 test "locks list put delete Study CRUD" {
