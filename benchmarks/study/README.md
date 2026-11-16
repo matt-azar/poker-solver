@@ -55,7 +55,9 @@ Each execution is exactly one of:
 
 ## Cases
 
-Reference cases live in `benchmarks/study/cases/`. The executable content is the `argv` array. Metadata next to it describes the same spot. The runner executes `argv` and does not rebuild a second configuration model. Street cases load the tree from a `street-config 1` file under `benchmarks/study/configs/` via `street_solver --config`. Relative `--config` paths are resolved against the repository root. Solve controls (`--iterations`, `--algorithm`, `--accuracy`, `--frozen`) and optional `--memory-mib` / `--threads` overrides stay on the command line.
+Reference cases live in `benchmarks/study/cases/`. Each case's `argv` is a removed C++ `street_solver` or `river_solver` command. The Python runner that executed those commands is not a current how-to. See [How to run](#how-to-run) for the Zig sidecar smoke. The notes below describe those old commands so the committed `RESULTS.md` rows stay readable.
+
+Street cases loaded the tree from a `street-config 1` file under `benchmarks/study/configs/` via `street_solver --config`. Relative `--config` paths were resolved against the repository root. Solve controls (`--iterations`, `--algorithm`, `--accuracy`, `--frozen`) and optional `--memory-mib` / `--threads` overrides stayed on the command line.
 
 ### `river_competing_weights`
 

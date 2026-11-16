@@ -26,7 +26,7 @@ Examples: pot 200 at 5% → 10; pot 199 at 5% → 9; pot 200 at 5% with cap 5 �
 ## Terminal utilities
 
 Zero rake keeps the existing root-centered chip rule and
-`utility[1] == -utility[0]` bit-for-bit with the no-argument `ChipPayoff::terminal`.
+`utility[1] == -utility[0]` bit-for-bit with `chipTerminal` when rake is zero.
 
 With rake `R > 0`:
 

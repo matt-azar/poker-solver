@@ -18,7 +18,7 @@ Player 0's utility is net chips from the start of the river:
 
 An uncalled raise is not profit. Betting 100 into a pot of 100 and getting a fold wins 50, the same as winning a check-down. A called bet that wins is worth `pot / 2` plus the call.
 
-Optional pot rake (`RiverConfig::rake`, CLI `--rake-rate` / `--rake-cap`, and `rake-rate` / `rake-cap` on `river-config 1`) subtracts the house take from the winner, or half each on a tie. Zero rake keeps the chip rule above bit-for-bit. See [RAKE.md](auxiliary/payoffs/RAKE.md). Optional tournament ICM (`RiverConfig::icm`, CLI `--icm-stacks` / `--icm-payouts`) wraps chip/rake terminals into equity deltas; empty ICM stays bit-identical. See [ICM.md](auxiliary/payoffs/ICM.md). Optional action-label incentives (`RiverConfig::incentives`, CLI `--incentive`) are path-attributed at terminals after chip/ICM; see [INCENTIVES.md](auxiliary/payoffs/INCENTIVES.md).
+Optional pot rake (`rake-rate` / `rake-cap` on `street-config 1`) subtracts the house take from the winner, or half each on a tie. Zero rake keeps the chip rule above bit-for-bit. See [RAKE.md](auxiliary/payoffs/RAKE.md). Optional tournament ICM (`icm-stacks` / `icm-payouts` on the same document) wraps chip/rake terminals into equity deltas. Empty ICM stays bit-identical. See [ICM.md](auxiliary/payoffs/ICM.md). Optional action-label incentives (`incentive` / `edge-tag` lines) are path-attributed at terminals after chip/ICM. See [INCENTIVES.md](auxiliary/payoffs/INCENTIVES.md). There is no `river-config 1` parser. Five-card spots use `street-config 1`.
 
 ## Sizes
 

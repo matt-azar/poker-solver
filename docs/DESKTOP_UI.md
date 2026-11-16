@@ -26,6 +26,14 @@ cd desktop && npm ci && npm run tauri dev
 
 Browser-only `npm run dev` does not start an engine.
 
+## Other entries
+
+| Entry | How to open it |
+| --- | --- |
+| Public demo | Precomputed packs. `cd desktop && npm run build:public-demo`, then `npm run preview:public-demo`. Local URL `http://127.0.0.1:4173/?demo=flop-explore`. Pages: `https://matt-azar.github.io/poker-solver/?demo=flop-explore`. Details: `desktop/src/demo/README.md`. |
+| River beta | Live river solves, five-card boards only. `python3 services/river-beta/run.py --host 127.0.0.1 --port 8787` and `http://127.0.0.1:5173/?river-beta=1`. Details: `services/river-beta/README.md`. |
+| Private QA | `cd desktop && npm run preview:scenario`, then `?preview=`. Separate from the public demo. |
+
 ## Capability map
 
 IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/transport.ts`). Retired C++ HTTP `/api/*` paths are historical only ([EXPLORER.md](EXPLORER.md)). Soft-gated features: `desktop/src/engine/ipcCapabilities.ts`.
@@ -80,7 +88,8 @@ IPC ops are protocol-2 host methods on `solver-engine` (see `desktop/src/engine/
 | Contracts + `EngineClient` | Done |
 | Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
 | Analysis dock + Build + Library | Done — Equity hist + band filter + OOP vs IP chart; Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
-| Locks + Strategy edits + Compare | Done |
+| Locks + strategy edits | Done |
+| Compare | Off over IPC. `compare: false` in `desktop/src/engine/ipcCapabilities.ts`. The Compare workspace stays in the UI. Dual-session baseline is not wired. |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |
 | Visual / a11y / perf polish | Partial — focus-visible, reduced-motion, compact ≤1280, light/dark themes |
 

@@ -38,9 +38,14 @@ Browser-only `npm run dev` does **not** start an engine (no HTTP explorer fallba
 
 Limited **river** live browser beta (isolated sessions over typed IPC): see
 [`services/river-beta/README.md`](services/river-beta/README.md) and open
-`http://127.0.0.1:5173/?river-beta=1` with the service running. Turn/flop live
-solving is out of scope until per-session CPU/RSS metrics from that beta are
-reviewed. Precomputed public demo and private QA preview remain separate entries.
+`http://127.0.0.1:5173/?river-beta=1` with the service running. Boards must be
+five cards. Turn and flop stay out of that service until its per-session CPU
+and RSS numbers are reviewed.
+
+Precomputed public demo (browse only): [`desktop/src/demo/README.md`](desktop/src/demo/README.md).
+Pages URL: `https://matt-azar.github.io/poker-solver/?demo=flop-explore`
+(repo Pages source must be GitHub Actions). Private QA is `?preview=` via
+`npm run preview:scenario`. It is a separate entry.
 
 ## Requirements
 

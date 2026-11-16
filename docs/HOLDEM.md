@@ -43,7 +43,7 @@ a * (103 - a) / 2 + (b - a - 1)
 
 ## Ranges
 
-`Range::parse` reads a comma-separated list. An optional `:weight` is a nonnegative number. The last assignment wins. Supported tokens:
+`Range.parse` in `engine/src/poker/range.zig` reads a comma-separated list. An optional `:weight` is a nonnegative number. The last assignment wins. Supported tokens:
 
 | Token | Hands |
 | --- | ---: |
@@ -58,16 +58,8 @@ a * (103 - a) / 2 + (b - a - 1)
 | `AhKd` or `Ah Kd` | 1 |
 | `random` or `*` | 1,326 |
 
-`normalize()` divides by the sum of the weights. An all-zero range stays all zero. `remove_blockers` zeros every combo that uses a dead card. `conditioned` removes those combos and then normalizes (conditional distribution given the dead cards).
-
-JSON is a hand-written array of 1,326 weights in combo-index order. There is no JSON library.
+`Range` stores the parsed weights. It has no `normalize`, `remove_blockers`, or `conditioned` method. `toComboList` writes each non-zero weight as `combo:weight`. Board blockers and overlapping hole cards are dropped later, in compile (`buildHandIndex` in `engine/src/game/compile.zig`).
 
 ## Joint distribution
 
-Hands are ordered: first component is player 0, second is player 1. A pair `(h0, h1)` is legal when `h0`, `h1`, and the board are pairwise disjoint. The unnormalized mass is
-
-```text
-sum w0(h0) w1(h1)
-```
-
-over those legal ordered pairs. `joint_distribution` divides each product by that mass. If the mass is zero the result is empty. With both ranges uniform and no board, the mass is `1326 * 1225` (`C(50, 2) = 1225` hands remain after one private hand is removed).
+Hands are ordered: first component is player 0 (OOP), second is player 1 (IP). Compile sums `w0(h0) * w1(h1)` over pairs whose four hole cards and the board are disjoint. That sum is `hands.joint_mass`. Each deal's probability is the product divided by that mass. A zero mass fails compile. With both ranges uniform and no board, the mass is `1326 * 1225` (`C(50, 2) = 1225` hands remain after one private hand is removed). `range_w` on the compiled game keeps the input weights of combos that appear in at least one legal pair.

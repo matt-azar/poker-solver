@@ -63,14 +63,16 @@ The following CMake targets and `include/` / `src/` layout are **gone** from the
 
 Read `src/solver/postflop/algorithms/cfr_plus.hpp` for one complete CFR+ iteration without opening DCFR or PCFR+. DCFR math stays in `include/solver/dcfr.hpp`. Predictive notes: `include/solver/pcfr.hpp`.
 
-### Runtime modules
+### Historical runtime modules (removed)
+
+These C++ names are gone. The Zig map is the table under [Current layout](#current-layout).
 
 | Module | Role |
 | --- | --- |
 | `poker::holdem` | Card ids, seven-card hand values, range weights, joint hand distribution |
-| `poker::streets::StreetConfig` | Shared postflop config + sizing/legality rules (production) |
+| `poker::streets::StreetConfig` | Shared postflop config + sizing/legality rules |
 | `poker::streets::StreetGame` | Reference flop/turn/river enumerator |
-| `poker::solver::StreetBatchSolver` | Same streets on one public betting tree; production default |
+| `poker::solver::StreetBatchSolver` | Same streets on one public betting tree; was the C++ production default |
 | `street_solver` | CLI over `StreetBatchSolver`; `--reference` for `StreetGame`; `--config` for `street-config 1` |
 | `poker::river::RiverConfig` | Shared river config (legacy batch + conversion) |
 | `poker::river::RiverGame` | Five-card oracle enumerator |
@@ -82,9 +84,9 @@ Read `src/solver/postflop/algorithms/cfr_plus.hpp` for one complete CFR+ iterati
 | `compute_best_response` | Exact best response, deepest information set first |
 | `explorer` | *(retired)* Local Study HTTP server; Zig Study uses `solver-engine` IPC instead |
 
-## Extensive-game interface
+## Extensive-game interface (removed C++ trainer)
 
-A game type provides a small `State` and:
+The C++ `CfrTrainer` required a game type with a small `State` and:
 
 - `root`, `is_chance`, `is_terminal`, `p1_utility`
 - `chance_count`, `chance_probability`, `child_chance`

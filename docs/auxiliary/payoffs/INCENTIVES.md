@@ -35,8 +35,7 @@ Base chip terminal `(+10, -10)`:
 ## Config
 
 `IncentiveConfig` carries `rules[]` and optional `edge_tags[]`. Empty rules mean
-incentives are off. `StreetConfig::incentives` and `RiverConfig::incentives` are
-optional. `street-config 1` / `river-config 1` emit one `incentive` line per
+incentives are off. `street-config 1` emits one `incentive` line per
 rule and one `edge-tag` line per tag assignment:
 
 ```
@@ -61,11 +60,11 @@ also match on the solve path.
 Solve-path edges are public betting actions. Category tags are **not** inferred
 from hand strength in this milestone. Configure them explicitly:
 
-1. Add an `edge-tag` (config / CLI / Job `edge_tags`) that matches the edge's
+1. Add an `edge-tag` line on `street-config 1` that matches the edge's
    compact token or display label. Optional `player` `0`/`1` restricts the seat;
-   omitted / `-1` means either seat.
-2. Matching edges receive those tags via `attach_edge_tags` when the root-to-
-   terminal path is built (`StreetGame` / `RiverGame` / street & river batch).
+   omitted means either seat.
+2. Matching edges receive those tags when the public tree is compiled
+   (`engine/src/game/compile.zig`).
 3. `incentive tag PLAYER KEY DELTA` then fires when `KEY` appears on that edge's
    tag list and the acting seat equals `PLAYER`.
 
@@ -92,7 +91,7 @@ Labels:
 
 | Quantity | Meaning |
 | --- | --- |
-| Chip EV | `ChipPayoff` only (rake/ICM/incentives off) |
+| Chip EV | `chipTerminal` only (rake/ICM/incentives off) |
 | Modeled utility | Chip → optional ICM → path incentives |
 
 `SolveStats::p1_expected_utility` / `p1_best_response_utility` are player-0

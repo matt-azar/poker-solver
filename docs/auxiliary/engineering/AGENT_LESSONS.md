@@ -251,14 +251,14 @@ Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via no
 
 | Kind | Format | Example |
 | --- | --- | --- |
-| Street CLI / PSOL canonical | `street-config 1` text, LF, trailing newline | `configs/street_default.txt` |
-| River explorer default JSON | JSON field names (`effective_stack`, arrays) | `configs/river_default.json` |
-| River canonical text | `river-config 1` | `include/game/river_config_text.hpp` |
+| Street / PSOL canonical | `street-config 1` text, LF, trailing newline (CRLF accepted on parse) | `configs/street_default.txt` |
+| River explorer JSON | Removed. `configs/river_default.json` is a leftover sample. Nothing parses it. | — |
+| `river-config 1` | Removed. `include/game/river_config_text.hpp` is gone. Five-card spots use `street-config 1`. | — |
 
 Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fraction.  
-`--config` loads tree fields; **iterations / algorithm / accuracy / `--reference` / `--frozen` stay on the CLI** and override the file.
+`street-config-check <file>` only parses and prints board length, pot, and stack. Iterations, accuracy, and the train thread cap stay off the document and go out through host `solve`. The removed `street_solver --config` flag reader is gone.
 
-**Don't:** Invent JSON street configs or put iteration caps inside `street-config 1`.
+**Don't:** Invent JSON street configs, revive `river-config 1`, or put iteration caps inside `street-config 1`.
 
 ### Study / street-config bet arrays
 
@@ -378,7 +378,7 @@ Made-hand **categories** (when present) are category mass on a **five-card** boa
 | ≤ 8 legal actions at a decision | `kMaxStreetActions` / trainer scratch | Large size lists without merging |
 | `StreetGame` ≤ ~200k terminals | reference enumerator | “Fix” big spots by raising the cap instead of using batch |
 | Equity work limit ~1.1e6 pair-runouts | library / Equity Calculator default | Full-range turn rejected; don't silently sample |
-| Study equity ceiling ~51.4e6 | packaged Study `--max-pair-runouts` | Dense flop check-down can still exceed; raise explicitly |
+| Study equity ceiling 51,369,120 pair-runouts | host constant `study_explorer_max_pair_runouts` (`engine/src/analysis/equity.zig`). `solver-engine` has no `--max-pair-runouts` flag | Dense flop check-down can still return `WorkLimit`. Warm path uses `study_warm_max_hand_runouts` (hand×runout), not this pair-runout ceiling |
 | Public tree depth / history caps | street index | Pathological trees |
 
 ### Labels and node ids

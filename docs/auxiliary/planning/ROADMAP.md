@@ -16,7 +16,7 @@ Release A is the dependable postflop study tool in the table. A finished feature
 
 ## 2. Starting point and evidence
 
-Foundation in place: shared street/river public tree, pass-frozen CFR variants, active-player CFR+ flooring, blocker-aware showdowns, first-public-card parallelism, engine allocation budgets (default 1024 MiB), node-scoped browsing, Hold’em reference enumerators on `CfrTrainer`. Threads default to one.
+Foundation in place: one Zig public tree for flop, turn, and river; CFR+ with active-player flooring; blocker-aware showdowns; first-public-card parallelism; engine allocation budget (default 1024 MiB); node-scoped browsing. Train threads default to 1, then `WorkerBudget` caps them. The removed C++ tree also had other CFR schedules and `CfrTrainer` enumerators.
 
 Flop, turn, and river are one betting tree (two, one, or zero cards left) in the Zig engine Session. Historical C++ names `StreetGame` / `StreetBatchSolver` / `RiverGame` describe the same public-tree idea in older math docs; they are not a shipping binary path on `main`.
 

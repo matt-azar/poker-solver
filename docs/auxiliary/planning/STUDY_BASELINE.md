@@ -9,7 +9,8 @@ Product entry points: Zig `solver-engine` + Study UI (`desktop/`). Living status
 - Shared flop/turn/river public tree in Zig Session; math docs may still say `StreetBatchSolver` / `RiverGame` as historical vocabulary
 - Conditional action EV, check-down equity (+ buckets and an OOP vs IP chart), made-hand categories on five-card boards, flop/turn draw and backdoor tags
 - Stop-and-keep, pause/continue, accuracy and wall-clock stopping (Acc walls are not cutover blockers)
-- Versioned PSOL save/open/continue; recent-files list; street-config templates; named range presets; Build betting-tree catalogue
+- Versioned PSOL save/open/continue; in-app solutions catalogue (folders) plus Library recent list; street-config templates; named range presets; Build betting-tree catalogue
+- Precomputed public Study demo (`desktop/src/demo/README.md`) and a limited five-card river browser beta (`services/river-beta/README.md`). Neither replaces the Windows Tauri product.
 - Node locks, resolve-locked, and session strategy edits over typed IPC
 - Build preview tree with force/remove/add-size edits and a memory-plan dry run (`tree_preview` / `plan_memory`)
 - Pot rake on the Zig compile/terminal path
