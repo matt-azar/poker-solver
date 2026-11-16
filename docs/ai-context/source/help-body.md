@@ -17,7 +17,7 @@
 - Preferred grain: **seat×action** charts composed into OOP/IP for SRP/3BP.
 - Build → **Catalogue** opens the seat×action tree (save/edit user ranges in localStorage).
 - Synthetic fixtures are demos — not verified GTO.
-- Wording: pot type required for create; `100NL` = rake structure; silence → **cEV** + **100bb**.
+- Wording: pot type + positions required for create; compose ranges from seat×action (e.g. CO vs BB SRP). Unspecified stack → **100bb**.
 
 ## Numerical labels (do not redefine)
 

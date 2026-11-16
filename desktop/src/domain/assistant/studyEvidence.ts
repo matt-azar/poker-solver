@@ -75,8 +75,27 @@ export interface StudyEvidenceLiveState {
   status: StatusPayload | null;
 }
 
+/**
+ * Send-time Study identity. Evidence tools and Open in Study bind to this
+ * snapshot; if live Study diverges (or the bind is unavailable), return
+ * stale-context absences instead of quoting numbers.
+ */
+export interface StudyEvidenceBind {
+  solutionId: string | null;
+  /** Published policy / average epoch when known. */
+  policyRevision: number | null;
+  statusGeneration: number | null;
+  nodeId: string | null;
+  selectedHand: string | null;
+}
+
 export interface StudyEvidenceHost {
   read: () => StudyEvidenceLiveState;
+  /**
+   * Optional send-time bind. When set, tools refuse results if live Study no
+   * longer matches solution / policy / node / selected hand.
+   */
+  bind?: StudyEvidenceBind | null;
   /** Warm EV + equity via Study's analysis scheduler (user/auto priority). */
   ensureNodeAnalysis: () => Promise<void>;
   /**
@@ -98,6 +117,96 @@ export interface StudyEvidenceHost {
   openLineCardRow?: (resolvedNodeId: string) => Promise<void>;
   /** Read the loaded Compare-runouts report (after load). */
   readLineCardReport?: () => LineCardReportModel | null;
+}
+
+/** Build a send-time bind from a live Study read (or context snapshot fields). */
+export function captureStudyEvidenceBind(
+  live: StudyEvidenceLiveState,
+): StudyEvidenceBind {
+  const policy =
+    typeof live.status?.policy_revision === "number"
+      ? live.status.policy_revision
+      : typeof live.currentNode?.policy_revision === "number"
+        ? live.currentNode.policy_revision
+        : typeof live.status?.analysis_revision === "number"
+          ? live.status.analysis_revision
+          : null;
+  const statusGeneration =
+    typeof live.status?.status_generation === "number"
+      ? live.status.status_generation
+      : typeof live.currentNode?.status_generation === "number"
+        ? live.currentNode.status_generation
+        : null;
+  return {
+    solutionId: live.solutionId,
+    policyRevision: policy,
+    statusGeneration,
+    nodeId: live.currentNode?.node_id ?? null,
+    selectedHand: live.selectedCell?.text ?? null,
+  };
+}
+
+/**
+ * Validate send-time bind against live Study. Returns absence messages when
+ * stale or when a required published context is unavailable.
+ */
+export function sendTimeBindAbsences(
+  host: StudyEvidenceHost,
+  opts: { requireSolution?: boolean; requireNode?: boolean; requireHand?: boolean } = {},
+): string[] {
+  const bind = host.bind;
+  if (!bind) {
+    return [];
+  }
+  const absences: string[] = [];
+  if (opts.requireSolution !== false && !bind.solutionId) {
+    absences.push(
+      "Stale context: no published solution was bound at send time — strategy and EV evidence are unavailable.",
+    );
+    return absences;
+  }
+  if (opts.requireNode && !bind.nodeId) {
+    absences.push(
+      "Stale context: no Study decision was bound at send time. Open a decision and retry.",
+    );
+    return absences;
+  }
+  if (opts.requireHand && !bind.selectedHand) {
+    absences.push(
+      "Stale context: no matrix hand was selected at send time.",
+    );
+    return absences;
+  }
+  const live = host.read();
+  if (bind.solutionId && live.solutionId !== bind.solutionId) {
+    absences.push(
+      "Stale context: the published solution changed after send. Retry on the intended solution.",
+    );
+  }
+  if (bind.nodeId && live.currentNode?.node_id !== bind.nodeId) {
+    absences.push(
+      "Stale context: the Study decision changed after send. Retry on the intended node.",
+    );
+  }
+  if (
+    bind.policyRevision != null &&
+    typeof live.status?.policy_revision === "number" &&
+    live.status.policy_revision !== bind.policyRevision
+  ) {
+    absences.push(
+      "Stale context: the published policy revision advanced after send. Retry for fresh frequencies.",
+    );
+  }
+  if (
+    bind.selectedHand &&
+    opts.requireHand &&
+    live.selectedCell?.text !== bind.selectedHand
+  ) {
+    absences.push(
+      "Stale context: the selected hand changed after send. Reselect the hand and retry.",
+    );
+  }
+  return absences;
 }
 
 export const QUERY_NODE_STRATEGY_TOOL = {
@@ -259,10 +368,14 @@ export function isStudyEvidenceToolName(name: string): name is StudyEvidenceTool
 export interface NodeStrategyEvidence {
   ok: boolean;
   seat: StudyEvidenceSeat | null;
+  /** Acting seat at the bound node (may match `seat`). */
+  actingSeat: StudyEvidenceSeat | null;
   nodeId: string | null;
   line: string | null;
   path: string[];
   actions: Array<{ action: string; frequency: number }>;
+  /** Display EV basis when quoting EVs alongside freqs (strategy mix has no EV). */
+  evBasis: EvDisplayBasis | null;
   /** Always false in this pass — evidence never mutates Study selection. */
   navigated: boolean;
   hops: number;
@@ -283,6 +396,7 @@ export interface BluffCandidateRow {
 export interface BluffCandidatesEvidence {
   ok: boolean;
   seat: StudyEvidenceSeat | null;
+  actingSeat: StudyEvidenceSeat | null;
   nodeId: string | null;
   line: string | null;
   path: string[];
@@ -296,6 +410,7 @@ export interface BluffCandidatesEvidence {
   truncated: boolean;
   navigated: boolean;
   hops: number;
+  evBasis: EvDisplayBasis | null;
   absences: string[];
   pathHint?: string | null;
 }
@@ -650,76 +765,123 @@ function identityStillMatches(
   nodeId: string,
 ): boolean {
   const live = host.read();
-  return live.solutionId === solutionId && live.currentNode?.node_id === nodeId;
+  if (live.solutionId !== solutionId || live.currentNode?.node_id !== nodeId) {
+    return false;
+  }
+  const bind = host.bind;
+  if (!bind) {
+    return true;
+  }
+  if (bind.solutionId && bind.solutionId !== solutionId) {
+    return false;
+  }
+  if (bind.nodeId && bind.nodeId !== nodeId) {
+    return false;
+  }
+  if (
+    bind.policyRevision != null &&
+    typeof live.status?.policy_revision === "number" &&
+    live.status.policy_revision !== bind.policyRevision
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function emptyNodeStrategy(
+  partial: Partial<NodeStrategyEvidence> & { absences: string[] },
+): NodeStrategyEvidence {
+  return {
+    ok: false,
+    seat: partial.seat ?? null,
+    actingSeat: partial.actingSeat ?? null,
+    nodeId: partial.nodeId ?? null,
+    line: partial.line ?? null,
+    path: partial.path ?? [],
+    actions: [],
+    evBasis: partial.evBasis ?? null,
+    navigated: false,
+    hops: 0,
+    absences: partial.absences,
+    pathHint: partial.pathHint,
+  };
 }
 
 export async function queryNodeStrategy(
   host: StudyEvidenceHost,
   args: Record<string, unknown> = {},
 ): Promise<NodeStrategyEvidence> {
+  const stale = sendTimeBindAbsences(host, { requireSolution: true, requireNode: true });
+  if (stale.length) {
+    return emptyNodeStrategy({ absences: stale });
+  }
   const live = host.read();
   const seat = normalizeSeat(args.seat, actingSeat(live.currentNode));
   if (!seat) {
-    return {
-      ok: false,
+    return emptyNodeStrategy({
       seat: null,
+      actingSeat: actingSeat(live.currentNode),
       nodeId: live.currentNode?.node_id ?? null,
       line: live.currentNode?.line ?? null,
       path: pathLabels(live.pathTrail),
-      actions: [],
-      navigated: false,
-      hops: 0,
+      evBasis: live.evDisplayBasis,
       absences: [
         "Could not determine seat (IP/OOP). Pass seat explicitly or open a decision node.",
       ],
-    };
+    });
   }
   if (!live.solutionId) {
-    return {
-      ok: false,
+    return emptyNodeStrategy({
       seat,
-      nodeId: null,
-      line: null,
+      actingSeat: actingSeat(live.currentNode),
       path: pathLabels(live.pathTrail),
-      actions: [],
-      navigated: false,
-      hops: 0,
+      evBasis: live.evDisplayBasis,
       absences: ["No published solution — strategy evidence is unavailable."],
-    };
+    });
   }
 
   const resolved = await resolveCurrentSeatNode(host, seat);
   if ("absences" in resolved) {
-    return {
-      ok: false,
+    return emptyNodeStrategy({
       seat,
+      actingSeat: actingSeat(live.currentNode),
       nodeId: live.currentNode?.node_id ?? null,
       line: live.currentNode?.line ?? null,
       path: pathLabels(host.read().pathTrail),
-      actions: [],
-      navigated: false,
-      hops: 0,
+      evBasis: live.evDisplayBasis,
       absences: resolved.absences,
       pathHint: resolved.pathHint,
-    };
+    });
   }
 
   const { node, path, pathHint } = resolved;
-  const absences: string[] = [];
-  if (!node.strategy || !node.reach_defined) {
-    absences.push(`Strategy frequencies are not loaded for node ${node.node_id}.`);
-    return {
-      ok: false,
+  if (host.bind?.nodeId && node.node_id !== host.bind.nodeId) {
+    return emptyNodeStrategy({
       seat,
+      actingSeat: actingSeat(node),
       nodeId: node.node_id,
       line: node.line ?? node.node_id,
       path,
-      actions: [],
-      navigated: false,
-      hops: 0,
+      evBasis: live.evDisplayBasis,
+      absences: [
+        "Stale context: evidence would leave the send-time Study decision. Open the intended node and retry.",
+      ],
+      pathHint,
+    });
+  }
+  const absences: string[] = [];
+  if (!node.strategy || !node.reach_defined) {
+    absences.push(`Strategy frequencies are not loaded for node ${node.node_id}.`);
+    return emptyNodeStrategy({
+      seat,
+      actingSeat: actingSeat(node),
+      nodeId: node.node_id,
+      line: node.line ?? node.node_id,
+      path,
+      evBasis: live.evDisplayBasis,
       absences,
       pathHint,
-    };
+    });
   }
 
   const labels = node.actions ?? [];
@@ -727,6 +889,7 @@ export async function queryNodeStrategy(
   return {
     ok: true,
     seat,
+    actingSeat: actingSeat(node),
     nodeId: node.node_id,
     line: node.line ?? node.node_id,
     path,
@@ -734,6 +897,7 @@ export async function queryNodeStrategy(
       action,
       frequency: freqs[index] ?? 0,
     })),
+    evBasis: live.evDisplayBasis,
     navigated: false,
     hops: 0,
     absences,
@@ -773,6 +937,7 @@ export async function listBluffCandidates(
   ): BluffCandidatesEvidence => ({
     ok: false,
     seat,
+    actingSeat: actingSeat(live.currentNode),
     nodeId: live.currentNode?.node_id ?? null,
     line: live.currentNode?.line ?? null,
     path: pathLabels(host.read().pathTrail),
@@ -785,9 +950,15 @@ export async function listBluffCandidates(
     truncated: false,
     navigated: false,
     hops: 0,
+    evBasis: live.evDisplayBasis,
     absences,
     ...partial,
   });
+
+  const stale = sendTimeBindAbsences(host, { requireSolution: true, requireNode: true });
+  if (stale.length) {
+    return empty(stale);
+  }
 
   if (!seat) {
     return empty([
@@ -901,6 +1072,7 @@ export async function listBluffCandidates(
   return {
     ok: rows.length > 0,
     seat,
+    actingSeat: actingSeat(liveNode),
     nodeId: liveNode.node_id,
     line: liveNode.line ?? liveNode.node_id,
     path,
@@ -913,6 +1085,7 @@ export async function listBluffCandidates(
     truncated: sorted.length > rows.length,
     navigated: false,
     hops: 0,
+    evBasis: after.evDisplayBasis,
     pathHint,
     absences:
       rows.length > 0
@@ -1018,6 +1191,14 @@ export async function compareRunouts(
     ...partial,
   });
 
+  const staleCompare = sendTimeBindAbsences(host, {
+    requireSolution: true,
+    requireNode: true,
+  });
+  if (staleCompare.length) {
+    return empty(staleCompare);
+  }
+
   if (!seat) {
     return empty([
       "Could not determine seat (IP/OOP). Pass seat explicitly or open a decision node.",
@@ -1079,7 +1260,10 @@ export async function compareRunouts(
   let actionIndex: number | null = null;
   let actionLabel: string | null = null;
   if (sortBy === "frequency") {
-    const matched = resolveLineCardAction(actionLabels, actionQuery);
+    const matched = resolveLineCardAction(actionLabels, actionQuery, {
+      pot: node.pot,
+      toCall: node.to_call,
+    });
     if (!matched.ok) {
       return empty([matched.reason], {
         nodeId,
@@ -1263,8 +1447,29 @@ export async function querySelectedHandAnalysis(
   host: StudyEvidenceHost,
   _args: Record<string, unknown> = {},
 ): Promise<SelectedHandEvidence> {
+  const stale = sendTimeBindAbsences(host, {
+    requireSolution: true,
+    requireNode: true,
+    requireHand: true,
+  });
+  if (stale.length) {
+    return {
+      ok: false,
+      label: host.bind?.selectedHand ?? null,
+      nodeId: host.bind?.nodeId ?? null,
+      strategy: null,
+      mixedEv: null,
+      actionEv: null,
+      equity: null,
+      evBasis: host.read().evDisplayBasis,
+      absences: stale,
+    };
+  }
   const live = host.read();
-  const label = live.selectedCell?.text?.trim() || null;
+  const label =
+    host.bind?.selectedHand?.trim() ||
+    live.selectedCell?.text?.trim() ||
+    null;
   const absences: string[] = [];
   if (!label) {
     return {

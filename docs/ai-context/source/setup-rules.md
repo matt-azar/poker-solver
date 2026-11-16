@@ -3,11 +3,9 @@
 | Input | Rule |
 | --- | --- |
 | Pot type (`SRP` / `3BP` / `4BP`) | **Required** for `prepare_study`. If missing → `clarify`. Never guess. |
-| `100NL` / `NNNL` | Rake structure / stakes environment — **not** personal profile, **not** stack depth. |
-| No rake named | Set `stakesLabel` to **cEV** (range-source environment only). |
-| No stack named | Set `stackBb` to **100**. Never infer 100bb from an NL label alone. |
-| “my 100NL profile” | Standard/GTO catalogue for that rake + stated action. |
-| Range-source vs solve rake | `stakesLabel` / 100NL / cEV select catalogue ranges only. **Never** copy onto `fieldEdits.rakeRate` / `rakeCap`. Loading ranges preserves current engine solve rake. “Make the sim rake-free” → `fieldEdits: { rakeRate: 0, rakeCap: 0 }` only. |
+| Positions + preflop action | Primary range selectors (e.g. CO vs BB SRP → seat×action charts). Do **not** require stakes/NL labels. |
+| No stack named | Set `stackBb` to **100**. |
+| Engine solve rake | Independent of catalogue ranges. Leave unchanged unless the player explicitly asks to edit `rakeRate` / `rakeCap`. Never invent solve rake from spot wording. |
 
 ## Proposal kinds
 
@@ -21,24 +19,25 @@
 ## Ranges
 
 - Prefer non-synthetic catalogue rows / seat×action composition over `synthetic_fixture`.
+- Compose by **position × preflop action** (e.g. CO open + BB call vs CO for SRP). Open size / stack are soft preferences when charts carry that metadata; missing stakes tags never block compose.
 - Stack bracket → `interpolateFromIds` + target `stackBb` (app blends weights).
 - Else guarded `generatedRanges` `{oop,ip}` weighted text; note model-proposed, not equilibrium.
 - Do **not** put range weights in `intent` — only in `generatedRanges`.
-- Position×action atoms (e.g. CO open + BB call vs CO) compose into OOP/IP for SRP/3BP in app code. Use available profile metadata ids when they match.
+- Use available profile metadata ids when they match. Record chart ids + revisions the app used.
 
 ## Silence defaults
 
 1. Explicit request fields  
 2. Selected / exact-matched catalogue entry  
 3. Saved preferences  
-4. **100bb** stacks, **cEV** rake  
+4. **100bb** stacks when a stack is required  
 5. Visible general defaults  
 
-Surface conflicts — never silent override. Solve is not started by the assistant.
+Surface conflicts — never silent override. Solve is not started by the assistant. Do not emphasize stakes/rake in proposals or summaries unless the player asked about solve rake.
 
 ## Direct field edits
 
-When the player names a draft field without asking for a new study, emit `update_study` with `fieldEdits` containing only those keys. Do not invent pot type, ranges, or stakes. Do not set solve rake from a 100NL/cEV range request.
+When the player names a draft field without asking for a new study, emit `update_study` with `fieldEdits` containing only those keys. Do not invent pot type or ranges. Do not set solve rake unless the player asked.
 
 `fieldEdits` keys the app accepts: `pot`, `stack`, `iterations`, `accuracy`, `timeLimit`, `threads`, `memoryMib`, `algorithm` (`cfr_plus` | `cfr` | `dcfr`), `samples`, `maxRaises`, `mergeThresholdPct`, `allInThresholdPct`, `potCap`, `rakeRate`, `rakeCap`, `donkFlop`, `donkTurn`, `donkRiver`, `incentives`, `edgeTags`. Reject negative pot/stack/memory, zero threads, and fractional iterations. Geometric and explicit all-in are size tokens (`e`, `a`) on each street. `allInThresholdPct` is Pio's all-in threshold as percent of starting stack (default 50 = more than half the stack → all-in; 0 = off; draft stores the fraction). List `a` on a size field for an explicit all-in. Max raises covers no-3-bet; there is no Build "No 3-bet" toggle.
 

@@ -55,9 +55,9 @@ function request(text: string) {
 describe("FakeAssistantProvider", () => {
   const provider = createFakeAssistantProvider();
 
-  it("prepares CO vs BB SRP with 100NL as rake structure (no range weights)", async () => {
+  it("prepares CO vs BB SRP from positions + pot type (no range weights)", async () => {
     const proposal = await provider.interpret(
-      request("Set up CO vs BB SRP with 100NL ranges"),
+      request("Set up CO vs BB SRP"),
     );
     expect(proposal.kind).toBe("prepare_study");
     if (proposal.kind !== "prepare_study") return;
@@ -65,17 +65,17 @@ describe("FakeAssistantProvider", () => {
     expect(proposal.intent.oopPosition).toBe("BB");
     expect(proposal.intent.ipPosition).toBe("CO");
     expect(proposal.intent.potType).toBe("SRP");
-    expect(proposal.intent.stakesLabel).toBe("100NL");
-    // Stack still omitted — resolve assumes 100bb; 100NL must not imply stack.
+    expect(proposal.intent.stakesLabel).toBeUndefined();
+    // Stack still omitted — resolve assumes 100bb.
     expect(proposal.intent.stackBb).toBeUndefined();
-    expect(proposal.selectedProfileId).toBe(fixture25Nl.id);
+    expect(proposal.selectedProfileId).toBe(fixture25.id);
     const serialized = JSON.stringify(proposal);
-    expect(serialized).not.toContain(fixture25Nl.ranges.oop);
-    expect(serialized).not.toContain(fixture25Nl.ranges.ip);
+    expect(serialized).not.toContain(fixture25.ranges.oop);
+    expect(serialized).not.toContain(fixture25.ranges.ip);
     expect(serialized.length).toBeLessThan(2000);
   });
 
-  it("omits rake/stack on the proposal when silent so resolve can assume cEV / 100bb", async () => {
+  it("omits rake/stack on the proposal when silent so resolve can assume 100bb", async () => {
     const proposal = await provider.interpret(
       request("Set up CO vs BB SRP"),
     );
@@ -92,16 +92,16 @@ describe("FakeAssistantProvider", () => {
 
   it("clarifies when pot type / preflop action is missing", async () => {
     const proposal = await provider.interpret(
-      request("Set up CO vs BB with 100NL ranges"),
+      request("Set up CO vs BB"),
     );
     expect(proposal.kind).toBe("clarify");
     if (proposal.kind !== "clarify") return;
     expect(proposal.questions[0]).toMatch(/pot type|SRP|3BP|4BP/i);
   });
 
-  it("does not treat “my 100NL profile” as a personal profile without pot type", async () => {
+  it("still needs pot type when the player names a profile without it", async () => {
     const proposal = await provider.interpret(
-      request("Set up CO vs BB using my 100NL profile"),
+      request("Set up CO vs BB using my catalogue profile"),
     );
     expect(proposal.kind).toBe("clarify");
     if (proposal.kind !== "clarify") return;
@@ -170,12 +170,11 @@ describe("FakeAssistantProvider", () => {
     expect(preflop.kind).toBe("unsupported");
   });
 
-  it("clarifies rake-only requests and does not invent stack from 100NL", async () => {
-    const proposal = await provider.interpret(request("100NL"));
+  it("clarifies incomplete requests without inventing stack", async () => {
+    const proposal = await provider.interpret(request("set up a study"));
     expect(proposal.kind).toBe("clarify");
     if (proposal.kind !== "clarify") return;
-    expect(proposal.questions[0]).toMatch(/rake structure|stakes environment/i);
-    expect(proposal.questions[0]).not.toMatch(/100bb/i);
+    expect(proposal.questions[0]).toMatch(/pot type|position|SRP|3BP|CO vs BB/i);
   });
 
   it("writes named Build fields without inventing a new study", async () => {

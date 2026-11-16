@@ -3,6 +3,7 @@ import type { SpotDraft } from "../types";
 import type { RangeProfileCatalogue } from "../profiles";
 import { buildUnifiedAssistantSystemPrompt } from "./contextPacks";
 import {
+  compactHelpContextPayload,
   SELECTED_HAND_ANALYSIS_TOOL_SCHEMA,
   STUDY_NODE_EVIDENCE_TOOL_NAMES,
   type AssistantContextSnapshot,
@@ -127,11 +128,19 @@ export type AssistantTurnIntent = "setup" | "qa" | "clarify";
 const HELP_QUESTION_START =
   /^(how|what|where|why|when|who|which|can i|do i|does|is there|explain|tell me)\b/;
 
+/** Conceptual help that must never force setup ("Can you explain when to use…"). */
+const CONCEPTUAL_HELP =
+  /\b(explain|when to|why (do|would|should)|what (is|does|are)|how (do|does|to|should)|tell me about|difference between)\b/i;
+
 const EXPLICIT_MUTATION_VERB =
-  /\b(set up|setup|prepare|duplicate|change|update|set|use|make|add|apply|generate|interpolate)\b/;
+  /\b(set up|setup|prepare|duplicate|change|update|set|make|add|apply|generate|interpolate)\b/;
+
+/** "Use" only counts as mutation with a clear Build object — not "when to use a larger bet". */
+const USE_AS_MUTATION =
+  /\buse\b[\s\S]{0,48}\b(the\s+)?(pot|stack|board|flop|turn|river|range|ranges|profile|catalogue|oop|ip)\b/i;
 
 const DRAFT_FIELD_MUTATION =
-  /\b(set|change|update|use|make)\b[\s\S]{0,48}\b(the\s+)?(pot|stack|iterations|iters|accuracy|time limit|threads|memory|samples|algorithm|max raises|board|flop|turn|river|range|ranges)\b/i;
+  /\b(set|change|update|make)\b[\s\S]{0,48}\b(the\s+)?(pot|stack|iterations|iters|accuracy|time limit|threads|memory|samples|algorithm|max raises|board|flop|turn|river|range|ranges)\b/i;
 
 const NUMERIC_FIELD_ASSIGNMENT =
   /\b(pot|stack|iterations|iters|accuracy|threads|memory|samples|max raises)\s*(to|=|:)?\s*\d/i;
@@ -141,15 +150,25 @@ const EXPLICIT_SETUP_COMMAND =
 
 /**
  * Classify whether the player wants a Build write, product/Study Q&A, or a
- * short clarification. Poker terms (3BP, 100NL, bet size) alone never imply
- * mutation; "How do I set up…" is help; "Can you set the stack to 150?" is setup.
+ * short clarification. Poker terms (3BP, bet size) alone never imply mutation;
+ * "How do I set up…" / "Can you explain when to use…" are help;
+ * "Can you set the stack to 150?" is setup.
  */
 export function classifyAssistantTurnIntent(text: string): AssistantTurnIntent {
   const lower = text.trim().toLowerCase();
   if (!lower) return "qa";
 
+  // Conceptual help wins over can-you + verb heuristics ("when to use a larger bet").
+  if (CONCEPTUAL_HELP.test(lower) && !EXPLICIT_SETUP_COMMAND.test(lower)) {
+    return "qa";
+  }
+
   // "Can you set/change…" is an explicit edit request (not a how-to).
-  if (/^can you\b/.test(lower) && EXPLICIT_MUTATION_VERB.test(lower)) {
+  if (
+    /^can you\b/.test(lower) &&
+    (EXPLICIT_MUTATION_VERB.test(lower) || USE_AS_MUTATION.test(lower)) &&
+    !CONCEPTUAL_HELP.test(lower)
+  ) {
     return "setup";
   }
 
@@ -162,6 +181,7 @@ export function classifyAssistantTurnIntent(text: string): AssistantTurnIntent {
   if (
     EXPLICIT_SETUP_COMMAND.test(lower) ||
     DRAFT_FIELD_MUTATION.test(lower) ||
+    USE_AS_MUTATION.test(lower) ||
     NUMERIC_FIELD_ASSIGNMENT.test(lower)
   ) {
     return "setup";
@@ -304,6 +324,12 @@ export function summarizeProposal(proposal: InterpretProposal): string {
   return bits.join(" · ");
 }
 
+function formatEvBasisLabel(basis: string | null | undefined): string {
+  if (basis === "global") return "Global EV (root-centered)";
+  if (basis === "local") return "Local EV";
+  return basis ? String(basis) : "EV basis n/a";
+}
+
 function formatNodeStrategyAnswer(evidence: NodeStrategyEvidence): string {
   if (!evidence.ok) {
     return (
@@ -314,10 +340,14 @@ function formatNodeStrategyAnswer(evidence: NodeStrategyEvidence): string {
   const mix = evidence.actions
     .map((row) => `${row.action} ${(row.frequency * 100).toFixed(1)}%`)
     .join(", ");
+  const acting = evidence.actingSeat ?? evidence.seat;
   const nav = evidence.navigated
     ? ` (opened ${evidence.seat} node ${evidence.nodeId} after ${evidence.hops} hop${evidence.hops === 1 ? "" : "s"})`
     : "";
-  return `${evidence.seat} strategy at ${evidence.line ?? evidence.nodeId}${nav}: ${mix}.`;
+  return (
+    `${evidence.seat} strategy at ${evidence.line ?? evidence.nodeId}` +
+    ` (acting seat ${acting}; ${formatEvBasisLabel(evidence.evBasis)})${nav}: ${mix}.`
+  );
 }
 
 function formatBluffAnswer(evidence: BluffCandidatesEvidence): string {
@@ -342,9 +372,11 @@ function formatBluffAnswer(evidence: BluffCandidatesEvidence): string {
       : "";
   const minReach =
     evidence.minReach != null ? `, min reach ≥ ${evidence.minReach}` : "";
+  const acting = evidence.actingSeat ?? evidence.seat;
   return (
     `${evidence.seat} bluff candidates at ${evidence.line ?? evidence.nodeId}` +
-    ` (node equity < ${(evidence.equityThreshold * 100).toFixed(0)}%${minBet}${minReach})${more}:\n` +
+    ` (acting seat ${acting}; ${formatEvBasisLabel(evidence.evBasis)};` +
+    ` node equity < ${(evidence.equityThreshold * 100).toFixed(0)}%${minBet}${minReach})${more}:\n` +
     `${lines.join("\n")}${caveat}`
   );
 }
@@ -689,23 +721,57 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
       );
     }
 
+    const intent = classifyAssistantTurnIntent(text);
+    if (intent === "clarify") {
+      return {
+        kind: "answer",
+        provider: "openai",
+        message: CLARIFY_MUTATION_MESSAGE,
+      };
+    }
+
     const history = (request.history ?? []).slice(-10);
-    const userPayload = JSON.stringify({
-      text: text.slice(0, ASSISTANT_MAX_TEXT_LENGTH),
-      setupSummary: request.setupSummary,
-      preferencesSummary: request.preferencesSummary,
-      draftRevision: requestRevision,
-      availableProfiles: request.availableProfiles,
-      capabilities: request.capabilities,
-      contextSnapshot: request.contextSnapshot ?? null,
-      analysisTools: {
-        available: [...STUDY_NODE_EVIDENCE_TOOL_NAMES],
-        note:
-          "Use query_node_strategy / list_bluff_candidates / query_selected_hand_analysis for live Study evidence at the current decision only — they wait on the Study analysis scheduler and do not change Study selection. Use compare_runouts to open Compare runouts with card filters and frequency ranking on the current line (wrong seat/size → path hint or supported actions). Never start a solve.",
-        deferred: [...STUDY_EVIDENCE_DEFERRED_TOOLS],
-        selectedHandSchemaStatus: SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.status,
-      },
-    });
+    // Ordinary help / Q&A: shrink payload — no dual range previews or catalogue dump.
+    const helpPayload =
+      intent !== "setup" && request.contextSnapshot
+        ? compactHelpContextPayload(request.contextSnapshot)
+        : null;
+    const userPayload = JSON.stringify(
+      intent === "setup"
+        ? {
+            text: text.slice(0, ASSISTANT_MAX_TEXT_LENGTH),
+            setupSummary: request.setupSummary,
+            preferencesSummary: request.preferencesSummary,
+            draftRevision: requestRevision,
+            availableProfiles: request.availableProfiles,
+            capabilities: request.capabilities,
+            contextSnapshot: request.contextSnapshot ?? null,
+            analysisTools: {
+              available: [...STUDY_NODE_EVIDENCE_TOOL_NAMES],
+              note:
+                "Setup-shaped requests should emit emit_study_setup_proposal. Evidence tools are not used on setup turns.",
+              deferred: [...STUDY_EVIDENCE_DEFERRED_TOOLS],
+              selectedHandSchemaStatus: SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.status,
+            },
+          }
+        : {
+            text: text.slice(0, ASSISTANT_MAX_TEXT_LENGTH),
+            setupSummary: request.setupSummary,
+            preferencesSummary: request.preferencesSummary,
+            draftRevision: requestRevision,
+            // Profiles omitted on help — position×action composition is app-side.
+            availableProfiles: [],
+            capabilities: request.capabilities,
+            contextSnapshot: helpPayload,
+            analysisTools: {
+              available: [...STUDY_NODE_EVIDENCE_TOOL_NAMES],
+              note:
+                "Use query_node_strategy / list_bluff_candidates / query_selected_hand_analysis for live Study evidence at the send-time decision — they wait on the Study analysis scheduler and do not change Study selection. Use compare_runouts to open Compare runouts with card filters and frequency ranking on the current line (wrong seat/size → path hint or supported actions). Never start a solve.",
+              deferred: [...STUDY_EVIDENCE_DEFERRED_TOOLS],
+              selectedHandSchemaStatus: SELECTED_HAND_ANALYSIS_TOOL_SCHEMA.status,
+            },
+          },
+    );
 
     const messages: ChatMessage[] = [
       { role: "system", content: buildUnifiedAssistantSystemPrompt() },
@@ -716,14 +782,6 @@ export class OpenAiUnifiedChatClient implements UnifiedChatClient {
       { role: "user", content: userPayload },
     ];
 
-    const intent = classifyAssistantTurnIntent(text);
-    if (intent === "clarify") {
-      return {
-        kind: "answer",
-        provider: "openai",
-        message: CLARIFY_MUTATION_MESSAGE,
-      };
-    }
     const setupForced = intent === "setup";
     const tools = openaiToolsForIntent(intent);
     let evidenceRounds = 0;

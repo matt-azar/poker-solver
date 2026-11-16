@@ -86,6 +86,7 @@ export {
 
 export {
   composeSpotFromSeatActions,
+  type ComposeChartRef,
   type ComposeSpotRequest,
   type ComposeSpotResult,
 } from "./seatActionCompose";

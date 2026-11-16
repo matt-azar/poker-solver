@@ -21,11 +21,10 @@ import {
  *
  * Product semantics:
  * - Pot type (SRP / 3BP / 4BP) is required for create; never guessed.
- * - "100NL" is a rake/stakes-environment key, not a personal profile.
- * - Unspecified rake structure defaults to cEV (chip EV / no rake).
- * - Unspecified stacks default to 100bb (independent of any NL label).
- * - Catalogue matching prefers standard/GTO entries keyed by rake + action +
- *   positions + stacks — not personal "my … profile" naming.
+ * - Positions + preflop action drive range composition (seat×action charts).
+ * - Unspecified stacks default to 100bb.
+ * - Stakes/NL labels are not primary; do not emphasize them in proposals.
+ * - Catalogue matching prefers positions + action (+ stack when tagged).
  */
 export class FakeAssistantProvider implements AssistantProvider {
   async interpret(request: InterpretRequest): Promise<InterpretProposal> {
@@ -317,7 +316,7 @@ export class FakeAssistantProvider implements AssistantProvider {
       return {
         kind: "clarify",
         questions: [
-          "I need a clearer study-setup request (e.g. “Set up CO vs BB SRP with 100NL ranges”).",
+          "I need a clearer study-setup request (e.g. “Set up CO vs BB SRP”).",
         ],
         candidates:
           request.availableProfiles.length > 0

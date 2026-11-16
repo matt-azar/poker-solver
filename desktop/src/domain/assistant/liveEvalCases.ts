@@ -53,23 +53,9 @@ export const LIVE_EVAL_PROFILE_IDS = {
 
 export const LIVE_EVAL_CASES: readonly LiveEvalCase[] = [
   {
-    id: "srp-100nl-explicit",
-    text: "Set up CO vs BB SRP with 100NL ranges",
-    rationale: "Named pot type + rake structure; 100NL must not invent stack by itself.",
-    expect: {
-      kind: "prepare_study",
-      potType: "SRP",
-      stakesLabel: "100NL",
-      stackBb: "silent-or-100",
-      oopPosition: "BB",
-      ipPosition: "CO",
-      selectedProfileId: LIVE_EVAL_PROFILE_IDS.nl25,
-    },
-  },
-  {
-    id: "srp-silence-defaults",
+    id: "srp-positions-explicit",
     text: "Set up CO vs BB SRP",
-    rationale: "Missing rake → cEV; missing stack → 100bb (resolve and/or model).",
+    rationale: "Named pot type + positions; stack silent → 100bb; no stakes required.",
     expect: {
       kind: "prepare_study",
       potType: "SRP",
@@ -81,8 +67,22 @@ export const LIVE_EVAL_CASES: readonly LiveEvalCase[] = [
     },
   },
   {
+    id: "srp-silence-defaults",
+    text: "Set up CO vs BB SRP at 100bb",
+    rationale: "Named stack; stakes stay silent.",
+    expect: {
+      kind: "prepare_study",
+      potType: "SRP",
+      stakesLabel: "silent-or-cev",
+      stackBb: 100,
+      oopPosition: "BB",
+      ipPosition: "CO",
+      selectedProfileId: LIVE_EVAL_PROFILE_IDS.cev25,
+    },
+  },
+  {
     id: "missing-pot-type-clarify",
-    text: "Set up CO vs BB with 100NL ranges",
+    text: "Set up CO vs BB",
     rationale: "Pot type required — clarify; do not guess SRP.",
     expect: {
       kind: "clarify",
@@ -90,54 +90,53 @@ export const LIVE_EVAL_CASES: readonly LiveEvalCase[] = [
     },
   },
   {
-    id: "my-100nl-profile-not-personal",
-    text: "Set up CO vs BB using my 100NL profile",
-    rationale:
-      "“my 100NL profile” is not a personal profile picker — still need pot type.",
+    id: "profile-without-pot-type",
+    text: "Set up CO vs BB using my catalogue profile",
+    rationale: "Profile wording without pot type still needs SRP/3BP/4BP.",
     expect: {
       kind: "clarify",
       questionMatch: /pot type|SRP|3BP|4BP/i,
     },
   },
   {
-    id: "100nl-vs-100bb-both-named",
-    text: "Prepare a CO vs BB SRP study at 100bb for 100NL",
-    rationale: "Distinguish rake structure (100NL) from stack depth (100bb).",
+    id: "srp-with-explicit-stack",
+    text: "Prepare a CO vs BB SRP study at 100bb",
+    rationale: "Stack depth named; ranges from position × preflop action.",
     expect: {
       kind: "prepare_study",
       potType: "SRP",
-      stakesLabel: "100NL",
+      stakesLabel: "silent-or-cev",
       stackBb: 100,
       oopPosition: "BB",
       ipPosition: "CO",
-      selectedProfileId: LIVE_EVAL_PROFILE_IDS.nl25,
+      selectedProfileId: LIVE_EVAL_PROFILE_IDS.cev25,
     },
   },
   {
     id: "varied-wording-single-raised",
-    text: "Build a single-raised pot study: CO opens, BB calls, standard GTO ranges for 100NL",
-    rationale: "Varied wording for SRP + 100NL without saying “SRP” literally.",
+    text: "Build a single-raised pot study: CO opens, BB calls, standard GTO ranges",
+    rationale: "Varied wording for SRP without saying “SRP” literally.",
     expect: {
       kind: ["prepare_study", "clarify"],
       // Prefer prepare with SRP; clarify is acceptable if the model asks to confirm pot type.
       potType: "SRP",
-      stakesLabel: "100NL",
+      stakesLabel: "silent-or-cev",
       oopPosition: "BB",
       ipPosition: "CO",
       selectedProfileId: [
-        LIVE_EVAL_PROFILE_IDS.nl25,
+        LIVE_EVAL_PROFILE_IDS.cev25,
         // clarify path may omit selection
       ],
     },
   },
   {
-    id: "3bp-btn-bb-100nl",
-    text: "Set up BTN vs BB 3BP with 100NL ranges",
+    id: "3bp-btn-bb",
+    text: "Set up BTN vs BB 3BP",
     rationale: "3-bet pot path against the synthetic BTN/BB 3BP fixture.",
     expect: {
       kind: "prepare_study",
       potType: "3BP",
-      stakesLabel: "100NL",
+      stakesLabel: "silent-or-cev",
       stackBb: "silent-or-100",
       oopPosition: "BB",
       ipPosition: "BTN",

@@ -18,7 +18,7 @@ describe("buildAssistantContextSnapshot", () => {
     const snapshot = buildAssistantContextSnapshot({
       draft: draft({ boardText: "As7d2c", pot: 100, stack: 200, rakeRate: 0.05, rakeCap: 3 }),
       draftRevision: 4,
-      rangeSourceLabel: "100NL",
+      rangeSourceLabel: null,
     });
 
     expect(snapshot.version).toBe(ASSISTANT_CONTEXT_SNAPSHOT_VERSION);
@@ -30,7 +30,7 @@ describe("buildAssistantContextSnapshot", () => {
     expect(snapshot.build.pot).toBe(100);
     expect(snapshot.build.stack).toBe(200);
     expect(snapshot.build.solveRake).toEqual({ rate: 0.05, cap: 3 });
-    expect(snapshot.build.rangeSourceLabel).toBe("100NL");
+    expect(snapshot.build.rangeSourceLabel).toBeNull();
     expect(snapshot.publishedSolution.present).toBe(false);
     expect(snapshot.studyNode.present).toBe(false);
     expect(snapshot.selectedHand.present).toBe(false);

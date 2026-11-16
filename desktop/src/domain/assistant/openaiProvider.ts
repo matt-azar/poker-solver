@@ -197,7 +197,7 @@ const INTERPRET_JSON_SCHEMA = {
     stakesLabel: {
       type: "string",
       description:
-        "Range-source environment (catalogue matching / provenance, e.g. 100NL or cEV). Independent of engine solve rake — do not copy onto fieldEdits.rakeRate.",
+        "Optional legacy stakes tag. Prefer position + pot type for ranges. Independent of engine solve rake — do not copy onto fieldEdits.rakeRate.",
     },
     generatedRanges: {
       type: "object",
@@ -218,7 +218,7 @@ const INTERPRET_JSON_SCHEMA = {
     fieldEdits: {
       type: "object",
       description:
-        "Direct Build writes. Use rakeRate/rakeCap only for explicit solve-rake changes (e.g. make sim rake-free → 0). Never set them from stakesLabel / 100NL / cEV range loads.",
+        "Direct Build writes. Use rakeRate/rakeCap only for explicit solve-rake changes (e.g. make sim rake-free → 0). Never invent solve rake from spot wording.",
       properties: {
         pot: { type: "number" },
         stack: { type: "number" },

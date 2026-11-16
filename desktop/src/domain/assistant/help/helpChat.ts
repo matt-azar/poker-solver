@@ -179,14 +179,14 @@ export class FakeHelpChatClient implements HelpChatClient {
       return {
         provider: "fake",
         message:
-          "On Build, set board, pot type (SRP/3BP/4BP), stacks, and ranges (Catalogue seat×action tree or paint grids), then Solve. You can also ask this Study assistant to change Build with an explicit command such as “Set up CO vs BB SRP with 100NL ranges.”",
+          "On Build, set board, pot type (SRP/3BP/4BP), stacks, and ranges (Catalogue seat×action tree or paint grids), then Solve. You can also ask this Study assistant to change Build with an explicit command such as “Set up CO vs BB SRP.”",
       };
     }
-    if (/catalogue|100nl|range profile|prepare a study/.test(q)) {
+    if (/catalogue|range profile|prepare a study|seat.?action/.test(q)) {
       return {
         provider: "fake",
         message:
-          "Describe the study in this Study assistant (e.g. Set up CO vs BB SRP with 100NL ranges). Conflict-free changes are written onto the Build fields. Undo is available in the assistant. Pot type is required; 100NL is a rake structure, not stack depth.",
+          "Describe the study in this Study assistant (e.g. Set up CO vs BB SRP). Ranges compose from seat×action charts by position and preflop action. Keep and Undo are available after a suggestion. Pot type is required; unspecified stacks default to 100bb.",
       };
     }
     if (/\b(shortcuts?|hotkeys?|keyboard)\b/.test(q)) {

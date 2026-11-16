@@ -1,6 +1,6 @@
 ## Product surface (mounted UI)
 
-- Local postflop solver: React Study UI + `explorer` engine. OpenAI is optional; **Solve** is local.
+- Local postflop solver: React Study UI + Zig `solver-engine` typed IPC. OpenAI is optional; **Solve** is local.
 - Workspaces (menu bar tabs): **Study**, **Build**, **Equity**, **Compare**, **Library**.
 - Primary AI surface: floating **Study assistant** — menu bar **Assistant** toggle. Hideable, movable, resizable. Available on every workspace. Keyboard shortcuts stay on `?` (Help overlay).
 - Help overlay (`?`) shows the diagnostics folder path and offers **Open diagnostics folder** / **Copy diagnostics zip** (desktop only). Before Solve/Continue, Study writes cheap `last-solve.json` + `host-resources.json` (`snapshotKind=pre-solve`). Every Solve failed / session-dead writes `last-fault.json` and refreshes host resources (`snapshotKind=fault`). Temporary UI unresponsiveness (status-poll timeout/slow/hung, main-thread stall) appends `ui-hang-events.json` even when the soft blip recovers. Folder: `%LOCALAPPDATA%\Holdem Study\diagnostics` (plus `engine.log` / `session-meta.json`).
@@ -8,10 +8,11 @@
 
 ### Apply / write behavior
 
-- Successful setup proposals **auto-write** onto the live Build draft (ranges, board, bet sizes, pot/stack, stop criteria, `fieldEdits`).
-- An **Apply to Build** / **Apply anyway** control appears only when auto-commit is blocked (conflicts / validation). Do not tell the player to click Apply after a normal successful write.
+- Narrow scalar field edits auto-write onto the live Build draft, then show **Keep** and **Undo**.
+- Broad / full setups (create, duplicate, range replacement, many fields) stay **reviewable**: the assistant shows **Keep** (apply), **Undo** (discard), and **Open in Build** before writing. Draft-revision checks still reject stale applies.
+- After any applied suggestion, **Keep** confirms/retains the change (clears the Undo entry) and **Undo** reverts via the guarded revision mechanism. Both controls stay visible on the Study assistant window — not only after Open in Build.
 - Chat text after a write comes from an **application receipt** (before/after). Prefer describing what the receipt committed.
-- The player can **Undo** the last assistant transaction in the assistant window. Solve is never started by the assistant.
+- Solve is never started by the assistant.
 
 ### Build workspace (mounted controls)
 
@@ -39,9 +40,9 @@ Settings dialog (menu **Settings → Open settings…**): algorithm draft (`cfr_
 ### Study / other
 
 - Study: action history, range matrix (**Overlay → EV+Eq** among overlays), combo inspector, lower analysis dock (**Compare runouts**, equity hist, categories, **Value / Bluffs**).
-- **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers. The assistant can open this report with card filters and frequency ranking via `compare_runouts`; clicks and **Open in Study** use the same navigation as a manual report click.
+- **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers. The assistant can open this report with card filters and frequency ranking via `compare_runouts`; clicks and **Open in Study** use the same navigation as a manual report click and stay bound to the send-time solution/policy.
 - **Value / Bluffs** lists betting candidates; equity mode includes node equity and **After call** (panel-only; assistant bluff candidates use node equity).
-- The floating Study assistant reads the **current** Study decision (path, seat, strategy, selected hand) and lists Value / Bluffs-style **bluff candidates** for IP/OOP via bounded read-only tools. Those Q&A tools reuse the analysis scheduler and do **not** change Study selection. `compare_runouts` is the exception that opens Compare runouts with filters. The assistant never starts Solve.
+- The floating Study assistant binds evidence to the **send-time** Study decision (solution, published policy revision, node, selected hand). Strategy / bluff / hand tools reuse the analysis scheduler and do **not** change Study selection. `compare_runouts` is the exception that opens Compare runouts with filters. The assistant never starts Solve.
 - Solve / Pause / Continue / Stop from Solve menu or shortcuts (`S` solve when connected + draft valid).
 - File → Save / Open — in-app solutions catalogue with user folders (OS file picker is secondary Browse disk); Library lists recent solutions and templates.
 - Locks: Tree → Node locking… . Strategy edits: separate drawer.

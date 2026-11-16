@@ -164,7 +164,7 @@ describe("StudyAssistantWindow apply UX", () => {
     expect(box.getAttribute("placeholder")).toMatch(/Press (⌘↩|Ctrl\+Enter) to send\./);
   });
 
-  it("auto-applies a scalar pot edit with a receipt and Undo", async () => {
+  it("auto-applies a scalar pot edit with Keep and Undo", async () => {
     turnMock.mockResolvedValue(scalarPotOutcome(0));
     const user = userEvent.setup();
     render(<StudyAssistantWindow />);
@@ -177,11 +177,13 @@ describe("StudyAssistantWindow apply UX", () => {
       expect(screen.getByText(/Pot: 100 . 55/)).toBeTruthy();
     });
     expect(useStudyStore.getState().draft.pot).toBe(55);
+    expect(screen.getByTestId("assistant-keep-undo")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Keep$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Undo$/i })).toBeTruthy();
     expect(screen.queryByTestId("assistant-pending-apply")).toBeNull();
   });
 
-  it("auto-applies a broad create proposal with a receipt (no silent proposal)", async () => {
+  it("keeps broad creates reviewable with Keep, Undo, and Open in Build", async () => {
     turnMock.mockResolvedValue(broadCreateOutcome(0));
     const user = userEvent.setup();
     render(<StudyAssistantWindow />);
@@ -191,15 +193,24 @@ describe("StudyAssistantWindow apply UX", () => {
     await sendPrompt(user, "Set up CO vs BB SRP");
 
     await waitFor(() => {
+      expect(screen.getByTestId("assistant-pending-apply")).toBeTruthy();
+    });
+    // Not auto-applied — draft unchanged until Keep.
+    expect(useStudyStore.getState().draft.oopRange).toBe("AA");
+    expect(screen.getByRole("button", { name: /^Keep$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Undo$/i })).toBeTruthy();
+    expect(screen.getByTestId("assistant-open-in-build")).toBeTruthy();
+    expect(screen.getByText(/Review · create/i)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /^Keep$/i }));
+    await waitFor(() => {
       expect(useStudyStore.getState().draft.oopRange).toBe("QQ+");
     });
     expect(useStudyStore.getState().draft.pot).toBe(5.5);
-    expect(screen.queryByTestId("assistant-pending-apply")).toBeNull();
-    expect(screen.getByRole("button", { name: /^Undo$/i })).toBeTruthy();
-    expect(screen.getByText(/New study created|Review · create/i)).toBeTruthy();
+    expect(screen.getByTestId("assistant-keep-undo")).toBeTruthy();
   });
 
-  it("surfaces a sticky Apply bar when auto-commit is blocked by conflicts", async () => {
+  it("surfaces Keep anyway when the proposal has conflicts", async () => {
     turnMock.mockResolvedValue({
       ...broadCreateOutcome(0),
       run: {
@@ -221,11 +232,11 @@ describe("StudyAssistantWindow apply UX", () => {
       expect(screen.getByTestId("assistant-pending-apply")).toBeTruthy();
     });
     expect(screen.getByTestId("assistant-pending-apply").textContent).toMatch(
-      /Setup ready/i,
+      /Suggestion ready|Keep applies/i,
     );
     expect(useStudyStore.getState().draft.oopRange).toBe("AA");
 
-    await user.click(screen.getByRole("button", { name: /Apply anyway/i }));
+    await user.click(screen.getByRole("button", { name: /Keep anyway/i }));
     await waitFor(() => {
       expect(useStudyStore.getState().draft.oopRange).toBe("QQ+");
     });
