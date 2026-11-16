@@ -251,22 +251,63 @@ describe("line card predicates and action resolve", () => {
     }
   });
 
-  it("uses raise increment / pot when facing a bet", () => {
-    // pot 80, to_call 20: Raise to 80 → increment 60 = 75% pot.
-    const labels = ["Fold", "Call", "Raise to 80", "Raise to 100"];
+  it("uses raise increment over pot+call (engine basis) when facing a bet", () => {
+    // pot 80, to_call 20 → basis 100; 75% → raise-by 75 → Raise to 95.
+    const labels = ["Fold", "Call 20", "Raise to 80", "Raise to 95"];
     expect(
       resolveLineCardAction(labels, "75% pot", { pot: 80, toCall: 20 }),
+    ).toEqual({
+      ok: true,
+      index: 3,
+      label: "Raise to 95",
+    });
+    // Exact label still wins.
+    expect(
+      resolveLineCardAction(labels, "Raise to 80", { pot: 80, toCall: 20 }),
     ).toEqual({
       ok: true,
       index: 2,
       label: "Raise to 80",
     });
+  });
+
+  it("matches engine-rounded chips on a small pot (5 → Bet 3.8 for 75%)", () => {
+    const labels = ["Check", "Bet 3.8", "Bet 5"];
+    expect(resolveLineCardAction(labels, "75%", { pot: 5 })).toEqual({
+      ok: true,
+      index: 1,
+      label: "Bet 3.8",
+    });
+    expect(resolveLineCardAction(labels, "75% pot", { pot: 5 })).toEqual({
+      ok: true,
+      index: 1,
+      label: "Bet 3.8",
+    });
+  });
+
+  it("recovers to_call=0 from Call label / contrib when facing a bet", () => {
+    // Payload left to_call=0 but Call 50 is present — basis = pot+50.
+    // 75% of (80+50) → raise-by 97.5 → Raise to 147.5.
+    const withMatch = ["Fold", "Call 50", "Raise to 147.5"];
     expect(
-      resolveLineCardAction(labels, "Raise to 100", { pot: 80, toCall: 20 }),
+      resolveLineCardAction(withMatch, "75%", {
+        pot: 80,
+        toCall: 0,
+        contrib: [0, 50],
+        player: 0,
+      }),
     ).toEqual({
       ok: true,
-      index: 3,
-      label: "Raise to 100",
+      index: 2,
+      label: "Raise to 147.5",
+    });
+    // Call-label recovery alone (no contrib).
+    expect(
+      resolveLineCardAction(withMatch, "75% pot", { pot: 80, toCall: 0 }),
+    ).toEqual({
+      ok: true,
+      index: 2,
+      label: "Raise to 147.5",
     });
   });
 

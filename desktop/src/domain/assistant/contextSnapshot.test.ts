@@ -144,6 +144,13 @@ describe("buildAssistantContextSnapshot", () => {
     expect(summarizeContextSnapshot(snapshot)).toContain("hand=AA");
     expect(summarizeContextSnapshot(snapshot)).toContain("solution=sol-9");
     expect(summarizeContextSnapshot(snapshot)).toContain("seat=IP");
+    expect(summarizeContextSnapshot(snapshot)).toMatch(/\boop=/);
+    expect(
+      summarizeContextSnapshot(snapshot, { omitRangePreviews: true }),
+    ).not.toMatch(/\boop=/);
+    expect(
+      summarizeContextSnapshot(snapshot, { omitRangePreviews: true }),
+    ).not.toMatch(/\bip=/);
   });
 
   it("does not fill published or node boards from the Build draft", () => {

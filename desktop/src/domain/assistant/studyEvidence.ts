@@ -460,6 +460,8 @@ export interface CompareRunoutsEvidence {
   openInStudy: {
     card: string;
     resolvedNodeId: string;
+    /** Published solution identity at evidence time (required for Open in Study). */
+    solutionId: string;
   } | null;
   absences: string[];
   pathHint?: string | null;
@@ -1263,6 +1265,8 @@ export async function compareRunouts(
     const matched = resolveLineCardAction(actionLabels, actionQuery, {
       pot: node.pot,
       toCall: node.to_call,
+      contrib: node.contrib,
+      player: node.player,
     });
     if (!matched.ok) {
       return empty([matched.reason], {
@@ -1389,6 +1393,7 @@ export async function compareRunouts(
     openInStudy = {
       card: topOpenable.card,
       resolvedNodeId: topOpenable.resolvedNodeId,
+      solutionId,
     };
   }
 
@@ -1405,7 +1410,11 @@ export async function compareRunouts(
       absences.push(
         `Card ${openCard} matched, but Open in Study is not wired in this assistant host.`,
       );
-      openInStudy = { card: target.card, resolvedNodeId: target.resolvedNodeId };
+      openInStudy = {
+        card: target.card,
+        resolvedNodeId: target.resolvedNodeId,
+        solutionId,
+      };
     } else if (!identityStillMatches(host, solutionId, nodeId)) {
       absences.push(
         "Study solution or decision changed before opening the runout. Retry on the intended decision.",
@@ -1413,7 +1422,11 @@ export async function compareRunouts(
     } else {
       await host.openLineCardRow(target.resolvedNodeId);
       openedCard = target.card;
-      openInStudy = { card: target.card, resolvedNodeId: target.resolvedNodeId };
+      openInStudy = {
+        card: target.card,
+        resolvedNodeId: target.resolvedNodeId,
+        solutionId,
+      };
     }
   }
 

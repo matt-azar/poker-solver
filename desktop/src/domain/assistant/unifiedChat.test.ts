@@ -108,11 +108,17 @@ describe("looksLikeSetupRequest / classifyAssistantTurnIntent", () => {
     expect(
       looksLikeSetupRequest("Can you explain when to use a larger river bet?"),
     ).toBe(false);
+    expect(
+      looksLikeSetupRequest("Can you explain how to change the flop?"),
+    ).toBe(false);
     expect(classifyAssistantTurnIntent("How do I set up CO vs BB SRP?")).toBe(
       "qa",
     );
     expect(
       classifyAssistantTurnIntent("Can you explain when to use a larger river bet?"),
+    ).toBe("qa");
+    expect(
+      classifyAssistantTurnIntent("Can you explain how to change the flop?"),
     ).toBe("qa");
     expect(classifyAssistantTurnIntent("At this 3BP node, which hands bluff?")).toBe("qa");
   });
@@ -360,6 +366,8 @@ describe("FakeUnifiedChatClient", () => {
     if (outcome.kind === "answer") {
       expect(outcome.message).toMatch(/5h/i);
       expect(outcome.openInStudy?.card).toBe("5h");
+      expect(outcome.openInStudy?.solutionId).toBe("sol-1");
+      expect(outcome.openInStudy?.resolvedNodeId).toBe("n-5h");
     }
     expect(evidenceHost.loadLineCardReport).toHaveBeenCalled();
   });
@@ -422,10 +430,18 @@ describe("OpenAiUnifiedChatClient", () => {
     };
     expect(body.messages[0]?.content).toContain("unified Study assistant");
     const userPayload = JSON.parse(body.messages[body.messages.length - 1]?.content ?? "{}") as {
-      contextSnapshot?: { version?: number };
+      setupSummary?: string;
+      contextSnapshot?: {
+        version?: number;
+        build?: { oopRangePreview?: string; ipRangePreview?: string };
+      };
       analysisTools?: { deferred?: string[]; available?: string[] };
     };
     expect(userPayload.contextSnapshot?.version).toBe(2);
+    expect(userPayload.contextSnapshot?.build?.oopRangePreview).toBeUndefined();
+    expect(userPayload.contextSnapshot?.build?.ipRangePreview).toBeUndefined();
+    expect(userPayload.setupSummary ?? "").not.toMatch(/\boop=/i);
+    expect(userPayload.setupSummary ?? "").not.toMatch(/\bip=/i);
     expect(userPayload.analysisTools?.deferred).toContain("compare_baseline_scenario");
     expect(userPayload.analysisTools?.deferred).not.toContain("compare_runouts");
     expect(userPayload.analysisTools?.available).toEqual(
@@ -436,6 +452,73 @@ describe("OpenAiUnifiedChatClient", () => {
         "compare_runouts",
       ]),
     );
+  });
+
+  it("strips draft-range previews from help setupSummary even when the caller passed them", async () => {
+    const fetchImpl = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    function: {
+                      name: "answer_user",
+                      arguments: JSON.stringify({ message: "Use the Build board field." }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const client = createOpenAiUnifiedChatClient({
+      getCredential: async () => "sk-test",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const catalogue = createRangeProfileCatalogue();
+    const draft = emptyDraft();
+    draft.oopRange = "AA:1,KK:1,QQ:0.5";
+    draft.ipRange = "22+:1,AKs:1";
+    const contextSnapshot = buildAssistantContextSnapshot({
+      draft,
+      draftRevision: 1,
+    });
+    const leakySummary = summarizeContextSnapshot(contextSnapshot);
+    expect(leakySummary).toMatch(/\boop=/);
+    expect(leakySummary).toMatch(/\bip=/);
+
+    await client.turn(
+      {
+        text: "How do I change the flop?",
+        setupSummary: leakySummary,
+        availableProfiles: [],
+        draftRevision: 1,
+        contextSnapshot,
+      },
+      {
+        catalogue,
+        getDraft: () => draft,
+        getRevision: () => 1,
+        preferences: emptyStudySetupPreferences(),
+      },
+    );
+    const body = JSON.parse(String((fetchImpl.mock.calls[0]?.[1] as RequestInit).body)) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const userPayload = JSON.parse(body.messages[body.messages.length - 1]?.content ?? "{}") as {
+      setupSummary?: string;
+      contextSnapshot?: Record<string, unknown>;
+    };
+    expect(userPayload.setupSummary ?? "").not.toMatch(/\boop=/i);
+    expect(userPayload.setupSummary ?? "").not.toMatch(/\bip=/i);
+    expect(JSON.stringify(userPayload.contextSnapshot ?? {})).not.toMatch(/oopRangePreview/);
+    expect(JSON.stringify(userPayload.contextSnapshot ?? {})).not.toMatch(/ipRangePreview/);
   });
 
   it("keeps the send-time revision when the draft changes during a delayed provider response", async () => {

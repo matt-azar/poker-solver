@@ -230,8 +230,17 @@ fn fillPotStacks(page: *NodePage, game: compile.CompiledGame, node: compile.Node
     page.pot = start_pot + c0 + c1;
     page.stacks = .{ start_stack - c0, start_stack - c1 };
     page.stack = @min(page.stacks[0], page.stacks[1]);
-    // Facing amount is not stored on the compiled node; leave 0 (check / first to act).
-    page.to_call = 0;
+    // Facing amount is not stored on the compiled node. Recover it as
+    // max(contrib) - acting contrib (same as betting.State.to_call when
+    // committed == max street contrib). First-to-act / check → 0.
+    if (node.kind == .decision and node.player >= 0 and node.player < 2) {
+        const acting: usize = @intCast(node.player);
+        const committed = @max(c0, c1);
+        const own = if (acting == 0) c0 else c1;
+        page.to_call = @max(committed - own, 0);
+    } else {
+        page.to_call = 0;
+    }
 }
 
 fn fillParentId(
