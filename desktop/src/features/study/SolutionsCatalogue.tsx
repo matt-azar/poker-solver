@@ -514,11 +514,6 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
 
   return (
     <div className="tree-catalogue solutions-catalogue" aria-label="Solutions catalogue">
-      <p className="tree-catalogue__help">
-        Saved solutions live in this catalogue (folders allowed). Primary Save /
-        Open does not use the OS file picker — Browse disk is optional.
-      </p>
-
       <section className="seat-tree__toolbar" aria-label="Catalogue folders">
         <div className="seat-tree__save-form">
           <label>

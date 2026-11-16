@@ -94,9 +94,6 @@ describe("Node Locking workspace", () => {
     render(<LockDrawer />);
     await user.click(screen.getByRole("button", { name: "Full node" }));
     expect(screen.queryByRole("grid", { name: "Paint lock hand classes" })).toBeNull();
-    expect(
-      screen.getByText(/Switch to Selected combos to paint hand classes/),
-    ).toBeTruthy();
   });
 
   it("links frequency sliders so action probs stay normalized", async () => {

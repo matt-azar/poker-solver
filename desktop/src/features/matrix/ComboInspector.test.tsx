@@ -111,11 +111,12 @@ describe("ComboInspector", () => {
     expect(metrics.some((el) => /% · /.test(el.textContent ?? ""))).toBe(true);
   });
 
-  it("shows Hands empty hint when nothing is hovered or selected", () => {
+  it("shows Hands heading without instructional empty copy when nothing is focused", () => {
     useStudyStore.setState({ selectedCell: null, hoverCell: null });
     render(<ComboInspector />);
     expect(screen.getByRole("heading", { name: "Hands" })).toBeTruthy();
-    expect(screen.getByText("Hover a hand in the grid.")).toBeTruthy();
+    expect(screen.queryByText(/Hover a hand/i)).toBeNull();
+    expect(screen.queryByText(/Solve a spot/i)).toBeNull();
   });
 
   it("renders GTOWizard-style badge, black metrics, and passive-left paint", () => {

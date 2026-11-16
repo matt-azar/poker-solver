@@ -185,30 +185,15 @@ export function LockPaintPanel({
   };
 
   if (!currentNode) {
-    return (
-      <div className="lock-paint-panel">
-        <p className="empty-hint">Load a decision node to paint locks.</p>
-      </div>
-    );
+    return <div className="lock-paint-panel" />;
   }
 
   if (lockDraft.kind === "full") {
-    return (
-      <div className="lock-paint-panel">
-        <p className="lock-paint-panel__hint">
-          Full-node lock constrains every combo. Switch to Selected combos to paint
-          hand classes.
-        </p>
-      </div>
-    );
+    return <div className="lock-paint-panel" />;
   }
 
   return (
     <div className="lock-paint-panel">
-      <p className="lock-paint-panel__hint">
-        Paint hand classes to include their combos. Drag to add or remove. Cells show
-        the current strategy mix; green outline marks already-locked hands.
-      </p>
       <div
         className="lock-paint-grid"
         role="grid"

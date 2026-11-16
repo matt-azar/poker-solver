@@ -715,10 +715,6 @@ export function SeatActionCatalogueTree({ onPick, saveSource }: Props) {
                   </span>
                 </span>
               </summary>
-              <p className="empty-hint seat-tree__unfiled-hint">
-                Saves without a seat folder. Use Save here / Replace on a folder to file
-                them.
-              </p>
               {unfiledSaved.length === 0 ? (
                 <p className="empty-hint seat-tree__empty-folder">No unfiled saves.</p>
               ) : (

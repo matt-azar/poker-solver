@@ -176,8 +176,7 @@ describe("OpponentRangePanel", () => {
       },
     });
     render(<OpponentRangePanel />);
-    expect(
-      screen.getByText("Opponent reach appears on decision nodes."),
-    ).toBeTruthy();
+    expect(screen.getByText("No opponent reach.")).toBeTruthy();
+    expect(screen.queryByText(/appears on decision nodes/i)).toBeNull();
   });
 });

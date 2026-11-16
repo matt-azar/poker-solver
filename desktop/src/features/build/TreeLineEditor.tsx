@@ -118,7 +118,6 @@ function MemoryPlanStrip({
     <div
       className="memory-plan"
       data-over-budget={plan.fits_budget ? undefined : "true"}
-      title="estimated_peak_bytes is a labeled plan, not RSS"
     >
       <span>
         Plan peak {formatBytes(plan.estimated_peak_bytes)}
@@ -129,8 +128,7 @@ function MemoryPlanStrip({
         decisions · {plan.deals} deals
       </span>
       <span className="tree-meta">
-        pot {pot} · stack {stack} · {plan.dry_run ? "dry-run plan" : "plan"} · not
-        process RSS
+        pot {pot} · stack {stack}
       </span>
     </div>
   );
@@ -489,13 +487,6 @@ export function TreeLineEditor() {
       </div>
       {open ? (
         <>
-          <p className="tree-editor-help">
-            Branches start collapsed — expand from the root to reach a line.
-            Click a node for Force / Remove / Add size. Labels are pot-% tags
-            (`b50` = 50% of the pot before the bet). Edits write{" "}
-            <code>tree-edit</code> lines into the draft; Solve rebuilds from the
-            same draft serializer.
-          </p>
           {error ? <p className="tree-editor-error">{error}</p> : null}
           {draft.treeEdits.length > 0 ? (
             <div className="tree-edits-list">
@@ -542,7 +533,7 @@ export function TreeLineEditor() {
               />
             </div>
           ) : !error && !busy ? (
-            <p className="tree-editor-help">No decision nodes in this preview.</p>
+            <p className="empty-hint">No decision nodes in this preview.</p>
           ) : null}
           {addSizePath !== null ? (
             <div className="tree-add-dialog">
@@ -577,11 +568,7 @@ export function TreeLineEditor() {
             </div>
           ) : null}
         </>
-      ) : (
-        <p className="tree-editor-help">
-          Expand to preview legal actions and line edits before Solve.
-        </p>
-      )}
+      ) : null}
     </section>
   );
 }

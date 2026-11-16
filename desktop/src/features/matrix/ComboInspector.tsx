@@ -247,11 +247,7 @@ export function ComboInspector({ variant = "panel" }: ComboInspectorProps = {}) 
           {pinned ? "Pinned" : focus ? "Hover" : ""}
         </span>
       </div>
-      {!currentNode ? (
-        <p className="empty-hint">Solve a spot, then hover a hand in the grid.</p>
-      ) : !cell ? (
-        <p className="empty-hint">Hover a hand in the grid.</p>
-      ) : (
+      {!currentNode || !cell ? null : (
         <>
           {nodeValues?.pending ? (
             <p className="muted">Calculating action EVs…</p>

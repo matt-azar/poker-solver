@@ -283,7 +283,7 @@ export function BuildWorkspace() {
           <button
             type="button"
             className="toolbar-btn"
-            title="Export portable study job (street-config + run limits) for holdem-study-cli"
+            title="Export this Build as a portable study job"
             onClick={exportStudyJob}
           >
             Export job
@@ -432,9 +432,6 @@ export function BuildWorkspace() {
               value={draft.boardText}
               onChange={(event) => updateDraft({ boardText: event.target.value })}
             />
-            {!draft.boardText.trim() ? (
-              <span className="field-hint">Required for a postflop solve</span>
-            ) : null}
           </label>
           <div className="build-inline build-inline--scalar">
             <label>

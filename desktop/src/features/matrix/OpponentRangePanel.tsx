@@ -66,7 +66,7 @@ export function OpponentRangePanel() {
         <h2 className="panel-title">{seat} range</h2>
       </div>
       {!view ? (
-        <p className="empty-hint">Opponent reach appears on decision nodes.</p>
+        <p className="empty-hint">No opponent reach.</p>
       ) : (
         <div className="range-matrix-wrap" ref={wrapRef}>
           <div

@@ -414,11 +414,11 @@ export function ValueBluffsPanel() {
           <button
             type="button"
             className="toolbar-btn value-bluffs-compare-toggle"
-            aria-label={`Equity comparison ${compareSymbol}; click to switch`}
+            aria-label={`Equity comparison ${compareSymbol}`}
             title={
               equityCompare === "lt"
-                ? "Bluffs: equity < threshold. Click for value bets (>)"
-                : "Value bets: equity > threshold. Click for bluffs (<)"
+                ? "Bluffs: equity < threshold"
+                : "Value bets: equity > threshold"
             }
             onClick={() =>
               setEquityCompare((value) => (value === "lt" ? "gt" : "lt"))
@@ -552,15 +552,9 @@ export function ValueBluffsPanel() {
         .
       </p>
 
-      {!currentNode ? (
-        <p className="empty-hint">Browse a decision node after a solve.</p>
-      ) : currentNode.kind === "chance" || currentNode.kind === "terminal" ? (
-        <p className="empty-hint">
-          Value / Bluffs needs a decision node (bet or raise).
-        </p>
-      ) : equityMode === "node" && !equity ? (
-        <p className="empty-hint">Click Refresh to load equity.</p>
-      ) : equityMode === "node" && equity?.pending ? (
+      {!currentNode ? null : currentNode.kind === "chance" || currentNode.kind === "terminal" ? (
+        <p className="empty-hint">Needs a decision node.</p>
+      ) : equityMode === "node" && !equity ? null : equityMode === "node" && equity?.pending ? (
         <p className="empty-hint">Loading…</p>
       ) : equityMode === "after_call" && postCallPending ? (
         <p className="empty-hint">Loading post-call equity…</p>
