@@ -31,7 +31,7 @@ What it does:
 5. Opens the study-debug mini-app + the reports folder
 
 Keep that window open. Run the **installed** Study as usual. When you have a
-zip (Help → **Copy diagnostics zip**, or `study-debug.cmd collect`):
+zip (`?` → **Copy diagnostics zip**, or `study-debug.cmd collect`):
 
 - Mini-app → **Send report to GitHub** (posts to localhost; name is historical)
 - or `.\scripts\debug\study-debug.cmd send --zip path\to\zip --yes`

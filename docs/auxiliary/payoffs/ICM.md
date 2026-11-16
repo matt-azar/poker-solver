@@ -31,7 +31,7 @@ Tests check these to `1e-9`. Heads-up WTA collapses to stack share of the prize.
 
 ## Chip terminal → ICM delta
 
-`IcmPayoff::from_chip_terminal(stacks, payouts, chip_terminal)` applies the
+`applyIcmTerminal` (`engine/src/poker/icm.zig`) applies the
 chip utilities of players 0 and 1 to those seats, leaves any further stacks
 unchanged, and returns
 

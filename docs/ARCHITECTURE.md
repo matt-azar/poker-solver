@@ -100,9 +100,9 @@ On the street/river path, player 0 is out of position. Chance deals ordered hand
 
 The layout in this section is the removed C++ `StreetBatchSolver`. Zig training tables are in `engine/src/solve/training_state.zig`. The CFR+ floor and the NashConv definition below still match the Zig trainer.
 
-`StreetBatchSolver` stored regret, strategy-sum, and one shared sigma workspace as `TableScalar` (`float`) tables, with a compact offset table from information set to first action. Slot lookup is keyed by public node, legal runout (off-board card or ordered pair), and supported hand — not a dense `52×52×hands` map. One-action decisions omit stored rows (implicit probability 1). The sigma workspace holds the frozen strategy during a training pass and the normalized average during evaluation; those two views are mutually exclusive, so they share one full-size buffer. Counterfactual values, NashConv, and other sensitive reductions stay double. `CfrTrainer` (Hold’em reference enumerators) and legacy `RiverBatchSolver` keep `double` tables. The action-count scratch limit is 8 per information set. See `include/solver/table_scalar.hpp` and [STREETS.md](STREETS.md).
+`StreetBatchSolver` stored regret, strategy-sum, and one shared sigma workspace as `TableScalar` (`float`) tables. That sigma buffer held the frozen strategy during a pass and the normalized average during evaluation. Zig keeps `regret`, `strategy_sum`, and `sigma` allocated together, and publish writes a separate average (`engine/src/solve/training_state.zig`). Slot lookup is by public node, legal runout, and supported hand. One-action decisions omit stored rows. The action-count limit is 8. Details: [STREETS.md](STREETS.md).
 
-Node locks (`poker::solver::NodeLock` / `LockSet` in `node_lock.hpp`) are an immutable constraint layer keyed by `(infoset / public-node index, turn, river)`. A line lock uses `turn=river=-1` and applies on every runout of that betting line; a node lock keeps the selected cards and applies only there. Lookup prefers the exact runout, then falls back to the line lock. Locks may store a shared action row (legacy) or per-combo rows (`combo_probs` / `combo_actions`) so each locked combo keeps its own mix. `SelectedCombos` / listed `hand_indices` are the lock mask; an empty probability row means unlocked and is distinct from locking an action at probability zero. Publish and BR apply the effective lock (constrained Accuracy). When `SolveConfig::locks` is set, `CfrTrainer`, `StreetBatchSolver`, and `RiverBatchSolver` call `apply_lock_to_strategy` after regret matching. Explorer locking is street-first.
+Current locks live in `engine/src/solve/node_lock.zig`. The removed C++ types were `poker::solver::NodeLock` / `LockSet` in `node_lock.hpp`, keyed by public node, turn, and river. A line lock used `turn=river=-1`. A node lock kept the selected cards. Lookup preferred the exact runout, then the line lock. Locks stored a shared action row or per-combo rows. An empty probability row meant unlocked. Publish and best response applied the effective lock. `CfrTrainer`, `StreetBatchSolver`, and `RiverBatchSolver` called `apply_lock_to_strategy` after regret matching when locks were set.
 
 CFR+ floors the updating player's cumulative regrets once after that player's pass. The opponent's table is unchanged. The average strategy is weighted by the iteration index. The removed C++ tree also had Linear CFR (iteration weight on regret and average, regrets left signed) and fixed DCFR(1.5, 0, 2). See [MATHEMATICS.md](MATHEMATICS.md).
 
@@ -113,22 +113,15 @@ CFR+ floors the updating player's cumulative regrets once after that player's pa
 The Nash gap is NashConv, the sum of unilateral BR gains
 \((u_0(\mathrm{BR}_0)-u_0(\bar\sigma))+(u_1(\mathrm{BR}_1)-u_1(\bar\sigma))\).
 Under zero-sum chips this equals \(u_0(\mathrm{BR}_0)+u_1(\mathrm{BR}_1)\).
-`StreetBatchSolver::evaluate()`, `RiverBatchSolver::evaluate()`, and
-`evaluate_strategy` share `EvaluationResult`. Pio **Accuracy** is
-\(\mathrm{NashConv}/2\). Accuracy stopping uses that Accuracy metric
-(pot fraction by default; optional absolute chips).
+Zig `FrozenEval` (`engine/src/solve/frozen_walk.zig`) stores `nash_gap` and `accuracy` (`NashConv/2`). Pio **Accuracy** is that average. The stop unit on host `solve` is a pot fraction. The C++ names `StreetBatchSolver::evaluate`, `RiverBatchSolver::evaluate`, and `EvaluationResult` are gone.
 
 ## Stopping
 
-`SolveConfig` sets a maximum iteration count and an optional Accuracy threshold
-(`accuracy_threshold`, absolute chips of Pio Accuracy). The threshold applies
-only when it is non-negative and `eval_every` is positive (`eval_interval` is a legacy alias for the same field). Runtime reported
-by `solve` is the regret-update loop, including Accuracy checks that end the
-run early.
+Host `solve` passes `iterations`, `accuracy` (pot fraction of Pio Accuracy), optional `eval_every`, and `time_limit` into `Session.trainGated` (`app/src/session.zig`). `accuracy` ≤ 0 means iteration or time only. A positive `accuracy` stops when Accuracy chips are at or below `accuracy * pot`. Pot is stored in tenths. The fraction is multiplied by chip pot, then compared with Accuracy chips. `eval_every` is the EV/gap sample period. When the field is omitted, the host derives it from `samples` and caps the period at 10 iterations. `time_limit` stops at the next iteration boundary. The `solve` runtime is the regret-update loop, including Accuracy checks that end the run.
 
 ## Design limits
 
 - Production trees use a fixed list of bet sizes (plus geometric / all-in / pot-cap rules on the street path).
 - Best response is exact on the game that was solved.
 - At most 8 actions per information set until the scratch arrays are widened.
-- Tiny synthetic games and Hold’em `StreetGame` fixtures verify the shared trainer; they are not Study product surfaces.
+- Zig tests under `engine/` pin the trainer. There is no `StreetGame` product binary.

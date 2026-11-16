@@ -6,7 +6,7 @@ diagnostics zip (auto-included when you use `--diary` / the mini-app diary box).
 | Field | Value |
 | --- | --- |
 | Date (local) | |
-| Build / version | (Help → About, or installer version) |
+| Build / version | (installer version; `desktop/package.json` is `0.1.6` on current main) |
 | OS | Windows |
 | Symptom | crash / hang / freeze / other: |
 
@@ -29,6 +29,6 @@ diagnostics zip (auto-included when you use `--diary` / the mini-app diary box).
 
 ## Attachments checklist
 
-- [ ] Help → Copy diagnostics zip  **or** `study-debug.cmd collect`
+- [ ] `?` → Copy diagnostics zip  **or** `study-debug.cmd collect`
 - [ ] This diary (saved next to the zip / inside the bundle)
 - [ ] Crash dumps if any (`study-debug.cmd dumps`) after LocalDumps enabled once

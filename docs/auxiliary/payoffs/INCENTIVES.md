@@ -82,10 +82,9 @@ Empty incentives reproduce prior chip/ICM terminals bit-identically.
 
 ## Dual-utility training and best response
 
-CFR and best response maximize each seat's **own modeled utility**
-(`PlayerPayoff::utility[player]`). Player-1-only incentive rules therefore move
-training and BR. Under plain zero-sum chips this matches the historical
-player-0-scalar + negation path.
+CFR and best response maximize each seat's own modeled utility
+(`PlayerPayoff.utility[player]` in `engine/src/poker/payoff.zig`). Player-1-only incentive rules therefore move
+training and best response. With zero rake and no incentives, `utility[1]` is the negation of `utility[0]`.
 
 Labels:
 
@@ -94,11 +93,7 @@ Labels:
 | Chip EV | `chipTerminal` only (rake/ICM/incentives off) |
 | Modeled utility | Chip → optional ICM → path incentives |
 
-`SolveStats::p1_expected_utility` / `p1_best_response_utility` are player-0
-modeled utility. `p2_best_response_utility` is player-1 modeled utility when
-player 1 best-responds. `nash_gap` is the sum of unilateral BR **gains** in
-modeled utility (general-sum NashConv). **Do not claim chip Nash-gap / NashConv
-under active incentives** (same family of caveat as positive rake or ICM).
+Host status reports `player0_expected_utility`, `p1_best_response` (player 0 best-response utility), `p2_best_response` (player 1), and `nash_gap`. `nash_gap` is the sum of unilateral best-response gains in modeled utility. With rake, ICM, or incentives on, that gap is modeled utility. It is chip NashConv only when those overlays are off.
 
 ## Config / GUI
 

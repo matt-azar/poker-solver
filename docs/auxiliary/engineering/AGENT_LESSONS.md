@@ -375,7 +375,7 @@ Made-hand **categories** (when present) are category mass on a **five-card** boa
 
 | Limit | Where | Agent mistake |
 | --- | --- | --- |
-| ≤ 8 legal actions at a decision | `kMaxStreetActions` / trainer scratch | Large size lists without merging |
+| ≤ 8 legal actions at a decision | `engine/src/game/compile.zig` node `child[8]`; `frozen_walk.zig` `max_actions` | Large size lists without merging |
 | `StreetGame` ≤ ~200k terminals | reference enumerator | “Fix” big spots by raising the cap instead of using batch |
 | Equity work limit ~1.1e6 pair-runouts | library / Equity Calculator default | Full-range turn rejected; don't silently sample |
 | Study equity ceiling 51,369,120 pair-runouts | host constant `study_explorer_max_pair_runouts` (`engine/src/analysis/equity.zig`). `solver-engine` has no `--max-pair-runouts` flag | Dense flop check-down can still return `WorkLimit`. Warm path uses `study_warm_max_hand_runouts` (hand×runout), not this pair-runout ceiling |

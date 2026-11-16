@@ -198,7 +198,7 @@ cd path\to\poker-solver
 # A) Mini-app → set Diagnostics zip → "Send report to GitHub"
 .\scripts\debug\study-debug.cmd
 
-# B) CLI after Help → Copy diagnostics zip
+# B) CLI after ? → Copy diagnostics zip
 .\scripts\debug\study-debug.cmd send --zip $env:USERPROFILE\Desktop\holdem-study-diagnostics.zip
 
 # C) Collect while frozen, then send that bundle
@@ -229,7 +229,7 @@ Evidence the packaged app already writes:
 | Path | Contents |
 | --- | --- |
 | `%LOCALAPPDATA%\Holdem Study\diagnostics\` | `last-fault.json`, `ui-hang-events.json`, `last-solve.json`, `host-resources.json`, `engine.log`, `session-meta.json` |
-| Help → **Copy diagnostics zip** | Same folder zipped (preferred for bug reports) |
+| `?` → **Copy diagnostics zip** | Same folder zipped (preferred for bug reports). The `?` shortcut opens the help overlay. |
 | `%LOCALAPPDATA%\CrashDumps\` | Minidumps if LocalDumps is enabled (`Holdem Study.exe.*.dmp`, `solver-engine.exe.*.dmp`) |
 
 Installed binaries (typical):
@@ -247,7 +247,7 @@ Leave Study open if possible — killing it loses stacks.
 powershell -File scripts\debug\windows_collect.ps1
 ```
 
-Then in Study: Help → **Copy diagnostics zip**, and:
+Then in Study: press `?`, then **Copy diagnostics zip**, and:
 
 ```powershell
 .\scripts\debug\study-debug.cmd analyze --zip path\to\holdem-study-diagnostics.zip
