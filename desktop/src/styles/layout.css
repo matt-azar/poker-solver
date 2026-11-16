@@ -3230,6 +3230,39 @@
   margin: 2px 0 4px;
 }
 
+/* Per-decision expand/collapse — branches start collapsed. */
+.tree-diagram-expand {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 4px 2px 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius-sm);
+}
+
+.tree-diagram-expand:hover {
+  background: var(--secondary);
+}
+
+.tree-diagram-expand::before {
+  content: "▾";
+  color: var(--muted);
+  font-size: 11px;
+  width: 1em;
+  flex-shrink: 0;
+}
+
+.tree-diagram-expand[aria-expanded="false"]::before {
+  content: "▸";
+}
+
 .tree-diagram-children {
   list-style: none;
   margin: 0;
