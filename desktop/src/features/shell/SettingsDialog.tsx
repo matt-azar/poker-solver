@@ -46,12 +46,18 @@ export function SettingsDialog() {
     // Align study store when Settings opens / values change from this dialog.
     setEvDisplayBasis(settings.evDisplayBasis);
     setThemePreference(settings.themePreference);
+    // Engine ships CFR+ only — drop draft Vanilla/DCFR labels if present.
+    if (draft.algorithm !== "cfr_plus") {
+      updateDraft({ algorithm: "cfr_plus" });
+    }
   }, [
     open,
     settings.evDisplayBasis,
     settings.themePreference,
     setEvDisplayBasis,
     setThemePreference,
+    draft.algorithm,
+    updateDraft,
   ]);
 
   useEffect(() => {
@@ -196,14 +202,10 @@ export function SettingsDialog() {
         <div className="settings-grid">
           <label className="settings-field">
             Algorithm
-            <select
-              value={draft.algorithm}
-              onChange={(event) => updateDraft({ algorithm: event.target.value })}
-            >
-              <option value="cfr_plus">CFR+</option>
-              <option value="cfr">Vanilla CFR</option>
-              <option value="dcfr">DCFR</option>
-            </select>
+            <input type="text" value="CFR+" readOnly disabled />
+            <span className="settings-hint">
+              Study trains with CFR+ only. Other algorithms are not available yet.
+            </span>
           </label>
           <label className="settings-field" title="How many full EV/gap refreshes to aim for during a solve. Live progress never waits more than 10 iterations between refreshes; Iter n/x updates every iteration.">
             Samples

@@ -1089,6 +1089,81 @@ test "two-size flop streamed save open continue roundtrip" {
     try std.testing.expect(other.peakAllocatedBytes() <= other.memory_budget_bytes);
 }
 
+test "save near memory cap streams without full PSOL table copies" {
+    // Headroom below 3× table copies: old buildDocument would BudgetExceeded on save.
+    // Compact two-size flop gives a non-trivial table while staying CI-cheap.
+    const text =
+        \\street-config 1
+        \\board Js 8h 3h
+        \\pot 100
+        \\stack 200
+        \\oop-range AcAd:1,KsKh:1,QcQd:1,JcJh:1
+        \\ip-range AcAd:1,KsKh:1,QcQd:1,JcJh:1
+        \\first-to-act 0
+        \\max-raises 2
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\oop-flop-bets 0.333333 0.75
+        \\ip-flop-bets 0.333333 0.75
+        \\oop-raises 0.75
+        \\ip-raises 0.75
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(2);
+    try std.testing.expect(sess.canContinue());
+    const trained_before = sess.training.?.trained;
+    const game = sess.game orelse return error.TestUnexpectedResult;
+    const table_bytes: u64 = @as(u64, @intCast(game.table_entries)) * @sizeOf(f32);
+    try std.testing.expect(table_bytes > 0);
+
+    const live = sess.allocatedBytes();
+    const budget = sess.memory_budget_bytes;
+    // Leave less headroom than three full PSOL-order copies (old save peak),
+    // while keeping a little room for metadata (config/combos/slot_actions).
+    const three_copies = 3 * table_bytes;
+    const keep_headroom: u64 = @min(2 * table_bytes, budget - live - 1);
+    try std.testing.expect(keep_headroom < three_copies);
+    try std.testing.expect(budget > live + keep_headroom);
+    const filler_len: usize = @intCast(budget - live - keep_headroom);
+    const filler = try sess.allocator.alloc(u8, filler_len);
+    defer sess.allocator.free(filler);
+
+    const peak_before = sess.peakAllocatedBytes();
+    const live_before_save = sess.allocatedBytes();
+    try std.testing.expect(budget - live_before_save < three_copies);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "near_cap.psol" });
+    defer std.testing.allocator.free(path);
+
+    try sess.save(path);
+    const peak_after = sess.peakAllocatedBytes();
+    const live_after = sess.allocatedBytes();
+    // Save must not retain table copies; peak must stay under three full copies.
+    try std.testing.expectEqual(live_before_save, live_after);
+    try std.testing.expect(peak_after < peak_before + three_copies);
+    try std.testing.expect(peak_after <= budget);
+
+    var other = try Session.init(std.testing.allocator);
+    defer other.deinit();
+    try other.open(path);
+    try std.testing.expect(other.canContinue());
+    try std.testing.expectEqual(trained_before, other.training.?.trained);
+    try other.train(1);
+    try std.testing.expectEqual(trained_before + 1, other.training.?.trained);
+}
+
 test "0.1.6 allow-all-in 0 oversized river opens and Continues" {
     // Faithful 0.1.6 Study wire: allow-all-in 0 + pot-fraction 1 with stack < pot
     // → check-only tree. Must reopen with matching strategy (Continue OK).

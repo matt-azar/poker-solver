@@ -560,6 +560,49 @@ const PayloadSink = struct {
             i += n;
         }
     }
+
+    /// Stream one policy/regret table from memory runout-major order into PSOL
+    /// hand-major wire order using only `stream_chunk_bytes` scratch (no full copy).
+    fn f32sFromMemoryOrder(
+        self: *PayloadSink,
+        game: poker_engine.game.compile.CompiledGame,
+        layout: poker_engine.game.compile.PsolLayoutMap,
+        mem_src: []const f32,
+    ) OpenError!void {
+        const entries: usize = @intCast(layout.psol_table_entries);
+        if (entries > std.math.maxInt(u32)) return error.InvalidPsol;
+        if (mem_src.len != @as(usize, @intCast(game.table_entries))) return error.InvalidPsol;
+        if (layout.mem_of_psol.len != layout.psol_actions.len) return error.InvalidPsol;
+        try self.u32w(@intCast(entries));
+
+        var buf: [stream_chunk_bytes]u8 = undefined;
+        const chunk_f32 = buf.len / 4;
+        var filled: usize = 0;
+        var written: usize = 0;
+        var psol_i: usize = 0;
+        while (psol_i < layout.mem_of_psol.len) : (psol_i += 1) {
+            const mem_i = layout.mem_of_psol[psol_i];
+            const n: usize = layout.psol_actions[psol_i];
+            if (mem_i >= game.slots.len) return error.InvalidPsol;
+            const src_base: usize = @intCast(game.slots[mem_i].base);
+            if (src_base + n > mem_src.len) return error.InvalidPsol;
+            var a: usize = 0;
+            while (a < n) : (a += 1) {
+                if (filled == chunk_f32) {
+                    try self.writeAll(buf[0 .. filled * 4]);
+                    written += filled;
+                    filled = 0;
+                }
+                std.mem.writeInt(u32, buf[filled * 4 ..][0..4], @bitCast(mem_src[src_base + a]), .little);
+                filled += 1;
+            }
+        }
+        if (filled > 0) {
+            try self.writeAll(buf[0 .. filled * 4]);
+            written += filled;
+        }
+        if (written != entries) return error.InvalidPsol;
+    }
 };
 
 fn streamDocumentPayload(sink: *PayloadSink, document: Document, flags: u32) OpenError!void {
@@ -598,6 +641,175 @@ fn streamDocumentPayload(sink: *PayloadSink, document: Document, flags: u32) Ope
         try sink.f64w(document.metrics.nash_gap);
         try sink.f64w(document.metrics.accuracy);
     }
+}
+
+/// Memory-order tables for streaming Save. Wire order stays PSOL hand-major;
+/// conversion uses bounded scratch only (no full PSOL-order copies).
+pub const MemoryOrderTables = struct {
+    game: poker_engine.game.compile.CompiledGame,
+    layout: poker_engine.game.compile.PsolLayoutMap,
+    average: []const f32,
+    regret: []const f32 = &.{},
+    strategy_sum: []const f32 = &.{},
+};
+
+fn encodedFileBytesMemoryOrder(document: Document, tables: MemoryOrderTables) OpenError!u64 {
+    const entries: usize = @intCast(tables.layout.psol_table_entries);
+    if (document.algorithm != algorithm_cfr_plus) return error.InvalidPsol;
+    if (document.config_text.len == 0) return error.InvalidPsol;
+    if (entries == 0 and document.slot_actions.len != 0) return error.InvalidPsol;
+    if (tables.average.len != @as(usize, @intCast(tables.game.table_entries))) return error.InvalidPsol;
+
+    var n: u64 = 4; // algorithm + frozen + pad u16
+    n = try addLenPrefixed(n, document.config_text.len, 1);
+    n = try addLenPrefixed(n, document.oop_combos.len, 4);
+    n = try addLenPrefixed(n, document.ip_combos.len, 4);
+    n = try addLenPrefixed(n, document.slot_actions.len, 2);
+    n = try addLenPrefixed(n, entries, 4);
+    if (document.hasTraining()) {
+        n = std.math.add(u64, n, 4) catch return error.InvalidPsol; // trained i32
+        n = try addLenPrefixed(n, entries, 4);
+        n = try addLenPrefixed(n, entries, 4);
+        if (tables.regret.len != tables.average.len) return error.InvalidPsol;
+        if (tables.strategy_sum.len != tables.average.len) return error.InvalidPsol;
+    }
+    if (document.hasOverlays()) {
+        n = try addLenPrefixed(n, document.locks_text.len, 1);
+        n = try addLenPrefixed(n, document.strategy_edits_text.len, 1);
+    }
+    if (document.has_metrics) {
+        n = std.math.add(u64, n, 5 * 8) catch return error.InvalidPsol;
+    }
+    return std.math.add(u64, header_bytes, n) catch return error.InvalidPsol;
+}
+
+fn streamDocumentPayloadMemoryOrder(
+    sink: *PayloadSink,
+    document: Document,
+    flags: u32,
+    tables: MemoryOrderTables,
+) OpenError!void {
+    if (document.algorithm != algorithm_cfr_plus) return error.InvalidPsol;
+    if (document.config_text.len == 0) return error.InvalidPsol;
+    std.debug.assert(document.algorithm == algorithm_cfr_plus);
+    std.debug.assert(document.config_text.len > 0);
+
+    try sink.u8w(document.algorithm);
+    try sink.u8w(if (document.frozen) 1 else 0);
+    try sink.u16w(0);
+    try sink.text(document.config_text);
+    try sink.i32s(document.oop_combos);
+    try sink.i32s(document.ip_combos);
+    try sink.u16s(document.slot_actions);
+    try sink.f32sFromMemoryOrder(tables.game, tables.layout, tables.average);
+
+    if ((flags & flag_training) != 0) {
+        try sink.i32w(document.trained);
+        try sink.f32sFromMemoryOrder(tables.game, tables.layout, tables.regret);
+        try sink.f32sFromMemoryOrder(tables.game, tables.layout, tables.strategy_sum);
+    }
+    if ((flags & flag_overlays) != 0) {
+        try sink.text(document.locks_text);
+        try sink.text(document.strategy_edits_text);
+    }
+    if ((flags & flag_metrics) != 0) {
+        try sink.f64w(document.metrics.value);
+        try sink.f64w(document.metrics.br0);
+        try sink.f64w(document.metrics.br1);
+        try sink.f64w(document.metrics.nash_gap);
+        try sink.f64w(document.metrics.accuracy);
+    }
+}
+
+/// Atomic save from memory-order tables (ZR-156): convert through bounded scratch
+/// while streaming to the sibling temp, then rename. Preserves PSOL v4, browse-only
+/// vs resumable (`has_training_flag`), and fail-closed destination replacement.
+pub fn writeFileMemoryOrder(
+    path: []const u8,
+    document: Document,
+    tables: MemoryOrderTables,
+) OpenError!void {
+    return writeFileMemoryOrderInjected(path, document, tables, .none);
+}
+
+pub fn writeFileMemoryOrderInjected(
+    path: []const u8,
+    document: Document,
+    tables: MemoryOrderTables,
+    fault: SaveFault,
+) OpenError!void {
+    const total_bytes = try encodedFileBytesMemoryOrder(document, tables);
+    if (total_bytes > max_psol_bytes) return error.InvalidPsol;
+    std.debug.assert(total_bytes >= header_bytes);
+    std.debug.assert(total_bytes <= max_psol_bytes);
+
+    var flags: u32 = 0;
+    if (document.hasTraining()) flags |= flag_training;
+    if (document.hasOverlays()) flags |= flag_overlays;
+    if (document.has_metrics) flags |= flag_metrics;
+
+    const dirname = std.fs.path.dirname(path) orelse ".";
+    const basename = std.fs.path.basename(path);
+    if (basename.len == 0) return error.InvalidPsol;
+
+    var dir = std.fs.cwd().openDir(dirname, .{}) catch return error.InvalidPsol;
+    defer dir.close();
+
+    var tmp_name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_name = std.fmt.bufPrint(&tmp_name_buf, ".{s}.tmp-{d}", .{
+        basename,
+        std.time.nanoTimestamp(),
+    }) catch return error.InvalidPsol;
+
+    const file = dir.createFile(tmp_name, .{ .exclusive = true }) catch return error.InvalidPsol;
+    var file_open = true;
+    errdefer {
+        if (file_open) file.close();
+        dir.deleteFile(tmp_name) catch {};
+    }
+
+    var zero_header: [header_bytes]u8 = .{0} ** header_bytes;
+    file.writeAll(&zero_header) catch return error.InvalidPsol;
+
+    if (fault == .write) {
+        const stub = [_]u8{ algorithm_cfr_plus, 0, 0, 0 };
+        file.writeAll(&stub) catch {};
+        return error.InvalidPsol;
+    }
+
+    var sink = PayloadSink{ .file = file };
+    try streamDocumentPayloadMemoryOrder(&sink, document, flags, tables);
+    std.debug.assert(sink.payload_len + header_bytes == total_bytes);
+
+    var header: [header_bytes]u8 = undefined;
+    writeHeader(&header, flags, sink.payload_len, sink.hash);
+    std.debug.assert(std.mem.eql(u8, header[0..4], magic));
+    std.debug.assert(std.mem.readInt(u32, header[4..8], .little) == version);
+    std.debug.assert(std.mem.readInt(u64, header[12..20], .little) == sink.payload_len);
+
+    file.seekTo(0) catch return error.InvalidPsol;
+    file.writeAll(&header) catch return error.InvalidPsol;
+
+    if (fault == .sync) {
+        std.debug.assert(fault == .sync);
+        return error.InvalidPsol;
+    }
+    file.sync() catch return error.InvalidPsol;
+
+    file.close();
+    file_open = false;
+
+    if (fault == .interrupt_before_replace) {
+        std.debug.assert(fault == .interrupt_before_replace);
+        return error.InvalidPsol;
+    }
+    if (fault == .rename) {
+        std.debug.assert(fault == .rename);
+        return error.InvalidPsol;
+    }
+
+    std.debug.assert(fault == .none);
+    try renameReplace(dir, tmp_name, basename);
 }
 
 /// Atomic save (ZR-92 / ZR-144 / ZR-156): stream the payload with a bounded scratch

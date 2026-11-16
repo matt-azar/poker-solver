@@ -38,6 +38,9 @@ pub const NodeLock = struct {
     /// Per-combo mixes parallel to `combo_indices`. When non-empty, length must
     /// equal `combo_indices.len`; listed combos use their own row.
     combo_actions: []ActionLockRow = &.{},
+    /// Board-local record created by a line-lock expansion (not an explicit river/turn edit).
+    /// Line unlock removes only these; independent board-local locks survive.
+    from_line: bool = false,
 
     pub fn isLine(self: NodeLock) bool {
         return self.scope == .line;
@@ -498,6 +501,7 @@ fn mergeLockMasks(allocator: std.mem.Allocator, base: NodeLock, patch: NodeLock)
         .river = patch.river,
         .scope = patch.scope,
         .kind = .selected_combos,
+        .from_line = patch.from_line,
     };
     errdefer out.deinit(allocator);
 
@@ -606,6 +610,7 @@ pub fn formatNodeLock(allocator: std.mem.Allocator, lock: NodeLock) ![]u8 {
         try out.appendSlice(" line");
     } else {
         try out.writer().print(" at {d} {d}", .{ lock.turn, lock.river });
+        if (lock.from_line) try out.appendSlice(" from_line");
     }
     try out.append(' ');
     if (lock.hasPerComboActions()) {
@@ -741,6 +746,10 @@ pub fn parseNodeLock(allocator: std.mem.Allocator, line: []const u8) !NodeLock {
         lock.turn = @intCast(try parseCardIndex(parts[index + 1]));
         lock.river = @intCast(try parseCardIndex(parts[index + 2]));
         index += 3;
+        if (index < parts.len and std.mem.eql(u8, parts[index], "from_line")) {
+            lock.from_line = true;
+            index += 1;
+        }
     } else if (index < parts.len and std.mem.eql(u8, parts[index], "line")) {
         lock.scope = .line;
         lock.turn = -1;

@@ -218,6 +218,22 @@ pub fn main() !void {
             };
             continue;
         }
+        if (std.mem.eql(u8, req.op, "tree_preview")) {
+            dispatch.startTreePreview(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
+        if (std.mem.eql(u8, req.op, "plan_memory")) {
+            dispatch.startPlanMemory(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
 
         var reply = dispatch.handle(&state, req) catch |err| blk: {
             break :blk try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));

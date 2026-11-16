@@ -314,8 +314,8 @@ export function TreeLineEditor() {
   };
 
   const refresh = async () => {
-    // Host tree_preview is still sync on the sidecar stdin loop. Issuing it while
-    // Solve/begin owns the engine starves status polls → "Solve failed." (ZR-158).
+    // Host tree_preview is async/cancellable, but still refuse while Solve/begin
+    // is active so preview does not race train heap traffic (ZR-158).
     if (previewBlockedPhase(useStudyStore.getState().phase)) {
       return;
     }

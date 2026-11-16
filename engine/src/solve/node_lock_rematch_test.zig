@@ -265,6 +265,30 @@ test "text round trip node line selected unlocked legacy" {
     try std.testing.expect(node_lock.lockedProbability(round.findExact(9, -1, -1).?.*, 1, 2) == null);
 }
 
+test "from_line board-local lock roundtrips in lock text" {
+    const allocator = std.testing.allocator;
+    var set = node_lock.LockSet.init(allocator);
+    defer set.deinit();
+    const lock = node_lock.NodeLock{
+        .infoset_id = 5,
+        .turn = -1,
+        .river = 20,
+        .scope = .node,
+        .kind = .full_node,
+        .from_line = true,
+        .actions = try node_lock.makeActionLockRow(allocator, &.{ 0.4, 0.6 }, 2),
+    };
+    try set.upsert(lock);
+    const text = try node_lock.formatLockSet(allocator, &set);
+    defer allocator.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, "from_line") != null);
+    var round = try node_lock.parseLockSet(allocator, text);
+    defer round.deinit();
+    const got = round.findExact(5, -1, 20).?;
+    try std.testing.expect(got.from_line);
+    try std.testing.expectEqual(@as(f64, 0.4), node_lock.lockedProbability(got.*, 0, 0).?);
+}
+
 test "per-combo combo_probs roundtrips in lock text" {
     const allocator = std.testing.allocator;
     var set = node_lock.LockSet.init(allocator);
