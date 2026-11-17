@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { actionSizePotBasis } from "../../domain/actionHistory";
 import type { EquityHandRow } from "../../domain/analysis";
-import { formatFrequencyPct } from "../../domain/betSizes";
+import {
+  formatActionDisplay,
+  formatFrequencyPct,
+} from "../../domain/betSizes";
 import {
   formatEquityPct,
   formatEvChip,
@@ -10,11 +14,13 @@ import {
   DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD,
   MIN_VALUE_BLUFFS_BET_FREQ,
   MIN_VALUE_BLUFFS_REACH_MASS,
+  filterValueBluffsBySizes,
   formatReachMass,
   listValueBluffs,
   matrixCellForCombo,
   matrixCellsForValueBluffs,
   sortValueBluffs,
+  valueBluffsBettingActionIndices,
   type ValueBluffsEquityCompare,
   type ValueBluffsEquityMode,
   type ValueBluffsSortDir,
@@ -138,9 +144,11 @@ export function ValueBluffsPanel() {
   const calculateEv = useStudyStore((s) => s.calculateEv);
   // Settings is the authority for local vs global EV display.
   const evDisplayBasis = useSettingsStore((s) => s.settings.evDisplayBasis);
+  const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const solutionId = useStudyStore((s) => s.solutionId);
   const status = useStudyStore((s) => s.status);
+  const draftPot = useStudyStore((s) => s.draft?.pot);
   const setHighlightCells = useValueBluffsHighlightStore(
     (s) => s.setHighlightCells,
   );
@@ -156,6 +164,8 @@ export function ValueBluffsPanel() {
   const [equityMode, setEquityMode] = useState<ValueBluffsEquityMode>("node");
   const [sortKey, setSortKey] = useState<ValueBluffsSortKey>("betFreq");
   const [sortDir, setSortDir] = useState<ValueBluffsSortDir>("desc");
+  /** Absent key = enabled (default all on). Local only — does not navigate. */
+  const [sizeEnabled, setSizeEnabled] = useState<Record<number, boolean>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [postCall, setPostCall] = useState<PostCallCache | null>(null);
   const [postCallPending, setPostCallPending] = useState(false);
@@ -336,6 +346,34 @@ export function ValueBluffsPanel() {
     return equityHandsForNode(equity, currentNode?.player) as EquityHandRow[] | null;
   }, [equityMode, postCall, expectedPostCallKey, equity, currentNode?.player]);
 
+  const bettingActionIndices = useMemo(
+    () => valueBluffsBettingActionIndices(currentNode?.actions),
+    [currentNode?.actions],
+  );
+  const actionsKey = (currentNode?.actions ?? []).join("\0");
+
+  // New node / action list → all size toggles on.
+  useEffect(() => {
+    setSizeEnabled({});
+  }, [currentNode?.node_id, actionsKey]);
+
+  const enabledSizeIndices = useMemo(() => {
+    const enabled = new Set<number>();
+    for (const index of bettingActionIndices) {
+      if (sizeEnabled[index] !== false) {
+        enabled.add(index);
+      }
+    }
+    return enabled;
+  }, [bettingActionIndices, sizeEnabled]);
+
+  const pot = actionSizePotBasis(
+    currentNode,
+    Number(status?.pot ?? draftPot ?? 0),
+  );
+  const toCall = Number(currentNode?.to_call ?? 0);
+  const sizeDisplayOpts = useMemo(() => ({ toCall }), [toCall]);
+
   const rows = useMemo(() => {
     if (equityMode === "after_call" && (postCallPending || !equityHands)) {
       return [];
@@ -351,7 +389,8 @@ export function ValueBluffsPanel() {
       nodeValues: valuesForNode ? nodeValues : null,
       evDisplayBasis,
     });
-    return sortValueBluffs(listed, sortKey, sortDir);
+    const sized = filterValueBluffsBySizes(listed, enabledSizeIndices);
+    return sortValueBluffs(sized, sortKey, sortDir);
   }, [
     currentNode,
     equityHands,
@@ -364,6 +403,7 @@ export function ValueBluffsPanel() {
     evDisplayBasis,
     minBetFreq,
     reachFloor,
+    enabledSizeIndices,
     sortKey,
     sortDir,
   ]);
@@ -399,6 +439,13 @@ export function ValueBluffsPanel() {
     };
   }, [highlightReady, rows, setHighlightCells]);
 
+  const toggleSize = (actionIndex: number) => {
+    setSizeEnabled((prev) => {
+      const currentlyOn = prev[actionIndex] !== false;
+      return { ...prev, [actionIndex]: !currentlyOn };
+    });
+  };
+
   const onRowActivate = (combo: string) => {
     const cell = matrixCellForCombo(combo);
     if (!cell) {
@@ -430,6 +477,7 @@ export function ValueBluffsPanel() {
     setMinBetPct(Math.round(MIN_VALUE_BLUFFS_BET_FREQ * 100));
     setMinReachMass(MIN_VALUE_BLUFFS_REACH_MASS);
     setEquityCompare("lt");
+    setSizeEnabled({});
     setSortKey("betFreq");
     setSortDir("desc");
   };
@@ -439,24 +487,26 @@ export function ValueBluffsPanel() {
       <div className="value-bluffs-controls">
         <label className="value-bluffs-control">
           <span className="muted">Equity</span>
-          <button
-            type="button"
-            className="toolbar-btn value-bluffs-compare-toggle"
-            aria-label={`${compareCaption}: equity ${compareSymbol} threshold`}
-            title={
-              equityCompare === "lt"
-                ? "Bluffs: equity < threshold"
-                : "Value bets: equity > threshold"
-            }
-            onClick={() =>
-              setEquityCompare((value) => (value === "lt" ? "gt" : "lt"))
-            }
-          >
-            <span className="value-bluffs-compare-symbol" aria-hidden="true">
+          <span className="value-bluffs-compare">
+            <button
+              type="button"
+              className="toolbar-btn value-bluffs-compare-toggle"
+              aria-label={`${compareCaption}: equity ${compareSymbol} threshold`}
+              title={
+                equityCompare === "lt"
+                  ? "Bluffs: equity < threshold"
+                  : "Value bets: equity > threshold"
+              }
+              onClick={() =>
+                setEquityCompare((value) => (value === "lt" ? "gt" : "lt"))
+              }
+            >
               {compareSymbol}
+            </button>
+            <span className="value-bluffs-compare-caption" aria-hidden="true">
+              {compareCaption}
             </span>
-            <span className="value-bluffs-compare-caption">{compareCaption}</span>
-          </button>
+          </span>
           <input
             type="number"
             className="value-bluffs-threshold"
@@ -494,6 +544,36 @@ export function ValueBluffsPanel() {
             After call
           </button>
         </div>
+        {bettingActionIndices.length > 0 ? (
+          <div
+            className="seat-toggle value-bluffs-size-toggles"
+            role="group"
+            aria-label="Value / Bluffs bet sizes"
+          >
+            {bettingActionIndices.map((actionIndex) => {
+              const label = currentNode?.actions?.[actionIndex] ?? "";
+              const display = formatActionDisplay(
+                label,
+                pot,
+                betSizeDisplay,
+                sizeDisplayOpts,
+              );
+              const pressed = sizeEnabled[actionIndex] !== false;
+              return (
+                <button
+                  key={`${actionIndex}-${label}`}
+                  type="button"
+                  className="toolbar-btn"
+                  aria-pressed={pressed}
+                  title={label}
+                  onClick={() => toggleSize(actionIndex)}
+                >
+                  {display.primary}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <div className="value-bluffs-actions">
           <button
             type="button"
