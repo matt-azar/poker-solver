@@ -71,6 +71,8 @@ export interface ValueBluffsRow {
   equity: number;
   /** Betting action with the largest probability for this hand, if any. */
   topBetAction: string | null;
+  /** Index of {@link topBetAction} in the node action list, or -1. */
+  topBetActionIndex: number;
   weight: number | null;
   reach: number | null;
 }
@@ -94,6 +96,43 @@ export function isValueBluffsBettingAction(label: string): boolean {
     return true;
   }
   return /^all[\s-]*in$/i.test(trimmed);
+}
+
+/** Indices of bet/raise/all-in actions on a node (Value / Bluffs size toggles). */
+export function valueBluffsBettingActionIndices(
+  actions: readonly string[] | null | undefined,
+): number[] {
+  if (!actions?.length) {
+    return [];
+  }
+  const out: number[] = [];
+  for (let index = 0; index < actions.length; index += 1) {
+    if (isValueBluffsBettingAction(actions[index] ?? "")) {
+      out.push(index);
+    }
+  }
+  return out;
+}
+
+/**
+ * Keep rows whose dominant betting size is enabled. Empty enabled set → [].
+ * Does not navigate the tree; callers own toggle state.
+ */
+export function filterValueBluffsBySizes(
+  rows: readonly ValueBluffsRow[],
+  enabledActionIndices: ReadonlySet<number>,
+): ValueBluffsRow[] {
+  if (!rows.length) {
+    return [];
+  }
+  if (!enabledActionIndices.size) {
+    return [];
+  }
+  return rows.filter(
+    (row) =>
+      row.topBetActionIndex >= 0 &&
+      enabledActionIndices.has(row.topBetActionIndex),
+  );
 }
 
 /** True when the label is a Call (not Check). */
@@ -503,12 +542,15 @@ export function listValueBluffs(args: ListValueBluffsArgs): ValueBluffsRow[] {
     if (!Number.isFinite(handReach) || !(handReach >= minReachMass)) {
       continue;
     }
+    const topBetActionIndex = topBettingActionIndex(row, actions);
     rows.push({
       combo,
       betFreq,
       ev: comboEv(node, nodeValues, combo, evDisplayBasis),
       equity: equityEntry.equity,
-      topBetAction: topBettingAction(row, actions),
+      topBetAction:
+        topBetActionIndex >= 0 ? (actions[topBetActionIndex] ?? null) : null,
+      topBetActionIndex,
       weight: Number.isFinite(equityEntry.weight) ? equityEntry.weight : null,
       reach: handReach,
     });

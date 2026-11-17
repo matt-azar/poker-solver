@@ -9,6 +9,7 @@ import {
   equityHandsForDominantSizes,
   equityPassesThreshold,
   facingChildIdForBet,
+  filterValueBluffsBySizes,
   formatReachMass,
   isValueBluffsBettingAction,
   listValueBluffs,
@@ -17,6 +18,7 @@ import {
   sortValueBluffs,
   topBettingAction,
   topBettingActionIndex,
+  valueBluffsBettingActionIndices,
 } from "./valueBluffs";
 import { fetchPostCallEquityHands } from "./valueBluffsPostCall";
 import type { NodePayload } from "./types";
@@ -46,6 +48,18 @@ describe("isValueBluffsBettingAction", () => {
     expect(isValueBluffsBettingAction("Check")).toBe(false);
     expect(isValueBluffsBettingAction("Fold")).toBe(false);
     expect(isValueBluffsBettingAction("Call")).toBe(false);
+  });
+
+  it("lists betting action indices for size toggles", () => {
+    expect(
+      valueBluffsBettingActionIndices([
+        "Check",
+        "Bet 15",
+        "Bet 75 all-in",
+        "Call",
+      ]),
+    ).toEqual([1, 2]);
+    expect(valueBluffsBettingActionIndices(["Check", "Fold"])).toEqual([]);
   });
 });
 
@@ -271,8 +285,24 @@ describe("listValueBluffs", () => {
     expect(rows[2]!.betFreq).toBeCloseTo(0.5, 12);
     expect(rows.every((row) => row.equity < 0.3)).toBe(true);
     expect(rows.every((row) => (row.reach ?? 0) >= MIN_VALUE_BLUFFS_REACH_MASS)).toBe(true);
+    expect(rows.map((row) => row.topBetActionIndex)).toEqual([3, 2, 1]);
     expect(MIN_VALUE_BLUFFS_BET_FREQ).toBe(0.01);
     expect(MIN_VALUE_BLUFFS_REACH_MASS).toBe(0.005);
+  });
+
+  it("filters rows by enabled dominant bet sizes", () => {
+    const rows = listValueBluffs({
+      node,
+      equityHands: hands,
+      threshold: DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD,
+    });
+    expect(
+      filterValueBluffsBySizes(rows, new Set([1])).map((row) => row.combo),
+    ).toEqual(["KhKd"]);
+    expect(
+      filterValueBluffsBySizes(rows, new Set([2, 3])).map((row) => row.combo),
+    ).toEqual(["2c2d", "7h2d"]);
+    expect(filterValueBluffsBySizes(rows, new Set())).toEqual([]);
   });
 
   it("drops combos with reach mass below 0.005", () => {
