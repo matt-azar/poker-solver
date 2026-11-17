@@ -671,7 +671,7 @@ export async function ipcCancelEquityJob(jobId: string): Promise<unknown> {
   return env.body;
 }
 
-/** Study Categories (made-hand on five-card boards; host `categories`). */
+/** Study Categories (made-hand on river; draws/backdoors on flop/turn; host `categories`). */
 export async function ipcCategories(opts?: {
   nodeIndex?: number;
   nodeId?: string;

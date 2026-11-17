@@ -38,6 +38,7 @@ fn appendJsonString(list: *std.ArrayList(u8), value: []const u8) PackError!void 
 }
 
 fn appendPlayer(list: *std.ArrayList(u8), player: hand_categories.PlayerCategoryMass) PackError!void {
+    const count = player.count;
     list.appendSlice("{\"defined\":") catch return error.OutOfMemory;
     list.appendSlice(if (player.defined) "true" else "false") catch return error.OutOfMemory;
     list.appendSlice(",\"total_mass\":") catch return error.OutOfMemory;
@@ -48,7 +49,7 @@ fn appendPlayer(list: *std.ArrayList(u8), player: hand_categories.PlayerCategory
     }
     list.appendSlice(",\"fractions\":[") catch return error.OutOfMemory;
     var slot: usize = 0;
-    while (slot < hand_categories.hand_category_count) : (slot += 1) {
+    while (slot < count) : (slot += 1) {
         if (slot != 0) list.append(',') catch return error.OutOfMemory;
         if (player.defined) {
             try appendF64(list, player.fraction[slot]);
@@ -58,7 +59,7 @@ fn appendPlayer(list: *std.ArrayList(u8), player: hand_categories.PlayerCategory
     }
     list.appendSlice("],\"mass\":[") catch return error.OutOfMemory;
     slot = 0;
-    while (slot < hand_categories.hand_category_count) : (slot += 1) {
+    while (slot < count) : (slot += 1) {
         if (slot != 0) list.append(',') catch return error.OutOfMemory;
         if (player.defined) {
             try appendF64(list, player.mass[slot]);
@@ -67,6 +68,39 @@ fn appendPlayer(list: *std.ArrayList(u8), player: hand_categories.PlayerCategory
         }
     }
     list.appendSlice("]}") catch return error.OutOfMemory;
+}
+
+fn appendCategoryNames(list: *std.ArrayList(u8), model: []const u8, category_count: usize) PackError!void {
+    const is_draws = std.mem.eql(u8, model, hand_categories.draw_category_model);
+    if (is_draws) {
+        const order = [_]hand_categories.DrawCategory{
+            .flush_draw,
+            .oesd,
+            .gutshot,
+            .backdoor_flush,
+            .backdoor_straight,
+        };
+        for (order[0..@min(order.len, category_count)], 0..) |cat, slot| {
+            if (slot != 0) list.append(',') catch return error.OutOfMemory;
+            try appendJsonString(list, hand_categories.drawCategoryName(cat));
+        }
+        return;
+    }
+    const order = [_]hand_eval.HandCategory{
+        .high_card,
+        .pair,
+        .two_pair,
+        .three_of_a_kind,
+        .straight,
+        .flush,
+        .full_house,
+        .four_of_a_kind,
+        .straight_flush,
+    };
+    for (order[0..@min(order.len, category_count)], 0..) |cat, slot| {
+        if (slot != 0) list.append(',') catch return error.OutOfMemory;
+        try appendJsonString(list, hand_categories.categoryName(cat));
+    }
 }
 
 pub const PackArgs = struct {
@@ -111,21 +145,7 @@ pub fn packStudyCategoriesBody(allocator: std.mem.Allocator, args: PackArgs) Pac
         try appendJsonString(&list, text);
     }
     try list.appendSlice("],\"categories\":[");
-    const category_order = [_]hand_eval.HandCategory{
-        .high_card,
-        .pair,
-        .two_pair,
-        .three_of_a_kind,
-        .straight,
-        .flush,
-        .full_house,
-        .four_of_a_kind,
-        .straight_flush,
-    };
-    for (category_order, 0..) |cat, slot| {
-        if (slot != 0) try list.append(',');
-        try appendJsonString(&list, hand_categories.categoryName(cat));
-    }
+    try appendCategoryNames(&list, args.report.model, args.report.category_count);
     try list.appendSlice("],\"oop\":");
     try appendPlayer(&list, args.report.player0);
     try list.appendSlice(",\"ip\":");

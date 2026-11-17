@@ -5683,7 +5683,7 @@ test "ZR-116 dig: node equity root vs navigated differs on reach fixture" {
     try std.testing.expect(std.mem.eql(u8, bad_reply.error_code orelse "", "unknown_node"));
 }
 
-test "ZR-116 dig: categories river ok; flop/turn available=false" {
+test "ZR-116 dig: categories river made-hand; flop/turn draws available" {
     const river =
         \\street-config 1
         \\board Ah Kh Qh Jh 2c
@@ -5720,6 +5720,7 @@ test "ZR-116 dig: categories river ok; flop/turn available=false" {
     defer river_reply.deinit();
     try std.testing.expect(river_reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, river_reply.body_json, "\"available\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, river_reply.body_json, "\"model\":\"made-hand\"") != null);
 
     const flop =
         \\street-config 1
@@ -5756,8 +5757,10 @@ test "ZR-116 dig: categories river ok; flop/turn available=false" {
     var flop_reply = try handle(&flop_state, flop_req);
     defer flop_reply.deinit();
     try std.testing.expect(flop_reply.ok);
-    try std.testing.expect(std.mem.indexOf(u8, flop_reply.body_json, "\"available\":false") != null);
-    try std.testing.expect(std.mem.indexOf(u8, flop_reply.body_json, "five-card") != null);
+    try std.testing.expect(std.mem.indexOf(u8, flop_reply.body_json, "\"available\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, flop_reply.body_json, "\"model\":\"draws\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, flop_reply.body_json, "\"exclusive\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, flop_reply.body_json, "flush draw") != null);
 
     const turn =
         \\street-config 1
@@ -5794,7 +5797,8 @@ test "ZR-116 dig: categories river ok; flop/turn available=false" {
     var turn_reply = try handle(&turn_state, turn_req);
     defer turn_reply.deinit();
     try std.testing.expect(turn_reply.ok);
-    try std.testing.expect(std.mem.indexOf(u8, turn_reply.body_json, "\"available\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, turn_reply.body_json, "\"available\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, turn_reply.body_json, "\"model\":\"draws\"") != null);
 }
 
 test "ZR-116 dig: equity calculator invalid board + cancel under busy" {

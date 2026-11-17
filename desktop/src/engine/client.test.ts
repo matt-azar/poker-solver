@@ -649,6 +649,32 @@ describe("EngineClient ZR-103 getCategories / compare IPC", () => {
     });
   });
 
+  it("routes flop draws categories payload over IPC", async () => {
+    invoke.mockResolvedValueOnce(
+      okBody("categories", {
+        pending: false,
+        kind: "categories",
+        model: "draws",
+        available: true,
+        exclusive: false,
+        categories: ["flush draw", "oesd", "gutshot", "backdoor flush", "backdoor straight"],
+        oop: { defined: true, total_mass: 2, fractions: [0.5, 0, 0, 0.5, 0], mass: [1, 0, 0, 1, 0] },
+        ip: { defined: true, total_mass: 1, fractions: [0, 0, 0, 0, 0], mass: [0, 0, 0, 0, 0] },
+        node_id: "p0.t-1.r-1",
+      }),
+    );
+    const body = (await client.getCategories("s1", "p0.t-1.r-1")) as {
+      model?: string;
+      exclusive?: boolean;
+      available?: boolean;
+      categories?: string[];
+    };
+    expect(body.available).toBe(true);
+    expect(body.model).toBe("draws");
+    expect(body.exclusive).toBe(false);
+    expect(body.categories?.[0]).toBe("flush draw");
+  });
+
   it("routes compare over IPC (dual-session baseline vs scenario)", async () => {
     invoke.mockResolvedValueOnce(
       okBody("compare", {
