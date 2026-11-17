@@ -4,6 +4,8 @@ Reference workloads for river, turn, and flop study. Ranges are study inputs. Th
 
 ## What is measured
 
+The field names in this section are the historical runner schema in `benchmarks/run_study_benchmarks.py`. That script targeted the removed `river_solver` and `street_solver` CLIs. The names explain `RESULTS.md`. They are not `solver-engine` flags. Current checks are in [TESTING.md](../../docs/auxiliary/engineering/TESTING.md).
+
 NashConv is the sum of unilateral BR gains
 `(u0(BR0)-u0)+(u1(BR1)-u1)`. Under zero-sum chips that equals
 `player0_best_response_utility + player1_best_response_utility`. Player 0 is out of position.
@@ -95,6 +97,8 @@ These do not replace the three reference cases.
 | `smoke_resource` | `resource-rejection`. Full-range flop with a 1 MiB engine budget |
 
 ## How to run
+
+Case JSON `binary` values (`river_solver`, `street_solver`) and their argv flags record the retired CLIs used for `RESULTS.md`. `benchmarks/run_study_benchmarks.py` still speaks that schema. It is not a current product command.
 
 Zig Study contract smoke:
 

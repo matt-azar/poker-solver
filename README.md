@@ -42,6 +42,19 @@ Limited **river** live browser beta (isolated sessions over typed IPC): see
 five cards. Turn and flop stay out of that service until its per-session CPU
 and RSS numbers are reviewed.
 
+Portable study jobs (`holdem-study-job/1`) are shared by Build **Export job** / **Import job** and `holdem-study-cli`:
+
+```sh
+zig build
+./zig-out/bin/holdem-study-cli plan configs/examples/study-jobs/river_btn_bb_srp.job.json
+./zig-out/bin/holdem-study-cli solve configs/examples/study-jobs/river_btn_bb_srp.job.json \
+  --out /tmp/study.psol --engine ./zig-out/bin/solver-engine
+./zig-out/bin/holdem-study-cli from-hh configs/examples/study-jobs/river_btn_bb_srp.hh.txt \
+  --out /tmp/job.json
+```
+
+`from-hh` reads a five-card `hand-history 1` file. Details: [`configs/examples/study-jobs/README.md`](configs/examples/study-jobs/README.md).
+
 Precomputed public demo (browse only): [`desktop/src/demo/README.md`](desktop/src/demo/README.md).
 Pages URL: `https://matt-azar.github.io/poker-solver/?demo=flop-explore`
 (repo Pages source must be GitHub Actions). Private QA is `?preview=` via
@@ -67,7 +80,7 @@ Windows Study installer packaging: see [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md#d
 ## Layout
 
 ```text
-engine/ app/ formats/ host/ cli/   Zig solver + Study IPC host (`solver-engine`)
+engine/ app/ formats/ host/ cli/   Zig solver, `solver-engine`, `holdem-study-cli`
 build.zig / build.zig.zon          Zig workspace
 desktop/                           React Study UI + Tauri Windows shell
 configs/                           Defaults, ranges, templates; range-profiles/

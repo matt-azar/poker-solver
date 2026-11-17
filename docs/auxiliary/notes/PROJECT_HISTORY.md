@@ -192,6 +192,12 @@ The same night, wide-range flop EV and equity after a successful solve stopped w
 
 November 14 published `v0.1.6-windows`. The package version on the desktop and Tauri manifests is 0.1.6. The cut includes the IPC ownership work, the flop EV/equity change, the hang and job/launch fixes, and the LocalDumps console-flash fix. [Windows 0.1.6](https://github.com/matt-azar/poker-solver/pull/385)
 
+## After the 0.1.6 Windows cut
+
+On November 15 the repository published a precomputed public Study demo on GitHub Pages and a limited five-card river browser beta. Neither replaces the Windows Tauri app. [Public demo](https://github.com/matt-azar/poker-solver/pull/414) · [River beta](https://github.com/matt-azar/poker-solver/pull/415)
+
+On November 16, `holdem-study-job/1` became the shared job file for Build and `holdem-study-cli` (`plan`, `solve`, `from-hh`). `from-hh` reads a five-card `hand-history 1` document. Settings shows CFR+ only. The Build preview tree and its decision branches start collapsed. [Study job CLI](https://github.com/matt-azar/poker-solver/pull/428) · [Settings CFR+](https://github.com/matt-azar/poker-solver/pull/433) · [Collapsed preview](https://github.com/matt-azar/poker-solver/pull/434)
+
 ## Current documentation
 
 [Architecture](../../ARCHITECTURE.md) · [Postflop engine](../../STREETS.md) · [Desktop UI](../../DESKTOP_UI.md) · [Feature comparison](../planning/FEATURE_PARITY.md)

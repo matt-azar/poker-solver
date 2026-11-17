@@ -156,7 +156,7 @@ Engine code lives under `engine/` and `host/`. Those modules do not import `desk
 
 - Config `threads` is the frozen-pass worker count. The per-deal walk stays serial.
 - Parallelism splits the **first future public card** only (turn→rivers, flop→turns).
-- Shipped trainer is CFR+ (`trainFrozenCfrPlus`). PSOL v4 stores that algorithm byte and rejects any other. Settings still lists Vanilla CFR and DCFR. Those strings are draft fields. The host does not switch trainers from them.
+- Shipped trainer is CFR+ (`trainFrozenCfrPlus`). PSOL v4 stores that algorithm byte and rejects any other. Settings shows a read-only CFR+ field and sets the draft to `cfr_plus` when the dialog opens. The host trains CFR+ only.
 - CFR+: sum counterfactual regret across the frozen pass, then **floor only the updating player**. Leave the opponent table alone.
 
 **Pointers:** `docs/STREETS.md` (frozen threads), Zig frozen CFR under `engine/`, historical commits `9e0d87d`, `6a597df`, `e2ad8df`.
@@ -253,7 +253,9 @@ Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via no
 Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fraction.  
 `street-config-check <file>` parses a file and prints board length, pot, and stack. Iterations, accuracy, and the train thread cap stay off the document and go out through host `solve`.
 
-**Don't:** Invent JSON street configs, revive `river-config 1`, or put iteration caps inside `street-config 1`.
+`holdem-study-cli` commands are `plan`, `solve`, and `from-hh`. They read `holdem-study-job/1` JSON. Build **Export job** / **Import job** use that same JSON. `from-hh` accepts a five-card `hand-history 1` file. Import rejects `first-to-act` other than 0. `solve` spawns an isolated `solver-engine`.
+
+**Don't:** Invent JSON street configs, revive `river-config 1`, or put iteration caps inside `street-config 1`. Don't invent a second job schema.
 
 ### Study / street-config bet arrays
 

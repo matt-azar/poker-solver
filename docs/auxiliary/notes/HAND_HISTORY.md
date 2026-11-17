@@ -1,6 +1,8 @@
 # Hand history export
 
-`hand-history 1` is a versioned text document for one heads-up played hand — the export contract for future self-play and trainer fills. Not a Monte-Carlo trainer, pack loader, or session-statistics report.
+`hand-history 1` is a versioned text document for one heads-up played hand. It is the export contract for a future self-play fill. It is not a Monte-Carlo trainer, pack loader, or session-statistics report.
+
+`holdem-study-cli from-hh` reads a five-card document and writes a reviewable `holdem-study-job/1` file. A board that is not five cards is rejected.
 
 `format_hand_history` writes one document from a `HandHistoryRecord`. `parse_hand_history` reads it. Formatting a parsed document produces the same text.
 

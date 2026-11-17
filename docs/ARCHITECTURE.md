@@ -1,6 +1,6 @@
 # Architecture
 
-The Study engine is Zig. `zig build` installs `solver-engine`, `street-config-check`, and `gate-bench`. Study talks to `solver-engine` over protocol 2 on inherited pipes. The trainer is CFR+. PSOL files are version 4 and store that algorithm byte (`formats/src/psol_v4.zig`).
+The Study engine is Zig. `zig build` installs `solver-engine`, `holdem-study-cli`, `street-config-check`, and `gate-bench`. Study talks to `solver-engine` over protocol 2 on inherited pipes. The trainer is CFR+. PSOL files are version 4 and store that algorithm byte (`formats/src/psol_v4.zig`).
 
 Index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md), [DESKTOP_UI.md](DESKTOP_UI.md), [HOLDEM.md](HOLDEM.md), [EXPLORER.md](EXPLORER.md).
 
@@ -15,10 +15,10 @@ Index: [README.md](README.md). See [STREETS.md](STREETS.md), [RIVER.md](RIVER.md
 | `engine/src/kernel/terminal.zig` | Chip payoff, then rake, then ICM, then path incentives |
 | `app/src/session.zig` | Session train, pause, save, open |
 | `host/` | `solver-engine` typed IPC |
-| `cli/` | `street-config-check` and `gate-bench` |
+| `cli/` | `holdem-study-cli`, `street-config-check`, and `gate-bench` |
 | `desktop/` | React Study UI and Tauri shell |
 
-Study Settings lists CFR+, Vanilla CFR, and DCFR. The host trains with `trainFrozenCfrPlus` for each label.
+Settings shows a read-only CFR+ field. The host trains with `trainFrozenCfrPlus`.
 
 ## One postflop tree
 
