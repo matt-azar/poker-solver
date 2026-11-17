@@ -2169,9 +2169,26 @@
 }
 
 .value-bluffs-compare-toggle {
-  min-width: 2rem;
-  padding-inline: 6px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 3.25rem;
+  padding: 2px 6px;
+  line-height: 1.1;
   font-weight: 700;
+}
+
+.value-bluffs-compare-symbol {
+  font-size: 13px;
+}
+
+.value-bluffs-compare-caption {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .value-bluffs-row {

@@ -43,6 +43,7 @@ import { usePhoneDemoLayout } from "../../demo/phoneLayout";
 import { clampDockHeight } from "../../state/layoutStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
+import { useValueBluffsHighlightStore } from "../../state/valueBluffsHighlightStore";
 import { StrategyPaintBars } from "./StrategyPaintBars";
 import "../../styles/matrix-density.css";
 
@@ -184,6 +185,9 @@ export function RangeMatrix() {
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const setHoverCell = useStudyStore((s) => s.setHoverCell);
   const actionFilter = useStudyStore((s) => s.actionFilter);
+  const valueBluffsHighlight = useValueBluffsHighlightStore(
+    (s) => s.highlightCells,
+  );
   const equity = useStudyStore((s) => s.equity);
   const displayPrefs = useMatrixDisplayStore((s) => s.prefs);
   const dualRange = useStudyStore((s) => s.layout.dualRange);
@@ -301,6 +305,7 @@ export function RangeMatrix() {
               selectedCell={selectedCell}
               hoverCell={hoverCell}
               actionFilter={actionFilter}
+              valueBluffsHighlight={valueBluffsHighlight}
               currentNode={currentNode}
               nodeValues={nodeValues}
               evDisplayBasis={evDisplayBasis}
@@ -352,6 +357,8 @@ interface RowProps {
   selectedCell: Selected | null;
   hoverCell: Selected | null;
   actionFilter: number | null;
+  /** When non-null, dim matrix cells whose label is not in the set. */
+  valueBluffsHighlight: ReadonlySet<string> | null;
   currentNode: NodePayload | null;
   nodeValues: ActionValuesPayload | null;
   evDisplayBasis: EvDisplayBasis;
@@ -370,6 +377,7 @@ function MatrixRow({
   selectedCell,
   hoverCell,
   actionFilter,
+  valueBluffsHighlight,
   currentNode,
   nodeValues,
   evDisplayBasis,
@@ -512,9 +520,13 @@ function MatrixRow({
             }
           }
 
-          // Selected action: dim cells that barely use it, outline the rest.
-          // With no overlay, the sublabel becomes that action's share of the cell.
-          if (actionFilter != null && cell.actionMass.length) {
+          // Value / Bluffs tab: dim hand classes that are not bluffs/value bets.
+          // Takes priority over action-filter dimming while the tab is open.
+          if (valueBluffsHighlight != null) {
+            dimmed = !valueBluffsHighlight.has(text);
+          } else if (actionFilter != null && cell.actionMass.length) {
+            // Selected action: dim cells that barely use it, outline the rest.
+            // With no overlay, the sublabel becomes that action's share of the cell.
             const share =
               cell.marginalSum > 0
                 ? cell.actionMass[actionFilter] / cell.marginalSum
