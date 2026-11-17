@@ -10,13 +10,20 @@ import {
   type FixtureIpcHandler,
 } from "../engine/transport";
 import {
+  createEquityCalculatorFixtureHandler,
+  EQUITY_CALCULATOR_PREVIEW_ID,
+  type EquityCalculatorFixtureController,
+} from "./scenarios/equityCalculatorFixture";
+import {
   createNodeLockingFixtureHandler,
   NODE_LOCKING_PREVIEW_ID,
   type NodeLockingFixtureController,
   type PreviewReviewerState,
 } from "./scenarios/nodeLockingFixture";
 
-export type PreviewScenarioId = typeof NODE_LOCKING_PREVIEW_ID;
+export type PreviewScenarioId =
+  | typeof NODE_LOCKING_PREVIEW_ID
+  | typeof EQUITY_CALCULATOR_PREVIEW_ID;
 
 export type PreviewBootConfig = {
   scenario: PreviewScenarioId;
@@ -24,11 +31,16 @@ export type PreviewBootConfig = {
   commitSha: string;
 };
 
+type PreviewFixtureController =
+  | NodeLockingFixtureController
+  | EquityCalculatorFixtureController;
+
 /** Playwright / Vitest hook for test-controlled fixture timing. */
 export type PreviewFixtureTestApi = {
   holdValues: (nodeId: string) => void;
   releaseValues: (nodeId: string) => void;
   getLastPutLock: () => ReturnType<NodeLockingFixtureController["getLastPutLock"]>;
+  getLastEquityStart: () => unknown;
   getReviewerState: () => PreviewReviewerState;
 };
 
@@ -38,7 +50,7 @@ declare global {
   }
 }
 
-let activeFixture: NodeLockingFixtureController | null = null;
+let activeFixture: PreviewFixtureController | null = null;
 let activeConfig: PreviewBootConfig | null = null;
 
 const LISTENERS = new Set<() => void>();
@@ -49,7 +61,13 @@ function notify(): void {
   }
 }
 
-function publishTestApi(fixture: NodeLockingFixtureController | null): void {
+function isNodeLockingFixture(
+  fixture: PreviewFixtureController,
+): fixture is NodeLockingFixtureController {
+  return "holdValues" in fixture && typeof fixture.holdValues === "function";
+}
+
+function publishTestApi(fixture: PreviewFixtureController | null): void {
   if (typeof window === "undefined") {
     return;
   }
@@ -58,14 +76,34 @@ function publishTestApi(fixture: NodeLockingFixtureController | null): void {
     return;
   }
   window.__STUDY_PREVIEW_FIXTURE__ = {
-    holdValues: (nodeId) => fixture.holdValues(nodeId),
-    releaseValues: (nodeId) => fixture.releaseValues(nodeId),
-    getLastPutLock: () => fixture.getLastPutLock(),
+    holdValues: (nodeId) => {
+      if (isNodeLockingFixture(fixture)) {
+        fixture.holdValues(nodeId);
+      }
+    },
+    releaseValues: (nodeId) => {
+      if (isNodeLockingFixture(fixture)) {
+        fixture.releaseValues(nodeId);
+      }
+    },
+    getLastPutLock: () =>
+      isNodeLockingFixture(fixture) ? fixture.getLastPutLock() : null,
+    getLastEquityStart: () => fixture.getLastEquityStart(),
     getReviewerState: () => fixture.getReviewerState(),
   };
 }
 
-function armFixture(fixture: NodeLockingFixtureController): void {
+function createFixtureForScenario(
+  scenario: PreviewScenarioId,
+  state: PreviewReviewerState,
+): PreviewFixtureController {
+  if (scenario === EQUITY_CALCULATOR_PREVIEW_ID) {
+    return createEquityCalculatorFixtureHandler(state);
+  }
+  return createNodeLockingFixtureHandler(state);
+}
+
+function armFixture(fixture: PreviewFixtureController): void {
   activeFixture = fixture;
   const handler: FixtureIpcHandler = fixture.handler;
   installFixtureIpcHandler(handler);
@@ -102,7 +140,12 @@ export function parsePreviewSearch(search: string): {
     search.startsWith("?") ? search.slice(1) : search,
   );
   const raw = (params.get("preview") || "").trim().toLowerCase();
-  const scenario = raw === NODE_LOCKING_PREVIEW_ID ? NODE_LOCKING_PREVIEW_ID : null;
+  let scenario: PreviewScenarioId | null = null;
+  if (raw === NODE_LOCKING_PREVIEW_ID) {
+    scenario = NODE_LOCKING_PREVIEW_ID;
+  } else if (raw === EQUITY_CALCULATOR_PREVIEW_ID) {
+    scenario = EQUITY_CALCULATOR_PREVIEW_ID;
+  }
   const stateRaw = (params.get("state") || "default").trim().toLowerCase();
   let state: PreviewReviewerState = "default";
   if (stateRaw === "pending-ev" || stateRaw === "pending_ev") {
@@ -131,7 +174,7 @@ export function getActivePreviewReviewerState(): PreviewReviewerState {
   return activeFixture?.getReviewerState() ?? activeConfig?.state ?? "default";
 }
 
-export function getActivePreviewFixture(): NodeLockingFixtureController | null {
+export function getActivePreviewFixture(): PreviewFixtureController | null {
   return activeFixture;
 }
 
@@ -169,7 +212,7 @@ export function installBrowserPreviewTransport(
     return null;
   }
 
-  armFixture(createNodeLockingFixtureHandler(parsed.state));
+  armFixture(createFixtureForScenario(parsed.scenario, parsed.state));
 
   activeConfig = {
     scenario: parsed.scenario,
@@ -209,7 +252,7 @@ export function rearmBrowserPreviewTransport(): PreviewBootConfig | null {
     activeFixture?.getReviewerState() === "dropped-connection"
       ? "default"
       : (activeFixture?.getReviewerState() ?? activeConfig.state);
-  armFixture(createNodeLockingFixtureHandler(state));
+  armFixture(createFixtureForScenario(activeConfig.scenario, state));
   activeConfig = {
     ...activeConfig,
     state,

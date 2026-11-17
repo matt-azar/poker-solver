@@ -9,6 +9,10 @@
  */
 import type { FixtureIpcHandler, IpcRequestEnvelope } from "../../engine/transport";
 import { SolverIpcError } from "../../engine/transport";
+import {
+  createEquityJobFixtureSession,
+  type EquityJobFixtureSession,
+} from "./equityJobFixture";
 
 export type PreviewReviewerState = "default" | "pending-ev" | "dropped-connection";
 
@@ -73,25 +77,6 @@ function envelope(op: string, body: unknown, requestId: string): IpcRequestEnvel
     error_code: null,
     error_message: null,
     body,
-  };
-}
-
-function failEnvelope(
-  op: string,
-  requestId: string,
-  errorCode: string,
-  errorMessage: string,
-): IpcRequestEnvelope {
-  return {
-    v: 2,
-    kind: "reply",
-    request_id: requestId,
-    job_id: null,
-    op,
-    ok: false,
-    error_code: errorCode,
-    error_message: errorMessage,
-    body: null,
   };
 }
 
@@ -270,6 +255,8 @@ export type NodeLockingFixtureController = {
   getReviewerState: () => PreviewReviewerState;
   setReviewerState: (next: PreviewReviewerState) => void;
   getLastPutLock: () => RecordedLock | null;
+  getLastEquityStart: () => unknown;
+  equityJobs: EquityJobFixtureSession;
   /** Hold `values` replies for a node until {@link releaseValues} (stale-EV). */
   holdValues: (nodeId: string) => void;
   releaseValues: (nodeId: string) => void;
@@ -292,6 +279,7 @@ export function createNodeLockingFixtureHandler(
     deferredValues: new Map(),
     valuesHold: new Set(),
   };
+  const equityJobs = createEquityJobFixtureSession();
 
   async function waitIfValuesHeld(nodeId: string): Promise<void> {
     if (!state.valuesHold.has(nodeId)) {
@@ -316,6 +304,11 @@ export function createNodeLockingFixtureHandler(
         requestId,
         launchId: "fixture-preview",
       });
+    }
+
+    const equityReply = equityJobs.handle(op, body, requestId);
+    if (equityReply) {
+      return equityReply;
     }
 
     switch (op) {
@@ -518,15 +511,6 @@ export function createNodeLockingFixtureHandler(
           },
           requestId,
         );
-      case "start_equity_job":
-      case "get_equity_job":
-      case "cancel_equity_job":
-        return failEnvelope(
-          op,
-          requestId,
-          "preview_unsupported",
-          "Equity Calculator jobs are not part of this preview fixture.",
-        );
       default:
         return envelope(op, {}, requestId);
     }
@@ -539,6 +523,8 @@ export function createNodeLockingFixtureHandler(
       state.reviewerState = next;
     },
     getLastPutLock: () => state.lastPutLock,
+    getLastEquityStart: () => equityJobs.getLastStartBody(),
+    equityJobs,
     holdValues: (nodeId) => {
       state.valuesHold.add(nodeId);
     },

@@ -19,7 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:preview": "playwright test e2e/node-locking-preview.spec.ts",
+    "test:e2e:preview": "playwright test e2e/node-locking-preview.spec.ts e2e/equity-calculator-preview.spec.ts",
     "test:e2e:public-demo": "playwright test -c playwright.public-demo.config.ts",
     "sync:ai-context": "node ./scripts/sync-ai-context-packs.mjs",
     "check:ai-context": "node ./scripts/sync-ai-context-packs.mjs --check",

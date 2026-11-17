@@ -63,6 +63,16 @@ describe("ensureEngine", () => {
     );
   });
 
+  it("installs recorded fixture IPC for ?preview=equity-calculator", async () => {
+    window.history.replaceState({}, "", "/?preview=equity-calculator");
+    const result = await ensureEngine();
+    expect(result.ok).toBe(true);
+    expect(getActiveTransport().kind).toBe("ipc");
+    expect(getActiveTransport().kind === "ipc" && getActiveTransport().sidecar).toBe(
+      "recorded-fixture",
+    );
+  });
+
   it("installs precomputed demo IPC for ?demo=flop-explore", async () => {
     stubDemoFetch();
     window.history.replaceState({}, "", "/?demo=flop-explore");

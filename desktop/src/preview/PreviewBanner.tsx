@@ -52,8 +52,16 @@ const STATES: Array<{ id: PreviewReviewerState; label: string }> = [
 export function PreviewBanner() {
   const config = usePreviewConfig();
   const state = usePreviewState();
+  const setWorkspace = useStudyStore((s) => s.setWorkspace);
   const nodeId = useStudyStore((s) => s.currentNode?.node_id ?? null);
   const nodeValues = useStudyStore((s) => s.nodeValues);
+
+  // Equity Calculator scenario opens the Equity workspace (not Study).
+  useEffect(() => {
+    if (config?.scenario === "equity-calculator") {
+      setWorkspace("equity");
+    }
+  }, [config?.scenario, setWorkspace]);
 
   // Playwright stale-EV reads this snapshot under test-controlled timing.
   useEffect(() => {
@@ -74,6 +82,11 @@ export function PreviewBanner() {
     return null;
   }
 
+  const reviewerStates =
+    config.scenario === "equity-calculator"
+      ? STATES.filter((entry) => entry.id !== "pending-ev")
+      : STATES;
+
   return (
     <div className="preview-banner" role="region" aria-label="Browser preview">
       <div className="preview-banner__meta">
@@ -87,7 +100,7 @@ export function PreviewBanner() {
       </div>
       <div className="preview-banner__states" role="group" aria-label="Reviewer states">
         <span className="muted">Reviewer state</span>
-        {STATES.map((entry) => (
+        {reviewerStates.map((entry) => (
           <button
             key={entry.id}
             type="button"

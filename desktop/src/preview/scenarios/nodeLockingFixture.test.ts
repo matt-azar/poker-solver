@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SolverIpcError } from "../../engine/transport";
+import { EXPECTED_EQUITY_SUBMISSION } from "./equityJobFixture";
 import {
   assertExpectedLockSubmission,
   createNodeLockingFixtureHandler,
@@ -102,5 +103,25 @@ describe("nodeLockingFixture", () => {
     releaseValues("p1.t-1.r-1");
     const env = await pending;
     expect(env.body).toMatchObject({ node_id: "p1.t-1.r-1", node_ev: 21.5 });
+  });
+
+  it("serves Equity Calculator jobs for the expected AA vs KK river", async () => {
+    const { handler } = createNodeLockingFixtureHandler();
+    const started = await handler("start_equity_job", {
+      version: 1,
+      client_revision: "nl-eq",
+      method: EXPECTED_EQUITY_SUBMISSION.method,
+      board: [...EXPECTED_EQUITY_SUBMISSION.board],
+      dead_cards: [],
+      players: EXPECTED_EQUITY_SUBMISSION.players.map((p) => ({ ...p })),
+    });
+    expect(started.body).toMatchObject({ state: "queued" });
+    const jobId = (started.body as { job_id: string }).job_id;
+    await handler("get_equity_job", { job_id: jobId });
+    const done = await handler("get_equity_job", { job_id: jobId });
+    expect(done.body).toMatchObject({
+      state: "completed",
+      result: { players: [{ equity: 1 }, { equity: 0 }] },
+    });
   });
 });

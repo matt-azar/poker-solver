@@ -35,12 +35,23 @@ describe("previewMode", () => {
       scenario: "node-locking",
       state: "dropped-connection",
     });
+    expect(parsePreviewSearch("?preview=equity-calculator")).toEqual({
+      scenario: "equity-calculator",
+      state: "default",
+    });
     expect(parsePreviewSearch("")).toEqual({ scenario: null, state: "default" });
   });
 
   it("installs the fixture IPC handler for the node-locking scenario", () => {
     const config = installBrowserPreviewTransport("?preview=node-locking");
     expect(config?.scenario).toBe("node-locking");
+    expect(config?.commitSha).toBe(getPreviewCommitSha());
+    expect(hasFixtureIpcHandler()).toBe(true);
+  });
+
+  it("installs the fixture IPC handler for the equity-calculator scenario", () => {
+    const config = installBrowserPreviewTransport("?preview=equity-calculator");
+    expect(config?.scenario).toBe("equity-calculator");
     expect(config?.commitSha).toBe(getPreviewCommitSha());
     expect(hasFixtureIpcHandler()).toBe(true);
   });
