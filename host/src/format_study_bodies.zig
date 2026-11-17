@@ -492,7 +492,7 @@ pub fn formatValuesBody(
     );
     defer allocator.free(node_id_text);
 
-    const engine_tag: []const u8 = if (located.node_index == 0 and located.turn < 0 and located.river < 0)
+    const engine_tag: []const u8 = if (located.turn < 0 and located.river < 0)
         "frozen_response_walk"
     else
         "deal_by_deal";

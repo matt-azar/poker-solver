@@ -2496,10 +2496,12 @@ fn buildValuesReply(
     const located = try resolveLocatedNode(lease.game, body_json);
     const t0 = std.time.nanoTimestamp();
     // Post-solve: reuse Session FrozenCtx ranks (avoid rebuilding flop/turn tables).
+    // Starting-board decisions (root + facing) share the warm path — deal-by-deal
+    // on wide flop Root x never finishes in time for Study overlays.
     // Mid-train / no warm ctx: fall back to a private eval ctx (#384 threaded walk).
     var page: poker_engine.analysis.action_ev.ActionValues = undefined;
     var held_ctx = false;
-    if (located.node_index == 0 and located.turn < 0 and located.river < 0) {
+    if (located.turn < 0 and located.river < 0) {
         if (state.session.acquireFrozenCtxForAnalysis()) |ctx| {
             held_ctx = true;
             const serial_chance = ctx.threads <= 1;
@@ -2508,7 +2510,7 @@ fn buildValuesReply(
                 ctx,
                 lease.game,
                 lease.published,
-                0,
+                located.node_index,
                 serial_chance,
             ) catch |err| {
                 state.session.releaseFrozenCtxForAnalysis();
@@ -4105,6 +4107,74 @@ test "values flop solve returns local utility_basis and dual root_centered" {
     // Flop 169-cell EV aggregates (PR2 hotspot) on local + dual root.
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"cell_ev\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"text\":\"") != null);
+}
+
+test "values flop Root-x facing uses frozen walk not deal-by-deal" {
+    // UI-35: after complete flop solve at Root x (IP faces OOP Check), Study EV
+    // overlays must settle via warm FrozenCtx — deal-by-deal never finishes wide.
+    const config =
+        \\street-config 1
+        \\board Qh 7h 7d
+        \\pot 5
+        \\stack 100
+        \\oop-range 2s2h:1,3s3h:1,4s4h:1,5s5h:1,6s6h:1,8s8h:1,9s9h:1,TsTh:1,JsJh:1,QsQh:1,KsKh:1,AsAc:1
+        \\ip-range 2s2h:1,3s3h:1,4s4h:1,5s5h:1,6s6h:1,8s8h:1,9s9h:1,TsTh:1,JsJh:1,QsQh:1,KsKh:1,AsAc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "values-flop-facing");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    var id_buf: [64]u8 = undefined;
+    var body_buf: [96]u8 = undefined;
+    const body: []const u8 = blk: {
+        var lease = try state.session.borrowPublishedWait(1 * std.time.ns_per_s);
+        defer lease.deinit();
+        const game = lease.game;
+        const root_node = game.nodes[0];
+        var check0: ?u32 = null;
+        var a: usize = 0;
+        while (a < root_node.n_actions) : (a += 1) {
+            if (std.mem.startsWith(u8, root_node.action_labels[a], "Check")) {
+                check0 = root_node.child[a];
+                break;
+            }
+        }
+        const facing = check0 orelse return error.TestUnexpectedResult;
+        try std.testing.expect(game.nodes[facing].player == 1);
+        const facing_id = try std.fmt.bufPrint(&id_buf, "p{d}.t-1.r-1", .{facing});
+        break :blk try std.fmt.bufPrint(&body_buf, "{{\"node_id\":\"{s}\"}}", .{facing_id});
+    };
+
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "v-facing"),
+        .op = try std.testing.allocator.dupe(u8, "values"),
+        .body_json = try std.testing.allocator.dupe(u8, body),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"engine\":\"frozen_response_walk\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"engine\":\"deal_by_deal\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"pending\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"action_ev\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"cell_ev\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"player\":1") != null);
 }
 
 
