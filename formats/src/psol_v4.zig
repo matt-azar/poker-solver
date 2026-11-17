@@ -17,6 +17,8 @@ pub const OpenError = error{
     Kind2RiverRejected,
     UnsupportedFormat,
     InvalidPsol,
+    /// Encoded `.psol` would exceed `max_psol_bytes` (flop training saves).
+    PsolTooLarge,
     OutOfMemory,
 };
 
@@ -402,7 +404,10 @@ pub fn decode(allocator: std.mem.Allocator, file: []const u8) OpenError!Document
     return document;
 }
 
-pub const max_psol_bytes: usize = 512 * 1024 * 1024;
+/// Hard ceiling for one `.psol` on disk. 512 MiB rejected ordinary flop training
+/// checkpoints (average+regret+strategy_sum ≈ ¾ of the live table footprint).
+/// 4 GiB matches the common Study memory-mib budget class.
+pub const max_psol_bytes: usize = 4 * 1024 * 1024 * 1024;
 /// Bounded scratch for streaming Save/Open (ZR-156). Not a second full-file buffer.
 pub const stream_chunk_bytes: usize = 64 * 1024;
 
@@ -471,7 +476,7 @@ const PayloadSink = struct {
         if (bytes.len == 0) return;
         const next = std.math.add(u64, self.payload_len, bytes.len) catch return error.InvalidPsol;
         const total = std.math.add(u64, header_bytes, next) catch return error.InvalidPsol;
-        if (total > max_psol_bytes) return error.InvalidPsol;
+        if (total > max_psol_bytes) return error.PsolTooLarge;
         for (bytes) |b| {
             self.hash ^= b;
             self.hash *%= 0x100000001b3;
@@ -739,7 +744,7 @@ pub fn writeFileMemoryOrderInjected(
     fault: SaveFault,
 ) OpenError!void {
     const total_bytes = try encodedFileBytesMemoryOrder(document, tables);
-    if (total_bytes > max_psol_bytes) return error.InvalidPsol;
+    if (total_bytes > max_psol_bytes) return error.PsolTooLarge;
     std.debug.assert(total_bytes >= header_bytes);
     std.debug.assert(total_bytes <= max_psol_bytes);
 
@@ -813,7 +818,7 @@ pub fn writeFileMemoryOrderInjected(
 }
 
 /// Atomic save (ZR-92 / ZR-144 / ZR-156): stream the payload with a bounded scratch
-/// buffer (no full-file encode before the 512 MiB gate), require write+flush, then
+/// buffer (no full-file encode before the `max_psol_bytes` gate), require write+flush, then
 /// replace the destination in one rename. Never deletes the destination on failure.
 pub fn writeFile(allocator: std.mem.Allocator, path: []const u8, document: Document) OpenError!void {
     _ = allocator;
@@ -827,7 +832,7 @@ pub fn writeFileInjected(
 ) OpenError!void {
     // Size gate before any disk write — exact, no staging buffer.
     const total_bytes = try encodedFileBytes(document);
-    if (total_bytes > max_psol_bytes) return error.InvalidPsol;
+    if (total_bytes > max_psol_bytes) return error.PsolTooLarge;
     std.debug.assert(total_bytes >= header_bytes);
     std.debug.assert(total_bytes <= max_psol_bytes);
 
@@ -1152,7 +1157,7 @@ pub fn peekConfigText(allocator: std.mem.Allocator, path: []const u8) OpenError!
 
     const payload_len = std.mem.readInt(u64, header_buf[12..20], .little);
     const total = std.math.add(u64, header_bytes, payload_len) catch return error.InvalidPsol;
-    if (total > max_psol_bytes) return error.InvalidPsol;
+    if (total > max_psol_bytes) return error.PsolTooLarge;
 
     var src = PayloadSource{ .file = file, .remaining = payload_len };
     const algorithm = try src.u8r();
@@ -1192,7 +1197,7 @@ pub fn readFile(allocator: std.mem.Allocator, path: []const u8) OpenError!Docume
     const payload_len = std.mem.readInt(u64, header_buf[12..20], .little);
     const expected = std.mem.readInt(u64, header_buf[20..28], .little);
     const total = std.math.add(u64, header_bytes, payload_len) catch return error.InvalidPsol;
-    if (total > max_psol_bytes) return error.InvalidPsol;
+    if (total > max_psol_bytes) return error.PsolTooLarge;
 
     var src = PayloadSource{ .file = file, .remaining = payload_len };
     var document = Document{ .allocator = allocator };
@@ -1416,7 +1421,7 @@ test "streamed writeFile rejects over max_psol_bytes before touching payload" {
     }
     doc.config_text = try std.testing.allocator.dupe(u8, "street-config 1\nboard Ah Kd 7c\npot 100\n");
     doc.slot_actions = try std.testing.allocator.dupe(u16, &.{2});
-    // Length-only slice: size gate must refuse without encoding/allocating 512 MiB+.
+    // Length-only slice: size gate must refuse without encoding/allocating max_psol_bytes+.
     const too_many: usize = (max_psol_bytes / 4) + 1024;
     doc.average = @as([*]f32, @ptrFromInt(@alignOf(f32)))[0..too_many];
 
@@ -1430,7 +1435,7 @@ test "streamed writeFile rejects over max_psol_bytes before touching payload" {
     const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "too_big.psol" });
     defer std.testing.allocator.free(path);
     // writeFile checks encoded size before createFile/stream — no payload deref.
-    try std.testing.expectError(error.InvalidPsol, writeFile(std.testing.allocator, path, doc));
+    try std.testing.expectError(error.PsolTooLarge, writeFile(std.testing.allocator, path, doc));
 }
 
 test "streamed writeFile readFile roundtrip matches encode decode" {

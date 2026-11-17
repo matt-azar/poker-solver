@@ -421,6 +421,20 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     );
   });
 
+  it("surfaces plain Error save reasons instead of generic Save failed", async () => {
+    engineMocks.engineClient.save.mockRejectedValueOnce(
+      new Error("Solution file exceeds the 4 GiB save limit"),
+    );
+    const failed = await useStudyStore
+      .getState()
+      .saveSolution("/too-big.psol");
+    expect(failed).toEqual({
+      ok: false,
+      error: "Solution file exceeds the 4 GiB save limit",
+    });
+    expect(useStudyStore.getState().draft.solutionPath).toBe("/good.psol");
+  });
+
   it("openSolution keeps polling while a slow open fails without painting unreachable", async () => {
     let releaseOpen: (() => void) | null = null;
     const openGate = new Promise<void>((resolve) => {

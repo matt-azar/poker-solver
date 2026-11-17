@@ -3950,8 +3950,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     try {
       await engineClient.save(solutionId, target);
     } catch (error) {
+      // EngineError messages are already presentUserText'd in the client.
+      // Also accept plain Error / SolverIpcError so catalogue Save never
+      // collapses a real host reason into the generic "Save failed".
       const message =
-        error instanceof EngineError ? error.message : "Save failed";
+        error instanceof EngineError
+          ? error.message
+          : error instanceof Error && error.message.trim()
+            ? presentUserText(error.message)
+            : "Save failed";
       // Keep the previous displayed path on write failure.
       set({
         phase: phaseFromStatus(get().status, "complete"),
@@ -3994,7 +4001,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       await engineClient.open(target);
     } catch (error) {
       const message =
-        error instanceof EngineError ? error.message : "Open failed";
+        error instanceof EngineError
+          ? error.message
+          : error instanceof Error && error.message.trim()
+            ? presentUserText(error.message)
+            : "Open failed";
       // Document identity, draft path, undo stacks, and published study unchanged.
       set({
         phase: "failed",

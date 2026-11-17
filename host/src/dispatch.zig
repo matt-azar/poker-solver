@@ -1774,8 +1774,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
         defer state.allocator.free(path);
         state.session.save(path) catch |err| {
-            const code: []const u8 = if (err == error.BudgetExceeded) "budget_exceeded" else "save_failed";
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
+            const mapped = mapSaveError(err);
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, mapped.code, mapped.message);
         };
         return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, "{\"saved\":true}");
     }
@@ -1788,18 +1788,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
         defer state.allocator.free(path);
         state.session.open(path) catch |err| {
-            const code: []const u8 = switch (err) {
-                error.InvalidStrategy => "invalid_strategy",
-                error.Busy => "busy",
-                error.BudgetExceeded => "budget_exceeded",
-                error.IncompatibleSave => "incompatible_save",
-                else => "open_failed",
-            };
-            const message: []const u8 = switch (err) {
-                error.IncompatibleSave => "Incompatible save: reopened tree/strategy does not match this checkpoint. Rebuild the tree in Study (0.1.6 allow-all-in / oversize rules diverged from current DS-26).",
-                else => @errorName(err),
-            };
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, message);
+            const mapped = mapOpenError(err);
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, mapped.code, mapped.message);
         };
         state.last_cancelled.store(false, .release);
         try state.setActiveJob(null);
@@ -2836,8 +2826,8 @@ fn ioWorker(task: *IoTask) void {
     switch (task.kind) {
         .save => {
             state.session.save(task.path) catch |err| {
-                const code: []const u8 = if (err == error.BudgetExceeded) "budget_exceeded" else "save_failed";
-                var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+                const mapped = mapSaveError(err);
+                var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, mapped.code, mapped.message) catch return;
                 defer err_reply.deinit();
                 state.writeReply(err_reply) catch {};
                 return;
@@ -2848,18 +2838,8 @@ fn ioWorker(task: *IoTask) void {
         },
         .open => {
             state.session.open(task.path) catch |err| {
-                const code: []const u8 = switch (err) {
-                    error.InvalidStrategy => "invalid_strategy",
-                    error.Busy => "busy",
-                    error.BudgetExceeded => "budget_exceeded",
-                    error.IncompatibleSave => "incompatible_save",
-                    else => "open_failed",
-                };
-                const message: []const u8 = switch (err) {
-                    error.IncompatibleSave => "Incompatible save: reopened tree/strategy does not match this checkpoint. Rebuild the tree in Study (0.1.6 allow-all-in / oversize rules diverged from current DS-26).",
-                    else => @errorName(err),
-                };
-                var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, message) catch return;
+                const mapped = mapOpenError(err);
+                var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, mapped.code, mapped.message) catch return;
                 defer err_reply.deinit();
                 state.writeReply(err_reply) catch {};
                 return;
@@ -2925,6 +2905,48 @@ fn startIo(state: *HostState, req: ipc.Envelope, kind: IoKind, path: []u8) !void
         defer err_reply.deinit();
         try state.writeReply(err_reply);
         return;
+    };
+}
+
+fn mapSaveError(err: anyerror) struct { code: []const u8, message: []const u8 } {
+    return switch (err) {
+        error.BudgetExceeded => .{
+            .code = "budget_exceeded",
+            .message = "Save exceeded the memory budget",
+        },
+        error.PsolTooLarge => .{
+            .code = "psol_too_large",
+            .message = "Solution file exceeds the 4 GiB save limit",
+        },
+        error.Busy => .{
+            .code = "busy",
+            .message = "Engine is busy; wait for the current job to finish",
+        },
+        error.NothingPublished => .{
+            .code = "nothing_published",
+            .message = "Nothing to save — solve first",
+        },
+        else => .{
+            .code = "save_failed",
+            .message = @errorName(err),
+        },
+    };
+}
+
+fn mapOpenError(err: anyerror) struct { code: []const u8, message: []const u8 } {
+    return switch (err) {
+        error.InvalidStrategy => .{ .code = "invalid_strategy", .message = @errorName(err) },
+        error.Busy => .{ .code = "busy", .message = @errorName(err) },
+        error.BudgetExceeded => .{ .code = "budget_exceeded", .message = @errorName(err) },
+        error.PsolTooLarge => .{
+            .code = "psol_too_large",
+            .message = "Solution file exceeds the 4 GiB open limit",
+        },
+        error.IncompatibleSave => .{
+            .code = "incompatible_save",
+            .message = "Incompatible save: reopened tree/strategy does not match this checkpoint. Rebuild the tree in Study (0.1.6 allow-all-in / oversize rules diverged from current DS-26).",
+        },
+        else => .{ .code = "open_failed", .message = @errorName(err) },
     };
 }
 
