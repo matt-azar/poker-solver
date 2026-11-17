@@ -304,6 +304,23 @@ export function matrixCellForCombo(combo: string): SelectedMatrixCell | null {
   return { row, col, text };
 }
 
+/**
+ * Study matrix cell labels (AA, AKs, …) that contain at least one Value / Bluffs
+ * row. Used to dim non-matching cells while the Value / Bluffs tab is open.
+ */
+export function matrixCellsForValueBluffs(
+  rows: ReadonlyArray<Pick<ValueBluffsRow, "combo">>,
+): Set<string> {
+  const cells = new Set<string>();
+  for (const row of rows) {
+    const cell = matrixCellForCombo(row.combo);
+    if (cell?.text) {
+      cells.add(cell.text);
+    }
+  }
+  return cells;
+}
+
 function equityLookup(
   hands: EquityHandRow[] | null | undefined,
 ): Map<string, { equity: number; weight: number }> {

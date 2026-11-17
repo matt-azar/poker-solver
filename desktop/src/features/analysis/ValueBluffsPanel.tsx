@@ -13,6 +13,7 @@ import {
   formatReachMass,
   listValueBluffs,
   matrixCellForCombo,
+  matrixCellsForValueBluffs,
   sortValueBluffs,
   type ValueBluffsEquityCompare,
   type ValueBluffsEquityMode,
@@ -23,6 +24,7 @@ import { fetchPostCallEquityHands } from "../../domain/valueBluffsPostCall";
 import { engineClient } from "../../engine/client";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
+import { useValueBluffsHighlightStore } from "../../state/valueBluffsHighlightStore";
 
 const DISPLAY_CAP = 50;
 
@@ -139,6 +141,9 @@ export function ValueBluffsPanel() {
   const setSelectedCell = useStudyStore((s) => s.setSelectedCell);
   const solutionId = useStudyStore((s) => s.solutionId);
   const status = useStudyStore((s) => s.status);
+  const setHighlightCells = useValueBluffsHighlightStore(
+    (s) => s.setHighlightCells,
+  );
 
   const [thresholdPct, setThresholdPct] = useState(
     () => Math.round(DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD * 100),
@@ -370,6 +375,29 @@ export function ValueBluffsPanel() {
   const modeLabel = equityMode === "after_call" ? "after call" : "at this node";
   const compareSymbol = equityCompare === "gt" ? ">" : "<";
   const compareLabel = equityCompare === "gt" ? "value bets" : "bluffs";
+  const compareCaption = equityCompare === "gt" ? "Value bets" : "Bluffs";
+
+  const highlightReady =
+    Boolean(currentNode) &&
+    currentNode?.kind !== "chance" &&
+    currentNode?.kind !== "terminal" &&
+    (equityMode === "after_call"
+      ? !postCallPending && equityHands != null
+      : Boolean(equity) && !equity?.pending);
+
+  // Publish matching matrix cells so the Study grid can dim the rest.
+  useEffect(() => {
+    if (!highlightReady) {
+      setHighlightCells(null);
+      return () => {
+        setHighlightCells(null);
+      };
+    }
+    setHighlightCells(matrixCellsForValueBluffs(rows));
+    return () => {
+      setHighlightCells(null);
+    };
+  }, [highlightReady, rows, setHighlightCells]);
 
   const onRowActivate = (combo: string) => {
     const cell = matrixCellForCombo(combo);
@@ -414,7 +442,7 @@ export function ValueBluffsPanel() {
           <button
             type="button"
             className="toolbar-btn value-bluffs-compare-toggle"
-            aria-label={`Equity comparison ${compareSymbol}`}
+            aria-label={`${compareCaption}: equity ${compareSymbol} threshold`}
             title={
               equityCompare === "lt"
                 ? "Bluffs: equity < threshold"
@@ -424,7 +452,10 @@ export function ValueBluffsPanel() {
               setEquityCompare((value) => (value === "lt" ? "gt" : "lt"))
             }
           >
-            {compareSymbol}
+            <span className="value-bluffs-compare-symbol" aria-hidden="true">
+              {compareSymbol}
+            </span>
+            <span className="value-bluffs-compare-caption">{compareCaption}</span>
           </button>
           <input
             type="number"

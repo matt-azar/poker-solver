@@ -13,6 +13,7 @@ import {
   isValueBluffsBettingAction,
   listValueBluffs,
   matrixCellForCombo,
+  matrixCellsForValueBluffs,
   sortValueBluffs,
   topBettingAction,
   topBettingActionIndex,
@@ -221,6 +222,18 @@ describe("matrixCellForCombo", () => {
     expect(matrixCellForCombo("AhAd")).toEqual({ row: 0, col: 0, text: "AA" });
     expect(matrixCellForCombo("AhKh")).toEqual({ row: 0, col: 1, text: "AKs" });
     expect(matrixCellForCombo("AhKd")).toEqual({ row: 1, col: 0, text: "AKo" });
+  });
+});
+
+describe("matrixCellsForValueBluffs", () => {
+  it("unions distinct matrix labels from qualifying combos", () => {
+    const cells = matrixCellsForValueBluffs([
+      { combo: "AhAd" },
+      { combo: "AcAs" },
+      { combo: "AhKd" },
+      { combo: "7h6h" },
+    ]);
+    expect([...cells].sort()).toEqual(["76s", "AA", "AKo"]);
   });
 });
 
