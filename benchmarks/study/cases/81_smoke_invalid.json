@@ -2,7 +2,7 @@
   "id": "smoke_invalid",
   "role": "diagnostic",
   "binary": "river_solver",
-  "why": "Unknown flag. The river CLI prints usage and exits 2. Used only to show an invalid-input record.",
+  "why": "Unknown flag. The removed river CLI printed usage and exited 2. Used only to show an invalid-input record.",
   "study_inputs_note": "Diagnostic only. Not a solve.",
   "pot": null,
   "effective_stack": null,

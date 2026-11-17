@@ -12,7 +12,8 @@ Product entry points: Zig `solver-engine` and the Study UI (`desktop/`). Living 
 - Versioned PSOL save/open/continue; in-app solutions catalogue (folders) plus Library recent list; street-config templates; named range presets; Build betting-tree catalogue
 - Precomputed public Study demo (`desktop/src/demo/README.md`) and a limited five-card river browser beta (`services/river-beta/README.md`). Neither replaces the Windows Tauri product.
 - Node locks, resolve-locked, and session strategy edits over typed IPC
-- Build preview tree with force/remove/add-size edits and a memory-plan dry run (`tree_preview` / `plan_memory`)
+- Build preview tree with force/remove/add-size edits and a memory-plan dry run (`tree_preview` / `plan_memory`). The preview section and its decision branches start collapsed. The plan strip labels are Plan peak, Budget, pot, and stack.
+- Portable `holdem-study-job/1` files. Build Export job / Import job and `holdem-study-cli` (`plan`, `solve`, `from-hh`) share that JSON. `from-hh` accepts five-card `hand-history 1` only. Settings shows CFR+ only.
 - Pot rake on the Zig compile/terminal path
 - Windows NSIS installer for Holdem Study — Zig `solver-engine` only ([DESKTOP_UI.md](../../DESKTOP_UI.md))
 

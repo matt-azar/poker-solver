@@ -1,6 +1,6 @@
 # Mathematics
 
-Definitions used by the postflop solver. The shipped trainer is CFR+. The vanilla, linear, and DCFR sections define those schedules. Study Settings lists Vanilla CFR and DCFR. The host trains with CFR+.
+Definitions used by the postflop solver. The shipped trainer is CFR+. The vanilla, linear, and DCFR sections define those schedules. Settings shows CFR+ only. The host trains with CFR+.
 
 ## Hold'em showdown and hand distributions
 

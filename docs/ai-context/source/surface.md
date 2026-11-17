@@ -8,9 +8,9 @@
 
 ### Apply / write behavior
 
-- Narrow scalar field edits auto-write onto the live Build draft, then show **Keep** and **Undo**.
-- Broad / full setups (create, duplicate, range replacement, many fields) stay **reviewable**: the assistant shows **Keep** (apply), **Undo** (discard), and **Open in Build** before writing. Draft-revision checks still reject stale applies.
-- After any applied suggestion, **Keep** confirms/retains the change (clears the Undo entry) and **Undo** reverts via the guarded revision mechanism. Both controls stay visible on the Study assistant window — not only after Open in Build.
+- A narrow field edit with no conflicts writes onto the live Build draft, then shows **Keep** and **Undo**.
+- A broad setup (create, duplicate, range replacement, or many fields) stays unapplied until **Keep**. That pending row also shows **Undo** and **Open in Build**. A conflict adds **Keep anyway**. Draft-revision checks still reject stale applies.
+- After a write, **Keep** clears the Undo entry and **Undo** reverts that assistant change. Both controls stay on the Study assistant window.
 - Chat text after a write comes from an **application receipt** (before/after). Prefer describing what the receipt committed.
 - Solve is never started by the assistant.
 
@@ -25,7 +25,8 @@ Visible on Build today:
 - Pot cap, merge threshold (%), All-in threshold (%)
 - Stop: iterations, accuracy (% of pot; `0.5` = 0.5% pot), time limit (s)
 - Ranges: paint grids, Catalogue (seat×action tree), range text, Swap / Undo / Redo / Clear
-- Collapsible **Preview tree** (tree line edits → `tree_edits`)
+- **Preview tree** starts collapsed. Decision branches start collapsed. Line edits go to `tree_edits`.
+- **Export job** / **Import job** read and write portable study-job JSON (`holdem-study-job/1`).
 - **Open ranges in Equity** copies board + ranges into the Equity workspace
 
 Not mounted as Build form controls (but still draft fields the assistant may write when asked):
@@ -35,7 +36,7 @@ Not mounted as Build form controls (but still draft fields the assistant may wri
 
 ### Settings (Solve section)
 
-Settings dialog (menu **Settings → Open settings…**): algorithm draft (`cfr_plus` | `cfr` | `dcfr`), samples, threads, memory MiB, solution path, incentives, edge tags, ICM stacks/payouts, display prefs (theme, **EV display** Local / **Global EV (root-centered)**, bet-size labels). The engine trains CFR+ for every algorithm draft value. PSOL saves store the CFR+ algorithm byte.
+Settings opens from the menu-bar gear (aria-label **Settings**). **Algorithm** is a read-only CFR+ field. Opening Settings sets the draft algorithm to `cfr_plus`. Other fields: samples, threads, memory MiB, solution path, incentives, edge tags, ICM stacks/payouts, display prefs (theme, **EV display** Local / **Global EV (root-centered)**, bet-size labels). The host trains CFR+. PSOL saves store the CFR+ algorithm byte.
 
 ### Study / other
 

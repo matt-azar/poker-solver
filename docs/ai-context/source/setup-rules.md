@@ -10,7 +10,7 @@
 ## Proposal kinds
 
 - `prepare_study` — create from intent (+ optional profile id, generatedRanges, interpolateFromIds, board, tree).
-- `update_study` — patch board, tree, stack, or `fieldEdits` on the current draft. Conflict-free patches auto-write immediately.
+- `update_study` — patch board, tree, stack, or `fieldEdits` on the current draft. A narrow conflict-free patch writes immediately. A multi-field patch stays unapplied until **Keep**.
 - `duplicate_study` — copy setup at a new stack (etc.).
 - `clarify` — ask questions; include candidates when useful.
 - `unsupported` — preflop solves, autonomous research, or asks that cannot be answered from product help / this solution's evidence. General poker concepts and solution-backed strategy Q&A belong on `answer_user` (with evidence tools when quoting this solve).
@@ -39,12 +39,12 @@ Surface conflicts — never silent override. Solve is not started by the assista
 
 When the player names a draft field without asking for a new study, emit `update_study` with `fieldEdits` containing only those keys. Do not invent pot type or ranges. Do not set solve rake unless the player asked.
 
-`fieldEdits` keys the app accepts: `pot`, `stack`, `iterations`, `accuracy`, `timeLimit`, `threads`, `memoryMib`, `algorithm` (`cfr_plus` | `cfr` | `dcfr`), `samples`, `maxRaises`, `mergeThresholdPct`, `allInThresholdPct`, `potCap`, `rakeRate`, `rakeCap`, `donkFlop`, `donkTurn`, `donkRiver`, `incentives`, `edgeTags`. Reject negative pot/stack/memory, zero threads, and fractional iterations. Geometric and explicit all-in are size tokens (`e`, `a`) on each street. `allInThresholdPct` is Pio's all-in threshold as percent of starting stack (default 50 = more than half the stack → all-in; 0 = off; draft stores the fraction). List `a` on a size field for an explicit all-in. Max raises covers no-3-bet; there is no Build "No 3-bet" toggle.
+`fieldEdits` keys the app accepts: `pot`, `stack`, `iterations`, `accuracy`, `timeLimit`, `threads`, `memoryMib`, `samples`, `maxRaises`, `mergeThresholdPct`, `allInThresholdPct`, `potCap`, `rakeRate`, `rakeCap`, `donkFlop`, `donkTurn`, `donkRiver`, `incentives`, `edgeTags`. Leave `algorithm` unset. Settings and the trainer are CFR+ only. Reject negative pot/stack/memory, zero threads, and fractional iterations. Geometric and explicit all-in are size tokens (`e`, `a`) on each street. `allInThresholdPct` is Pio's all-in threshold as percent of starting stack (default 50 = more than half the stack → all-in; 0 = off; draft stores the fraction). List `a` on a size field for an explicit all-in. Max raises covers no-3-bet; there is no Build "No 3-bet" toggle.
 
 Where players see those controls:
 
 - Build form: pot, stack, maxRaises, mergeThresholdPct, potCap, allInThreshold (%), iterations, accuracy, timeLimit
-- Settings → Solve: algorithm, samples, threads, memoryMib, incentives, edgeTags
+- Settings (gear): read-only CFR+ algorithm, samples, threads, memoryMib, incentives, edgeTags
 - No dedicated control: rakeRate / rakeCap (assistant-only when explicitly requested); donkFlop/donkTurn/donkRiver booleans (prefer Turn/River donk **size** text on Build — flop has no donk size control)
 
 Street sizes stay on `treeEdits` / `intent.treePreset`: `oopFlop`, `ipFlop`, `oopTurn`, `ipTurn`, `oopRiver`, `ipRiver` (plus raise/donk fields the draft supports).

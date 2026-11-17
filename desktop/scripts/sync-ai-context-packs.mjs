@@ -65,7 +65,7 @@ const FORBIDDEN = [
 const REQUIRED_IN_PACKS = [
   { pack: "help.md", re: /menu bar \*\*Assistant\*\*/ },
   { pack: "help.md", re: /\*\*Equity\*\*/ },
-  { pack: "help.md", re: /auto-write|writes those fields immediately|auto-commit/i },
+  { pack: "help.md", re: /writes onto the live Build draft|writes immediately/i },
   { pack: "setup-assistant.md", re: /no separate Build-page assistant/i },
   { pack: "setup-assistant.md", re: /Turn donk/ },
   { pack: "setup-assistant.md", re: /River donk/ },
@@ -73,7 +73,7 @@ const REQUIRED_IN_PACKS = [
   { pack: "unified.md", re: /contextSnapshot/ },
   { pack: "unified.md", re: /application receipt/i },
   { pack: "unified.md", re: /\*\*Equity\*\*/ },
-  { pack: "unified.md", re: /Apply to Build/ },
+  { pack: "unified.md", re: /Keep anyway/ },
   { pack: "unified.md", re: /list_bluff_candidates/ },
   { pack: "unified.md", re: /query_node_strategy/ },
   { pack: "unified.md", re: /query_selected_hand_analysis/ },
@@ -99,6 +99,8 @@ const BUILD_LABELS_CLAIMED = [
   "Time limit",
   "Catalogue",
   "Open ranges in Equity",
+  "Export job",
+  "Import job",
 ];
 
 function readSource(name) {
@@ -124,7 +126,7 @@ function assembleHelp(surface, helpBody) {
     "",
     "## Tone",
     "",
-    "Be direct and accurate. If the player wants the app to change a study, call `emit_study_setup_proposal`. Conflict-free proposals auto-write; only conflicted proposals need **Apply to Build**. Do not tell them to click Apply after a normal write.",
+    "Be direct and accurate. If the player wants the app to change a study, call `emit_study_setup_proposal`. A narrow conflict-free edit writes immediately, then show **Keep** and **Undo**. A broad setup stays unapplied until **Keep**. A conflict uses **Keep anyway**.",
     "",
   ].join("\n");
 }
@@ -173,7 +175,7 @@ function assembleUnified(surface, setupRules, unifiedExtra, helpBody) {
     "",
     "## Tone",
     "",
-    "Direct, accurate, product-grounded. When you change a setup, say which fields were written (from the receipt). The player can Undo in the assistant. Mention Solve only if they ask to run it. If auto-commit was blocked, point them at **Apply to Build** / **Apply anyway** — otherwise do not mention Apply.",
+    "Direct, accurate, product-grounded. When you change a setup, say which fields were written (from the receipt). The player can Undo in the assistant. Mention Solve only if they ask to run it. A narrow conflict-free edit is already written; point at **Keep** or **Undo**. A broad setup or a conflict stays pending until **Keep** or **Keep anyway**.",
     "",
   ].join("\n");
 }

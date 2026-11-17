@@ -23,7 +23,7 @@ Supported example phrasing (demo/fake adapter and structured OpenAI tools):
 - `Duplicate this setup at 150bb`
 - `Use my alternative BB calling range`
 
-Successful proposals **auto-write** to Build. An **Apply to Build** / **Apply anyway** control appears only when auto-commit is blocked (conflicts / validation). **Solve** still uses the existing solve controls after validation.
+A narrow field edit with no conflicts writes to the Build draft immediately, then shows **Keep** and **Undo**. A broad setup (create, duplicate, range replacement, or many fields) stays unapplied until **Keep**. That pending row also shows **Undo** and **Open in Build**. A conflict adds **Keep anyway**. **Solve** still uses the existing solve controls.
 
 ## Range semantics (product rules)
 
@@ -92,7 +92,7 @@ Exact catalogue match still preferred when a reliable pack exists.
 | Browser prototype credential | Optional `localStorage` key `holdem-study-openai-key`, or paste in the OpenAI provider UI |
 | Authenticated backend proxy | **Not built** — required for a distributed product so clients do not hold long-lived vendor keys |
 
-Credential lookup prefers Tauri storage when running inside the shell, then the browser prototype key. Solving remains local via `explorer`. Product UI requires an OpenAI key for the Study assistant (fake provider retained for tests only).
+Credential lookup prefers Tauri storage when running inside the shell, then the browser prototype key. Solving stays on the local `solver-engine`. The assistant does not start a solve. The product UI requires an OpenAI key for the Study assistant. The fake provider is for tests.
 
 External processing disclosure: the OpenAI path sends setup summaries, preference summaries, and catalogue **metadata** (ids, labels, stacks, pot type) — not full private range strings when identifiers suffice.
 

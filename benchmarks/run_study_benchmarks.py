@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run the postflop study benchmark cases against river_solver and street_solver.
+"""Historical runner for the removed river_solver and street_solver CLIs.
+
+The case files and this script explain benchmarks/study/RESULTS.md.
+They are not current product commands. Current checks are in
+docs/auxiliary/engineering/TESTING.md.
 
 Python standard library only. Processes are started with argument arrays.
 Cases run one at a time. The runner does not interpret a shell command string.
@@ -105,7 +109,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--bin-dir",
         required=True,
-        help="Directory that contains river_solver and street_solver",
+        help="Directory that held river_solver and street_solver for a historical run",
     )
     parser.add_argument(
         "--output-dir",
@@ -132,7 +136,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--threads",
         type=int,
         default=None,
-        help="Override --threads on street_solver. Ignored for river_solver, which has no thread flag",
+        help="Historical: override --threads on street_solver. Ignored for river_solver",
     )
     parser.add_argument(
         "--wall-seconds",
@@ -273,7 +277,7 @@ def apply_overrides(case: dict, args: argparse.Namespace, bin_dir: Path) -> dict
             notes.append(f"--threads overridden to {threads_requested}")
         else:
             notes.append(
-                "river_solver has no --threads flag; the requested thread count was not passed"
+                "historical river_solver had no --threads flag; the requested thread count was not passed"
             )
     elif threads_supported:
         text = flag_value(argv, "--threads")
@@ -709,8 +713,8 @@ def write_summary(path: Path, payload: dict) -> None:
         "It is not process wall time. "
         "`allocated_bytes` and `peak_allocated_bytes` are engine allocator requests. "
         "`estimated_peak_bytes` is a labeled plan. "
-        "`memory_bytes_estimate` on the river CLI is the regret table plus the strategy-sum table only. "
-        "`process_peak_working_set_bytes` is process working set and is printed by the street CLI only. "
+        "`memory_bytes_estimate` on the removed river CLI was the regret table plus the strategy-sum table only. "
+        "`process_peak_working_set_bytes` is process working set and was printed by the removed street CLI only. "
         "The street `--memory-mib` value is an engine allocation budget, not an operating-system limit.",
         "",
     ]
