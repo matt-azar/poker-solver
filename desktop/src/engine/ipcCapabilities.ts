@@ -6,7 +6,7 @@
  * - resolveLocked  → ZR-100 (#301) — enabled
  * - strategyEdits  → ZR-101 (#303) — enabled
  * - categories     → ZR-103 (#302) — enabled
- * - compare        → deferred (immutable dual-session baseline)
+ * - compare        → dual-session baseline snapshot + host `compare` — enabled
  *
  * Packaged Study is IPC-only. Browser/Vitest (no Tauri, no IPC) leave controls
  * enabled so unit tests that mock the store can still exercise handlers.
@@ -17,7 +17,8 @@ import { isIpcTransport } from "./transport";
 export const STUDY_IPC_FEATURE_FLAGS = {
   // Host `resolve_locked` + EngineClient IPC branch (#301).
   resolveLocked: true,
-  compare: false,
+  // Immutable dual-session baseline retained on resolve-locked + host `compare`.
+  compare: true,
   // ZR-103: host `categories` + EngineClient IPC branch (made-hand on 5-card boards).
   categories: true,
   // Host strategy-edits CRUD + EngineClient IPC branch (#303).
@@ -29,8 +30,7 @@ export type StudyIpcFeature = keyof typeof STUDY_IPC_FEATURE_FLAGS;
 const UNAVAILABLE_COPY: Record<StudyIpcFeature, string> = {
   resolveLocked:
     "Resolve locked is not available over solver-engine IPC yet",
-  compare:
-    "Compare needs an immutable dual-session baseline; not available over Zig IPC yet",
+  compare: "Compare is not available over solver-engine IPC yet",
   categories: "Categories are not available over solver-engine IPC yet",
   strategyEdits:
     "Strategy edits are not available over solver-engine IPC yet",

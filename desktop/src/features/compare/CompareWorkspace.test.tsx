@@ -84,7 +84,7 @@ describe("CompareWorkspace busy state (R12)", () => {
     setNoEngineTransport();
   });
 
-  it("shows an honest unavailable empty when compare lacks IPC", () => {
+  it("auto-loads compare over IPC when baseline + scenario + node are set", async () => {
     setIpcTransport({
       protocol: 2,
       launchId: "test",
@@ -92,9 +92,10 @@ describe("CompareWorkspace busy state (R12)", () => {
       workers: 1,
     });
     render(<CompareWorkspace />);
-    expect(screen.getByText("Unavailable over IPC")).toBeTruthy();
-    expect(screen.getByText(/dual-session baseline/i)).toBeTruthy();
-    expect(useStudyStore.getState().loadCompare).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(useStudyStore.getState().loadCompare).toHaveBeenCalled();
+    });
+    expect(screen.queryByText("Unavailable over IPC")).toBeNull();
   });
 
   it("re-enables Refresh after a successful auto-load leaves a valid note", async () => {

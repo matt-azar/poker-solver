@@ -177,7 +177,7 @@ describe("IPC soft-disable gates (ZR-102)", () => {
     setNoEngineTransport();
   });
 
-  it("allows Resolve locked + Categories + strategy edits; keeps compare soft-disabled", () => {
+  it("allows Resolve locked + Categories + strategy edits + Compare over IPC", () => {
     setIpcTransport({
       protocol: 2,
       launchId: "test",
@@ -191,7 +191,7 @@ describe("IPC soft-disable gates (ZR-102)", () => {
       workspace: "study",
     });
     expect(canExecuteResolveLocked(study).ok).toBe(true);
-    expect(canExecuteCompareToBaseline(study).ok).toBe(false);
+    expect(canExecuteCompareToBaseline(study).ok).toBe(true);
     // ZR-101 (#303) enabled strategy edits over IPC.
     expect(canExecuteOpenStrategyEditor(study).ok).toBe(true);
     expect(canExecuteLoadCategories(study).ok).toBe(true);

@@ -685,6 +685,23 @@ export async function ipcCategories(opts?: {
   });
 }
 
+/**
+ * Dual-session Compare (baseline vs scenario strategy/EV at a node).
+ * Host `compare` is sync and does not bump the analysis generation.
+ */
+export async function ipcCompare(opts: {
+  baseline: string;
+  scenario: string;
+  nodeId: string;
+}): Promise<unknown> {
+  const env = await solverEngineRequest("compare", {
+    baseline: opts.baseline,
+    scenario: opts.scenario,
+    node_id: opts.nodeId,
+  });
+  return env.body;
+}
+
 /** Compare-runouts fat report (host `line_card_report`). */
 export async function ipcLineCardReport(opts: {
   nodeId: string;

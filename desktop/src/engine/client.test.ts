@@ -649,12 +649,39 @@ describe("EngineClient ZR-103 getCategories / compare IPC", () => {
     });
   });
 
-  it("compare stays explicit dual-session deferred 501 on IPC", async () => {
-    await expect(client.compare("base", "s1", "p0.t-1.r-1")).rejects.toMatchObject({
-      name: "EngineError",
-      status: 501,
-      message: expect.stringMatching(/dual-session baseline/i),
+  it("routes compare over IPC (dual-session baseline vs scenario)", async () => {
+    invoke.mockResolvedValueOnce(
+      okBody("compare", {
+        baseline_id: "s0",
+        scenario_id: "s1",
+        node_id: "p0.t-1.r-1",
+        baseline_value: 1,
+        scenario_value: 2,
+        value_delta: 1,
+        baseline_nash_gap: 0.1,
+        scenario_nash_gap: 0.2,
+        actions: ["Check", "Bet 50"],
+        hands: [
+          {
+            combo: "AcAd",
+            locked: true,
+            baseline: [0.5, 0.5],
+            scenario: [1, 0],
+            delta: [0.5, -0.5],
+          },
+        ],
+      }),
+    );
+    const body = (await client.compare("s0", "s1", "p0.t-1.r-1")) as {
+      baseline_id?: string;
+      value_delta?: number;
+    };
+    expect(body.baseline_id).toBe("s0");
+    expect(body.value_delta).toBe(1);
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "compare",
+      body: { baseline: "s0", scenario: "s1", node_id: "p0.t-1.r-1" },
+      jobId: null,
     });
-    expect(invoke).not.toHaveBeenCalled();
   });
 });

@@ -20,7 +20,7 @@ Foundation in place: one Zig public tree for flop, turn, and river. CFR+ with ac
 
 Flop, turn, and river are one betting tree (two, one, or zero cards left) in the Zig Session.
 
-Also landed on the Zig Study path: conditional action EV; stop-and-keep / pause / continue; PSOL v4; check-down equity (+ buckets); made-hand categories; node locks + strategy edits; pot rake; ICM and path incentives on the terminal when configured; Windows NSIS Study installer (Zig sidecar only); flop/turn draw and backdoor tags in Study. The trainer is CFR+. Compact saves, a durable batch queue, trainer packs, preflop, and dual-session Compare are still open. No head-to-head Pio performance or solution-quality equivalence. Acc / time-to-Accuracy walls are not cutover blockers.
+Also landed on the Zig Study path: conditional action EV; stop-and-keep / pause / continue; PSOL v4; check-down equity (+ buckets); made-hand categories; node locks + strategy edits; dual-session Compare (baseline snapshot on resolve-locked); pot rake; ICM and path incentives on the terminal when configured; Windows NSIS Study installer (Zig sidecar only); flop/turn draw and backdoor tags in Study. The trainer is CFR+. Compact saves, a durable batch queue, trainer packs, and preflop are still open. No head-to-head Pio performance or solution-quality equivalence. Acc / time-to-Accuracy walls are not cutover blockers.
 
 Full-range check-down measures whether a large tree fits. Timed betting fixtures and pinned raw-table comparisons stay under the protocol that produced them. Assertion counts and sanitizer notes: [TESTING.md](../engineering/TESTING.md), [BENCHMARKS.md](../engineering/BENCHMARKS.md).
 
@@ -38,7 +38,7 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Stop-and-keep, pause/continue, accuracy stopping | Present over IPC; construction-time stop/pause still publishes nothing; Acc walls ≠ cutover gates | M4 |
 | Full saves, resumable checkpoints, compact saves, lazy load | Versioned PSOL + recent files; compact/lazy open | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Study corpus + Zig digs; Pio parity unproven | M6 |
-| Full and combo node locking, editing, re-solving | Locks + resolve_locked + strategy edits over IPC; Compare still soft-gated | M7 |
+| Full and combo node locking, editing, re-solving | Locks + resolve_locked + strategy edits + dual-session Compare over IPC | M7 |
 | Rake, ICM, opponent incentives | Pot rake, ICM, and path incentives on Zig terminals when configured; NashConv is then modeled utility | M8 |
 | Turn/river and multi-flop aggregation, filtered reports | Client Compare runouts; aggregation open | M9 |
 | Scriptable engine, durable batch queue, exports | Zig CLI + typed IPC; durable queue open | M9 |
@@ -125,7 +125,7 @@ Five-card boards already solve on the shared Zig Session tree. Cards still to co
 
 ### M7 — Strategy editing, node locking and constrained re-solving
 
-Locks and strategy edits ship over typed IPC (`list_locks`, `put_lock`, `delete_lock`, `resolve_locked`, strategy-edit ops). Default lock scope is the selected board. Compare of two sessions stays soft-gated. PSOL v4 stores the CFR+ trainer. Strategy edits are session overlays. Lock code is `engine/src/solve/node_lock.zig`.
+Locks and strategy edits ship over typed IPC (`list_locks`, `put_lock`, `delete_lock`, `resolve_locked`, strategy-edit ops). Default lock scope is the selected board. Dual-session Compare retains an immutable baseline average on resolve-locked and diffs via host `compare`. PSOL v4 stores the CFR+ trainer. Strategy edits are session overlays. Lock code is `engine/src/solve/node_lock.zig`.
 
 Implement immutable scenario forks, manual strategy editing, full-node and selected-combo locks, validated probability rows, lock visualization, copy/paste, presets, undo, unlock and reset. The UI separates editing a stored strategy from locking selected hands against later updates [S5].
 

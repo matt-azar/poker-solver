@@ -9,6 +9,8 @@ pub const budget_allocator = @import("budget_allocator.zig");
 pub const Session = session.Session;
 pub const Phase = session.Phase;
 pub const PublishedLease = session.PublishedLease;
+pub const BaselineLease = session.BaselineLease;
+pub const BaselineSnapshot = session.BaselineSnapshot;
 pub const BudgetAllocator = budget_allocator.BudgetAllocator;
 pub const phase = "phase-5";
 
@@ -427,14 +429,21 @@ test "prepareResolveLocked reset stamps baseline and zeros trained" {
     try sess.begin(text);
     try sess.train(3);
     const prior = sess.solution_id;
+    const prior_avg_len = sess.published.?.average.len;
     try std.testing.expect(sess.training.?.trained >= 3);
     try sess.prepareResolveLocked(false);
     try std.testing.expectEqual(prior, sess.baseline_id);
     try std.testing.expect(sess.solution_id != prior);
     try std.testing.expectEqual(@as(i32, 0), sess.training.?.trained);
+    // Dual-session: immutable baseline average retained for Compare.
+    try std.testing.expect(sess.baseline_snapshot != null);
+    try std.testing.expectEqual(prior, sess.baseline_snapshot.?.solution_id);
+    try std.testing.expectEqual(prior_avg_len, sess.baseline_snapshot.?.average.len);
     try sess.train(1);
     try std.testing.expect(sess.training.?.trained >= 1);
     try std.testing.expectEqual(prior, sess.baseline_id);
+    try std.testing.expect(sess.baseline_snapshot != null);
+    try std.testing.expectEqual(prior, sess.baseline_snapshot.?.solution_id);
 }
 
 test "publish cadence carries across train(1) and flushes on exact" {
