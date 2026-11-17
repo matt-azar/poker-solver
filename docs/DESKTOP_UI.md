@@ -55,7 +55,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Locks | `list_locks` / `put_lock` / `delete_lock` (`scope` node\|line) | Node Locking workspace (Tree → Node locking…) | Default scope is this board; line lock is explicit; all-zero PUT rejected; 0%≠unlock | `locks.test.ts` |
 | Strategy edits | `list_strategy_edits` / `put_strategy_edit` / `delete_strategy_edit` | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | `strategyEdits.test.ts` (ZR-101) |
 | Resolve locked | `resolve_locked` | Solver menu + drawer | New solution + baseline | client IPC tests (ZR-100) |
-| Compare | *(soft-gated)* | Compare workspace | Dual-session baseline not available over Zig IPC yet (`compare: false`) | — |
+| Compare | `compare` | Compare workspace | Immutable baseline retained on `resolve_locked`; strategy/EV deltas vs scenario | host + desktop vitest |
 | Save / Open | `save`, `open` | File menu / Study toolbar → in-app solutions catalogue | PSOL + locks; folders in localStorage index under managed solutions root; Browse disk secondary; invalid strategy rows rejected before replace | contract smoke; checkpoint + `solutionsCatalogue` vitest |
 | Recent / templates / ranges | Tauri FS `library_*` (not engine HTTP) | Library + File menu | Nested `configs/ranges`; flat `configs/templates`; staged via `bundle.resources` | library IPC vitest; `check:library-assets` |
 | Config parse | local TS (`streetConfigText`) | Build | `street-config 1` only; echoes `tree_edits`; no host session mutate | `streetConfigText.test.ts` |
@@ -90,7 +90,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
 | Analysis dock + Build + Library | Done — Equity hist + band filter + OOP vs IP chart; Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
 | Locks + strategy edits | Done |
-| Compare | Off over IPC. `compare: false` in `desktop/src/engine/ipcCapabilities.ts`. The Compare workspace stays in the UI. Dual-session baseline is not wired. |
+| Compare | Done — host `compare` + Session baseline snapshot on resolve-locked; `compare: true` in `ipcCapabilities` |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |
 | Visual / a11y / perf polish | Partial — focus-visible, reduced-motion, compact ≤1280, light/dark themes |
 
@@ -146,7 +146,7 @@ npm run tauri:build
 | Apply free-form strategy edit | Strategy editor / inspector | `put_strategy_edit` |
 | Clear strategy edits | Strategy editor | `delete_strategy_edit` |
 | Resolve locked | Solve/Tree menus + drawer | `resolve_locked` |
-| Compare revisions | Compare workspace | soft-gated (`compare: false`) until dual-session IPC lands |
+| Compare revisions | Compare workspace | `compare` (baseline snapshot vs scenario) |
 
 ## Validation notes
 

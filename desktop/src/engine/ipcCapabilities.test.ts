@@ -23,7 +23,7 @@ describe("studyIpcFeatureAvailable", () => {
     expect(studyIpcFeatureAvailable("categories")).toBe(true);
   });
 
-  it("enables wired IPC features and soft-disables the rest", () => {
+  it("enables wired IPC features including dual-session Compare", () => {
     setIpcTransport({
       protocol: 2,
       launchId: "test",
@@ -32,7 +32,7 @@ describe("studyIpcFeatureAvailable", () => {
     });
     expect(studyUsesIpcFeatureGates()).toBe(true);
     expect(studyIpcFeatureAvailable("resolveLocked")).toBe(true);
-    expect(studyIpcFeatureAvailable("compare")).toBe(false);
+    expect(studyIpcFeatureAvailable("compare")).toBe(true);
     // ZR-101 wired host strategy-edits CRUD + client IPC branch.
     expect(studyIpcFeatureAvailable("strategyEdits")).toBe(true);
     // ZR-103 wired host `categories` + client IPC branch.
@@ -46,14 +46,14 @@ describe("studyIpcFeatureAvailable", () => {
       sidecar: "solver-engine",
       workers: 1,
     });
-    setStudyIpcFeatureOverrideForTests("compare", true);
-    expect(studyIpcFeatureAvailable("compare")).toBe(true);
-    setStudyIpcFeatureOverrideForTests("compare", null);
+    setStudyIpcFeatureOverrideForTests("compare", false);
     expect(studyIpcFeatureAvailable("compare")).toBe(false);
+    setStudyIpcFeatureOverrideForTests("compare", null);
+    expect(studyIpcFeatureAvailable("compare")).toBe(true);
   });
 
   it("exposes honest unavailable copy", () => {
-    expect(studyIpcUnavailableReason("compare")).toMatch(/dual-session baseline/i);
+    expect(studyIpcUnavailableReason("compare")).toMatch(/not available/i);
     expect(studyIpcUnavailableReason("resolveLocked")).toMatch(/not available/i);
     expect(studyIpcUnavailableReason("strategyEdits")).toMatch(/not available/i);
     expect(studyIpcUnavailableReason("categories")).toMatch(/not available/i);

@@ -19,7 +19,7 @@ Product entry points: Zig `solver-engine` and the Study UI (`desktop/`). Living 
 
 ## Still open
 
-- Compact/lazy saves; durable batch queue; dual-session Compare over IPC; host `runouts`
+- Compact/lazy saves; durable batch queue; host `runouts`
 - ICM and path incentives: on when the street-config lists them. NashConv is then modeled utility (`docs/auxiliary/payoffs/ICM.md`)
 - Trainer packs/drills; preflop
 - Code-signed Windows release; Pio matched quality/timing runs

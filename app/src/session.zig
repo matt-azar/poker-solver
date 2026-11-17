@@ -74,6 +74,55 @@ pub const PublishedLease = struct {
     }
 };
 
+/// Immutable dual-session baseline retained across resolve-locked (C++ HeldSolution clone).
+/// Owns a copy of the pre-resolve published average so Compare can inspect it after the
+/// scenario revision replaces Session.published.
+pub const BaselineSnapshot = struct {
+    allocator: std.mem.Allocator,
+    solution_id: u64 = 0,
+    average: []f32 = &.{},
+    revision: u64 = 0,
+    trained: i32 = 0,
+    value: f64 = 0,
+    nash_gap: f64 = 0,
+
+    pub fn deinit(self: *BaselineSnapshot) void {
+        if (self.average.len != 0) self.allocator.free(self.average);
+        self.* = .{ .allocator = self.allocator };
+    }
+
+    pub fn asPublished(self: *const BaselineSnapshot) poker_engine.solve.training_state.PublishedPolicy {
+        return .{
+            .allocator = self.allocator,
+            .average = self.average,
+            .revision = self.revision,
+            .trained = self.trained,
+        };
+    }
+};
+
+/// Reader lease over the retained baseline average (Compare dual-session).
+pub const BaselineLease = struct {
+    session: ?*Session = null,
+    game: poker_engine.game.compile.CompiledGame,
+    /// Borrowed view into Session.baseline_snapshot — valid until `release`. Do not deinit.
+    published: poker_engine.solve.training_state.PublishedPolicy,
+    solution_id: u64 = 0,
+    value: f64 = 0,
+    nash_gap: f64 = 0,
+
+    pub fn release(self: *BaselineLease) void {
+        if (self.session) |sess| {
+            sess.releaseBaselineReader();
+            self.session = null;
+        }
+    }
+
+    pub fn deinit(self: *BaselineLease) void {
+        self.release();
+    }
+};
+
 /// Application-owned solution lifetime. Fail-closed on open/replace.
 pub const Session = struct {
     /// Host/GPA for the budget wrapper itself (not charged).
@@ -90,6 +139,8 @@ pub const Session = struct {
     game: ?poker_engine.game.compile.CompiledGame = null,
     training: ?poker_engine.solve.training_state.TrainingState = null,
     published: ?poker_engine.solve.training_state.PublishedPolicy = null,
+    /// Owned immutable policy for Compare after resolve-locked. Cleared on begin/open.
+    baseline_snapshot: ?BaselineSnapshot = null,
     locks_text: []u8 = &.{},
     strategy_edits_text: []u8 = &.{},
     /// CFR / pre-edit baseline for strategy-edit restore (owned). Null until first edit
@@ -122,6 +173,8 @@ pub const Session = struct {
     /// Protects phase / published swap / reader count (mid-train Study browse).
     mu: std.Thread.Mutex = .{},
     readers: u32 = 0,
+    /// Readers holding `baseline_snapshot` for Compare (independent of published).
+    baseline_readers: u32 = 0,
     quiet: std.Thread.Condition = .{},
     /// Signaled when a new policy_revision is installed (values waiters).
     published_cv: std.Thread.Condition = .{},
@@ -270,7 +323,7 @@ pub const Session = struct {
 
     pub fn deinit(self: *Session) void {
         self.mu.lock();
-        while (self.readers != 0 or self.frozen_analysis_holds != 0) {
+        while (self.readers != 0 or self.baseline_readers != 0 or self.frozen_analysis_holds != 0) {
             self.quiet.wait(&self.mu);
         }
         self.mu.unlock();
@@ -320,6 +373,7 @@ pub const Session = struct {
         game: ?poker_engine.game.compile.CompiledGame = null,
         training: ?poker_engine.solve.training_state.TrainingState = null,
         published: ?poker_engine.solve.training_state.PublishedPolicy = null,
+        baseline_snapshot: ?BaselineSnapshot = null,
         average_spare: ?[]f32 = null,
         locks_text: []u8 = &.{},
         strategy_edits_text: []u8 = &.{},
@@ -350,6 +404,10 @@ pub const Session = struct {
                 policy.deinit();
                 self.published = null;
             }
+            if (self.baseline_snapshot) |*snap| {
+                snap.deinit();
+                self.baseline_snapshot = null;
+            }
             if (self.average_spare) |buf| {
                 self.allocator.free(buf);
                 self.average_spare = null;
@@ -369,8 +427,9 @@ pub const Session = struct {
         }
     };
 
-    /// Caller holds `mu` and has waited until `readers == 0`. Moves owned
-    /// solution memory out for free-after-unlock; resets Session bookkeeping.
+    /// Caller holds `mu` and has waited until `readers == 0` and
+    /// `baseline_readers == 0`. Moves owned solution memory out for
+    /// free-after-unlock; resets Session bookkeeping.
     fn detachSolutionLocked(self: *Session) DetachedSolution {
         var out = DetachedSolution.empty(self.allocator);
         if (self.frozen_ctx) |ctx| {
@@ -392,6 +451,10 @@ pub const Session = struct {
         if (self.published) |policy| {
             out.published = policy;
             self.published = null;
+        }
+        if (self.baseline_snapshot) |snap| {
+            out.baseline_snapshot = snap;
+            self.baseline_snapshot = null;
         }
         if (self.average_spare) |buf| {
             out.average_spare = buf;
@@ -426,6 +489,7 @@ pub const Session = struct {
         self.threads = 1;
         self.has_training = false;
         self.memory_budget_bytes = 0;
+        self.baseline_id = 0;
         self.last_terminal = .completed;
         self.clearControlFlags();
         self.phase = .idle;
@@ -641,7 +705,7 @@ pub const Session = struct {
             self.mu.unlock();
             return error.Cancelled;
         }
-        while (self.readers != 0 or self.frozen_analysis_holds != 0) {
+        while (self.readers != 0 or self.baseline_readers != 0 or self.frozen_analysis_holds != 0) {
             self.quiet.wait(&self.mu);
         }
         detached = self.detachSolutionLocked();
@@ -1569,10 +1633,11 @@ pub const Session = struct {
     }
 
     /// Prepare a locked re-solve (Study Resolve Locked).
-    /// Stamps `baseline_id` from the prior solution when unset, mints a new
-    /// `solution_id`, and optionally resets trainer tables (warm_start=false).
-    /// Does not clone the baseline policy blob — Compare still needs a later
-    /// dual-solution host path; status still reports the baseline id for UI.
+    /// On the first resolve, clones the published average into an immutable
+    /// `baseline_snapshot` (C++ dual-session HeldSolution) and stamps
+    /// `baseline_id`. Mints a new `solution_id`, and optionally resets trainer
+    /// tables (warm_start=false). Later resolve-locked calls keep the original
+    /// baseline snapshot so Compare still diffs against the pre-lock revision.
     pub fn prepareResolveLocked(self: *Session, warm_start: bool) SessionError!void {
         self.mu.lock();
         defer self.mu.unlock();
@@ -1581,6 +1646,11 @@ pub const Session = struct {
         if (self.game == null) return error.InvalidSession;
         if (!self.has_training or self.training == null) return error.InvalidSession;
         if (self.solution_id == 0) return error.NothingPublished;
+
+        if (self.baseline_id == 0) {
+            try self.retainBaselineSnapshotLocked();
+            self.baseline_id = self.solution_id;
+        }
 
         if (!warm_start) {
             const game = self.game.?;
@@ -1618,14 +1688,71 @@ pub const Session = struct {
             self.force_next_publish = true;
         }
 
-        if (self.baseline_id == 0) {
-            self.baseline_id = self.solution_id;
-        }
         self.solution_id = self.next_id;
         self.next_id += 1;
         self.clearControlFlags();
         self.last_terminal = .completed;
         self.phase = .paused;
+    }
+
+    /// Caller holds `mu`. Clone current published average + metrics into baseline.
+    /// Empty average is allowed (check-only trees / single-action expand at inspect).
+    fn retainBaselineSnapshotLocked(self: *Session) SessionError!void {
+        const published = self.published orelse return error.NothingPublished;
+        // Wait out Compare readers before replacing a prior snapshot (should be none
+        // when baseline_id was 0, but stay fail-closed).
+        while (self.baseline_readers != 0) {
+            self.quiet.wait(&self.mu);
+        }
+        const owned: []f32 = if (published.average.len == 0)
+            &.{}
+        else
+            (self.allocator.dupe(f32, published.average) catch return error.OutOfMemory);
+        errdefer if (owned.len != 0) self.allocator.free(owned);
+        var value: f64 = 0;
+        var nash_gap: f64 = 0;
+        if (self.has_metrics) {
+            value = self.metrics.value;
+            nash_gap = self.metrics.nash_gap;
+        }
+        if (self.baseline_snapshot) |*old| {
+            old.deinit();
+            self.baseline_snapshot = null;
+        }
+        self.baseline_snapshot = .{
+            .allocator = self.allocator,
+            .solution_id = self.solution_id,
+            .average = owned,
+            .revision = published.revision,
+            .trained = published.trained,
+            .value = value,
+            .nash_gap = nash_gap,
+        };
+    }
+
+    /// Borrow retained baseline for Compare. Independent of published readers.
+    pub fn borrowBaseline(self: *Session) SessionError!BaselineLease {
+        self.mu.lock();
+        defer self.mu.unlock();
+        const game = self.game orelse return error.NothingPublished;
+        const snap = &(self.baseline_snapshot orelse return error.NothingPublished);
+        if (snap.solution_id == 0) return error.NothingPublished;
+        self.baseline_readers += 1;
+        return .{
+            .session = self,
+            .game = game,
+            .published = snap.asPublished(),
+            .solution_id = snap.solution_id,
+            .value = snap.value,
+            .nash_gap = snap.nash_gap,
+        };
+    }
+
+    pub fn releaseBaselineReader(self: *Session) void {
+        self.mu.lock();
+        defer self.mu.unlock();
+        if (self.baseline_readers > 0) self.baseline_readers -= 1;
+        if (self.baseline_readers == 0) self.quiet.broadcast();
     }
 
     pub fn setStrategyEditsText(self: *Session, text: []const u8) SessionError!void {

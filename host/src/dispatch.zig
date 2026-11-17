@@ -7,6 +7,7 @@ const workers = @import("workers.zig");
 const equity_json = @import("equity_json.zig");
 const equity_jobs = @import("equity_jobs.zig");
 const categories_json = @import("categories_json.zig");
+const compare_json = @import("compare_json.zig");
 const study_reports = @import("study_reports.zig");
 const locks_json = @import("locks_json.zig");
 const strategy_edits_json = @import("strategy_edits_json.zig");
@@ -1398,6 +1399,125 @@ fn handleCategories(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
 }
 
+/// Parse Study solution tokens (`s12`) or bare decimals into a numeric id.
+fn parseSolutionIdToken(text: []const u8) ?u64 {
+    if (text.len == 0) return null;
+    const digits = if (text.len >= 2 and (text[0] == 's' or text[0] == 'S')) text[1..] else text;
+    if (digits.len == 0) return null;
+    return std.fmt.parseInt(u64, digits, 10) catch null;
+}
+
+/// Dual-session Compare: inspect retained baseline vs current scenario at one node.
+fn handleCompare(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
+    const baseline_token = bodyStringField(req.body_json, "baseline") orelse
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "baseline, scenario, and node_id are required");
+    const scenario_token = bodyStringField(req.body_json, "scenario") orelse
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "baseline, scenario, and node_id are required");
+    const baseline_id = parseSolutionIdToken(baseline_token) orelse
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "baseline, scenario, and node_id are required");
+    const scenario_id = parseSolutionIdToken(scenario_token) orelse
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "baseline, scenario, and node_id are required");
+
+    if (state.session.baseline_id == 0 or state.session.baseline_snapshot == null) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "no_baseline", "no retained baseline (resolve-locked first)");
+    }
+    if (baseline_id != state.session.baseline_id) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "expired_solution", "baseline solution expired");
+    }
+    if (scenario_id == 0 or scenario_id != state.session.solution_id) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "expired_solution", "scenario solution expired");
+    }
+
+    var baseline_lease = state.session.borrowBaseline() catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "expired_solution", @errorName(err));
+    };
+    defer baseline_lease.deinit();
+
+    var scenario_lease = state.session.borrowPublished() catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
+    };
+    defer scenario_lease.deinit();
+
+    const located = resolveLocatedNode(scenario_lease.game, req.body_json) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
+    };
+    var owned_node_id: ?[]u8 = null;
+    defer if (owned_node_id) |p| state.allocator.free(p);
+    const node_id_text: []const u8 = if (bodyStringField(req.body_json, "node_id")) |text|
+        text
+    else blk: {
+        const formatted = poker_engine.analysis.node_id.formatNodeId(
+            state.allocator,
+            located.node_index,
+            located.turn,
+            located.river,
+        ) catch {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "compare_failed", "node_id");
+        };
+        owned_node_id = formatted;
+        break :blk formatted;
+    };
+
+    var base_page = poker_engine.analysis.inspect.inspectNode(
+        state.allocator,
+        baseline_lease.game,
+        baseline_lease.published,
+        located.node_index,
+        located.turn,
+        located.river,
+    ) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "compare_failed", @errorName(err));
+    };
+    defer base_page.deinit();
+
+    var scen_page = poker_engine.analysis.inspect.inspectNode(
+        state.allocator,
+        scenario_lease.game,
+        scenario_lease.published,
+        located.node_index,
+        located.turn,
+        located.river,
+    ) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "compare_failed", @errorName(err));
+    };
+    defer scen_page.deinit();
+
+    if (base_page.kind != .decision or scen_page.kind != .decision) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "compare requires a decision node");
+    }
+    if (base_page.n_actions != scen_page.n_actions) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "arity_mismatch", "solutions disagree on action arity at node");
+    }
+
+    var locks_owned: ?node_lock.LockSet = null;
+    defer if (locks_owned) |*owned| owned.deinit();
+    if (state.session.locks_text.len != 0) {
+        locks_owned = node_lock.parseLockSet(state.allocator, state.session.locks_text) catch null;
+    }
+
+    const scenario_value: f64 = if (state.session.has_metrics) state.session.metrics.value else 0;
+    const scenario_nash: f64 = if (state.session.has_metrics) state.session.metrics.nash_gap else 0;
+
+    const body = compare_json.packCompareBody(state.allocator, .{
+        .baseline_id = baseline_id,
+        .scenario_id = scenario_id,
+        .node_id = node_id_text,
+        .baseline_value = baseline_lease.value,
+        .scenario_value = scenario_value,
+        .baseline_nash_gap = baseline_lease.nash_gap,
+        .scenario_nash_gap = scenario_nash,
+        .baseline_page = &base_page,
+        .scenario_page = &scen_page,
+        .locks = if (locks_owned) |*owned| owned else null,
+        .turn = located.turn,
+        .river = located.river,
+    }) catch |err| {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "compare_pack_failed", @errorName(err));
+    };
+    defer state.allocator.free(body);
+    return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
+}
+
 fn resolveLocatedNode(
     game: poker_engine.game.CompiledGame,
     body_json: []const u8,
@@ -1875,6 +1995,12 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     // Study Categories — sync path for unit tests. Product stdin uses startCategories (ZR-171).
     if (std.mem.eql(u8, req.op, "categories")) {
         return handleCategories(state, req);
+    }
+
+    // Dual-session Compare (baseline vs scenario). Sync — does not bump analysis gen
+    // so Study node/values/equity are not superseded by a Compare workspace refresh.
+    if (std.mem.eql(u8, req.op, "compare")) {
+        return handleCompare(state, req);
     }
 
     // Fat Study reports (Compare runouts / Value-Bluffs after-call). Product uses start* off stdin.
@@ -4727,6 +4853,8 @@ test "resolve_locked stamps baseline, mints solution id, trains under lock" {
     try std.testing.expect(state.session.solution_id != prior_id);
     try std.testing.expect(state.session.training.?.trained == 0);
     try std.testing.expect(prior_trained >= 2);
+    try std.testing.expect(state.session.baseline_snapshot != null);
+    try std.testing.expectEqual(prior_id, state.session.baseline_snapshot.?.solution_id);
     try state.session.train(2);
     try std.testing.expect(state.session.training.?.trained >= 2);
     try std.testing.expect(state.session.phase == .published);
@@ -4745,6 +4873,87 @@ test "resolve_locked stamps baseline, mints solution id, trains under lock" {
     try std.testing.expect(state.session.baseline_id == prior_id);
     try std.testing.expect(state.session.solution_id != mid_id);
     try std.testing.expect(state.session.training.?.trained == mid_trained);
+    // Original baseline snapshot survives a second resolve-locked.
+    try std.testing.expect(state.session.baseline_snapshot != null);
+    try std.testing.expectEqual(prior_id, state.session.baseline_snapshot.?.solution_id);
+}
+
+test "compare dual-session flop baseline vs resolve-locked scenario" {
+    // Flop coverage: lock root → resolve-locked → compare strategy/EV at root.
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1,KsKh:1
+        \\ip-range QcQd:1,JcJh:1
+        \\oop-flop-bets 0.5
+        \\ip-flop-bets 
+        \\oop-turn-bets 
+        \\ip-turn-bets 
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "compare-flop");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(3);
+    const prior_id = state.session.solution_id;
+
+    var put_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "cmp-put"),
+        .op = try std.testing.allocator.dupe(u8, "put_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\":\"p0.t-1.r-1\",\"kind\":\"full\",\"scope\":\"node\",\"probs\":[1,0]}"),
+    };
+    defer put_req.deinit();
+    var put_reply = try handle(&state, put_req);
+    defer put_reply.deinit();
+    try std.testing.expect(put_reply.ok);
+
+    try state.session.prepareResolveLocked(false);
+    try state.session.train(2);
+    const scenario_id = state.session.solution_id;
+    try std.testing.expect(scenario_id != prior_id);
+    try std.testing.expect(state.session.baseline_snapshot != null);
+
+    var body_buf: [128]u8 = undefined;
+    const body = try std.fmt.bufPrint(
+        &body_buf,
+        "{{\"baseline\":\"s{d}\",\"scenario\":\"s{d}\",\"node_id\":\"p0.t-1.r-1\"}}",
+        .{ prior_id, scenario_id },
+    );
+    var cmp_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "cmp-1"),
+        .op = try std.testing.allocator.dupe(u8, "compare"),
+        .body_json = try std.testing.allocator.dupe(u8, body),
+    };
+    defer cmp_req.deinit();
+    var cmp_reply = try handle(&state, cmp_req);
+    defer cmp_reply.deinit();
+    try std.testing.expect(cmp_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, cmp_reply.body_json, "\"value_delta\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmp_reply.body_json, "\"locked\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmp_reply.body_json, "\"hands\":[") != null);
+    var baseline_id_buf: [32]u8 = undefined;
+    const baseline_id_needle = try std.fmt.bufPrint(&baseline_id_buf, "\"baseline_id\":\"s{d}\"", .{prior_id});
+    try std.testing.expect(std.mem.indexOf(u8, cmp_reply.body_json, baseline_id_needle) != null);
+    var scenario_id_buf: [32]u8 = undefined;
+    const scenario_id_needle = try std.fmt.bufPrint(&scenario_id_buf, "\"scenario_id\":\"s{d}\"", .{scenario_id});
+    try std.testing.expect(std.mem.indexOf(u8, cmp_reply.body_json, scenario_id_needle) != null);
 }
 
 test "status body exposes iterations and requested target" {

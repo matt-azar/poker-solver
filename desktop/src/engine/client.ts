@@ -17,6 +17,7 @@ import {
   ipcCancel,
   ipcCancelEquityJob,
   ipcCategories,
+  ipcCompare,
   ipcDeleteLock,
   ipcDeleteStrategyEdit,
   ipcEquity,
@@ -821,16 +822,7 @@ export class EngineClient {
 
   async compare(baseline: string, scenario: string, nodeId: string): Promise<unknown> {
     if (isIpcTransport()) {
-      void baseline;
-      void scenario;
-      void nodeId;
-      // Dual-session immutable baseline is deferred (audit §6). Soft-gate UI
-      // should avoid calling this; keep a clear 501 if something still does.
-      throw new EngineError(
-        "Compare needs an immutable dual-session baseline; not available over Zig IPC yet",
-        501,
-        { code: "compare_dual_session_deferred" },
-      );
+      return ipcCompare({ baseline, scenario, nodeId });
     }
     const query = new URLSearchParams({ baseline, scenario, node_id: nodeId });
     const { response, data } = await this.request("GET", `/api/compare?${query}`);
