@@ -950,7 +950,7 @@ export class EngineClient {
     return data;
   }
 
-  /** Standalone equity calculator job (no solution required). */
+  /** Standalone equity calculator job (no solution required). Distinct from Study `equity`. */
   async startEquityJob(
     body: Record<string, unknown>,
     signal?: AbortSignal,
@@ -960,23 +960,58 @@ export class EngineClient {
         throw new EngineError("aborted", 0, null);
       }
       const data = await ipcStartEquityJob(body);
-      return data as { job_id: string; state: string };
+      const record =
+        data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+      const jobId = typeof record?.job_id === "string" ? record.job_id.trim() : "";
+      if (!jobId) {
+        // Fixture/demo handlers that return `{}` for unknown ops used to leave
+        // Equity stuck on "queued" with no pollable id — fail loudly instead.
+        throw new EngineError("start_equity_job returned no job_id", 0, data);
+      }
+      const state = typeof record?.state === "string" ? record.state : "queued";
+      return { job_id: jobId, state };
+    }
+    // Packaged Study never uses HTTP equity jobs (no explore :8765).
+    if (isTauriRuntime()) {
+      throw new EngineError(
+        "Equity calculator requires solver-engine IPC — reconnect the engine",
+        0,
+        null,
+      );
     }
     const { response, data } = await this.request("POST", "/api/equity/jobs", body, { signal });
     this.ensureOk(response, data, true);
-    return data as { job_id: string; state: string };
+    const record =
+      data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+    const jobId = typeof record?.job_id === "string" ? record.job_id.trim() : "";
+    if (!jobId) {
+      throw new EngineError("start equity job returned no job_id", 0, data);
+    }
+    const state = typeof record?.state === "string" ? record.state : "queued";
+    return { job_id: jobId, state };
   }
 
   async getEquityJob(jobId: string, signal?: AbortSignal): Promise<unknown> {
+    const id = jobId.trim();
+    if (!id) {
+      throw new EngineError("equity job id required", 400, null);
+    }
     if (isIpcTransport()) {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      return ipcGetEquityJob(jobId);
+      return ipcGetEquityJob(id);
+    }
+    if (isTauriRuntime()) {
+      throw new EngineError(
+        "Equity calculator requires solver-engine IPC — reconnect the engine",
+        0,
+        null,
+      );
     }
     const { response, data } = await this.request(
       "GET",
-      `/api/equity/jobs/${encodeURIComponent(jobId)}`,
+      `/api/equity/jobs/${encodeURIComponent(id)}`,
       undefined,
       { signal },
     );
@@ -985,12 +1020,23 @@ export class EngineClient {
   }
 
   async cancelEquityJob(jobId: string): Promise<unknown> {
+    const id = jobId.trim();
+    if (!id) {
+      throw new EngineError("equity job id required", 400, null);
+    }
     if (isIpcTransport()) {
-      return ipcCancelEquityJob(jobId);
+      return ipcCancelEquityJob(id);
+    }
+    if (isTauriRuntime()) {
+      throw new EngineError(
+        "Equity calculator requires solver-engine IPC — reconnect the engine",
+        0,
+        null,
+      );
     }
     const { response, data } = await this.request(
       "POST",
-      `/api/equity/jobs/${encodeURIComponent(jobId)}/cancel`,
+      `/api/equity/jobs/${encodeURIComponent(id)}/cancel`,
       {},
     );
     this.ensureOk(response, data);

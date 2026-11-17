@@ -76,6 +76,25 @@ function envelope(op: string, body: unknown, requestId: string): IpcRequestEnvel
   };
 }
 
+function failEnvelope(
+  op: string,
+  requestId: string,
+  errorCode: string,
+  errorMessage: string,
+): IpcRequestEnvelope {
+  return {
+    v: 2,
+    kind: "reply",
+    request_id: requestId,
+    job_id: null,
+    op,
+    ok: false,
+    error_code: errorCode,
+    error_message: errorMessage,
+    body: null,
+  };
+}
+
 function decisionNodeBody(
   nodeId: string,
   policyRevision: number,
@@ -498,6 +517,15 @@ export function createNodeLockingFixtureHandler(
             dry_run: true,
           },
           requestId,
+        );
+      case "start_equity_job":
+      case "get_equity_job":
+      case "cancel_equity_job":
+        return failEnvelope(
+          op,
+          requestId,
+          "preview_unsupported",
+          "Equity Calculator jobs are not part of this preview fixture.",
         );
       default:
         return envelope(op, {}, requestId);

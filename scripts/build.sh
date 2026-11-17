@@ -22,6 +22,7 @@ else
 fi
 python3 scripts/zig/check-no-avx512.py "$BIN"
 python3 scripts/zig/ready-smoke.py "$BIN"
+python3 scripts/zig/equity-calculator-smoke.py "$BIN"
 python3 scripts/zig/study-contract-smoke.py "$BIN"
 # ZR-143: kill sidecar mid-session → cold restart cannot restore unsaved;
 # open last saved checkpoint restores disk only (Linux cloud; Windows installer
