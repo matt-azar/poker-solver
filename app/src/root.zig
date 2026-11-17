@@ -208,6 +208,83 @@ test "browse-only open keeps has_training false and continue disabled" {
     try std.testing.expect(resumed.canContinue());
 }
 
+test "study-only save on flop omits trainer tables and disables Continue" {
+    // Flop coverage (3-card board): Study-only export drops regret/strategy_sum
+    // while the live session keeps has_training for an immediate Continue checkpoint.
+    // One multi-action flop bet keeps average non-empty without a huge tree.
+    const text =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\oop-flop-bets 0.5
+        \\ip-flop-bets 
+        \\oop-turn-bets 
+        \\ip-turn-bets 
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 1024
+        \\threads 1
+        \\
+    ;
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(text);
+    try sess.train(2);
+    try std.testing.expect(sess.has_training);
+    try std.testing.expect(sess.canContinue());
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const study_path = try std.fs.path.join(std.testing.allocator, &.{ abs, "flop-study.psol" });
+    defer std.testing.allocator.free(study_path);
+    const ckpt_path = try std.fs.path.join(std.testing.allocator, &.{ abs, "flop-ckpt.psol" });
+    defer std.testing.allocator.free(ckpt_path);
+
+    try sess.saveWithOptions(study_path, .{ .study_only = true });
+    // Live trainer must survive a Study-only export.
+    try std.testing.expect(sess.has_training);
+    try std.testing.expect(sess.canContinue());
+
+    var study_doc = try poker_formats.readFile(std.testing.allocator, study_path);
+    defer study_doc.deinit();
+    try std.testing.expect(!study_doc.hasTraining());
+    try std.testing.expect(study_doc.average.len > 0);
+    try std.testing.expectEqual(@as(usize, 0), study_doc.regret.len);
+    try std.testing.expectEqual(@as(usize, 0), study_doc.strategy_sum.len);
+
+    const study_bytes = try poker_formats.encodedFileBytes(study_doc);
+
+    try sess.save(ckpt_path);
+    var ckpt_doc = try poker_formats.readFile(std.testing.allocator, ckpt_path);
+    defer ckpt_doc.deinit();
+    try std.testing.expect(ckpt_doc.hasTraining());
+    try std.testing.expect(ckpt_doc.regret.len == ckpt_doc.average.len);
+    try std.testing.expect(ckpt_doc.strategy_sum.len == ckpt_doc.average.len);
+    const ckpt_bytes = try poker_formats.encodedFileBytes(ckpt_doc);
+    // Average-only should be strictly smaller than the full checkpoint.
+    try std.testing.expect(study_bytes < ckpt_bytes);
+
+    var opened = try Session.init(std.testing.allocator);
+    defer opened.deinit();
+    try opened.open(study_path);
+    try std.testing.expect(!opened.has_training);
+    try std.testing.expect(opened.training == null);
+    try std.testing.expect(!opened.canContinue());
+    try std.testing.expect(opened.published != null);
+}
+
 test "train recovers from sticky failed phase without re-begin" {
     const text =
         \\street-config 1

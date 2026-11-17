@@ -575,7 +575,10 @@ interface StudyState {
    * node. Safe to call on every navigate — cache hits and in-flight jobs no-op.
    */
   ensureNodeAnalysis: () => Promise<void>;
-  saveSolution: (path?: string) => Promise<SaveSolutionResult>;
+  saveSolution: (
+    path?: string,
+    options?: { studyOnly?: boolean },
+  ) => Promise<SaveSolutionResult>;
   openSolution: (
     path?: string,
     options?: { decisionActions?: string[] },
@@ -3935,20 +3938,24 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     );
   },
 
-  async saveSolution(path) {
+  async saveSolution(path, options) {
     const solutionId = get().solutionId;
     const previous = get().draft.solutionPath;
     const target = (path ?? previous).trim();
+    const studyOnly = options?.studyOnly === true;
     if (!solutionId || !target) {
       const error = "Set a solution path before saving.";
       set({ message: error });
       return { ok: false, error };
     }
-    set({ phase: "saving", message: `Saving ${target}…` });
+    set({
+      phase: "saving",
+      message: studyOnly ? `Saving study ${target}…` : `Saving ${target}…`,
+    });
     // Open/Save run as explorer overlay jobs (202 + status). Keep polling so
     // the accept loop stays free for `/api/status` during the write.
     try {
-      await engineClient.save(solutionId, target);
+      await engineClient.save(solutionId, target, { studyOnly });
     } catch (error) {
       // EngineError messages are already presentUserText'd in the client.
       // Also accept plain Error / SolverIpcError so catalogue Save never
@@ -3970,7 +3977,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       draft: { ...get().draft, solutionPath: target },
       lastCheckpointPath: target,
       phase: phaseFromStatus(get().status, "complete"),
-      message: `Saved ${target}`,
+      message: studyOnly ? `Saved study ${target}` : `Saved ${target}`,
     });
     return { ok: true, path: target };
   },

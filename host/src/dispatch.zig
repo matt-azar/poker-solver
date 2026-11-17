@@ -53,6 +53,8 @@ const IoTask = struct {
     op: []u8,
     path: []u8,
     kind: IoKind,
+    /// Save only: average-only Study export (omit regret/strategy_sum).
+    study_only: bool = false,
 };
 
 const PreviewKind = enum { tree_preview, plan_memory };
@@ -452,6 +454,17 @@ fn bodyFloatField(body: []const u8, key: []const u8) ?f64 {
     }
     if (from == i) return null;
     return std.fmt.parseFloat(f64, body[from..i]) catch null;
+}
+
+fn bodyBoolField(body: []const u8, key: []const u8) ?bool {
+    var needle_buf: [64]u8 = undefined;
+    const needle = std.fmt.bufPrint(&needle_buf, "\"{s}\":", .{key}) catch return null;
+    const start = std.mem.indexOf(u8, body, needle) orelse return null;
+    var i = start + needle.len;
+    while (i < body.len and (body[i] == ' ' or body[i] == '\t')) : (i += 1) {}
+    if (std.mem.startsWith(u8, body[i..], "true")) return true;
+    if (std.mem.startsWith(u8, body[i..], "false")) return false;
+    return null;
 }
 
 fn bodyArraySlice(body: []const u8, key: []const u8) ?[]const u8 {
@@ -1773,7 +1786,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         const path = (try bodyUnescapedStringField(state.allocator, req.body_json, "path")) orelse
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
         defer state.allocator.free(path);
-        state.session.save(path) catch |err| {
+        const study_only = bodyBoolField(req.body_json, "study_only") orelse false;
+        state.session.saveWithOptions(path, .{ .study_only = study_only }) catch |err| {
             const mapped = mapSaveError(err);
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, mapped.code, mapped.message);
         };
@@ -2825,7 +2839,7 @@ fn ioWorker(task: *IoTask) void {
 
     switch (task.kind) {
         .save => {
-            state.session.save(task.path) catch |err| {
+            state.session.saveWithOptions(task.path, .{ .study_only = task.study_only }) catch |err| {
                 const mapped = mapSaveError(err);
                 var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, mapped.code, mapped.message) catch return;
                 defer err_reply.deinit();
@@ -2855,7 +2869,7 @@ fn ioWorker(task: *IoTask) void {
     }
 }
 
-fn startIo(state: *HostState, req: ipc.Envelope, kind: IoKind, path: []u8) !void {
+fn startIo(state: *HostState, req: ipc.Envelope, kind: IoKind, path: []u8, study_only: bool) !void {
     // Caller transferred path ownership. Free on every early-exit before worker owns it.
     var path_owned = true;
     errdefer if (path_owned) state.allocator.free(path);
@@ -2889,6 +2903,7 @@ fn startIo(state: *HostState, req: ipc.Envelope, kind: IoKind, path: []u8) !void
         .op = op,
         .path = path,
         .kind = kind,
+        .study_only = study_only,
     };
     path_owned = false;
 
@@ -2957,7 +2972,8 @@ pub fn startSave(state: *HostState, req: ipc.Envelope) !void {
         try state.writeReply(err_reply);
         return;
     };
-    try startIo(state, req, .save, path);
+    const study_only = bodyBoolField(req.body_json, "study_only") orelse false;
+    try startIo(state, req, .save, path, study_only);
 }
 
 pub fn startOpen(state: *HostState, req: ipc.Envelope) !void {
@@ -2973,7 +2989,7 @@ pub fn startOpen(state: *HostState, req: ipc.Envelope) !void {
         try state.writeReply(err_reply);
         return;
     };
-    try startIo(state, req, .open, path);
+    try startIo(state, req, .open, path, false);
 }
 
 fn previewWorker(task: *PreviewTask) void {
@@ -3610,6 +3626,80 @@ test "pause cancel and status-shaped open reply" {
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"has_training\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"status_generation\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"solution_id\":\"s") != null);
+}
+
+test "study_only save round-trips browse-only status on flop" {
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\oop-flop-bets 0.5
+        \\ip-flop-bets 
+        \\oop-turn-bets 
+        \\ip-turn-bets 
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "study-only-save");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+    try std.testing.expect(state.session.has_training);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const tmp_path = try std.fs.path.join(std.testing.allocator, &.{ abs, "study-only.psol" });
+    defer std.testing.allocator.free(tmp_path);
+    const path_json = try std.fmt.allocPrint(std.testing.allocator, "{s}", .{std.json.fmt(tmp_path, .{})});
+    defer std.testing.allocator.free(path_json);
+
+    var save_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "study-save"),
+        .op = try std.testing.allocator.dupe(u8, "save"),
+        .body_json = try std.fmt.allocPrint(
+            std.testing.allocator,
+            "{{\"path\":{s},\"study_only\":true}}",
+            .{path_json},
+        ),
+    };
+    defer save_req.deinit();
+    var save_reply = try handle(&state, save_req);
+    defer save_reply.deinit();
+    try std.testing.expect(save_reply.ok);
+    // Live session still resumable after Study-only export.
+    try std.testing.expect(state.session.has_training);
+    try std.testing.expect(state.session.canContinue());
+
+    var open_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "study-open"),
+        .op = try std.testing.allocator.dupe(u8, "open"),
+        .body_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"path\":{s}}}", .{path_json}),
+    };
+    defer open_req.deinit();
+    var open_reply = try handle(&state, open_req);
+    defer open_reply.deinit();
+    try std.testing.expect(open_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"has_training\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, open_reply.body_json, "\"can_continue\":false") != null);
 }
 
 test "stale cancel does not requestStop on train-current" {
