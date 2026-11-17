@@ -174,7 +174,13 @@ Engine code lives under `engine/` and `host/`. Those modules do not import `desk
 
 Keep status polling across Open and Save. Let `engineClient.open` and `save` wait until `running` clears. Treat `stopPolling` aborts as shutdown cancel. Do not surface raw AbortError text in the status bar. A failed Open must leave the prior `solution_id` intact.
 
-**Pointers:** `desktop/src/state/studyStore.ts` (`openSolution` / `saveSolution`), `desktop/src/domain/requestScope.ts`.
+| Trap | Symptom | Do / Don't |
+| --- | --- | --- |
+| Generic catalogue "Save failed" | Host rejected save (size/path/busy) but modal shows only "Save failed" | Wrap IPC save/open into `EngineError`; surface `Error.message` in `saveSolution` / `openSolution` — never keep only `instanceof EngineError` |
+| 512 MiB PSOL gate | Flop training Save fails after a healthy solve (~GiB live tables) | `max_psol_bytes` is **4 GiB**; oversize → `PsolTooLarge` / `psol_too_large`, not bare `InvalidPsol` |
+| Windows `\\?\` solutions root | Catalogue path from `solutions_root` canonicalize breaks Zig `openDir` | Strip verbatim prefixes before handing paths to the engine |
+
+**Pointers:** `desktop/src/state/studyStore.ts` (`openSolution` / `saveSolution`), `formats/src/psol_v4.zig`, `desktop/src-tauri/src/solutions.rs`, `desktop/src/domain/requestScope.ts`.
 
 ### Study analysis scheduling (EV / equity / runouts)
 

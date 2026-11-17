@@ -185,6 +185,19 @@ describe("EngineClient Slice A IPC branches", () => {
 
     invoke.mockResolvedValueOnce(okBody("save", { saved: true }));
     await expect(client.save("s2", "/tmp/demo.psol")).resolves.toEqual({ saved: true });
+
+    invoke.mockResolvedValueOnce({
+      ok: false,
+      op: "save",
+      request_id: "r-save-fail",
+      error_code: "psol_too_large",
+      error_message: "Solution file exceeds the 4 GiB save limit",
+      body: null,
+    });
+    await expect(client.save("s2", "/tmp/too-big.psol")).rejects.toMatchObject({
+      name: "EngineError",
+      message: expect.stringMatching(/4 GiB save limit/i),
+    });
   });
 
   it("refuses HTTP in the Tauri shell when transport is no-engine", async () => {

@@ -664,7 +664,12 @@ export class EngineClient {
       }
       // Host save is sync; solutionId is Study-side identity (host uses current session).
       void solutionId;
-      return ipcSave(path);
+      try {
+        return await ipcSave(path);
+      } catch (err) {
+        if (err instanceof EngineError) throw err;
+        throw new EngineError(err instanceof Error ? err.message : String(err), 0, null);
+      }
     }
     const { response, data } = await this.request(
       "POST",
@@ -685,7 +690,13 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      const data = await ipcOpen(path);
+      let data: unknown;
+      try {
+        data = await ipcOpen(path);
+      } catch (err) {
+        if (err instanceof EngineError) throw err;
+        throw new EngineError(err instanceof Error ? err.message : String(err), 0, null);
+      }
       try {
         return decodeStatusPayload(data);
       } catch (err) {

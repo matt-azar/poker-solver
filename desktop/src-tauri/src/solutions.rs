@@ -61,13 +61,30 @@ fn relative_to_path(key: &str) -> PathBuf {
     PathBuf::from(key.replace('/', std::path::MAIN_SEPARATOR_STR))
 }
 
+/// Drop Windows `\\?\` / `\\?\UNC\` verbatim prefixes. Zig `openDir` / createFile
+/// reject those forms; catalogue saves must pass ordinary absolute paths.
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let raw = path.to_string_lossy();
+    if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        if let Some(unc) = rest.strip_prefix(r"UNC\") {
+            return PathBuf::from(format!(r"\\{unc}"));
+        }
+        return PathBuf::from(rest);
+    }
+    path
+}
+
 /// Ensure the solutions root exists and return its absolute path.
 #[tauri::command]
 pub fn solutions_root() -> Result<String, String> {
     let dir = solutions_dir();
     fs::create_dir_all(&dir).map_err(|err| format!("create solutions root: {err}"))?;
-    let canon = fs::canonicalize(&dir).unwrap_or(dir);
-    Ok(canon.to_string_lossy().into_owned())
+    // Prefer a real absolute path, but never hand Study a `\\?\` verbatim path —
+    // the solver-engine save path opens the parent via Zig cwd.openDir.
+    let absolute = fs::canonicalize(&dir)
+        .map(strip_verbatim_prefix)
+        .unwrap_or(dir);
+    Ok(absolute.to_string_lossy().into_owned())
 }
 
 /// Ensure parent directories exist for a catalogue-relative key (`folder/name.psol`).
@@ -94,4 +111,31 @@ pub fn solutions_ensure_parent(relative_key: String) -> Result<(), String> {
     }
     fs::create_dir_all(&candidate).map_err(|err| format!("create solutions folder: {err}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_verbatim_prefix;
+    use std::path::PathBuf;
+
+    #[test]
+    fn strips_windows_verbatim_drive_prefix() {
+        let stripped = strip_verbatim_prefix(PathBuf::from(r"\\?\C:\Users\matt\AppData\Local\Holdem Study\solutions"));
+        assert_eq!(
+            stripped,
+            PathBuf::from(r"C:\Users\matt\AppData\Local\Holdem Study\solutions")
+        );
+    }
+
+    #[test]
+    fn strips_windows_verbatim_unc_prefix() {
+        let stripped = strip_verbatim_prefix(PathBuf::from(r"\\?\UNC\server\share\solutions"));
+        assert_eq!(stripped, PathBuf::from(r"\\server\share\solutions"));
+    }
+
+    #[test]
+    fn leaves_ordinary_paths_alone() {
+        let path = PathBuf::from(r"C:\Users\matt\AppData\Local\Holdem Study\solutions");
+        assert_eq!(strip_verbatim_prefix(path.clone()), path);
+    }
 }
