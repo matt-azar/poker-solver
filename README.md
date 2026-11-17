@@ -8,6 +8,10 @@ Flop, turn, and river share one public betting tree. Convergence is an equilibri
 
 Study is Zig typed IPC.
 
+## Live demo
+
+**[Hold’em Study (public demo)](https://matt-azar.github.io/poker-solver/?demo=flop-explore)** — browse a precomputed flop solution on GitHub Pages (no local install).
+
 ## Windows installer
 
 Download the unsigned NSIS setup from the [latest GitHub Release](https://github.com/matt-azar/poker-solver/releases/latest) (current cut: `v0.1.7-windows`):
@@ -55,8 +59,8 @@ zig build
 
 `from-hh` reads a five-card `hand-history 1` file. Details: [`configs/examples/study-jobs/README.md`](configs/examples/study-jobs/README.md).
 
-Precomputed public demo (browse only): [`desktop/src/demo/README.md`](desktop/src/demo/README.md).
-Pages URL: `https://matt-azar.github.io/poker-solver/?demo=flop-explore`
+Precomputed public demo (browse only): [live Pages link](https://matt-azar.github.io/poker-solver/?demo=flop-explore)
+above; details in [`desktop/src/demo/README.md`](desktop/src/demo/README.md)
 (repo Pages source must be GitHub Actions). Private QA is `?preview=` via
 `npm run preview:scenario`. It is a separate entry.
 
