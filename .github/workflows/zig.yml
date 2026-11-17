@@ -81,6 +81,12 @@ jobs:
           python3 scripts/zig/check-no-avx512.py ./zig-out/bin/solver-engine
           python3 scripts/zig/ready-smoke.py ./zig-out/bin/solver-engine
 
+      # Standalone Equity Calculator jobs (distinct from Study node equity).
+      - name: Equity calculator smoke
+        run: |
+          set -euo pipefail
+          python3 scripts/zig/equity-calculator-smoke.py ./zig-out/bin/solver-engine
+
       # ZR-104 / audit §8: real-sidecar Study contract on river_gate_smoke (≤60s).
       - name: Study contract smoke
         run: |
@@ -161,6 +167,11 @@ jobs:
           }
           python scripts/zig/check-no-avx512.py zig-out/bin/solver-engine.exe
           python scripts/zig/ready-smoke.py zig-out/bin/solver-engine.exe
+
+      - name: Equity calculator smoke
+        shell: pwsh
+        run: |
+          python scripts/zig/equity-calculator-smoke.py zig-out/bin/solver-engine.exe
 
       # ZR-104 / audit §8: real-sidecar Study contract on river_gate_smoke (≤60s).
       - name: Study contract smoke

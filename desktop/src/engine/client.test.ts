@@ -551,6 +551,41 @@ describe("EngineClient Equity calculator jobs IPC (ZR-84)", () => {
       jobId: null,
     });
   });
+
+  it("rejects start_equity_job replies without job_id", async () => {
+    invoke.mockResolvedValueOnce(okBody("start_equity_job", {}));
+    await expect(
+      client.startEquityJob({
+        version: 1,
+        method: "exact",
+        players: [
+          { id: "p1", range: "AsAd" },
+          { id: "p2", range: "KcKd" },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      name: "EngineError",
+      message: expect.stringMatching(/no job_id/i),
+    });
+  });
+
+  it("refuses equity HTTP in the Tauri shell when transport is no-engine", async () => {
+    setNoEngineTransport();
+    await expect(
+      client.startEquityJob({
+        version: 1,
+        method: "exact",
+        players: [
+          { id: "p1", range: "AsAd" },
+          { id: "p2", range: "KcKd" },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      name: "EngineError",
+      message: expect.stringMatching(/requires solver-engine IPC/i),
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
 });
 
 describe("EngineClient ZR-103 getCategories / compare IPC", () => {

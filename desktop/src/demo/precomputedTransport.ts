@@ -333,6 +333,17 @@ export async function createPrecomputedSession(opts: {
           "precomputed_readonly",
           "Public demo is precomputed — live solving requires the Windows app.",
         );
+      // Standalone Equity Calculator jobs need a live solver-engine. Returning
+      // `{}` here used to leave Calculate stuck on queued with no job_id.
+      case "start_equity_job":
+      case "get_equity_job":
+      case "cancel_equity_job":
+        return failEnvelope(
+          op,
+          requestId,
+          "precomputed_readonly",
+          "Equity Calculator needs the Windows app (live solver-engine).",
+        );
       default:
         return envelope(op, {}, requestId);
     }

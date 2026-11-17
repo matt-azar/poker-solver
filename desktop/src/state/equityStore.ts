@@ -9,6 +9,7 @@ import {
 } from "../domain/equity/types";
 import { validateEquityDraft } from "../domain/equity/validation";
 import { EngineError, engineClient } from "../engine/client";
+import { ensureEngine } from "../platform/engine";
 import { parseCardList, serializeExactRange, type ExactRange } from "../domain/range";
 
 const DRAFT_KEY = "poker-solver.equity.draft.v1";
@@ -373,6 +374,24 @@ export const useEquityStore = create<EquityStore>((set, get) => ({
     });
 
     try {
+      // Calculator jobs are session-independent, but still need the sidecar.
+      // Re-arm IPC after hung-kill / soft boot failure so we never fall through
+      // to empty-base HTTP (Failed to fetch / stuck queued with no job_id).
+      const engine = await ensureEngine();
+      if (!engine.ok) {
+        if (get().run.revision !== revision) {
+          return;
+        }
+        set({
+          run: {
+            ...get().run,
+            starting: false,
+            error: engine.error || "solver-engine unavailable",
+          },
+        });
+        return;
+      }
+
       const body = {
         version: 1,
         client_revision: revision,
@@ -388,6 +407,9 @@ export const useEquityStore = create<EquityStore>((set, get) => ({
       };
       const accepted = await engineClient.startEquityJob(body);
       const jobId = accepted.job_id;
+      if (!jobId) {
+        throw new EngineError("start_equity_job returned no job_id", 0, accepted);
+      }
       if (get().run.revision !== revision) {
         await engineClient.cancelEquityJob(jobId);
         return;
