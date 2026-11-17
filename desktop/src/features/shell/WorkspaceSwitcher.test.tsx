@@ -1,6 +1,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearStudyIpcFeatureOverridesForTests } from "../../engine/ipcCapabilities";
+import {
+  clearStudyIpcFeatureOverridesForTests,
+  setStudyIpcFeatureOverrideForTests,
+} from "../../engine/ipcCapabilities";
 import { setNoEngineTransport, setIpcTransport } from "../../engine/transport";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
@@ -29,13 +32,29 @@ describe("WorkspaceSwitcher", () => {
     expect(select.value).toBe("study");
   });
 
-  it("soft-disables Compare when solver-engine IPC lacks compare", () => {
+  it("keeps Compare enabled when solver-engine IPC has compare", () => {
     setIpcTransport({
       protocol: 2,
       launchId: "test",
       sidecar: "solver-engine",
       workers: 1,
     });
+    const onChange = vi.fn();
+    render(<WorkspaceSwitcher workspace="study" onChange={onChange} />);
+    const compareTab = screen.getByRole("tab", { name: "Compare" });
+    expect(compareTab).toHaveProperty("disabled", false);
+    compareTab.click();
+    expect(onChange).toHaveBeenCalledWith("compare");
+  });
+
+  it("soft-disables Compare when compare capability is overridden off", () => {
+    setIpcTransport({
+      protocol: 2,
+      launchId: "test",
+      sidecar: "solver-engine",
+      workers: 1,
+    });
+    setStudyIpcFeatureOverrideForTests("compare", false);
     const onChange = vi.fn();
     render(<WorkspaceSwitcher workspace="study" onChange={onChange} />);
     const compareTab = screen.getByRole("tab", { name: "Compare" });
