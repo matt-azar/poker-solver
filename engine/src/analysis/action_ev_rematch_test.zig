@@ -532,3 +532,95 @@ test "frozen-root flop check-only Q_i matches deal-by-deal" {
     try std.testing.expectApproxEqAbs(deal.mixed_ev[nuts], frozen.mixed_ev[nuts], 1e-9);
     try std.testing.expectApproxEqAbs(deal.node_ev, frozen.node_ev, 1e-9);
 }
+
+test "frozen facing river Q_i matches deal-by-deal" {
+    // Starting-board facing (after Bet) must use path-conditioned q_opp, not root open.
+    var game = try riverBluffConfig(std.testing.allocator);
+    defer game.deinit();
+    var published = try uniformPublished(std.testing.allocator, game);
+    defer published.deinit();
+    const facing = try installRiverBluff(game, published.average, 0.0, 0.0);
+
+    var frozen = try action_ev.actionValues(std.testing.allocator, game, published, facing, -1, -1);
+    defer frozen.deinit();
+    var deal = try action_ev.actionValuesDealByDeal(std.testing.allocator, game, published, facing, -1, -1);
+    defer deal.deinit();
+    const aces = findHand(deal.combos, "Ah", "Ad") orelse return error.TestUnexpectedResult;
+    const fold = findAction(deal.actions, "Fold") orelse return error.TestUnexpectedResult;
+    const call = findAction(deal.actions, "Call") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(frozen.player == 1);
+    try std.testing.expect(frozen.ev_defined[aces] == 1);
+    try std.testing.expectApproxEqAbs(pageAction(deal, aces, fold), pageAction(frozen, aces, fold), 1e-9);
+    try std.testing.expectApproxEqAbs(pageAction(deal, aces, call), pageAction(frozen, aces, call), 1e-9);
+    try std.testing.expectApproxEqAbs(deal.mixed_ev[aces], frozen.mixed_ev[aces], 1e-9);
+    try std.testing.expectApproxEqAbs(deal.node_ev, frozen.node_ev, 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, -150.0), pageAction(frozen, aces, call), 1e-9);
+}
+
+test "frozen facing flop Root-x Q_i matches deal-by-deal" {
+    // Matt screenshot path: flop board, OOP Check → IP to act. Deal-by-deal on
+    // wide ranges never finishes; frozen path-conditioned walk must rematch oracle.
+    const text =
+        \\street-config 1
+        \\board Qh 7h 7d
+        \\pot 100
+        \\stack 100
+        \\oop-range KcKs:1,2c3d:1
+        \\ip-range AhAd:1,JcJd:1
+        \\oop-bets 0.5
+        \\ip-bets 0.5
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    var spec = try street_config.parseStreetConfig(std.testing.allocator, text);
+    defer spec.deinit();
+    var game = try compile.compile(std.testing.allocator, spec);
+    defer game.deinit();
+    var published = try uniformPublished(std.testing.allocator, game);
+    defer published.deinit();
+
+    const root = game.nodes[0];
+    try std.testing.expect(root.player == 0);
+    const check = findAction(root.action_labels[0..root.n_actions], "Check") orelse return error.TestUnexpectedResult;
+    const facing: u32 = root.child[check];
+    try std.testing.expect(game.nodes[facing].player == 1);
+
+    const oop_nuts = try findGameHand(game, 0, "Kc", "Ks");
+    const oop_air = try findGameHand(game, 0, "2c", "3d");
+    try setNamedAverage(game, published.average, 0, oop_nuts, -1, -1, &.{
+        .{ .prefix = "Check", .p = 1.0 },
+        .{ .prefix = "Bet", .p = 0.0 },
+    });
+    try setNamedAverage(game, published.average, 0, oop_air, -1, -1, &.{
+        .{ .prefix = "Check", .p = 1.0 },
+        .{ .prefix = "Bet", .p = 0.0 },
+    });
+
+    var frozen = try action_ev.actionValues(std.testing.allocator, game, published, facing, -1, -1);
+    defer frozen.deinit();
+    var deal = try action_ev.actionValuesDealByDeal(std.testing.allocator, game, published, facing, -1, -1);
+    defer deal.deinit();
+    try std.testing.expect(frozen.player == 1);
+    try std.testing.expect(frozen.reach_defined);
+    try std.testing.expect(frozen.actions.len >= 2);
+    const aces = findHand(deal.combos, "Ah", "Ad") orelse return error.TestUnexpectedResult;
+    const jacks = findHand(deal.combos, "Jc", "Jd") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(frozen.ev_defined[aces] == 1);
+    try std.testing.expect(frozen.ev_defined[jacks] == 1);
+    var action: usize = 0;
+    while (action < deal.actions.len) : (action += 1) {
+        try std.testing.expectApproxEqAbs(pageAction(deal, aces, action), pageAction(frozen, aces, action), 1e-6);
+        try std.testing.expectApproxEqAbs(pageAction(deal, jacks, action), pageAction(frozen, jacks, action), 1e-6);
+    }
+    try std.testing.expectApproxEqAbs(deal.mixed_ev[aces], frozen.mixed_ev[aces], 1e-6);
+    try std.testing.expectApproxEqAbs(deal.mixed_ev[jacks], frozen.mixed_ev[jacks], 1e-6);
+    try std.testing.expectApproxEqAbs(deal.node_ev, frozen.node_ev, 1e-6);
+}

@@ -6,6 +6,7 @@ const range_mod = @import("../poker/range.zig");
 const traversal = @import("../solve/traversal.zig");
 const training_state = @import("../solve/training_state.zig");
 const frozen_walk = @import("../solve/frozen_walk.zig");
+const equity = @import("equity.zig");
 
 pub const ActionEvError = error{ InvalidAnalysis, OutOfMemory };
 
@@ -78,10 +79,11 @@ fn resolveSigma(
     return owned.*.?;
 }
 
-/// Prefer frozen public-tree `response_walk` + Q_i normalize for root EV (Study latency).
-/// Non-root / explicit turn·river pins keep the deal-by-deal oracle path.
-/// `threads` steals first-future-card chance work on flop/turn roots (idle Study
-/// analysis should not force a single-core walk — wide ranges otherwise stall UI).
+/// Prefer frozen public-tree `response_walk` + Q_i normalize for starting-board EV
+/// (root and facing flop/turn decisions before a dealt card). Explicit turn·river
+/// pins keep the deal-by-deal oracle path.
+/// `threads` steals first-future-card chance work (idle Study analysis should not
+/// force a single-core walk — wide ranges otherwise stall UI).
 pub fn actionValues(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,
@@ -102,8 +104,10 @@ pub fn actionValuesWithThreads(
     river: i32,
     threads: u32,
 ) ActionEvError!ActionValues {
-    if (node_index == 0 and turn < 0 and river < 0) {
-        if (actionValuesFrozen(allocator, game, published, 0, threads)) |page| {
+    // Starting-board decisions (no turn/river pin): frozen walk. Includes Root x /
+    // facing-bet nodes that deal-by-deal cannot finish on wide flop ranges.
+    if (turn < 0 and river < 0) {
+        if (actionValuesFrozen(allocator, game, published, node_index, threads)) |page| {
             return page;
         } else |_| {
             // Malformed frozen tables → deal-by-deal fallback (tiny oracles).
@@ -140,25 +144,23 @@ fn differenceIsStable(total: f64, removed: f64, difference: f64) bool {
     return difference > scale * 1e-3;
 }
 
-/// Root `open` / D_i(h): compatible opponent range mass (C++ stable_compatible_mass at root).
-fn rootCompatibleOpponentMass(
-    allocator: std.mem.Allocator,
+/// D_i(h): compatible opponent mass from `opp_amount` (range priors at root, or
+/// path-conditioned q_opp at facing nodes — C++ stable_compatible_mass).
+fn compatibleOpponentMass(
     game: compile.CompiledGame,
     actor: usize,
+    opp_amount: []const f64,
     open_out: []f64,
 ) ActionEvError!void {
     const opp: usize = 1 - actor;
     const opp_hands = game.hands.combos[opp].len;
-    var amount = allocator.alloc(f64, opp_hands) catch return error.OutOfMemory;
-    defer allocator.free(amount);
-    @memset(amount, 0);
+    if (opp_amount.len != opp_hands) return error.InvalidAnalysis;
     var by_card: [52]f64 = .{0} ** 52;
     var total: f64 = 0;
     var oh: usize = 0;
     while (oh < opp_hands) : (oh += 1) {
-        const w = game.hands.range_w[opp][oh];
+        const w = opp_amount[oh];
         if (!(w > 0) or handCollidesBoard(game, opp, oh)) continue;
-        amount[oh] = w;
         total += w;
         const c0 = game.hands.hole_low[opp][oh];
         const c1 = game.hands.hole_high[opp][oh];
@@ -174,7 +176,7 @@ fn rootCompatibleOpponentMass(
         var blocked = by_card[@intCast(c0)] + by_card[@intCast(c1)];
         const combo = range_mod.Range.comboIndex(c0, c1) catch return error.InvalidAnalysis;
         const twin = game.hands.combo_to_hand[opp][@intCast(combo)];
-        if (twin >= 0) blocked -= amount[@intCast(twin)];
+        if (twin >= 0) blocked -= opp_amount[@intCast(twin)];
         const open = total - blocked;
         if (differenceIsStable(total, blocked, open)) {
             open_out[hand] = open;
@@ -184,17 +186,19 @@ fn rootCompatibleOpponentMass(
         var direct: f64 = 0;
         oh = 0;
         while (oh < opp_hands) : (oh += 1) {
-            if (!(amount[oh] > 0)) continue;
+            if (!(opp_amount[oh] > 0)) continue;
             if (handsShareHole(game, actor, hand, opp, oh)) continue;
-            direct += amount[oh];
+            direct += opp_amount[oh];
         }
         open_out[hand] = direct;
     }
 }
 
-/// Frozen StreetBatch-style action EV at the **root** on a caller-owned FrozenCtx.
+/// Frozen StreetBatch-style action EV on a caller-owned FrozenCtx.
+/// Starting-board decisions only (turn/river pins stay on deal-by-deal).
 /// Prefer this after train: Session ranks are already warm — a fresh `initEval`
 /// rebuilds the entire flop/turn rank cache on every Study values request.
+/// Non-root nodes replay path reach so facing EV (Root x) stays O(hands·runouts).
 pub fn actionValuesFrozenOnCtx(
     allocator: std.mem.Allocator,
     ctx: *frozen_walk.FrozenCtx,
@@ -203,7 +207,6 @@ pub fn actionValuesFrozenOnCtx(
     node_index: u32,
     serial_chance: bool,
 ) ActionEvError!ActionValues {
-    if (node_index != 0) return error.InvalidAnalysis;
     if (node_index >= game.nodes.len) return error.InvalidAnalysis;
     const node = game.nodes[node_index];
     if (node.kind != .decision) return error.InvalidAnalysis;
@@ -214,8 +217,18 @@ pub fn actionValuesFrozenOnCtx(
 
     ctx.ensureAllRanksReady() catch return error.InvalidAnalysis;
     const w = &ctx.workspace;
-    ctx.prepareResponseRoot(w);
-    ctx.responseWalk(w, 0, -1, -1, 0, -1, sigma, serial_chance) catch return error.InvalidAnalysis;
+
+    // Path-conditioned q (range × path σ). Root is a no-op (q = range_w → pi = 1).
+    const reach = equity.replayReachWeights(allocator, game, sigma, node_index, -1, -1) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidAnalysis,
+    };
+    defer {
+        allocator.free(reach.q0);
+        allocator.free(reach.q1);
+    }
+    ctx.prepareResponseWithReach(w, reach.q0, reach.q1);
+    ctx.responseWalk(w, node_index, -1, -1, 0, -1, sigma, serial_chance) catch return error.InvalidAnalysis;
 
     const actor: usize = @intCast(node.player);
     const hands: usize = if (actor == 0) ctx.n0 else ctx.n1;
@@ -223,10 +236,11 @@ pub fn actionValuesFrozenOnCtx(
     const aev = if (actor == 0) w.scratch[0].aev0 else w.scratch[0].aev1;
     const n_act: usize = node.n_actions;
     const joint_scale = ctx.joint_scale;
+    const opp_q = if (actor == 0) reach.q1 else reach.q0;
 
     const open = allocator.alloc(f64, hands) catch return error.OutOfMemory;
     defer allocator.free(open);
-    try rootCompatibleOpponentMass(allocator, game, actor, open);
+    try compatibleOpponentMass(game, actor, opp_q, open);
 
     var page = ActionValues{
         .allocator = allocator,
@@ -262,8 +276,10 @@ pub fn actionValuesFrozenOnCtx(
     }
 
     // response_walk stores CF raw (= prior * joint_scale * open * Q_i for the actor).
-    // Publish MATHEMATICS.md Q_i; node_ev keeps the CF sum (matches evaluate util / deal-by-deal).
-    var node_ev: f64 = 0;
+    // Publish MATHEMATICS.md Q_i. Node EV = Σ CF / (joint_scale · Σ prior·open):
+    // at root the denom is 1; at facing nodes it normalizes path-thinned mass.
+    var cf_sum: f64 = 0;
+    var mass_sum: f64 = 0;
     var any = false;
     var node_ok = true;
     hand = 0;
@@ -282,8 +298,8 @@ pub fn actionValuesFrozenOnCtx(
         }
         any = true;
         page.ev_defined[hand] = 1;
-        // CF mixed sum → node_ev (same as pre-normalize evaluatePublishedFrozen util).
-        node_ev += ev[hand];
+        cf_sum += ev[hand];
+        mass_sum += prior * open_mass;
         page.mixed_ev[hand] = ev[hand] / denom;
         if (n_act <= 1) {
             page.action_ev[hand * n_act] = page.mixed_ev[hand];
@@ -295,12 +311,12 @@ pub fn actionValuesFrozenOnCtx(
         }
     }
     page.reach_defined = any;
-    page.node_ev_defined = any and node_ok;
-    if (page.node_ev_defined) page.node_ev = node_ev;
+    page.node_ev_defined = any and node_ok and mass_sum > 0 and joint_scale > 0;
+    if (page.node_ev_defined) page.node_ev = cf_sum / (joint_scale * mass_sum);
     return page;
 }
 
-/// Frozen StreetBatch-style action EV at the **root** under published average.
+/// Frozen StreetBatch-style action EV under published average (starting board).
 /// Reuses FrozenCtx rank cache / response_walk (same engine as flop train + #256 BR / #259 MT),
 /// then Q_i-normalizes raw CF aev: `conditional = raw / (prior * joint_scale * open)`
 /// (C++ `compute_action_values` / MATHEMATICS.md).

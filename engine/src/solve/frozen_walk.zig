@@ -1782,6 +1782,25 @@ pub const FrozenCtx = struct {
         w.resetSupport();
     }
 
+    /// Path-conditioned Study values: `q` is range_w × path σ (from replayReachWeights).
+    /// Converts to pi so `collectReach` rebuilds the same masses (pi × range_w).
+    /// Root is q = range_w → pi = 1 (same as prepareResponseRoot).
+    pub fn prepareResponseWithReach(self: *FrozenCtx, w: *WorkerLocal, q0: []const f64, q1: []const f64) void {
+        var h0: usize = 0;
+        while (h0 < self.n0) : (h0 += 1) {
+            const prior = self.game.hands.range_w[0][h0];
+            const q = if (h0 < q0.len) q0[h0] else 0;
+            w.scratch[0].pi0[h0] = if (prior > 0) q / prior else 0;
+        }
+        var h1: usize = 0;
+        while (h1 < self.n1) : (h1 += 1) {
+            const prior = self.game.hands.range_w[1][h1];
+            const q = if (h1 < q1.len) q1[h1] else 0;
+            w.scratch[0].pi1[h1] = if (prior > 0) q / prior else 0;
+        }
+        w.resetSupport();
+    }
+
     /// Load Study check-down reach into amount[] (already strategy-conditioned —
     /// do **not** multiply by `range_w` again the way CFR `collectReach` does).
     fn loadCheckdownReach(
