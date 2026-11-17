@@ -312,6 +312,14 @@ describe("Slice A IPC lifecycle + node helpers", () => {
       body: { path: "/tmp/x.psol" },
       jobId: null,
     });
+
+    invoke.mockClear();
+    await ipcSave("/tmp/study.psol", { studyOnly: true });
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "save",
+      body: { path: "/tmp/study.psol", study_only: true },
+      jobId: null,
+    });
   });
 });
 

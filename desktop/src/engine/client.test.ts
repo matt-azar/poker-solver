@@ -186,6 +186,16 @@ describe("EngineClient Slice A IPC branches", () => {
     invoke.mockResolvedValueOnce(okBody("save", { saved: true }));
     await expect(client.save("s2", "/tmp/demo.psol")).resolves.toEqual({ saved: true });
 
+    invoke.mockResolvedValueOnce(okBody("save", { saved: true }));
+    await expect(
+      client.save("s2", "/tmp/study.psol", { studyOnly: true }),
+    ).resolves.toEqual({ saved: true });
+    expect(invoke).toHaveBeenLastCalledWith("solver_engine_request", {
+      op: "save",
+      body: { path: "/tmp/study.psol", study_only: true },
+      jobId: null,
+    });
+
     invoke.mockResolvedValueOnce({
       ok: false,
       op: "save",

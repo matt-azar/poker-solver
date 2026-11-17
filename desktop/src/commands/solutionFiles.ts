@@ -15,13 +15,23 @@ export type SaveSolutionResult =
   | { ok: true; path: string }
   | { ok: false; error: string };
 
+export type SaveSolutionOptions = {
+  /** Average-only PSOL; Continue disabled after open. */
+  studyOnly?: boolean;
+};
+
 /** Shared deps so File menu and Study toolbar open/save the same way. */
 export interface SolutionFileDeps {
   getSolutionPath: () => string;
   updateDraft: (partial: { solutionPath: string }) => void;
   openSolution: (path: string) => Promise<OpenSolutionResult | void>;
   /** Pass the proposed path; the store commits draft.solutionPath only after ack. */
-  saveSolution: (path: string) => Promise<SaveSolutionResult | void>;
+  saveSolution: (
+    path: string,
+    options?: SaveSolutionOptions,
+  ) => Promise<SaveSolutionResult | void>;
+  /** Default Save mode for disk picker flows (catalogue wires Study vs Continue). */
+  saveOptions?: SaveSolutionOptions;
   pickOpenPath?: () => Promise<string | null>;
   pickSavePath?: (defaultPath?: string) => Promise<string | null>;
   /**
@@ -87,7 +97,7 @@ export async function saveSolutionFile(
 ): Promise<SolutionFileResult> {
   const existing = deps.getSolutionPath().trim();
   if (existing) {
-    const result = await deps.saveSolution(existing);
+    const result = await deps.saveSolution(existing, deps.saveOptions);
     return asSaveResult(existing, result);
   }
   const pick = deps.pickSavePath ?? ((defaultPath?: string) => getPlatform().pickSavePath(defaultPath));
@@ -95,7 +105,7 @@ export async function saveSolutionFile(
   if (!path) {
     return { ok: false, error: "cancelled", cancelled: true };
   }
-  const result = await deps.saveSolution(path);
+  const result = await deps.saveSolution(path, deps.saveOptions);
   return asSaveResult(path, result);
 }
 
@@ -118,6 +128,6 @@ export async function saveSolutionFileAs(
       return { ok: false, error: "cancelled", cancelled: true };
     }
   }
-  const result = await deps.saveSolution(path);
+  const result = await deps.saveSolution(path, deps.saveOptions);
   return asSaveResult(path, result);
 }

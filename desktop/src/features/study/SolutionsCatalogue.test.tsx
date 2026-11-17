@@ -63,6 +63,15 @@ describe("SolutionsCatalogue", () => {
     useStudyStore.setState({
       phase: "complete",
       solutionId: "sol-1",
+      status: {
+        running: false,
+        paused: false,
+        cancelled: false,
+        status_generation: 1,
+        solution_id: "sol-1",
+        has_training: true,
+        can_continue: true,
+      },
       draft: { ...useStudyStore.getState().draft, solutionPath: "" },
       saveSolution: vi.fn(async (path: string) => ({ ok: true as const, path })),
       openSolution: vi.fn(async (path: string) => ({ ok: true as const, path })),
@@ -93,6 +102,7 @@ describe("SolutionsCatalogue", () => {
 
     expect(useStudyStore.getState().saveSolution).toHaveBeenCalledWith(
       "/tmp/holdem-study-solutions/SRP/Flop probe.psol",
+      { studyOnly: true },
     );
     expect(onClose).toHaveBeenCalled();
     expect(memory.get(SOLUTIONS_CATALOGUE_STORAGE_KEY)).toContain("Flop probe");
@@ -107,5 +117,45 @@ describe("SolutionsCatalogue", () => {
       "/tmp/holdem-study-solutions/SRP/Flop probe.psol",
     );
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("saves a Continue checkpoint when Mode is Continue", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<SolutionsCatalogue mode="save" onClose={onClose} />);
+
+    await user.type(
+      screen.getByLabelText("Name for saved solution"),
+      "Checkpoint",
+    );
+    await user.selectOptions(screen.getByLabelText("Save mode"), "checkpoint");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(useStudyStore.getState().saveSolution).toHaveBeenCalledWith(
+      "/tmp/holdem-study-solutions/Checkpoint.psol",
+      { studyOnly: false },
+    );
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("disables Continue mode without trainer state", () => {
+    useStudyStore.setState({
+      status: {
+        running: false,
+        paused: false,
+        cancelled: false,
+        status_generation: 2,
+        solution_id: "sol-1",
+        has_training: false,
+        can_continue: false,
+      },
+    });
+    render(<SolutionsCatalogue mode="save" onClose={vi.fn()} />);
+    const mode = screen.getByLabelText("Save mode") as HTMLSelectElement;
+    expect(mode.value).toBe("study");
+    const continueOpt = within(mode).getByRole("option", {
+      name: "Continue",
+    }) as HTMLOptionElement;
+    expect(continueOpt.disabled).toBe(true);
   });
 });

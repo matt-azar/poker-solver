@@ -72,7 +72,7 @@ describe("saveSolutionFile", () => {
     });
     expect(deps.pickSavePath).not.toHaveBeenCalled();
     expect(deps.updateDraft).not.toHaveBeenCalled();
-    expect(deps.saveSolution).toHaveBeenCalledWith("/tmp/existing.psol");
+    expect(deps.saveSolution).toHaveBeenCalledWith("/tmp/existing.psol", undefined);
   });
 
   it("prompts Save As when no path is set and does not draft before ack", async () => {
@@ -86,7 +86,7 @@ describe("saveSolutionFile", () => {
     });
     expect(deps.pickSavePath).toHaveBeenCalled();
     expect(deps.updateDraft).not.toHaveBeenCalled();
-    expect(deps.saveSolution).toHaveBeenCalledWith("/tmp/new.psol");
+    expect(deps.saveSolution).toHaveBeenCalledWith("/tmp/new.psol", undefined);
   });
 
   it("returns failure when the store rejects the save", async () => {
@@ -133,7 +133,22 @@ describe("saveSolutionFileAs", () => {
       path: "/tmp/renamed.psol",
     });
     expect(deps.updateDraft).not.toHaveBeenCalled();
-    expect(deps.saveSolution).toHaveBeenCalledWith("/tmp/renamed.psol");
+    expect(deps.saveSolution).toHaveBeenCalledWith("/tmp/renamed.psol", undefined);
+  });
+
+  it("passes saveOptions through to saveSolution", async () => {
+    const deps = makeDeps({
+      getSolutionPath: () => "/tmp/existing.psol",
+      pickSavePath: vi.fn(async () => "/tmp/study.psol"),
+      saveOptions: { studyOnly: true },
+    });
+    await expect(saveSolutionFileAs(deps)).resolves.toEqual({
+      ok: true,
+      path: "/tmp/study.psol",
+    });
+    expect(deps.saveSolution).toHaveBeenCalledWith("/tmp/study.psol", {
+      studyOnly: true,
+    });
   });
 
   it("cancels when replace confirm returns false", async () => {

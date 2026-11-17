@@ -1668,9 +1668,21 @@ pub const Session = struct {
         }
     }
 
+    /// Save options. Default is a full checkpoint when trainer state exists.
+    pub const SaveOptions = struct {
+        /// Average-only PSOL for Study browse (~⅓ size). Clears `flag_training`;
+        /// Continue stays disabled after open (ZR-96 / ZR-115). Session trainer
+        /// tables are left intact in memory.
+        study_only: bool = false,
+    };
+
     /// Metadata-only Document for streaming Save. Table bodies stay in memory order
     /// and convert through bounded scratch in `writeFileMemoryOrder` (no full PSOL copies).
-    fn buildDocumentMeta(self: *Session, layout: poker_engine.game.compile.PsolLayoutMap) SessionError!poker_formats.Document {
+    fn buildDocumentMeta(
+        self: *Session,
+        layout: poker_engine.game.compile.PsolLayoutMap,
+        opts: SaveOptions,
+    ) SessionError!poker_formats.Document {
         const game = self.game orelse return error.InvalidSession;
         if (self.published == null) return error.NothingPublished;
 
@@ -1683,8 +1695,9 @@ pub const Session = struct {
         doc.slot_actions = self.allocator.dupe(u16, layout.psol_actions) catch return error.OutOfMemory;
 
         // Preserve browse-only: never invent training tables on save (ZR-96).
+        // Study-only export drops trainer tables even when the live session has them.
         // Degenerate check-only trees may have empty tables but still continue.
-        if (self.has_training) {
+        if (!opts.study_only and self.has_training) {
             doc.has_training_flag = true;
             if (self.training) |state| {
                 doc.trained = state.trained;
@@ -1703,7 +1716,13 @@ pub const Session = struct {
         return doc;
     }
 
+    /// Full checkpoint Save (includes trainer tables when present).
     pub fn save(self: *Session, path: []const u8) SessionError!void {
+        return self.saveWithOptions(path, .{});
+    }
+
+    /// Save with explicit Study-only vs Continue/checkpoint mode.
+    pub fn saveWithOptions(self: *Session, path: []const u8, opts: SaveOptions) SessionError!void {
         self.mu.lock();
         if (self.busyForReplace()) {
             self.mu.unlock();
@@ -1713,9 +1732,11 @@ pub const Session = struct {
         // Checkpoint average must match the completed iteration being claimed.
         try self.ensurePublishedExact();
         std.debug.assert(self.published != null);
-        if (self.training) |ts| {
-            // Save claims the last committed iteration when trainer tables exist.
-            std.debug.assert(self.last_committed_trained == ts.trained);
+        if (!opts.study_only) {
+            if (self.training) |ts| {
+                // Save claims the last committed iteration when trainer tables exist.
+                std.debug.assert(self.last_committed_trained == ts.trained);
+            }
         }
 
         const game = self.game orelse return error.InvalidSession;
@@ -1729,12 +1750,15 @@ pub const Session = struct {
         };
         defer layout.deinit();
 
-        var doc = self.buildDocumentMeta(layout) catch |err| {
+        var doc = self.buildDocumentMeta(layout, opts) catch |err| {
             if (err == error.OutOfMemory) return self.mapAllocErr(err);
             return err;
         };
         defer doc.deinit();
         std.debug.assert(doc.config_text.len > 0);
+        if (opts.study_only) {
+            std.debug.assert(!doc.hasTraining());
+        }
 
         var tables = poker_formats.MemoryOrderTables{
             .game = game,

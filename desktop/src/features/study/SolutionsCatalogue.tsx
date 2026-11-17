@@ -19,8 +19,11 @@ import {
 } from "../../domain/solutionsCatalogue";
 import { resolveCatalogueSavePath } from "../../domain/solutionsRoot";
 import { openSolutionFile, saveSolutionFileAs } from "../../commands/solutionFiles";
+import { trainerContinueFromStatus } from "../../commands/studyCommands";
 import { useStudyStore } from "../../state/studyStore";
 import type { SolutionsCatalogueMode } from "../../state/solutionsCatalogueUi";
+
+export type CatalogueSaveKind = "study" | "checkpoint";
 
 export interface SolutionsCatalogueProps {
   mode: SolutionsCatalogueMode;
@@ -161,19 +164,28 @@ function promptLabel(message: string, initial: string): string | null {
 export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
   const catalogue = getSolutionsCatalogue();
   const solutionId = useStudyStore((s) => s.solutionId);
+  const status = useStudyStore((s) => s.status);
   const saveSolution = useStudyStore((s) => s.saveSolution);
   const openSolution = useStudyStore((s) => s.openSolution);
   const updateDraft = useStudyStore((s) => s.updateDraft);
   const loadRecent = useStudyStore((s) => s.loadRecent);
+  const canSaveCheckpoint = trainerContinueFromStatus(status) === true;
 
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [saveFolder, setSaveFolder] = useState(UNFILED_FOLDER);
+  const [saveKind, setSaveKind] = useState<CatalogueSaveKind>("study");
   const [newFolder, setNewFolder] = useState("");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [highlightSave, setHighlightSave] = useState(mode === "save");
+
+  useEffect(() => {
+    if (!canSaveCheckpoint && saveKind === "checkpoint") {
+      setSaveKind("study");
+    }
+  }, [canSaveCheckpoint, saveKind]);
 
   const folders = useMemo(() => {
     void revision;
@@ -202,6 +214,11 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
       setError("Solve or open a solution before saving.");
       return;
     }
+    const studyOnly = saveKind !== "checkpoint";
+    if (!studyOnly && !canSaveCheckpoint) {
+      setError("Continue checkpoint needs trainer state.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -210,7 +227,7 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
         setError(resolved.error);
         return;
       }
-      const saved = await saveSolution(resolved.path);
+      const saved = await saveSolution(resolved.path, { studyOnly });
       if (!saved.ok) {
         setError(saved.error);
         return;
@@ -376,6 +393,11 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
   };
 
   const browseDiskSave = async () => {
+    const studyOnly = saveKind !== "checkpoint";
+    if (!studyOnly && !canSaveCheckpoint) {
+      setError("Continue checkpoint needs trainer state.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -384,6 +406,7 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
         updateDraft,
         openSolution,
         saveSolution,
+        saveOptions: { studyOnly },
         confirmReplace: (path) =>
           window.confirm(
             `Save over "${path}"? An existing file at that path will be replaced.`,
@@ -584,6 +607,22 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
               aria-label="Name for saved solution"
               autoFocus={mode === "save"}
             />
+          </label>
+          <label>
+            Mode
+            <select
+              value={saveKind}
+              onChange={(event) => {
+                setSaveKind(event.target.value as CatalogueSaveKind);
+                setError(null);
+              }}
+              aria-label="Save mode"
+            >
+              <option value="study">Study</option>
+              <option value="checkpoint" disabled={!canSaveCheckpoint}>
+                Continue
+              </option>
+            </select>
           </label>
           <button
             type="button"

@@ -477,8 +477,20 @@ export async function ipcOpen(path: string): Promise<unknown> {
   return env.body;
 }
 
-export async function ipcSave(path: string): Promise<unknown> {
-  const env = await solverEngineRequest("save", { path });
+export type IpcSaveOptions = {
+  /** Average-only PSOL; Continue disabled after open (ZR-96 / ZR-115). */
+  studyOnly?: boolean;
+};
+
+export async function ipcSave(
+  path: string,
+  options?: IpcSaveOptions,
+): Promise<unknown> {
+  const body: Record<string, unknown> = { path };
+  if (options?.studyOnly === true) {
+    body.study_only = true;
+  }
+  const env = await solverEngineRequest("save", body);
   return env.body;
 }
 

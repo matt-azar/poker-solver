@@ -418,7 +418,22 @@ describe("studyStore lifecycle guards (R04/R08/R09)", () => {
     expect(engineMocks.engineClient.save).toHaveBeenLastCalledWith(
       "s1",
       "/other.psol",
+      { studyOnly: false },
     );
+  });
+
+  it("passes studyOnly through to the engine client", async () => {
+    engineMocks.engineClient.save.mockResolvedValueOnce(undefined);
+    const saved = await useStudyStore
+      .getState()
+      .saveSolution("/study.psol", { studyOnly: true });
+    expect(saved).toEqual({ ok: true, path: "/study.psol" });
+    expect(engineMocks.engineClient.save).toHaveBeenLastCalledWith(
+      "s1",
+      "/study.psol",
+      { studyOnly: true },
+    );
+    expect(useStudyStore.getState().message).toMatch(/saved study/i);
   });
 
   it("surfaces plain Error save reasons instead of generic Save failed", async () => {

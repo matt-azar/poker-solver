@@ -657,7 +657,13 @@ export class EngineClient {
     throw new EngineError("timed out waiting for engine job", 504, null);
   }
 
-  async save(solutionId: string, path: string, signal?: AbortSignal): Promise<unknown> {
+  async save(
+    solutionId: string,
+    path: string,
+    options?: { studyOnly?: boolean; signal?: AbortSignal },
+  ): Promise<unknown> {
+    const signal = options?.signal;
+    const studyOnly = options?.studyOnly === true;
     if (isIpcTransport()) {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
@@ -665,7 +671,7 @@ export class EngineClient {
       // Host save is sync; solutionId is Study-side identity (host uses current session).
       void solutionId;
       try {
-        return await ipcSave(path);
+        return await ipcSave(path, { studyOnly });
       } catch (err) {
         if (err instanceof EngineError) throw err;
         throw new EngineError(err instanceof Error ? err.message : String(err), 0, null);
@@ -674,7 +680,7 @@ export class EngineClient {
     const { response, data } = await this.request(
       "POST",
       `/api/solutions/${solutionId}/save`,
-      { path },
+      studyOnly ? { path, study_only: true } : { path },
       { signal },
     );
     this.ensureOk(response, data, true);
