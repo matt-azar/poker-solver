@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildEquityChartCurve,
   categorySeatView,
+  filterHandsByCategories,
   filterHandsByEquityBands,
   filteredEquityComposition,
   formatCategoryLabel,
   groupRangesByFolder,
   handShape,
+  matrixCellLabelForCombo,
+  matrixCellsFromCombos,
   normalizeBucketWeights,
 } from "./analysis";
 
@@ -28,8 +31,8 @@ describe("analysis helpers", () => {
       mass: [1, 3],
     });
     expect(view.rows).toEqual([
-      { name: "Pair", fraction: 0.25, mass: 1 },
-      { name: "Flush", fraction: 0.75, mass: 3 },
+      { id: "pair", name: "Pair", fraction: 0.25, mass: 1 },
+      { id: "flush", name: "Flush", fraction: 0.75, mass: 3 },
     ]);
   });
 
@@ -81,6 +84,20 @@ describe("analysis helpers", () => {
     ];
     const filtered = filterHandsByEquityBands(hands, [{ lo: 0.8, hi: 0.9 }, { lo: 0.9, hi: 1 }]);
     expect(filtered.map((row) => row.combo)).toEqual(["AhAd", "KcKd"]);
+  });
+
+  it("filters category hands and maps combos onto matrix cells", () => {
+    const hands = [
+      { combo: "AhKh", categories: ["flush draw", "oesd"] },
+      { combo: "2c2d", categories: ["pair"] },
+      { combo: "AhKd", categories: ["gutshot"] },
+    ];
+    const filtered = filterHandsByCategories(hands, ["flush draw"]);
+    expect(filtered.map((row) => row.combo)).toEqual(["AhKh"]);
+    expect(matrixCellLabelForCombo("AhAd")).toBe("AA");
+    expect(matrixCellLabelForCombo("AhKh")).toBe("AKs");
+    expect(matrixCellLabelForCombo("AhKd")).toBe("AKo");
+    expect([...matrixCellsFromCombos(["AhAd", "AhKh"])].sort()).toEqual(["AA", "AKs"]);
   });
 
   it("composes filtered check-down equity by shape", () => {

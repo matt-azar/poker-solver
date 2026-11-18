@@ -40,7 +40,7 @@ Settings opens from the menu-bar gear (aria-label **Settings**). **Algorithm** i
 
 ### Study / other
 
-- Study: action history, range matrix (**Overlay → EV+Eq** among overlays), combo inspector, lower analysis dock (**Compare runouts**, **Range equity**, **Categories**, **Value / Bluffs**). Range equity is the histogram, band filter, and OOP vs IP chart. There is no Runouts tab.
+- Study: action history, range matrix (**Overlay → EV+Eq** among overlays), combo inspector, lower analysis dock (**Compare runouts**, **Equity**, **Categories**, **Value / Bluffs**). Equity is the histogram, band filter, and OOP vs IP chart. There is no Runouts tab.
 - **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers. The assistant can open this report with card filters and frequency ranking via `compare_runouts`; clicks and **Open in Study** use the same navigation as a manual report click and stay bound to the send-time solution/policy.
 - **Value / Bluffs** lists betting candidates; equity mode includes node equity and **After call** (panel-only; assistant bluff candidates use node equity).
 - The floating Study assistant binds evidence to the **send-time** Study decision (solution, published policy revision, node, selected hand). Strategy / bluff / hand tools reuse the analysis scheduler and do **not** change Study selection. `compare_runouts` is the exception that opens Compare runouts with filters. The assistant never starts Solve.

@@ -29,21 +29,49 @@ describe("LowerDock tabs", () => {
     });
   });
 
-  it("shows Compare runouts and does not keep a Runouts tab", () => {
+  it("shows Compare runouts when the board has alternate deals", () => {
     useStudyStore.setState({
       analysisTab: "equity",
+      currentNode: {
+        node_id: "p0.t0.r-1",
+        kind: "decision",
+        board: ["Ah", "Kd", "7c", "2s"],
+      },
       layout: { ...useStudyStore.getState().layout, lowerDock: false },
     });
     render(<LowerDock />);
     expect(screen.getByRole("tab", { name: "Compare runouts" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Equity" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Runouts" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Runouts" })).toBeNull();
+  });
+
+  it("hides Compare runouts on flop-only boards without chance fan-out", () => {
+    useStudyStore.setState({
+      analysisTab: "equity",
+      currentNode: {
+        node_id: "p0.t-1.r-1",
+        kind: "decision",
+        board: ["Ah", "Kd", "7c"],
+      },
+      boardChangeChanceNode: null,
+      lineCardReport: null,
+      layout: { ...useStudyStore.getState().layout, lowerDock: false },
+    });
+    render(<LowerDock />);
+    expect(screen.queryByRole("tab", { name: "Compare runouts" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Equity" })).toBeTruthy();
   });
 
   it("sends a stored Runouts tab to Equity", async () => {
     useStudyStore.setState({
       // Legacy persisted tab id — migrate off after dock removal.
       analysisTab: "runouts" as "equity",
+      currentNode: {
+        node_id: "p0.t0.r-1",
+        kind: "decision",
+        board: ["Ah", "Kd", "7c", "2s"],
+      },
       layout: { ...useStudyStore.getState().layout, lowerDock: false },
     });
     render(<LowerDock />);
@@ -51,6 +79,6 @@ describe("LowerDock tabs", () => {
       expect(useStudyStore.getState().analysisTab).toBe("equity");
     });
     expect(screen.queryByRole("tab", { name: "Runouts" })).toBeNull();
-    expect(screen.getByRole("tab", { name: "Compare runouts" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Equity" })).toBeTruthy();
   });
 });

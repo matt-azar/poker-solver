@@ -36,6 +36,8 @@ pub const PlayerCategoryMass = struct {
     count: usize = hand_category_count,
     mass: [max_category_count]f64 = .{0} ** max_category_count,
     fraction: [max_category_count]f64 = .{0} ** max_category_count,
+    /// Per-combo category bitmask for Study matrix filters (0 = absent / zero weight).
+    combo_tags: [card.combo_count]u16 = .{0} ** card.combo_count,
 };
 
 pub const CategoryComposition = struct {
@@ -245,6 +247,7 @@ fn composeMadePlayer(board: []const card.Card, range: range_mod.Range) Categorie
         const slot: usize = @intFromEnum(category);
         out.mass[slot] += weight;
         out.total_mass += weight;
+        out.combo_tags[@intCast(index)] = @as(u16, 1) << @intCast(slot);
     }
     if (!(out.total_mass > 0.0) or !std.math.isFinite(out.total_mass)) {
         return out;
@@ -267,11 +270,28 @@ fn composeDrawPlayer(board: []const card.Card, range: range_mod.Range) Categorie
         if (boardBlocks(board, holes[0], holes[1])) continue;
         const flags = classifyDraws(holes[0], holes[1], board);
         out.total_mass += weight;
-        if (flags.flush_draw) out.mass[@intFromEnum(DrawCategory.flush_draw)] += weight;
-        if (flags.oesd) out.mass[@intFromEnum(DrawCategory.oesd)] += weight;
-        if (flags.gutshot) out.mass[@intFromEnum(DrawCategory.gutshot)] += weight;
-        if (flags.backdoor_flush) out.mass[@intFromEnum(DrawCategory.backdoor_flush)] += weight;
-        if (flags.backdoor_straight) out.mass[@intFromEnum(DrawCategory.backdoor_straight)] += weight;
+        var mask: u16 = 0;
+        if (flags.flush_draw) {
+            out.mass[@intFromEnum(DrawCategory.flush_draw)] += weight;
+            mask |= @as(u16, 1) << @intFromEnum(DrawCategory.flush_draw);
+        }
+        if (flags.oesd) {
+            out.mass[@intFromEnum(DrawCategory.oesd)] += weight;
+            mask |= @as(u16, 1) << @intFromEnum(DrawCategory.oesd);
+        }
+        if (flags.gutshot) {
+            out.mass[@intFromEnum(DrawCategory.gutshot)] += weight;
+            mask |= @as(u16, 1) << @intFromEnum(DrawCategory.gutshot);
+        }
+        if (flags.backdoor_flush) {
+            out.mass[@intFromEnum(DrawCategory.backdoor_flush)] += weight;
+            mask |= @as(u16, 1) << @intFromEnum(DrawCategory.backdoor_flush);
+        }
+        if (flags.backdoor_straight) {
+            out.mass[@intFromEnum(DrawCategory.backdoor_straight)] += weight;
+            mask |= @as(u16, 1) << @intFromEnum(DrawCategory.backdoor_straight);
+        }
+        out.combo_tags[@intCast(index)] = mask;
     }
     if (!(out.total_mass > 0.0) or !std.math.isFinite(out.total_mass)) {
         return out;

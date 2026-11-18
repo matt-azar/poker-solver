@@ -54,7 +54,10 @@ describe("AnalysisDockPanel equity tab", () => {
     const { AnalysisDockPanel } = await import("./AnalysisDockPanel");
     render(<AnalysisDockPanel />);
 
+    expect(screen.getByText("Equity")).toBeTruthy();
     expect(screen.getByText("Equity (fraction of pot).")).toBeTruthy();
+    expect(screen.getByText("0.4400")).toBeTruthy();
+    expect(screen.getByText("0.5600")).toBeTruthy();
     expect(screen.queryByText(/Not chip EV/i)).toBeNull();
     expect(screen.queryByText("Range composition")).toBeNull();
     expect(screen.queryByText("Top hands in filter")).toBeNull();

@@ -37,11 +37,23 @@ export interface ChanceCardOption {
   nodeId: string;
   weight: number | null;
   blocked: boolean;
+  /**
+   * Legal deal in the tree, but the child pack was not exported (public demo
+   * chance fan-out cap). Distinct from board-blocked and from missing.
+   */
+  unrecorded?: boolean;
 }
 
 export type DeckCell =
   | ChanceCardOption
-  | { card: string; rank: string; suit: string; missing: true; blocked: boolean };
+  | {
+      card: string;
+      rank: string;
+      suit: string;
+      missing: true;
+      blocked: boolean;
+      unrecorded?: boolean;
+    };
 
 export interface BoardGroups {
   flop: string[];
@@ -204,8 +216,14 @@ export function chanceCardEntries(node: NodePayload): RawChanceCard[] {
   return (node.children ?? []).filter(isChanceCardEntry);
 }
 
-/** Legal next cards from a deal (next-card) node for the rank×suit picker. */
-export function chanceCardOptions(node: NodePayload | null | undefined): ChanceCardOption[] {
+/**
+ * Legal next cards from a deal (next-card) node for the rank×suit picker.
+ * Pass `recordedChildIds` in public demo to mark legal-but-unexported children.
+ */
+export function chanceCardOptions(
+  node: NodePayload | null | undefined,
+  recordedChildIds?: ReadonlySet<string> | null,
+): ChanceCardOption[] {
   if (!node || node.kind !== "chance") {
     return [];
   }
@@ -225,6 +243,9 @@ export function chanceCardOptions(node: NodePayload | null | undefined): ChanceC
       typeof entry.weight === "number" && Number.isFinite(entry.weight)
         ? entry.weight
         : null;
+    const unrecorded = Boolean(
+      recordedChildIds && recordedChildIds.size > 0 && !recordedChildIds.has(nodeId),
+    );
     byCard.set(code, {
       card: code,
       rank: parsed.rank,
@@ -232,6 +253,7 @@ export function chanceCardOptions(node: NodePayload | null | undefined): ChanceC
       nodeId,
       weight,
       blocked: blockers.has(code),
+      unrecorded,
     });
   }
   return Array.from(byCard.values());
@@ -274,8 +296,32 @@ export function isMissingDeckCell(
   return "missing" in cell && cell.missing;
 }
 
+export function isUnrecordedDeckCell(cell: DeckCell): boolean {
+  return Boolean(cell.unrecorded) && !cell.blocked;
+}
+
+/** Selectable next card: present in chance links, not blocked, and recorded when gated. */
 export function isLegalDeckCell(cell: DeckCell): cell is ChanceCardOption {
-  return !isMissingDeckCell(cell) && !cell.blocked;
+  return !isMissingDeckCell(cell) && !cell.blocked && !cell.unrecorded;
+}
+
+/** True when the deal ancestor exposes more than one selectable alternate card. */
+export function hasAlternateDeals(
+  options: readonly ChanceCardOption[] | null | undefined,
+): boolean {
+  if (!options?.length) {
+    return false;
+  }
+  let count = 0;
+  for (const option of options) {
+    if (!option.blocked && !option.unrecorded) {
+      count += 1;
+      if (count >= 2) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /** Minimal trail step shape for resolving a deal-chance ancestor. */

@@ -2305,6 +2305,33 @@
   font-size: 12px;
 }
 
+/* Visible reset for equity-band / category matrix filters (logic, not redesign chrome). */
+.matrix-analysis-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.category-filter-btn {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.category-row--active .category-filter-btn,
+.category-filter-btn[aria-pressed="true"] {
+  color: var(--accent, #3b82f6);
+  font-weight: 600;
+}
+
 /* OOP vs IP equity distribution chart (GTO Wizard–style step plot). */
 .equity-chart {
   min-width: 0;

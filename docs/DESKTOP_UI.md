@@ -48,7 +48,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Action EV | `values` | Inspector / Analysis | Decision only; mid-train demux by `request_id` | analysis vitest; node-EV scripts |
 | Runouts | *(soft-gated)* | Study has no Runouts tab | Host `runouts` not enabled in `ipcCapabilities` | — |
 | Next-card picker | chance `cards[]` on `node` | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout; flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
-| Equity (node) | `equity` | Study dock tab **Range equity**: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); reach-weighted at selected node; buckets + `oop_hands`/`ip_hands`. There is no Runouts tab | analysis vitest; contract smoke |
+| Equity (node) | `equity` | Study Equity tab: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); reach-weighted at selected node; buckets + `oop_hands`/`ip_hands`. There is no Runouts tab | analysis vitest; contract smoke |
 | Equity calculator | `start_equity_job` / `get_equity_job` / `cancel_equity_job` | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | `equityStore` / client vitest; `scripts/zig/equity-calculator-smoke.py` (Study node equity uses `equity-smoke.py`) |
 | Value / Bluffs | Client join of node `strategy` + `equity` + `values` | Study **Value / Bluffs** tab | After call = equity on Call child of each hand’s max-prob bet/raise; EV via `values` (`comboEv`); Reach is node reach mass | `valueBluffs.test.ts` |
 | Categories | `categories` | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | analysis vitest (ZR-103) |
@@ -88,7 +88,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | --- | --- |
 | Contracts + `EngineClient` | Done |
 | Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
-| Analysis dock + Build + Library | Done — Range equity (histogram, band filter, OOP vs IP chart); Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
+| Analysis dock + Build + Library | Done — Equity hist + band filter + OOP vs IP chart; Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
 | Locks + strategy edits | Done |
 | Compare | Done — host `compare` + Session baseline snapshot on resolve-locked; `compare: true` in `ipcCapabilities` |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |

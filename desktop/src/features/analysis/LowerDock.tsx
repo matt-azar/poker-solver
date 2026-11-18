@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import {
+  chanceCardOptions,
+  hasAlternateDeals,
+} from "../../domain/cards";
+import { lineCardReportStreet } from "../../domain/lineCardReport";
 import { clampDockHeight } from "../../state/layoutStore";
 import { useStudyStore } from "../../state/studyStore";
 import { AnalysisDockPanel } from "./AnalysisDockPanel";
@@ -19,7 +24,27 @@ export function LowerDock() {
   const setLayout = useStudyStore((s) => s.setLayout);
   const analysisTab = useStudyStore((s) => s.analysisTab);
   const setAnalysisTab = useStudyStore((s) => s.setAnalysisTab);
+  const currentNode = useStudyStore((s) => s.currentNode);
+  const boardChangeChanceNode = useStudyStore((s) => s.boardChangeChanceNode);
+  const lineCardReport = useStudyStore((s) => s.lineCardReport);
   const dragRef = useRef<{ startY: number; startH: number; cap: number } | null>(null);
+
+  const showCompareRunouts = useMemo(() => {
+    if (lineCardReport) {
+      return true;
+    }
+    const chance = boardChangeChanceNode ?? currentNode;
+    const options = chanceCardOptions(chance);
+    if (hasAlternateDeals(options)) {
+      return true;
+    }
+    return lineCardReportStreet(currentNode?.board) != null;
+  }, [boardChangeChanceNode, currentNode, lineCardReport]);
+
+  const visibleTabs = useMemo(
+    () => TABS.filter((tab) => tab.id !== "line-cards" || showCompareRunouts),
+    [showCompareRunouts],
+  );
 
   useEffect(() => {
     // Repair a corrupted height without forcing the dock open over the matrix.
@@ -38,8 +63,12 @@ export function LowerDock() {
     }
     if (tab === "bluffs") {
       setAnalysisTab("value-bluffs");
+      return;
     }
-  }, [analysisTab, setAnalysisTab]);
+    if (tab === "line-cards" && !showCompareRunouts) {
+      setAnalysisTab("equity");
+    }
+  }, [analysisTab, setAnalysisTab, showCompareRunouts]);
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent) => {
@@ -75,9 +104,18 @@ export function LowerDock() {
 
   const openTab = (id: DockTabId) => {
     setAnalysisTab(id);
+    // Cap so Categories / Equity do not cover most of the 13×13 at laptop heights.
+    const preferred = Math.min(
+      clampDockHeight(Math.max(layout.lowerDockHeight, 240)),
+      clampDockHeight(
+        typeof window === "undefined"
+          ? 280
+          : Math.floor(window.innerHeight * 0.35),
+      ),
+    );
     setLayout({
       lowerDock: true,
-      lowerDockHeight: Math.max(layout.lowerDockHeight, 400),
+      lowerDockHeight: preferred,
     });
   };
 
@@ -93,7 +131,7 @@ export function LowerDock() {
     return (
       <section className="lower-dock lower-dock--collapsed" aria-label="Analysis">
         <div className="lower-dock__tabs" role="tablist" aria-label="Analysis">
-          {TABS.map((tab) => (
+          {visibleTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -111,7 +149,7 @@ export function LowerDock() {
   }
 
   let body: ReactNode;
-  if (activeTab === "line-cards") {
+  if (activeTab === "line-cards" && showCompareRunouts) {
     body = <LineCardReport />;
   } else if (activeTab === "value-bluffs") {
     body = <ValueBluffsPanel />;
@@ -133,7 +171,7 @@ export function LowerDock() {
         title="Drag to resize"
       />
       <div className="lower-dock__tabs" role="tablist" aria-label="Analysis">
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"

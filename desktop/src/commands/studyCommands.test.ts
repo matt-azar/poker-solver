@@ -63,6 +63,19 @@ describe("canExecuteSolve", () => {
     );
     expect(complete.ok).toBe(true);
   });
+
+  it("blocks Solve on precomputed demo transport", () => {
+    setIpcTransport({
+      protocol: 2,
+      launchId: "precomputed-demo",
+      sidecar: "precomputed-pack",
+      workers: 0,
+    });
+    const gate = canExecuteSolve(ctx());
+    expect(gate.ok).toBe(false);
+    expect(gate.reason).toMatch(/precomputed|Windows app/i);
+    setNoEngineTransport();
+  });
 });
 
 describe("canExecuteSave / Calculate EV / lock / strategy", () => {

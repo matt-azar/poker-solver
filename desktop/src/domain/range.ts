@@ -950,3 +950,38 @@ export function comboCount(grid: WeightGrid, boardText: string): number {
   }
   return count;
 }
+
+export type ExactComboAvailability = {
+  /** Positive-weight combos in the editor range (before board/dead removal). */
+  original: number;
+  /** Combos still legal after removing board + dead cards. */
+  available: number;
+};
+
+/**
+ * Count suit-specific exact combos before/after board+dead removal.
+ * Acceptance: AA vs KK on As Kh 7c 4d 2s → 3 available each.
+ */
+export function exactComboAvailability(
+  range: ExactRange,
+  boardAndDeadText: string,
+): ExactComboAvailability {
+  const blocked = boardSet(boardAndDeadText);
+  let original = 0;
+  let available = 0;
+  for (const [combo, weight] of range) {
+    if (!(weight > 0) || !Number.isFinite(weight)) {
+      continue;
+    }
+    if (combo.length < 4) {
+      continue;
+    }
+    original += 1;
+    const first = combo.slice(0, 2);
+    const second = combo.slice(2, 4);
+    if (!blocked.has(first) && !blocked.has(second)) {
+      available += 1;
+    }
+  }
+  return { original, available };
+}

@@ -15,11 +15,14 @@ import {
   deckCellIndex,
   deckCoords,
   fullDeckGrid,
+  hasAlternateDeals,
   isLegalDeckCell,
   isMissingDeckCell,
+  isUnrecordedDeckCell,
   type DealStreet,
   type DeckCell,
 } from "../../domain/cards";
+import { getActiveDemoSession } from "../../demo/demoMode";
 import { useStudyStore } from "../../state/studyStore";
 import { PlayingCard } from "../cards/PlayingCard";
 import "../../styles/cards.css";
@@ -64,11 +67,22 @@ export function CardPicker({
 
   // Prefer the armed deal-chance ancestor so options load without leaving the line.
   const dealNode = boardChangeChanceNode ?? currentNode;
-  const options = useMemo(() => chanceCardOptions(dealNode), [dealNode]);
+  const recordedChildIds = useMemo(() => {
+    const session = getActiveDemoSession();
+    if (!session || !dealNode?.node_id) {
+      return null;
+    }
+    return session.recordedChildIdsForChance(dealNode.node_id);
+  }, [dealNode?.node_id]);
+  const options = useMemo(
+    () => chanceCardOptions(dealNode, recordedChildIds),
+    [dealNode, recordedChildIds],
+  );
   const grid = useMemo(
     () => fullDeckGrid(options, dealNode?.board),
     [options, dealNode?.board],
   );
+  const alternateDeals = useMemo(() => hasAlternateDeals(options), [options]);
   const activeStreet =
     street ??
     boardChangeStreet ??
@@ -187,6 +201,8 @@ export function CardPicker({
       </div>
       {!chanceReady ? (
         <p className="empty-hint">No next cards at this node.</p>
+      ) : !alternateDeals ? (
+        <p className="empty-hint">No alternate deals at this node.</p>
       ) : (
         <div className="card-picker-grid" role="grid" aria-label="Suit and rank">
           {CARD_SUITS.map((suit, rowIndex) => (
@@ -200,6 +216,7 @@ export function CardPicker({
                 const index = rowIndex * CARD_RANKS.length + colIndex;
                 const cell = grid[index]!;
                 const legal = isLegalDeckCell(cell);
+                const unrecorded = isUnrecordedDeckCell(cell);
                 const focused = index === focusIndex;
                 const selected = selectedCard === cell.card || focused;
                 return (
@@ -211,14 +228,17 @@ export function CardPicker({
                     data-suit={suit}
                     data-blocked={cell.blocked ? "true" : "false"}
                     data-missing={isMissingDeckCell(cell) ? "true" : "false"}
+                    data-unrecorded={unrecorded ? "true" : "false"}
                     data-focused={focused ? "true" : "false"}
                     disabled={!legal}
                     aria-label={`${cell.card}${
                       cell.blocked
                         ? " board blocker"
-                        : isMissingDeckCell(cell)
-                          ? " unavailable"
-                          : ""
+                        : unrecorded
+                          ? " not recorded in this demo"
+                          : isMissingDeckCell(cell)
+                            ? " unavailable"
+                            : ""
                     }`}
                     onClick={() => selectCell(cell)}
                     onFocus={() => setFocusIndex(index)}
