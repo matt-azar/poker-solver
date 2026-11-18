@@ -60,5 +60,5 @@ if ($proc.ExitCode -ne 0) {
 }
 Write-Host "ipc async acceptance PASS"
 Write-Host "Pipe-level race cases (no WebView): .\scripts\desktop\ipc-race-replay.ps1 -All"
-Write-Host "Windows CI: .github/workflows/ipc-race-probes.yml"
+Write-Host "CI: ipc-race-probes.yml (supervisor + hold-EV); installer Stage DelayedReply (this script)"
 exit 0

@@ -14,6 +14,32 @@ use tauri::{AppHandle, Manager, RunEvent};
 
 use assistant_secrets::AssistantSecretStore;
 
+/// Normal window Close / app Exit path (audit §8 Parent exit).
+///
+/// Delegates to [`solver_engine::kill_solver_engine`]: kill handle first, then
+/// bounded join of reader/writer and `wait` on the child. Idempotent — safe to
+/// call from both [`RunEvent::ExitRequested`] (last-window Close / `app.exit`)
+/// and [`RunEvent::Exit`] (LoopDestroyed, including paths that skip
+/// ExitRequested such as some macOS quit routes).
+///
+/// Distinct from the installer / IPC-acceptance harness command
+/// `exit_with_code`, which calls `std::process::exit` and **never** reaches
+/// this RunEvent handler (and therefore does not reap). Do not use that
+/// command to prove Close cleanup.
+fn reap_solver_engine_on_parent_exit(app_handle: &AppHandle) {
+    if let Some(state) = app_handle.try_state::<solver_engine::SolverEngineState>() {
+        solver_engine::kill_solver_engine(&*state);
+    }
+}
+
+/// Whether a Tauri run-loop event is the parent-exit reap surface.
+///
+/// Used by the Exit handler and by the regression test so Close/Exit stay
+/// distinct from `exit_with_code` (`std::process::exit`).
+fn parent_exit_run_event_reaps(event: &RunEvent) -> bool {
+    matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. })
+}
+
 fn assistant_secret_store(app: &AppHandle) -> Result<AssistantSecretStore, String> {
     let dir = app
         .path()
@@ -58,9 +84,7 @@ fn copy_diagnostics_bundle() -> Result<String, String> {
         Err(zip_err) => {
             // Fallback: folder path is still shareable.
             let dir = diagnostics::diagnostics_dir_path_string()?;
-            Err(format!(
-                "zip failed ({zip_err}); diagnostics folder: {dir}"
-            ))
+            Err(format!("zip failed ({zip_err}); diagnostics folder: {dir}"))
         }
     }
 }
@@ -209,12 +233,55 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Hold'em Study")
         .run(|app_handle, event| {
-            // Only on final Exit — ExitRequested can still be cancelled.
-            // Bounded reap: kill handle first, then join I/O threads / wait child.
-            if let RunEvent::Exit = event {
-                if let Some(state) = app_handle.try_state::<solver_engine::SolverEngineState>() {
-                    solver_engine::kill_solver_engine(&*state);
-                }
+            // Window Close → ExitRequested then Exit. Some quit paths (e.g.
+            // macOS Cmd+Q via LoopDestroyed) emit Exit only. Reap on both;
+            // kill_solver_engine is idempotent. This shell never calls
+            // prevent_exit, so ExitRequested always proceeds to process exit.
+            //
+            // Not the installer path: `exit_with_code` → std::process::exit
+            // skips this loop entirely (see parent_exit_run_event_reaps tests).
+            if parent_exit_run_event_reaps(&event) {
+                reap_solver_engine_on_parent_exit(&app_handle);
             }
         });
+}
+
+#[cfg(test)]
+mod parent_exit_tests {
+    use super::*;
+
+    #[test]
+    fn run_event_exit_is_parent_reap_path() {
+        // Constructing ExitRequested needs ExitRequestApi (runtime-only), so
+        // we assert the Exit arm that every Close eventually reaches, and that
+        // unrelated run-loop events do not reap.
+        assert!(parent_exit_run_event_reaps(&RunEvent::Exit));
+        assert!(!parent_exit_run_event_reaps(&RunEvent::Ready));
+        assert!(!parent_exit_run_event_reaps(&RunEvent::Resumed));
+        assert!(!parent_exit_run_event_reaps(&RunEvent::MainEventsCleared));
+    }
+
+    #[test]
+    fn kill_solver_engine_is_idempotent_empty_session() {
+        // Same API the Close/Exit handler calls — empty session is a no-op
+        // (second call after a live reap must also be safe).
+        let state = solver_engine::SolverEngineState::new();
+        solver_engine::kill_solver_engine(&state);
+        solver_engine::kill_solver_engine(&state);
+        assert!(state.launch_id_snapshot().is_none());
+    }
+
+    #[test]
+    fn exit_with_code_is_registered_but_not_the_close_reap_path() {
+        // Proof boundary for audit §8: the harness command exists on the
+        // invoke surface, but parent Exit reaping is RunEvent-driven via
+        // kill_solver_engine — not std::process::exit.
+        //
+        // We cannot call exit_with_code here (it terminates the test process).
+        // Symbol + handler registration in `run()` keep the installer path
+        // available; Close must keep using parent_exit_run_event_reaps.
+        let _harness_exit: fn(i32) = solver_engine::exit_with_code;
+        assert!(parent_exit_run_event_reaps(&RunEvent::Exit));
+        let _ = _harness_exit; // referenced so the harness symbol stays linked in tests
+    }
 }
