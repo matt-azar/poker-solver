@@ -29,7 +29,7 @@ cd desktop && npm ci && npm test && npx tsc -b
 cd desktop && npm run check:ai-context
 ```
 
-Windows: use `python` and `zig-out/bin/solver-engine.exe` the same way. Prefer `-Dcpu=x86_64_v2` for any sidecar that may leave the builder host.
+Windows: use `python` and `zig-out/bin/solver-engine.exe` the same way. On x86_64, omitting `-Dcpu` already targets `x86_64_v2`. Scripts and Windows CI still pass `-Dcpu=x86_64_v2`. `-Dcpu=native` follows the builder CPU and can emit AVX-512.
 
 ## What each layer covers
 
@@ -47,7 +47,9 @@ Windows: use `python` and `zig-out/bin/solver-engine.exe` the same way. Prefer `
 | Windows installer E2E Stage A | `scripts/desktop/windows-installer-e2e.ps1 -InstallerExe … -Stage A` | Silent-installs the **exact** NSIS artifact with explicit `/D=%LOCALAPPDATA%\Holdem Study` (PR installer when the follow-on job runs after `windows-installer`); resolves UI as `Holdem Study.exe` **or** Cargo/Tauri `poker-solver-study.exe` (registry `MainBinaryName`); requires an **interactive** Windows session; launches Study with `STUDY_INSTALLER_E2E=stage-a` so the WebView boot hook drives `ensure`+`status` (proves control); explicit timeouts; on failure writes `last-completed-step.txt` + `windows_collect` diagnostics. |
 | Windows installer E2E Stage B | `scripts/desktop/windows-installer-e2e.ps1 -InstallerExe … -Stage B` | Same install bar, then `STUDY_INSTALLER_E2E=stage-b` + `STUDY_INSTALLER_E2E_STAGE_B=1`: tiny river solve → browse node → save PSOL → **clear active solution** (kill+re-ensure; assert `nothing_published`) → reopen PSOL → assert strategy fingerprint restored → close; sidecar exits. |
 | Windows installer E2E Stage DelayedReply | `… -Stage DelayedReply` | Same install bar, then `ipc-async-acceptance.ps1` (test sidecar + `STUDY_IPC_ACCEPTANCE`). Packaged WebView delayed-reply concurrency. Does **not** replace Stage B. |
-| Windows installer E2E (future) | `-Stage BlockedWrite` / `NormalClosePending` / `StaleCallAfterReconnect` | YAML hooks present (`if: false`) in `windows-installer.yml`. Need product `STUDY_INSTALLER_E2E` boot hooks from other IPC tracks before enabling. |
+| Windows installer E2E Stage BlockedWrite | `… -Stage BlockedWrite` | `STUDY_INSTALLER_E2E=stage-blocked-write`. The script points `STUDY_SOLVER_ENGINE` at `ipc-test-sidecar` with `--stop-reading-after 0 --partial-drain-bytes 4`. Probes a mid-frame write stall. The probe does not SKIP. |
+| Windows installer E2E Stage NormalClosePending | `… -Stage NormalClosePending` | `STUDY_INSTALLER_E2E=stage-normal-close-pending`. Close while IPC work is still pending. |
+| Windows installer E2E Stage StaleCallAfterReconnect | `… -Stage StaleCallAfterReconnect` | `STUDY_INSTALLER_E2E=stage-stale-call-after-reconnect`. A stale invoke after kill and ensure. |
 | Desktop Vitest | `cd desktop && npm test` | `EngineClient` IPC branches, Study store/lifecycle, locks/strategy-edits soft gates, analysis helpers, UI domain |
 | Desktop typecheck | `cd desktop && npx tsc -b` | Store/client nullability that vitest can miss |
 | AI context packs | `cd desktop && npm run check:ai-context` | Generated packs match `docs/ai-context/source/` |
@@ -58,11 +60,11 @@ Coverage claims use IPC envelope errors, host `error` replies, and the contract 
 
 | Workflow | Role |
 | --- | --- |
-| `.github/workflows/zig.yml` | `zig build` / `zig build test` + ready smoke + Study contract smoke + `holdem-study-cli` smoke (Linux + Windows; Windows pins `-Dcpu=x86_64_v2`) |
+| `.github/workflows/zig.yml` | Linux and Windows: `zig build` / `zig build test`, ready smoke, `check-no-avx512.py`, equity-calculator smoke, Study contract smoke, `holdem-study-cli` smoke. Linux also runs engine-crash-recovery, stop-close-responsive, study-overlap-actions, and status-vs-mutation smokes. Windows passes `-Dcpu=x86_64_v2`. On x86_64, omitting `-Dcpu` already targets `x86_64_v2`. |
 | `.github/workflows/ci.yml` | Desktop Vitest, `tsc`, and build |
 | `.github/workflows/public-demo-pages.yml` | Precomputed public Study demo: `npm run build:public-demo` + Playwright (desktop Chromium + touch Chromium/WebKit @ 360/390), then deploy `desktop/dist-public-demo` to GitHub Pages (`PUBLIC_DEMO_BASE=/poker-solver/`). One-time: repo Pages source = GitHub Actions. Not live solving; Windows download stays on GitHub Releases. |
 | `.github/workflows/ipc-race-probes.yml` | Windows (+ Linux) hold-EV probe + `cargo test --lib solver_engine::`. Path filters include production Rust supervisor, Zig `host/src/dispatch.zig`, and TypeScript `engine/{transport,client}.ts` (not only harness files). Separate from flop/memory benches, installer E2E, and UI stale-EV. Packaged WebView concurrency is Stage DelayedReply in the installer workflow. |
-| `.github/workflows/windows-installer.yml` | NSIS packs Zig `solver-engine`. The frontend Vite build is Tauri `beforeBuildCommand`. Follow-on `windows-installer-e2e` runs Stage A, Stage B (real-engine river Save/reopen), then Stage DelayedReply (packaged WebView concurrency). Future BlockedWrite / NormalClosePending / StaleCallAfterReconnect stages are YAML-hooked until product entrypoints land. |
+| `.github/workflows/windows-installer.yml` | NSIS packs Zig `solver-engine`. The frontend Vite build is Tauri `beforeBuildCommand`. Follow-on `windows-installer-e2e` runs Stage A, Stage B (real-engine river Save/reopen), Stage DelayedReply, Stage BlockedWrite, Stage NormalClosePending, and Stage StaleCallAfterReconnect. |
 
 Packaged Tauri webview lifecycle and the Windows installer remain a release gate (Actions → **Windows Installer**). See [DESKTOP_UI.md](../../DESKTOP_UI.md).
 

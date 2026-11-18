@@ -16,9 +16,9 @@ Wire format: little-endian `u32` payload length + UTF-8 JSON envelope
 | River-beta Python reader | 64 MiB |
 
 **These fixtures assume a hard ceiling of `16 * 1024 * 1024` bytes**
-(`boundary/CEILING.txt`). The Frame Unicode track may finalize a single
-documented limit at 16 or 64 MiB; update `CEILING.txt` + boundary metas when
-that lands. Admission byte budgets in Rust remain a separate limit.
+(`boundary/CEILING.txt`). That ceiling is the protocol-2 limit on the Zig host
+and the desktop Rust framer. The CLI and river-beta readers in the table above
+still accept 64 MiB. Admission byte budgets in Rust remain a separate limit.
 
 ## Cases
 

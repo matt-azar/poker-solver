@@ -48,7 +48,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Action EV | `values` | Inspector / Analysis | Decision only; mid-train demux by `request_id` | analysis vitest; node-EV scripts |
 | Runouts | *(soft-gated)* | Study has no Runouts tab | Host `runouts` not enabled in `ipcCapabilities` | — |
 | Next-card picker | chance `cards[]` on `node` | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout; flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
-| Equity (node) | `equity` | Study Equity tab: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); reach-weighted at selected node; buckets + `oop_hands`/`ip_hands` | analysis vitest; contract smoke |
+| Equity (node) | `equity` | Study dock tab **Range equity**: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); reach-weighted at selected node; buckets + `oop_hands`/`ip_hands`. There is no Runouts tab | analysis vitest; contract smoke |
 | Equity calculator | `start_equity_job` / `get_equity_job` / `cancel_equity_job` | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | `equityStore` / client vitest; `scripts/zig/equity-calculator-smoke.py` (Study node equity uses `equity-smoke.py`) |
 | Value / Bluffs | Client join of node `strategy` + `equity` + `values` | Study **Value / Bluffs** tab | After call = equity on Call child of each hand’s max-prob bet/raise; EV via `values` (`comboEv`); Reach is node reach mass | `valueBluffs.test.ts` |
 | Categories | `categories` | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | analysis vitest (ZR-103) |
@@ -56,7 +56,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Strategy edits | `list_strategy_edits` / `put_strategy_edit` / `delete_strategy_edit` | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | `strategyEdits.test.ts` (ZR-101) |
 | Resolve locked | `resolve_locked` | Solver menu + drawer | New solution + baseline | client IPC tests (ZR-100) |
 | Compare | `compare` | Compare workspace | Immutable baseline retained on `resolve_locked`; strategy/EV deltas vs scenario | host + desktop vitest |
-| Save / Open | `save`, `open` | File menu / Study toolbar → in-app solutions catalogue | PSOL + locks; folders in localStorage index under managed solutions root; Browse disk secondary; invalid strategy rows rejected before replace | contract smoke; checkpoint + `solutionsCatalogue` vitest |
+| Save / Open | `save`, `open` | File menu / Study toolbar → in-app solutions catalogue | Mode **Study only** (`study_only: true`) or **Resumable checkpoint**. PSOL + locks; folders in localStorage index under managed solutions root; Browse disk secondary; invalid strategy rows rejected before replace. Browse-only files disable Continue | contract smoke; checkpoint + `solutionsCatalogue` vitest |
 | Recent / templates / ranges | Tauri FS `library_*` (not engine HTTP) | Library + File menu | Nested `configs/ranges`; flat `configs/templates`; staged via `bundle.resources` | library IPC vitest; `check:library-assets` |
 | Config parse | local TS (`streetConfigText`) | Build | `street-config 1` only; echoes `tree_edits`; no host session mutate | `streetConfigText.test.ts` |
 | Memory plan dry-run | `plan_memory` | Build strip shows Plan peak, Budget, decision count, deal count, pot, and stack | JSON field `estimated_peak_bytes` is the plan. It is not process RSS. Temp compile. | TreeLineEditor tests |
@@ -88,7 +88,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | --- | --- |
 | Contracts + `EngineClient` | Done |
 | Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
-| Analysis dock + Build + Library | Done — Equity hist + band filter + OOP vs IP chart; Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
+| Analysis dock + Build + Library | Done — Range equity (histogram, band filter, OOP vs IP chart); Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
 | Locks + strategy edits | Done |
 | Compare | Done — host `compare` + Session baseline snapshot on resolve-locked; `compare: true` in `ipcCapabilities` |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |
@@ -100,7 +100,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | --- | --- |
 | Browser-only Study without Tauri | UI shell only. `npm run dev` does not start `solver-engine`. |
 | Tauri 2 managed sidecar (`desktop/src-tauri`) | Supported — shell spawns installed `solver-engine` beside the app (absolute path; not `binaries/…`) over inherited-pipe IPC (`ensure_solver_engine` / `solver_engine_request`, protocol 2). The webview loads Vite `dist`. |
-| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer` on `main`. Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe`. PREINSTALL stops the UI then force-kills and deletes `solver-engine.exe`. POSTINSTALL requires `solver-engine.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`, registers HKCU LocalDumps for the UI + sidecar, and seeds `%LOCALAPPDATA%\Holdem Study\diagnostics`. Follow-on job `windows-installer-e2e` runs **Stage A** (silent `/S /D=%LOCALAPPDATA%\Holdem Study`, interactive WebView `ensure`+`status`) then **Stage B** (tiny river solve → browse → clear active solution → reopen PSOL → strategy restore → sidecar exit) via `scripts/desktop/windows-installer-e2e.ps1`. |
+| Windows NSIS installer | Supported via CI — workflow `Windows Installer` uploads artifact `holdem-study-windows-installer` on `main`. Intentional `v*-windows` tags publish a GitHub Release with stable asset `Holdem-Study-windows-x64-setup.exe`. PREINSTALL stops the UI then force-kills and deletes `solver-engine.exe`. POSTINSTALL requires `solver-engine.exe`, Unblock-Files the UI+engine, writes `engine-setup.txt`, registers HKCU LocalDumps for the UI + sidecar, and seeds `%LOCALAPPDATA%\Holdem Study\diagnostics`. Follow-on job `windows-installer-e2e` runs Stage A (silent `/S /D=%LOCALAPPDATA%\Holdem Study`, interactive WebView `ensure`+`status`), Stage B (tiny river solve → browse → clear active solution → reopen PSOL → strategy restore → sidecar exit), Stage DelayedReply (packaged WebView held-values concurrency), Stage BlockedWrite, Stage NormalClosePending, and Stage StaleCallAfterReconnect via `scripts/desktop/windows-installer-e2e.ps1`. |
 | Local crash diagnostics | Help (`?`) shows the diagnostics folder path and offers Open / Copy zip. Sidecar stderr rolls into `engine.log`; **before** Solve/Continue train start a cheap `last-solve.json` + `host-resources.json` (`snapshotKind=pre-solve`) is written; **every** Solve failed / session-dead / kill / ensure-fail / soft solve-RPC fail writes `last-fault.json` and refreshes `host-resources.json` (`snapshotKind=fault`); temporary UI unresponsiveness (status-poll timeout/slow/hung, main-thread stall) appends a ring to `ui-hang-events.json` even when the soft blip recovers; ready handshake writes `session-meta.json`. Packaged path: `%LOCALAPPDATA%\Holdem Study\diagnostics`. No remote Sentry. |
 | Native Open/Save dialogs | Primary Save/Open uses the in-app solutions catalogue (folders). Browse disk remains secondary: browser prompts; Windows Tauri build wires `tauri-plugin-dialog` + `dialog:default` capability; adapter keeps a prompt fallback if the plugin invoke fails |
 | Packaged engine ownership | `solver-engine` with `--launch-id` over inherited pipes (protocol 2). Tauri demuxes stdout by `request_id` so Study can issue mid-train `values` while `solve` is in flight. |
@@ -130,8 +130,9 @@ Installer product name is `Holdem Study` (no apostrophe) because NSIS shortcut m
 
 ```sh
 # build Zig solver-engine, copy sidecar with target triple, then:
-# Always pin -Dcpu=x86_64_v2 for any Windows sidecar that may leave the builder
-# host (bare ReleaseFast follows host CPU and can APPCRASH on older machines).
+# On x86_64, omitting -Dcpu already targets x86_64_v2 (ZR-175).
+# Windows CI and scripts still pass -Dcpu=x86_64_v2.
+# -Dcpu=native follows the builder CPU and can emit AVX-512.
 zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2
 cd desktop
 npm ci && npm run build
