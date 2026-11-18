@@ -385,8 +385,24 @@ pub const HostState = struct {
         self.writeReply(err_reply) catch {};
     }
 
-    pub fn beginOrTrainBusy(self: *HostState) bool {
+    pub fn beginOrTrainBusy(self: *const HostState) bool {
         return self.begin_running.load(.acquire) or self.train_running.load(.acquire);
+    }
+
+    /// Exclusive session mutations share one host gate: Build, Open, Save,
+    /// Solve/Continue, Resolve Locked, and sync lock/strategy edits.
+    /// Status and cancel/pause stay available while a mutation is reserved.
+    /// (IPC-18 / audit §2: I/O reservation must block Build/train and vice versa.)
+    pub fn exclusiveMutationBusy(self: *const HostState) bool {
+        return self.beginOrTrainBusy() or self.io_running.load(.acquire);
+    }
+
+    /// Reason string for a `busy` reply when `exclusiveMutationBusy` is true.
+    pub fn exclusiveMutationBusyMessage(self: *const HostState) []const u8 {
+        if (self.io_running.load(.acquire)) return "save or open already running";
+        if (self.begin_running.load(.acquire)) return "begin or train already running";
+        if (self.train_running.load(.acquire)) return "train already running";
+        return "session mutation busy";
     }
 
     /// Mint a generation for one analysis metric; sibling metrics stay current.
@@ -1085,10 +1101,21 @@ fn eraseLineLockRunouts(locks: *node_lock.LockSet, infoset_id: usize) void {
     }
 }
 
+fn mutationBusyForSyncEdit(state: *const HostState) bool {
+    return state.exclusiveMutationBusy() or
+        state.session.phase == .training or
+        state.session.phase == .compiling;
+}
+
+fn mutationBusyMessageForSyncEdit(state: *const HostState) []const u8 {
+    if (state.exclusiveMutationBusy()) return state.exclusiveMutationBusyMessage();
+    return "a solve is already running";
+}
+
 /// ZR-136: fat `put_lock` body extracted from `handle` (op discriminator stays in parent).
 fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
-    if (state.train_running.load(.acquire) or state.session.phase == .training) {
-        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+    if (mutationBusyForSyncEdit(state)) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", mutationBusyMessageForSyncEdit(state));
     }
     var lease = state.session.borrowPublished() catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
@@ -1296,8 +1323,8 @@ fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
 
 /// ZR-136: sibling of `handlePutLock` (cheap extract with the put path).
 fn handleDeleteLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
-    if (state.train_running.load(.acquire) or state.session.phase == .training) {
-        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+    if (mutationBusyForSyncEdit(state)) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", mutationBusyMessageForSyncEdit(state));
     }
     if (state.session.solution_id == 0) {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
@@ -1419,8 +1446,8 @@ fn handleDeleteLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
 
 /// ZR-136: fat `put_strategy_edit` body extracted from `handle`.
 fn handlePutStrategyEdit(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
-    if (state.train_running.load(.acquire) or state.session.phase == .training) {
-        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+    if (mutationBusyForSyncEdit(state)) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", mutationBusyMessageForSyncEdit(state));
     }
     var lease = state.session.borrowPublished() catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
@@ -1540,8 +1567,8 @@ fn handlePutStrategyEdit(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
 
 /// ZR-136: sibling of `handlePutStrategyEdit` (cheap extract with the put path).
 fn handleDeleteStrategyEdit(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
-    if (state.train_running.load(.acquire) or state.session.phase == .training) {
-        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "a solve is already running");
+    if (mutationBusyForSyncEdit(state)) {
+        return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", mutationBusyMessageForSyncEdit(state));
     }
     if (state.session.solution_id == 0) {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
@@ -2338,8 +2365,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     if (std.mem.eql(u8, req.op, "begin_config")) {
         // Sync path for unit tests. Product stdin loop uses `startBeginConfig`
         // so flop compile cannot starve status/control (ZR-120).
-        if (state.beginOrTrainBusy()) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
+        if (state.exclusiveMutationBusy()) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", state.exclusiveMutationBusyMessage());
         }
         const escaped = bodyStringField(req.body_json, "config_text") orelse
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "config_text required");
@@ -2427,6 +2454,9 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "save")) {
+        if (state.exclusiveMutationBusy()) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", state.exclusiveMutationBusyMessage());
+        }
         if (try rejectStaleSolution(state, req, state.session.solution_id)) |err_reply| return err_reply;
         const path = (try bodyUnescapedStringField(state.allocator, req.body_json, "path")) orelse
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
@@ -2442,8 +2472,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "open")) {
-        if (state.beginOrTrainBusy()) {
-            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
+        if (state.exclusiveMutationBusy()) {
+            return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", state.exclusiveMutationBusyMessage());
         }
         const path = (try bodyUnescapedStringField(state.allocator, req.body_json, "path")) orelse
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
@@ -2757,6 +2787,13 @@ fn admitTrainJob(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
         return .replied;
     }
 
+    // Exclusive with Save/Open: I/O reservation must block train admission (IPC-18).
+    if (state.io_running.load(.acquire)) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "save or open already running");
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return .replied;
+    }
     if (state.begin_running.load(.acquire)) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin_config still compiling");
         defer err_reply.deinit();
@@ -2772,6 +2809,15 @@ fn admitTrainJob(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
     // Reap a finished worker before starting another.
     state.joinTrain();
     return .ok;
+}
+
+/// Pure train-admission busy reason (no stdout). Used by unit tests so busy
+/// branches that would `writeReply` cannot deadlock under `zig build test`.
+fn trainAdmissionBusyReason(state: *const HostState) ?[]const u8 {
+    if (state.io_running.load(.acquire)) return "save or open already running";
+    if (state.begin_running.load(.acquire)) return "begin_config still compiling";
+    if (state.train_running.load(.acquire)) return "train already running";
+    return null;
 }
 
 fn spawnTrainWorker(
@@ -2918,8 +2964,9 @@ pub fn startBeginConfig(state: *HostState, req: ipc.Envelope) !void {
     try state.track(req.request_id);
     errdefer state.untrack(req.request_id);
 
-    if (state.beginOrTrainBusy()) {
-        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
+    // Exclusive with Save/Open as well as an in-flight begin/train (IPC-18).
+    if (state.exclusiveMutationBusy()) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", state.exclusiveMutationBusyMessage());
         defer err_reply.deinit();
         state.untrack(req.request_id);
         try state.writeReply(err_reply);
@@ -3740,9 +3787,10 @@ fn startIo(
     try state.track(req.request_id);
     errdefer state.untrack(req.request_id);
 
-    // Serialize Save/Open: reject if busy rather than block Stop on the stdin loop.
-    if (state.io_running.load(.acquire)) {
-        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "save or open already running");
+    // Exclusive with Build/train/replacement as well as another Save/Open (IPC-18).
+    // Reject before spawning so a conflicting op never touches the destination file.
+    if (state.exclusiveMutationBusy()) {
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", state.exclusiveMutationBusyMessage());
         defer err_reply.deinit();
         state.untrack(req.request_id);
         try state.writeReply(err_reply);
@@ -3860,12 +3908,7 @@ pub fn startOpen(state: *HostState, req: ipc.Envelope) !void {
         try state.writeReply(owned);
         return;
     }
-    if (state.beginOrTrainBusy()) {
-        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
-        defer err_reply.deinit();
-        try state.writeReply(err_reply);
-        return;
-    }
+    // begin/train/io exclusivity is reserved inside startIo (IPC-18).
     const path = (try bodyUnescapedStringField(state.allocator, req.body_json, "path")) orelse {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
         defer err_reply.deinit();
@@ -7472,4 +7515,231 @@ test "compact and spaced node_select fixtures select the same child" {
     defer omitted_reply.deinit();
     try std.testing.expect(omitted_reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, omitted_reply.body_json, "\"node_id\":\"p0.t-1.r-1\"") != null);
+}
+
+const river_admit_config =
+    \\street-config 1
+    \\board Ah Kh Qh Jh 2c
+    \\pot 100
+    \\stack 100
+    \\oop-range AsQs:1,2d2h:1
+    \\ip-range AsQs:1,2d2h:1
+    \\oop-river-bets 
+    \\ip-river-bets 
+    \\first-to-act 0
+    \\max-raises 0
+    \\allow-three-bet 1
+    \\all-in-threshold 0
+    \\pot-cap 0
+    \\rake-rate 0
+    \\rake-cap 0
+    \\memory-mib 256
+    \\threads 1
+    \\
+;
+
+test "exclusive mutation: Save/Open reservation blocks train begin and locks" {
+    // Arrival order A: I/O reserved first → Build/train/lock must busy-reject
+    // without mutating solution, destination file, or active job (IPC-18).
+    var state = try HostState.init(std.testing.allocator, "excl-io-first");
+    defer state.deinit();
+    try state.session.begin(river_admit_config);
+    try state.session.train(1);
+    const prior_id = state.session.solution_id;
+    try state.setActiveJob("job-live");
+    try std.testing.expect(state.matchesActiveJob("job-live"));
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const dest = try std.fs.path.join(std.testing.allocator, &.{ abs, "should-not-exist.psol" });
+    defer std.testing.allocator.free(dest);
+
+    // Fake reservation only — no io_thread. Clear before deinit (same pattern as
+    // job-scoped Stop tests); leaving the latch set is unsafe if anything waits
+    // on the busy flag during teardown.
+    state.io_running.store(true, .release);
+    defer state.io_running.store(false, .release);
+    try std.testing.expect(state.exclusiveMutationBusy());
+    try std.testing.expectEqualStrings("save or open already running", state.exclusiveMutationBusyMessage());
+    try std.testing.expectEqualStrings("save or open already running", trainAdmissionBusyReason(&state).?);
+
+    // Sync Open / Save / Begin refuse while I/O is reserved.
+    const path_json = try std.fmt.allocPrint(std.testing.allocator, "{s}", .{std.json.fmt(dest, .{})});
+    defer std.testing.allocator.free(path_json);
+    const open_body = try std.fmt.allocPrint(std.testing.allocator, "{{\"path\":{s}}}", .{path_json});
+    defer std.testing.allocator.free(open_body);
+    var open_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "open-vs-io"),
+        .op = try std.testing.allocator.dupe(u8, "open"),
+        .body_json = try std.testing.allocator.dupe(u8, open_body),
+    };
+    defer open_req.deinit();
+    var open_reply = try handle(&state, open_req);
+    defer open_reply.deinit();
+    try std.testing.expect(!open_reply.ok);
+    try std.testing.expectEqualStrings("busy", open_reply.error_code orelse "");
+
+    var save_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "save-vs-io"),
+        .op = try std.testing.allocator.dupe(u8, "save"),
+        .body_json = try std.testing.allocator.dupe(u8, open_body),
+    };
+    defer save_req.deinit();
+    var save_reply = try handle(&state, save_req);
+    defer save_reply.deinit();
+    try std.testing.expect(!save_reply.ok);
+    try std.testing.expectEqualStrings("busy", save_reply.error_code orelse "");
+
+    var begin_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "begin-vs-io"),
+        .op = try std.testing.allocator.dupe(u8, "begin_config"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"config_text\":\"x\"}"),
+    };
+    defer begin_req.deinit();
+    var begin_reply = try handle(&state, begin_req);
+    defer begin_reply.deinit();
+    try std.testing.expect(!begin_reply.ok);
+    try std.testing.expectEqualStrings("busy", begin_reply.error_code orelse "");
+
+    var lock_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "lock-vs-io"),
+        .op = try std.testing.allocator.dupe(u8, "delete_lock"),
+        .body_json = try std.testing.allocator.dupe(u8, "{}"),
+    };
+    defer lock_req.deinit();
+    var lock_reply = try handle(&state, lock_req);
+    defer lock_reply.deinit();
+    try std.testing.expect(!lock_reply.ok);
+    try std.testing.expectEqualStrings("busy", lock_reply.error_code orelse "");
+
+    // Status / job control remain available under the I/O reservation.
+    var status_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "status-vs-io"),
+        .op = try std.testing.allocator.dupe(u8, "status"),
+        .body_json = try std.testing.allocator.dupe(u8, "{}"),
+    };
+    defer status_req.deinit();
+    var status_reply = try handle(&state, status_req);
+    defer status_reply.deinit();
+    try std.testing.expect(status_reply.ok);
+
+    var cancel_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "cancel-vs-io"),
+        .job_id = try std.testing.allocator.dupe(u8, "job-live"),
+        .op = try std.testing.allocator.dupe(u8, "cancel"),
+        .body_json = try std.testing.allocator.dupe(u8, "{}"),
+    };
+    defer cancel_req.deinit();
+    var cancel_reply = try handle(&state, cancel_req);
+    defer cancel_reply.deinit();
+    try std.testing.expect(cancel_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, cancel_reply.body_json, "\"cancelled\":true") != null);
+
+    try std.testing.expectEqual(prior_id, state.session.solution_id);
+    try std.testing.expect(state.matchesActiveJob("job-live"));
+    tmp.dir.access("should-not-exist.psol", .{}) catch |err| {
+        try std.testing.expect(err == error.FileNotFound);
+        return;
+    };
+    try std.testing.expect(false); // file must not exist
+}
+
+test "exclusive mutation: train/begin reservation blocks Save and Open" {
+    // Arrival order B: training/replacement first → Save/Open must busy-reject
+    // and leave the prior solution + destination untouched (IPC-18).
+    var state = try HostState.init(std.testing.allocator, "excl-train-first");
+    defer state.deinit();
+    try state.session.begin(river_admit_config);
+    try state.session.train(1);
+    const prior_id = state.session.solution_id;
+    try state.setActiveJob("job-train");
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const dest = try std.fs.path.join(std.testing.allocator, &.{ abs, "blocked-save.psol" });
+    defer std.testing.allocator.free(dest);
+
+    // Fake train/begin latches only — no worker threads. Always clear both
+    // before HostState.deinit (mirrors job-scoped Stop/Pause tests).
+    state.train_running.store(true, .release);
+    defer {
+        state.train_running.store(false, .release);
+        state.begin_running.store(false, .release);
+    }
+    try std.testing.expect(state.exclusiveMutationBusy());
+    try std.testing.expectEqualStrings("train already running", state.exclusiveMutationBusyMessage());
+    try std.testing.expectEqualStrings("train already running", trainAdmissionBusyReason(&state).?);
+
+    const path_json = try std.fmt.allocPrint(std.testing.allocator, "{s}", .{std.json.fmt(dest, .{})});
+    defer std.testing.allocator.free(path_json);
+    const body = try std.fmt.allocPrint(std.testing.allocator, "{{\"path\":{s}}}", .{path_json});
+    defer std.testing.allocator.free(body);
+
+    var save_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "save-vs-train"),
+        .op = try std.testing.allocator.dupe(u8, "save"),
+        .body_json = try std.testing.allocator.dupe(u8, body),
+    };
+    defer save_req.deinit();
+    var save_reply = try handle(&state, save_req);
+    defer save_reply.deinit();
+    try std.testing.expect(!save_reply.ok);
+    try std.testing.expectEqualStrings("busy", save_reply.error_code orelse "");
+
+    var open_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "open-vs-train"),
+        .op = try std.testing.allocator.dupe(u8, "open"),
+        .body_json = try std.testing.allocator.dupe(u8, body),
+    };
+    defer open_req.deinit();
+    var open_reply = try handle(&state, open_req);
+    defer open_reply.deinit();
+    try std.testing.expect(!open_reply.ok);
+    try std.testing.expectEqualStrings("busy", open_reply.error_code orelse "");
+
+    // Flip to begin_running (replacement) — Save/Open still refuse.
+    state.train_running.store(false, .release);
+    state.begin_running.store(true, .release);
+    try std.testing.expectEqualStrings("begin or train already running", state.exclusiveMutationBusyMessage());
+
+    var save2: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "save-vs-begin"),
+        .op = try std.testing.allocator.dupe(u8, "save"),
+        .body_json = try std.testing.allocator.dupe(u8, body),
+    };
+    defer save2.deinit();
+    var save2_reply = try handle(&state, save2);
+    defer save2_reply.deinit();
+    try std.testing.expect(!save2_reply.ok);
+    try std.testing.expectEqualStrings("busy", save2_reply.error_code orelse "");
+
+    try std.testing.expectEqual(prior_id, state.session.solution_id);
+    try std.testing.expect(state.matchesActiveJob("job-train"));
+    tmp.dir.access("blocked-save.psol", .{}) catch |err| {
+        try std.testing.expect(err == error.FileNotFound);
+        return;
+    };
+    try std.testing.expect(false);
 }
