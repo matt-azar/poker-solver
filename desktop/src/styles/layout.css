@@ -4699,7 +4699,8 @@
 
 /* One selectable deck card in the picker. */
 .card-picker-cell[data-blocked="true"],
-.card-picker-cell[data-missing="true"] {
+.card-picker-cell[data-missing="true"],
+.card-picker-cell[data-unrecorded="true"] {
   opacity: 0.35;
 }
 
@@ -5610,6 +5611,33 @@
   .seat-tree__menu-trigger {
     opacity: 0.7;
   }
+}
+
+/* Matrix chip when Range equity / Categories filter the grid. */
+.matrix-analysis-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.category-filter-btn {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.category-row--active .category-filter-btn,
+.category-filter-btn[aria-pressed="true"] {
+  color: var(--accent, #3b82f6);
+  font-weight: 600;
 }
 
 /* Equity calculator workspace */

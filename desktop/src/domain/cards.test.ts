@@ -93,6 +93,20 @@ describe("card helpers", () => {
       true,
     );
 
+    // Public demo: listed chance link without a recorded child is unrecorded.
+    const asNodeId = as!.nodeId;
+    const other = options.find(
+      (option) => option.card !== "As" && !option.blocked,
+    );
+    expect(other).toBeTruthy();
+    const gated = chanceCardOptions(node, new Set([asNodeId]));
+    const asGated = gated.find((option) => option.card === "As");
+    const otherGated = gated.find((option) => option.card === other!.card);
+    expect(asGated?.unrecorded).toBe(false);
+    expect(otherGated?.unrecorded).toBe(true);
+    expect(asGated && isLegalDeckCell(asGated)).toBe(true);
+    expect(otherGated && isLegalDeckCell(otherGated)).toBe(false);
+
     expect(prepareBoardCardChange(node, "river")).toEqual({
       ok: true,
       street: "river",
