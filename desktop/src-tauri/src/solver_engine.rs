@@ -2456,7 +2456,7 @@ mod tests {
         async fn admission_rejects_when_saturated() {
             let session = spawn_supervised_test_sidecar("accept-saturate");
             let io = Arc::clone(&session.io);
-            solver_admission::force_outstanding_for_test(&io.board, MAX_OUTSTANDING);
+            solver_admission::force_outstanding_for_test(&io.board, solver_admission::MAX_OUTSTANDING);
             let err = rpc_shared(&io, "values", json!({}), None, Duration::from_secs(1))
                 .await
                 .unwrap_err();
@@ -2466,7 +2466,7 @@ mod tests {
             // Control reserve path for normal ops near the ceiling.
             solver_admission::force_outstanding_for_test(
                 &io.board,
-                MAX_OUTSTANDING - solver_admission::CONTROL_RESERVE_SLOTS,
+                solver_admission::MAX_OUTSTANDING - solver_admission::CONTROL_RESERVE_SLOTS,
             );
             let err = rpc_shared(&io, "values", json!({}), None, Duration::from_secs(1))
                 .await
