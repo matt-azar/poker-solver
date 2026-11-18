@@ -101,9 +101,9 @@ fn failPendingOnParentExit(state: *dispatch.HostState) void {
 pub fn shutdownOnParentEof(state: *dispatch.HostState) void {
     signalParentGoneCancel(state);
 
-    // Supersede in-flight analysis/preview so workers exit without finishing
-    // obsolete walks (same intent as prior exit defer bumpAnalysisGen).
-    _ = state.bumpAnalysisGen();
+    // Supersede in-flight analysis/preview so the persistent pools exit without
+    // finishing obsolete walks (per-metric gens + latest-draft preview).
+    state.supersedeAllAnalysis();
     _ = state.bumpPreviewGen();
 
     // Equity calculator: cancel queued/current work and wake the worker CV.
@@ -138,6 +138,7 @@ pub fn main() !void {
     var state = try dispatch.HostState.init(allocator, launch_id);
     defer {
         // stdin EOF / loop break lands here: stop first, then join (audit §8).
+        // shutdownOnParentEof supersedes analysis/preview pool gens before joins.
         shutdownOnParentEof(&state);
         state.deinit();
         std.debug.print("solver-engine exiting\n", .{});
