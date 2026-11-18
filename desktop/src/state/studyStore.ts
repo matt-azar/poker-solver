@@ -26,7 +26,6 @@ import {
 import {
   applyPaintAtPreservingExact,
   blankGrid,
-  combosForCell,
   createExactRangeHistory,
   exactPairFromTexts,
   exactPairsEqual,
@@ -60,7 +59,6 @@ import {
   comboProbsRowsForHands,
   handIndexForCombo,
   isHandLocked,
-  lockDraftIsDirty,
   lockForNode,
   lockMutationCompletion,
   normalizeProbs,
@@ -72,7 +70,6 @@ import {
   type ComparePayload,
   type LockDraft,
   type LockRecord,
-  type LockScope,
   type LocksPayload,
 } from "../domain/locks";
 import {
@@ -450,9 +447,6 @@ interface StudyState {
 
   lockDrawerOpen: boolean;
   setLockDrawerOpen: (open: boolean) => void;
-  /** This board vs every runout of the betting line (Apply / Apply and re-solve). */
-  lockScope: LockScope;
-  setLockScope: (scope: LockScope) => void;
   locks: LockRecord[];
   lockDraft: LockDraft;
   lockDraftBaseline: LockDraft | null;
@@ -475,14 +469,10 @@ interface StudyState {
   selectAllCombosForLock: () => void;
   seedLockFromStrategy: () => void;
   revertLockDraft: () => void;
-  /** Discard unapplied draft edits back to the last applied lock. */
-  discardLockDraft: () => void;
   refreshLocks: () => Promise<void>;
-  applyLock: (scope?: LockScope) => Promise<boolean>;
-  /** Apply the draft lock, then resolve-locked. Keeps draft + error on apply failure. */
-  applyLockAndResolve: (scope?: LockScope) => Promise<boolean>;
+  applyLock: (scope?: "node" | "line") => Promise<boolean>;
   /** Freeze every combo's current mix on this board (or line); ignores selection subset. */
-  lockAllHands: (scope?: LockScope) => Promise<boolean>;
+  lockAllHands: (scope?: "node" | "line") => Promise<boolean>;
   unlockHands: (handIndices?: number[]) => Promise<void>;
   unlockNode: () => Promise<void>;
   /** Clear expanded line locks for the current betting line (reverse of lockAllHands("line")). */
@@ -548,11 +538,7 @@ interface StudyState {
   refresh: () => Promise<void>;
   solve: () => Promise<void>;
   continueSolve: () => Promise<void>;
-  /**
-   * Constrained re-solve. Applies a dirty lock draft first unless
-   * `skipDraftApply` (used by Apply and re-solve after a successful apply).
-   */
-  resolveLocked: (opts?: { skipDraftApply?: boolean }) => Promise<void>;
+  resolveLocked: () => Promise<void>;
   pause: () => Promise<void>;
   stop: () => Promise<void>;
   navigateTo: (
@@ -1389,65 +1375,22 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   lockDrawerOpen: false,
-  lockScope: "node",
-  setLockScope(scope) {
-    set({ lockScope: scope });
-  },
   setLockDrawerOpen(open) {
     if (!open) {
-      // Cancel / close must not silently keep an unapplied draft.
-      const baseline = get().lockDraftBaseline;
-      set({
-        lockDrawerOpen: false,
-        lockDraft: baseline
-          ? structuredClone(baseline)
-          : get().lockDraft,
-      });
+      set({ lockDrawerOpen: false });
       return;
     }
-    const node = get().currentNode;
-    const actions = node?.actions?.length ?? 0;
+    const actions = get().currentNode?.actions?.length ?? 0;
     const existing = get().lockDraft;
-    let draft =
+    const draft =
       existing.probs.length === actions
         ? existing
         : defaultLockDraft(actions);
-
-    // Open from a pinned Study hand class when the draft has no selection yet.
-    const pinned = get().selectedCell;
-    const priorBaseline = get().lockDraftBaseline;
-    if (
-      pinned &&
-      node?.combos?.length &&
-      draft.kind === "selected" &&
-      draft.handIndices.length === 0
-    ) {
-      const combos = combosForCell(pinned.row, pinned.col);
-      const handIndices = combos
-        .map((combo) => handIndexForCombo(node.combos, combo))
-        .filter((index) => index >= 0);
-      const unique = [...new Set(handIndices)].sort((a, b) => a - b);
-      if (unique.length > 0) {
-        const strategy = node.strategy ?? null;
-        const comboProbsByHand =
-          seedComboProbsByHandFromStrategy(strategy, unique, actions) ??
-          undefined;
-        const probs = seedProbsFromStrategy(strategy, unique, actions);
-        draft = {
-          kind: "selected",
-          handIndices: unique,
-          probs,
-          comboProbsByHand,
-        };
-      }
-    }
-
     set({
       lockDrawerOpen: true,
       strategyEditDrawerOpen: false,
       lockDraft: draft,
-      // Keep last applied baseline when seeding from a pin so Discard restores it.
-      lockDraftBaseline: priorBaseline ?? structuredClone(draft),
+      lockDraftBaseline: structuredClone(draft),
     });
     void get().refreshLocks();
     // Frequency sliders need per-combo action EV; kick calculation if missing.
@@ -1634,17 +1577,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     set({ lockDraft: structuredClone(baseline) });
   },
-  discardLockDraft() {
-    const baseline = get().lockDraftBaseline;
-    if (!baseline) {
-      set({ message: "No applied lock to restore." });
-      return;
-    }
-    set({
-      lockDraft: structuredClone(baseline),
-      message: "Discarded draft lock changes.",
-    });
-  },
   async refreshLocks() {
     const solutionId = get().solutionId;
     if (!solutionId) {
@@ -1674,8 +1606,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
     return isHandLocked(lockForNode(get().locks, node.node_id), handIndex);
   },
-  async applyLock(scope?: LockScope) {
-    const resolvedScope = scope ?? get().lockScope ?? "node";
+  async applyLock(scope: "node" | "line" = "node") {
     const solutionId = get().solutionId;
     const node = get().currentNode;
     if (!solutionId || !node || node.kind !== "decision") {
@@ -1685,7 +1616,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const draft = structuredClone(get().lockDraft);
     // kind "full" always expands to an explicit full-range per-combo freeze.
     if (draft.kind === "full") {
-      return get().lockAllHands(resolvedScope);
+      return get().lockAllHands(scope);
     }
     if (draft.handIndices.length === 0) {
       set({ message: "Select at least one combo, or use Lock all hands." });
@@ -1694,7 +1625,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const comboBody = draft.comboProbsByHand
       ? buildComboLockPutBody({
           nodeId: node.node_id,
-          scope: resolvedScope,
+          scope,
           handIndices: draft.handIndices,
           comboProbsByHand: draft.comboProbsByHand,
           aggregateProbs: draft.probs,
@@ -1715,7 +1646,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       const body = comboBody ?? {
         node_id: node.node_id,
         kind: "selected" as const,
-        scope: resolvedScope,
+        scope,
         hand_indices: draft.handIndices,
         probs: normalized.probs,
       };
@@ -1730,8 +1661,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (!completion.applyLocksList) {
         return false;
       }
-      const scopeLabel =
-        resolvedScope === "line" ? "all runouts" : "this board";
+      const scopeLabel = scope === "line" ? "line (all runouts)" : "node";
       if (completion.applyDraft) {
         const nextDraft: LockDraft = {
           ...draft,
@@ -1744,7 +1674,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
           locks: payload.locks || [],
           lockDraft: nextDraft,
           lockDraftBaseline: structuredClone(nextDraft),
-          lockScope: resolvedScope,
           message: `Locked ${draft.handIndices.length} combo(s) on ${scopeLabel} at ${node.node_id}`,
         });
       } else {
@@ -1764,15 +1693,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       });
       return false;
     }
-  },
-  async applyLockAndResolve(scope?: LockScope) {
-    const ok = await get().applyLock(scope);
-    if (!ok) {
-      // Keep draft + surface the apply error; do not start resolve.
-      return false;
-    }
-    await get().resolveLocked({ skipDraftApply: true });
-    return true;
   },
   async lockAllHands(scope: "node" | "line" = "node") {
     const solutionId = get().solutionId;
@@ -3032,7 +2952,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
   },
 
-  async resolveLocked(opts) {
+  async resolveLocked() {
     const unavailable = rejectUnavailableIpcFeature("resolveLocked");
     if (unavailable) {
       set({ message: unavailable });
@@ -3041,17 +2961,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const solutionId = get().solutionId;
     if (!solutionId) {
       return;
-    }
-    // Resolve must not run without applying a dirty draft first.
-    if (
-      !opts?.skipDraftApply &&
-      get().lockDrawerOpen &&
-      lockDraftIsDirty(get().lockDraft, get().lockDraftBaseline)
-    ) {
-      const applied = await get().applyLock();
-      if (!applied) {
-        return;
-      }
     }
     const prior = snapshotPublishedStudy(get());
     const resumeNodeId = get().currentNode?.node_id ?? null;
@@ -3069,7 +2978,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       strategyEditDraft: defaultLockDraft(0),
       strategyEditDraftBaseline: null,
       strategyEditDrawerOpen: false,
-      lockDrawerOpen: false,
     });
     continuationPending = true;
     get().startPolling();
@@ -3094,11 +3002,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       }
       await engineClient.resolveLocked(solutionId, body);
       await get().refresh();
-      // Surface Compare when a baseline exists after re-solve completes.
-      if (get().baselineSolutionId && get().solutionId) {
-        set({ workspace: "compare" });
-        void get().loadCompare();
-      }
     } catch (error) {
       if (await recoverTrainRpcTimeout(get, error)) {
         return;
