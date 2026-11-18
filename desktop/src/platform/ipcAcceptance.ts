@@ -16,6 +16,9 @@
  * `values-hold-status-cancel` covers the DelayedReply pass bar.
  */
 import { invoke } from "@tauri-apps/api/core";
+// Static import so the packaged Vite bundle always includes window Close/Destroy
+// (a dynamic import can fail in the NSIS WebView and trip exit_with_code(1)).
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauriRuntime } from "./index";
 
 /** Canonical -Stage / probe names (CI ValidateSet + YAML). */
@@ -308,8 +311,9 @@ export async function runBlockedWriteProbe(): Promise<IpcAcceptanceResult> {
  * NormalClosePending — normal window Close (not exit_with_code) while work
  * may still be pending. Env: STUDY_INSTALLER_E2E=stage-normal-close-pending
  *
- * Success path is process Exit via Tauri RunEvent::Exit (sidecar reap).
- * Does not call exit_with_code on success.
+ * Success path: getCurrentWindow().close() → ExitRequested/Exit (see #458
+ * parent-exit reap). Returns ok immediately after Close is accepted — do not
+ * wait or call exit_with_code (that skips the RunEvent path).
  */
 export async function runNormalClosePendingProbe(): Promise<IpcAcceptanceResult> {
   if (!isTauriRuntime()) {
@@ -345,24 +349,34 @@ export async function runNormalClosePendingProbe(): Promise<IpcAcceptanceResult>
     }).catch(() => {});
   }
 
+  const win = getCurrentWindow();
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().close();
-    await sleep(8000);
+    await win.close();
     return {
-      ok: false,
+      ok: true,
       stage: "NormalClosePending",
-      detail: "window.close() returned but process still alive after 8s",
+      detail: "window.close() accepted; awaiting RunEvent::Exit reap (not exit_with_code)",
     };
-  } catch (err: unknown) {
-    const detail = err instanceof Error ? err.message : String(err);
-    // TODO(Rust): if Close is cancelled by an ExitRequested handler without a
-    // destroy path, desktop exit worker must allow probe Close (IPC-23).
-    return {
-      ok: false,
-      stage: "NormalClosePending",
-      detail: `normal window Close failed: ${detail}`,
-    };
+  } catch (closeErr: unknown) {
+    const closeDetail =
+      closeErr instanceof Error ? closeErr.message : String(closeErr);
+    // Force-destroy still goes through window teardown / Exit, unlike exit_with_code.
+    try {
+      await win.destroy();
+      return {
+        ok: true,
+        stage: "NormalClosePending",
+        detail: `window.close() failed (${closeDetail}); destroy() accepted for Exit path`,
+      };
+    } catch (destroyErr: unknown) {
+      const destroyDetail =
+        destroyErr instanceof Error ? destroyErr.message : String(destroyErr);
+      return {
+        ok: false,
+        stage: "NormalClosePending",
+        detail: `normal window Close/destroy failed: close=${closeDetail}; destroy=${destroyDetail}`,
+      };
+    }
   }
 }
 

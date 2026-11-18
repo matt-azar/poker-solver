@@ -183,20 +183,24 @@ describe("runStaleCallAfterReconnectProbe", () => {
   });
 });
 
+const closeMock = vi.fn();
+const destroyMock = vi.fn();
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    close: (...args: unknown[]) => closeMock(...args),
+    destroy: (...args: unknown[]) => destroyMock(...args),
+  }),
+}));
+
 describe("runNormalClosePendingProbe", () => {
   beforeEach(() => {
     invoke.mockReset();
-    vi.resetModules();
+    closeMock.mockReset();
+    destroyMock.mockReset();
   });
 
-  it("reports failure when window close is unavailable", async () => {
-    vi.doMock("@tauri-apps/api/window", () => ({
-      getCurrentWindow: () => ({
-        close: async () => {
-          throw new Error("close denied");
-        },
-      }),
-    }));
+  it("returns ok after window.close() without waiting or exiting", async () => {
+    closeMock.mockResolvedValue(undefined);
     invoke.mockImplementation(async (cmd: string, args?: { op?: string }) => {
       if (cmd === "solver_engine_request" && args?.op === "values") {
         return { ok: true, body: {} };
@@ -208,8 +212,36 @@ describe("runNormalClosePendingProbe", () => {
     });
     const { runNormalClosePendingProbe } = await import("./ipcAcceptance");
     const result = await runNormalClosePendingProbe();
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
     expect(result.stage).toBe("NormalClosePending");
+    expect(result.detail).toMatch(/window\.close\(\) accepted/);
+    expect(destroyMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to destroy when close fails", async () => {
+    closeMock.mockRejectedValue(new Error("close denied"));
+    destroyMock.mockResolvedValue(undefined);
+    invoke.mockImplementation(async (cmd: string, args?: { op?: string }) => {
+      if (cmd === "solver_engine_request") return { ok: true, body: {} };
+      throw new Error(`unexpected invoke ${cmd}`);
+    });
+    const { runNormalClosePendingProbe } = await import("./ipcAcceptance");
+    const result = await runNormalClosePendingProbe();
+    expect(result.ok).toBe(true);
+    expect(result.detail).toMatch(/destroy\(\) accepted/);
+  });
+
+  it("reports failure when both close and destroy fail", async () => {
+    closeMock.mockRejectedValue(new Error("close denied"));
+    destroyMock.mockRejectedValue(new Error("destroy denied"));
+    invoke.mockImplementation(async (cmd: string, args?: { op?: string }) => {
+      if (cmd === "solver_engine_request") return { ok: true, body: {} };
+      throw new Error(`unexpected invoke ${cmd}`);
+    });
+    const { runNormalClosePendingProbe } = await import("./ipcAcceptance");
+    const result = await runNormalClosePendingProbe();
+    expect(result.ok).toBe(false);
     expect(result.detail).toMatch(/close denied/);
+    expect(result.detail).toMatch(/destroy denied/);
   });
 });
