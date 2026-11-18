@@ -30,8 +30,8 @@
   Stage BlockedWrite (-Stage BlockedWrite):
     STUDY_INSTALLER_E2E=stage-blocked-write — WebView blocked-write / write-bound
     probe. Builds desktop/ipc-test-sidecar, sets STUDY_SOLVER_ENGINE +
-    STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 1 --partial-drain-bytes 4 so
-    spawn_session arms a mid-frame stdin stall (non-SKIP PASS required).
+    STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 0 --partial-drain-bytes 4 so
+    spawn_session arms a mid-frame stdin stall after ready (non-SKIP PASS).
 
   Stage NormalClosePending (-Stage NormalClosePending):
     STUDY_INSTALLER_E2E=stage-normal-close-pending — normal window Close while
@@ -434,8 +434,10 @@ try {
       }
       $testSidecar = (Resolve-Path -LiteralPath $testSidecar).Path
       $psi.Environment["STUDY_SOLVER_ENGINE"] = $testSidecar
-      # Mid-frame: answer ready, read 4 more stdin bytes (length prefix), park.
-      $psi.Environment["STUDY_SOLVER_ENGINE_ARGS"] = "--stop-reading-after 1 --partial-drain-bytes 4"
+      # Mid-frame after ready: ready never counts toward stop-reading. Limit 0
+      # → first post-ready frame (large save) is partial-drained (4-byte
+      # length prefix) then parked so write_all blocks.
+      $psi.Environment["STUDY_SOLVER_ENGINE_ARGS"] = "--stop-reading-after 0 --partial-drain-bytes 4"
       $psi.Environment["STUDY_IPC_BLOCKED_WRITE"] = "1"
       Write-E2E "STUDY_SOLVER_ENGINE=$testSidecar"
       Write-E2E "STUDY_SOLVER_ENGINE_ARGS=$($psi.Environment['STUDY_SOLVER_ENGINE_ARGS'])"

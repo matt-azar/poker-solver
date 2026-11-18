@@ -152,7 +152,7 @@ describe("runBlockedWriteProbe", () => {
     invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "ipc_blocked_write_armed") return true;
       if (cmd === "solver_engine_extra_args") {
-        return ["--stop-reading-after", "1", "--partial-drain-bytes", "4"];
+        return ["--stop-reading-after", "0", "--partial-drain-bytes", "4"];
       }
       if (cmd === "solver_engine_request") {
         throw new Error("unknown-after-write: op save deadline elapsed after write started");

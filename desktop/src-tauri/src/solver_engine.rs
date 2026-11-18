@@ -1665,6 +1665,16 @@ pub async fn ensure_solver_engine_session(
             .map(|s| (Arc::clone(&s.io), s.info.clone(), s.launch_id.clone()))
     };
     if let Some((io, info, launch_id)) = existing {
+        // Stage BlockedWrite arms stop-reading after the first ready. A second
+        // ready probe would mid-frame-stall and fail ensure (exit 2). Trust the
+        // already-ready session when the blocked-write arm is active.
+        if ipc_blocked_write_armed()
+            && info.status.contains("ready")
+            && !io.connection_closed.load(Ordering::SeqCst)
+            && !io.shut_down.load(Ordering::SeqCst)
+        {
+            return Ok(info);
+        }
         state.remember_op("ready");
         match rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT).await {
             Ok(_) => return Ok(info),
@@ -2866,9 +2876,9 @@ mod tests {
         async fn mid_frame_blocked_write_reports_unknown_after_write() {
             let session = spawn_supervised_test_sidecar_args(
                 "accept-mid-frame-block",
-                // After ready is answered: read only 4 more stdin bytes (next
-                // frame's length prefix), then park — body never drains.
-                &["--stop-reading-after", "1", "--partial-drain-bytes", "4"],
+                // After ready: stop-reading limit 0 (ready excluded) → next
+                // frame's length prefix only, then park — body never drains.
+                &["--stop-reading-after", "0", "--partial-drain-bytes", "4"],
             );
             let io = Arc::clone(&session.io);
             rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT)

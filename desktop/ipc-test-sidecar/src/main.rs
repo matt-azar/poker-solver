@@ -10,9 +10,11 @@
 //! - `--malformed-after-ready`: after ready, emit a garbage frame (protocol death)
 //! - `--exit-after-ready`: exit immediately after answering ready
 //! - `--reject-next <code>`: next non-ready op returns ok:false with that error_code
-//! - `--stop-reading-after <n>`: answer n requests then stop draining stdin
+//! - `--stop-reading-after <n>`: after ready, answer n *non-ready* requests
+//!   then stop draining stdin (`ready` never counts — ensure re-probes stay live)
 //! - `--partial-drain-bytes <n>`: with stop-reading-after, read exactly n more
-//!   stdin bytes of the next frame then park (mid-frame blocked-write arm)
+//!   stdin bytes of the next frame then park (mid-frame blocked-write arm).
+//!   Use `--stop-reading-after 0` to stall the first post-ready frame mid-body.
 //! - `--stop-reading-after-bytes <n>`: after answering ready, read at most n
 //!   additional stdin bytes then park mid-stream
 
@@ -185,24 +187,29 @@ fn main() {
     let mut stdout = io::stdout().lock();
     let mut stash = Vec::new();
     let mut withheld_values = false;
-    let mut answered: usize = 0;
+    // Non-ready replies only — `ready` must never consume the stop-reading
+    // budget (background ensure + probe ensure both re-probe ready).
+    let mut non_ready_answered: usize = 0;
     let mut ready_done = false;
     let mut reject_armed = mode.reject_code.clone();
     let mut post_ready_bytes: usize = 0;
 
     loop {
-        if let Some(limit) = mode.stop_reading_after {
-            if answered >= limit {
-                if let Some(n) = mode.partial_drain_bytes {
-                    let mut buf = Vec::with_capacity(n);
-                    let got = read_exact_or_eof(&mut stdin, n, &mut buf).unwrap_or(0);
+        // Arm only after at least one ready so ensure/handshake cannot hang.
+        if ready_done {
+            if let Some(limit) = mode.stop_reading_after {
+                if non_ready_answered >= limit {
+                    if let Some(n) = mode.partial_drain_bytes {
+                        let mut buf = Vec::with_capacity(n);
+                        let got = read_exact_or_eof(&mut stdin, n, &mut buf).unwrap_or(0);
+                        park_forever(&format!(
+                            "stop-reading after {limit} non-ready answers; partial-drain {got}/{n} bytes (stdin mid-frame ignored)"
+                        ));
+                    }
                     park_forever(&format!(
-                        "stop-reading after {limit} answers; partial-drain {got}/{n} bytes (stdin mid-frame ignored)"
+                        "stop-reading after {limit} non-ready answers (stdin ignored)"
                     ));
                 }
-                park_forever(&format!(
-                    "stop-reading after {limit} answers (stdin ignored)"
-                ));
             }
         }
 
@@ -257,7 +264,7 @@ fn main() {
                         "test-sidecar rejection",
                     ),
                 );
-                answered += 1;
+                non_ready_answered += 1;
                 continue;
             }
             // Keep rejection for the next non-ready op.
@@ -317,8 +324,6 @@ fn main() {
             eprintln!("ipc-test-sidecar write error: {err}");
             break;
         }
-        answered += 1;
-
         if op == "ready" {
             ready_done = true;
             if mode.exit_after_ready {
@@ -332,6 +337,8 @@ fn main() {
                 // Leave stdout half-broken; next read on host should fault.
                 break;
             }
+        } else {
+            non_ready_answered += 1;
         }
     }
 }

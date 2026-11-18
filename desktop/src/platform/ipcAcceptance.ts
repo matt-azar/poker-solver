@@ -239,9 +239,10 @@ export async function runIpcAcceptanceProbe(): Promise<IpcAcceptanceResult> {
  * Env: STUDY_INSTALLER_E2E=stage-blocked-write
  *
  * Requires the Rust spawn arm (`STUDY_SOLVER_ENGINE` → ipc-test-sidecar plus
- * `STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 1` and/or auto-arm via
- * stage-blocked-write / `STUDY_IPC_BLOCKED_WRITE=1`). Probe FAILs (never SKIP)
- * when the arm is missing or no write/admission bound is observed.
+ * `STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 0 --partial-drain-bytes 4`
+ * and/or auto-arm via stage-blocked-write / `STUDY_IPC_BLOCKED_WRITE=1`).
+ * Sidecar counts only non-ready answers so ensure Ready re-probes stay live.
+ * Probe FAILs (never SKIP) when the arm is missing or no write bound.
  */
 export async function runBlockedWriteProbe(): Promise<IpcAcceptanceResult> {
   if (!isTauriRuntime()) {
@@ -267,8 +268,9 @@ export async function runBlockedWriteProbe(): Promise<IpcAcceptanceResult> {
       stage: "BlockedWrite",
       detail:
         "BlockedWrite arm not active: set STUDY_SOLVER_ENGINE to ipc-test-sidecar and " +
-        "STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 1 (or STUDY_IPC_BLOCKED_WRITE=1 / " +
-        "stage-blocked-write auto-arm). spawn_session must forward stop-reading flags." +
+        "STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 0 --partial-drain-bytes 4 " +
+        "(or STUDY_IPC_BLOCKED_WRITE=1 / stage-blocked-write auto-arm). " +
+        "spawn_session must forward stop-reading flags." +
         (extraArgs.length ? ` extraArgs=${JSON.stringify(extraArgs)}` : ""),
     };
   }
