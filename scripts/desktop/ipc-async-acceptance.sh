@@ -20,6 +20,7 @@ python3 "$ROOT/scripts/desktop/ipc_race_replay.py" \
   "$ROOT/scripts/desktop/ipc-race-cases/values-hold-status-cancel.json"
 
 echo "PASS: hold-EV Status+Cancel"
-echo "Windows CI: .github/workflows/ipc-race-probes.yml"
+echo "Windows/Linux CI supervisor + hold-EV: .github/workflows/ipc-race-probes.yml"
 echo "UI A→B stale-EV: browser/Playwright track (not this probe)"
-echo "Windows WebView gate: scripts/desktop/ipc-async-acceptance.ps1 -StudyExe <Holdem Study.exe>"
+echo "Packaged Windows WebView gate: windows-installer-e2e Stage DelayedReply"
+echo "  (scripts/desktop/ipc-async-acceptance.ps1 -StudyExe <Holdem Study.exe>)"
