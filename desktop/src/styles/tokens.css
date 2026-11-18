@@ -77,14 +77,15 @@
   --space-4: 16px;
   --radius-sm: 2px;
   --radius: 4px;
-  /* Shell chrome heights/widths (layout.css reads these) */
-  --menubar-h: 32px;
-  --tabs-h: 28px;
-  --context-h: 52px; /* Study context strip (board / pot / stacks) */
-  --statusbar-h: 34px;
-  --history-h: 120px; /* Default action-history height before user resize */
+  /* Shell chrome heights/widths (layout.css reads these).
+   * Cursor-minimal: thin menubar/status + compact Study context. */
+  --menubar-h: 24px;
+  --tabs-h: 26px;
+  --context-h: 36px; /* Study context strip (board / pot / stacks) */
+  --statusbar-h: 22px;
+  --history-h: 48px; /* Default action-history height before user resize */
   --dock-h: 240px; /* Default lower analysis dock height */
-  --inspector-w: 300px; /* Study detail rail default width hint */
+  --inspector-w: 420px; /* Study detail rail width hint (~40% at 1280) */
   --nav-w: 180px; /* Optional left node navigator */
   --body-size: 13px; /* Default UI body text */
   --label-size: 11px; /* Uppercase field labels */

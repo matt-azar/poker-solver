@@ -208,25 +208,26 @@
   cursor: not-allowed;
 }
 
-/* Top application menu bar (File/Edit/… + workspace switcher). */
+/* Top application menu bar (File/Edit/… + workspace switcher). Cursor-thin. */
 .menu-bar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   padding: 0 var(--space-2);
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   user-select: none;
   z-index: 20;
+  font-size: 12px;
 }
 
 /* Product name on the left of the menu bar. */
 .menu-bar__brand {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
   letter-spacing: 0.02em;
-  padding: 0 var(--space-2);
+  padding: 0 var(--space-1);
   white-space: nowrap;
 }
 
@@ -259,9 +260,10 @@
   height: 100%;
   border: 0;
   background: transparent;
-  padding: 0 10px;
+  padding: 0 8px;
   color: var(--text);
   border-radius: var(--radius-sm);
+  font-size: 12px;
 }
 
 /* One top-level menu (button + dropdown). — clickable button inside the parent. */
@@ -349,9 +351,11 @@
 .workspace-switcher__tab {
   border: 0;
   background: transparent;
-  padding: 3px 10px;
+  padding: 1px 8px;
   color: var(--muted);
   border-right: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 20px;
 }
 
 /* One workspace tab button. */
@@ -491,17 +495,18 @@
   flex-direction: column;
 }
 
-/* Bottom status strip: phase, message, metrics, connection. */
+/* Bottom status strip: phase, message, metrics, connection. Cursor-thin. */
 .status-bar {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   padding: 0 var(--space-2);
   background: var(--panel);
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   min-width: 0;
+  line-height: 1;
 }
 
 /* Solve/engine phase badge (SOLVING, COMPLETE, …). */
@@ -509,14 +514,14 @@
   flex-shrink: 0;
   font-weight: 700;
   color: var(--text);
-  padding: 0 6px;
+  padding: 0 5px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: 10px;
-  line-height: 18px;
+  font-size: 9px;
+  line-height: 14px;
 }
 
 /* Solve/engine phase badge (SOLVING, COMPLETE, …). (active). */
@@ -572,13 +577,42 @@
 
 /* Study workspace */
 
-/* Study page column: context, history, matrix, lower dock. */
+/* Study page: left primary + permanent right rail + lower dock. */
 .study-workspace {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   overflow: hidden;
+}
+
+/* Wireframe split: left grid-dominant (~58%) + permanent right rail (~42%). */
+.study-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr);
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Left column: node nav (green) stacked above matrix (blue). */
+.study-primary {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+/* Board / line / history strip above the grid (wireframe green). */
+.study-node-nav {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
 }
 
 /* Legacy Study sub-tab strip (if shown). */
@@ -606,15 +640,46 @@
   background: var(--panel);
 }
 
-/* Top Study strip: board, pot/stacks, engine activity. */
+/* Top Study strip: board, pot/stacks, engine activity. Compact in green nav. */
 .context-strip {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 0 var(--space-3);
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   min-height: var(--context-h);
+}
+
+.study-node-nav .context-strip {
+  border-bottom-color: color-mix(in srgb, var(--border) 70%, transparent);
+  min-height: 32px;
+  gap: var(--space-2);
+  padding: 2px var(--space-2);
+}
+
+/* Inline label+value so the green strip stays short (Cursor density). */
+.study-node-nav .context-strip__group {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.study-node-nav .context-strip__label {
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.study-node-nav .context-strip__value {
+  font-size: 12px;
+}
+
+.study-node-nav .context-strip__sep {
+  height: 16px;
+}
+
+.study-node-nav .board-cards__group-label {
+  font-size: 10px;
 }
 
 /* One labeled value group in the context strip. */
@@ -871,7 +936,7 @@
   background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
-/* Study center grid: optional nav + matrix pane. */
+/* Left-column matrix host (optional legacy left nav + matrix pane). */
 .study-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -880,7 +945,6 @@
   overflow: hidden;
 }
 
-/* Study center grid: optional nav + matrix pane. */
 .study-main[data-nav="false"] {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -961,7 +1025,7 @@
   overflow: hidden;
 }
 
-/* Strategy/Range/EV modes, action nav, display controls. */
+/* Strategy/Range/EV modes, action nav, display controls. Quiet density. */
 .matrix-toolbar {
   display: flex;
   align-items: center;
@@ -970,7 +1034,8 @@
   flex: 0 0 auto;
   background: var(--secondary);
   border-bottom: 1px solid var(--border);
-  padding: 4px 8px;
+  padding: 2px 6px;
+  min-height: 28px;
 }
 
 /* Strategy / Range / EV mode button group. */
@@ -986,7 +1051,7 @@
   border-left: 1px solid var(--border);
 }
 
-/* Row that holds the range matrix and Study detail rail. */
+/* Matrix stage: primary grid only (detail rail is a sibling column). */
 .matrix-stage {
   flex: 1 1 0;
   min-width: 0;
@@ -995,6 +1060,7 @@
   display: flex;
   flex-direction: row;
   align-items: stretch;
+  overflow: hidden;
 }
 
 /* Strategy / Range / EV mode toggle button. */
@@ -1229,19 +1295,22 @@
   font-size: 12px;
 }
 
-/* Right Study rail: Actions summary + Hands inspector. */
+/* Permanent right rail: overall strategy + combo breakdowns (wireframe red). */
 .study-detail-panel {
-  flex: 1 1 0;
+  min-width: 0;
   width: auto;
-  min-width: 360px;
   max-width: none;
   height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--secondary);
-  border-left: 1px solid var(--border);
+  border-left: 0;
   overflow: hidden;
+}
+
+.study-columns > .study-detail-panel {
+  min-width: 0;
 }
 
 /* Hands panel showing combo breakdown for the focus hand. */
@@ -1268,7 +1337,7 @@
 
 /* Hands panel header (title + hover/pinned state). */
 .combo-inspector__head {
-  padding: 8px 10px 6px;
+  padding: 6px 8px 4px;
   border-bottom: 1px solid var(--border);
   background: transparent;
   margin-bottom: 0;
@@ -2899,6 +2968,15 @@
 
 /* Responsive overrides below 1100px width. */
 @media (max-width: 1100px) {
+  .study-columns {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .study-primary {
+    border-right: 0;
+  }
+
   /* Study center grid: optional nav + matrix pane. */
   .study-main {
     grid-template-columns: 1fr;
@@ -2911,12 +2989,16 @@
     width: 100%;
     max-width: none;
     min-width: 0;
-    max-height: 220px;
+    max-height: 240px;
     border-left: 0;
     border-right: 0;
   }
 
-  /* Row that holds the range matrix and Study detail rail. */
+  .study-columns > .study-detail-panel {
+    border-top: 1px solid var(--border);
+  }
+
+  /* Row that holds the range matrix. */
   .matrix-stage {
     flex-direction: column;
   }
@@ -4636,6 +4718,10 @@
 
 /* Responsive overrides below 1024px width. */
 @media (max-width: 1024px) {
+  .study-columns {
+    grid-template-columns: 1fr !important;
+  }
+
   /* Study center grid: optional nav + matrix pane. */
   .study-main {
     grid-template-columns: 1fr !important;
@@ -5097,9 +5183,10 @@
 
 /* Standard bordered toolbar button used across workspaces. */
 .status-bar__controls .toolbar-btn {
-  min-height: 22px;
-  padding: 1px 6px;
-  font-size: 11px;
+  min-height: 18px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 16px;
 }
 
 /* Collapsed lower-dock height/state. Stays in flow as a tab strip. */
@@ -5943,6 +6030,24 @@ html[data-phone-demo="true"] .path-nav {
   height: auto !important;
   min-height: 0;
   max-height: none;
+}
+
+html[data-phone-demo="true"] .study-columns {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  overflow: visible;
+  min-height: 0;
+}
+
+html[data-phone-demo="true"] .study-primary {
+  border-right: 0;
+  overflow: visible;
+  min-height: 0;
+}
+
+html[data-phone-demo="true"] .study-node-nav {
+  flex: 0 0 auto;
 }
 
 html[data-phone-demo="true"] .study-main {

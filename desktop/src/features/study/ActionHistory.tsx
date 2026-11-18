@@ -166,7 +166,7 @@ export function ActionHistory() {
             : Math.max(96, Math.floor(window.innerHeight * 0.35));
         const next = Math.min(
           maxHistory,
-          Math.max(56, dragRef.current.startH + (ev.clientY - dragRef.current.startY)),
+          Math.max(40, dragRef.current.startH + (ev.clientY - dragRef.current.startY)),
         );
         setLayout({ historyHeight: next });
       };

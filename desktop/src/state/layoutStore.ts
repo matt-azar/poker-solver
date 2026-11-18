@@ -17,15 +17,16 @@ export const DEFAULT_LAYOUT: StudyLayout = {
   // Closed until the player opens an analysis tab, so the matrix owns the page.
   lowerDock: false,
   dualRange: false,
-  inspectorWidth: 280,
-  historyHeight: 72,
+  // Permanent right rail targets ~40% width; CSS grid owns the split.
+  inspectorWidth: 420,
+  historyHeight: 48,
   lowerDockHeight: 200,
   matrixWidth: null,
   density: "comfortable",
 };
 
 const DOCK_MIN = 120;
-const HISTORY_MIN = 56;
+const HISTORY_MIN = 40;
 
 function dockMaxPx(): number {
   if (typeof window === "undefined") {
@@ -75,8 +76,8 @@ function sanitizeLayout(raw: Partial<StudyLayout> & { leftNav?: unknown }): Stud
       Number(merged.historyHeight) || DEFAULT_LAYOUT.historyHeight,
     ),
     inspectorWidth: Math.min(
-      520,
-      Math.max(220, Number(merged.inspectorWidth) || DEFAULT_LAYOUT.inspectorWidth),
+      720,
+      Math.max(280, Number(merged.inspectorWidth) || DEFAULT_LAYOUT.inspectorWidth),
     ),
     matrixWidth: clampMatrixWidth(merged.matrixWidth),
     density: merged.density === "compact" ? "compact" : "comfortable",
