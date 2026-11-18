@@ -31,7 +31,7 @@ import { isTauriRuntime } from "../platform";
 import { decodeErrorPayload } from "./contracts/error";
 import { decodeStatusPayload } from "./contracts/status";
 import { formatSolveJobStreetConfig, parseStreetConfigTextToSolutionConfig } from "./streetConfigText";
-import { raceWithAbort } from "../domain/requestScope";
+import { isAbortError, raceWithAbort } from "../domain/requestScope";
 import {
   ipcBeginConfig,
   ipcCancel,
@@ -652,7 +652,15 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      const data = (await ipcValues(nodeId, solutionId)) as Record<string, unknown>;
+      let data: Record<string, unknown>;
+      try {
+        data = (await ipcValues(nodeId, solutionId, signal)) as Record<string, unknown>;
+      } catch (err) {
+        if (signal?.aborted || isAbortError(err)) {
+          throw new EngineError("aborted", 0, null);
+        }
+        throw err;
+      }
       const served = hostedSolutionId(data.solution_id, solutionId);
       return {
         ...data,
@@ -675,11 +683,19 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      const data = (await ipcEquity(
-        nodeId
-          ? { nodeId, solutionId }
-          : { nodeIndex: 0, nodeId: "p0.t-1.r-1", solutionId },
-      )) as Record<string, unknown>;
+      let data: Record<string, unknown>;
+      try {
+        data = (await ipcEquity(
+          nodeId
+            ? { nodeId, solutionId, signal }
+            : { nodeIndex: 0, nodeId: "p0.t-1.r-1", solutionId, signal },
+        )) as Record<string, unknown>;
+      } catch (err) {
+        if (signal?.aborted || isAbortError(err)) {
+          throw new EngineError("aborted", 0, null);
+        }
+        throw err;
+      }
       const served = hostedSolutionId(data.solution_id, solutionId);
       // Host packs equity generation into `status_generation` with a different
       // formula than status-path sequence — expose an explicit equity field and
@@ -748,10 +764,19 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      const data = (await ipcCategories({
-        nodeId: nodeId ?? "p0.t-1.r-1",
-        solutionId,
-      })) as Record<string, unknown>;
+      let data: Record<string, unknown>;
+      try {
+        data = (await ipcCategories({
+          nodeId: nodeId ?? "p0.t-1.r-1",
+          solutionId,
+          signal,
+        })) as Record<string, unknown>;
+      } catch (err) {
+        if (signal?.aborted || isAbortError(err)) {
+          throw new EngineError("aborted", 0, null);
+        }
+        throw err;
+      }
       const served = hostedSolutionId(data.solution_id, solutionId);
       return {
         ...data,
@@ -781,11 +806,20 @@ export class EngineClient {
     if (opts?.signal?.aborted) {
       throw new EngineError("aborted", 0, null);
     }
-    const data = (await ipcLineCardReport({
-      nodeId,
-      varyStreet: opts?.varyStreet,
-      solutionId,
-    })) as Record<string, unknown>;
+    let data: Record<string, unknown>;
+    try {
+      data = (await ipcLineCardReport({
+        nodeId,
+        varyStreet: opts?.varyStreet,
+        solutionId,
+        signal: opts?.signal,
+      })) as Record<string, unknown>;
+    } catch (err) {
+      if (opts?.signal?.aborted || isAbortError(err)) {
+        throw new EngineError("aborted", 0, null);
+      }
+      throw err;
+    }
     const served = hostedSolutionId(data.solution_id, solutionId);
     return {
       ...data,
@@ -806,11 +840,20 @@ export class EngineClient {
     if (opts?.signal?.aborted) {
       throw new EngineError("aborted", 0, null);
     }
-    const data = (await ipcValueBluffsPostCall({
-      nodeId,
-      minBetFreq: opts?.minBetFreq,
-      solutionId,
-    })) as Record<string, unknown>;
+    let data: Record<string, unknown>;
+    try {
+      data = (await ipcValueBluffsPostCall({
+        nodeId,
+        minBetFreq: opts?.minBetFreq,
+        solutionId,
+        signal: opts?.signal,
+      })) as Record<string, unknown>;
+    } catch (err) {
+      if (opts?.signal?.aborted || isAbortError(err)) {
+        throw new EngineError("aborted", 0, null);
+      }
+      throw err;
+    }
     const served = hostedSolutionId(data.solution_id, solutionId);
     return {
       ...data,

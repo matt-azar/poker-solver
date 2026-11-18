@@ -403,13 +403,33 @@ async function runAnalysisNodeIpc<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-async function runAnalysisWorkerIpc<T>(run: () => Promise<T>): Promise<T> {
+/** Drop aborted queued analysis before any transport admit. */
+function throwIfAnalysisAborted(signal?: AbortSignal | null): void {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+}
+
+/**
+ * Serialize worker-bound analysis admits. When `signal` aborts before this
+ * job reaches transport send (still queued behind a prior values/equity/…),
+ * drop it without calling `solverEngineRequest` so coalesce/nav supersession
+ * does not pay for obsolete work on the wire.
+ */
+async function runAnalysisWorkerIpc<T>(
+  run: () => Promise<T>,
+  signal?: AbortSignal | null,
+): Promise<T> {
   const waitForNodeQuietThenRun = async (): Promise<T> => {
     while (analysisNodeInflight > 0) {
+      throwIfAnalysisAborted(signal);
       await new Promise<void>((resolve) => {
         setTimeout(resolve, 0);
       });
     }
+    // Final gate immediately before transport — covers mid-queue abort while
+    // a prior worker job held the chain (audit §5 equity-behind-values case).
+    throwIfAnalysisAborted(signal);
     return run();
   };
   const scheduled = analysisWorkerChain.then(
@@ -434,6 +454,7 @@ export function resetAnalysisIpcSerialForTests(): void {
 export async function ipcValues(
   nodeIdOrIndex: string | number = 0,
   solutionId?: string | null,
+  signal?: AbortSignal | null,
 ): Promise<unknown> {
   return runAnalysisWorkerIpc(async () => {
     const body =
@@ -442,7 +463,7 @@ export async function ipcValues(
         : withRequestScope(solutionId, { node_index: nodeIdOrIndex });
     const env = await solverEngineRequest("values", body);
     return env.body;
-  });
+  }, signal);
 }
 
 /** Study check-down equity (host `equity` → reach-weighted `checkdownEquityAtNode`). */
@@ -450,6 +471,7 @@ export async function ipcEquity(opts?: {
   nodeIndex?: number;
   nodeId?: string;
   solutionId?: string | null;
+  signal?: AbortSignal | null;
 }): Promise<unknown> {
   return runAnalysisWorkerIpc(async () => {
     const env = await solverEngineRequest(
@@ -460,7 +482,7 @@ export async function ipcEquity(opts?: {
       }),
     );
     return env.body;
-  });
+  }, opts?.signal);
 }
 
 /** Study node inspect (`pN.tT.rR`) or legacy numeric node_index (root = 0). */
@@ -748,6 +770,7 @@ export async function ipcCategories(opts?: {
   nodeIndex?: number;
   nodeId?: string;
   solutionId?: string | null;
+  signal?: AbortSignal | null;
 }): Promise<unknown> {
   return runAnalysisWorkerIpc(async () => {
     const env = await solverEngineRequest(
@@ -758,7 +781,7 @@ export async function ipcCategories(opts?: {
       }),
     );
     return env.body;
-  });
+  }, opts?.signal);
 }
 
 /**
@@ -786,6 +809,7 @@ export async function ipcLineCardReport(opts: {
   nodeId: string;
   varyStreet?: "turn" | "river";
   solutionId?: string | null;
+  signal?: AbortSignal | null;
 }): Promise<unknown> {
   return runAnalysisWorkerIpc(async () => {
     const env = await solverEngineRequest(
@@ -796,7 +820,7 @@ export async function ipcLineCardReport(opts: {
       }),
     );
     return env.body;
-  });
+  }, opts.signal);
 }
 
 /** Value/Bluffs Mode B after-call equity join (host `value_bluffs_post_call`). */
@@ -804,6 +828,7 @@ export async function ipcValueBluffsPostCall(opts: {
   nodeId: string;
   minBetFreq?: number;
   solutionId?: string | null;
+  signal?: AbortSignal | null;
 }): Promise<unknown> {
   return runAnalysisWorkerIpc(async () => {
     const env = await solverEngineRequest(
@@ -814,5 +839,5 @@ export async function ipcValueBluffsPostCall(opts: {
       }),
     );
     return env.body;
-  });
+  }, opts.signal);
 }
