@@ -1,0 +1,7 @@
+{
+  "description": "Two valid frames concatenated; a short-read consumer may see both in one recv",
+  "frame_a_len": 101,
+  "frame_b_len": 100,
+  "frame_a_request_id": "r-frag-a",
+  "frame_b_request_id": "r-frag-b"
+}

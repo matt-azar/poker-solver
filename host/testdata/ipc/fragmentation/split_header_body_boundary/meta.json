@@ -1,0 +1,18 @@
+{
+  "description": "Cut exactly at header/body boundary is covered by split_after_length_prefix; this cut also slices early body",
+  "cuts": [
+    12
+  ],
+  "frame_file": "../complete.request.frame",
+  "frame_len": 101,
+  "payload_len": 97,
+  "chunk_files": [
+    "chunk0.bin",
+    "chunk1.bin"
+  ],
+  "chunk_lengths": [
+    12,
+    89
+  ],
+  "reassembly": "concat(chunk*) == complete.request.frame"
+}

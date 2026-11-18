@@ -1,0 +1,21 @@
+{
+  "description": "Ordinary multi-chunk delivery: mid-length, then mid-body, then remainder",
+  "cuts": [
+    2,
+    52
+  ],
+  "frame_file": "../complete.request.frame",
+  "frame_len": 101,
+  "payload_len": 97,
+  "chunk_files": [
+    "chunk0.bin",
+    "chunk1.bin",
+    "chunk2.bin"
+  ],
+  "chunk_lengths": [
+    2,
+    50,
+    49
+  ],
+  "reassembly": "concat(chunk*) == complete.request.frame"
+}

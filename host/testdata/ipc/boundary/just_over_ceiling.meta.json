@@ -1,0 +1,15 @@
+{
+  "assumed_ceiling_bytes": 16777216,
+  "payload_len": 16777217,
+  "expect": "reject",
+  "synthesize": {
+    "method": "build_envelope_with_padding",
+    "op": "ready",
+    "request_id": "r-boundary-just_over_ceiling",
+    "pad_field": "body.pad",
+    "note": "Use load_fixtures.synthesize_padded_frame(payload_len) \u2014 do not commit multi-MiB blobs"
+  },
+  "cli_beta_today_bytes": 67108864,
+  "host_desktop_today_bytes": 16777216,
+  "note": "Frame Unicode track may finalize shared ceiling at 16 or 64 MiB; fixtures assume 16 MiB until then"
+}
