@@ -1,5 +1,6 @@
 //! Map IPC ops onto the app Session. Cancel fails pending jobs (D1).
 const std = @import("std");
+const builtin = @import("builtin");
 const poker_app = @import("poker_app");
 const poker_engine = @import("poker_engine");
 const ipc = @import("ipc.zig");
@@ -264,7 +265,7 @@ pub const HostState = struct {
         self.analysis_worker_stop.store(true, .release);
         self.supersedeAllAnalysis();
         self.analysis_mu.lock();
-        self.analysis_cv.signal();
+        self.analysis_cv.broadcast();
         const t = self.analysis_worker;
         self.analysis_mu.unlock();
         if (t) |thread| {
@@ -295,7 +296,7 @@ pub const HostState = struct {
         self.preview_worker_stop.store(true, .release);
         _ = self.bumpPreviewGen();
         self.preview_mu.lock();
-        self.preview_cv.signal();
+        self.preview_cv.broadcast();
         const t = self.preview_worker;
         self.preview_mu.unlock();
         if (t) |thread| {
@@ -460,6 +461,9 @@ pub const HostState = struct {
     }
 
     pub fn writeReply(self: *HostState, reply: ipc.Envelope) !void {
+        // Unit-test binaries share stdout with the Zig 0.14 listen protocol.
+        // Writing IPC frames there desyncs the runner and hangs `zig build test`.
+        if (builtin.is_test) return;
         self.stdout_mu.lock();
         defer self.stdout_mu.unlock();
         try ipc.writeFrame(self.allocator, std.io.getStdOut().writer(), reply);
@@ -2870,7 +2874,9 @@ fn analysisPoolMain(state: *HostState) void {
         while (state.analysis_queue.items.len == 0 and !state.analysis_worker_stop.load(.acquire)) {
             state.analysis_cv.wait(&state.analysis_mu);
         }
-        if (state.analysis_worker_stop.load(.acquire) and state.analysis_queue.items.len == 0) {
+        // On stop, leave any remaining queue for joinAnalysis to drop — do not
+        // start another task (avoids join waiting on a long borrow/solve).
+        if (state.analysis_worker_stop.load(.acquire)) {
             state.analysis_running.store(false, .release);
             state.analysis_current = null;
             state.analysis_live_workers.store(0, .release);
@@ -3631,11 +3637,11 @@ fn previewPoolMain(state: *HostState) void {
         while (state.preview_latest == null and !state.preview_worker_stop.load(.acquire)) {
             state.preview_cv.wait(&state.preview_mu);
         }
-        if (state.preview_worker_stop.load(.acquire) and state.preview_latest == null) {
+        // On stop, leave the latest draft for joinPreview to drop.
+        if (state.preview_worker_stop.load(.acquire)) {
             state.preview_running.store(false, .release);
             state.preview_current = null;
             state.preview_live_workers.store(0, .release);
-            state.preview_queued.store(0, .release);
             state.preview_mu.unlock();
             return;
         }
@@ -3889,6 +3895,8 @@ test "superseded analysis finish does not return budget for live gen" {
 }
 
 test "analysis pool coalesce drops identical queued work" {
+    // Do not call replyAnalysisDropped / writeReply here — under `zig build test`
+    // stdout is the listen protocol; writing IPC frames hangs the runner forever.
     var state = try HostState.init(std.testing.allocator, "analysis-coalesce");
     defer state.deinit();
 
@@ -3912,13 +3920,38 @@ test "analysis pool coalesce drops identical queued work" {
         }
     }.task;
 
+    const freeMatching = struct {
+        fn call(s: *HostState, needle: *const AnalysisTask) void {
+            var i: usize = 0;
+            while (i < s.analysis_queue.items.len) {
+                const task = s.analysis_queue.items[i];
+                if (analysisTasksSameKey(task, needle)) {
+                    _ = s.analysis_queue.orderedRemove(i);
+                    freeAnalysisTask(task);
+                    continue;
+                }
+                i += 1;
+            }
+            s.analysis_queued.store(@intCast(s.analysis_queue.items.len), .release);
+        }
+    }.call;
+
+    const freeAllQueued = struct {
+        fn call(s: *HostState) void {
+            for (s.analysis_queue.items) |task| freeAnalysisTask(task);
+            s.analysis_queue.clearRetainingCapacity();
+            s.analysis_queued.store(0, .release);
+        }
+    }.call;
+
     // Hold the pool idle so tasks stay queued (stop latch before ensure).
     state.analysis_worker_stop.store(true, .release);
     state.analysis_mu.lock();
+    defer state.analysis_mu.unlock();
     const a = try mk(&state, "a", .values, 42);
     const b = try mk(&state, "b", .values, 42);
     try state.analysis_queue.append(a);
-    state.dropMatchingQueuedAnalysisLocked(b);
+    freeMatching(&state, b);
     try std.testing.expectEqual(@as(usize, 0), state.analysis_queue.items.len);
     try state.analysis_queue.append(b);
     try std.testing.expectEqual(@as(usize, 1), state.analysis_queue.items.len);
@@ -3929,8 +3962,7 @@ test "analysis pool coalesce drops identical queued work" {
     try state.analysis_queue.append(nav);
     const pick = state.pickNextAnalysisIndexLocked().?;
     try std.testing.expect(state.analysis_queue.items[pick].kind == .node);
-    state.dropQueuedAnalysisLocked("test cleanup");
-    state.analysis_mu.unlock();
+    freeAllQueued(&state);
 }
 
 test "analysis pool is a single retained worker not per-request orphans" {
