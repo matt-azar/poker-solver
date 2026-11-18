@@ -4,12 +4,24 @@
  * Env (read via Tauri `installer_e2e_stage`):
  *   STUDY_INSTALLER_E2E=stage-a  — Stage A: prove WebView → Tauri → installed sidecar
  *   STUDY_INSTALLER_E2E=stage-b  — Stage B: river solve / browse / clear-then-reopen PSOL
+ *   STUDY_INSTALLER_E2E=stage-blocked-write — BlockedWrite IPC probe
+ *   STUDY_INSTALLER_E2E=stage-normal-close-pending — NormalClosePending IPC probe
+ *   STUDY_INSTALLER_E2E=stage-stale-call-after-reconnect — StaleCallAfterReconnect
+ *
+ * Stage DelayedReply uses STUDY_IPC_ACCEPTANCE=1 via ipc-async-acceptance.ps1
+ * (not this boot hook).
  *
  * Stage B also requires STUDY_INSTALLER_E2E_STAGE_B=1.
  * Optional STUDY_INSTALLER_E2E_PSOL = absolute .psol path for the round-trip.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "./index";
+import {
+  isInstallerIpcProbeStage,
+  normalizeIpcAcceptanceStage,
+  runInstallerIpcProbeAndExit,
+  type IpcAcceptanceStageName,
+} from "./ipcAcceptance";
 
 export type InstallerE2eResult = {
   ok: boolean;
@@ -401,6 +413,18 @@ export async function maybeRunInstallerE2eAndExit(): Promise<boolean> {
       result.detail,
     );
     await exitWithCode(result.ok ? 0 : 1);
+    return true;
+  }
+
+  // Audit §7 installer IPC probes (CI: -Stage BlockedWrite / NormalClosePending /
+  // StaleCallAfterReconnect → STUDY_INSTALLER_E2E=stage-…).
+  if (isInstallerIpcProbeStage(stage)) {
+    const named = normalizeIpcAcceptanceStage(stage) as Exclude<
+      IpcAcceptanceStageName,
+      "DelayedReply"
+    >;
+    console.info(`[installer-e2e] dispatching IPC probe stage=${named} env=${stage}`);
+    await runInstallerIpcProbeAndExit(named);
     return true;
   }
 

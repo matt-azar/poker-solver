@@ -202,3 +202,52 @@ function asBody(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") return null;
   return value as Record<string, unknown>;
 }
+
+describe("maybeRunInstallerE2eAndExit IPC probe stages", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+  });
+
+  it("runs BlockedWrite via STUDY_INSTALLER_E2E=stage-blocked-write (skip path)", async () => {
+    const { maybeRunInstallerE2eAndExit } = await import("./installerE2e");
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "installer_e2e_stage") return "stage-blocked-write";
+      if (cmd === "ensure_solver_engine") return { ok: true };
+      if (cmd === "solver_engine_request") return { ok: true, body: {} };
+      if (cmd === "exit_with_code") return null;
+      throw new Error(`unexpected invoke ${cmd}`);
+    });
+    const handled = await maybeRunInstallerE2eAndExit();
+    expect(handled).toBe(true);
+    expect(invoke).toHaveBeenCalledWith("exit_with_code", { code: 0 });
+  });
+
+  it("runs StaleCallAfterReconnect via stage-stale-call-after-reconnect", async () => {
+    const { maybeRunInstallerE2eAndExit } = await import("./installerE2e");
+    let launch = "launch-a";
+    let resolveValues: (v: unknown) => void = () => {};
+    const valuesPromise = new Promise((_resolve, reject) => {
+      resolveValues = reject;
+    });
+    invoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "installer_e2e_stage") return "stage-stale-call-after-reconnect";
+      if (cmd === "ensure_solver_engine") return { ok: true };
+      if (cmd === "solver_engine_info") return { launchId: launch };
+      if (cmd === "solver_engine_request" && args?.op === "values") return valuesPromise;
+      if (cmd === "kill_solver_engine_cmd") {
+        launch = "launch-b";
+        resolveValues(new Error("closed"));
+        return null;
+      }
+      if (cmd === "solver_engine_request" && args?.op === "status") {
+        return { ok: true, body: { running: false } };
+      }
+      if (cmd === "exit_with_code") return null;
+      throw new Error(`unexpected invoke ${cmd}`);
+    });
+    const handled = await maybeRunInstallerE2eAndExit();
+    expect(handled).toBe(true);
+    expect(invoke).toHaveBeenCalledWith("exit_with_code", { code: 0 });
+  });
+});
+

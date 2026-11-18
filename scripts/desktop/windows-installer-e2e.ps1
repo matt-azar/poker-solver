@@ -27,15 +27,24 @@
     packaged WebView → Tauri → pipe under a held/delayed values reply
     (Status + Cancel still complete). Does not replace Stage B.
 
-  Future stages (YAML hooks in windows-installer.yml; product STUDY_INSTALLER_E2E
-  targets not on main yet — do not invent a second engine):
-    BlockedWrite, NormalClosePending, StaleCallAfterReconnect.
+  Stage BlockedWrite (-Stage BlockedWrite):
+    STUDY_INSTALLER_E2E=stage-blocked-write — WebView blocked-write / write-bound
+    probe (skips until Rust STUDY_SOLVER_ENGINE_ARGS / stop-reading arm lands).
+
+  Stage NormalClosePending (-Stage NormalClosePending):
+    STUDY_INSTALLER_E2E=stage-normal-close-pending — normal window Close while
+    work may be pending (not process::exit).
+
+  Stage StaleCallAfterReconnect (-Stage StaleCallAfterReconnect):
+    STUDY_INSTALLER_E2E=stage-stale-call-after-reconnect — stale invoke after
+    kill+ensure must not poison the new launch.
 
 .PARAMETER InstallerExe
   Path to the NSIS setup exe (artifact from windows-installer job).
 
 .PARAMETER Stage
-  A (default), B, or DelayedReply.
+  A (default), B, DelayedReply, BlockedWrite, NormalClosePending,
+  or StaleCallAfterReconnect.
 
 .PARAMETER OutDir
   Logs + failure diagnostic bundle directory.
@@ -79,7 +88,9 @@ $LastStepPath = Join-Path $OutDir "last-completed-step.txt"
 
 if ($StudyReadySec -le 0) {
   if ($Stage -eq "B") { $StudyReadySec = 180 }
-  elseif ($Stage -eq "DelayedReply") { $StudyReadySec = 180 }
+  elseif ($Stage -in @("DelayedReply", "BlockedWrite", "NormalClosePending", "StaleCallAfterReconnect")) {
+    $StudyReadySec = 180
+  }
   else { $StudyReadySec = 120 }
 }
 
@@ -281,17 +292,6 @@ $studyProc = $null
 $resolvedInstallDir = $null
 
 try {
-  # Named future targets (YAML hooks in windows-installer.yml use if: false until
-  # product STUDY_INSTALLER_E2E boot hooks land on other IPC tracks).
-  if ($Stage -in @("BlockedWrite", "NormalClosePending", "StaleCallAfterReconnect")) {
-    $envHint = switch ($Stage) {
-      "BlockedWrite" { "STUDY_INSTALLER_E2E=stage-blocked-write" }
-      "NormalClosePending" { "STUDY_INSTALLER_E2E=stage-normal-close-pending" }
-      "StaleCallAfterReconnect" { "STUDY_INSTALLER_E2E=stage-stale-call-after-reconnect" }
-    }
-    throw "Stage $Stage harness stub only — awaiting product hook $envHint (ipc-audit-2026-11-18 §7). Flip the windows-installer.yml if:false guard after the WebView boot path exists."
-  }
-
   $result.interactiveSession = [ordered]@{
     sessionId = (Get-Process -Id $PID).SessionId
     userName  = $env:USERNAME
@@ -382,11 +382,19 @@ try {
     $result.remaining = @()
     Write-E2E "STAGE DelayedReply PASS"
   } else {
-    $stageEnv = if ($Stage -eq "B") { "stage-b" } else { "stage-a" }
+    # Map -Stage → STUDY_INSTALLER_E2E (must match desktop platform boot hooks).
+    $stageEnv = switch ($Stage) {
+      "B" { "stage-b" }
+      "BlockedWrite" { "stage-blocked-write" }
+      "NormalClosePending" { "stage-normal-close-pending" }
+      "StaleCallAfterReconnect" { "stage-stale-call-after-reconnect" }
+      Default { "stage-a" }
+    }
     $stageBGate = if ($Stage -eq "B") { "1" } else { "0" }
     $psolPath = Join-Path $OutDir "stage-b-roundtrip.psol"
+    $isIpcProbe = $Stage -in @("BlockedWrite", "NormalClosePending", "StaleCallAfterReconnect")
 
-    Write-E2E "Launching Study for Stage $Stage WebView drive: $studyExe"
+    Write-E2E "Launching Study for Stage $Stage WebView drive: $studyExe (STUDY_INSTALLER_E2E=$stageEnv)"
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $studyExe
     $psi.UseShellExecute = $false
@@ -402,6 +410,7 @@ try {
     if ($env:HOLDEM_STUDY_DIAGNOSTICS_DIR) {
       $psi.Environment["HOLDEM_STUDY_DIAGNOSTICS_DIR"] = $env:HOLDEM_STUDY_DIAGNOSTICS_DIR
     }
+    # Optional: CI may pre-set STUDY_SOLVER_ENGINE (BlockedWrite stop-reading wrapper).
 
     $studyProc = New-Object System.Diagnostics.Process
     $studyProc.StartInfo = $psi
@@ -414,7 +423,7 @@ try {
 
     if (-not $studyProc.WaitForExit($StudyReadySec * 1000)) {
       try { $studyProc.Kill() } catch {}
-      throw "Stage $Stage timed out after ${StudyReadySec}s (Study did not exit; WebView hook may not have run — is this build's installer missing STUDY_INSTALLER_E2E?)"
+      throw "Stage $Stage timed out after ${StudyReadySec}s (Study did not exit; WebView hook may not have run — is this build's installer missing STUDY_INSTALLER_E2E=$stageEnv?)"
     }
     $result.studyExitCode = $studyProc.ExitCode
     Write-E2E "Study exited code=$($studyProc.ExitCode)"
@@ -423,6 +432,8 @@ try {
     }
     if ($Stage -eq "B") {
       Set-LastStep "stage-b-webview-pass" $result
+    } elseif ($isIpcProbe) {
+      Set-LastStep ("stage-" + $Stage.ToLowerInvariant() + "-pass") $result
     } else {
       Set-LastStep "webview-control-proven" $result
     }
